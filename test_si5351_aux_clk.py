@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+
+import time
+from litex import RemoteClient
+
+bus = RemoteClient()
+bus.open()
+
+def latch_and_read():
+    bus.regs.aux_clk_measurement_latch.write(1)
+    return bus.regs.aux_clk_measurement_value.read()
+
+num_measurements    = 10
+delay_between_tests = 1
+
+for i in range(num_measurements):
+    value = latch_and_read()
+    frequency_mhz = value / (delay_between_tests * 1e6)
+    print(f"Measurement {i + 1}: Clock Frequency: {frequency_mhz:.2f} MHz")
+    time.sleep(delay_between_tests)
+
+bus.close()
