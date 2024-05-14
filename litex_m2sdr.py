@@ -36,7 +36,7 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
-from gateware.si5351_i2c import SI5351, i2c_program_148p5, i2c_program_148p35
+from gateware.si5351_i2c import SI5351, i2c_program_38p4
 
 #from software import generate_litepcie_software
 
@@ -85,7 +85,7 @@ class BaseSoC(SoCMini):
         self.crg = CRG(platform, sys_clk_freq, with_ethernet=with_ethernet)
 
         # SI5351 Clock Generator -------------------------------------------------------------------
-        self.si5351 = SI5351(platform.request("si5351_i2c"), [i2c_program_148p5, i2c_program_148p35], sys_clk_freq)
+        self.si5351 = SI5351(platform.request("si5351_i2c"), [i2c_program_38p4, i2c_program_38p4], sys_clk_freq)
 
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
