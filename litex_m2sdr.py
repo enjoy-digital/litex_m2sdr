@@ -71,7 +71,7 @@ class CRG(LiteXModule):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_ethernet=True, ethernet_sfp=0, with_jtagbone=True):
+    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=1, with_ethernet=True, ethernet_sfp=0, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
 
@@ -113,8 +113,8 @@ class BaseSoC(SoCMini):
 
         # PCIe -------------------------------------------------------------------------------------
         if with_pcie:
-            self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x4"),
-                data_width  = 128,
+            self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}"),
+                data_width  = {1: 64, 4: 128}[pcie_lanes],
                 bar0_size   = 0x20000,
                 cd          = "sys",
             )
