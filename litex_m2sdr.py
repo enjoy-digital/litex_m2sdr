@@ -158,8 +158,8 @@ class BaseSoC(SoCMini):
                 qpll_channel = qpll.channels[0],
                 data_pads    = self.platform.request("sfp", 0),
                 sys_clk_freq = sys_clk_freq,
-                rx_polarity  = 0,
-                tx_polarity  = 1, # Inverted on Acorn Baseboard Mini.
+                rx_polarity  = 1, # Inverted on M2SDR.
+                tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
             self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
 
