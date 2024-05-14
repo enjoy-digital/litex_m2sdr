@@ -36,7 +36,7 @@ class Platform(Xilinx7SeriesPlatform):
     default_clk_period = 1e9/100e6
 
     def __init__(self, toolchain="vivado"):
-        Xilinx7SeriesPlatform.__init__(self, "xc7a200tsbg384-3", _io, toolchain=toolchain)
+        Xilinx7SeriesPlatform.__init__(self, "xc7a200tsbg484-3", _io, toolchain=toolchain)
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
@@ -45,7 +45,7 @@ class Platform(Xilinx7SeriesPlatform):
         ]
 
     def create_programmer(self):
-        return OpenFPGALoader(cable="digilent_hs2", fpga_part=f"xc7a200tsbg384", freq=10e6)
+        return OpenFPGALoader(cable="digilent_hs2", fpga_part=f"xc7a200tsbg484", freq=10e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
