@@ -17,6 +17,13 @@ _io = [
     # Leds.
     ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
 
+    # SI5351 Clocking.
+    ("si5351_i2c", 0,
+        Subsignal("scl", Pins("AA20")),
+        Subsignal("sda", Pins("AB21")),
+        IOStandard("LVCMOS33")
+    ),
+
     # PCIe (M2 Connector).
     ("pcie_x4", 0,
         Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
