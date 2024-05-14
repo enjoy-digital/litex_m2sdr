@@ -71,7 +71,7 @@ class CRG(LiteXModule):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_ethernet=True, with_jtagbone=True):
+    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_ethernet=True, ethernet_sfp=0, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
 
@@ -156,7 +156,7 @@ class BaseSoC(SoCMini):
 
             self.ethphy = A7_1000BASEX(
                 qpll_channel = qpll.channels[0],
-                data_pads    = self.platform.request("sfp", 0),
+                data_pads    = self.platform.request("sfp", ethernet_sfp),
                 sys_clk_freq = sys_clk_freq,
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
@@ -174,10 +174,15 @@ def main():
     comopts = parser.add_mutually_exclusive_group()
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
     comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Etherbone Communication.")
+    parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC(with_pcie=args.with_pcie, with_ethernet=args.with_ethernet)
+    soc = BaseSoC(
+        with_pcie     = args.with_pcie,
+        with_ethernet = args.with_ethernet,
+        ethernet_sfp  = args.ethernet_sfp,
+    )
     builder = Builder(soc, csr_csv="csr.csv")
     builder.build(run=args.build)
 
