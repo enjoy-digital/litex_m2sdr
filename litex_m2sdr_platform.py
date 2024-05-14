@@ -68,7 +68,7 @@ class Platform(Xilinx7SeriesPlatform):
         ]
 
     def create_programmer(self):
-        return OpenFPGALoader(cable="digilent_hs2", fpga_part=f"xc7a200tsbg484", freq=10e6)
+        return OpenFPGALoader(cable="ft2232", fpga_part=f"xc7a200tsbg484", freq=10e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
