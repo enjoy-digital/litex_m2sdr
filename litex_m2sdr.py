@@ -118,6 +118,9 @@ class BaseSoC(SoCMini):
                 bar0_size   = 0x20000,
                 cd          = "sys",
             )
+            if pcie_lanes == 1:
+                platform.toolchain.pre_placement_commands.append("reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
+                platform.toolchain.pre_placement_commands.append("set_property LOC GTPE2_CHANNEL_X0Y4 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
             self.pcie_phy.update_config({
                 "Base_Class_Menu"          : "Wireless_controller",
                 "Sub_Class_Interface_Menu" : "RF_controller",
