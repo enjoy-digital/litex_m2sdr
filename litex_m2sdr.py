@@ -43,7 +43,7 @@ from gateware.si5351_i2c import SI5351, i2c_program_148p5, i2c_program_148p35
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, with_etherbone):
+    def __init__(self, platform, sys_clk_freq, with_ethernet):
         self.cd_sys    = ClockDomain()
         self.cd_idelay = ClockDomain()
 
@@ -62,7 +62,7 @@ class CRG(LiteXModule):
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
         # Ethernet PLL.
-        if with_etherbone:
+        if with_ethernet:
             self.cd_eth_ref = ClockDomain()
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(clk100, 100e6)
@@ -71,7 +71,7 @@ class CRG(LiteXModule):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_etherbone=True, with_jtagbone=True):
+    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_ethernet=True, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
 
@@ -82,7 +82,7 @@ class BaseSoC(SoCMini):
         )
 
         # Clocking ---------------------------------------------------------------------------------
-        self.crg = CRG(platform, sys_clk_freq, with_etherbone=with_etherbone)
+        self.crg = CRG(platform, sys_clk_freq, with_ethernet=with_ethernet)
 
         # SI5351 Clock Generator -------------------------------------------------------------------
         self.si5351 = SI5351(platform.request("si5351_i2c"), [i2c_program_148p5, i2c_program_148p35], sys_clk_freq)
@@ -139,7 +139,7 @@ class BaseSoC(SoCMini):
                 platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       icap_clk] -asynchronous")
 
         # Etherbone --------------------------------------------------------------------------------
-        if with_etherbone:
+        if with_ethernet:
            # Ethernet QPLL Settings.
             qpll_eth_settings = QPLLSettings(
                 refclksel  = 0b111,
@@ -173,11 +173,11 @@ def main():
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
     comopts = parser.add_mutually_exclusive_group()
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
-    comopts.add_argument("--with-etherbone", action="store_true", help="Enable Etherbone Communication.")
+    comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Etherbone Communication.")
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC(with_pcie=args.with_pcie, with_etherbone=args.with_etherbone)
+    soc = BaseSoC(with_pcie=args.with_pcie, with_ethernet=args.with_ethernet)
     builder = Builder(soc, csr_csv="csr.csv")
     builder.build(run=args.build)
 
