@@ -27,7 +27,12 @@ from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 
+from litex.build.generic_platform import IOStandard, Subsignal, Pins
+
 from litepcie.phy.s7pciephy import S7PCIEPHY
+
+from liteeth.phy.a7_gtp import QPLLSettings, QPLL
+from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
@@ -36,7 +41,7 @@ from litescope import LiteScopeAnalyzer
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq):
+    def __init__(self, platform, sys_clk_freq, with_etherbone):
         self.cd_sys    = ClockDomain()
         self.cd_idelay = ClockDomain()
 
@@ -54,27 +59,17 @@ class CRG(LiteXModule):
         # IDelayCtrl.
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
+        # Ethernet PLL.
+        if with_etherbone:
+            self.cd_eth_ref = ClockDomain()
+            self.eth_pll = eth_pll = S7PLL()
+            eth_pll.register_clkin(clk100, 100e6)
+            eth_pll.create_clkout(self.cd_eth_ref, 156.25e6, margin=0)
+
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    SoCCore.csr_map = {
-        # SoC.
-        "uart"      : 0,
-        "icap"      : 1,
-        "flash"     : 2,
-        "xadc"      : 3,
-        "dna"       : 4,
-
-        # PCIe.
-        "pcie_phy"  : 10,
-        "pcie_msi"  : 11,
-        "pcie_dma0" : 12,
-
-        # Analyzer.
-        "analyzer"  : 30,
-    }
-
-    def __init__(self, sys_clk_freq=int(125e6), with_jtagbone=True):
+    def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, with_etherbone=True, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
 
@@ -85,7 +80,7 @@ class BaseSoC(SoCMini):
         )
 
         # Clocking ---------------------------------------------------------------------------------
-        self.crg = CRG(platform, sys_clk_freq)
+        self.crg = CRG(platform, sys_clk_freq, with_etherbone=with_etherbone)
 
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
@@ -112,30 +107,66 @@ class BaseSoC(SoCMini):
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # PCIe -------------------------------------------------------------------------------------
-        self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x4"),
-            data_width  = 128,
-            bar0_size   = 0x20000,
-            cd          = "sys",
-        )
-        self.pcie_phy.update_config({
-            "Base_Class_Menu"          : "Wireless_controller",
-            "Sub_Class_Interface_Menu" : "RF_controller",
-            "Class_Code_Base"          : "0D",
-            "Class_Code_Sub"           : "10",
-            }
-        )
-        self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1,
-            with_dma_buffering    = True, dma_buffering_depth=8192,
-            with_dma_loopback     = True,
-            with_dma_synchronizer = True,
-            with_msi              = True
-        )
+        if with_pcie:
+            self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x4"),
+                data_width  = 128,
+                bar0_size   = 0x20000,
+                cd          = "sys",
+            )
+            self.pcie_phy.update_config({
+                "Base_Class_Menu"          : "Wireless_controller",
+                "Sub_Class_Interface_Menu" : "RF_controller",
+                "Class_Code_Base"          : "0D",
+                "Class_Code_Sub"           : "10",
+                }
+            )
+            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1,
+                with_dma_buffering    = True, dma_buffering_depth=8192,
+                with_dma_loopback     = True,
+                with_dma_synchronizer = True,
+                with_msi              = True
+            )
 
-        # Timing Constraints/False Paths -----------------------------------------------------------
-        for i in range(4):
-            platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks        dna_clk] -asynchronous")
-            platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       jtag_clk] -asynchronous")
-            platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       icap_clk] -asynchronous")
+            # Timing Constraints/False Paths -------------------------------------------------------
+            for i in range(4):
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks        dna_clk] -asynchronous")
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       jtag_clk] -asynchronous")
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       icap_clk] -asynchronous")
+
+        # Etherbone --------------------------------------------------------------------------------
+        if with_etherbone:
+           # Ethernet QPLL Settings.
+            qpll_eth_settings = QPLLSettings(
+                refclksel  = 0b111,
+                fbdiv      = 4,
+                fbdiv_45   = 4,
+                refclk_div = 1,
+            )
+            # Shared QPLL.
+            self.qpll = qpll = QPLL(
+                gtgrefclk0    = self.crg.cd_eth_ref.clk,
+                qpllsettings0 = qpll_eth_settings,
+            )
+            platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
+
+            _eth_io = [
+                ("sfp", 0,
+                    Subsignal("txp", Pins("B6")),
+                    Subsignal("txn", Pins("A6")),
+                    Subsignal("rxp", Pins("B10")),
+                    Subsignal("rxn", Pins("A10")),
+                ),
+            ]
+            platform.add_extension(_eth_io)
+
+            self.ethphy = A7_1000BASEX(
+                qpll_channel = qpll.channels[0],
+                data_pads    = self.platform.request("sfp"),
+                sys_clk_freq = sys_clk_freq,
+                rx_polarity  = 0,
+                tx_polarity  = 1, # Inverted on Acorn Baseboard Mini.
+            )
+            self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -145,10 +176,13 @@ def main():
     parser.add_argument("--load",   action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",  action="store_true", help="Flash bitstream.")
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+    comopts = parser.add_mutually_exclusive_group()
+    comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
+    comopts.add_argument("--with-etherbone", action="store_true", help="Enable Etherbone Communication.")
     args = parser.parse_args()
 
     # Build SoC.
-    soc = BaseSoC()
+    soc = BaseSoC(with_pcie=args.with_pcie, with_etherbone=args.with_etherbone)
     builder = Builder(soc, csr_csv="csr.csv")
     builder.build(run=args.build)
 
