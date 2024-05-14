@@ -149,19 +149,9 @@ class BaseSoC(SoCMini):
             )
             platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
 
-            _eth_io = [
-                ("sfp", 0,
-                    Subsignal("txp", Pins("B6")),
-                    Subsignal("txn", Pins("A6")),
-                    Subsignal("rxp", Pins("B10")),
-                    Subsignal("rxn", Pins("A10")),
-                ),
-            ]
-            platform.add_extension(_eth_io)
-
             self.ethphy = A7_1000BASEX(
                 qpll_channel = qpll.channels[0],
-                data_pads    = self.platform.request("sfp"),
+                data_pads    = self.platform.request("sfp", 0),
                 sys_clk_freq = sys_clk_freq,
                 rx_polarity  = 0,
                 tx_polarity  = 1, # Inverted on Acorn Baseboard Mini.

@@ -17,7 +17,7 @@ _io = [
     # Leds.
     ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
 
-    # PCIe.
+    # PCIe (M2 Connector).
     ("pcie_x4", 0,
         Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
         Subsignal("clk_p", Pins("F6")),
@@ -26,6 +26,22 @@ _io = [
         Subsignal("rx_n",  Pins("C9 C11 A10 A8")),
         Subsignal("tx_p",  Pins("D7  D5  B6 B4")),
         Subsignal("tx_n",  Pins("C7  C5  A6 A4")),
+    ),
+
+    # SFP 0 (When plugged in Acorn Baseboard Mini).
+    ("sfp", 0,
+        Subsignal("txp", Pins("B6")),
+        Subsignal("txn", Pins("A6")),
+        Subsignal("rxp", Pins("B10")),
+        Subsignal("rxn", Pins("A10")),
+    ),
+
+    # SFP 1 (When plugged in Acorn Baseboard Mini).
+    ("sfp", 1,
+        Subsignal("txp", Pins("D5")),
+        Subsignal("txn", Pins("C5")),
+        Subsignal("rxp", Pins("D11")),
+        Subsignal("rxn", Pins("C11")),
     ),
 ]
 
