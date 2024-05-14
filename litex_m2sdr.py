@@ -10,6 +10,8 @@ import os
 import argparse
 
 from migen import *
+from migen.genlib.resetsync import AsyncResetSynchronizer
+from migen.genlib.cdc import PulseSynchronizer, MultiReg
 
 from litex.gen import *
 
@@ -165,6 +167,34 @@ class BaseSoC(SoCMini):
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
             self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
+
+        # Clk Measurements -------------------------------------------------------------------------
+
+        class ClkMeasurement(LiteXModule):
+            def __init__(self, clk, increment=1):
+                self.latch = CSR()
+                self.value = CSRStatus(64)
+
+                # # #
+
+                # Create Clock Domain.
+                self.cd_counter = ClockDomain()
+                self.comb += self.cd_counter.clk.eq(clk)
+                self.specials += AsyncResetSynchronizer(self.cd_counter, ResetSignal())
+
+                # Free-running Clock Counter.
+                counter = Signal(64)
+                self.sync.counter += counter.eq(counter + increment)
+
+                # Latch Clock Counter.
+                latch_value = Signal(64)
+                latch_sync  = PulseSynchronizer("sys", "counter")
+                self.submodules += latch_sync
+                self.comb += latch_sync.i.eq(self.latch.re)
+                self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
+                self.specials += MultiReg(latch_value, self.value.status)
+
+        self.aux_clk_measurement = ClkMeasurement(clk=platform.request("aux_clk"))
 
 # Build --------------------------------------------------------------------------------------------
 

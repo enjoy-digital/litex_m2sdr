@@ -14,6 +14,9 @@ _io = [
     # Clk/Rst.
     ("clk100", 0, Pins("C18"), IOStandard("LVCMOS33")),
 
+    # Aux Clk.
+    ("aux_clk", 0, Pins("J19"), IOStandard("LVCMOS33")),
+
     # Leds.
     ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
 
