@@ -29,6 +29,7 @@ from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 from litex.soc.cores.pwm       import PWM
+from litex.soc.cores.spi       import SPIMaster
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
@@ -174,6 +175,22 @@ class BaseSoC(SoCMini):
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
             self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
+
+        # AD9361 RFIC ------------------------------------------------------------------------------
+
+
+        ad9361_rfic_pads = platform.request("ad9361_rfic")
+        self.comb += [
+            ad9361_rfic_pads.rst_n.eq(1),
+            ad9361_rfic_pads.enable.eq(1),
+        ]
+
+        self.ad9361_spi = SPIMaster(
+            pads         = platform.request("ad9361_spi"),
+            data_width   = 24,
+            sys_clk_freq = sys_clk_freq,
+            spi_clk_freq = 1e6
+        )
 
         # Clk Measurements -------------------------------------------------------------------------
 
