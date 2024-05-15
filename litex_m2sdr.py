@@ -41,7 +41,7 @@ from litescope import LiteScopeAnalyzer
 
 from gateware.si5351_i2c import SI5351, i2c_program_38p4
 
-#from software import generate_litepcie_software
+from software import generate_litepcie_software
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -233,7 +233,7 @@ def main():
     builder.build(run=args.build)
 
     # Generate LitePCIe Driver.
-    #generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
+    generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
 
     # Load Bistream.
     if args.load:
