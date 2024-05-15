@@ -17,6 +17,9 @@ _io = [
     # Leds.
     ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
 
+    # Debug.
+    ("debug", 0, Pins("V13"),  IOStandard("LVCMOS33")), # SYNCDBG_CLK.
+
     # SI5351 Clocking.
     ("si5351_i2c", 0,
         Subsignal("scl", Pins("AA20")),

@@ -199,6 +199,8 @@ class BaseSoC(SoCMini):
         self.si5351_clk2_measurement = ClkMeasurement(clk=platform.request("si5351_clk2"))
         self.si5351_clk3_measurement = ClkMeasurement(clk=platform.request("si5351_clk3"))
 
+        self.comb += platform.request("debug").eq(platform.lookup_request("si5351_clk0"))
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
