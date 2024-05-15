@@ -26,6 +26,7 @@ _io = [
         Subsignal("sda", Pins("AB21")),
         IOStandard("LVCMOS33")
     ),
+    ("si5351_pwm",  0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ("si5351_clk0", 0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
     ("si5351_clk1", 0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
     ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS33")), # FPGA_AUXCLK_3.

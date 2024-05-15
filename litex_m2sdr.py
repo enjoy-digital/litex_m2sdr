@@ -28,6 +28,7 @@ from litex.soc.cores.led       import LedChaser
 from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
+from litex.soc.cores.pwm       import PWM
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
@@ -87,7 +88,13 @@ class BaseSoC(SoCMini):
         self.crg = CRG(platform, sys_clk_freq, with_ethernet=with_ethernet)
 
         # SI5351 Clock Generator -------------------------------------------------------------------
-        self.si5351 = SI5351(platform.request("si5351_i2c"), [i2c_program_38p4, i2c_program_38p4], sys_clk_freq)
+        self.si5351     = SI5351(platform.request("si5351_i2c"), [i2c_program_38p4, i2c_program_38p4], sys_clk_freq)
+        self.si5351_pwm = PWM(platform.request("si5351_pwm"),
+            default_enable = 1,
+            default_width  = 1024,
+            default_period = 2048,
+        )
+        #self.comb += platform.request("si5351_pwm").eq(1)
 
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
@@ -200,6 +207,7 @@ class BaseSoC(SoCMini):
         self.si5351_clk3_measurement = ClkMeasurement(clk=platform.request("si5351_clk3"))
 
         self.comb += platform.request("debug").eq(platform.lookup_request("si5351_clk0"))
+        #self.comb += platform.request("debug").eq(self.si5351.done)
 
 # Build --------------------------------------------------------------------------------------------
 
