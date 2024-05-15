@@ -19,10 +19,17 @@ def latch_and_read():
 num_measurements    = 10
 delay_between_tests = 1
 
+# Initialize the previous value
+previous_value = latch_and_read()
+
 for i in range(num_measurements):
-    value = latch_and_read()
-    frequency_mhz = value / (delay_between_tests * 1e6)
-    print(f"Measurement {i + 1}: Clock Frequency: {frequency_mhz:.2f} MHz")
     time.sleep(delay_between_tests)
+    current_value = latch_and_read()
+    # Compute the difference between the current and previous values
+    delta_value = current_value - previous_value
+    frequency_mhz = delta_value / (delay_between_tests * 1e6)
+    print(f"Measurement {i + 1}: Clock Frequency: {frequency_mhz:.2f} MHz")
+    # Update the previous value
+    previous_value = current_value
 
 bus.close()

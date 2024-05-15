@@ -38,6 +38,15 @@ Board mounted in Acorn Mini Baseboard:
 lspci
 ```
 
+[> SI5351 Tests
+----------------
+
+```bash
+./litex_m2sdr.py --with-pcie --build --load
+litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
+./test_si5351_aux_clk.py
+```
+
 [> Contact
 ----------
 E-mail: florent@enjoy-digital.fr
