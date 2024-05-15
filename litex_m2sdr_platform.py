@@ -12,18 +12,18 @@ from litex.build.openfpgaloader import OpenFPGALoader
 
 _io = [
     # Clk/Rst.
-    ("clk100", 0, Pins("C18"), IOStandard("LVCMOS33")),
+    ("clk100", 0, Pins("C18"), IOStandard("LVCMOS33")), # SYSCLK.
 
     # Leds.
-    ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
+    ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")), # FPGA_LED2.
 
     # Debug.
     ("debug", 0, Pins("V13"),  IOStandard("LVCMOS33")), # SYNCDBG_CLK.
 
     # SI5351 Clocking.
     ("si5351_i2c", 0,
-        Subsignal("scl", Pins("AA20")),
-        Subsignal("sda", Pins("AB21")),
+        Subsignal("scl", Pins("AA20")), # SI5351_SCL.
+        Subsignal("sda", Pins("AB21")), # SI5351_SDA.
         IOStandard("LVCMOS33")
     ),
     ("si5351_pwm",  0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
@@ -34,38 +34,38 @@ _io = [
 
     # PCIe (M2 Connector).
     ("pcie_x1", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
-        Subsignal("clk_p", Pins("F6")),
-        Subsignal("clk_n", Pins("E6")),
-        Subsignal("rx_p",  Pins("B8")),
-        Subsignal("rx_n",  Pins("A8")),
-        Subsignal("tx_p",  Pins("B4")),
-        Subsignal("tx_n",  Pins("A4")),
+        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("B8")), # PCIe_RX3_P
+        Subsignal("rx_n",  Pins("A8")), # PCIe_RX3_N.
+        Subsignal("tx_p",  Pins("B4")), # PCIe_TX3_P.
+        Subsignal("tx_n",  Pins("A4")), # PCIe_TX3_N.
     ),
     ("pcie_x4", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")),
-        Subsignal("clk_p", Pins("F6")),
-        Subsignal("clk_n", Pins("E6")),
-        Subsignal("rx_p",  Pins("D9 D11 B10 B8")),
-        Subsignal("rx_n",  Pins("C9 C11 A10 A8")),
-        Subsignal("tx_p",  Pins("D7  D5  B6 B4")),
-        Subsignal("tx_n",  Pins("C7  C5  A6 A4")),
+        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("D9 D11 B10 B8")), # PCIe_RX0-3_P.
+        Subsignal("rx_n",  Pins("C9 C11 A10 A8")), # PCIe_RX0-3_N.
+        Subsignal("tx_p",  Pins("D7  D5  B6 B4")), # PCIe_TX0-3_P.
+        Subsignal("tx_n",  Pins("C7  C5  A6 A4")), # PCIe_TX0-3_N.
     ),
 
     # SFP 0 (When plugged in Acorn Baseboard Mini).
     ("sfp", 0,
-        Subsignal("txp", Pins("B6")),
-        Subsignal("txn", Pins("A6")),
-        Subsignal("rxp", Pins("B10")),
-        Subsignal("rxn", Pins("A10")),
+        Subsignal("txp", Pins("B6")),  # PCIe_TX2_P.
+        Subsignal("txn", Pins("A6")),  # PCIe_TX2_N.
+        Subsignal("rxp", Pins("B10")), # PCIe_RX2_P.
+        Subsignal("rxn", Pins("A10")), # PCIe_RX2_N.
     ),
 
     # SFP 1 (When plugged in Acorn Baseboard Mini).
     ("sfp", 1,
-        Subsignal("txp", Pins("D5")),
-        Subsignal("txn", Pins("C5")),
-        Subsignal("rxp", Pins("D11")),
-        Subsignal("rxn", Pins("C11")),
+        Subsignal("txp", Pins("D5")),  # PCIe_TX1_P.
+        Subsignal("txn", Pins("C5")),  # PCIe_TX1_N.
+        Subsignal("rxp", Pins("D11")), # PCIe_RX1_P.
+        Subsignal("rxn", Pins("C11")), # PCIe_RX1_N.
     ),
 
     # AD9361.
