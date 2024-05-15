@@ -1,3 +1,9 @@
+#
+# This file is part of LiteX-M2SDR.
+#
+# Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
+
 from collections import namedtuple
 
 from migen import *
