@@ -42,9 +42,10 @@ lspci
 ----------------
 
 ```bash
-./litex_m2sdr.py --with-pcie --build --load
+./litex_m2sdr.py --with-ethernet --build --load
 litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
-./test_si5351_aux_clk.py
+litex_server --udp
+./test_si5351_clks.py
 ```
 
 [> Contact

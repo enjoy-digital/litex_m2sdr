@@ -194,7 +194,10 @@ class BaseSoC(SoCMini):
                 self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
                 self.specials += MultiReg(latch_value, self.value.status)
 
-        self.aux_clk_measurement = ClkMeasurement(clk=platform.request("aux_clk"))
+        self.si5351_clk0_measurement = ClkMeasurement(clk=platform.request("si5351_clk0"))
+        self.si5351_clk1_measurement = ClkMeasurement(clk=platform.request("si5351_clk1"))
+        self.si5351_clk2_measurement = ClkMeasurement(clk=platform.request("si5351_clk2"))
+        self.si5351_clk3_measurement = ClkMeasurement(clk=platform.request("si5351_clk3"))
 
 # Build --------------------------------------------------------------------------------------------
 

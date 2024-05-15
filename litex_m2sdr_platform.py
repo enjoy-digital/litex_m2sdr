@@ -14,9 +14,6 @@ _io = [
     # Clk/Rst.
     ("clk100", 0, Pins("C18"), IOStandard("LVCMOS33")),
 
-    # Aux Clk.
-    ("aux_clk", 0, Pins("J19"), IOStandard("LVCMOS33")),
-
     # Leds.
     ("user_led", 0, Pins("AB15"),  IOStandard("LVCMOS33")),
 
@@ -26,6 +23,10 @@ _io = [
         Subsignal("sda", Pins("AB21")),
         IOStandard("LVCMOS33")
     ),
+    ("si5351_clk0", 0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
+    ("si5351_clk1", 0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
+    ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS33")), # FPGA_AUXCLK_3.
+    ("si5351_clk3", 0, Pins("R4"),  IOStandard("LVCMOS33")), # FPGA_AUXCLK_4.
 
     # PCIe (M2 Connector).
     ("pcie_x1", 0,
