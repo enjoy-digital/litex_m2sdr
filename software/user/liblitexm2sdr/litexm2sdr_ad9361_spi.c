@@ -16,8 +16,8 @@
 
 //#define AD9361_SPI_XFER_DEBUG
 
-//#define AD9361_SPI_WRITE_DEBUG
-//#define AD9361_SPI_READ_DEBUG
+#define AD9361_SPI_WRITE_DEBUG
+#define AD9361_SPI_READ_DEBUG
 
 /* Private Functions */
 

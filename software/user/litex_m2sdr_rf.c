@@ -51,7 +51,28 @@ int spi_write_then_read(struct spi_device *spi,
                         unsigned char *rxbuf, unsigned n_rx)
 {
 
-    /* FIXME: Implement */
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (n_tx == 2 && n_rx == 1) {
+        /* read */
+        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] <<8 | txbuf[1]);
+    } else if (n_tx == 3 && n_rx == 0) {
+        /* write */
+        litexm2sdr_ad9361_spi_write(fd, SPI_AD9361_CS, txbuf[1] << 8 | txbuf[2], txbuf[0]);
+    } else {
+        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
+                n_tx, n_rx);
+        exit(1);
+    }
+
+    close(fd);
+
     return 0;
 }
 
@@ -374,6 +395,8 @@ static void init(void)
     default_init_param.gpio_sync = -1;
     default_init_param.gpio_cal_sw1 = -1;
     default_init_param.gpio_cal_sw2 = -1;
+
+    ad9361_spi_init(fd);
 
     ad9361_phy = ad9361_init(&default_init_param);
 

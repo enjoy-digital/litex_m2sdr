@@ -196,7 +196,7 @@ static void test_ad9361_spi_scan(void)
 
     /* Check AD9361 presence. */
     for (i=0; i<128; i++)
-        printf("%02x: %04x\n", i, litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, i));
+        printf("Reg 0x%02x: 0x%04x\n", i, litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, i));
 
     printf("\n");
 
