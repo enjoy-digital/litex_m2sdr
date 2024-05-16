@@ -16,7 +16,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+
 #include "liblitepcie.h"
+#include "liblitexm2sdr.h"
 
 /* Parameters */
 /*------------*/
@@ -36,6 +38,29 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
+/* SI5351 I2C */
+/*------------*/
+
+#define SI5351_I2C_ADDR 0x60
+
+static void test_si5351_i2c_scan(void)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("\e[1m[> SI53512 I2C Bus Scan:\e[0m\n");
+    printf("-----------------------------\n");
+    litexm2sdr_si5351_i2c_scan(fd);
+    printf("\n");
+
+    close(fd);
+}
+
 /* Info */
 /*------*/
 
@@ -52,8 +77,8 @@ static void info(void)
     }
 
 
-    printf("\e[1m[> FPGA/SoC Information:\e[0m\n");
-    printf("------------------------\n");
+    printf("\e[1m[> FPGA/SoC Info:\e[0m\n");
+    printf("---------------------\n");
 
     for (i = 0; i < 256; i ++)
         fpga_identifier[i] = litepcie_readl(fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
@@ -65,15 +90,19 @@ static void info(void)
     );
 #endif
 #ifdef CSR_XADC_BASE
-    printf("FPGA Temperature: %0.1f °C\n",
+    printf("FPGA Temperature : %0.1f °C\n",
            (double)litepcie_readl(fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
-    printf("FPGA VCC-INT:     %0.2f V\n",
+    printf("FPGA VCC-INT     : %0.2f V\n",
            (double)litepcie_readl(fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
-    printf("FPGA VCC-AUX:     %0.2f V\n",
+    printf("FPGA VCC-AUX     : %0.2f V\n",
            (double)litepcie_readl(fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
-    printf("FPGA VCC-BRAM:    %0.2f V\n",
+    printf("FPGA VCC-BRAM    : %0.2f V\n",
            (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
 #endif
+    printf("\n");
+
+    /* SI5351 I2C */
+    test_si5351_i2c_scan();
     close(fd);
 }
 
@@ -484,7 +513,7 @@ static void help(void)
            "-c device_num                     Select the device (default = 0).\n"
            "-z                                Enable zero-copy DMA mode.\n"
            "-e                                Use external loopback (default = internal).\n"
-           "-w data_width                     Width of data bus (default = 16).\n"
+           "-w data_width                     Width of data bus (default = 32).\n"
            "-a                                Automatic DMA RX-Delay calibration.\n"
            "\n"
            "available commands:\n"
@@ -515,7 +544,7 @@ int main(int argc, char **argv)
     static int litepcie_auto_rx_delay;
 
     litepcie_device_num = 0;
-    litepcie_data_width = 16;
+    litepcie_data_width = 32;
     litepcie_auto_rx_delay = 0;
     litepcie_device_zero_copy = 0;
     litepcie_device_external_loopback = 0;
