@@ -177,11 +177,12 @@ class BaseSoC(SoCMini):
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
-
         ad9361_rfic_pads = platform.request("ad9361_rfic")
+
+        self.ad9361_enable = CSRStorage()
         self.comb += [
-            ad9361_rfic_pads.rst_n.eq(1),
-            ad9361_rfic_pads.enable.eq(1),
+            ad9361_rfic_pads.rst_n.eq(self.ad9361_enable.storage),
+            ad9361_rfic_pads.enable.eq(self.ad9361_enable.storage),
         ]
 
         self.ad9361_spi = SPIMaster(
