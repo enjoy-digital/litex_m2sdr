@@ -41,8 +41,6 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
-from gateware.si5351_i2c import SI5351, i2c_program_38p4
-
 from software import generate_litepcie_software
 
 # CRG ----------------------------------------------------------------------------------------------
