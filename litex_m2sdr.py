@@ -29,6 +29,7 @@ from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 from litex.soc.cores.pwm       import PWM
+from litex.soc.cores.bitbang   import I2CMaster
 from litex.soc.cores.spi       import SPIMaster
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
@@ -89,7 +90,7 @@ class BaseSoC(SoCMini):
         self.crg = CRG(platform, sys_clk_freq, with_ethernet=with_ethernet)
 
         # SI5351 Clock Generator -------------------------------------------------------------------
-        self.si5351     = SI5351(platform.request("si5351_i2c"), [i2c_program_38p4, i2c_program_38p4], sys_clk_freq)
+        self.si5351_i2c = I2CMaster(pads=platform.request("si5351_i2c"))
         self.si5351_pwm = PWM(platform.request("si5351_pwm"),
             default_enable = 1,
             default_width  = 1024,
