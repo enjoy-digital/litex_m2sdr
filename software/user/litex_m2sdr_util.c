@@ -195,7 +195,7 @@ static void test_ad9361_spi_scan(void)
     ad9361_spi_init(fd);
 
     /* Check AD9361 presence. */
-    for (i=0; i<16; i++)
+    for (i=0; i<128; i++)
         printf("%02x: %04x\n", i, ad9361_spi_read(fd, SPI_AD9361_CS, i));
 
     printf("\n");
@@ -667,7 +667,7 @@ static void help(void)
            "si5351_i2c_scan                   Scan SI5351 I2C.\n"
            "si5351_i2c_init                   Init SI5351 over I2C.\n"
            "\n"
-           "ad9391_spi_scan                   Scan AD9361 SPI.\n"
+           "ad9361_spi_scan                   Scan AD9361 SPI.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
@@ -742,9 +742,9 @@ int main(int argc, char **argv)
         scratch_test();
     /* SI5351 cmds. */
     else if (!strcmp(cmd, "si5351_i2c_scan"))
-        test_si5351_i2c_init();
-    else if (!strcmp(cmd, "si5351_i2c_init"))
         test_si5351_i2c_scan();
+    else if (!strcmp(cmd, "si5351_i2c_init"))
+        test_si5351_i2c_init();
     /* AD9361 cmds. */
     else if (!strcmp(cmd, "ad9361_spi_scan"))
         test_ad9361_spi_scan();

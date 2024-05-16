@@ -192,6 +192,15 @@ class BaseSoC(SoCMini):
         )
         self.ad9361_spi.add_clk_divider()
 
+        # Debug.
+        analyzer_signals = [platform.lookup_request("ad9361_spi")]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 4096,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
         # Clk Measurements -------------------------------------------------------------------------
 
         class ClkMeasurement(LiteXModule):

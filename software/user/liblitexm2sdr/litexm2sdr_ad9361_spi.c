@@ -27,8 +27,9 @@ void ad9361_spi_init(int fd) {
     /* Set SPI Clk Freq */
     litepcie_writel(fd, CSR_AD9361_SPI_CLK_DIVIDER_ADDR, SYS_CLK_FREQ_MHZ/SPI_CLK_FREQ_MHZ);
 
-    /* Configure AD361 for 4-Wire SPI */
-    ad9361_spi_write(fd, SPI_AD9361_CS, 0, 0x3c);
+    /* Reset and Configure AD361 for 4-Wire SPI */
+    ad9361_spi_write(fd, SPI_AD9361_CS, 0, 1<<7);
+    ad9361_spi_write(fd, SPI_AD9361_CS, 0, 0);
 
     /* Small delay. */
     usleep(1000);
