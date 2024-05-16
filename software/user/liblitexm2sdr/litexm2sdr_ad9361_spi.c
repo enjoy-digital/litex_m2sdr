@@ -14,10 +14,10 @@
 
 #include "litexm2sdr_ad9361_spi.h"
 
-#define AD9361_SPI_XFER_DEBUG
+//#define AD9361_SPI_XFER_DEBUG
 
-#define AD9361_SPI_WRITE_DEBUG
-#define AD9361_SPI_READ_DEBUG
+//#define AD9361_SPI_WRITE_DEBUG
+//#define AD9361_SPI_READ_DEBUG
 
 /* Private Functions */
 
@@ -100,7 +100,7 @@ void ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat) {
 #endif
 
     /* Prepare Data. */
-    mosi[0]  = (0 << 7);
+    mosi[0]  = (1 << 7);
     mosi[0] |= (reg >> 8) & 0x7f;
     mosi[1]  = (reg >> 0) & 0xff;
     mosi[2]  = dat;
@@ -115,7 +115,7 @@ uint8_t ad9361_spi_read(int fd, uint8_t cs, uint16_t reg) {
     uint8_t miso[3];
 
     /* Prepare Data. */
-    mosi[0]  = (1 << 7);
+    mosi[0]  = (0 << 7);
     mosi[0] |= (reg >> 8) & 0x7f;
     mosi[1]  = (reg >> 0) & 0xff;
     mosi[2]  = 0x00;
