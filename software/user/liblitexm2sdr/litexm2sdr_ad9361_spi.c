@@ -16,8 +16,8 @@
 
 //#define AD9361_SPI_XFER_DEBUG
 
-#define AD9361_SPI_WRITE_DEBUG
-#define AD9361_SPI_READ_DEBUG
+//#define AD9361_SPI_WRITE_DEBUG
+//#define AD9361_SPI_READ_DEBUG
 
 /* Private Functions */
 
@@ -39,6 +39,12 @@ void ad9361_spi_init(int fd) {
 
     /* Small delay. */
     usleep(1000);
+
+    /* Dummy Reads */
+    litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, 0);
+    litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, 0);
+    litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, 0);
+    litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, 0);
 }
 
 void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *miso) {
@@ -46,6 +52,8 @@ void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *mi
 
     /* Set Chip Select. */
     litepcie_writel(fd, CSR_AD9361_SPI_CS_ADDR, SPI_CS_MANUAL | (1 << cs));
+
+    //printf("new...\n");
 
     /* Do SPI Xfer. */
     i = 0;
@@ -69,6 +77,7 @@ void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *mi
             }
             i += 4;
         } else {
+            //printf("mosi[i] : 0%02x\n", mosi[i]);
             litepcie_writel(fd, CSR_AD9361_SPI_MOSI_ADDR, mosi[i] << 24);
             litepcie_writel(fd, CSR_AD9361_SPI_CONTROL_ADDR, 8*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
             while ((litepcie_readl(fd, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
@@ -125,6 +134,8 @@ uint8_t litexm2sdr_ad9361_spi_read(int fd, uint8_t cs, uint16_t reg) {
     mosi[0] |= (reg >> 8) & 0x7f;
     mosi[1]  = (reg >> 0) & 0xff;
     mosi[2]  = 0x00;
+
+
 
     /* Do SPI Xfer. */
     ad9361_spi_xfer(fd, cs, 3, mosi, miso);

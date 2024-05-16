@@ -61,10 +61,11 @@ int spi_write_then_read(struct spi_device *spi,
 
     if (n_tx == 2 && n_rx == 1) {
         /* read */
-        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] <<8 | txbuf[1]);
+        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
+        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]);
     } else if (n_tx == 3 && n_rx == 0) {
         /* write */
-        litexm2sdr_ad9361_spi_write(fd, SPI_AD9361_CS, txbuf[1] << 8 | txbuf[2], txbuf[0]);
+        litexm2sdr_ad9361_spi_write(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1], txbuf[0]);
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
                 n_tx, n_rx);
