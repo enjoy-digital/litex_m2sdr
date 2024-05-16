@@ -18,7 +18,7 @@ liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o liblitexm2s
 litex_m2sdr_util: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
 
-litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o
+litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o ad9361/ad9361.o ad9361/ad9361_api.o ad9361/util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
 
 litex_m2sdr_test: liblitepcie/liblitepcie.a litex_m2sdr_test.o
@@ -28,6 +28,7 @@ clean:
 	rm -f $(PROGS) *.o *.a *.d *~
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f liblitexm2sdr/*.a liblitexm2sdr/*.o liblitexm2sdr/*.d
+	rm -f  ad9361/*.o ad9361/*.d ad9361/*~
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<

@@ -34,7 +34,7 @@
 
 void ad9361_spi_init(int fd);
 void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *miso);
-void ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat);
-uint8_t ad9361_spi_read(int fd, uint8_t cs, uint16_t reg);
+void litexm2sdr_ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat);
+uint8_t litexm2sdr_ad9361_spi_read(int fd, uint8_t cs, uint16_t reg);
 
 #endif /* __AD9361_SPI_H */

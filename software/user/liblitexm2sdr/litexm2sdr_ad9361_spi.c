@@ -28,8 +28,8 @@ void ad9361_spi_init(int fd) {
     litepcie_writel(fd, CSR_AD9361_SPI_CLK_DIVIDER_ADDR, SYS_CLK_FREQ_MHZ/SPI_CLK_FREQ_MHZ);
 
     /* Reset and Configure AD361 for 4-Wire SPI */
-    ad9361_spi_write(fd, SPI_AD9361_CS, 0, 1<<7);
-    ad9361_spi_write(fd, SPI_AD9361_CS, 0, 0);
+    litexm2sdr_ad9361_spi_write(fd, SPI_AD9361_CS, 0, 1<<7);
+    litexm2sdr_ad9361_spi_write(fd, SPI_AD9361_CS, 0, 0);
 
     /* Small delay. */
     usleep(1000);
@@ -91,7 +91,7 @@ void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *mi
     litepcie_writel(fd, CSR_AD9361_SPI_CS_ADDR,  SPI_CS_MANUAL | (0 << cs));
 }
 
-void ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat) {
+void litexm2sdr_ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat) {
     uint8_t mosi[3];
     uint8_t miso[3];
 
@@ -109,7 +109,7 @@ void ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat) {
     ad9361_spi_xfer(fd, cs, 3, mosi, miso);
 }
 
-uint8_t ad9361_spi_read(int fd, uint8_t cs, uint16_t reg) {
+uint8_t litexm2sdr_ad9361_spi_read(int fd, uint8_t cs, uint16_t reg) {
     uint8_t dat;
     uint8_t mosi[3];
     uint8_t miso[3];
