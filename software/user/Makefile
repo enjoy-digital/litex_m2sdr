@@ -11,7 +11,7 @@ liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_flash
 	ar rcs $@ $+
 	ranlib $@
 
-liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o
+liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o liblitexm2sdr/litexm2sdr_ad9361_spi.o
 	ar rcs $@ $+
 	ranlib $@
 

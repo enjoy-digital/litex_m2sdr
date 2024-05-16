@@ -18,6 +18,7 @@ extern "C" {
 
 /* Libs */
 #include "litexm2sdr_si5351_i2c.h"
+#include "litexm2sdr_ad9361_spi.h"
 
 #ifdef __cplusplus
 }

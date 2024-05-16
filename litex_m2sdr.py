@@ -186,10 +186,11 @@ class BaseSoC(SoCMini):
 
         self.ad9361_spi = SPIMaster(
             pads         = platform.request("ad9361_spi"),
-            data_width   = 24,
+            data_width   = 32,
             sys_clk_freq = sys_clk_freq,
             spi_clk_freq = 1e6
         )
+        self.ad9361_spi.add_clk_divider()
 
         # Clk Measurements -------------------------------------------------------------------------
 

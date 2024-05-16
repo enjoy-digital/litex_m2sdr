@@ -152,7 +152,7 @@ const uint8_t si5351_config[][2] = {
     { 0xB7, 0x12 }
 };
 
-static void test_si5351_init(void)
+static void test_si5351_i2c_init(void)
 {
     int i;
     int fd;
@@ -172,6 +172,33 @@ static void test_si5351_init(void)
             fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
         }
     }
+
+    close(fd);
+}
+
+
+/* AD9361 SPI Scan */
+/*-----------------*/
+
+static void test_ad9361_spi_scan(void)
+{
+    int i;
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* Initialize SPI */
+    ad9361_spi_init(fd);
+
+    /* Check AD9361 presence. */
+    for (i=0; i<16; i++)
+        printf("%02x: %04x\n", i, ad9361_spi_read(fd, SPI_AD9361_CS, i));
+
+    printf("\n");
 
     close(fd);
 }
@@ -637,7 +664,10 @@ static void help(void)
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
            "\n"
-           "si5351_init                       Initialize SI5351.\n"
+           "si5351_i2c_scan                   Scan SI5351 I2C.\n"
+           "si5351_i2c_init                   Init SI5351 over I2C.\n"
+           "\n"
+           "ad9391_spi_scan                   Scan AD9361 SPI.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
@@ -711,8 +741,13 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
     /* SI5351 cmds. */
-    else if (!strcmp(cmd, "si5351_init"))
-        test_si5351_init();
+    else if (!strcmp(cmd, "si5351_i2c_scan"))
+        test_si5351_i2c_init();
+    else if (!strcmp(cmd, "si5351_i2c_init"))
+        test_si5351_i2c_scan();
+    /* AD9361 cmds. */
+    else if (!strcmp(cmd, "ad9361_spi_scan"))
+        test_ad9361_spi_scan();
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
     else if (!strcmp(cmd, "flash_write")) {
