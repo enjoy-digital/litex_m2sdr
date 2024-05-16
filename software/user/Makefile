@@ -3,7 +3,7 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-PROGS=litex_m2sdr_util litex_m2sdr_test
+PROGS=litex_m2sdr_util litex_m2sdr_rf litex_m2sdr_test
 
 all: $(PROGS)
 
@@ -16,6 +16,9 @@ liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o liblitexm2s
 	ranlib $@
 
 litex_m2sdr_util: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
+
+litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
 
 litex_m2sdr_test: liblitepcie/liblitepcie.a litex_m2sdr_test.o
