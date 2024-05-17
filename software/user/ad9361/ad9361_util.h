@@ -1,9 +1,9 @@
 /***************************************************************************//**
- *   @file   platform.h
- *   @brief  Header file of Platform driver.
+ *   @file   ad9361_util.h
+ *   @brief  AD9361 Header file of Util driver.
  *   @author DBogdan (dragos.bogdan@analog.com)
 ********************************************************************************
- * Copyright 2014(c) Analog Devices, Inc.
+ * Copyright 2013(c) Analog Devices, Inc.
  *
  * All rights reserved.
  *
@@ -36,26 +36,85 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *******************************************************************************/
-#ifndef PLATFORM_H_
-#define PLATFORM_H_
+#ifndef __AD9361_UTIL_H__
+#define __AD9361_UTIL_H__
 
 /******************************************************************************/
 /***************************** Include Files **********************************/
 /******************************************************************************/
-#include "util.h"
+#include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "ad9361.h"
+#include "common.h"
+#include "app_config.h"
 
-//#define USE_AXIADC
+/******************************************************************************/
+/********************** Macros and Constants Definitions **********************/
+/******************************************************************************/
+#define CLK_IGNORE_UNUSED						NO_OS_BIT(3)
+#define CLK_GET_RATE_NOCACHE					NO_OS_BIT(6)
+
+#if defined(HAVE_VERBOSE_MESSAGES)
+#define dev_err(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
+#define dev_warn(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
+#if defined(HAVE_DEBUG_MESSAGES)
+#define dev_dbg(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
+#else
+#define dev_dbg(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
+#endif
+#define printk(format, ...)			printf(format, ## __VA_ARGS__)
+#else
+#define dev_err(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
+#define dev_warn(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
+#define dev_dbg(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
+#define printk(format, ...)			({ if (0) printf(format, ## __VA_ARGS__); })
+#endif
+
+struct device {
+};
+
+struct spi_device {
+	struct device	dev;
+	uint8_t 		id_no;
+};
+
+struct axiadc_state {
+	struct ad9361_rf_phy	*phy;
+	uint32_t				pcore_version;
+};
+
+struct axiadc_chip_info {
+	char		*name;
+	int32_t		num_channels;
+};
+
+struct axiadc_converter {
+	struct axiadc_chip_info	*chip_info;
+	uint32_t				scratch_reg[16];
+};
+
+#ifdef WIN32
+#include "basetsd.h"
+typedef SSIZE_T ssize_t;
+#define strsep(s, ct)				0
+#define snprintf(s, n, format, ...)	0
+#define __func__ __FUNCTION__
+#endif
 
 /******************************************************************************/
 /************************ Functions Declarations ******************************/
 /******************************************************************************/
-int spi_write_then_read(struct spi_device *spi,
-		const unsigned char *txbuf, unsigned n_tx,
-		unsigned char *rxbuf, unsigned n_rx);
-bool gpio_is_valid(struct gpio_device *gpio_dev, int number);
-void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value);
-void udelay(unsigned long usecs);
-void mdelay(unsigned long msecs);
-unsigned long msleep_interruptible(unsigned int msecs);
+int32_t clk_prepare_enable(struct no_os_clk *clk);
+uint32_t clk_get_rate(struct ad9361_rf_phy *phy,
+		      struct refclk_scale *clk_priv);
+int32_t no_os_clk_set_rate(struct ad9361_rf_phy *phy,
+			   struct refclk_scale *clk_priv,
+			   uint32_t rate);
+uint32_t int_sqrt(uint32_t x);
+int32_t ilog2(int32_t x);
+uint32_t find_first_bit(uint32_t word);
+void * ERR_PTR(long error);
 
 #endif
