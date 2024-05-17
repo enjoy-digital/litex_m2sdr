@@ -110,7 +110,7 @@ void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value)
 
 AD9361_InitParam default_init_param = {
     /* Reference Clock */
-    40000000UL, //reference_clk_rate
+    38400000UL, //reference_clk_rate
     /* Base Configuration */
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
     1,      //frequency_division_duplex_mode_enable *** adi,frequency-division-duplex-mode-enable
@@ -401,8 +401,8 @@ static void init(void)
 
     ad9361_phy = ad9361_init(&default_init_param);
 
-    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
     close(fd);
 }
