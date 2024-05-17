@@ -18,11 +18,7 @@
 #include <signal.h>
 #include <stdbool.h>
 
-#define WITH_AD9361
-
-#ifdef WITH_AD9361
 #include "ad9361/ad9361_api.h"
-#endif
 
 #include "liblitepcie.h"
 #include "liblitexm2sdr.h"
@@ -53,11 +49,8 @@ void no_os_mdelay(uint32_t msecs)
     printf("TODO: Implement no_os_mdelay!");
 }
 
-
-#ifdef WITH_AD9361
-
-///* AD9361 */
-///*--------*/
+/* AD9361 */
+/*--------*/
 
 AD9361_InitParam default_init_param = {
     /* Device selection */
@@ -379,7 +372,6 @@ AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
     0 // tx_bandwidth
 };
 struct ad9361_rf_phy *ad9361_phy;
-#endif
 
 /* Info */
 /*------*/
@@ -437,7 +429,6 @@ static void init(void)
         exit(1);
     }
 
-#ifdef WITH_AD9361
     // FIXME.
     //default_init_param.spi_param.extra = &xil_spi_param;
     //default_init_param.spi_param.platform_ops = &xil_spi_ops;
@@ -454,8 +445,6 @@ static void init(void)
 
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-
-#endif
 
     close(fd);
 }
