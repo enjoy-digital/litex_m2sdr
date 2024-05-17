@@ -14,8 +14,6 @@
 
 #include "litexm2sdr_ad9361_spi.h"
 
-//#define AD9361_SPI_XFER_DEBUG
-
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
@@ -31,17 +29,11 @@ void ad9361_spi_init(int fd) {
     usleep(1000);
 
     /* Reset and Configure AD361 for 4-Wire SPI */
-    //litexm2sdr_ad9361_spi_write(fd, 0, 1<<7);
-    //litexm2sdr_ad9361_spi_write(fd, 0, 0);
+    litexm2sdr_ad9361_spi_write(fd, 0, 1<<7);
+    litexm2sdr_ad9361_spi_write(fd, 0, 0);
 
     /* Small delay. */
-    //usleep(1000);
-
-    /* Dummy Reads */
-    //litexm2sdr_ad9361_spi_read(fd, 0);
-    //litexm2sdr_ad9361_spi_read(fd, 0);
-    //litexm2sdr_ad9361_spi_read(fd, 0);
-    //litexm2sdr_ad9361_spi_read(fd, 0);
+    usleep(1000);
 }
 
 void ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso) {
@@ -50,22 +42,6 @@ void ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     litepcie_writel(fd, CSR_AD9361_SPI_CTRL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
     while ((litepcie_readl(fd, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
     miso[0] = litepcie_readl(fd, CSR_AD9361_SPI_MISO_ADDR) & 0xff;
-
-#ifdef AD9361_SPI_XFER_DEBUG
-    int i;
-    printf("ad9361_spi_xfer; en: %2d mosi:", len);
-    for (i=0; i<len; i++)
-        printf(" 0x%02x", mosi[i]);
-    printf("\n");
-    if (miso != NULL) {
-        for(i=0; i<32; i++)
-            printf(" ");
-        printf("miso:");
-        for (i=0; i<len; i++)
-            printf(" 0x%02x", miso[i]);
-        printf("\n");
-    }
-#endif
 }
 
 void litexm2sdr_ad9361_spi_write(int fd, uint16_t reg, uint8_t dat) {

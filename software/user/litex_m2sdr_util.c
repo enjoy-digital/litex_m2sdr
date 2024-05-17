@@ -191,13 +191,10 @@ static void test_ad9361_spi_scan(void)
         exit(1);
     }
 
-    /* Initialize SPI */
+    /* AD9361 SPI Init */
     ad9361_spi_init(fd);
 
-    /* Check AD9361 presence. */
-    //for (i=0; i<16; i++)
-    //    printf("Reg 0x%02x: 0x%04x\n", 0x37, litexm2sdr_ad9361_spi_read(fd, 0x37));
-
+    /* AD9361 SPI Dump */
     for (i=0; i<128; i++)
         printf("Reg 0x%02x: 0x%04x\n", i, litexm2sdr_ad9361_spi_read(fd, i));
 
