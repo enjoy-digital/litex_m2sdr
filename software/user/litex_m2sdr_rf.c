@@ -50,16 +50,15 @@ void no_os_mdelay(uint32_t msecs)
     printf("TODO: Implement no_os_mdelay!");
 }
 
-//int32_t no_os_spi_write_and_read(struct no_os_spi_desc *desc,
-//                 uint8_t *data,
-//                 uint16_t bytes_number)
-
-int32_t spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
+int32_t spi_write_and_read(struct no_os_spi_desc *desc,
+                                 uint8_t *data,
+                                 uint16_t bytes_number)
 {
+    uint16_t i;
+    uint8_t mosi[3];
+    uint8_t miso[3];
 
-    int fd;
+    int fd; // FIXME: Avoid open/close on each call.
 
     fd = open(litepcie_device, O_RDWR);
     if (fd < 0) {
@@ -67,29 +66,29 @@ int32_t spi_write_then_read(struct spi_device *spi,
         exit(1);
     }
 
-    printf("Here!!\n");
+    for (i = 0; i < bytes_number; i += 3) {
+        // Prepare MOSI data for writing
+        mosi[0] = data[i + 0];
+        mosi[1] = data[i + 1];
+        mosi[2] = data[i + 2];
 
-    if (n_tx == 2 && n_rx == 1) {
-        /* read */
-        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
-        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
-    } else if (n_tx == 3 && n_rx == 0) {
-        /* write */
-        litexm2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[0]);
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-                n_tx, n_rx);
-        exit(1);
+        // Perform SPI transfer
+        ad9361_spi_xfer(fd, 3, mosi, miso);
+
+        // Store the received data back into the data array
+        data[i + 0] = miso[0];
+        data[i + 1] = miso[1];
+        data[i + 2] = miso[2];
     }
 
     close(fd);
 
-    return 0;
+    return 0; // Return success
 }
 
 const struct no_os_spi_platform_ops spi_ops = {
     .init = NULL,
-    .write_and_read = &spi_write_then_read,
+    .write_and_read = &spi_write_and_read,
     .remove = NULL
 };
 
@@ -325,35 +324,35 @@ AD9361_InitParam default_init_param = {
     48,     //tx2_mon_lo_cm *** adi,txmon-2-lo-cm
     /* GPIO definitions */
     {
-        .number = -1,
+        .number       = -1,
         .platform_ops = NULL,
-        .extra = NULL
-    },      // gpio_resetb *** reset-gpios
+        .extra        = NULL
+    }, // gpio_resetb *** reset-gpios
     /* MCS Sync */
     {
-        .number = -1,
+        .number       = -1,
         .platform_ops = NULL,
-        .extra = NULL
-    },      //gpio_sync *** sync-gpios
+        .extra        = NULL
+    }, // gpio_sync *** sync-gpios
 
     {
-        .number = -1,
+        .number       = -1,
         .platform_ops = NULL,
-        .extra = NULL
-    },      //gpio_cal_sw1 *** cal-sw1-gpios
+        .extra        = NULL
+    }, // gpio_cal_sw1 *** cal-sw1-gpios
 
     {
-        .number = -1,
+        .number       = -1,
         .platform_ops = NULL,
-        .extra = NULL
-    },      //gpio_cal_sw2 *** cal-sw2-gpios
+        .extra        = NULL
+    }, // gpio_cal_sw2 *** cal-sw2-gpios
 
     {
-        .device_id = NULL,
-        .mode = 0,
-        .chip_select = NULL,
+        .device_id    = 0,
+        .mode         = 0,
+        .chip_select  = 0,
         .platform_ops = &spi_ops,
-        .extra = NULL
+        .extra        = NULL
     },
 
     /* External LO clocks */
