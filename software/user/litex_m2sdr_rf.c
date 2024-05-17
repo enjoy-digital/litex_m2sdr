@@ -58,98 +58,6 @@ void no_os_mdelay(uint32_t msecs)
 
 ///* AD9361 */
 ///*--------*/
-//
-//#define AD9361_GPIO_RESET_PIN 0
-//
-//struct ad9361_rf_phy *ad9361_phy;
-//
-//int spi_write_then_read(struct spi_device *spi,
-//                        const unsigned char *txbuf, unsigned n_tx,
-//                        unsigned char *rxbuf, unsigned n_rx)
-//{
-//
-//    int fd;
-//
-//    fd = open(litepcie_device, O_RDWR);
-//    if (fd < 0) {
-//        fprintf(stderr, "Could not init driver\n");
-//        exit(1);
-//    }
-//
-//    if (n_tx == 2 && n_rx == 1) {
-//        /* read */
-//        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
-//        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
-//    } else if (n_tx == 3 && n_rx == 0) {
-//        /* write */
-//        litexm2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[0]);
-//    } else {
-//        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-//                n_tx, n_rx);
-//        exit(1);
-//    }
-//
-//    close(fd);
-//
-//    return 0;
-//}
-//
-//void udelay(unsigned long usecs)
-//{
-//    usleep(usecs);
-//}
-//
-//void mdelay(unsigned long msecs)
-//{
-//    usleep(msecs * 1000);
-//}
-//
-//unsigned long msleep_interruptible(unsigned int msecs)
-//{
-//    usleep(msecs * 1000);
-//    return 0;
-//}
-//
-//bool gpio_is_valid(struct gpio_device *gpio_dev, int number)
-//{
-//    switch(number) {
-//    case AD9361_GPIO_RESET_PIN:
-//        return true;
-//    default:
-//        return false;
-//    }
-//}
-//
-//void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value)
-//{
-//    /* FIXME: Implement */
-//}
-
-
-//// Dummy GPIO parameters
-//static struct no_os_gpio_init_param dummy_gpio_param = {
-//    .number = -1,
-//    .platform_ops = &dummy_gpio_ops,
-//    .extra = NULL
-//};
-//
-//// Dummy SPI operations structure
-//static const struct no_os_spi_platform_ops dummy_spi_ops = {
-//    .init = NULL,
-//    .write_and_read = NULL,
-//    .write = NULL,
-//    .read = NULL,
-//    .remove = NULL,
-//};
-//
-//// Dummy SPI parameters
-//static struct no_os_spi_init_param dummy_spi_param = {
-//    .device_id = -1,
-//    .mode = 0,
-//    .chip_select = 0,
-//    .platform_ops = &dummy_spi_ops,
-//    .extra = NULL
-//};
 
 AD9361_InitParam default_init_param = {
     /* Device selection */
@@ -529,19 +437,25 @@ static void init(void)
         exit(1);
     }
 
-//#ifdef WITH_AD9361
-//    default_init_param.gpio_resetb = AD9361_GPIO_RESET_PIN;
-//    default_init_param.gpio_sync = -1;
-//    default_init_param.gpio_cal_sw1 = -1;
-//    default_init_param.gpio_cal_sw2 = -1;
-//
-//    ad9361_spi_init(fd);
-//
-//    ad9361_phy = ad9361_init(&default_init_param);
-//
-//    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-//    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-//#endif
+#ifdef WITH_AD9361
+    // FIXME.
+    //default_init_param.spi_param.extra = &xil_spi_param;
+    //default_init_param.spi_param.platform_ops = &xil_spi_ops;
+
+    // NOTE: The user has to choose the GPIO numbers according to desired
+    // carrier board.
+    //default_init_param.gpio_resetb.number = GPIO_RESET_PIN;
+
+    default_init_param.gpio_sync.number = -1;
+    default_init_param.gpio_cal_sw1.number = -1;
+    default_init_param.gpio_cal_sw2.number = -1;
+
+    ad9361_init(&ad9361_phy, &default_init_param);
+
+    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+
+#endif
 
     close(fd);
 }
