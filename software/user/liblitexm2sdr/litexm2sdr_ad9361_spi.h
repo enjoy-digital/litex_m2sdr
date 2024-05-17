@@ -22,19 +22,12 @@
 #define SPI_CONTROL_LENGTH (1 << 8)
 #define SPI_STATUS_DONE    (1 << 0)
 
-#define SPI_CS_MANUAL (1<<16)
-
-#define SYS_CLK_FREQ_MHZ (CONFIG_CLOCK_FREQUENCY/1000000)
-#define SPI_CLK_FREQ_MHZ 1
-
-#define SPI_AD9361_CS 0
-
 /* SPI functions */
 /*---------------*/
 
 void ad9361_spi_init(int fd);
-void ad9361_spi_xfer(int fd, uint8_t cs, uint8_t len, uint8_t *mosi, uint8_t *miso);
-void litexm2sdr_ad9361_spi_write(int fd, uint8_t cs, uint16_t reg, uint8_t dat);
-uint8_t litexm2sdr_ad9361_spi_read(int fd, uint8_t cs, uint16_t reg);
+void ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso);
+void litexm2sdr_ad9361_spi_write(int fd, uint16_t reg, uint8_t dat);
+uint8_t litexm2sdr_ad9361_spi_read(int fd, uint16_t reg);
 
 #endif /* __AD9361_SPI_H */

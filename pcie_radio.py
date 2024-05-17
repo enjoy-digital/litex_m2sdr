@@ -30,7 +30,6 @@ from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 from litex.soc.cores.pwm       import PWM
 from litex.soc.cores.bitbang   import I2CMaster
-from litex.soc.cores.spi       import SPIMaster
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
@@ -40,6 +39,8 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
+
+from gateware.spi import SPIMaster
 
 from software import generate_litepcie_software
 
@@ -161,12 +162,10 @@ class BaseSoC(SoCMini):
         ]
 
         self.ad9361_spi = SPIMaster(
-            pads         = platform.request("ad9361_spi"),
-            data_width   = 32,
-            sys_clk_freq = sys_clk_freq,
-            spi_clk_freq = 1e6
+            pads  = platform.request("ad9361_spi"),
+            width = 24,
+            div   = 8
         )
-        self.ad9361_spi.add_clk_divider()
 
         # Debug.
         analyzer_signals = [platform.lookup_request("ad9361_spi")]
