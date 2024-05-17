@@ -1,4 +1,4 @@
-CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Iliblitexm2sdr -MMD -fPIC
+CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Iliblitexm2sdr -Iad9361 -Iad9361/no_os -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
@@ -18,8 +18,12 @@ liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o liblitexm2s
 litex_m2sdr_util: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
 
-litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o ad9361/ad9361.o ad9361/ad9361_api.o ad9361/util.o
+litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o \
+	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361_util.o \
+	ad9361/no_os/no_os_alloc.o ad9361/no_os/no_os_gpio.o ad9361/no_os/no_os_spi.o \
+	ad9361/no_os/no_os_util.o ad9361/no_os/no_os_mutex.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
+
 
 litex_m2sdr_test: liblitepcie/liblitepcie.a litex_m2sdr_test.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
@@ -34,6 +38,12 @@ clean:
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 liblitepcie/%.o: liblitepcie/%.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+ad9361/%.o: ad9361/%.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+ad9361/no_os/%.o: ad9361/no_os/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 -include $(wildcard *.d)

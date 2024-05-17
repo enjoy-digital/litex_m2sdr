@@ -1,9 +1,9 @@
-/***************************************************************************//**
- *   @file   app_config.h
- *   @brief  Config file of AD9361/API Driver.
- *   @author DBogdan (dragos.bogdan@analog.com)
+/*******************************************************************************
+ *   @file   no_os_mutex.h
+ *   @brief  Header file of mutex implementation.
+ *   @author Robert Budai (robert.budai@analog.com)
 ********************************************************************************
- * Copyright 2015(c) Analog Devices, Inc.
+ * Copyright 2023(c) Analog Devices, Inc.
  *
  * All rights reserved.
  *
@@ -36,35 +36,49 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *******************************************************************************/
-#ifndef CONFIG_H_
-#define CONFIG_H_
+#ifndef _NO_OS_MUTEX_H_
+#define _NO_OS_MUTEX_H_
 
-#define HAVE_SPLIT_GAIN_TABLE	1 /* only set to 0 in case split_gain_table_mode_enable = 0*/
-#define HAVE_TDD_SYNTH_TABLE	1 /* only set to 0 in case split_gain_table_mode_enable = 0*/
+/**
+* @brief Function for no-os mutex initialization and thread safety.
+* This function is implemented based on different platforms/OS libraries
+* that NO-OS supports. These mutex functions are used for thread safety
+* of peripherals. Since these functions don't return error values it is
+* the developers responsibility to implement the safety checks in case
+* new mutex implementation is being added, like the following:
+*
+* if ((*mutex) == NULL)
+* {
+*      //code to initialize the mutex
+* }
+*
+* Also these check are responsible not to allocate different mutexes
+* for the same peripheral descriptor.
+*/
+void no_os_mutex_init(void **mutex);
 
-#define AD9361_DEVICE			1 /* set it 1 if AD9361 device is used, 0 otherwise */
-#define AD9364_DEVICE			0 /* set it 1 if AD9364 device is used, 0 otherwise */
-#define AD9363A_DEVICE			0 /* set it 1 if AD9363A device is used, 0 otherwise */
+/**
+ * @brief Function for locking mutex
+*/
+void no_os_mutex_lock(void *mutex);
 
-//#define XILINX_PLATFORM
-//#define ALTERA_PLATFORM
-//#define LINUX_PLATFORM
-//#define FMCOMMS5
-//#define ADI_RF_SOM
-//#define ADI_RF_SOM_CMOS
-//#define DMA_IRQ_ENABLE
-//#define DMA_EXAMPLE
-#define AXI_ADC_NOT_PRESENT
-//#define TDD_SWITCH_STATE_EXAMPLE
+/**
+ * @brief Function for unlocking mutex
+*/
+void no_os_mutex_unlock(void *mutex);
 
-//#define IIO_SUPPORT
+/**
+ * @brief Function for removing the initialized mutex.
+ * This function is responsible to remove the allocated mutex. This function is
+ * also used by the peripherals mutex thread safety feature and in case
+ * new mutex implementation is going to be added, it is the developers
+ * responsibility to add extra check inside the function while de-allocating the memory.
+ *
+ * if (mutex != NULL)
+ * {
+ *      //code to de-allocate mutex
+ * }
+*/
+void no_os_mutex_remove(void *mutex);
 
-#ifndef IIO_SUPPORT
-#define HAVE_VERBOSE_MESSAGES /* Recommended during development prints errors and warnings */
-//#define HAVE_DEBUG_MESSAGES /* For Debug purposes only */
-#endif // USE_LIBIIO
-/*
- * In case memory footprint is a concern these options allow
- * to disable unused functionality which may free up a few kb
- */
-#endif
+#endif // _NO_OS_MUTEX_H_

@@ -18,8 +18,12 @@
 #include <signal.h>
 #include <stdbool.h>
 
+//#define WITH_AD9361
+
+#if WITH_AD9361
 #include "ad9361/platform.h"
 #include "ad9361/ad9361_api.h"
+#endif
 
 #include "liblitepcie.h"
 #include "liblitexm2sdr.h"
@@ -38,6 +42,20 @@ sig_atomic_t keep_running = 1;
 void intHandler(int dummy) {
     keep_running = 0;
 }
+
+
+void no_os_udelay(uint32_t usecs)
+{
+    printf("TODO: Implement no_os_udelay!");
+}
+
+void no_os_mdelay(uint32_t msecs)
+{
+    printf("TODO: Implement no_os_mdelay!");
+}
+
+
+#if WITH_AD9361
 
 /* AD9361 */
 /*--------*/
@@ -335,6 +353,7 @@ AD9361_TXFIRConfig tx_fir_config = {
      -356, -1182, -307, 558, 271, -4, 219, 107,
      -315, -284, 86, 186, 35, -37, -6, -4} // tx_coef[64];
 };
+#endif
 
 /* Info */
 /*------*/
@@ -392,6 +411,7 @@ static void init(void)
         exit(1);
     }
 
+#ifdef WITH_AD9361
     default_init_param.gpio_resetb = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync = -1;
     default_init_param.gpio_cal_sw1 = -1;
@@ -403,6 +423,7 @@ static void init(void)
 
     //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+#endif
 
     close(fd);
 }
