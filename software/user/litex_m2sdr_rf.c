@@ -19,6 +19,7 @@
 #include <stdbool.h>
 
 #include "ad9361/ad9361_api.h"
+#include "no_os_spi.h"
 
 #include "liblitepcie.h"
 #include "liblitexm2sdr.h"
@@ -48,6 +49,49 @@ void no_os_mdelay(uint32_t msecs)
 {
     printf("TODO: Implement no_os_mdelay!");
 }
+
+int32_t no_os_spi_write_and_read(struct no_os_spi_desc *desc,
+                 uint8_t *data,
+                 uint16_t bytes_number)
+
+int32_t spi_write_then_read(struct spi_device *spi,
+                        const unsigned char *txbuf, unsigned n_tx,
+                        unsigned char *rxbuf, unsigned n_rx)
+{
+
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("Here!!\n");
+
+    if (n_tx == 2 && n_rx == 1) {
+        /* read */
+        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
+        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
+    } else if (n_tx == 3 && n_rx == 0) {
+        /* write */
+        litexm2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[0]);
+    } else {
+        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
+                n_tx, n_rx);
+        exit(1);
+    }
+
+    close(fd);
+
+    return 0;
+}
+
+const struct no_os_spi_platform_ops spi_ops = {
+    .init = NULL,
+    .write_and_read = &spi_write_then_read,
+    .remove = NULL
+};
 
 /* AD9361 */
 /*--------*/
@@ -308,7 +352,7 @@ AD9361_InitParam default_init_param = {
         .device_id = NULL,
         .mode = 0,
         .chip_select = NULL,
-        .platform_ops = NULL,
+        .platform_ops = &spi_ops,
         .extra = NULL
     },
 
