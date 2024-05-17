@@ -198,8 +198,8 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
 
 static void help(void)
 {
-    printf("LitePCIe testing utilities\n"
-           "usage: litepcie_test [options] cmd [args...]\n"
+    printf("M2SDR testing utilities\n"
+           "usage: m2sdr_test [options] cmd [args...]\n"
            "\n"
            "options:\n"
            "-h                               Help.\n"

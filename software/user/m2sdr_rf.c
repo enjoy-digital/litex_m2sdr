@@ -22,7 +22,7 @@
 #include "no_os_spi.h"
 
 #include "liblitepcie.h"
-#include "liblitexm2sdr.h"
+#include "libm2sdr.h"
 
 /* Parameters */
 /*------------*/
@@ -73,7 +73,7 @@ int32_t spi_write_and_read(struct no_os_spi_desc *desc,
         mosi[2] = data[i + 2];
 
         // Perform SPI transfer
-        ad9361_spi_xfer(fd, 3, mosi, miso);
+        m2sdr_ad9361_spi_xfer(fd, 3, mosi, miso);
 
         // Store the received data back into the data array
         data[i + 0] = miso[0];
@@ -499,8 +499,8 @@ static void init(void)
 
 static void help(void)
 {
-    printf("LiteXM2SDR utilities\n"
-           "usage: litex_m2sdr_rf [options] cmd [args...]\n"
+    printf("M2SDR utilities\n"
+           "usage: m2sdr_rf [options] cmd [args...]\n"
            "\n"
            "options:\n"
            "-h                                Help.\n"

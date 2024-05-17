@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#ifndef LITEXM2SDR_LIB_H
-#define LITEXM2SDR_LIB_H
+#ifndef M2SDR_LIB_H
+#define M2SDR_LIB_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,11 +17,11 @@ extern "C" {
 /* Constants */
 
 /* Libs */
-#include "litexm2sdr_si5351_i2c.h"
-#include "litexm2sdr_ad9361_spi.h"
+#include "m2sdr_si5351_i2c.h"
+#include "m2sdr_ad9361_spi.h"
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* LITEXM2SDR_H */
+#endif /* M2SDR_LIB_H */

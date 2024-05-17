@@ -11,7 +11,7 @@
 
 #include "liblitepcie.h"
 
-#include "litexm2sdr_si5351_i2c.h"
+#include "m2sdr_si5351_i2c.h"
 
 extern void nanosleep(int n);
 
@@ -112,7 +112,7 @@ static uint8_t si5351_i2c_receive_byte(int fd, bool ack)
 }
 
 /* Reset line state */
-void litexm2sdr_si5351_i2c_reset(int fd)
+void m2sdr_si5351_i2c_reset(int fd)
 {
 	int i;
 	si5351_i2c_oe_scl_sda(fd, 1, 1, 1);
@@ -140,7 +140,7 @@ void litexm2sdr_si5351_i2c_reset(int fd)
  * Some chips require that after transmiting the address, there will be no STOP in between:
  *   START WR(slaveaddr) WR(addr) START WR(slaveaddr) RD(data) RD(data) ... STOP
  */
-bool litexm2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop)
+bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop)
 {
 	int i;
 
@@ -179,7 +179,7 @@ bool litexm2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_
  * First writes the memory starting address, then writes the data:
  *   START WR(slaveaddr) WR(addr) WR(data) WR(data) ... STOP
  */
-bool litexm2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len)
+bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len)
 {
 	int i;
 
@@ -208,7 +208,7 @@ bool litexm2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const
 /*
  * Poll I2C slave at given address, return true if it sends an ACK back
  */
-bool litexm2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr)
+bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr)
 {
     bool result;
 
@@ -223,7 +223,7 @@ bool litexm2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr)
 /*
  * Scan I2C
  */
-void litexm2sdr_si5351_i2c_scan(int fd)
+void m2sdr_si5351_i2c_scan(int fd)
 {
 	int slave_addr;
 
@@ -232,7 +232,7 @@ void litexm2sdr_si5351_i2c_scan(int fd)
 		if (slave_addr % 0x10 == 0) {
 			printf("\n0x%02x:", slave_addr & 0x70);
 		}
-		if (litexm2sdr_si5351_i2c_poll(fd, slave_addr)) {
+		if (m2sdr_si5351_i2c_poll(fd, slave_addr)) {
 			printf(" %02x", slave_addr);
 		} else {
 			printf(" --");

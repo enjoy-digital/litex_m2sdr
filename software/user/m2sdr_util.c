@@ -18,7 +18,7 @@
 #include <signal.h>
 
 #include "liblitepcie.h"
-#include "liblitexm2sdr.h"
+#include "libm2sdr.h"
 
 /* Parameters */
 /*------------*/
@@ -55,7 +55,7 @@ static void test_si5351_i2c_scan(void)
 
     printf("\e[1m[> SI53512 I2C Bus Scan:\e[0m\n");
     printf("-----------------------------\n");
-    litexm2sdr_si5351_i2c_scan(fd);
+    m2sdr_si5351_i2c_scan(fd);
     printf("\n");
 
     close(fd);
@@ -168,7 +168,7 @@ static void test_si5351_i2c_init(void)
         uint8_t addr = si5351_config[i][0];
         uint8_t data = si5351_config[i][1];
         printf("Writing 0x%02X to register 0x%02X\n", data, addr);
-        if (!litexm2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, addr, &data, 1)) {
+        if (!m2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, addr, &data, 1)) {
             fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
         }
     }
@@ -192,11 +192,11 @@ static void test_ad9361_spi_scan(void)
     }
 
     /* AD9361 SPI Init */
-    ad9361_spi_init(fd);
+    m2sdr_ad9361_spi_init(fd);
 
     /* AD9361 SPI Dump */
     for (i=0; i<128; i++)
-        printf("Reg 0x%02x: 0x%04x\n", i, litexm2sdr_ad9361_spi_read(fd, i));
+        printf("Reg 0x%02x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
 
     printf("\n");
 
@@ -647,8 +647,8 @@ end:
 
 static void help(void)
 {
-    printf("LitePCIe utilities\n"
-           "usage: litepcie_util [options] cmd [args...]\n"
+    printf("M2SDR utilities\n"
+           "usage: m2sdr_util [options] cmd [args...]\n"
            "\n"
            "options:\n"
            "-h                                Help.\n"

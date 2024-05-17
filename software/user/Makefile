@@ -1,9 +1,9 @@
-CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Iliblitexm2sdr -Iad9361 -Iad9361/no_os -MMD -fPIC
+CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -Iad9361/no_os -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-PROGS=litex_m2sdr_util litex_m2sdr_rf litex_m2sdr_test
+PROGS=m2sdr_util m2sdr_rf m2sdr_test
 
 all: $(PROGS)
 
@@ -11,27 +11,27 @@ liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_flash
 	ar rcs $@ $+
 	ranlib $@
 
-liblitexm2sdr/liblitexm2sdr.a: liblitexm2sdr/litexm2sdr_si5351_i2c.o liblitexm2sdr/litexm2sdr_ad9361_spi.o
+libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o
 	ar rcs $@ $+
 	ranlib $@
 
-litex_m2sdr_util: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
+m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
-litex_m2sdr_rf: liblitepcie/liblitepcie.a liblitexm2sdr/liblitexm2sdr.a litex_m2sdr_rf.o \
+m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361_util.o \
 	ad9361/no_os/no_os_alloc.o ad9361/no_os/no_os_gpio.o ad9361/no_os/no_os_spi.o \
 	ad9361/no_os/no_os_util.o ad9361/no_os/no_os_mutex.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Lliblitexm2sdr -llitepcie -llitexm2sdr
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
 
-litex_m2sdr_test: liblitepcie/liblitepcie.a litex_m2sdr_test.o
+m2sdr_test: liblitepcie/liblitepcie.a m2sdr_test.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
 
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
-	rm -f liblitexm2sdr/*.a liblitexm2sdr/*.o liblitexm2sdr/*.d
+	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f  ad9361/*.o ad9361/*.d ad9361/*~
 
 %.o: %.c
