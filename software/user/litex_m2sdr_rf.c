@@ -18,10 +18,9 @@
 #include <signal.h>
 #include <stdbool.h>
 
-//#define WITH_AD9361
+#define WITH_AD9361
 
-#if WITH_AD9361
-#include "ad9361/platform.h"
+#ifdef WITH_AD9361
 #include "ad9361/ad9361_api.h"
 #endif
 
@@ -55,83 +54,114 @@ void no_os_mdelay(uint32_t msecs)
 }
 
 
-#if WITH_AD9361
+#ifdef WITH_AD9361
 
-/* AD9361 */
-/*--------*/
+///* AD9361 */
+///*--------*/
+//
+//#define AD9361_GPIO_RESET_PIN 0
+//
+//struct ad9361_rf_phy *ad9361_phy;
+//
+//int spi_write_then_read(struct spi_device *spi,
+//                        const unsigned char *txbuf, unsigned n_tx,
+//                        unsigned char *rxbuf, unsigned n_rx)
+//{
+//
+//    int fd;
+//
+//    fd = open(litepcie_device, O_RDWR);
+//    if (fd < 0) {
+//        fprintf(stderr, "Could not init driver\n");
+//        exit(1);
+//    }
+//
+//    if (n_tx == 2 && n_rx == 1) {
+//        /* read */
+//        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
+//        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
+//    } else if (n_tx == 3 && n_rx == 0) {
+//        /* write */
+//        litexm2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[0]);
+//    } else {
+//        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
+//                n_tx, n_rx);
+//        exit(1);
+//    }
+//
+//    close(fd);
+//
+//    return 0;
+//}
+//
+//void udelay(unsigned long usecs)
+//{
+//    usleep(usecs);
+//}
+//
+//void mdelay(unsigned long msecs)
+//{
+//    usleep(msecs * 1000);
+//}
+//
+//unsigned long msleep_interruptible(unsigned int msecs)
+//{
+//    usleep(msecs * 1000);
+//    return 0;
+//}
+//
+//bool gpio_is_valid(struct gpio_device *gpio_dev, int number)
+//{
+//    switch(number) {
+//    case AD9361_GPIO_RESET_PIN:
+//        return true;
+//    default:
+//        return false;
+//    }
+//}
+//
+//void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value)
+//{
+//    /* FIXME: Implement */
+//}
 
-#define AD9361_GPIO_RESET_PIN 0
 
-struct ad9361_rf_phy *ad9361_phy;
-
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
-{
-
-    int fd;
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    if (n_tx == 2 && n_rx == 1) {
-        /* read */
-        //rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, SPI_AD9361_CS, txbuf[0] << 8 | txbuf[1]); /* FIXME: First read seems wrong */
-        rxbuf[0] = litexm2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
-    } else if (n_tx == 3 && n_rx == 0) {
-        /* write */
-        litexm2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[0]);
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-                n_tx, n_rx);
-        exit(1);
-    }
-
-    close(fd);
-
-    return 0;
-}
-
-void udelay(unsigned long usecs)
-{
-    usleep(usecs);
-}
-
-void mdelay(unsigned long msecs)
-{
-    usleep(msecs * 1000);
-}
-
-unsigned long msleep_interruptible(unsigned int msecs)
-{
-    usleep(msecs * 1000);
-    return 0;
-}
-
-bool gpio_is_valid(struct gpio_device *gpio_dev, int number)
-{
-    switch(number) {
-    case AD9361_GPIO_RESET_PIN:
-        return true;
-    default:
-        return false;
-    }
-}
-
-void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value)
-{
-    /* FIXME: Implement */
-}
+//// Dummy GPIO parameters
+//static struct no_os_gpio_init_param dummy_gpio_param = {
+//    .number = -1,
+//    .platform_ops = &dummy_gpio_ops,
+//    .extra = NULL
+//};
+//
+//// Dummy SPI operations structure
+//static const struct no_os_spi_platform_ops dummy_spi_ops = {
+//    .init = NULL,
+//    .write_and_read = NULL,
+//    .write = NULL,
+//    .read = NULL,
+//    .remove = NULL,
+//};
+//
+//// Dummy SPI parameters
+//static struct no_os_spi_init_param dummy_spi_param = {
+//    .device_id = -1,
+//    .mode = 0,
+//    .chip_select = 0,
+//    .platform_ops = &dummy_spi_ops,
+//    .extra = NULL
+//};
 
 AD9361_InitParam default_init_param = {
+    /* Device selection */
+    ID_AD9361,  // dev_sel
     /* Reference Clock */
-    38400000UL, //reference_clk_rate
+    40000000UL, //reference_clk_rate
     /* Base Configuration */
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
+    1,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
+    1,      //one_rx_one_tx_mode_use_tx_num *** adi,1rx-1tx-mode-use-tx-num
     1,      //frequency_division_duplex_mode_enable *** adi,frequency-division-duplex-mode-enable
+    0,      //frequency_division_duplex_independent_mode_enable *** adi,frequency-division-duplex-independent-mode-enable
     0,      //tdd_use_dual_synth_mode_enable *** adi,tdd-use-dual-synth-mode-enable
     0,      //tdd_skip_vco_cal_enable *** adi,tdd-skip-vco-cal-enable
     0,      //tx_fastlock_delay_ns *** adi,tx-fastlock-delay-ns
@@ -141,21 +171,23 @@ AD9361_InitParam default_init_param = {
     0,      //external_rx_lo_enable *** adi,external-rx-lo-enable
     0,      //external_tx_lo_enable *** adi,external-tx-lo-enable
     5,      //dc_offset_tracking_update_event_mask *** adi,dc-offset-tracking-update-event-mask
-    6,      //dc_offset_attenuation_high_range *** adi,dc-offset-tracking-update-event-mask
-    5,      //dc_offset_attenuation_low_range *** adi,dc-offset-tracking-update-event-mask
-    0x28,   //dc_offset_count_high_range *** adi,dc-offset-tracking-update-event-mask
-    0x32,   //dc_offset_count_low_range *** adi,dc-offset-tracking-update-event-mask
-    0,      //tdd_use_fdd_vco_tables_enable *** adi,tdd-use-fdd-vco-tables-enable
+    6,      //dc_offset_attenuation_high_range *** adi,dc-offset-attenuation-high-range
+    5,      //dc_offset_attenuation_low_range *** adi,dc-offset-attenuation-low-range
+    0x28,   //dc_offset_count_high_range *** adi,dc-offset-count-high-range
+    0x32,   //dc_offset_count_low_range *** adi,dc-offset-count-low-range
     0,      //split_gain_table_mode_enable *** adi,split-gain-table-mode-enable
+    MAX_SYNTH_FREF, //trx_synthesizer_target_fref_overwrite_hz *** adi,trx-synthesizer-target-fref-overwrite-hz
+    0,      // qec_tracking_slow_mode_enable *** adi,qec-tracking-slow-mode-enable
     /* ENSM Control */
     0,      //ensm_enable_pin_pulse_mode_enable *** adi,ensm-enable-pin-pulse-mode-enable
     0,      //ensm_enable_txnrx_control_enable *** adi,ensm-enable-txnrx-control-enable
     /* LO Control */
     2400000000UL,   //rx_synthesizer_frequency_hz *** adi,rx-synthesizer-frequency-hz
     2400000000UL,   //tx_synthesizer_frequency_hz *** adi,tx-synthesizer-frequency-hz
+    1,              //tx_lo_powerdown_managed_enable *** adi,tx-lo-powerdown-managed-enable
     /* Rate & BW Control */
-    {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},//uint32_t  rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
-    {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},//uint32_t  tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
+    {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},// rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
+    {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},// tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
     18000000,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
     18000000,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
     /* RF Port Control */
@@ -167,7 +199,7 @@ AD9361_InitParam default_init_param = {
     /* Reference Clock Control */
     0,      //xo_disable_use_ext_refclk_enable *** adi,xo-disable-use-ext-refclk-enable
     {8, 5920},  //dcxo_coarse_and_fine_tune[2] *** adi,dcxo-coarse-and-fine-tune
-    0,      //clk_output_mode_select *** adi,clk-output-mode-select
+    CLKOUT_DISABLE, //clk_output_mode_select *** adi,clk-output-mode-select
     /* Gain Control */
     2,      //gc_rx1_mode *** adi,gc-rx1-mode
     2,      //gc_rx2_mode *** adi,gc-rx2-mode
@@ -180,6 +212,7 @@ AD9361_InitParam default_init_param = {
     704,    //gc_lmt_overload_low_thresh *** adi,gc-lmt-overload-low-thresh
     24,     //gc_low_power_thresh *** adi,gc-low-power-thresh
     15,     //gc_max_dig_gain *** adi,gc-max-dig-gain
+    0,      //gc_use_rx_fir_out_for_dec_pwr_meas_enable *** adi,gc-use-rx-fir-out-for-dec-pwr-meas-enable
     /* Gain MGC Control */
     2,      //mgc_dec_gain_step *** adi,mgc-dec-gain-step
     2,      //mgc_inc_gain_step *** adi,mgc-inc-gain-step
@@ -212,22 +245,20 @@ AD9361_InitParam default_init_param = {
     /* Fast AGC */
     64,     //fagc_dec_pow_measuremnt_duration ***  adi,fagc-dec-pow-measurement-duration
     260,    //fagc_state_wait_time_ns ***  adi,fagc-state-wait-time-ns
-        /* Fast AGC - Low Power */
+    /* Fast AGC - Low Power */
     0,      //fagc_allow_agc_gain_increase ***  adi,fagc-allow-agc-gain-increase-enable
     5,      //fagc_lp_thresh_increment_time ***  adi,fagc-lp-thresh-increment-time
     1,      //fagc_lp_thresh_increment_steps ***  adi,fagc-lp-thresh-increment-steps
-        /* Fast AGC - Lock Level */
-    10,     //fagc_lock_level ***  adi,fagc-lock-level */
+    /* Fast AGC - Lock Level (Lock Level is set via slow AGC inner high threshold) */
     1,      //fagc_lock_level_lmt_gain_increase_en ***  adi,fagc-lock-level-lmt-gain-increase-enable
     5,      //fagc_lock_level_gain_increase_upper_limit ***  adi,fagc-lock-level-gain-increase-upper-limit
-        /* Fast AGC - Peak Detectors and Final Settling */
+    /* Fast AGC - Peak Detectors and Final Settling */
     1,      //fagc_lpf_final_settling_steps ***  adi,fagc-lpf-final-settling-steps
     1,      //fagc_lmt_final_settling_steps ***  adi,fagc-lmt-final-settling-steps
     3,      //fagc_final_overrange_count ***  adi,fagc-final-overrange-count
-        /* Fast AGC - Final Power Test */
+    /* Fast AGC - Final Power Test */
     0,      //fagc_gain_increase_after_gain_lock_en ***  adi,fagc-gain-increase-after-gain-lock-enable
-        /* Fast AGC - Unlocking the Gain */
-        /* 0 = MAX Gain, 1 = Optimized Gain, 2 = Set Gain */
+    /* Fast AGC - Unlocking the Gain */
     0,      //fagc_gain_index_type_after_exit_rx_mode ***  adi,fagc-gain-index-type-after-exit-rx-mode
     1,      //fagc_use_last_lock_level_for_set_gain_en ***  adi,fagc-use-last-lock-level-for-set-gain-enable
     1,      //fagc_rst_gla_stronger_sig_thresh_exceeded_en ***  adi,fagc-rst-gla-stronger-sig-thresh-exceeded-enable
@@ -242,6 +273,7 @@ AD9361_InitParam default_init_param = {
     0,      //fagc_rst_gla_en_agc_pulled_high_en ***  adi,fagc-rst-gla-en-agc-pulled-high-enable
     0,      //fagc_rst_gla_if_en_agc_pulled_high_mode ***  adi,fagc-rst-gla-if-en-agc-pulled-high-mode
     64,     //fagc_power_measurement_duration_in_state5 ***  adi,fagc-power-measurement-duration-in-state5
+    2,      //fagc_large_overload_inc_steps *** adi,fagc-adc-large-overload-inc-steps
     /* RSSI Control */
     1,      //rssi_delay *** adi,rssi-delay
     1000,   //rssi_duration *** adi,rssi-duration
@@ -279,13 +311,16 @@ AD9361_InitParam default_init_param = {
     0,      //elna_bypass_loss_mdB *** adi,elna-bypass-loss-mdB
     0,      //elna_rx1_gpo0_control_enable *** adi,elna-rx1-gpo0-control-enable
     0,      //elna_rx2_gpo1_control_enable *** adi,elna-rx2-gpo1-control-enable
+    0,      //elna_gaintable_all_index_enable *** adi,elna-gaintable-all-index-enable
     /* Digital Interface Control */
+    0,      //digital_interface_tune_skip_mode *** adi,digital-interface-tune-skip-mode
+    0,      //digital_interface_tune_fir_disable *** adi,digital-interface-tune-fir-disable
     1,      //pp_tx_swap_enable *** adi,pp-tx-swap-enable
     1,      //pp_rx_swap_enable *** adi,pp-rx-swap-enable
     0,      //tx_channel_swap_enable *** adi,tx-channel-swap-enable
     0,      //rx_channel_swap_enable *** adi,rx-channel-swap-enable
     1,      //rx_frame_pulse_mode_enable *** adi,rx-frame-pulse-mode-enable
-    1,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
+    0,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
     0,      //invert_data_bus_enable *** adi,invert-data-bus-enable
     0,      //invert_data_clk_enable *** adi,invert-data-clk-enable
     0,      //fdd_alt_word_order_enable *** adi,fdd-alt-word-order-enable
@@ -306,6 +341,31 @@ AD9361_InitParam default_init_param = {
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
+    0xFF,   //lvds_invert1_control *** adi,lvds-invert1-control
+    0x0F,   //lvds_invert2_control *** adi,lvds-invert2-control
+    /* GPO Control */
+    0,      //gpo_manual_mode_enable *** adi,gpo-manual-mode-enable
+    0,      //gpo_manual_mode_enable_mask *** adi,gpo-manual-mode-enable-mask
+    0,      //gpo0_inactive_state_high_enable *** adi,gpo0-inactive-state-high-enable
+    0,      //gpo1_inactive_state_high_enable *** adi,gpo1-inactive-state-high-enable
+    0,      //gpo2_inactive_state_high_enable *** adi,gpo2-inactive-state-high-enable
+    0,      //gpo3_inactive_state_high_enable *** adi,gpo3-inactive-state-high-enable
+    0,      //gpo0_slave_rx_enable *** adi,gpo0-slave-rx-enable
+    0,      //gpo0_slave_tx_enable *** adi,gpo0-slave-tx-enable
+    0,      //gpo1_slave_rx_enable *** adi,gpo1-slave-rx-enable
+    0,      //gpo1_slave_tx_enable *** adi,gpo1-slave-tx-enable
+    0,      //gpo2_slave_rx_enable *** adi,gpo2-slave-rx-enable
+    0,      //gpo2_slave_tx_enable *** adi,gpo2-slave-tx-enable
+    0,      //gpo3_slave_rx_enable *** adi,gpo3-slave-rx-enable
+    0,      //gpo3_slave_tx_enable *** adi,gpo3-slave-tx-enable
+    0,      //gpo0_rx_delay_us *** adi,gpo0-rx-delay-us
+    0,      //gpo0_tx_delay_us *** adi,gpo0-tx-delay-us
+    0,      //gpo1_rx_delay_us *** adi,gpo1-rx-delay-us
+    0,      //gpo1_tx_delay_us *** adi,gpo1-tx-delay-us
+    0,      //gpo2_rx_delay_us *** adi,gpo2-rx-delay-us
+    0,      //gpo2_tx_delay_us *** adi,gpo2-tx-delay-us
+    0,      //gpo3_rx_delay_us *** adi,gpo3-rx-delay-us
+    0,      //gpo3_tx_delay_us *** adi,gpo3-tx-delay-us
     /* Tx Monitor Control */
     37000,  //low_high_gain_threshold_mdB *** adi,txmon-low-high-thresh
     0,      //low_gain_dB *** adi,txmon-low-gain
@@ -319,40 +379,98 @@ AD9361_InitParam default_init_param = {
     48,     //tx1_mon_lo_cm *** adi,txmon-1-lo-cm
     48,     //tx2_mon_lo_cm *** adi,txmon-2-lo-cm
     /* GPIO definitions */
-    -1,     //gpio_resetb;  /* reset-gpios */
+    {
+        .number = -1,
+        .platform_ops = NULL,
+        .extra = NULL
+    },      // gpio_resetb *** reset-gpios
     /* MCS Sync */
-    -1,     //gpio_sync;        /* sync-gpios */
-    -1,     //gpio_cal_sw1; /* cal-sw1-gpios */
-    -1      //gpio_cal_sw2; /* cal-sw2-gpios */
+    {
+        .number = -1,
+        .platform_ops = NULL,
+        .extra = NULL
+    },      //gpio_sync *** sync-gpios
+
+    {
+        .number = -1,
+        .platform_ops = NULL,
+        .extra = NULL
+    },      //gpio_cal_sw1 *** cal-sw1-gpios
+
+    {
+        .number = -1,
+        .platform_ops = NULL,
+        .extra = NULL
+    },      //gpio_cal_sw2 *** cal-sw2-gpios
+
+    {
+        .device_id = NULL,
+        .mode = 0,
+        .chip_select = NULL,
+        .platform_ops = NULL,
+        .extra = NULL
+    },
+
+    /* External LO clocks */
+    NULL,   //(*ad9361_rfpll_ext_recalc_rate)()
+    NULL,   //(*ad9361_rfpll_ext_round_rate)()
+    NULL,   //(*ad9361_rfpll_ext_set_rate)()
 };
 
-AD9361_RXFIRConfig rx_fir_config = {
-    3, // rx;
-    0, // rx_gain;
-    1, // rx_dec;
-    {-4, -6, -37, 35, 186, 86, -284, 315,
-     107, 219, -4, 271, 558, -307, -1182, -356,
-     658, 157, 207, 1648, 790, -2525, -2553, 748,
-     865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
-     14819, -5278, -14731, -3583, 6560, 3737, -476, 865,
-     748, -2553, -2525, 790, 1648, 207, 157, 658,
-     -356, -1182, -307, 558, 271, -4, 219, 107,
-     -315, -284, 86, 186, 35, -37, -6, -4} // rx_coef[64];
+AD9361_RXFIRConfig rx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
+    3, // rx
+    0, // rx_gain
+    1, // rx_dec
+    {
+        -4, -6, -37, 35, 186, 86, -284, -315,
+            107, 219, -4, 271, 558, -307, -1182, -356,
+            658, 157, 207, 1648, 790, -2525, -2553, 748,
+            865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
+            14819, -5278, -14731, -3583, 6560, 3737, -476, 865,
+            748, -2553, -2525, 790, 1648, 207, 157, 658,
+            -356, -1182, -307, 558, 271, -4, 219, 107,
+            -315, -284, 86, 186, 35, -37, -6, -4,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0
+        }, // rx_coef[128]
+    64, // rx_coef_size
+    {0, 0, 0, 0, 0, 0}, //rx_path_clks[6]
+    0 // rx_bandwidth
 };
 
-AD9361_TXFIRConfig tx_fir_config = {
-    3, // tx;
-    -6, // tx_gain;
-    1, // tx_inc;
-    {-4, -6, -37, 35, 186, 86, -284, 315,
-     107, 219, -4, 271, 558, -307, -1182, -356,
-     658, 157, 207, 1648, 790, -2525, -2553, 748,
-     865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
-     14819, -5278, -14731, -3583, 6560, 3737, -476, 865,
-     748, -2553, -2525, 790, 1648, 207, 157, 658,
-     -356, -1182, -307, 558, 271, -4, 219, 107,
-     -315, -284, 86, 186, 35, -37, -6, -4} // tx_coef[64];
+AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
+    3, // tx
+    -6, // tx_gain
+    1, // tx_int
+    {
+        -4, -6, -37, 35, 186, 86, -284, -315,
+            107, 219, -4, 271, 558, -307, -1182, -356,
+            658, 157, 207, 1648, 790, -2525, -2553, 748,
+            865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
+            14819, -5278, -14731, -3583, 6560, 3737, -476, 865,
+            748, -2553, -2525, 790, 1648, 207, 157, 658,
+            -356, -1182, -307, 558, 271, -4, 219, 107,
+            -315, -284, 86, 186, 35, -37, -6, -4,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0
+        }, // tx_coef[128]
+    64, // tx_coef_size
+    {0, 0, 0, 0, 0, 0}, // tx_path_clks[6]
+    0 // tx_bandwidth
 };
+struct ad9361_rf_phy *ad9361_phy;
 #endif
 
 /* Info */
@@ -411,19 +529,19 @@ static void init(void)
         exit(1);
     }
 
-#ifdef WITH_AD9361
-    default_init_param.gpio_resetb = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync = -1;
-    default_init_param.gpio_cal_sw1 = -1;
-    default_init_param.gpio_cal_sw2 = -1;
-
-    ad9361_spi_init(fd);
-
-    ad9361_phy = ad9361_init(&default_init_param);
-
-    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-#endif
+//#ifdef WITH_AD9361
+//    default_init_param.gpio_resetb = AD9361_GPIO_RESET_PIN;
+//    default_init_param.gpio_sync = -1;
+//    default_init_param.gpio_cal_sw1 = -1;
+//    default_init_param.gpio_cal_sw2 = -1;
+//
+//    ad9361_spi_init(fd);
+//
+//    ad9361_phy = ad9361_init(&default_init_param);
+//
+//    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+//    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+//#endif
 
     close(fd);
 }
