@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LitePCIe test
+ * M2SDR I/Q Player Utility.
  *
- * This file is part of LitePCIe.
+ * This file is part of LiteX-M2SDR project.
  *
- * Copyright (C) 2018-2023 / EnjoyDigital  / florent@enjoy-digital.fr
+ * Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
+
 #include "liblitepcie.h"
 
 /* Variables */
@@ -27,90 +28,10 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-/* Record (DMA RX) */
-/*-----------------*/
-
-static void litepcie_record(const char *device_name, const char *filename, uint32_t size, uint8_t zero_copy)
-{
-    static struct litepcie_dma_ctrl dma = {.use_writer = 1};
-
-    FILE * fo = NULL;
-    int i = 0;
-    size_t len;
-    size_t total_len = 0;
-    int64_t last_time;
-    int64_t writer_sw_count_last = 0;
-
-    /* Open File to write to. */
-    if (filename != NULL) {
-        fo = fopen(filename, "wb");
-        if (!fo) {
-            perror(filename);
-            exit(1);
-        }
-    }
-
-    /* Initialize DMA. */
-    if (litepcie_dma_init(&dma, device_name, zero_copy))
-        exit(1);
-
-    /* Test Loop. */
-    last_time = get_time_ms();
-    for (;;) {
-        /* Exit loop on CTRL+C. */
-        if (!keep_running)
-            break;
-
-        /* Update DMA status. */
-        litepcie_dma_process(&dma);
-
-        /* Read from DMA. */
-        while (1) {
-            /* Get Read buffer. */
-            char *buf_rd = litepcie_dma_next_read_buffer(&dma);
-            /* Break when no buffer available for Read. */
-            if (!buf_rd)
-                break;
-            /* Copy Read data to File. */
-            if (filename != NULL) {
-                len = fwrite(buf_rd, 1, fmin(size - total_len, DMA_BUFFER_SIZE), fo);
-                total_len += len;
-            }
-            /* Stop when specified size is reached */
-            if (size > 0 && total_len >= size)
-                keep_running = 0;
-        }
-
-        /* Statistics every 200ms. */
-        int64_t duration = get_time_ms() - last_time;
-        if (duration > 200) {
-            /* Print banner every 10 lines. */
-            if (i % 10 == 0)
-                printf("\e[1mSPEED(Gbps)    BUFFERS SIZE(MB)\e[0m\n");
-            i++;
-            /* Print statistics. */
-            printf("%10.2f %10" PRIu64 "  %8" PRIu64"\n",
-                    (double)(dma.writer_sw_count - writer_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6),
-                    dma.writer_sw_count,
-                    (size > 0) ? ((dma.writer_sw_count) * DMA_BUFFER_SIZE) / 1024 / 1024 : 0);
-            /* Update time/count. */
-            last_time = get_time_ms();
-            writer_sw_count_last = dma.writer_sw_count;
-        }
-    }
-
-    /* Cleanup DMA. */
-    litepcie_dma_cleanup(&dma);
-
-    /* Close File. */
-    if (filename != NULL)
-        fclose(fo);
-}
-
 /* Play (DMA TX) */
 /*---------------*/
 
-static void litepcie_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy)
+static void m2sdr_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
@@ -121,6 +42,7 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
     int64_t last_time;
     uint32_t current_loop = 0;
     uint64_t sw_underflows = 0;
+    int64_t hw_count_stop = 0;
 
     /* Open File to read from. */
     fo = fopen(filename, "rb");
@@ -133,23 +55,28 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
     if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
 
+    //dma.reader_enable = 1;
+
     /* Test Loop. */
     last_time = get_time_ms();
     for (;;) {
-        /* Exit loop on CTRL+C. */
-        if (!(keep_running))
-            break;
-
         /* Update DMA status. */
         litepcie_dma_process(&dma);
+
+        /* Exit loop on CTRL+C. */
+        if (!(keep_running)) {
+            hw_count_stop = dma.reader_sw_count + 16;
+            break;
+        }
 
         /* Write to DMA. */
         while (1) {
             /* Get Write buffer. */
             char *buf_wr = litepcie_dma_next_write_buffer(&dma);
-            /* Break when no buffer available for Write. */
-            if (!buf_wr)
+            /* Break when no buffer available for Write */
+            if (!buf_wr) {
                 break;
+            }
             /* Detect DMA underflows. */
             if (dma.reader_sw_count - dma.reader_hw_count < 0)
                 sw_underflows += (dma.reader_hw_count - dma.reader_sw_count);
@@ -186,6 +113,12 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
         }
     }
 
+    /* Wait end of DMA transfer. */
+    while (dma.reader_hw_count < hw_count_stop) {
+        //dma.reader_enable = 1;
+        litepcie_dma_process(&dma);
+    }
+
     /* Cleanup DMA. */
     litepcie_dma_cleanup(&dma);
 
@@ -198,16 +131,15 @@ static void litepcie_play(const char *device_name, const char *filename, uint32_
 
 static void help(void)
 {
-    printf("M2SDR testing utilities\n"
-           "usage: m2sdr_test [options] cmd [args...]\n"
+    printf("LitePCIe testing utilities\n"
+           "usage: litepcie_test [options] cmd [args...]\n"
            "\n"
            "options:\n"
            "-h                               Help.\n"
            "-c device_num                    Select the device (default = 0).\n"
            "-z                               Enable zero-copy DMA mode.\n"
            "\n"
-           "record [filename] [size]         Record DMA stream to file.\n"
-           "play filename [loops]            Play DMA stream from file.\n"
+           "filename [loops]                 Play I/Q samples stream from file.\n"
            );
     exit(1);
 }
@@ -217,7 +149,6 @@ static void help(void)
 
 int main(int argc, char **argv)
 {
-    const char *cmd;
     int c;
     static char litepcie_device[1024];
     static int litepcie_device_num;
@@ -255,31 +186,17 @@ int main(int argc, char **argv)
     /* Select device. */
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
-    cmd = argv[optind++];
+    /* Interpret cmd and play. */
+    const char *filename;
+    uint32_t loops = 1;
+    if (optind + 1 > argc)
+        goto show_help;
+    filename = argv[optind++];
+    if (optind < argc)
+        loops = strtoul(argv[optind++], NULL, 0);
+    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
+    return 0;
 
-    /* Record cmd. */
-    if (!strcmp(cmd, "record")) {
-        const char *filename = NULL;
-        uint32_t size = 0;
-        if (optind != argc) {
-            if (optind + 2 > argc)
-                goto show_help;
-            filename = argv[optind++];
-            size = strtoul(argv[optind++], NULL, 0);
-        }
-        litepcie_record(litepcie_device, filename, size, litepcie_device_zero_copy);
-    /* Play cmd. */
-    } else if (!strcmp(cmd, "play")) {
-        const char *filename;
-        uint32_t loops = 1;
-        if (optind + 1 > argc)
-            goto show_help;
-        filename = argv[optind++];
-        if (optind < argc)
-            loops = strtoul(argv[optind++], NULL, 0);
-        litepcie_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
-    /* Show help otherwise. */
-    } else
 show_help:
         help();
 

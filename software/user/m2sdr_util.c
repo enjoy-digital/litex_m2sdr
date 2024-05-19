@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LitePCIe util
+ * M2SDR Utility.
  *
- * This file is part of LitePCIe.
+ * This file is part of LiteX-M2SDR project.
  *
- * Copyright (C) 2018-2023 / EnjoyDigital  / florent@enjoy-digital.fr
+ * Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 

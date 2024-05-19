@@ -3,7 +3,7 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-PROGS=m2sdr_util m2sdr_rf m2sdr_test
+PROGS=m2sdr_util m2sdr_rf m2sdr_play m2sdr_record
 
 all: $(PROGS)
 
@@ -25,7 +25,10 @@ m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
 
-m2sdr_test: liblitepcie/liblitepcie.a m2sdr_test.o
+m2sdr_play: liblitepcie/liblitepcie.a m2sdr_play.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+
+m2sdr_record: liblitepcie/liblitepcie.a m2sdr_record.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
 
 clean:
