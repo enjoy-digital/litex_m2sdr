@@ -41,13 +41,11 @@ void intHandler(int dummy) {
 
 void no_os_udelay(uint32_t usecs)
 {
-    //printf("TODO: Implement no_os_udelay!");
     //usleep(usecs);
 }
 
 void no_os_mdelay(uint32_t msecs)
 {
-    //printf("TODO: Implement no_os_mdelay!");
     //usleep(msecs * 1000);
 }
 
@@ -118,7 +116,7 @@ AD9361_InitParam default_init_param = {
     /* Device selection */
     ID_AD9361,  // dev_sel
     /* Reference Clock */
-    40000000UL, //reference_clk_rate
+    38400000UL, //reference_clk_rate
     /* Base Configuration */
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
     1,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
@@ -499,6 +497,8 @@ static void init(void)
     default_init_param.gpio_sync.number = -1;
     default_init_param.gpio_cal_sw1.number = -1;
     default_init_param.gpio_cal_sw2.number = -1;
+
+    m2sdr_ad9361_spi_init(fd);
 
     ad9361_init(&ad9361_phy, &default_init_param);
 

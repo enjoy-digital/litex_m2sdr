@@ -28,10 +28,6 @@ void m2sdr_ad9361_spi_init(int fd) {
     litepcie_writel(fd, CSR_MAIN_AD9361_ENABLE_ADDR, 1);
     usleep(1000);
 
-    /* Reset and Configure AD361 for 4-Wire SPI */
-    m2sdr_ad9361_spi_write(fd, 0, 1<<7);
-    m2sdr_ad9361_spi_write(fd, 0, 0);
-
     /* Small delay. */
     usleep(1000);
 }
