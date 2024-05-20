@@ -39,15 +39,28 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-
 void no_os_udelay(uint32_t usecs)
 {
-    printf("TODO: Implement no_os_udelay!");
+    //printf("TODO: Implement no_os_udelay!");
+    //usleep(usecs);
 }
 
 void no_os_mdelay(uint32_t msecs)
 {
-    printf("TODO: Implement no_os_mdelay!");
+    //printf("TODO: Implement no_os_mdelay!");
+    //usleep(msecs * 1000);
+}
+
+int32_t spi_init(struct no_os_spi_desc **desc,
+             const struct no_os_spi_init_param *param)
+{
+    *desc = (struct no_os_spi_desc *)malloc(sizeof(**desc));
+    if (!(*desc))
+        return -1;
+
+    printf("TODO: Implement spi_init!");
+
+    return 0;
 }
 
 int32_t spi_write_and_read(struct no_os_spi_desc *desc,
@@ -86,10 +99,16 @@ int32_t spi_write_and_read(struct no_os_spi_desc *desc,
     return 0; // Return success
 }
 
+int32_t spi_remove(struct no_os_spi_desc *desc)
+{
+    printf("TODO: Implement spi_remove!");
+    return 0;
+}
+
 const struct no_os_spi_platform_ops spi_ops = {
-    .init = NULL,
+    .init           = &spi_init,
     .write_and_read = &spi_write_and_read,
-    .remove = NULL
+    .remove         = &spi_remove
 };
 
 /* AD9361 */
@@ -346,7 +365,6 @@ AD9361_InitParam default_init_param = {
         .platform_ops = NULL,
         .extra        = NULL
     }, // gpio_cal_sw2 *** cal-sw2-gpios
-
     {
         .device_id    = 0,
         .mode         = 0,
@@ -474,10 +492,6 @@ static void init(void)
         exit(1);
     }
 
-    // FIXME.
-    //default_init_param.spi_param.extra = &xil_spi_param;
-    //default_init_param.spi_param.platform_ops = &xil_spi_ops;
-
     // NOTE: The user has to choose the GPIO numbers according to desired
     // carrier board.
     //default_init_param.gpio_resetb.number = GPIO_RESET_PIN;
@@ -488,8 +502,8 @@ static void init(void)
 
     ad9361_init(&ad9361_phy, &default_init_param);
 
-    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
     close(fd);
 }

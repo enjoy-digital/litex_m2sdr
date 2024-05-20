@@ -40,7 +40,7 @@ void m2sdr_ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     litepcie_writel(fd, CSR_AD9361_SPI_MOSI_ADDR, mosi[0] << 16 | mosi[1] << 8 | mosi[2]);
     litepcie_writel(fd, CSR_AD9361_SPI_CTRL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
     while ((litepcie_readl(fd, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
-    miso[0] = litepcie_readl(fd, CSR_AD9361_SPI_MISO_ADDR) & 0xff;
+    miso[2] = litepcie_readl(fd, CSR_AD9361_SPI_MISO_ADDR) & 0xff;
 }
 
 void m2sdr_ad9361_spi_write(int fd, uint16_t reg, uint8_t dat) {
@@ -76,7 +76,7 @@ uint8_t m2sdr_ad9361_spi_read(int fd, uint16_t reg) {
     m2sdr_ad9361_spi_xfer(fd, 3, mosi, miso);
 
     /* Process Data. */
-    dat = miso[0];
+    dat = miso[2];
 
 #ifdef AD9361_SPI_WRITE_DEBUG
     printf("ad9361_spi_read_reg; reg:0x%04x dat:%02x\n", reg, dat);
