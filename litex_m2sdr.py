@@ -40,7 +40,7 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
-from gateware.spi import SPIMaster
+from gateware.ad9361.spi import SPIMaster
 
 from software import generate_litepcie_software
 
