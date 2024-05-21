@@ -21,12 +21,12 @@ modes = {
     "1R1T": 1,
 }
 
-def phy_layout(bps=12):
+def phy_layout():
     layout = [
-        ("ia", bps),
-        ("qa", bps),
-        ("ib", bps),
-        ("qb", bps)]
+        ("ia", 12),
+        ("qa", 12),
+        ("ib", 12),
+        ("qb", 12)]
     return stream.EndpointDescription(layout)
 
 # RFICPHY ------------------------------------------------------------------------------------------

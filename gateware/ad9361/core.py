@@ -17,7 +17,7 @@ from litepcie.common import *
 from gateware.ad9361.phy import RFICPHY, phy_layout
 from gateware.ad9361.spi import SPIMaster
 
-# AD9361RFIC ---------------------------------------------------------------------------------------
+# AD9361 RFIC --------------------------------------------------------------------------------------
 
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq):
@@ -48,13 +48,13 @@ class AD9361RFIC(LiteXModule):
 
         # Cross domain crossing --------------------------------------------------------------------
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
-            layout  = phy_layout(bps=12),
+            layout  = dma_layout(64),
             cd_from = "sys",
             cd_to   = "rfic",
             with_common_rst = True
         )
         self.rx_cdc = rx_cdc = stream.ClockDomainCrossing(
-            layout  = phy_layout(bps=12),
+            layout  = dma_layout(64),
             cd_from = "rfic",
             cd_to   = "sys",
             with_common_rst = True
@@ -65,9 +65,15 @@ class AD9361RFIC(LiteXModule):
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
 
         # Data Flow --------------------------------------------------------------------------------
-        self.comb += self.phy.source.connect(rx_cdc.sink)
+        self.comb += [
+            self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
+            rx_cdc.sink.data[0*16:1*16].eq(self.phy.source.ia),
+            rx_cdc.sink.data[1*16:2*16].eq(self.phy.source.qa),
+            rx_cdc.sink.data[2*16:3*16].eq(self.phy.source.ib),
+            rx_cdc.sink.data[3*16:4*16].eq(self.phy.source.qb),
+        ]
         self.rx_pipeline = stream.Pipeline(
-            #rx_cdc, # FIXME: Add phy_layout to DMA mapping.
+            rx_cdc,
             rx_buffer,
             self.source
         )
@@ -75,9 +81,15 @@ class AD9361RFIC(LiteXModule):
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
-            #tx_cdc, # FIXME: Add DMA to phy_layout mapping.
+            tx_cdc,
         )
-        self.comb += tx_cdc.source.connect(self.phy.sink)
+        self.comb += [
+            tx_cdc.source.connect(self.phy.sink, keep={"valid", "ready"}),
+            self.phy.sink.ia.eq(tx_cdc.source.data[0*16:1*16]),
+            self.phy.sink.qa.eq(tx_cdc.source.data[1*16:2*16]),
+            self.phy.sink.ib.eq(tx_cdc.source.data[2*16:3*16]),
+            self.phy.sink.qa.eq(tx_cdc.source.data[3*16:4*16]),
+        ]
 
         # Config / Status --------------------------------------------------------------------------
         self.sync += [
