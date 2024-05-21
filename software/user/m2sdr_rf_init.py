@@ -13,6 +13,8 @@ def initialize_ad9361():
 
     attempt_count = 0
 
+    subprocess.run(["./m2sdr_util", "si5351_i2c_init"])
+
     while True:
         try:
             attempt_count += 1
