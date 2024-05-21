@@ -1056,9 +1056,6 @@ int32_t ad9361_reset(struct ad9361_rf_phy *phy)
 		return 0;
 	}
 
-	printf("TODO: Implement ad9361_reset from GPIO\n");
-	return 0;
-
 	/* SPI Soft Reset was removed from the register map, since it doesn't
 	 * work reliably. Without a prober HW reset randomness may happen.
 	 * Please specify a RESET GPIO.

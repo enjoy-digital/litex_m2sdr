@@ -20,6 +20,7 @@
 
 #include "ad9361/ad9361_api.h"
 #include "no_os_spi.h"
+#include "no_os_alloc.h"
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
@@ -41,12 +42,12 @@ void intHandler(int dummy) {
 
 void no_os_udelay(uint32_t usecs)
 {
-    //usleep(usecs);
+    usleep(usecs);
 }
 
 void no_os_mdelay(uint32_t msecs)
 {
-    //usleep(msecs * 1000);
+    usleep(msecs * 1000);
 }
 
 int32_t spi_init(struct no_os_spi_desc **desc,
@@ -118,6 +119,106 @@ const struct no_os_spi_platform_ops spi_ops = {
     .init           = &spi_init,
     .write_and_read = &spi_write_and_read,
     .remove         = &spi_remove
+};
+
+
+int32_t gpio_set_value(struct no_os_gpio_desc *desc, uint8_t value)
+{
+
+    if(!desc)
+        return -1;
+
+    if (desc->number < 32)
+        return -1;
+
+    int fd; // FIXME: Avoid open/close on each call.
+    int data;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    data = litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR);
+    data &= 0xfffffffe;
+    data |= value;
+    litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, data);
+
+    close(fd);
+
+    return 0;
+}
+
+int32_t gpio_get(struct no_os_gpio_desc **desc, const struct no_os_gpio_init_param *param)
+{
+
+    struct no_os_gpio_desc *descriptor;
+
+    descriptor = no_os_calloc(1, sizeof(*descriptor));
+
+    if (!descriptor)
+        return -1;
+
+    *desc = descriptor;
+
+    return 0;
+}
+
+int32_t gpio_get_optional(struct no_os_gpio_desc **desc, const struct no_os_gpio_init_param *param)
+{
+    if(param == NULL) {
+        *desc = NULL;
+        return 0;
+    }
+
+    return no_os_gpio_get(desc, param);
+}
+
+int32_t gpio_direction_output(struct no_os_gpio_desc *desc, uint8_t value)
+{
+    return no_os_gpio_set_value(desc, value);
+}
+
+
+int32_t gpio_get_value(struct no_os_gpio_desc *desc, uint8_t value)
+{
+
+    if(!desc)
+        return -1;
+
+    if (desc->number < 32)
+        return -1;
+
+    int fd; // FIXME: Avoid open/close on each call.
+    int data;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    data = litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR);
+    data &= 0xfffffffe;
+    data |= value;
+    litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, data);
+
+    close(fd);
+
+    return 0;
+}
+
+
+const struct no_os_gpio_platform_ops gpio_ops = {
+    .gpio_ops_get              = &gpio_get,
+    .gpio_ops_get_optional     = NULL,
+    .gpio_ops_remove           = NULL,
+    .gpio_ops_direction_input  = NULL,
+    .gpio_ops_direction_output = &gpio_direction_output,
+    .gpio_ops_get_direction    = NULL,
+    .gpio_ops_set_value        = &gpio_set_value,
+    .gpio_ops_get_value        = NULL,
 };
 
 /* AD9361 */
@@ -353,7 +454,7 @@ AD9361_InitParam default_init_param = {
     /* GPIO definitions */
     {
         .number       = -1,
-        .platform_ops = NULL,
+        .platform_ops = &gpio_ops,
         .extra        = NULL
     }, // gpio_resetb *** reset-gpios
     /* MCS Sync */
@@ -501,7 +602,8 @@ static void init(void)
         exit(1);
     }
 
-    default_init_param.gpio_sync.number = -1;
+    default_init_param.gpio_resetb.number  =  1;
+    default_init_param.gpio_sync.number    = -1;
     default_init_param.gpio_cal_sw1.number = -1;
     default_init_param.gpio_cal_sw2.number = -1;
 
