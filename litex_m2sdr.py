@@ -206,9 +206,10 @@ class BaseSoC(SoCMini):
             analyzer_signals = [
                 self.ad9361.phy.sink,   # TX.
                 self.ad9361.phy.source, # RX.
+                *self.ad9361.phy.rx_debug,
             ]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 4096,
+                depth        = 1024,
                 clock_domain = "rfic",
                 register     = True,
                 csr_csv      = "analyzer.csv"
@@ -240,7 +241,7 @@ class BaseSoC(SoCMini):
                 self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
                 self.specials += MultiReg(latch_value, self.value.status)
 
-        self.ck0_measurement  = ClkMeasurement(clk=platform.request("si5351_clk0"))
+        self.clk0_measurement = ClkMeasurement(clk=platform.request("si5351_clk0"))
         self.clk1_measurement = ClkMeasurement(clk=ClockSignal("rfic"))
         self.clk2_measurement = ClkMeasurement(clk=0)
         self.clk3_measurement = ClkMeasurement(clk=0)

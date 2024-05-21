@@ -164,6 +164,21 @@ class RFICPHY(LiteXModule):
             )
         ]
 
+        self.rx_debug = [
+            rx_frame_ibufds,
+            rx_frame,
+            rx_frame_d,
+            rx_frame_rising,
+            rx_frame_rising_d,
+            rx_data_half_i,
+            rx_data_half_q,
+            rx_frame_first,
+            rx_data_valid,
+            rx_data_ia,
+            rx_data_qa,
+            rx_data_ib,
+            rx_data_qb,
+        ]
 
         # Drive Source
         if not loopback:
