@@ -13,6 +13,8 @@
 
 #include "m2sdr_si5351_i2c.h"
 
+#ifdef CSR_SI5351_I2C_BASE
+
 extern void nanosleep(int n);
 
 /* Private Functions */
@@ -240,3 +242,5 @@ void m2sdr_si5351_i2c_scan(int fd)
 	}
 	printf("\n");
 }
+
+#endif

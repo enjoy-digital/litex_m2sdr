@@ -38,6 +38,8 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
+#ifdef CSR_SI5351_I2C_BASE
+
 /* SI5351 I2C */
 /*------------*/
 
@@ -176,6 +178,9 @@ static void test_si5351_i2c_init(void)
     close(fd);
 }
 
+#endif
+
+#ifdef CSR_CDCM6208_BASE
 
 /* CDCM6208 SPI Scan */
 /*-------------------*/
@@ -202,7 +207,6 @@ static void test_cdcm6208_spi_scan(void)
 
     close(fd);
 }
-
 
 /* 38.4MHz internal VCXO */
 static const uint16_t cdcm_regs_vcxo_38[][2] =
@@ -265,6 +269,7 @@ static void test_cdcm6208_spi_init(void)
     close(fd);
 }
 
+#endif
 
 /* AD9361 SPI Scan */
 /*-----------------*/
@@ -753,12 +758,16 @@ static void help(void)
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
            "\n"
+#ifdef  CSR_SI5351_I2C_BASE
            "si5351_i2c_scan                   Scan SI5351 I2C.\n"
            "si5351_i2c_init                   Init SI5351 over I2C.\n"
            "\n"
+#endif
+#ifdef CSR_CDCM6208_BASE
            "cdcm6208_spi_scan                 Scan CDCM6208 SPI.\n"
            "cdcm6208_spi_init                 Init CDCM6208 over SPI.\n"
            "\n"
+#endif
            "ad9361_spi_scan                   Scan AD9361 SPI.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
@@ -832,16 +841,20 @@ int main(int argc, char **argv)
     /* Scratch cmds. */
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
+#ifdef CSR_SI5351_I2C_BASE
     /* SI5351 cmds. */
     else if (!strcmp(cmd, "si5351_i2c_scan"))
         test_si5351_i2c_scan();
     else if (!strcmp(cmd, "si5351_i2c_init"))
         test_si5351_i2c_init();
+#endif
+#ifdef CSR_CDCM6208_BASE
     /* CDCM6208 cmds. */
     else if (!strcmp(cmd, "cdcm6208_spi_scan"))
         test_cdcm6208_spi_scan();
     else if (!strcmp(cmd, "cdcm6208_spi_init"))
         test_cdcm6208_spi_init();
+#endif
     /* AD9361 cmds. */
     else if (!strcmp(cmd, "ad9361_spi_scan"))
         test_ad9361_spi_scan();

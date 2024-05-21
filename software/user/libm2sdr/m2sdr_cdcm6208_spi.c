@@ -14,6 +14,8 @@
 
 #include "m2sdr_cdcm6208_spi.h"
 
+#ifdef CSR_CDCM6208_BASE
+
 //#define CDCM6208_SPI_WRITE_DEBUG
 //#define CDCM6208_SPI_READ_DEBUG
 
@@ -48,3 +50,5 @@ uint8_t m2sdr_cdcm6208_spi_read(int fd, uint16_t reg) {
     while ((litepcie_readl(fd, CSR_CDCM6208_SPI_STATUS_ADDR) & 1) == 0);
     return litepcie_readl(fd, CSR_CDCM6208_SPI_MISO_ADDR) & 0xffff;
 }
+
+#endif
