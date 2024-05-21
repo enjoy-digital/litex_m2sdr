@@ -281,7 +281,7 @@ AD9361_InitParam default_init_param = {
     0,      //tx_channel_swap_enable *** adi,tx-channel-swap-enable
     0,      //rx_channel_swap_enable *** adi,rx-channel-swap-enable
     1,      //rx_frame_pulse_mode_enable *** adi,rx-frame-pulse-mode-enable
-    0,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
+    1,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
     0,      //invert_data_bus_enable *** adi,invert-data-bus-enable
     0,      //invert_data_clk_enable *** adi,invert-data-clk-enable
     0,      //fdd_alt_word_order_enable *** adi,fdd-alt-word-order-enable
@@ -295,10 +295,10 @@ AD9361_InitParam default_init_param = {
     0,      //full_port_enable *** adi,full-port-enable
     0,      //full_duplex_swap_bits_enable *** adi,full-duplex-swap-bits-enable
     0,      //delay_rx_data *** adi,delay-rx-data
-    0,      //rx_data_clock_delay *** adi,rx-data-clock-delay
-    4,      //rx_data_delay *** adi,rx-data-delay
-    7,      //tx_fb_clock_delay *** adi,tx-fb-clock-delay
-    0,      //tx_data_delay *** adi,tx-data-delay
+    2,      //rx_data_clock_delay *** adi,rx-data-clock-delay
+    2,      //rx_data_delay *** adi,rx-data-delay
+    2,      //tx_fb_clock_delay *** adi,tx-fb-clock-delay
+    2,      //tx_data_delay *** adi,tx-data-delay
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
@@ -505,14 +505,22 @@ static void init(void)
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
+    ad9361_set_trx_clock_chain_freq(ad9361_phy, 30720000);
+
     ad9361_bist_loopback(ad9361_phy, 0);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
 #if 1
     ad9361_bist_loopback(ad9361_phy, 1);
+    ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 #endif
 
+    printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
+    printf("SPI Register 0x011—Parallel Port Configuration 2: %08x\n", m2sdr_ad9361_spi_read(fd, 0x11));
+    printf("SPI Register 0x012—Parallel Port Configuration 3: %08x\n", m2sdr_ad9361_spi_read(fd, 0x12));
+
+    printf("AD9361 Control: %08x\n", litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR));
     close(fd);
 }
 
