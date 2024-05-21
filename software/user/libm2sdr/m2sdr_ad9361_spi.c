@@ -23,9 +23,9 @@
 
 void m2sdr_ad9361_spi_init(int fd) {
     /* Reset Through GPIO */
-    litepcie_writel(fd, CSR_MAIN_AD9361_ENABLE_ADDR, 0);
+    litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, 0b00);
     usleep(1000);
-    litepcie_writel(fd, CSR_MAIN_AD9361_ENABLE_ADDR, 1);
+    litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, 0b11);
     usleep(1000);
 
     /* Small delay. */

@@ -14,13 +14,13 @@ from litex.soc.interconnect.csr import *
 
 from litepcie.common import *
 
-from gateware.ad9361.phy import RFICPHY
+from gateware.ad9361.phy import RFICPHY, phy_layout
 from gateware.ad9361.spi import SPIMaster
 
 # AD9361RFIC ---------------------------------------------------------------------------------------
 
 class AD9361RFIC(LiteXModule):
-    def __init__(self, platform, pads, sys_clk_freq, packing="lut"):
+    def __init__(self, rfic_pads, spi_pads, sys_clk_freq):
         # Controls ---------------------------------------------------------------------------------
         self.enable_datapath = Signal(reset=1)
 
@@ -44,7 +44,7 @@ class AD9361RFIC(LiteXModule):
         self.cd_rfic.rst_buf = "bufg"
 
         # PHY --------------------------------------------------------------------------------------
-        self.phy = RFICPHY(platform, pads)
+        self.phy = RFICPHY(rfic_pads)
 
         # Cross domain crossing --------------------------------------------------------------------
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
@@ -67,7 +67,7 @@ class AD9361RFIC(LiteXModule):
         # Data Flow --------------------------------------------------------------------------------
         self.comb += self.phy.source.connect(rx_cdc.sink)
         self.rx_pipeline = stream.Pipeline(
-            rx_cdc,
+            #rx_cdc, # FIXME: Add phy_layout to DMA mapping.
             rx_buffer,
             self.source
         )
@@ -75,26 +75,23 @@ class AD9361RFIC(LiteXModule):
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
-            tx_cdc,
+            #tx_cdc, # FIXME: Add DMA to phy_layout mapping.
         )
         self.comb += tx_cdc.source.connect(self.phy.sink)
 
-        # Loopback Path.
-        self.comb += tx_unpacker.loopback.connect(rx_packer.loopback)
-
         # Config / Status --------------------------------------------------------------------------
         self.sync += [
-            pads.rst_n.eq(self._config.fields.rst_n),
-            pads.enable.eq(self._config.fields.enable),
-            pads.txnrx.eq(self._config.fields.txnrx),
-            pads.en_agc.eq(self._config.fields.en_agc),
+            rfic_pads.rst_n.eq(self._config.fields.rst_n),
+            rfic_pads.enable.eq(self._config.fields.enable),
+            rfic_pads.txnrx.eq(self._config.fields.txnrx),
+            rfic_pads.en_agc.eq(self._config.fields.en_agc),
 
-            pads.ctrl.eq(self._ctrl.storage),
-            self._stat.status.eq(pads.stat)
+            rfic_pads.ctrl.eq(self._ctrl.storage),
+            self._stat.status.eq(rfic_pads.stat)
         ]
 
         # SPI --------------------------------------------------------------------------------------
-        self.spi = SPIMaster(platform.request("rfic_spi"), 24, 8)
+        self.spi = SPIMaster(spi_pads, width=24, div=8)
 
 
     def add_prbs(self):

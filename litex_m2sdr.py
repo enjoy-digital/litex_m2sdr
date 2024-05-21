@@ -40,7 +40,7 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
-from gateware.ad9361.spi import SPIMaster
+from gateware.ad9361.core import AD9361RFIC
 
 from software import generate_litepcie_software
 
@@ -178,28 +178,20 @@ class BaseSoC(SoCMini):
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
-        ad9361_rfic_pads = platform.request("ad9361_rfic")
-
-        self.ad9361_enable = CSRStorage()
-        self.comb += [
-            ad9361_rfic_pads.rst_n.eq(self.ad9361_enable.storage),
-            ad9361_rfic_pads.enable.eq(self.ad9361_enable.storage),
-        ]
-
-        self.ad9361_spi = SPIMaster(
-            pads  = platform.request("ad9361_spi"),
-            width = 24,
-            div   = 8
+        self.ad9361 = AD9361RFIC(
+            rfic_pads    = platform.request("ad9361_rfic"),
+            spi_pads     = platform.request("ad9361_spi"),
+            sys_clk_freq = sys_clk_freq,
         )
 
         # Debug.
-        analyzer_signals = [platform.lookup_request("ad9361_spi")]
-        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 4096,
-            clock_domain = "sys",
-            register     = True,
-            csr_csv      = "analyzer.csv"
-        )
+#        analyzer_signals = [platform.lookup_request("ad9361_spi")]
+#        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+#            depth        = 4096,
+#            clock_domain = "sys",
+#            register     = True,
+#            csr_csv      = "analyzer.csv"
+#        )
 
         # Clk Measurements -------------------------------------------------------------------------
 

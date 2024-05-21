@@ -10,8 +10,9 @@ from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
 
+
 from litex.soc.interconnect.csr import *
-from litex.soc.interconnect.stream import Endpoint
+from litex.soc.interconnect import stream
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -26,7 +27,7 @@ def phy_layout(bps=12):
         ("qa", bps),
         ("ib", bps),
         ("qb", bps)]
-    return EndpointDescription(layout)
+    return stream.EndpointDescription(layout)
 
 # RFICPHY ------------------------------------------------------------------------------------------
 
@@ -41,10 +42,10 @@ class RFICPHY(LiteXModule):
     Mode can be selected with mode register.
     """
 
-    def __init__(self, platform, pads, loopback=False):
+    def __init__(self, pads, loopback=False):
         self.dw      = 64
-        self.sink    = sink   = Endpoint(phy_layout())
-        self.source  = source = Endpoint(phy_layout())
+        self.sink    = sink   = stream.Endpoint(phy_layout())
+        self.source  = source = stream.Endpoint(phy_layout())
         self.control = CSRStorage(fields=[
             CSRField("mode", size=1, offset=0, values=[
                 ("``0b0``", "2R2T."),

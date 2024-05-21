@@ -29,8 +29,8 @@ _io = [
     ("si5351_pwm",  0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ("si5351_clk0", 0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
     ("si5351_clk1", 0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
-    ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS18")), # FPGA_AUXCLK_3.
-    ("si5351_clk3", 0, Pins("R4"),  IOStandard("LVCMOS18")), # FPGA_AUXCLK_4.
+    ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_3.
+    ("si5351_clk3", 0, Pins("R4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_4.
 
     # PCIe (M2 Connector).
     ("pcie_x1", 0,
@@ -70,34 +70,34 @@ _io = [
 
     # AD9361.
     ("ad9361_rfic", 0,
-        #Subsignal("rx_clk_p",   Pins("V4"),                 IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RF_DATA_CLK_P.
-        #Subsignal("rx_clk_n",   Pins("W4"),                 IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RF_DATA_CLK_N.
-        #Subsignal("rx_frame_p", Pins("AB7"),                IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_P.
-        #Subsignal("rx_frame_n", Pins("AB6"),                IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_N.
-        #Subsignal("rx_data_p",  Pins("U6 W6  Y6 Y7 W9 V9"), IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
-        #Subsignal("rx_data_n",  Pins("V5 W5 AA6 W7 Y9 V8"), IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
+        Subsignal("rx_clk_p",   Pins("V4"),                 IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_DATA_CLK_P.
+        Subsignal("rx_clk_n",   Pins("W4"),                 IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_DATA_CLK_N.
+        Subsignal("rx_frame_p", Pins("AB7"),                IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_P.
+        Subsignal("rx_frame_n", Pins("AB6"),                IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_N.
+        Subsignal("rx_data_p",  Pins("U6 W6  Y6 Y7 W9 V9"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
+        Subsignal("rx_data_n",  Pins("V5 W5 AA6 W7 Y9 V8"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
 
-        #Subsignal("tx_clk_p",   Pins("T5"),                    IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_P.
-        #Subsignal("tx_clk_n",   Pins("U5"),                    IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_N.
-        #Subsignal("tx_frame_p", Pins("AA8"),                   IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_P.
-        #Subsignal("tx_frame_n", Pins("AB8"),                   IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_N.
-        #Subsignal("tx_data_p",  Pins("U3  Y4 AB3 AA1 W1 AA5"), IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # TX_DATA_P_0-5.
-        #Subsignal("tx_data_n",  Pins("V3 AA4 AB2 AB1 Y1 AB5"), IOStandard("LVDS_18"), Misc("DIFF_TERM=TRUE")), # TX_DATA_N_0-5.
+        Subsignal("tx_clk_p",   Pins("T5"),                    IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_P.
+        Subsignal("tx_clk_n",   Pins("U5"),                    IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_N.
+        Subsignal("tx_frame_p", Pins("AA8"),                   IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_P.
+        Subsignal("tx_frame_n", Pins("AB8"),                   IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_N.
+        Subsignal("tx_data_p",  Pins("U3  Y4 AB3 AA1 W1 AA5"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_DATA_P_0-5.
+        Subsignal("tx_data_n",  Pins("V3 AA4 AB2 AB1 Y1 AB5"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_DATA_N_0-5.
 
-        Subsignal("rst_n",  Pins("E1"), IOStandard("LVCMOS18")), # RF_RESET_N.
-        Subsignal("enable", Pins("P4"), IOStandard("LVCMOS18")), # RF_ENABLE.
-        #Subsignal("txnrx",  Pins("B2"), IOStandard("LVCMOS18")), # RF_RXTX.
-        #Subsignal("en_agc", Pins("N5"), IOStandard("LVCMOS18")), # RF_EN_AGC.
+        Subsignal("rst_n",  Pins("E1"), IOStandard("LVCMOS25")), # RF_RESET_N.
+        Subsignal("enable", Pins("P4"), IOStandard("LVCMOS25")), # RF_ENABLE.
+        Subsignal("txnrx",  Pins("B2"), IOStandard("LVCMOS25")), # RF_RXTX.
+        Subsignal("en_agc", Pins("N5"), IOStandard("LVCMOS25")), # RF_EN_AGC.
 
-        #Subsignal("ctrl", Pins("T1 U1 M3 M1"),             IOStandard("LVCMOS18")), # RF_CTRL_IN_ 0-3.
-        #Subsignal("stat", Pins("L1 M2 P1 R2 R3 N3 N2 N4"), IOStandard("LVCMOS18")), # RF_CTRL_OUT_0-7.
+        Subsignal("ctrl", Pins("T1 U1 M3 M1"),             IOStandard("LVCMOS25")), # RF_CTRL_IN_ 0-3.
+        Subsignal("stat", Pins("L1 M2 P1 R2 R3 N3 N2 N4"), IOStandard("LVCMOS25")), # RF_CTRL_OUT_0-7.
     ),
     ("ad9361_spi", 0,
         Subsignal("clk",  Pins("P5")), # RF_SPI_CLK.
         Subsignal("cs_n", Pins("E2")), # RF_SPI_CS.
         Subsignal("mosi", Pins("P6")), # RF_SPI_DI.
         Subsignal("miso", Pins("M6")), # RF_SPI_DO.
-        IOStandard("LVCMOS18")
+        IOStandard("LVCMOS25")
     ),
 ]
 
