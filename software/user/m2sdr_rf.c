@@ -52,11 +52,22 @@ void no_os_mdelay(uint32_t msecs)
 int32_t spi_init(struct no_os_spi_desc **desc,
              const struct no_os_spi_init_param *param)
 {
+
+    int fd; // FIXME: Avoid open/close on each call.
+
     *desc = (struct no_os_spi_desc *)malloc(sizeof(**desc));
     if (!(*desc))
         return -1;
 
-    printf("TODO: Implement spi_init!");
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    m2sdr_ad9361_spi_init(fd);
+
+    close(fd);
 
     return 0;
 }
@@ -490,15 +501,9 @@ static void init(void)
         exit(1);
     }
 
-    // NOTE: The user has to choose the GPIO numbers according to desired
-    // carrier board.
-    //default_init_param.gpio_resetb.number = GPIO_RESET_PIN;
-
     default_init_param.gpio_sync.number = -1;
     default_init_param.gpio_cal_sw1.number = -1;
     default_init_param.gpio_cal_sw2.number = -1;
-
-    m2sdr_ad9361_spi_init(fd);
 
     ad9361_init(&ad9361_phy, &default_init_param);
 
