@@ -183,6 +183,7 @@ class BaseSoC(SoCMini):
             spi_pads     = platform.request("ad9361_spi"),
             sys_clk_freq = sys_clk_freq,
         )
+        self.ad9361.add_prbs()
 
         # Debug.
 #        analyzer_signals = [platform.lookup_request("ad9361_spi")]
