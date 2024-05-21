@@ -144,6 +144,7 @@ class BaseSoC(SoCMini):
                 with_dma_synchronizer = True,
                 with_msi              = True
             )
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
 
             # Timing Constraints/False Paths -------------------------------------------------------
             for i in range(4):
@@ -184,15 +185,34 @@ class BaseSoC(SoCMini):
             sys_clk_freq = sys_clk_freq,
         )
         self.ad9361.add_prbs()
+        if with_pcie:
+            self.comb += [
+                self.pcie_dma0.source.connect(self.ad9361.sink),
+                self.ad9361.source.connect(self.pcie_dma0.sink),
+        ]
 
         # Debug.
-#        analyzer_signals = [platform.lookup_request("ad9361_spi")]
-#        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-#            depth        = 4096,
-#            clock_domain = "sys",
-#            register     = True,
-#            csr_csv      = "analyzer.csv"
-#        )
+        with_spi_analyzer  = False
+        with_rfic_analyzer = True
+        if with_spi_analyzer:
+            analyzer_signals = [platform.lookup_request("ad9361_spi")]
+            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+                depth        = 4096,
+                clock_domain = "sys",
+                register     = True,
+                csr_csv      = "analyzer.csv"
+            )
+        if with_rfic_analyzer:
+            analyzer_signals = [
+                self.ad9361.phy.sink,   # TX.
+                self.ad9361.phy.source, # RX.
+            ]
+            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+                depth        = 4096,
+                clock_domain = "rfic",
+                register     = True,
+                csr_csv      = "analyzer.csv"
+            )
 
         # Clk Measurements -------------------------------------------------------------------------
 
