@@ -147,6 +147,9 @@ int32_t gpio_set_value(struct no_os_gpio_desc *desc, uint8_t value)
     data |= value;
     litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, data);
 
+    /* Small delay. */
+    usleep(1000);
+
     close(fd);
 
     return 0;

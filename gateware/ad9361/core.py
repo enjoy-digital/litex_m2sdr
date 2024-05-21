@@ -103,7 +103,7 @@ class AD9361RFIC(LiteXModule):
         ]
 
         # SPI --------------------------------------------------------------------------------------
-        self.spi = SPIMaster(spi_pads, width=24, div=8)
+        self.spi = SPIMaster(spi_pads, width=24, div=32)
 
 
     def add_prbs(self):
