@@ -92,11 +92,16 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 		return -ENOMEM;
 	}
 
+	printf("here1\n");
+
 	phy->clk_refin = (struct no_os_clk *)no_os_calloc(1, sizeof(*phy->clk_refin));
 	if (!phy->clk_refin) {
 		no_os_free(phy);
 		return -ENOMEM;
 	}
+
+	printf("here2\n");
+
 
 	phy->pdata = (struct ad9361_phy_platform_data *)no_os_calloc(1,
 			sizeof(*phy->pdata));
@@ -105,6 +110,9 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 		no_os_free(phy);
 		return -ENOMEM;
 	}
+
+	printf("here3\n");
+
 #ifndef AXI_ADC_NOT_PRESENT
 	phy->adc_conv = (struct axiadc_converter *)no_os_calloc(1,
 			sizeof(*phy->adc_conv));
@@ -114,6 +122,9 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 		no_os_free(phy);
 		return -ENOMEM;
 	}
+
+
+	printf("here4\n");
 
 	phy->adc_state = (struct axiadc_state *)no_os_calloc(1,
 			 sizeof(*phy->adc_state));
@@ -126,6 +137,9 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	}
 	phy->adc_state->phy = phy;
 #endif
+
+
+	printf("here5\n");
 
 	/* Device selection */
 	phy->dev_sel = init_param->dev_sel;
@@ -495,6 +509,9 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 
 	phy->pdata->debug_mode = true;
 
+
+	printf("here6\n");
+
 	no_os_gpio_get(&phy->gpio_desc_resetb, &init_param->gpio_resetb);
 	/* Optional: next three GPIOs are used for MCS synchronization */
 	no_os_gpio_get_optional(&phy->gpio_desc_sync, &init_param->gpio_sync);
@@ -542,6 +559,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->bist_tone_level_dB = 0;
 	phy->bist_tone_mask = 0;
 
+	printf("here7\n");
+
 	ad9361_reset(phy);
 
 	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
@@ -552,6 +571,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	}
 	rev = ret & REV_MASK;
 
+	printf("here8\n");
+
 	phy->ad9361_rfpll_ext_recalc_rate = init_param->ad9361_rfpll_ext_recalc_rate;
 	phy->ad9361_rfpll_ext_round_rate = init_param->ad9361_rfpll_ext_round_rate;
 	phy->ad9361_rfpll_ext_set_rate = init_param->ad9361_rfpll_ext_set_rate;
@@ -559,6 +580,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	ret = ad9361_register_clocks(phy);
 	if (ret < 0)
 		goto out;
+
+	printf("here9\n");
 
 	ret = ad9361_setup(phy);
 	if (ret < 0)
@@ -572,6 +595,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	if (ret < 0)
 		goto out_clk;
 #endif
+
+	printf("here10\n");
 
 	printf("%s : AD936x Rev %d successfully initialized\n", __func__, (int)rev);
 

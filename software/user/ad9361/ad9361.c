@@ -4649,6 +4649,8 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 {
 	int32_t ret, i, j, n;
 
+	printf("machin1\n");
+
 	dev_dbg(&phy->spi->dev, "%s", __func__);
 
 	if (!rx_path_clks || !tx_path_clks)
@@ -4666,6 +4668,8 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 		tx_path_clks[R2_FREQ], tx_path_clks[R1_FREQ],
 		tx_path_clks[CLKRF_FREQ], tx_path_clks[RX_SAMPL_FREQ]);
 
+	printf("machin2\n");
+
 	ret = ad9361_validate_trx_clock_chain(phy, rx_path_clks, tx_path_clks);
 	if (ret < 0)
 		return ret;
@@ -4675,10 +4679,13 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 	if (ret < 0)
 		return ret;
 
+	printf("machin3\n");
+
 	phy->current_rx_path_clks[BBPLL_FREQ] = rx_path_clks[BBPLL_FREQ];
 
 	for (i = ADC_CLK, j = DAC_CLK, n = ADC_FREQ;
 	     i <= RX_SAMPL_CLK; i++, j++, n++) {
+		printf("i: %d,ref_clk_scale[i]: %d, rx_path_clks[n]: %d \n", i, phy->ref_clk_scale[i], rx_path_clks[n]);
 		ret = no_os_clk_set_rate(phy, phy->ref_clk_scale[i], rx_path_clks[n]);
 		if (ret < 0) {
 			dev_err(dev, "Failed to set BB ref clock rate (%"PRId32")",
@@ -4695,6 +4702,8 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 		phy->current_tx_path_clks[n] = tx_path_clks[n];
 	}
 
+	printf("machin4\n");
+
 	/*
 	 * Workaround for clock framework since clocks don't change we
 	 * manually need to enable the filter
@@ -4710,6 +4719,8 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 				  TX_FIR_ENABLE_INTERPOLATION(~0), !phy->bypass_tx_fir);
 	}
 
+	printf("machin5\n");
+
 	/* The FIR filter once enabled causes the interface timing to change.
 	 * It's typically not a problem if the timing margin is big enough.
 	 * However at 61.44 MSPS it causes problems on some systems.
@@ -4720,6 +4731,8 @@ int32_t ad9361_set_trx_clock_chain(struct ad9361_rf_phy *phy,
 	if (!phy->pdata->dig_interface_tune_fir_disable &&
 	    !(phy->bypass_tx_fir && phy->bypass_rx_fir))
 		ret = ad9361_dig_tune(phy, 0, SKIP_STORE_RESULT);
+
+	printf("machin6\n");
 
 	return ad9361_bb_clk_change_handler(phy);
 }
@@ -5376,6 +5389,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 
 	dev_dbg(dev, "%s", __func__);
 
+	printf("toto1\n");
+
 	pd->rf_rx_bandwidth_Hz = ad9361_validate_rf_bw(phy, pd->rf_rx_bandwidth_Hz);
 	pd->rf_tx_bandwidth_Hz = ad9361_validate_rf_bw(phy, pd->rf_tx_bandwidth_Hz);
 
@@ -5392,6 +5407,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 		}
 	}
 
+	printf("toto2\n");
+
 	ret = ad9361_auxdac_setup(phy, &pd->auxdac_ctrl);
 	if (ret < 0)
 		return ret;
@@ -5403,6 +5420,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 	if (pd->port_ctrl.pp_conf[2] & FDD_RX_RATE_2TX_RATE)
 		phy->rx_eq_2tx = true;
 
+	printf("toto3\n");
+
 	ad9361_spi_write(spi, REG_CTRL, CTRL_ENABLE);
 	ad9361_spi_write(spi, REG_BANDGAP_CONFIG0,
 			 MASTER_BIAS_TRIM(0x0E)); /* Enable Master Bias */
@@ -5410,6 +5429,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 			 BANDGAP_TEMP_TRIM(0x0E)); /* Set Bandgap Trim */
 
 	ad9361_set_dcxo_tune(phy, pd->dcxo_coarse, pd->dcxo_fine);
+
+	printf("toto4\n");
 
 	refin_Hz = phy->clk_refin->rate;
 
@@ -5424,6 +5445,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 	ad9361_spi_writef(spi, REG_REF_DIVIDE_CONFIG_2,
 			  RX_REF_DOUBLER_FB_DELAY(~0), 3); /* FB DELAY */
 
+	printf("toto5\n");
+
 	ad9361_spi_write(spi, REG_CLOCK_ENABLE,
 			 DIGITAL_POWER_UP | CLOCK_ENABLE_DFLT | BBPLL_ENABLE |
 			 (pd->use_extclk ? XO_BYPASS : 0)); /* Enable Clocks */
@@ -5435,6 +5458,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 		return ret;
 	}
 
+	printf("toto6\n");
+
 	ret = clk_prepare_enable(phy->clks[BB_REFCLK]);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable BB ref clock rate (%"PRId32")",
@@ -5445,10 +5470,15 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 	ad9361_spi_write(spi, REG_FRACT_BB_FREQ_WORD_2, 0x12);
 	ad9361_spi_write(spi, REG_FRACT_BB_FREQ_WORD_3, 0x34);
 
+
+	printf("toto7\n");
+
 	ret = ad9361_set_trx_clock_chain(phy, pd->rx_path_clks,
 					 pd->tx_path_clks);
 	if (ret < 0)
 		return ret;
+
+	printf("toto8\n");
 
 	if (!pd->rx2tx2) {
 		pd->rx1tx1_mode_use_tx_num =
@@ -5462,6 +5492,8 @@ int32_t ad9361_setup(struct ad9361_rf_phy *phy)
 		ad9361_en_dis_tx(phy, TX_1 | TX_2, TX_1 | TX_2);
 		ad9361_en_dis_rx(phy, RX_1 | RX_2, RX_1 | RX_2);
 	}
+
+	printf("toto9\n");
 
 	ret = ad9361_rf_port_setup(phy, true, pd->rf_rx_input_sel,
 				   pd->rf_tx_output_sel);

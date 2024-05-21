@@ -116,6 +116,33 @@ uint32_t clk_get_rate(struct ad9361_rf_phy *phy,
 	return rate;
 }
 
+void print_refclk_scale(const struct refclk_scale *scale) {
+    if (scale == NULL) {
+        printf("refclk_scale is NULL\n");
+        return;
+    }
+
+    struct ad9361_rf_phy *phy = scale->phy;
+    if (phy == NULL) {
+        printf("phy is NULL\n");
+        return;
+    }
+
+    uint32_t current_rate = phy->clks[scale->source]->rate;
+    uint32_t parent_rate = phy->clks[scale->parent_source]->rate;
+
+    printf("refclk_scale:\n");
+    printf("  mult: %u\n", scale->mult);
+    printf("  div: %u\n", scale->div);
+    printf("  source: %d\n", scale->source);
+    printf("  parent_source: %d\n", scale->parent_source);
+    printf("  current_rate: %u\n", current_rate);
+    printf("  parent_rate: %u\n", parent_rate);
+    printf("  spi: %p\n", (void *)scale->spi);
+    printf("  phy: %p\n", (void *)scale->phy);
+}
+
+
 /***************************************************************************//**
  * @brief clk_set_rate
 *******************************************************************************/
@@ -127,8 +154,20 @@ int32_t no_os_clk_set_rate(struct ad9361_rf_phy *phy,
 	int32_t i;
 	uint32_t round_rate;
 
+	printf("set_rate1!\n");
+
+	printf("ad9361_rf_phy:\n");
+    for (int i = 0; i < NUM_AD9361_CLKS; i++) {
+        printf("ref_clk_scale[%d]:\n", i);
+        print_refclk_scale(phy->ref_clk_scale[i]);
+    }
+
 	source = clk_priv->source;
 	if(phy->clks[source]->rate != rate) {
+		printf("set_rate2!\n");
+
+		printf("source %d\n", source);
+
 		switch (source) {
 		case TX_REFCLK:
 		case RX_REFCLK:
@@ -178,8 +217,10 @@ int32_t no_os_clk_set_rate(struct ad9361_rf_phy *phy,
 		case T1_CLK:
 		case CLKTF_CLK:
 		case TX_SAMPL_CLK:
+			printf("rate: %d, paren_source_rate: %d\n", rate, phy->clks[clk_priv->parent_source]->rate);
 			round_rate = ad9361_clk_factor_round_rate(clk_priv, rate,
 					&phy->clks[clk_priv->parent_source]->rate);
+			printf("round_rate: %d, paren_source_rate: %d\n", round_rate, phy->clks[clk_priv->parent_source]->rate);
 			ad9361_clk_factor_set_rate(clk_priv, round_rate,
 						   phy->clks[clk_priv->parent_source]->rate);
 			phy->clks[source]->rate = ad9361_clk_factor_recalc_rate(clk_priv,
@@ -210,6 +251,8 @@ int32_t no_os_clk_set_rate(struct ad9361_rf_phy *phy,
 			phy->clks[i]->rate = ad9361_rfpll_recalc_rate(phy->ref_clk_scale[i]);
 		}
 	} else {
+		printf("set_rate3!\n");
+
 		if ((source == BBPLL_CLK) && !phy->bbpll_initialized) {
 			round_rate = ad9361_bbpll_round_rate(clk_priv, rate,
 							     &phy->clks[clk_priv->parent_source]->rate);
