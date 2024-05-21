@@ -209,8 +209,8 @@ class BaseSoC(SoCMini):
                 *self.ad9361.phy.rx_debug,
             ]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 1024,
-                clock_domain = "rfic",
+                depth        = 4096,
+                clock_domain = "sys",
                 register     = True,
                 csr_csv      = "analyzer.csv"
             )

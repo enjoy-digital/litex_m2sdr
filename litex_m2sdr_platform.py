@@ -74,7 +74,7 @@ _io = [
         Subsignal("rx_clk_n",   Pins("W4"),                 IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_DATA_CLK_N.
         Subsignal("rx_frame_p", Pins("AB7"),                IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_P.
         Subsignal("rx_frame_n", Pins("AB6"),                IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_FRAME_N.
-        Subsignal("rx_data_p",  Pins("U6 W6  Y6 Y7 W9 V9"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
+        Subsignal("rx_data_p",  Pins("U6 W6  Y6 V7 W9 V9"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
         Subsignal("rx_data_n",  Pins("V5 W5 AA6 W7 Y9 V8"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
 
         Subsignal("tx_clk_p",   Pins("T5"),                    IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_P.

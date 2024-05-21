@@ -510,7 +510,7 @@ static void init(void)
     ad9361_bist_loopback(ad9361_phy, 0);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
-#if 1
+#if 0
     ad9361_bist_loopback(ad9361_phy, 1);
     ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
