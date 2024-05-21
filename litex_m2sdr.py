@@ -240,13 +240,13 @@ class BaseSoC(SoCMini):
                 self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
                 self.specials += MultiReg(latch_value, self.value.status)
 
-        self.si5351_clk0_measurement = ClkMeasurement(clk=platform.request("si5351_clk0"))
-        self.si5351_clk1_measurement = ClkMeasurement(clk=platform.request("si5351_clk1"))
-        self.si5351_clk2_measurement = ClkMeasurement(clk=platform.request("si5351_clk2"))
-        self.si5351_clk3_measurement = ClkMeasurement(clk=platform.request("si5351_clk3"))
+        self.ck0_measurement  = ClkMeasurement(clk=platform.request("si5351_clk0"))
+        self.clk1_measurement = ClkMeasurement(clk=ClockSignal("rfic"))
+        self.clk2_measurement = ClkMeasurement(clk=0)
+        self.clk3_measurement = ClkMeasurement(clk=0)
 
-        self.comb += platform.request("debug").eq(platform.lookup_request("si5351_clk0"))
-        #self.comb += platform.request("debug").eq(self.si5351.done)
+        #self.comb += platform.request("debug").eq(platform.lookup_request("si5351_clk0"))
+        self.comb += platform.request("debug").eq(ClockSignal("rfic"))
 
 # Build --------------------------------------------------------------------------------------------
 
