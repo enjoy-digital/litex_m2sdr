@@ -28,6 +28,17 @@ _io = [
         Subsignal("tx_n",  Pins("A6"))
     ),
 
+    # CDCM 6208.
+    ("cdcm6208", 0,
+        Subsignal("clk",    Pins("H2")),
+        Subsignal("rst_n",  Pins("K2")),
+        Subsignal("cs_n",   Pins("H3")),
+        Subsignal("mosi",   Pins("K1")),
+        Subsignal("miso",   Pins("J1")),
+        Subsignal("status", Pins("M1 L1")),
+        IOStandard("LVCMOS25")
+    ),
+
     # AD9361.
     ("ad9361_rfic", 0,
         Subsignal("rx_clk_p",   Pins("L19"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")),

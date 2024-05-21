@@ -177,6 +177,33 @@ static void test_si5351_i2c_init(void)
 }
 
 
+/* CDCM6208 SPI Scan */
+/*-------------------*/
+
+static void test_cdcm6208_spi_scan(void)
+{
+    int i;
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* CDCM6208 SPI Init */
+    m2sdr_cdcm6208_spi_init(fd);
+
+    /* CDCM6208 SPI Dump */
+    for (i=0; i<128; i++)
+        printf("Reg 0x%02x: 0x%04x\n", i, m2sdr_cdcm6208_spi_read(fd, i));
+
+    printf("\n");
+
+    close(fd);
+}
+
+
 /* AD9361 SPI Scan */
 /*-----------------*/
 
@@ -667,6 +694,8 @@ static void help(void)
            "si5351_i2c_scan                   Scan SI5351 I2C.\n"
            "si5351_i2c_init                   Init SI5351 over I2C.\n"
            "\n"
+           "cdcm6208_spi_scan                 Scan CDCM6208 SPI.\n"
+           "\n"
            "ad9361_spi_scan                   Scan AD9361 SPI.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
@@ -745,6 +774,9 @@ int main(int argc, char **argv)
         test_si5351_i2c_scan();
     else if (!strcmp(cmd, "si5351_i2c_init"))
         test_si5351_i2c_init();
+    /* CDCM6208 cmds. */
+    else if (!strcmp(cmd, "cdcm6208_spi_scan"))
+        test_cdcm6208_spi_scan();
     /* AD9361 cmds. */
     else if (!strcmp(cmd, "ad9361_spi_scan"))
         test_ad9361_spi_scan();

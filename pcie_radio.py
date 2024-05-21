@@ -41,6 +41,7 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 from litescope import LiteScopeAnalyzer
 
 from gateware.ad9361.core import AD9361RFIC
+from gateware.cdcm6208 import CDCM6208
 
 from software import generate_litepcie_software
 
@@ -80,7 +81,7 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
         self.crg = CRG(platform, sys_clk_freq)
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_clkin]")
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_clkin}}]")
 
         # SI5351 Clock Generator -------------------------------------------------------------------
         class SI5351FakePads:
@@ -96,6 +97,10 @@ class BaseSoC(SoCMini):
             default_width  = 1024,
             default_period = 2048,
         )
+
+        # CDCM6208 Clock Generator -----------------------------------------------------------------
+
+        self.cdcm6208 = CDCM6208(pads=platform.request("cdcm6208"), sys_clk_freq=sys_clk_freq)
 
         # JTAGBone ---------------------------------------------------------------------------------
         if with_jtagbone:
