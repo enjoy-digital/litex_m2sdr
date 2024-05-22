@@ -16,29 +16,36 @@ class SPIMaster(LiteXModule):
     def __init__(self, pads, width=24, div=2):
         self.pads = pads
 
-        self._ctrl   = CSR(16)
-        self._status = CSRStatus(4)
-        self._mosi   = CSRStorage(width)
-        self._miso   = CSRStatus(width)
+        self._control = CSRStorage(fields=[
+            CSRField("start",  size=1, offset=0, pulse=True, values=[
+                ("``0b0``", "No Action."),
+                ("``0b1``", "Start Xfer."),
+            ], description="SPI Xfer Start"),
+            CSRField("length", size=8, offset=8, values=[
+                ("``  8``", " 8-bit SPI Xfer."),
+                ("`` 16``", "16-bit SPI Xfer."),
+                ("`` 24``", "24-bit SPI Xfer."),
+            ], description="SPI Xfer Length (in bits).")
+        ])
+        self._status  = CSRStatus(fields=[
+            CSRField("done", size=1, offset=0, values=[
+                ("``0b0``", "SPI Xfer Onggoing."),
+                ("``0b1``", "SPI Xfer Done."),
+            ], description="SPI Xfer Done."),
+        ])
+        self._mosi = CSRStorage(width)
+        self._miso = CSRStatus(width)
 
         self.irq = Signal()
 
         # # #
 
         # Ctrl -------------------------------------------------------------------------------------
-        start        = Signal()
-        length       = Signal(8)
+        start        = self._control.fields.start
+        length       = self._control.fields.length
         enable_cs    = Signal()
         enable_shift = Signal()
-        done         = Signal()
-
-        self.comb += [
-            start.eq(self._ctrl.re & self._ctrl.r[0]),
-            self._status.status.eq(done)
-        ]
-        self.sync += \
-            If(self._ctrl.re, length.eq(self._ctrl.r[8:16]))
-
+        done         = self._status.fields.done
 
         # CLK --------------------------------------------------------------------------------------
         i       = Signal(max=div)
