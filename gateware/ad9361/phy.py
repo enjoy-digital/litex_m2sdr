@@ -40,20 +40,25 @@ class RFICPHY(LiteXModule):
     Mode can be selected with mode register.
     """
 
-    def __init__(self, pads, loopback=False):
+    def __init__(self, pads):
         self.dw      = 64
         self.sink    = sink   = stream.Endpoint(phy_layout())
         self.source  = source = stream.Endpoint(phy_layout())
         self.control = CSRStorage(fields=[
             CSRField("mode", size=1, offset=0, values=[
-                ("``0b0``", "2R2T."),
-                ("``0b1``", "1R1T."),
-            ])
+                ("``0b0``", "2R2T mode."),
+                ("``0b1``", "1R1T mode."),
+            ]),
+            CSRField("loopback", size=1, offset=1, values=[
+                ("``0b0``", "Loopback disabled."),
+                ("``0b1``", "Loopback enabled."),
+            ]),
         ])
 
         # # #
 
         mode = self.control.fields.mode
+        loopback = self.control.fields.loopback
 
         # RX ---------------------------------------------------------------------------------------
         # Due to use of IDDR, AD9361 needs to be configured with a delay of ~4ns on data.
@@ -73,8 +78,6 @@ class RFICPHY(LiteXModule):
             ),
             AsyncResetSynchronizer(ClockDomain("rfic"), ResetSignal("sys")),
         ]
-
-
 
         # Frame
         rx_frame_ibufds   = Signal()
@@ -164,36 +167,17 @@ class RFICPHY(LiteXModule):
             )
         ]
 
-        self.rx_debug = [
-            rx_clk_ibufds,
-            rx_frame_ibufds,
-            rx_data_ibufds,
-            #rx_frame,
-            #rx_frame_d,
-            #rx_frame_rising,
-            #rx_frame_rising_d,
-            #rx_data_half_i,
-            #rx_data_half_q,
-            #rx_frame_first,
-            #rx_data_valid,
-            #rx_data_ia,
-            #rx_data_qa,
-            #rx_data_ib,
-            #rx_data_qb,
-        ]
-
         # Drive Source
-        if not loopback:
-            self.sync.rfic += [
-                source.valid.eq(0),
-                If(rx_data_valid[3],
-                    source.valid.eq(1),
-                    source.ia.eq(rx_data_ia),
-                    source.qa.eq(rx_data_qa),
-                    source.ib.eq(rx_data_ib),
-                    source.qb.eq(rx_data_qb)
-                )
-            ]
+        self.sync.rfic += [
+            source.valid.eq(0),
+            If(rx_data_valid[3],
+                source.valid.eq(1),
+                source.ia.eq(rx_data_ia),
+                source.qa.eq(rx_data_qa),
+                source.ib.eq(rx_data_ib),
+                source.qb.eq(rx_data_qb)
+            )
+        ]
 
         # TX ---------------------------------------------------------------------------------------
         # Due to use of ODDR, AD9361 needs to be configured with a delay of ~4ns on data.
@@ -225,14 +209,24 @@ class RFICPHY(LiteXModule):
         ]
         self.comb += sink.ready.eq(tx_ce)
 
-        if loopback:
-            self.comb += [
-                source.valid.eq(tx_ce),
+        # Dynamic Loopback Logic
+        self.comb += [
+            If(loopback,
+                source.valid.eq(sink.valid),
                 source.ia.eq(sink.ia),
                 source.qa.eq(sink.qa),
                 source.ib.eq(sink.ib),
-                source.qb.eq(sink.qb)
-            ]
+                source.qb.eq(sink.qb),
+                sink.ready.eq(source.ready)
+            ).Else(
+                source.valid.eq(rx_data_valid[3]),
+                source.ia.eq(rx_data_ia),
+                source.qa.eq(rx_data_qa),
+                source.ib.eq(rx_data_ib),
+                source.qb.eq(rx_data_qb),
+                sink.ready.eq(tx_ce)
+            )
+        ]
 
         tx_frame       = Signal()
         tx_data_half_i = Signal(6)
