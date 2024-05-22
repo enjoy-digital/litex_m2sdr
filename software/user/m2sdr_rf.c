@@ -382,6 +382,9 @@ static void info(void)
 /* Init */
 /*------*/
 
+//#define BIST_TONE
+#define BIST_PRBS
+
 static void init(void)
 {
     int fd;
@@ -404,21 +407,30 @@ static void init(void)
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
-    //ad9361_bist_loopback(ad9361_phy, 0);
-    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-
-    ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
-
-#if 0
-    ad9361_bist_loopback(ad9361_phy, 1);
-    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-#endif
-
     printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
     printf("SPI Register 0x011—Parallel Port Configuration 2: %08x\n", m2sdr_ad9361_spi_read(fd, 0x11));
     printf("SPI Register 0x012—Parallel Port Configuration 3: %08x\n", m2sdr_ad9361_spi_read(fd, 0x12));
 
     printf("AD9361 Control: %08x\n", litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR));
+
+    ad9361_bist_loopback(ad9361_phy, 0);
+    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+
+#ifdef BIST_TONE
+    ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
+#endif
+
+#ifdef BIST_PRBS
+    int i;
+    ad9361_bist_loopback(ad9361_phy, 1);
+    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+    for (i=0; i<10; i++) {
+        int synced;
+        synced = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+        printf("PRBS RX Synced: %d\n", synced);
+        mdelay(1000);
+    }
+#endif
     close(fd);
 }
 
