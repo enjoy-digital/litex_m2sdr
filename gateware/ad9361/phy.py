@@ -6,10 +6,8 @@
 
 from migen import *
 from migen.genlib.resetsync import AsyncResetSynchronizer
-from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
-
 
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
@@ -90,20 +88,20 @@ class RFICPHY(LiteXModule):
                 i_IB = pads.rx_frame_n,
                 o_O  = rx_frame_ibufds
             ),
-#            Instance("IDDR",
-#                p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
-#                i_C  = ClockSignal("rfic"),
-#                i_CE = 1,
-#                i_S  = 0,
-#                i_R  = 0,
-#                i_D  = rx_frame_ibufds,
-#                o_Q1 = rx_frame,
-#                o_Q2 = Open(),
-#            )
+            Instance("IDDR",
+                p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
+                i_C  = ClockSignal("rfic"),
+                i_CE = 1,
+                i_S  = 0,
+                i_R  = 0,
+                i_D  = rx_frame_ibufds,
+                o_Q1 = rx_frame,
+                o_Q2 = Open(),
+            )
         ]
-#        self.sync.rfic += rx_frame_d.eq(rx_frame)
-#        self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
-#        self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
+        self.sync.rfic += rx_frame_d.eq(rx_frame)
+        self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
+        self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
 
         # Data
         # I sampled on rfic clk rising edge
@@ -118,16 +116,16 @@ class RFICPHY(LiteXModule):
                     i_IB = pads.rx_data_n[i],
                     o_O  = rx_data_ibufds[i]
                 ),
-#                Instance("IDDR",
-#                    p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
-#                    i_C  = ClockSignal("rfic"),
-#                    i_CE = 1,
-#                    i_S  = 0,
-#                    i_R  = 0,
-#                    i_D  = rx_data_ibufds[i],
-#                    o_Q1 = rx_data_half_i[i],
-#                    o_Q2 = rx_data_half_q[i],
-#                )
+                Instance("IDDR",
+                    p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
+                    i_C  = ClockSignal("rfic"),
+                    i_CE = 1,
+                    i_S  = 0,
+                    i_R  = 0,
+                    i_D  = rx_data_ibufds[i],
+                    o_Q1 = rx_data_half_i[i],
+                    o_Q2 = rx_data_half_q[i],
+                )
             ]
 
         # rx_frame = 1 / IA/QA
@@ -138,33 +136,33 @@ class RFICPHY(LiteXModule):
         rx_data_qa     = Signal(12)
         rx_data_ib     = Signal(12)
         rx_data_qb     = Signal(12)
-#        self.sync.rfic += [
-#            If(mode == modes["1R1T"],
-#                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
-#                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
-#            ).Elif(mode == modes["2R2T"],
-#                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
-#            )
-#        ]
-#        self.sync.rfic += [
-#            If(mode == modes["1R1T"],
-#                If(rx_frame_first,
-#                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-#                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
-#                ).Else(
-#                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-#                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
-#                )
-#            ).Elif(mode == modes["2R2T"],
-#                If(rx_frame,
-#                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-#                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
-#                ).Else(
-#                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-#                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
-#                )
-#            )
-#        ]
+        self.sync.rfic += [
+            If(mode == modes["1R1T"],
+                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
+                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
+            ).Elif(mode == modes["2R2T"],
+                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
+            )
+        ]
+        self.sync.rfic += [
+            If(mode == modes["1R1T"],
+                If(rx_frame_first,
+                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
+                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
+                ).Else(
+                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
+                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
+                )
+            ).Elif(mode == modes["2R2T"],
+                If(rx_frame,
+                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
+                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
+                ).Else(
+                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
+                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
+                )
+            )
+        ]
 
         self.rx_debug = [
             rx_clk_ibufds,
@@ -186,12 +184,15 @@ class RFICPHY(LiteXModule):
 
         # Drive Source
         if not loopback:
-            self.comb += [
-                source.valid.eq(rx_data_valid[3]),
-                source.ia.eq(rx_data_ia),
-                source.qa.eq(rx_data_qa),
-                source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb)
+            self.sync.rfic += [
+                source.valid.eq(0),
+                If(rx_data_valid[3],
+                    source.valid.eq(1),
+                    source.ia.eq(rx_data_ia),
+                    source.qa.eq(rx_data_qa),
+                    source.ib.eq(rx_data_ib),
+                    source.qb.eq(rx_data_qb)
+                )
             ]
 
         # TX ---------------------------------------------------------------------------------------
