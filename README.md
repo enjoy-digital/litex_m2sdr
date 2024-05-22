@@ -38,22 +38,43 @@ Board mounted in Acorn Mini Baseboard:
 lspci
 ```
 
-[> SI5351 Tests
-----------------
+[> Software Tests
+------------------
 
+Kernel
 ```bash
-./litex_m2sdr.py --with-ethernet --build --load
-litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
-litex_server --udp
-./test_si5351_clks.py
+cd software/kernel
+make clean all
+sudo ./init.sh
 ```
 
+User
+```bash
+cd software/user
+make clean all
+./m2sdr_util info
+./m2sdr_util si5351_i2c_init
+./m2sdr_rf init
+./tone_gen.py tone_tx.bin
+./m2sdr_play tone_tx.bin 100000
+```
 [> Enable Debug in Kernel
 -------------------------
 
 ```bash
 sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
 ```
+
+[> Use JTAGBone
+---------------
+
+```bash
+litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
+litex_cli --regs
+litescope_cli
+./test_clks.py
+```
+
 
 [> Contact
 ----------
