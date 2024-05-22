@@ -173,7 +173,8 @@ class BaseSoC(SoCMini):
 
         # Debug.
         with_spi_analyzer  = False
-        with_rfic_analyzer = True
+        with_rfic_analyzer = False
+        with_dma_analyzer  = True
         if with_spi_analyzer:
             analyzer_signals = [platform.lookup_request("ad9361_spi")]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
@@ -186,11 +187,24 @@ class BaseSoC(SoCMini):
             analyzer_signals = [
                 self.ad9361.phy.sink,   # TX.
                 self.ad9361.phy.source, # RX.
-                *self.ad9361.phy.rx_debug,
+                self.ad9361.prbs_rx.fields.synced
+            ]
+            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+                depth        = 4096,
+                clock_domain = "rfic",
+                register     = True,
+                csr_csv      = "analyzer.csv"
+            )
+        if with_dma_analyzer:
+            assert with_pcie
+            analyzer_signals = [
+                self.pcie_dma0.sink,   # RX.
+                self.pcie_dma0.source, # TX.
+                self.pcie_dma0.synchronizer.synced,
             ]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
                 depth        = 1024,
-                clock_domain = "rfic",
+                clock_domain = "sys",
                 register     = True,
                 csr_csv      = "analyzer.csv"
             )
