@@ -383,7 +383,7 @@ static void info(void)
 /*------*/
 
 //#define BIST_TONE
-#define BIST_PRBS
+//#define BIST_PRBS
 
 static void init(void)
 {

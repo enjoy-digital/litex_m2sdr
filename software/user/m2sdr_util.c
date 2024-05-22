@@ -640,6 +640,9 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     if (litepcie_dma_init(&dma, litepcie_device, zero_copy))
         exit(1);
 
+    dma.reader_enable = 1;
+    dma.writer_enable = 1;
+
     /* Test loop. */
     last_time = get_time_ms();
     for (;;) {
@@ -719,7 +722,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                    (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 * data_width / (get_next_pow2(data_width) * (double)duration * 1e6),
                    dma.reader_sw_count,
                    dma.writer_sw_count,
-                   dma.reader_sw_count - dma.writer_sw_count,
+                   (uint64_t) abs(dma.reader_sw_count - dma.writer_sw_count),
                    errors);
             /* Update errors/time/count. */
             errors = 0;

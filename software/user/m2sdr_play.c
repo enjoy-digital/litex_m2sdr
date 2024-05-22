@@ -55,7 +55,7 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
     if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
 
-    //dma.reader_enable = 1;
+    dma.reader_enable = 1;
 
     /* Test Loop. */
     last_time = get_time_ms();
@@ -115,7 +115,7 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
 
     /* Wait end of DMA transfer. */
     while (dma.reader_hw_count < hw_count_stop) {
-        //dma.reader_enable = 1;
+        dma.reader_enable = 1;
         litepcie_dma_process(&dma);
     }
 

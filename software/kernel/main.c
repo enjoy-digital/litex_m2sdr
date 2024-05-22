@@ -218,6 +218,10 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 
 	/* Start DMA Writer. */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 1);
+
+	/* Start DMA Synchronizer. */
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b0);
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b10); /* RX only */
 }
 
 static void litepcie_dma_writer_stop(struct litepcie_device *s, int chan_num)
@@ -265,15 +269,19 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	}
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_TABLE_LOOP_PROG_N_OFFSET, 1);
 
-	/* clear counters */
+	/* Clear counters */
 	dmachan->reader_hw_count = 0;
 	dmachan->reader_hw_count_last = 0;
 	dmachan->reader_sw_count = 0;
 
-	/* start dma reader */
+	/* Start dma reader */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
-}
 
+	/* Start DMA Synchronizer. */
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b0);
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b01); /* TX & RX */
+}
+/* RX only */
 static void litepcie_dma_reader_stop(struct litepcie_device *s, int chan_num)
 {
 	struct litepcie_dma_chan *dmachan;
@@ -300,8 +308,8 @@ void litepcie_stop_dma(struct litepcie_device *s)
 
 	for (i = 0; i < s->channels; i++) {
 		dmachan = &s->chan[i].dma;
-		litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 0);
-		litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 0b0);
 	}
 }
 
