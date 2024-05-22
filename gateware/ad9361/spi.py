@@ -18,20 +18,20 @@ class SPIMaster(LiteXModule):
 
         self._control = CSRStorage(fields=[
             CSRField("start",  size=1, offset=0, pulse=True, values=[
-                ("``0b0``", "No Action."),
-                ("``0b1``", "Start Xfer."),
-            ], description="SPI Xfer Start"),
+                ("``0b0``", "No action."),
+                ("``0b1``", "Start transfer."),
+            ], description="Start SPI transfer."),
             CSRField("length", size=8, offset=8, values=[
-                ("``  8``", " 8-bit SPI Xfer."),
-                ("`` 16``", "16-bit SPI Xfer."),
-                ("`` 24``", "24-bit SPI Xfer."),
-            ], description="SPI Xfer Length (in bits).")
+                ("``  8``", "8-bit transfer."),
+                ("`` 16``", "16-bit transfer."),
+                ("`` 24``", "24-bit transfer."),
+            ], description="Transfer length in bits.")
         ])
         self._status  = CSRStatus(fields=[
             CSRField("done", size=1, offset=0, values=[
-                ("``0b0``", "SPI Xfer Onggoing."),
-                ("``0b1``", "SPI Xfer Done."),
-            ], description="SPI Xfer Done."),
+                ("``0b0``", "Transfer ongoing."),
+                ("``0b1``", "Transfer done."),
+            ], description="Transfer status."),
         ])
         self._mosi = CSRStorage(width)
         self._miso = CSRStatus(width)
