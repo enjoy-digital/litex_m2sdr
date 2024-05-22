@@ -40,21 +40,23 @@ class SPIMaster(LiteXModule):
 
         # # #
 
-        # Ctrl -------------------------------------------------------------------------------------
-        start        = self._control.fields.start
-        length       = self._control.fields.length
-        enable_cs    = Signal()
-        enable_shift = Signal()
-        done         = self._status.fields.done
+        # Signals.
+        # --------
+        start  = self._control.fields.start
+        length = self._control.fields.length
+        cs     = Signal()
+        shift  = Signal()
+        done   = self._status.fields.done
 
-        # CLK --------------------------------------------------------------------------------------
+        # Clk Div/Gen.
+        # ------------
         i       = Signal(max=div)
         clk_en  = Signal()
         set_clk = Signal()
         clr_clk = Signal()
         self.sync += [
             If(set_clk,
-                pads.clk.eq(enable_cs)
+                pads.clk.eq(cs)
             ),
             If(clr_clk,
                 pads.clk.eq(0),
@@ -69,7 +71,8 @@ class SPIMaster(LiteXModule):
             clr_clk.eq(i==div-1)
         ]
 
-         # FSM -------------------------------------------------------------------------------------
+        # FSM.
+        # ----
         cnt     = Signal(8)
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
@@ -90,24 +93,45 @@ class SPIMaster(LiteXModule):
             ).Else(
                 NextValue(cnt, cnt + clr_clk)
             ),
-            enable_cs.eq(1),
-            enable_shift.eq(1),
+            cs.eq(1),
+            shift.eq(1),
         )
         fsm.act("END",
             If(set_clk,
                 NextState("IDLE")
             ),
-            enable_shift.eq(1),
+            shift.eq(1),
             self.irq.eq(1)
         )
 
-        # MISO -------------------------------------------------------------------------------------
+        # Chip Select.
+        # ------------
+        self.comb += pads.cs_n.eq(~cs)
+
+        # MOSI.
+        # -----
+        mosi    = Signal()
+        sr_mosi = Signal(width)
+
+        # Propagate on Clk Rising Edge (CPHA=1)
+        self.sync += [
+            If(start,
+                sr_mosi.eq(self._mosi.storage)
+            ).Elif(clr_clk & shift,
+                sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
+            ).Elif(set_clk,
+                pads.mosi.eq(sr_mosi[-1])
+            )
+        ]
+
+        # MISO.
+        # -----
         miso    = Signal()
         sr_miso = Signal(width)
 
         # Capture on Clk Falling Edge (CPHA=1).
         self.sync += [
-            If(enable_shift,
+            If(shift,
                 If(clr_clk,
                     miso.eq(pads.miso),
                 ).Elif(set_clk,
@@ -116,21 +140,3 @@ class SPIMaster(LiteXModule):
             )
         ]
         self.comb += self._miso.status.eq(sr_miso)
-
-        # MOSI -------------------------------------------------------------------------------------
-        mosi    = Signal()
-        sr_mosi = Signal(width)
-
-        # Propagate on Clk Rising Edge (CPHA=1)
-        self.sync += [
-            If(start,
-                sr_mosi.eq(self._mosi.storage)
-            ).Elif(clr_clk & enable_shift,
-                sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
-            ).Elif(set_clk,
-                pads.mosi.eq(sr_mosi[-1])
-            )
-        ]
-
-        # CS_n -------------------------------------------------------------------------------------
-        self.comb += pads.cs_n.eq(~enable_cs)
