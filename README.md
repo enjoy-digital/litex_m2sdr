@@ -48,6 +48,13 @@ litex_server --udp
 ./test_si5351_clks.py
 ```
 
+[> Enable Debug in Kernel
+-------------------------
+
+```bash
+sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
+```
+
 [> Contact
 ----------
 E-mail: florent@enjoy-digital.fr

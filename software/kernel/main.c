@@ -40,7 +40,7 @@
 #include "flags.h"
 #include "soc.h"
 
-//#define DEBUG_CSR
+#define DEBUG_CSR
 //#define DEBUG_MSI
 //#define DEBUG_POLL
 //#define DEBUG_READ
