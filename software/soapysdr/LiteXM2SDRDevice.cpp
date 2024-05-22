@@ -1,5 +1,5 @@
 //
-// SoapySDR driver for the LiteX-based alternative gateware for the LiteX M2SDR.
+// SoapySDR driver for the LiteX M2SDR.
 //
 // Copyright (c) 2021-2024 Enjoy Digital.
 // SPDX-License-Identifier: Apache-2.0

@@ -1,5 +1,5 @@
 //
-// SoapySDR driver for the LiteX-based alternative gateware for the Fairwaves/Lime XTRX.
+// SoapySDR driver for the LiteX M2SDR.
 //
 // Copyright (c) 2021-2024 Enjoy Digital.
 // Copyright (c) 2021 Julia Computing.
@@ -48,7 +48,7 @@ std::string generateDeviceLabel(const SoapySDR::Kwargs& dev, const std::string& 
 
 SoapySDR::Kwargs createDeviceKwargs(int fd, const std::string& path) {
     SoapySDR::Kwargs dev = {
-        {"device",         "LiteXM2SDR"},
+        {"device",         "LiteX-M2SDR"},
         {"path",           path},
         {"serial",         getLiteXM2SDRSerial(fd)},
         {"identification", getLiteXM2SDRIdentification(fd)},
@@ -68,8 +68,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(const SoapySDR::Kwargs &args) {
         auto dev = createDeviceKwargs(fd, path);
         close(fd);
 
-        if (dev["identification"].find("LiteX SoC on Fairwaves") != std::string::npos ||
-            dev["identification"].find("LiteX SoC on Lime") != std::string::npos) {
+        if (dev["identification"].find("LiteX SoC on LiteX-M2SDR") != std::string::npos) {
             discovered.push_back(std::move(dev));
             return true;
         }
