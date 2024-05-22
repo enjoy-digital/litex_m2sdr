@@ -194,7 +194,7 @@ class BaseSoC(SoCMini):
         # Debug.
         with_spi_analyzer  = False
         with_rfic_analyzer = False
-        with_dma_analyzer  = True
+        with_dma_analyzer  = False
         if with_spi_analyzer:
             analyzer_signals = [platform.lookup_request("ad9361_spi")]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
