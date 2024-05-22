@@ -19,6 +19,7 @@
 #include <stdbool.h>
 
 #include "ad9361/platform.h"
+#include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
 
 #include "liblitepcie.h"
@@ -400,19 +401,17 @@ static void init(void)
 
     ad9361_phy = ad9361_init(&default_init_param);
 
-#if 0
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
-    //ad9361_set_trx_clock_chain_freq(ad9361_phy, 30720000);
-
-    ad9361_bist_loopback(ad9361_phy, 0);
+    //ad9361_bist_loopback(ad9361_phy, 0);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
-#if 1
-    ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
+    ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
+
+#if 0
+    ad9361_bist_loopback(ad9361_phy, 1);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-#endif
 #endif
 
     printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
