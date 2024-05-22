@@ -82,13 +82,35 @@ class AD9361RFIC(LiteXModule):
 
         # Config/Control/Status registers ----------------------------------------------------------
         self._config = CSRStorage(fields=[
-            CSRField("rst_n",       size=1, offset=0, description="AD9361's active low reset, ``0``: Reset / ``1``: Enabled."),
-            CSRField("enable",      size=1, offset=1, description="AD9361's enable, ``0``: Disabled / ``1``: Enabled."),
-            CSRField("txnrx",       size=1, offset=4, description="AD9361's txnrx control."),
-            CSRField("en_agc",      size=1, offset=5, description="AD9361's en_agc control."),
+            CSRField("rst_n",  size=1, offset=0, values=[
+                ("``0b0``", "Reset the AD9361."),
+                ("``0b1``", "Enable the AD9361."),
+            ]),
+            CSRField("enable", size=1, offset=1, values=[
+                ("``0b0``", "AD9361 disabled."),
+                ("``0b1``", "AD9361 enabled."),
+            ]),
+            CSRField("txnrx",  size=1, offset=4, values=[
+                ("``0b0``", "Set to TX mode."),
+                ("``0b1``", "Set to RX mode."),
+            ]),
+            CSRField("en_agc", size=1, offset=5, values=[
+                ("``0b0``", "Disable AGC."),
+                ("``0b1``", "Enable AGC."),
+            ]),
         ])
-        self._ctrl = CSRStorage(4, description="AD9361's control pins.")
-        self._stat = CSRStatus(8,  description="AD9361's status pins.")
+        self._ctrl = CSRStorage(fields=[
+            CSRField("ctrl", size=4, offset=0, values=[
+                ("``0b0000``", "All control pins low"),
+                ("``0b1111``", "All control pins high"),
+            ], description="AD9361's control pins")
+        ])
+        self._stat = CSRStatus(fields=[
+            CSRField("stat", size=8, offset=0, values=[
+                ("``0b00000000``", "All status pins low"),
+                ("``0b11111111``", "All status pins high"),
+            ], description="AD9361's status pins")
+        ])
 
         # # #
 
