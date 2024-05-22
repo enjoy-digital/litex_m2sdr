@@ -36,39 +36,34 @@ class SPIMaster(LiteXModule):
         self._mosi = CSRStorage(width)
         self._miso = CSRStatus(width)
 
-        self.irq = Signal()
-
         # # #
 
         # Signals.
         # --------
-        start  = self._control.fields.start
-        length = self._control.fields.length
-        cs     = Signal()
-        shift  = Signal()
-        done   = self._status.fields.done
+        start       = self._control.fields.start
+        length      = self._control.fields.length
+        done        = self._status.fields.done
+        chip_select = Signal()
+        shift       = Signal()
 
         # Clk Div/Gen.
         # ------------
-        i       = Signal(max=div)
-        clk_en  = Signal()
-        set_clk = Signal()
-        clr_clk = Signal()
+        clk_count = Signal(max=div)
+        clk_set   = Signal()
+        clk_clr   = Signal()
         self.sync += [
-            If(set_clk,
-                pads.clk.eq(cs)
+            clk_count.eq(clk_count + 1),
+            If(clk_set,
+                pads.clk.eq(chip_select)
             ),
-            If(clr_clk,
+            If(clk_clr,
                 pads.clk.eq(0),
-                i.eq(0)
-            ).Else(
-                i.eq(i + 1),
-            )
+                clk_count.eq(0)
+            ),
         ]
-
         self.comb +=[
-            set_clk.eq(i==div//2-1),
-            clr_clk.eq(i==div-1)
+            clk_set.eq(clk_count ==  ((div//2) - 1)),
+            clk_clr.eq(clk_count ==       (div - 1)),
         ]
 
         # FSM.
@@ -83,7 +78,7 @@ class SPIMaster(LiteXModule):
             NextValue(cnt, 0),
         )
         fsm.act("WAIT_CLK",
-            If(clr_clk,
+            If(clk_clr,
                 NextState("SHIFT")
             ),
         )
@@ -91,52 +86,49 @@ class SPIMaster(LiteXModule):
             If(cnt == length,
                 NextState("END")
             ).Else(
-                NextValue(cnt, cnt + clr_clk)
+                NextValue(cnt, cnt + clk_clr)
             ),
-            cs.eq(1),
+            chip_select.eq(1),
             shift.eq(1),
         )
         fsm.act("END",
-            If(set_clk,
+            If(clk_set,
                 NextState("IDLE")
             ),
             shift.eq(1),
-            self.irq.eq(1)
         )
 
-        # Chip Select.
-        # ------------
-        self.comb += pads.cs_n.eq(~cs)
+        # Chip Select Output.
+        # -------------------
+        self.comb += pads.cs_n.eq(~chip_select)
 
-        # MOSI.
-        # -----
-        mosi    = Signal()
-        sr_mosi = Signal(width)
-
-        # Propagate on Clk Rising Edge (CPHA=1)
+        # MOSI Shift/Output.
+        # ------------------
+        # Propagate on Clk Rising Edge (CPHA=1).
+        mosi           = Signal()
+        mosi_shift_reg = Signal(width)
         self.sync += [
             If(start,
-                sr_mosi.eq(self._mosi.storage)
-            ).Elif(clr_clk & shift,
-                sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
-            ).Elif(set_clk,
-                pads.mosi.eq(sr_mosi[-1])
+                mosi_shift_reg.eq(self._mosi.storage)
+            ).Elif(clk_clr & shift,
+                mosi_shift_reg.eq(Cat(Signal(), mosi_shift_reg[:-1]))
+            ).Elif(clk_set,
+                pads.mosi.eq(mosi_shift_reg[-1])
             )
         ]
 
-        # MISO.
-        # -----
-        miso    = Signal()
-        sr_miso = Signal(width)
-
+        # MISO Input/Shift.
+        # -----------------
         # Capture on Clk Falling Edge (CPHA=1).
+        miso           = Signal()
+        miso_shift_reg = Signal(width)
         self.sync += [
             If(shift,
-                If(clr_clk,
+                If(clk_clr,
                     miso.eq(pads.miso),
-                ).Elif(set_clk,
-                    sr_miso.eq(Cat(miso, sr_miso[:-1]))
+                ).Elif(clk_set,
+                    miso_shift_reg.eq(Cat(miso, miso_shift_reg[:-1]))
                 )
             )
         ]
-        self.comb += self._miso.status.eq(sr_miso)
+        self.comb += self._miso.status.eq(miso_shift_reg)
