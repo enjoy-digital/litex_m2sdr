@@ -87,33 +87,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     // Frontend corrections API
     bool hasDCOffsetMode(const int direction,
                          const size_t channel) const override;
-    void setDCOffsetMode(const int direction, const size_t channel,
-                         const bool automatic) override;
-    bool SetNCOFrequency(const int direction, const size_t channel,
-                         uint8_t index, double frequency, double phaseOffset=-1.0);
-    bool getDCOffsetMode(const int direction,
-                         const size_t channel) const override;
-    bool hasDCOffset(const int direction,
-                     const size_t channel) const override;
-    void setDCOffset(const int direction, const size_t channel,
-                     const std::complex<double> &offset) override;
-    std::complex<double> getDCOffset(const int direction,
-                                     const size_t channel) const override;
-    bool hasIQBalance(const int /*direction*/, const size_t /*channel*/) const {
-        return true;
-    }
-    void setIQBalance(const int direction, const size_t channel,
-                      const std::complex<double> &balance) override;
-    std::complex<double> getIQBalance(const int direction,
-                                      const size_t channel) const override;
-
-    bool _rxDCOffsetMode;
-    std::complex<double> _txDCOffset;
-    std::map<int, std::map<size_t, std::complex<double>>> _cachedIqBalValues;
 
     // Gain API
     std::vector<std::string> listGains(const int direction,
                                        const size_t channel) const override;
+	bool hasGainMode(const int direction, const size_t channel) const override;
     void setGain(int direction, size_t channel, const double value) override;
     void setGain(const int direction, const size_t channel,
                  const std::string &name, const double value) override;
@@ -147,6 +125,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     void setSampleRate(const int direction, const size_t,
                        const double rate) override;
     double getSampleRate(const int direction, const size_t) const override;
+	std::vector<double> listSampleRates(const int direction,
+										const size_t channel) const override;
     SoapySDR::RangeList getSampleRateRange(const int direction,
                                         const size_t) const override;
 
