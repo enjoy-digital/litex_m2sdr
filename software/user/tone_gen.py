@@ -20,7 +20,8 @@ def insert_header_timestamp(f, header, timestamp):
 def tone_gen(filename, nchannels, nbits, frequency, amplitude, samplerate, nsamples, frame_header, frame_size):
     assert amplitude >= 0.0
     assert amplitude <= 1.0
-    assert frame_size%8 == 0 # 64-bit
+    if frame_header:
+        assert frame_size%8 == 0 # 64-bit
     f = open(filename, "wb")
     omega     = 2*pi*frequency/samplerate
     phi       = 0
@@ -47,14 +48,14 @@ def tone_gen(filename, nchannels, nbits, frequency, amplitude, samplerate, nsamp
 def main():
     parser = argparse.ArgumentParser(description="Tone Generator utility.")
     parser.add_argument("filename", help="Ouptut filename.")
-    parser.add_argument("--nchannels",    type=int,   default=2,               help="Number of RF channels.")
-    parser.add_argument("--nbits",        type=int,   default=16,              help="Number of bits per Sample resolution (in bits per I/Q).")
-    parser.add_argument("--frequency",    type=float, default=1e6,             help="Tone frequency.")
-    parser.add_argument("--amplitude",    type=float, default=1,               help="Tone amplitude.")
-    parser.add_argument("--samplerate",   type=float, default=122.88e6,        help="Sample Rate.")
-    parser.add_argument("--nsamples",     type=float, default=1e3,             help="Number of samples.")
-    parser.add_argument("--frame-header", action="store_true",                 help="Inserter Frame Header.")
-    parser.add_argument("--frame-size",   type=int,   default=122.88e6*8*1e-3, help="Frame Size (Used when Frame Header enabled).")
+    parser.add_argument("--nchannels",    type=int,   default=2,             help="Number of RF channels.")
+    parser.add_argument("--nbits",        type=int,   default=12,            help="Number of bits per Sample resolution (in bits per I/Q).")
+    parser.add_argument("--frequency",    type=float, default=1e6,           help="Tone frequency.")
+    parser.add_argument("--amplitude",    type=float, default=1,             help="Tone amplitude.")
+    parser.add_argument("--samplerate",   type=float, default=30.72e6,       help="Sample Rate.")
+    parser.add_argument("--nsamples",     type=float, default=1e3,           help="Number of samples.")
+    parser.add_argument("--frame-header", action="store_true",               help="Inserter Frame Header.")
+    parser.add_argument("--frame-size",   type=int,   default=30.726*8*1e-3, help="Frame Size (Used when Frame Header enabled).")
     args = parser.parse_args()
 
     tone_gen(

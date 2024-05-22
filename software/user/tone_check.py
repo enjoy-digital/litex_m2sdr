@@ -22,7 +22,8 @@ def calculate_rms(samples):
 # Tone Check ---------------------------------------------------------------------------------------
 
 def tone_check(filename, nchannels, nbits, samplerate, frame_header, frame_size, plot):
-    assert frame_size%8 == 0 # 64-bit
+    if frame_header:
+        assert frame_size%8 == 0 # 64-bit
     # Extract samples from file.
     f = open(filename, "rb")
     re = [[] for _ in range(nchannels)]
@@ -67,10 +68,10 @@ def main():
     parser = argparse.ArgumentParser(description="Tone Checker utility.")
     parser.add_argument("filename", help="Ouptut filename.")
     parser.add_argument("--nchannels",    type=int,   default=2,               help="Number of RF channels.")
-    parser.add_argument("--nbits",        type=int,   default=16,              help="Number of bits per Sample resolution (in bits per I/Q).")
-    parser.add_argument("--samplerate",   type=float, default=122.88e6,        help="Sample Rate.")
+    parser.add_argument("--nbits",        type=int,   default=12,              help="Number of bits per Sample resolution (in bits per I/Q).")
+    parser.add_argument("--samplerate",   type=float, default=30.72e6,         help="Sample Rate.")
     parser.add_argument("--frame-header", action="store_true",                 help="Extract Frame Header.")
-    parser.add_argument("--frame-size",   type=int,   default=122.88e6*8*1e-3, help="Frame Size default 1ms (Used when Frame Header enabled).")
+    parser.add_argument("--frame-size",   type=int,   default=30.72e6*8*1e-3,  help="Frame Size default 1ms (Used when Frame Header enabled).")
     parser.add_argument("--plot",         action= "store_true",                help="Enable Plot.")
     args = parser.parse_args()
 
