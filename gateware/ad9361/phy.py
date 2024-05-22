@@ -57,14 +57,17 @@ class RFICPHY(LiteXModule):
 
         # # #
 
-        mode = self.control.fields.mode
+        # Signals.
+        # --------
+        mode     = self.control.fields.mode
         loopback = self.control.fields.loopback
 
         # RX ---------------------------------------------------------------------------------------
         # Due to use of IDDR, AD9361 needs to be configured with a delay of ~4ns on data.
         # With 122.8MHz clk, it means a rx_data_delay of 13 (0.3ns LSB)
 
-        # Clock
+        # Clocking.
+        # ---------
         rx_clk_ibufds = Signal()
         self.specials += [
             Instance("IBUFDS",
@@ -79,7 +82,8 @@ class RFICPHY(LiteXModule):
             AsyncResetSynchronizer(ClockDomain("rfic"), ResetSignal("sys")),
         ]
 
-        # Frame
+        # Framing.
+        # --------
         rx_frame_ibufds   = Signal()
         rx_frame          = Signal()
         rx_frame_d        = Signal()
@@ -106,9 +110,10 @@ class RFICPHY(LiteXModule):
         self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
         self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
 
-        # Data
-        # I sampled on rfic clk rising edge
-        # Q sampled on rfic clk falling edge
+        # Data.
+        # -----
+        # I sampled on rfic clk  rising edge.
+        # Q sampled on rfic clk falling edge.
         rx_data_ibufds = Signal(6)
         rx_data_half_i = Signal(6)
         rx_data_half_q = Signal(6)
@@ -131,8 +136,8 @@ class RFICPHY(LiteXModule):
                 )
             ]
 
-        # rx_frame = 1 / IA/QA
-        # rx_frame = 0 / IB/QB
+        # rx_frame = 1 / IA/QA.
+        # rx_frame = 0 / IB/QB.
         rx_frame_first = Signal()
         rx_data_valid  = Signal(4)
         rx_data_ia     = Signal(12)
@@ -252,7 +257,8 @@ class RFICPHY(LiteXModule):
             )
         ]
 
-        # Clock
+        # Clocking.
+        # ---------
         tx_clk_obufds = Signal()
         self.specials += [
             Instance("ODDR",
@@ -272,7 +278,8 @@ class RFICPHY(LiteXModule):
             ),
         ]
 
-        # Frame
+        # Framing.
+        # --------
         tx_frame_obufds = Signal()
         self.specials += [
             Instance("ODDR",
@@ -292,7 +299,8 @@ class RFICPHY(LiteXModule):
             ),
         ]
 
-        # Data
+        # Data.
+        # -----
         tx_data_obufds = Signal(6)
         for i in range(6):
             self.specials += [
