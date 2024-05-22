@@ -1,9 +1,9 @@
-/*******************************************************************************
- *   @file   util/no_os_alloc.c
- *   @brief  Implementation of no-OS memory allocation functions.
- *   @author GMois (george.mois@analog.com)
+/***************************************************************************//**
+ *   @file   platform.h
+ *   @brief  Header file of Platform driver.
+ *   @author DBogdan (dragos.bogdan@analog.com)
 ********************************************************************************
- * Copyright 2023(c) Analog Devices, Inc.
+ * Copyright 2014(c) Analog Devices, Inc.
  *
  * All rights reserved.
  *
@@ -36,38 +36,26 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *******************************************************************************/
+#ifndef PLATFORM_H_
+#define PLATFORM_H_
 
-#include "no_os_alloc.h"
+/******************************************************************************/
+/***************************** Include Files **********************************/
+/******************************************************************************/
+#include "util.h"
 
-/**
- * @brief Allocate memory and return a pointer to it.
- * @param size - Size of the memory block, in bytes.
- * @return Pointer to the allocated memory, or NULL if the request fails.
- */
-__attribute__((weak)) void *no_os_malloc(size_t size)
-{
-	return malloc(size);
-}
+//#define USE_AXIADC
 
-/**
- * @brief Allocate memory and return a pointer to it, set memory to 0.
- * @param nitems - Number of elements to be allocated.
- * @param size - Size of elements.
- * @return Pointer to the allocated memory, or NULL if the request fails.
- */
-__attribute__((weak)) void *no_os_calloc(size_t nitems, size_t size)
-{
-	return calloc(nitems, size);
-}
+/******************************************************************************/
+/************************ Functions Declarations ******************************/
+/******************************************************************************/
+int spi_write_then_read(struct spi_device *spi,
+		const unsigned char *txbuf, unsigned n_tx,
+		unsigned char *rxbuf, unsigned n_rx);
+bool gpio_is_valid(struct gpio_device *gpio_dev, int number);
+void gpio_set_value(struct gpio_device *gpio_dev, unsigned gpio, int value);
+void udelay(unsigned long usecs);
+void mdelay(unsigned long msecs);
+unsigned long msleep_interruptible(unsigned int msecs);
 
-/**
- * @brief Deallocate memory previously allocated by a call to no_os_calloc
- * 		  or no_os_malloc.
- * @param ptr - Pointer to a memory block previously allocated by a call
- * 		  to no_os_calloc or no_os_malloc.
- * @return None.
- */
-__attribute__((weak)) void no_os_free(void *ptr)
-{
-	free(ptr);
-}
+#endif

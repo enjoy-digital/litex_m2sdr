@@ -1,5 +1,4 @@
-CFLAGS  = -O0 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -Iad9361/no_os -MMD -fPIC
-#CFLAGS += -D_DEBUG -DHAVE_DEBUG_MESSAGES
+CFLAGS  = -O0 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
@@ -20,9 +19,7 @@ m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
-	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361_util.o \
-	ad9361/no_os/no_os_alloc.o ad9361/no_os/no_os_gpio.o ad9361/no_os/no_os_spi.o \
-	ad9361/no_os/no_os_util.o ad9361/no_os/no_os_mutex.o
+	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
 
@@ -45,9 +42,6 @@ liblitepcie/%.o: liblitepcie/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 ad9361/%.o: ad9361/%.c
-	$(CC) -c $(CFLAGS) -o $@ $<
-
-ad9361/no_os/%.o: ad9361/no_os/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 -include $(wildcard *.d)
