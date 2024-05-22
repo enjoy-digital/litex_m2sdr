@@ -381,7 +381,7 @@ static int32_t ad9361_hdl_loopback(struct ad9361_rf_phy *phy, bool enable)
  * @param mode BIST loopback mode.
  * @return 0 in case of success, negative error code otherwise.
  */
-static int32_t ad9361_bist_loopback(struct ad9361_rf_phy *phy, int32_t mode)
+int32_t ad9361_bist_loopback(struct ad9361_rf_phy *phy, int32_t mode)
 {
 	uint32_t sp_hd, reg;
 
@@ -425,7 +425,7 @@ static int32_t ad9361_bist_loopback(struct ad9361_rf_phy *phy, int32_t mode)
  * @param mode Bist mode.
  * @return 0 in case of success, negative error code otherwise.
  */
-static int32_t ad9361_bist_prbs(struct ad9361_rf_phy *phy, enum ad9361_bist_mode mode)
+int32_t ad9361_bist_prbs(struct ad9361_rf_phy *phy, enum ad9361_bist_mode mode)
 {
 	uint32_t reg = 0;
 
@@ -455,7 +455,7 @@ static int32_t ad9361_bist_prbs(struct ad9361_rf_phy *phy, enum ad9361_bist_mode
  * @param mask Bist reg mask.
  * @return 0 in case of success, negative error code otherwise.
  */
-static int32_t ad9361_bist_tone(struct ad9361_rf_phy *phy,
+int32_t ad9361_bist_tone(struct ad9361_rf_phy *phy,
 enum ad9361_bist_mode mode, uint32_t freq_Hz,
 	uint32_t level_dB, uint32_t mask)
 {
