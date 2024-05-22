@@ -32,12 +32,14 @@ def phy_layout():
 class RFICPHY(LiteXModule):
     """7-Series AD9361 RFIC PHY
 
-    Supports 1R1T and 2R2T in LVDS MODE.
+    This module implements a PHY for the AD9361 RFIC in LVDS mode on 7-series FPGAs. It supports
+    both 1R1T and 2R2T configurations.
 
-    In 1R1T mode, suffix a is used for the first sample, b for the second sample.
-    In 2R2T mode, suffix a is used for channel 1 sample, b for channel 2 sample.
+    - In 1R1T mode, the 'a' suffix is used for the first sample, and 'b' for the second sample.
+    - In 2R2T mode, the 'a' suffix is used for channel 1 samples, and 'b' for channel 2 samples.
 
-    Mode can be selected with mode register.
+    The operating mode can be selected through the `mode` register. Additionally, a dynamic loopback
+    feature is supported, which can be enabled or disabled through the `loopback` register.
     """
 
     def __init__(self, pads):
