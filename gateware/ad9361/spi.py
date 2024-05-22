@@ -13,7 +13,7 @@ from litex.soc.interconnect.csr import *
 # SPIMaster ----------------------------------------------------------------------------------------
 
 class SPIMaster(LiteXModule):
-    def __init__(self, pads, width=24, div=2, cpha=1):
+    def __init__(self, pads, width=24, div=2):
         self.pads = pads
 
         self._ctrl   = CSR(16)
@@ -64,22 +64,13 @@ class SPIMaster(LiteXModule):
 
          # FSM -------------------------------------------------------------------------------------
         cnt     = Signal(8)
-        clr_cnt = Signal()
-        inc_cnt = Signal()
-        self.sync += \
-            If(clr_cnt,
-                cnt.eq(0)
-            ).Elif(inc_cnt,
-                cnt.eq(cnt+1)
-            )
-
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(start,
                 NextState("WAIT_CLK")
             ),
             done.eq(1),
-            clr_cnt.eq(1)
+            NextValue(cnt, 0),
         )
         fsm.act("WAIT_CLK",
             If(clr_clk,
@@ -90,7 +81,7 @@ class SPIMaster(LiteXModule):
             If(cnt == length,
                 NextState("END")
             ).Else(
-                inc_cnt.eq(clr_clk),
+                NextValue(cnt, cnt + clr_clk)
             ),
             enable_cs.eq(1),
             enable_shift.eq(1),
@@ -107,54 +98,32 @@ class SPIMaster(LiteXModule):
         miso    = Signal()
         sr_miso = Signal(width)
 
-        # (cpha = 1: capture on clk falling edge)
-        if cpha:
-            self.sync += \
-                If(enable_shift,
-                    If(clr_clk,
-                        miso.eq(pads.miso),
-                    ).Elif(set_clk,
-                        sr_miso.eq(Cat(miso, sr_miso[:-1]))
-                    )
+        # Capture on Clk Falling Edge (CPHA=1).
+        self.sync += [
+            If(enable_shift,
+                If(clr_clk,
+                    miso.eq(pads.miso),
+                ).Elif(set_clk,
+                    sr_miso.eq(Cat(miso, sr_miso[:-1]))
                 )
-        # (cpha = 0: capture on clk rising edge)
-        else:
-            self.sync += \
-                If(enable_shift,
-                    If(set_clk,
-                        miso.eq(pads.miso),
-                    ).Elif(clr_clk,
-                        sr_miso.eq(Cat(miso, sr_miso[:-1]))
-                    )
-                )
+            )
+        ]
         self.comb += self._miso.status.eq(sr_miso)
 
         # MOSI -------------------------------------------------------------------------------------
         mosi    = Signal()
         sr_mosi = Signal(width)
 
-        # (cpha = 1: propagated on clk rising edge)
-        if cpha:
-            self.sync += \
-                If(start,
-                    sr_mosi.eq(self._mosi.storage)
-                ).Elif(clr_clk & enable_shift,
-                    sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
-                ).Elif(set_clk,
-                    pads.mosi.eq(sr_mosi[-1])
-                )
-
-        # (cpha = 0: propagated on clk falling edge)
-        else:
-            self.sync += [
-                If(start,
-                    sr_mosi.eq(self._mosi.storage)
-                ).Elif(set_clk & enable_shift,
-                    sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
-                ).Elif(clr_clk,
-                    pads.mosi.eq(sr_mosi[-1])
-                )
-            ]
+        # Propagate on Clk Rising Edge (CPHA=1)
+        self.sync += [
+            If(start,
+                sr_mosi.eq(self._mosi.storage)
+            ).Elif(clr_clk & enable_shift,
+                sr_mosi.eq(Cat(Signal(), sr_mosi[:-1]))
+            ).Elif(set_clk,
+                pads.mosi.eq(sr_mosi[-1])
+            )
+        ]
 
         # CS_n -------------------------------------------------------------------------------------
         self.comb += pads.cs_n.eq(~enable_cs)
