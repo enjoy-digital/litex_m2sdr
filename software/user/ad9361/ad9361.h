@@ -2265,6 +2265,7 @@
 *	REG_RX_CP_CONFIG
 */
 #define HALF_VCO_CAL_CLK		     (1 << 7) /* Half Vco Cal Clk */
+#define CP_OFFSET_OFF			     (1 << 4) /* CP Offset Off */
 #define F_CPCAL				     (1 << 3) /* F Cpcal */
 #define CP_CAL_ENABLE			     (1 << 2) /* Cp Cal Enable */
 
@@ -2959,7 +2960,7 @@ struct gain_control {
 	uint8_t f_agc_lp_thresh_increment_steps; /* 0x117 1..8 */
 
 	/* Fast AGC - Lock Level */
-	uint8_t f_agc_lock_level; /* 0x101 0..-127 dBFS */
+	uint8_t f_agc_lock_level; /* NOT USED: 0x101 0..-127 dBFS same as agc_inner_thresh_high */
 	bool f_agc_lock_level_lmt_gain_increase_en; /* 0x111:6 */
 	uint8_t f_agc_lock_level_gain_increase_upper_limit; /* 0x118 0..63 */
 	/* Fast AGC - Peak Detectors and Final Settling */
@@ -3132,12 +3133,6 @@ enum ad9361_clkout {
 	ADC_CLK_DIV_4,
 	ADC_CLK_DIV_8,
 	ADC_CLK_DIV_16,
-};
-
-enum synth_pd_ctrl {
-	LO_DONTCARE,
-	LO_OFF,
-	LO_ON,
 };
 
 struct ad9361_phy_platform_data {
@@ -3328,7 +3323,6 @@ struct ad9361_rf_phy {
 	uint8_t			curr_ensm_state;
 	uint8_t			cached_rx_rfpll_div;
 	uint8_t			cached_tx_rfpll_div;
-	uint8_t			cached_synth_pd[2];
 	struct rx_gain_info rx_gain[RXGAIN_TBLS_END];
 	enum rx_gain_table_name current_table;
 	bool 			ensm_pin_ctl_en;
@@ -3371,6 +3365,7 @@ struct ad9361_rf_phy {
 	struct axiadc_converter	*adc_conv;
 	struct axiadc_state		*adc_state;
 	int32_t					bist_loopback_mode;
+	int32_t					bist_config;
 	enum ad9361_bist_mode	bist_prbs_mode;
 	enum ad9361_bist_mode	bist_tone_mode;
 	uint32_t				bist_tone_freq_Hz;
@@ -3490,6 +3485,8 @@ int32_t ad9361_fastlock_load(struct ad9361_rf_phy *phy, bool tx,
 int32_t ad9361_fastlock_save(struct ad9361_rf_phy *phy, bool tx,
 	uint32_t profile, uint8_t *values);
 void ad9361_ensm_force_state(struct ad9361_rf_phy *phy, uint8_t ensm_state);
+uint8_t ad9361_ensm_get_state(struct ad9361_rf_phy *phy);
+void ad9361_ensm_restore_state(struct ad9361_rf_phy *phy, uint8_t ensm_state);
 void ad9361_ensm_restore_prev_state(struct ad9361_rf_phy *phy);
 int32_t ad9361_set_trx_clock_chain_freq(struct ad9361_rf_phy *phy,
 	uint32_t freq);
@@ -3507,5 +3504,5 @@ int32_t ad9361_set_dcxo_tune(struct ad9361_rf_phy *phy,
 		uint32_t coarse, uint32_t fine);
 int32_t ad9361_tx_mute(struct ad9361_rf_phy *phy, uint32_t state);
 uint32_t ad9361_validate_rf_bw(struct ad9361_rf_phy *phy, uint32_t bw);
-int32_t ad9361_synth_lo_powerdown(struct ad9361_rf_phy *phy, enum synth_pd_ctrl rx, enum synth_pd_ctrl tx);
+int32_t ad9361_get_temp(struct ad9361_rf_phy *phy);
 #endif

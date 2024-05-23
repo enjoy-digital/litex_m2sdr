@@ -144,8 +144,8 @@ AD9361_InitParam default_init_param = {
     2400000000UL,   //rx_synthesizer_frequency_hz *** adi,rx-synthesizer-frequency-hz
     2400000000UL,   //tx_synthesizer_frequency_hz *** adi,tx-synthesizer-frequency-hz
     /* Rate & BW Control */
-    {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},//uint32_t  rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
-    {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},//uint32_t  tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
+    {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},// rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
+    {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},// tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
     18000000,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
     18000000,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
     /* RF Port Control */
@@ -206,8 +206,7 @@ AD9361_InitParam default_init_param = {
     0,      //fagc_allow_agc_gain_increase ***  adi,fagc-allow-agc-gain-increase-enable
     5,      //fagc_lp_thresh_increment_time ***  adi,fagc-lp-thresh-increment-time
     1,      //fagc_lp_thresh_increment_steps ***  adi,fagc-lp-thresh-increment-steps
-    /* Fast AGC - Lock Level */
-    10,     //fagc_lock_level ***  adi,fagc-lock-level
+    /* Fast AGC - Lock Level (Lock Level is set via slow AGC inner high threshold) */
     1,      //fagc_lock_level_lmt_gain_increase_en ***  adi,fagc-lock-level-lmt-gain-increase-enable
     5,      //fagc_lock_level_gain_increase_upper_limit ***  adi,fagc-lock-level-gain-increase-upper-limit
     /* Fast AGC - Peak Detectors and Final Settling */
@@ -295,7 +294,11 @@ AD9361_InitParam default_init_param = {
     4,      //rx_data_delay *** adi,rx-data-delay
     7,      //tx_fb_clock_delay *** adi,tx-fb-clock-delay
     0,      //tx_data_delay *** adi,tx-data-delay
+#ifdef ALTERA_PLATFORM
+    300,    //lvds_bias_mV *** adi,lvds-bias-mV
+#else
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
+#endif
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
     0xFF,   //lvds_invert1_control *** adi,lvds-invert1-control
