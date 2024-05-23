@@ -181,8 +181,7 @@ class AD9361RFIC(LiteXModule):
         ]
 
         # SPI --------------------------------------------------------------------------------------
-        self.spi = SPIMaster(spi_pads, width=24, div=32)
-
+        self.spi = SPIMaster(spi_pads, data_width=24, clk_divider=32)
 
     def add_prbs(self):
         self.prbs_tx = CSRStorage(fields=[

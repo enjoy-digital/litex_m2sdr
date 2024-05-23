@@ -4,6 +4,8 @@
 # Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import math
+
 from migen import *
 
 from litex.gen import *
@@ -13,7 +15,12 @@ from litex.soc.interconnect.csr import *
 # SPIMaster ----------------------------------------------------------------------------------------
 
 class SPIMaster(LiteXModule):
-    def __init__(self, pads, width=24, div=2):
+    """4-wire SPI Master
+
+    This module implements a 4-wire SPI Master with CPOL=0 and CPHA=1. It supports configurable data
+    width and SPI clk divider at build time.
+    """
+    def __init__(self, pads, data_width=24, clk_divider=2):
         self.pads = pads
 
         self._control = CSRStorage(fields=[
@@ -33,8 +40,8 @@ class SPIMaster(LiteXModule):
                 ("``0b1``", "Transfer done."),
             ], description="Transfer status."),
         ])
-        self._mosi = CSRStorage(width)
-        self._miso = CSRStatus(width)
+        self._mosi = CSRStorage(data_width)
+        self._miso = CSRStatus(data_width)
 
         # # #
 
@@ -48,7 +55,7 @@ class SPIMaster(LiteXModule):
 
         # Clk Div/Gen.
         # ------------
-        clk_count = Signal(max=div)
+        clk_count = Signal(int(math.log2(clk_divider)))
         clk_set   = Signal()
         clk_clr   = Signal()
         self.sync += [
@@ -62,8 +69,8 @@ class SPIMaster(LiteXModule):
             ),
         ]
         self.comb +=[
-            clk_set.eq(clk_count ==  ((div//2) - 1)),
-            clk_clr.eq(clk_count ==       (div - 1)),
+            clk_set.eq(clk_count == ((clk_divider//2) - 1)),
+            clk_clr.eq(clk_count ==      (clk_divider - 1)),
         ]
 
         # FSM.
@@ -104,31 +111,37 @@ class SPIMaster(LiteXModule):
 
         # MOSI Shift/Output.
         # ------------------
-        # Propagate on Clk Rising Edge (CPHA=1).
         mosi           = Signal()
-        mosi_shift_reg = Signal(width)
+        mosi_shift_reg = Signal(data_width)
+
+        # Shift.
         self.sync += [
+            # Load MOSI at the start of the transfer.
             If(start,
                 mosi_shift_reg.eq(self._mosi.storage)
+            # Shift MOSI.
             ).Elif(clk_clr & shift,
                 mosi_shift_reg.eq(Cat(Signal(), mosi_shift_reg[:-1]))
-            ).Elif(clk_set,
-                pads.mosi.eq(mosi_shift_reg[-1])
-            )
+            ),
+
         ]
 
-        # MISO Input/Shift.
-        # -----------------
-        # Capture on Clk Falling Edge (CPHA=1).
+        # Output MOSI on Clk rising edge (CPHA=1).
+        self.comb += mosi.eq(mosi_shift_reg[-1])
+        self.sync += If(clk_set, pads.mosi.eq(mosi))
+
+        # MISO Capture/Shift.
+        # -------------------
         miso           = Signal()
-        miso_shift_reg = Signal(width)
+        miso_shift_reg = Signal(data_width)
+
+        # Capture MISO on Clk falling edge (CPHA=1).
+        self.sync += If(clk_clr, miso.eq(pads.miso))
+
+        # Shift.
         self.sync += [
-            If(shift,
-                If(clk_clr,
-                    miso.eq(pads.miso),
-                ).Elif(clk_set,
-                    miso_shift_reg.eq(Cat(miso, miso_shift_reg[:-1]))
-                )
+            If(clk_set & shift ,
+                miso_shift_reg.eq(Cat(miso, miso_shift_reg[:-1]))
             )
         ]
         self.comb += self._miso.status.eq(miso_shift_reg)
