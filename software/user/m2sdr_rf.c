@@ -109,12 +109,16 @@ void gpio_set_value(unsigned gpio, int value)
 }
 
 AD9361_InitParam default_init_param = {
-    0,
+    /* Identification number */
+    0,      //id_no;
     /* Reference Clock */
     38400000UL, //reference_clk_rate
     /* Base Configuration */
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
+    1,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
+    1,      //one_rx_one_tx_mode_use_tx_num *** adi,1rx-1tx-mode-use-tx-num
     1,      //frequency_division_duplex_mode_enable *** adi,frequency-division-duplex-mode-enable
+    0,      //frequency_division_duplex_independent_mode_enable *** adi,frequency-division-duplex-independent-mode-enable
     0,      //tdd_use_dual_synth_mode_enable *** adi,tdd-use-dual-synth-mode-enable
     0,      //tdd_skip_vco_cal_enable *** adi,tdd-skip-vco-cal-enable
     0,      //tx_fastlock_delay_ns *** adi,tx-fastlock-delay-ns
@@ -124,12 +128,14 @@ AD9361_InitParam default_init_param = {
     0,      //external_rx_lo_enable *** adi,external-rx-lo-enable
     0,      //external_tx_lo_enable *** adi,external-tx-lo-enable
     5,      //dc_offset_tracking_update_event_mask *** adi,dc-offset-tracking-update-event-mask
-    6,      //dc_offset_attenuation_high_range *** adi,dc-offset-tracking-update-event-mask
-    5,      //dc_offset_attenuation_low_range *** adi,dc-offset-tracking-update-event-mask
-    0x28,   //dc_offset_count_high_range *** adi,dc-offset-tracking-update-event-mask
-    0x32,   //dc_offset_count_low_range *** adi,dc-offset-tracking-update-event-mask
+    6,      //dc_offset_attenuation_high_range *** adi,dc-offset-attenuation-high-range
+    5,      //dc_offset_attenuation_low_range *** adi,dc-offset-attenuation-low-range
+    0x28,   //dc_offset_count_high_range *** adi,dc-offset-count-high-range
+    0x32,   //dc_offset_count_low_range *** adi,dc-offset-count-low-range
     0,      //tdd_use_fdd_vco_tables_enable *** adi,tdd-use-fdd-vco-tables-enable
     0,      //split_gain_table_mode_enable *** adi,split-gain-table-mode-enable
+    MAX_SYNTH_FREF, //trx_synthesizer_target_fref_overwrite_hz *** adi,trx-synthesizer-target-fref-overwrite-hz
+    0,      // qec_tracking_slow_mode_enable *** adi,qec-tracking-slow-mode-enable
     /* ENSM Control */
     0,      //ensm_enable_pin_pulse_mode_enable *** adi,ensm-enable-pin-pulse-mode-enable
     0,      //ensm_enable_txnrx_control_enable *** adi,ensm-enable-txnrx-control-enable
@@ -150,7 +156,7 @@ AD9361_InitParam default_init_param = {
     /* Reference Clock Control */
     0,      //xo_disable_use_ext_refclk_enable *** adi,xo-disable-use-ext-refclk-enable
     {8, 5920},  //dcxo_coarse_and_fine_tune[2] *** adi,dcxo-coarse-and-fine-tune
-    0,      //clk_output_mode_select *** adi,clk-output-mode-select
+    CLKOUT_DISABLE, //clk_output_mode_select *** adi,clk-output-mode-select
     /* Gain Control */
     2,      //gc_rx1_mode *** adi,gc-rx1-mode
     2,      //gc_rx2_mode *** adi,gc-rx2-mode
@@ -195,22 +201,21 @@ AD9361_InitParam default_init_param = {
     /* Fast AGC */
     64,     //fagc_dec_pow_measuremnt_duration ***  adi,fagc-dec-pow-measurement-duration
     260,    //fagc_state_wait_time_ns ***  adi,fagc-state-wait-time-ns
-        /* Fast AGC - Low Power */
+    /* Fast AGC - Low Power */
     0,      //fagc_allow_agc_gain_increase ***  adi,fagc-allow-agc-gain-increase-enable
     5,      //fagc_lp_thresh_increment_time ***  adi,fagc-lp-thresh-increment-time
     1,      //fagc_lp_thresh_increment_steps ***  adi,fagc-lp-thresh-increment-steps
-        /* Fast AGC - Lock Level */
-    10,     //fagc_lock_level ***  adi,fagc-lock-level */
+    /* Fast AGC - Lock Level */
+    10,     //fagc_lock_level ***  adi,fagc-lock-level
     1,      //fagc_lock_level_lmt_gain_increase_en ***  adi,fagc-lock-level-lmt-gain-increase-enable
     5,      //fagc_lock_level_gain_increase_upper_limit ***  adi,fagc-lock-level-gain-increase-upper-limit
-        /* Fast AGC - Peak Detectors and Final Settling */
+    /* Fast AGC - Peak Detectors and Final Settling */
     1,      //fagc_lpf_final_settling_steps ***  adi,fagc-lpf-final-settling-steps
     1,      //fagc_lmt_final_settling_steps ***  adi,fagc-lmt-final-settling-steps
     3,      //fagc_final_overrange_count ***  adi,fagc-final-overrange-count
-        /* Fast AGC - Final Power Test */
+    /* Fast AGC - Final Power Test */
     0,      //fagc_gain_increase_after_gain_lock_en ***  adi,fagc-gain-increase-after-gain-lock-enable
-        /* Fast AGC - Unlocking the Gain */
-        /* 0 = MAX Gain, 1 = Optimized Gain, 2 = Set Gain */
+    /* Fast AGC - Unlocking the Gain */
     0,      //fagc_gain_index_type_after_exit_rx_mode ***  adi,fagc-gain-index-type-after-exit-rx-mode
     1,      //fagc_use_last_lock_level_for_set_gain_en ***  adi,fagc-use-last-lock-level-for-set-gain-enable
     1,      //fagc_rst_gla_stronger_sig_thresh_exceeded_en ***  adi,fagc-rst-gla-stronger-sig-thresh-exceeded-enable
@@ -262,13 +267,16 @@ AD9361_InitParam default_init_param = {
     0,      //elna_bypass_loss_mdB *** adi,elna-bypass-loss-mdB
     0,      //elna_rx1_gpo0_control_enable *** adi,elna-rx1-gpo0-control-enable
     0,      //elna_rx2_gpo1_control_enable *** adi,elna-rx2-gpo1-control-enable
+    0,      //elna_gaintable_all_index_enable *** adi,elna-gaintable-all-index-enable
     /* Digital Interface Control */
+    0,      //digital_interface_tune_skip_mode *** adi,digital-interface-tune-skip-mode
+    0,      //digital_interface_tune_fir_disable *** adi,digital-interface-tune-fir-disable
     1,      //pp_tx_swap_enable *** adi,pp-tx-swap-enable
     1,      //pp_rx_swap_enable *** adi,pp-rx-swap-enable
     0,      //tx_channel_swap_enable *** adi,tx-channel-swap-enable
     0,      //rx_channel_swap_enable *** adi,rx-channel-swap-enable
     1,      //rx_frame_pulse_mode_enable *** adi,rx-frame-pulse-mode-enable
-    1,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
+    0,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
     0,      //invert_data_bus_enable *** adi,invert-data-bus-enable
     0,      //invert_data_clk_enable *** adi,invert-data-clk-enable
     0,      //fdd_alt_word_order_enable *** adi,fdd-alt-word-order-enable
@@ -289,6 +297,29 @@ AD9361_InitParam default_init_param = {
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
+    0xFF,   //lvds_invert1_control *** adi,lvds-invert1-control
+    0x0F,   //lvds_invert2_control *** adi,lvds-invert2-control
+    /* GPO Control */
+    0,      //gpo0_inactive_state_high_enable *** adi,gpo0-inactive-state-high-enable
+    0,      //gpo1_inactive_state_high_enable *** adi,gpo1-inactive-state-high-enable
+    0,      //gpo2_inactive_state_high_enable *** adi,gpo2-inactive-state-high-enable
+    0,      //gpo3_inactive_state_high_enable *** adi,gpo3-inactive-state-high-enable
+    0,      //gpo0_slave_rx_enable *** adi,gpo0-slave-rx-enable
+    0,      //gpo0_slave_tx_enable *** adi,gpo0-slave-tx-enable
+    0,      //gpo1_slave_rx_enable *** adi,gpo1-slave-rx-enable
+    0,      //gpo1_slave_tx_enable *** adi,gpo1-slave-tx-enable
+    0,      //gpo2_slave_rx_enable *** adi,gpo2-slave-rx-enable
+    0,      //gpo2_slave_tx_enable *** adi,gpo2-slave-tx-enable
+    0,      //gpo3_slave_rx_enable *** adi,gpo3-slave-rx-enable
+    0,      //gpo3_slave_tx_enable *** adi,gpo3-slave-tx-enable
+    0,      //gpo0_rx_delay_us *** adi,gpo0-rx-delay-us
+    0,      //gpo0_tx_delay_us *** adi,gpo0-tx-delay-us
+    0,      //gpo1_rx_delay_us *** adi,gpo1-rx-delay-us
+    0,      //gpo1_tx_delay_us *** adi,gpo1-tx-delay-us
+    0,      //gpo2_rx_delay_us *** adi,gpo2-rx-delay-us
+    0,      //gpo2_tx_delay_us *** adi,gpo2-tx-delay-us
+    0,      //gpo3_rx_delay_us *** adi,gpo3-rx-delay-us
+    0,      //gpo3_tx_delay_us *** adi,gpo3-tx-delay-us
     /* Tx Monitor Control */
     37000,  //low_high_gain_threshold_mdB *** adi,txmon-low-high-thresh
     0,      //low_gain_dB *** adi,txmon-low-gain
@@ -302,22 +333,22 @@ AD9361_InitParam default_init_param = {
     48,     //tx1_mon_lo_cm *** adi,txmon-1-lo-cm
     48,     //tx2_mon_lo_cm *** adi,txmon-2-lo-cm
     /* GPIO definitions */
-    -1,     //gpio_resetb;  /* reset-gpios */
+    -1,     //gpio_resetb *** reset-gpios
     /* MCS Sync */
-    -1,     //gpio_sync;        /* sync-gpios */
-    -1,     //gpio_cal_sw1; /* cal-sw1-gpios */
-    -1      //gpio_cal_sw2; /* cal-sw2-gpios */
+    -1,     //gpio_sync *** sync-gpios
+    -1,     //gpio_cal_sw1 *** cal-sw1-gpios
+    -1,     //gpio_cal_sw2 *** cal-sw2-gpios
+    /* External LO clocks */
+    NULL,   //(*ad9361_rfpll_ext_recalc_rate)()
+    NULL,   //(*ad9361_rfpll_ext_round_rate)()
+    NULL    //(*ad9361_rfpll_ext_set_rate)()
 };
 
-AD9361_RXFIRConfig rx_fir_config = {
-    3, // rx;
-    0, // rx_gain;
-    1, // rx_dec;
-    {0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     -4, -6, -37, 35, 186, 86, -284, 315,
+AD9361_RXFIRConfig rx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
+    3, // rx
+    0, // rx_gain
+    1, // rx_dec
+    {-4, -6, -37, 35, 186, 86, -284, -315,
      107, 219, -4, 271, 558, -307, -1182, -356,
      658, 157, 207, 1648, 790, -2525, -2553, 748,
      865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
@@ -328,19 +359,21 @@ AD9361_RXFIRConfig rx_fir_config = {
      0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0}, // rx_coef[128];
-     128 // rx_coef_size
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0}, // rx_coef[128]
+     64, // rx_coef_size
+     {0, 0, 0, 0, 0, 0}, //rx_path_clks[6]
+     0 // rx_bandwidth
 };
 
-AD9361_TXFIRConfig tx_fir_config = {
-    3, // tx;
-    -6, // tx_gain;
-    1, // tx_inc;
-    {0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0,
-     -4, -6, -37, 35, 186, 86, -284, 315,
+AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
+    3, // tx
+    -6, // tx_gain
+    1, // tx_int
+    {-4, -6, -37, 35, 186, 86, -284, -315,
      107, 219, -4, 271, 558, -307, -1182, -356,
      658, 157, 207, 1648, 790, -2525, -2553, 748,
      865, -476, 3737, 6560, -3583, -14731, -5278, 14819,
@@ -351,8 +384,14 @@ AD9361_TXFIRConfig tx_fir_config = {
      0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0,
-     0, 0, 0, 0, 0, 0, 0, 0}, // tx_coef[128];
-     128 // tx_coef_size
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0}, // tx_coef[128]
+     64, // tx_coef_size
+     {0, 0, 0, 0, 0, 0}, // tx_path_clks[6]
+     0 // tx_bandwidth
 };
 
 /* Info */
