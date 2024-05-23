@@ -17,6 +17,9 @@
 #include <fcntl.h>
 #include <signal.h>
 
+#include "ad9361/util.h"
+#include "ad9361/ad9361.h"
+
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 
@@ -314,13 +317,13 @@ static void info(void)
 
 
     printf("\e[1m[> FPGA/SoC Info:\e[0m\n");
-    printf("---------------------\n");
+    printf("-----------------\n");
 
     for (i = 0; i < 256; i ++)
         fpga_identifier[i] = litepcie_readl(fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
-    printf("FPGA Identifier:  %s.\n", fpga_identifier);
+    printf("SoC Identifier   : %s.\n", fpga_identifier);
 #ifdef CSR_DNA_BASE
-    printf("FPGA DNA:         0x%08x%08x\n",
+    printf("FPGA DNA         : 0x%08x%08x\n",
         litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 0),
         litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 1)
     );
@@ -336,6 +339,13 @@ static void info(void)
            (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
 #endif
     printf("\n");
+
+    printf("\e[1m[> AD9361 Info:\e[0m\n");
+    printf("---------------\n");
+
+    printf("AD9361 Product ID  : %04x \n", m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID));
+    printf("AD9361 Temperature : %0.1f °C\n",
+        (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
 
     close(fd);
 }
