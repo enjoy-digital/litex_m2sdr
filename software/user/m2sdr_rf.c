@@ -30,9 +30,9 @@
 /*------------*/
 
 #define DEFAULT_REFCLK_FREQ    ((int64_t)38400000) /* Reference Clock */
-#define DEFAULT_BANDWIDTH                18000000  /* RF Bandwidth */
-#define DEFAULT_TX_FREQ      ((int64_t)2400000000) /* LO1 (RX1/2 & TX1/2) Center Freq in Hz */
-#define DEFAULT_RX_FREQ      ((int64_t)2400000000) /* LO2 (RX3/4 & TX3/4) Center Freq in Hz */
+#define DEFAULT_SAMPLERATE               30720000  /* RF Samplerate */
+#define DEFAULT_TX_FREQ      ((int64_t)2400000000) /* TX (TX1/2) Center Freq in Hz */
+#define DEFAULT_RX_FREQ      ((int64_t)2400000000) /* RX (RX1/2) Center Freq in Hz */
 #define DEFAULT_TX_GAIN                       -20  /* TX Gain in dB -89 ->  0 dB */
 #define DEFAULT_RX_GAIN                         0  /* RX Gain in dB   0 -> 76 dB */
 #define DEFAULT_LOOPBACK                        0  /* Internal loopback */
@@ -166,8 +166,8 @@ AD9361_InitParam default_init_param = {
     /* Rate & BW Control */
     {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},// rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
     {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},// tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
-    DEFAULT_BANDWIDTH,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
-    DEFAULT_BANDWIDTH,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
+    18000000,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
+    18000000,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
     /* RF Port Control */
     0,      //rx_rf_port_input_select *** adi,rx-rf-port-input-select
     0,      //tx_rf_port_input_select *** adi,tx-rf-port-input-select
@@ -421,7 +421,7 @@ AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
 //#define BIST_PRBS
 
 static void m2sdr_init(
-    uint32_t bandwidth,
+    uint32_t samplerate,
     int64_t  refclk_freq,
     int64_t  tx_freq,
     int64_t  rx_freq,
@@ -452,6 +452,9 @@ static void m2sdr_init(
     /* Configure AD9361 TX/RX FIRs */
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+
+    /* Configure AD9361 Samplerate */
+    ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
 
     /* Configure AD9361 TX Attenuation */
     ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
@@ -504,7 +507,7 @@ static void help(void)
            "-x                    Execute and exit.\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
-           "-bandwidth bandwidth  Set RF Bandwidth 18e6 (default=%d).\n"
+           "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
            "-tx_freq freq         Set the TX (TX1/2) frequency in Hz (default=%" PRId64 ").\n"
            "-rx_freq freq         Set the RX (RX1/2) frequency in Hz (default=%" PRId64 ").\n"
            "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
@@ -512,7 +515,7 @@ static void help(void)
            "-loopback enable      Set the internal loopback (JESD Deframer -> Framer) (default=%d).\n"
            "\n",
            DEFAULT_REFCLK_FREQ,
-           DEFAULT_BANDWIDTH,
+           DEFAULT_SAMPLERATE,
            DEFAULT_TX_FREQ,
            DEFAULT_RX_FREQ,
            DEFAULT_TX_GAIN,
@@ -525,7 +528,7 @@ static struct option options[] = {
     { "help",             no_argument, NULL, 'h' },   /*  0 */
     { "execute_and_exit", no_argument, NULL, 'x' },   /*  1 */
     { "refclk_freq",      required_argument },        /*  2 */
-    { "bandwidth",        required_argument },        /*  3 */
+    { "samplerate",       required_argument },        /*  3 */
     { "tx_freq",          required_argument },        /*  4 */
     { "rx_freq",          required_argument },        /*  5 */
     { "tx_gain",          required_argument },        /*  6 */
@@ -546,13 +549,13 @@ int main(int argc, char **argv)
     litepcie_execute_and_exit = 0;
 
     int64_t  refclk_freq;
-    uint32_t bandwidth;
+    uint32_t samplerate;
     int64_t  tx_freq, rx_freq;
     int64_t  tx_gain, rx_gain;
     uint8_t  loopback;
 
     refclk_freq  = DEFAULT_REFCLK_FREQ;
-    bandwidth    = DEFAULT_BANDWIDTH;
+    samplerate   = DEFAULT_SAMPLERATE;
     tx_freq      = DEFAULT_TX_FREQ;
     rx_freq      = DEFAULT_RX_FREQ;
     tx_gain      = DEFAULT_TX_GAIN;
@@ -570,8 +573,8 @@ int main(int argc, char **argv)
                 case 2: /* refclk_freq */
                     refclk_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 3: /* bandwidth */
-                    bandwidth = (uint32_t)strtod(optarg, NULL);
+                case 3: /* samplerate */
+                    samplerate = (uint32_t)strtod(optarg, NULL);
                     break;
                 case 4: /* tx_freq */
                     tx_freq = (int64_t)strtod(optarg, NULL);
@@ -612,7 +615,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit);
+    m2sdr_init(samplerate, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit);
 
     return 0;
 }
