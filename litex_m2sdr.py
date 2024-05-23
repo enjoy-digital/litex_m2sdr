@@ -41,6 +41,7 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 from litescope import LiteScopeAnalyzer
 
 from gateware.ad9361.core import AD9361RFIC
+from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 
 from software import generate_litepcie_software
@@ -90,8 +91,9 @@ class BaseSoC(SoCMini):
         "pcie_dma0"   : 12,
 
         # SDR.
-        "header"      : 20,
-        "ad9361"      : 21,
+        "timestamp"   : 20,
+        "header"      : 21,
+        "ad9361"      : 22,
 
         # Analyzer.
         "analyzer"    : 30,
@@ -199,10 +201,17 @@ class BaseSoC(SoCMini):
             )
             self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
 
+        # Timestamp --------------------------------------------------------------------------------
+
+        self.timestamp = Timestamp(clk_domain="rfic")
+
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
         self.header = TXRXHeader(data_width=64)
-
+        self.comb += [
+            self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
+            self.header.rx.timestamp.eq(self.timestamp.time),
+        ]
         if with_pcie:
             # PCIe TX -> Header TX.
             self.comb += [
