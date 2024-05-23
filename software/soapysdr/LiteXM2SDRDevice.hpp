@@ -31,8 +31,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     ~SoapyLiteXM2SDR(void);
 
     // Identification API
-    std::string getDriverKey(void) const { return "XTRX over LitePCIe"; }
-    std::string getHardwareKey(void) const { return "Fairwaves XTRX"; }
+    std::string getDriverKey(void) const { return "LiteX-M2SDR"; }
+    std::string getHardwareKey(void) const { return "R01"; }
     SoapySDR::Kwargs getHardwareInfo(void) const;
 
 
