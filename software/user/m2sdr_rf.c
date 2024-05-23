@@ -28,6 +28,14 @@
 /* Parameters */
 /*------------*/
 
+#define DEFAULT_REFCLK_FREQ    ((int64_t)38400000) /* Reference Clock */
+#define DEFAULT_BANDWIDTH                18000000  /* RF Bandwidth */
+#define DEFAULT_TX_FREQ      ((int64_t)2400000000) /* LO1 (RX1/2 & TX1/2) Center Freq in Hz */
+#define DEFAULT_RX_FREQ      ((int64_t)2400000000) /* LO2 (RX3/4 & TX3/4) Center Freq in Hz */
+#define DEFAULT_TX_GAIN                       -20  /* TX Gain in dB -89 ->  0 dB */
+#define DEFAULT_RX_GAIN                         0  /* RX Gain in dB   0 -> 76 dB */
+#define DEFAULT_LOOPBACK                        0  /* Internal loopback */
+
 /* Variables */
 /*-----------*/
 
@@ -114,7 +122,7 @@ AD9361_InitParam default_init_param = {
     /* Identification number */
     0,      //id_no
     /* Reference Clock */
-    38400000UL, //reference_clk_rate
+    DEFAULT_REFCLK_FREQ, //reference_clk_rate
     /* Base Configuration */
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
     1,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
@@ -141,14 +149,14 @@ AD9361_InitParam default_init_param = {
     0,      //ensm_enable_pin_pulse_mode_enable *** adi,ensm-enable-pin-pulse-mode-enable
     0,      //ensm_enable_txnrx_control_enable *** adi,ensm-enable-txnrx-control-enable
     /* LO Control */
-    2400000000UL,   //rx_synthesizer_frequency_hz *** adi,rx-synthesizer-frequency-hz
-    2400000000UL,   //tx_synthesizer_frequency_hz *** adi,tx-synthesizer-frequency-hz
+    DEFAULT_RX_FREQ, //rx_synthesizer_frequency_hz *** adi,rx-synthesizer-frequency-hz
+    DEFAULT_TX_FREQ, //tx_synthesizer_frequency_hz *** adi,tx-synthesizer-frequency-hz
     1,              //tx_lo_powerdown_managed_enable *** adi,tx-lo-powerdown-managed-enable
     /* Rate & BW Control */
     {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},// rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
     {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},// tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
-    18000000,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
-    18000000,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
+    DEFAULT_BANDWIDTH,//rf_rx_bandwidth_hz *** adi,rf-rx-bandwidth-hz
+    DEFAULT_BANDWIDTH,//rf_tx_bandwidth_hz *** adi,rf-tx-bandwidth-hz
     /* RF Port Control */
     0,      //rx_rf_port_input_select *** adi,rx-rf-port-input-select
     0,      //tx_rf_port_input_select *** adi,tx-rf-port-input-select
@@ -295,11 +303,7 @@ AD9361_InitParam default_init_param = {
     4,      //rx_data_delay *** adi,rx-data-delay
     7,      //tx_fb_clock_delay *** adi,tx-fb-clock-delay
     0,      //tx_data_delay *** adi,tx-data-delay
-#ifdef ALTERA_PLATFORM
-    300,    //lvds_bias_mV *** adi,lvds-bias-mV
-#else
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
-#endif
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
     0xFF,   //lvds_invert1_control *** adi,lvds-invert1-control
@@ -458,25 +462,38 @@ static void init(void)
         exit(1);
     }
 
-    default_init_param.gpio_resetb = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync = -1;
+    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
     default_init_param.gpio_cal_sw2 = -1;
 
+    /* Initialize AD9361 SPI */
     m2sdr_ad9361_spi_init(fd);
 
+    /* Initialize AD9361 RFIC */
     ad9361_init(&ad9361_phy, &default_init_param);
 
+    /* Configure AD9361 TX/RX FIRs */
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
+    /* Configure AD9361 TX Attenuation */
+    ad9361_set_tx_atten(ad9361_phy, -DEFAULT_TX_GAIN*1000, 1, 1, 1);
+
+    /* Configure AD9361 RX Gain */
+    ad9361_set_rx_rf_gain(ad9361_phy, 0, DEFAULT_RX_GAIN);
+    ad9361_set_rx_rf_gain(ad9361_phy, 1, DEFAULT_RX_GAIN);
+
+    /* Configure AD9361 RX->TX Loopback */
+    ad9361_bist_loopback(ad9361_phy, DEFAULT_LOOPBACK);
+
+    /* Debug/Tests */
     printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
     printf("SPI Register 0x011—Parallel Port Configuration 2: %08x\n", m2sdr_ad9361_spi_read(fd, 0x11));
     printf("SPI Register 0x012—Parallel Port Configuration 3: %08x\n", m2sdr_ad9361_spi_read(fd, 0x12));
 
     printf("AD9361 Control: %08x\n", litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR));
 
-    ad9361_bist_loopback(ad9361_phy, 0);
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
 #ifdef BIST_TONE
