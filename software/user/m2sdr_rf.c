@@ -109,6 +109,7 @@ void gpio_set_value(unsigned gpio, int value)
 }
 
 AD9361_InitParam default_init_param = {
+    0,
     /* Reference Clock */
     38400000UL, //reference_clk_rate
     /* Base Configuration */
@@ -420,7 +421,7 @@ static void init(void)
 
     m2sdr_ad9361_spi_init(fd);
 
-    ad9361_phy = ad9361_init(&default_init_param);
+    ad9361_init(&ad9361_phy, &default_init_param);
 
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);

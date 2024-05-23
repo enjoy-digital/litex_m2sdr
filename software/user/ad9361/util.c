@@ -41,7 +41,8 @@
 /***************************** Include Files **********************************/
 /******************************************************************************/
 #include "util.h"
-#include <string.h>
+#include "string.h"
+#include "platform.h"
 
 /******************************************************************************/
 /*************************** Macros Definitions *******************************/
@@ -300,5 +301,7 @@ void *zmalloc(size_t size)
 	void *ptr = malloc(size);
 	if (ptr)
 		memset(ptr, 0, size);
+	mdelay(1);
+
 	return ptr;
 }

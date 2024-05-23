@@ -68,7 +68,7 @@ static struct axiadc_chip_info axiadc_chip_info_tbl[] =
  * @return A structure that contains the AD9361 current state in case of
  *         success, negative error code otherwise.
  */
-struct ad9361_rf_phy *ad9361_init (AD9361_InitParam *init_param)
+int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_param)
 {
 	struct ad9361_rf_phy *phy;
 	int32_t ret = 0;
@@ -77,33 +77,39 @@ struct ad9361_rf_phy *ad9361_init (AD9361_InitParam *init_param)
 
 	phy = (struct ad9361_rf_phy *)zmalloc(sizeof(*phy));
 	if (!phy) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	phy->spi = (struct spi_device *)zmalloc(sizeof(*phy->spi));
 	if (!phy->spi) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	phy->clk_refin = (struct clk *)zmalloc(sizeof(*phy->clk_refin));
 	if (!phy->clk_refin) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	phy->pdata = (struct ad9361_phy_platform_data *)zmalloc(sizeof(*phy->pdata));
 	if (!phy->pdata) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	phy->adc_conv = (struct axiadc_converter *)zmalloc(sizeof(*phy->adc_conv));
 	if (!phy->adc_conv) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 
 	phy->adc_state = (struct axiadc_state *)zmalloc(sizeof(*phy->adc_state));
 	if (!phy->adc_state) {
-		return (struct ad9361_rf_phy *)ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
+
+	phy->spi->id_no = init_param->id_no;
+	phy->adc_state->phy = phy;
+
+	/* Identification number */
+	phy->id_no = init_param->id_no;
 
 	/* Reference Clock */
 	phy->clk_refin->rate = init_param->reference_clk_rate;
@@ -352,10 +358,10 @@ struct ad9361_rf_phy *ad9361_init (AD9361_InitParam *init_param)
 	phy->bist_tone_mask = 0;
 
 	ad9361_reset(phy);
-	ad9361_spi_write(NULL, REG_SPI_CONF, SOFT_RESET | _SOFT_RESET);
-	ad9361_spi_write(NULL, REG_SPI_CONF, 0x0);
+	ad9361_spi_write(phy->spi, REG_SPI_CONF, SOFT_RESET | _SOFT_RESET);
+	ad9361_spi_write(phy->spi, REG_SPI_CONF, 0x0);
 
-	ret = ad9361_spi_read(NULL, REG_PRODUCT_ID);
+	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
 		printf("%s : Unsupported PRODUCT_ID 0x%X", "ad9361_init", (unsigned int)ret);
 		ret = -ENODEV;
@@ -385,7 +391,9 @@ struct ad9361_rf_phy *ad9361_init (AD9361_InitParam *init_param)
 
 	printf("%s : AD9361 Rev %d successfully initialized\n", "ad9361_init", (int)rev);
 
-	return phy;
+	*ad9361_phy = phy;
+
+	return 0;
 
 out:
 	free(phy->spi);
@@ -396,7 +404,7 @@ out:
 	free(phy);
 	printf("%s : AD9361 initialization error\n", "ad9361_init");
 
-	return (struct ad9361_rf_phy *)ERR_PTR(ENODEV);
+	return -ENODEV;
 }
 
 /**
@@ -660,14 +668,14 @@ int32_t ad9361_get_rx_fir_config(struct ad9361_rf_phy *phy, uint8_t rx_ch, AD936
 	uint32_t fir_conf;
 	uint8_t index;
 
-	ret = ad9361_spi_read(NULL, REG_RX_FILTER_CONFIG);
+	ret = ad9361_spi_read(phy->spi, REG_RX_FILTER_CONFIG);
 	if(ret < 0)
 		return ret;
 	fir_conf = ret;
 
 	fir_cfg->rx_coef_size = (((fir_conf & FIR_NUM_TAPS(7)) >> 5) + 1) * 16;
 
-	ret = ad9361_spi_read(NULL, REG_RX_FILTER_GAIN);
+	ret = ad9361_spi_read(phy->spi, REG_RX_FILTER_GAIN);
 	if(ret < 0)
 		return ret;
 	fir_cfg->rx_gain = -6 * (ret & FILTER_GAIN(3)) + 6;
@@ -675,23 +683,23 @@ int32_t ad9361_get_rx_fir_config(struct ad9361_rf_phy *phy, uint8_t rx_ch, AD936
 
 	fir_conf &= ~FIR_SELECT(3);
 	fir_conf |= FIR_SELECT(rx_ch) | FIR_START_CLK;
-	ad9361_spi_write(NULL, REG_RX_FILTER_CONFIG, fir_conf);
+	ad9361_spi_write(phy->spi, REG_RX_FILTER_CONFIG, fir_conf);
 
 	for(index = 0; index < 128; index++)
 	{
-		ad9361_spi_write(NULL, REG_RX_FILTER_COEF_ADDR, index);
-		ret = ad9361_spi_read(NULL, REG_RX_FILTER_COEF_READ_DATA_1);
+		ad9361_spi_write(phy->spi, REG_RX_FILTER_COEF_ADDR, index);
+		ret = ad9361_spi_read(phy->spi, REG_RX_FILTER_COEF_READ_DATA_1);
 		if(ret < 0)
 			return ret;
 		fir_cfg->rx_coef[index] = ret;
-		ret = ad9361_spi_read(NULL, REG_RX_FILTER_COEF_READ_DATA_2);
+		ret = ad9361_spi_read(phy->spi, REG_RX_FILTER_COEF_READ_DATA_2);
 		if(ret < 0)
 			return ret;
 		fir_cfg->rx_coef[index] |= (ret << 8);
 	}
 
 	fir_conf &= ~FIR_START_CLK;
-	ad9361_spi_write(NULL, REG_RX_FILTER_CONFIG, fir_conf);
+	ad9361_spi_write(phy->spi, REG_RX_FILTER_CONFIG, fir_conf);
 
 	fir_cfg->rx_dec = phy->rx_fir_dec;
 
@@ -1016,7 +1024,7 @@ int32_t ad9361_get_tx_fir_config(struct ad9361_rf_phy *phy, uint8_t tx_ch, AD936
 	uint32_t fir_conf;
 	uint8_t index;
 
-	ret = ad9361_spi_read(NULL, REG_TX_FILTER_CONF);
+	ret = ad9361_spi_read(phy->spi, REG_TX_FILTER_CONF);
 	if(ret < 0)
 		return ret;
 	fir_conf = ret;
@@ -1026,23 +1034,23 @@ int32_t ad9361_get_tx_fir_config(struct ad9361_rf_phy *phy, uint8_t tx_ch, AD936
 
 	fir_conf &= ~FIR_SELECT(3);
 	fir_conf |= FIR_SELECT(tx_ch) | FIR_START_CLK;
-	ad9361_spi_write(NULL, REG_TX_FILTER_CONF, fir_conf);
+	ad9361_spi_write(phy->spi, REG_TX_FILTER_CONF, fir_conf);
 
 	for(index = 0; index < 128; index++)
 	{
-		ad9361_spi_write(NULL, REG_TX_FILTER_COEF_ADDR, index);
-		ret = ad9361_spi_read(NULL, REG_TX_FILTER_COEF_READ_DATA_1);
+		ad9361_spi_write(phy->spi, REG_TX_FILTER_COEF_ADDR, index);
+		ret = ad9361_spi_read(phy->spi, REG_TX_FILTER_COEF_READ_DATA_1);
 		if(ret < 0)
 			return ret;
 		fir_cfg->tx_coef[index] = ret;
-		ret = ad9361_spi_read(NULL, REG_TX_FILTER_COEF_READ_DATA_2);
+		ret = ad9361_spi_read(phy->spi, REG_TX_FILTER_COEF_READ_DATA_2);
 		if(ret < 0)
 			return ret;
 		fir_cfg->tx_coef[index] |= (ret << 8);
 	}
 
 	fir_conf &= ~FIR_START_CLK;
-	ad9361_spi_write(NULL, REG_TX_FILTER_CONF, fir_conf);
+	ad9361_spi_write(phy->spi, REG_TX_FILTER_CONF, fir_conf);
 
 	fir_cfg->tx_int = phy->tx_fir_int;
 
@@ -1121,4 +1129,57 @@ int32_t ad9361_get_trx_path_clks(struct ad9361_rf_phy *phy,
 	uint32_t *tx_path_clks)
 {
 	return ad9361_get_trx_clock_chain(phy, rx_path_clks, tx_path_clks);
+}
+
+/**
+ * Set the number of channels mode.
+ * @param phy The AD9361 state structure.
+ * @param ch_mode Number of channels mode: 1 - 1x1; 2 - 2x2.
+ * @return 0 in case of success, negative error code otherwise.
+ */
+int32_t ad9361_set_no_ch_mode(struct ad9361_rf_phy *phy, uint8_t no_ch_mode)
+{
+	switch (no_ch_mode) {
+	case 1:
+		phy->pdata->rx2tx2 = 0;
+		break;
+	case 2:
+		phy->pdata->rx2tx2 = 1;
+		break;
+	default:
+		return -1;
+	}
+
+	phy->adc_conv->chip_info = &axiadc_chip_info_tbl[phy->pdata->rx2tx2 ? ID_AD9361 : ID_AD9364];
+	ad9361_reset(phy);
+	ad9361_spi_write(phy->spi, REG_SPI_CONF, SOFT_RESET | _SOFT_RESET);
+	ad9361_spi_write(phy->spi, REG_SPI_CONF, 0x0);
+
+	phy->clks[TX_REFCLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[TX_REFCLK], phy->clk_refin->rate);
+	phy->clks[TX_REFCLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[TX_REFCLK], phy->clk_refin->rate);
+	phy->clks[RX_REFCLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[RX_REFCLK], phy->clk_refin->rate);
+	phy->clks[BB_REFCLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[BB_REFCLK], phy->clk_refin->rate);
+	phy->clks[BBPLL_CLK]->rate = ad9361_bbpll_recalc_rate(phy->ref_clk_scale[BBPLL_CLK], phy->clks[BB_REFCLK]->rate);
+	phy->clks[ADC_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[ADC_CLK], phy->clks[BBPLL_CLK]->rate);
+	phy->clks[R2_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[R2_CLK], phy->clks[ADC_CLK]->rate);
+	phy->clks[R1_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[R1_CLK], phy->clks[R2_CLK]->rate);
+	phy->clks[CLKRF_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[CLKRF_CLK], phy->clks[R1_CLK]->rate);
+	phy->clks[RX_SAMPL_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[RX_SAMPL_CLK], phy->clks[CLKRF_CLK]->rate);
+	phy->clks[DAC_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[DAC_CLK], phy->clks[ADC_CLK]->rate);
+	phy->clks[T2_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[T2_CLK], phy->clks[DAC_CLK]->rate);
+	phy->clks[T1_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[T1_CLK], phy->clks[T2_CLK]->rate);
+	phy->clks[CLKTF_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[CLKTF_CLK], phy->clks[T1_CLK]->rate);
+	phy->clks[TX_SAMPL_CLK]->rate = ad9361_clk_factor_recalc_rate(phy->ref_clk_scale[TX_SAMPL_CLK], phy->clks[CLKTF_CLK]->rate);
+	phy->clks[RX_RFPLL]->rate = ad9361_rfpll_recalc_rate(phy->ref_clk_scale[RX_RFPLL], phy->clks[RX_REFCLK]->rate);
+	phy->clks[TX_RFPLL]->rate = ad9361_rfpll_recalc_rate(phy->ref_clk_scale[TX_RFPLL], phy->clks[TX_REFCLK]->rate);
+
+#ifdef USE_AXIADC
+	axiadc_init(phy);
+#endif
+	ad9361_setup(phy);
+#ifdef USE_AXIADC
+	ad9361_post_setup(phy);
+#endif
+
+	return 0;
 }
