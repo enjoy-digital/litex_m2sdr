@@ -53,8 +53,8 @@ User
 cd software/user
 make clean all
 ./m2sdr_util info
-./m2sdr_util si5351_i2c_init
-./m2sdr_rf init
+./m2sdr_util si5351_init
+./m2sdr_rf init -samplerate=4000000
 ./tone_gen.py tone_tx.bin
 ./m2sdr_play tone_tx.bin 100000
 ```

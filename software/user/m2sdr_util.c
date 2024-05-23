@@ -40,12 +40,12 @@ void intHandler(int dummy) {
 
 #ifdef CSR_SI5351_I2C_BASE
 
-/* SI5351 I2C */
-/*------------*/
+/* SI5351 */
+/*--------*/
 
 #define SI5351_I2C_ADDR 0x60
 
-static void test_si5351_i2c_scan(void)
+static void test_si5351_scan(void)
 {
     int fd;
 
@@ -154,7 +154,7 @@ const uint8_t si5351_config[][2] = {
     { 0xB7, 0x12 }
 };
 
-static void test_si5351_i2c_init(void)
+static void test_si5351_init(void)
 {
     int i;
     int fd;
@@ -182,10 +182,10 @@ static void test_si5351_i2c_init(void)
 
 #ifdef CSR_CDCM6208_BASE
 
-/* CDCM6208 SPI Scan */
-/*-------------------*/
+/* CDCM6208 Dump */
+/*---------------*/
 
-static void test_cdcm6208_spi_scan(void)
+static void test_cdcm6208_dump(void)
 {
     int i;
     int fd;
@@ -242,10 +242,10 @@ static const uint16_t cdcm_regs_vcxo_38[][2] =
     { 20, 0x0000 },
 };
 
-/* CDCM6208 SPI Init */
-/*-------------------*/
+/* CDCM6208 Init */
+/*---------------*/
 
-static void test_cdcm6208_spi_init(void)
+static void test_cdcm6208_init(void)
 {
     int i;
     int fd;
@@ -271,10 +271,10 @@ static void test_cdcm6208_spi_init(void)
 
 #endif
 
-/* AD9361 SPI Scan */
-/*-----------------*/
+/* AD9361 Dump */
+/*-------------*/
 
-static void test_ad9361_spi_scan(void)
+static void test_ad9361_dump(void)
 {
     int i;
     int fd;
@@ -337,8 +337,6 @@ static void info(void)
 #endif
     printf("\n");
 
-    /* SI5351 I2C */
-    test_si5351_i2c_scan();
     close(fd);
 }
 
@@ -762,16 +760,16 @@ static void help(void)
            "scratch_test                      Test Scratch register.\n"
            "\n"
 #ifdef  CSR_SI5351_I2C_BASE
-           "si5351_i2c_scan                   Scan SI5351 I2C.\n"
-           "si5351_i2c_init                   Init SI5351 over I2C.\n"
+           "si5351_scan                       Scan SI5351 I2C Bus.\n"
+           "si5351_init                       Init SI5351.\n"
            "\n"
 #endif
 #ifdef CSR_CDCM6208_BASE
-           "cdcm6208_spi_scan                 Scan CDCM6208 SPI.\n"
-           "cdcm6208_spi_init                 Init CDCM6208 over SPI.\n"
+           "cdcm6208_dump                     Dump CDCM6208 Registers.\n"
+           "cdcm6208_init                     Init CDCM6208.\n"
            "\n"
 #endif
-           "ad9361_spi_scan                   Scan AD9361 SPI.\n"
+           "ad9361_dump                       Dump AD9361 Registers.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
@@ -841,26 +839,31 @@ int main(int argc, char **argv)
     /* Info cmds. */
     if (!strcmp(cmd, "info"))
         info();
+
     /* Scratch cmds. */
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
-#ifdef CSR_SI5351_I2C_BASE
+
     /* SI5351 cmds. */
-    else if (!strcmp(cmd, "si5351_i2c_scan"))
-        test_si5351_i2c_scan();
-    else if (!strcmp(cmd, "si5351_i2c_init"))
-        test_si5351_i2c_init();
+#ifdef CSR_SI5351_I2C_BASE
+    else if (!strcmp(cmd, "si5351_scan"))
+        test_si5351_scan();
+    else if (!strcmp(cmd, "si5351_init"))
+        test_si5351_init();
 #endif
-#ifdef CSR_CDCM6208_BASE
+
     /* CDCM6208 cmds. */
-    else if (!strcmp(cmd, "cdcm6208_spi_scan"))
-        test_cdcm6208_spi_scan();
-    else if (!strcmp(cmd, "cdcm6208_spi_init"))
-        test_cdcm6208_spi_init();
+#ifdef CSR_CDCM6208_BASE
+    else if (!strcmp(cmd, "cdcm6208_dump"))
+        test_cdcm6208_dump();
+    else if (!strcmp(cmd, "cdcm6208_init"))
+        test_cdcm6208_init();
 #endif
+
     /* AD9361 cmds. */
-    else if (!strcmp(cmd, "ad9361_spi_scan"))
-        test_ad9361_spi_scan();
+    else if (!strcmp(cmd, "ad9361_dump"))
+        test_ad9361_dump();
+
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
     else if (!strcmp(cmd, "flash_write")) {
@@ -888,6 +891,7 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "flash_reload"))
         flash_reload();
 #endif
+
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
         dma_test(
