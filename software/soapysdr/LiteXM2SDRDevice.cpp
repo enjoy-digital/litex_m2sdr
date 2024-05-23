@@ -76,6 +76,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 1e9;
         this->setAntenna(SOAPY_SDR_RX, i, "A_BALANCED");
         this->setAntenna(SOAPY_SDR_TX, i, "A");
+        this->setBandwidth(SOAPY_SDR_RX, i, 2e6);
+        this->setBandwidth(SOAPY_SDR_TX, i, 2e6);
 
         this->setGain(SOAPY_SDR_RX, 0, false);
     }
