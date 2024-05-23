@@ -16,8 +16,8 @@ from litex.soc.interconnect.csr import *
 # Header Inserter/Extracter ------------------------------------------------------------------------
 
 class HeaderInserterExtracter(LiteXModule):
-    def __init__(self, mode="inserter", data_width=128, with_csr=True):
-        assert data_width >= 128
+    def __init__(self, mode="inserter", data_width=64, with_csr=True):
+        assert data_width == 64
         assert mode in ["inserter", "extracter"]
         self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i
         self.source = source = stream.Endpoint(dma_layout(data_width)) # o
@@ -55,26 +55,38 @@ class HeaderInserterExtracter(LiteXModule):
         fsm.act("IDLE",
             NextValue(cycles, 0),
             If(self.header_enable,
-                NextState("HEADER-TIMESTAMP")
+                NextState("HEADER")
             ).Else(
                 NextState("FRAME")
             )
         )
         if mode == "extracter":
-            fsm.act("HEADER-TIMESTAMP",
+            fsm.act("HEADER",
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready & (sink.first | ~first),
                     NextValue(first, 0),
-                    NextValue(self.header,    sink.data[ 0: 64]),
-                    NextValue(self.timestamp, sink.data[64:128]),
+                    NextValue(self.header, sink.data[0:64]),
+                    NextState("TIMESTAMP")
+                )
+            )
+            fsm.act("TIMESTAMP",
+                sink.ready.eq(1),
+                If(sink.valid & sink.ready,
+                    NextValue(self.timestamp, sink.data[0:64]),
                     NextState("FRAME")
                 )
             )
         if mode == "inserter":
-            fsm.act("HEADER-TIMESTAMP",
+            fsm.act("HEADER",
                 source.valid.eq(1),
-                source.data[ 0: 64].eq(self.header),
-                source.data[64:128].eq(self.timestamp),
+                source.data[0:64].eq(self.header),
+                If(source.valid & source.ready,
+                    NextState("TIMESTAMP"),
+                )
+            )
+            fsm.act("TIMESTAMP",
+                source.valid.eq(1),
+                source.data[0:64].eq(self.timestamp),
                 If(source.valid & source.ready,
                     NextState("FRAME"),
                 )
@@ -86,12 +98,12 @@ class HeaderInserterExtracter(LiteXModule):
                 NextValue(cycles, cycles + 1),
                 If(cycles == (self.frame_cycles - 1),
                     NextValue(cycles, 0),
-                    NextState("HEADER-TIMESTAMP")
+                    NextState("HEADER")
                 )
             )
         )
 
-    def add_csr(self, default_enable=1, default_header_enable=0, default_frame_cycles=122.88e9*1e-3/2):
+    def add_csr(self, default_enable=1, default_header_enable=0, default_frame_cycles=30.72e6*1e-3/2):
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, values=[
                 ("``0b0``", "Module Disabled."),
@@ -102,7 +114,7 @@ class HeaderInserterExtracter(LiteXModule):
                 ("``0b1``", "Header Inserter/Extracter Disabled."),
             ], reset=default_header_enable),
         ])
-        self._frame_cycles = CSRStorage(32, description="Frame Cycles (128-bit word)", reset=int(default_frame_cycles))
+        self._frame_cycles = CSRStorage(32, description="Frame Cycles (64-bit word)", reset=int(default_frame_cycles))
 
         # # #
 

@@ -35,12 +35,13 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
-from liteeth.phy.a7_gtp import QPLLSettings, QPLL
+from liteeth.phy.a7_gtp       import QPLLSettings, QPLL
 from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
 
 from gateware.ad9361.core import AD9361RFIC
+from gateware.header      import TXRXHeader
 
 from software import generate_litepcie_software
 
@@ -177,6 +178,23 @@ class BaseSoC(SoCMini):
             )
             self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
 
+        # TX/RX Header Extracter/Inserter ----------------------------------------------------------
+
+        self.header = TXRXHeader(data_width=64)
+
+        if with_pcie:
+            # PCIe TX -> Header TX.
+            self.comb += [
+                self.header.tx.reset.eq(~self.pcie_dma0.reader.enable),
+                self.pcie_dma0.source.connect(self.header.tx.sink),
+            ]
+
+            # Header RX -> PCIe RX.
+            self.comb += [
+                self.header.rx.reset.eq(~self.pcie_dma0.writer.enable),
+                self.header.tx.source.connect(self.pcie_dma0.sink),
+            ]
+
         # AD9361 RFIC ------------------------------------------------------------------------------
 
         self.ad9361 = AD9361RFIC(
@@ -187,8 +205,10 @@ class BaseSoC(SoCMini):
         self.ad9361.add_prbs()
         if with_pcie:
             self.comb += [
-                self.pcie_dma0.source.connect(self.ad9361.sink),
-                self.ad9361.source.connect(self.pcie_dma0.sink),
+                # Header TX -> AD9361 TX.
+                self.header.tx.source.connect(self.ad9361.sink),
+                # AD9361 RX -> Header RX.
+                self.ad9361.source.connect(self.header.rx.sink),
         ]
 
         # Debug.
