@@ -45,6 +45,7 @@
 #include "platform.h"
 #include "util.h"
 #include "config.h"
+#include <string.h>
 
 #ifndef AXI_ADC_NOT_PRESENT
 /******************************************************************************/
@@ -53,14 +54,12 @@
 static struct axiadc_chip_info axiadc_chip_info_tbl[] =
 {
 	{
-		"AD9361",
-		4,
-		61440000UL,
+		"4_CH_DEV",
+		4
 	},
 	{
-		"AD9364",
-		2,
-		122880000UL,
+		"2_CH_DEV",
+		2
 	},
 };
 #endif
@@ -112,9 +111,11 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 	phy->adc_state->phy = phy;
 #endif
 
-	phy->spi->id_no = init_param->id_no;
+	/* Device selection */
+	phy->dev_sel = init_param->dev_sel;
 
 	/* Identification number */
+	phy->spi->id_no = init_param->id_no;
 	phy->id_no = init_param->id_no;
 
 	/* Reference Clock */
@@ -132,14 +133,18 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 	phy->pdata->tx_fastlock_delay_ns = init_param->tx_fastlock_delay_ns;
 	phy->pdata->trx_fastlock_pinctrl_en[0] = init_param->rx_fastlock_pincontrol_enable;
 	phy->pdata->trx_fastlock_pinctrl_en[1] = init_param->tx_fastlock_pincontrol_enable;
-	phy->pdata->use_ext_rx_lo = init_param->external_rx_lo_enable;
-	phy->pdata->use_ext_tx_lo = init_param->external_tx_lo_enable;
+	if (phy->dev_sel == ID_AD9363A) {
+		phy->pdata->use_ext_rx_lo = false;
+		phy->pdata->use_ext_tx_lo = false;
+	} else {
+		phy->pdata->use_ext_rx_lo = init_param->external_rx_lo_enable;
+		phy->pdata->use_ext_tx_lo = init_param->external_tx_lo_enable;
+	}
 	phy->pdata->dc_offset_update_events = init_param->dc_offset_tracking_update_event_mask;
 	phy->pdata->dc_offset_attenuation_high = init_param->dc_offset_attenuation_high_range;
 	phy->pdata->dc_offset_attenuation_low = init_param->dc_offset_attenuation_low_range;
 	phy->pdata->rf_dc_offset_count_high = init_param->dc_offset_count_high_range;
 	phy->pdata->rf_dc_offset_count_low = init_param->dc_offset_count_low_range;
-	phy->pdata->tdd_use_fdd_tables = init_param->tdd_use_fdd_vco_tables_enable;
 	phy->pdata->split_gt = init_param->split_gain_table_mode_enable;
 	phy->pdata->trx_synth_max_fref = init_param->trx_synthesizer_target_fref_overwrite_hz;
 	phy->pdata->qec_tracking_slow_mode_en = init_param->qec_tracking_slow_mode_enable;
@@ -171,7 +176,13 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 	phy->pdata->update_tx_gain_via_alert = init_param->update_tx_gain_in_alert_enable;
 
 	/* Reference Clock Control */
-	phy->pdata->use_extclk = init_param->xo_disable_use_ext_refclk_enable;
+	switch (phy->dev_sel) {
+		case ID_AD9363A:
+			phy->pdata->use_extclk = true;
+			break;
+		default:
+			phy->pdata->use_extclk = init_param->xo_disable_use_ext_refclk_enable;
+	}
 	phy->pdata->dcxo_coarse = init_param->dcxo_coarse_and_fine_tune[0];
 	phy->pdata->dcxo_fine = init_param->dcxo_coarse_and_fine_tune[1];
 	phy->pdata->ad9361_clkout_mode = (enum ad9361_clkout)init_param->clk_output_mode_select;
@@ -323,7 +334,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 	phy->pdata->port_ctrl.rx_clk_data_delay |= RX_DATA_DELAY(init_param->rx_data_delay);
 	phy->pdata->port_ctrl.tx_clk_data_delay = FB_CLK_DELAY(init_param->tx_fb_clock_delay);
 	phy->pdata->port_ctrl.tx_clk_data_delay |= TX_DATA_DELAY(init_param->tx_data_delay);
-	phy->pdata->port_ctrl.lvds_bias_ctrl = (init_param->lvds_bias_mV / 75) & 0x7;
+	phy->pdata->port_ctrl.lvds_bias_ctrl = ((init_param->lvds_bias_mV - 75) / 75) & 0x7;
 	phy->pdata->port_ctrl.lvds_bias_ctrl |= (init_param->lvds_rx_onchip_termination_enable << 5);
 	phy->pdata->rx1rx2_phase_inversion_en = init_param->rx1rx2_phase_inversion_en;
 
@@ -400,7 +411,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 
 	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
-		printf("%s : Unsupported PRODUCT_ID 0x%X", "ad9361_init", (unsigned int)ret);
+		printf("%s : Unsupported PRODUCT_ID 0x%X", __func__, (unsigned int)ret);
 		ret = -ENODEV;
 		goto out;
 	}
@@ -438,7 +449,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy, AD9361_InitParam *init_p
 		goto out;
 #endif
 
-	printf("%s : AD9361 Rev %d successfully initialized\n", "ad9361_init", (int)rev);
+	printf("%s : AD936x Rev %d successfully initialized\n", __func__, (int)rev);
 
 	*ad9361_phy = phy;
 
@@ -453,7 +464,7 @@ out:
 	free(phy->clk_refin);
 	free(phy->pdata);
 	free(phy);
-	printf("%s : AD9361 initialization error\n", "ad9361_init");
+	printf("%s : AD936x initialization error\n", __func__);
 
 	return -ENODEV;
 }
@@ -530,10 +541,12 @@ int32_t ad9361_set_en_state_machine_mode (struct ad9361_rf_phy *phy,
 int32_t ad9361_get_en_state_machine_mode (struct ad9361_rf_phy *phy,
 										  uint32_t *mode)
 {
-	uint8_t ensm_state = phy->curr_ensm_state;
+	uint8_t ensm_state;
 	bool pinctrl = false;
 	int32_t ret;
 
+	ensm_state = ad9361_spi_read(phy->spi, REG_STATE);
+	ensm_state &= ENSM_STATE(~0);
 	ret = ad9361_spi_read(phy->spi, REG_ENSM_CONFIG_1);
 	if ((ret & ENABLE_ENSM_PIN_CTRL) == ENABLE_ENSM_PIN_CTRL)
 		pinctrl = true;
@@ -649,6 +662,8 @@ int32_t ad9361_set_rx_rf_bandwidth (struct ad9361_rf_phy *phy,
 {
 	int32_t ret = 0;
 
+	bandwidth_hz = ad9361_validate_rf_bw(phy, bandwidth_hz);
+
 	if (phy->current_rx_bw_Hz != bandwidth_hz)
 		ret = ad9361_update_rf_bandwidth(phy, bandwidth_hz,
 				phy->current_tx_bw_Hz);
@@ -763,6 +778,11 @@ int32_t ad9361_get_rx_lo_freq (struct ad9361_rf_phy *phy,
  */
 int32_t ad9361_set_rx_lo_int_ext(struct ad9361_rf_phy *phy, uint8_t int_ext)
 {
+	if ((phy->dev_sel == ID_AD9363A) && (int_ext = EXT_LO)) {
+		printf("%s : EXT_LO is not supported by AD9363!\n", __func__);
+		return -1;
+	}
+
 	phy->pdata->use_ext_rx_lo = int_ext;
 
 	return ad9361_clk_mux_set_parent(phy->ref_clk_scale[RX_RFPLL], int_ext);
@@ -1273,6 +1293,8 @@ int32_t ad9361_set_tx_rf_bandwidth (struct ad9361_rf_phy *phy,
 {
 	int32_t ret = 0;
 
+	bandwidth_hz = ad9361_validate_rf_bw(phy, bandwidth_hz);
+
 	if (phy->current_tx_bw_Hz != bandwidth_hz)
 		ret = ad9361_update_rf_bandwidth(phy,
 				phy->current_rx_bw_Hz, bandwidth_hz);
@@ -1387,6 +1409,11 @@ int32_t ad9361_get_tx_lo_freq (struct ad9361_rf_phy *phy,
  */
 int32_t ad9361_set_tx_lo_int_ext(struct ad9361_rf_phy *phy, uint8_t int_ext)
 {
+	if ((phy->dev_sel == ID_AD9363A) && (int_ext = EXT_LO)) {
+		printf("%s : EXT_LO is not supported by AD9363!\n", __func__);
+		return -1;
+	}
+
 	phy->pdata->use_ext_tx_lo = int_ext;
 
 	return ad9361_clk_mux_set_parent(phy->ref_clk_scale[TX_RFPLL], int_ext);
@@ -1795,6 +1822,12 @@ int32_t ad9361_do_mcs(struct ad9361_rf_phy *phy_master, struct ad9361_rf_phy *ph
 	int32_t step;
 	int32_t reg;
 
+	if ((phy_master->dev_sel == ID_AD9363A) ||
+			(phy_slave->dev_sel == ID_AD9363A)) {
+		printf("%s : MCS is not supported by AD9363!\n", __func__);
+		return -1;
+	}
+
 	reg = ad9361_spi_read(phy_master->spi, REG_RX_CLOCK_DATA_DELAY);
 	ad9361_spi_write(phy_slave->spi, REG_RX_CLOCK_DATA_DELAY, reg);
 	reg = ad9361_spi_read(phy_master->spi, REG_TX_CLOCK_DATA_DELAY);
@@ -1911,18 +1944,69 @@ int32_t ad9361_trx_load_enable_fir(struct ad9361_rf_phy *phy,
 								   AD9361_RXFIRConfig rx_fir_cfg,
 								   AD9361_TXFIRConfig tx_fir_cfg)
 {
+	int32_t rtx = -1, rrx = -1;
+
+	phy->filt_rx_bw_Hz = 0;
+	phy->filt_tx_bw_Hz = 0;
+	phy->filt_valid = false;
+
+	if (tx_fir_cfg.tx_path_clks[TX_SAMPL_FREQ]) {
+		memcpy(phy->filt_tx_path_clks, tx_fir_cfg.tx_path_clks,
+				sizeof(phy->filt_tx_path_clks));
+		rtx = 0;
+	}
+
+	if (rx_fir_cfg.rx_path_clks[RX_SAMPL_FREQ]) {
+		memcpy(phy->filt_rx_path_clks, rx_fir_cfg.rx_path_clks,
+				sizeof(phy->filt_rx_path_clks));
+		rrx = 0;
+	}
+
+	if (tx_fir_cfg.tx_bandwidth) {
+		phy->filt_tx_bw_Hz = tx_fir_cfg.tx_bandwidth;
+	}
+
+	if (rx_fir_cfg.rx_bandwidth) {
+		phy->filt_rx_bw_Hz = rx_fir_cfg.rx_bandwidth;
+	}
+
 	ad9361_set_tx_fir_config(phy, tx_fir_cfg);
 	ad9361_set_rx_fir_config(phy, rx_fir_cfg);
 
+	if (!(rrx | rtx))
+		phy->filt_valid = true;
+
 	ad9361_set_trx_fir_en_dis(phy, 1);
 
-	if (tx_fir_cfg.tx_bandwidth && rx_fir_cfg.rx_bandwidth) {
-		ad9361_set_tx_rf_bandwidth(phy, tx_fir_cfg.tx_bandwidth);
-		ad9361_set_rx_rf_bandwidth(phy, rx_fir_cfg.rx_bandwidth);
-	}
-
-	if (rx_fir_cfg.rx_path_clks[RX_SAMPL_FREQ] && tx_fir_cfg.tx_path_clks[TX_SAMPL_FREQ])
-		ad9361_set_trx_path_clks(phy, rx_fir_cfg.rx_path_clks, tx_fir_cfg.tx_path_clks);
-
 	return 0;
+}
+
+/**
+ * Do DCXO coarse tuning.
+ * @param phy The AD9361 current state structure.
+ * @param coarse The DCXO coarse tuning value.
+ * @return 0 in case of success, negative error code otherwise.
+ */
+int32_t ad9361_do_dcxo_tune_coarse(struct ad9361_rf_phy *phy,
+								   uint32_t coarse)
+{
+	phy->pdata->dcxo_coarse = coarse;
+
+	return ad9361_set_dcxo_tune(phy, phy->pdata->dcxo_coarse,
+			phy->pdata->dcxo_fine);
+}
+
+/**
+ * Do DCXO fine tuning.
+ * @param phy The AD9361 current state structure.
+ * @param fine The DCXO fine tuning value.
+ * @return 0 in case of success, negative error code otherwise.
+ */
+int32_t ad9361_do_dcxo_tune_fine(struct ad9361_rf_phy *phy,
+								   uint32_t fine)
+{
+	phy->pdata->dcxo_fine = fine;
+
+	return ad9361_set_dcxo_tune(phy, phy->pdata->dcxo_coarse,
+			phy->pdata->dcxo_fine);
 }

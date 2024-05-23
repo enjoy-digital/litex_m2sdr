@@ -109,8 +109,10 @@ void gpio_set_value(unsigned gpio, int value)
 }
 
 AD9361_InitParam default_init_param = {
+    /* Device selection */
+    ID_AD9361,  // dev_sel
     /* Identification number */
-    0,      //id_no;
+    0,      //id_no
     /* Reference Clock */
     38400000UL, //reference_clk_rate
     /* Base Configuration */
@@ -132,7 +134,6 @@ AD9361_InitParam default_init_param = {
     5,      //dc_offset_attenuation_low_range *** adi,dc-offset-attenuation-low-range
     0x28,   //dc_offset_count_high_range *** adi,dc-offset-count-high-range
     0x32,   //dc_offset_count_low_range *** adi,dc-offset-count-low-range
-    0,      //tdd_use_fdd_vco_tables_enable *** adi,tdd-use-fdd-vco-tables-enable
     0,      //split_gain_table_mode_enable *** adi,split-gain-table-mode-enable
     MAX_SYNTH_FREF, //trx_synthesizer_target_fref_overwrite_hz *** adi,trx-synthesizer-target-fref-overwrite-hz
     0,      // qec_tracking_slow_mode_enable *** adi,qec-tracking-slow-mode-enable
@@ -393,6 +394,7 @@ AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
      {0, 0, 0, 0, 0, 0}, // tx_path_clks[6]
      0 // tx_bandwidth
 };
+
 
 /* Info */
 /*------*/

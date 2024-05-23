@@ -2823,7 +2823,14 @@
 #define MAX_BBPLL_DIV			64
 #define MIN_BBPLL_DIV			2
 
-#define MIN_ADC_CLK			(MIN_BBPLL_FREQ / MAX_BBPLL_DIV) /* 11.17MHz */
+/*
+ * The ADC minimum and maximum operating output data rates
+ * are 25MHz and 640MHz respectively.
+ * For more information see here: https://ez.analog.com/docs/DOC-12763
+ */
+
+#define MIN_ADC_CLK			25000000UL /* 25 MHz */
+//#define MIN_ADC_CLK			(MIN_BBPLL_FREQ / MAX_BBPLL_DIV) /* 11.17MHz */
 #define MAX_ADC_CLK			640000000UL /* 640 MHz */
 #define MAX_DAC_CLK			(MAX_ADC_CLK / 2)
 
@@ -2838,11 +2845,12 @@
 #define MAX_CARRIER_FREQ_HZ		6000000000ULL
 #define MIN_CARRIER_FREQ_HZ		70000000ULL
 
+#define AD9363A_MAX_CARRIER_FREQ_HZ	3800000000ULL
+#define AD9363A_MIN_CARRIER_FREQ_HZ	325000000ULL
+
 /*
 *	Driver
 */
-
-
 
 enum rx_gain_table_type {
 	RXGAIN_FULL_TBL,
@@ -3135,7 +3143,6 @@ struct ad9361_phy_platform_data {
 	bool			ensm_pin_pulse_mode;
 	bool			ensm_pin_ctrl;
 	bool			debug_mode;
-	bool			tdd_use_fdd_tables;
 	bool			tdd_use_dual_synth;
 	bool			tdd_skip_vco_cal;
 	bool			use_ext_rx_lo;
@@ -3293,7 +3300,14 @@ enum ad9361_bist_mode {
 	BIST_INJ_RX,
 };
 
+enum dev_id {
+	ID_AD9361,
+	ID_AD9364,
+	ID_AD9363A
+};
+
 struct ad9361_rf_phy {
+	enum dev_id		dev_sel;
 	uint8_t 		id_no;
 	struct spi_device 	*spi;
 	struct clk 		*clk_refin;
@@ -3315,6 +3329,10 @@ struct ad9361_rf_phy {
 	bool			auto_cal_en;
 	uint64_t			last_tx_quad_cal_freq;
 	uint32_t			last_tx_quad_cal_phase;
+	uint64_t		current_tx_lo_freq;
+	uint64_t		current_rx_lo_freq;
+	bool			current_tx_use_tdd_table;
+	bool			current_rx_use_tdd_table;
 	uint32_t		flags;
 	uint32_t		cal_threshold_freq;
 	uint32_t			current_rx_bw_Hz;
@@ -3340,6 +3358,8 @@ struct ad9361_rf_phy {
 	bool			txmon_tdd_en;
 	uint16_t 			auxdac1_value;
 	uint16_t 			auxdac2_value;
+	uint32_t 			tx1_atten_cached;
+	uint32_t 			tx2_atten_cached;
 	struct ad9361_fastlock	fastlock;
 	struct axiadc_converter	*adc_conv;
 	struct axiadc_state		*adc_state;
@@ -3349,6 +3369,7 @@ struct ad9361_rf_phy {
 	uint32_t				bist_tone_freq_Hz;
 	uint32_t				bist_tone_level_dB;
 	uint32_t				bist_tone_mask;
+	bool			bbpll_initialized;
 };
 
 struct refclk_scale {
@@ -3369,11 +3390,6 @@ enum debugfs_cmd {
 	DBGFS_BIST_DT_ANALYSIS,
 	DBGFS_RXGAIN_1,
 	DBGFS_RXGAIN_2,
-};
-
-enum {
-	ID_AD9361,
-	ID_AD9364,
 };
 
 /******************************************************************************/
@@ -3479,4 +3495,9 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 int32_t ad9361_en_dis_tx(struct ad9361_rf_phy *phy, uint32_t tx_if, uint32_t enable);
 int32_t ad9361_en_dis_rx(struct ad9361_rf_phy *phy, uint32_t rx_if, uint32_t enable);
 int32_t ad9361_1rx1tx_channel_map(struct ad9361_rf_phy *phy, bool tx, int32_t channel);
+int32_t ad9361_rssi_gain_step_calib(struct ad9361_rf_phy *phy);
+int32_t ad9361_set_dcxo_tune(struct ad9361_rf_phy *phy,
+		uint32_t coarse, uint32_t fine);
+int32_t ad9361_tx_mute(struct ad9361_rf_phy *phy, uint32_t state);
+uint32_t ad9361_validate_rf_bw(struct ad9361_rf_phy *phy, uint32_t bw);
 #endif

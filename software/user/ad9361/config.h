@@ -52,12 +52,16 @@
 
 #define AD9361_DEVICE			1 /* set it 1 if AD9361 device is used, 0 otherwise */
 #define AD9364_DEVICE			0 /* set it 1 if AD9364 device is used, 0 otherwise */
+#define AD9363A_DEVICE			0 /* set it 1 if AD9363A device is used, 0 otherwise */
 
 //#define CONSOLE_COMMANDS
 //#define XILINX_PLATFORM
+//#define ALTERA_PLATFORM
 //#define FMCOMMS5
 //#define PICOZED_SDR
+//#define PICOZED_SDR_CMOS
 //#define CAPTURE_SCRIPT
 #define AXI_ADC_NOT_PRESENT
+//#define TDD_SWITCH_STATE_EXAMPLE
 
 #endif

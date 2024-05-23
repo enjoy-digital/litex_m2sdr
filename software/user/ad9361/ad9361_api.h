@@ -49,6 +49,8 @@
 /******************************************************************************/
 typedef struct
 {
+	/* Device selection */
+	enum dev_id	dev_sel;
 	/* Identification number */
 	uint8_t		id_no;
 	/* Reference Clock */
@@ -72,7 +74,6 @@ typedef struct
 	uint8_t		dc_offset_attenuation_low_range;	/* adi,dc-offset-attenuation-low-range */
 	uint8_t		dc_offset_count_high_range;			/* adi,dc-offset-count-high-range */
 	uint8_t		dc_offset_count_low_range;			/* adi,dc-offset-count-low-range */
-	uint8_t		tdd_use_fdd_vco_tables_enable;	/* adi,tdd-use-fdd-vco-tables-enable */
 	uint8_t		split_gain_table_mode_enable;	/* adi,split-gain-table-mode-enable */
 	uint32_t	trx_synthesizer_target_fref_overwrite_hz;	/* adi,trx-synthesizer-target-fref-overwrite-hz */
 	uint8_t		qec_tracking_slow_mode_enable;	/* adi,qec-tracking-slow-mode-enable */
@@ -480,4 +481,10 @@ int32_t ad9361_do_calib(struct ad9361_rf_phy *phy, uint32_t cal, int32_t arg);
 int32_t ad9361_trx_load_enable_fir(struct ad9361_rf_phy *phy,
 								   AD9361_RXFIRConfig rx_fir_cfg,
 								   AD9361_TXFIRConfig tx_fir_cfg);
+/* Do DCXO coarse tuning. */
+int32_t ad9361_do_dcxo_tune_coarse(struct ad9361_rf_phy *phy,
+								   uint32_t coarse);
+/* Do DCXO fine tuning. */
+int32_t ad9361_do_dcxo_tune_fine(struct ad9361_rf_phy *phy,
+								   uint32_t fine);
 #endif

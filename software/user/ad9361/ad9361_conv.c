@@ -305,6 +305,9 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 		return 0;
 	}
 
+	/* Mute TX, we don't want to transmit the PRBS */
+	ad9361_tx_mute(phy, 1);
+
 	if (flags & DO_IDELAY)
 		ad9361_midscale_iodelay(phy, 0);
 
@@ -328,7 +331,9 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 		memset(field, 0, 32);
 		for (k = 0; (uint32_t)k < (max_freq ? ARRAY_SIZE(rates) : 1); k++) {
 			if (max_freq)
-				ad9361_set_trx_clock_chain_freq(phy, rates[k]);
+				ad9361_set_trx_clock_chain_freq(phy,
+					((phy->pdata->port_ctrl.pp_conf[2] & LVDS_MODE) || !phy->pdata->rx2tx2) ?
+					rates[k] : rates[k] / 2);
 			for (i = 0; i < 2; i++) {
 				for (j = 0; j < 16; j++) {
 					ad9361_spi_write(phy->spi,
@@ -399,6 +404,9 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 							     phy->pdata->ensm_pin_ctrl);
 					ad9361_ensm_restore_prev_state(phy);
 				}
+
+				ad9361_tx_mute(phy, 0);
+
 				return 0;
 			}
 
@@ -416,10 +424,11 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 				{
 					saved_dsel[chan] = axiadc_read(st, 0x4418 + (chan) * 0x40);
 					axiadc_write(st, 0x4418 + (chan) * 0x40, 9);
+					axiadc_write(st, 0x4414 + (chan) * 0x40, 0); /* !IQCOR_ENB */
 					axiadc_write(st, 0x4044, 0x1);
 				}
 				else
-					axiadc_write(st, 0x4414 + (chan) * 0x40, 1);
+					axiadc_write(st, 0x4414 + (chan) * 0x40, 1); /* DAC_PN_ENB */
 
 			}
 			if (PCORE_VERSION_MAJOR(hdl_dac_version) < 8) {
@@ -475,6 +484,8 @@ int32_t ad9361_dig_tune(struct ad9361_rf_phy *phy, uint32_t max_freq,
 			axiadc_write(st, ADI_REG_RSTN, ADI_MMCM_RSTN);
 			axiadc_write(st, ADI_REG_RSTN, ADI_RSTN | ADI_MMCM_RSTN);
 
+			ad9361_tx_mute(phy, 0);
+
 			return err;
 		}
 	}
@@ -502,13 +513,19 @@ int32_t ad9361_post_setup(struct ad9361_rf_phy *phy)
 
 	if (!rx2tx2) {
 		axiadc_write(st, 0x4048, tmp | BIT(5)); /* R1_MODE */
-		axiadc_write(st, 0x404c, 1); /* RATE */
+		axiadc_write(st, 0x404c,
+			     (phy->pdata->port_ctrl.pp_conf[2] & LVDS_MODE) ? 1 : 0); /* RATE */
 	}
 	else {
 		tmp &= ~BIT(5);
 		axiadc_write(st, 0x4048, tmp);
-		axiadc_write(st, 0x404c, 3); /* RATE */
+		axiadc_write(st, 0x404c,
+			     (phy->pdata->port_ctrl.pp_conf[2] & LVDS_MODE) ? 3 : 1); /* RATE */
 	}
+
+#ifdef ALTERA_PLATFORM
+	axiadc_write(st, 0x404c, 1);
+#endif
 
 	for (i = 0; i < num_chan; i++) {
 		axiadc_write(st, ADI_REG_CHAN_CNTRL_1(i),
