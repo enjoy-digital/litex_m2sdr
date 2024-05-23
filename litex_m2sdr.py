@@ -222,7 +222,7 @@ class BaseSoC(SoCMini):
             # Header RX -> PCIe RX.
             self.comb += [
                 self.header.rx.reset.eq(~self.pcie_dma0.writer.enable),
-                self.header.tx.source.connect(self.pcie_dma0.sink),
+                self.header.rx.source.connect(self.pcie_dma0.sink),
             ]
 
         # AD9361 RFIC ------------------------------------------------------------------------------

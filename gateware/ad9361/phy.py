@@ -61,8 +61,8 @@ class RFICPHY(LiteXModule):
 
         # Signals.
         # --------
-        mode     = self.control.fields.mode
-        loopback = self.control.fields.loopback
+        mode     = self.control.fields.mode     # FIXME: Add MultiReg.
+        loopback = self.control.fields.loopback # FIXME: Add MultiReg.
 
         # RX ---------------------------------------------------------------------------------------
         # Due to use of IDDR, AD9361 needs to be configured with a delay of ~4ns on data.
