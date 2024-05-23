@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <getopt.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -36,11 +37,21 @@
 #define DEFAULT_RX_GAIN                         0  /* RX Gain in dB   0 -> 76 dB */
 #define DEFAULT_LOOPBACK                        0  /* Internal loopback */
 
+#define TX_FREQ_MIN   47000000 /* Hz */
+#define TX_FREQ_MAX 6000000000 /* Hz */
+#define RX_FREQ_MIN   70000000 /* Hz */
+#define RX_FREQ_MAX 6000000000 /* Hz */
+#define TX_GAIN_MIN        -89 /* dB */
+#define TX_GAIN_MAX          0 /* dB */
+#define RX_GAIN_MIN          0 /* dB */
+#define RX_GAIN_MAX         76 /* dB */
+
 /* Variables */
 /*-----------*/
 
 static char litepcie_device[1024];
 static int litepcie_device_num;
+static int litepcie_execute_and_exit;
 
 sig_atomic_t keep_running = 1;
 
@@ -403,57 +414,22 @@ AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
      0 // tx_bandwidth
 };
 
-/* Info */
-/*------*/
-
-static void info(void)
-{
-    int fd;
-    int i;
-    unsigned char fpga_identifier[256];
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-
-    printf("\e[1m[> FPGA/SoC Info:\e[0m\n");
-    printf("---------------------\n");
-
-    for (i = 0; i < 256; i ++)
-        fpga_identifier[i] = litepcie_readl(fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
-    printf("FPGA Identifier:  %s.\n", fpga_identifier);
-#ifdef CSR_DNA_BASE
-    printf("FPGA DNA:         0x%08x%08x\n",
-        litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 0),
-        litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 1)
-    );
-#endif
-#ifdef CSR_XADC_BASE
-    printf("FPGA Temperature : %0.1f °C\n",
-           (double)litepcie_readl(fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
-    printf("FPGA VCC-INT     : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
-    printf("FPGA VCC-AUX     : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
-    printf("FPGA VCC-BRAM    : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
-#endif
-    printf("\n");
-
-    close(fd);
-}
-
-/* Init */
-/*------*/
+/* M2SDR Init */
+/*------------*/
 
 //#define BIST_TONE
 //#define BIST_PRBS
 
-static void init(void)
-{
+static void m2sdr_init(
+    uint32_t bandwidth,
+    int64_t  refclk_freq,
+    int64_t  tx_freq,
+    int64_t  rx_freq,
+    int64_t  tx_gain,
+    int64_t  rx_gain,
+    uint8_t  loopback,
+    uint8_t  execute_and_exit
+) {
     int fd;
 
     fd = open(litepcie_device, O_RDWR);
@@ -478,14 +454,14 @@ static void init(void)
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
     /* Configure AD9361 TX Attenuation */
-    ad9361_set_tx_atten(ad9361_phy, -DEFAULT_TX_GAIN*1000, 1, 1, 1);
+    ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
 
     /* Configure AD9361 RX Gain */
-    ad9361_set_rx_rf_gain(ad9361_phy, 0, DEFAULT_RX_GAIN);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, DEFAULT_RX_GAIN);
+    ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
+    ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
 
     /* Configure AD9361 RX->TX Loopback */
-    ad9361_bist_loopback(ad9361_phy, DEFAULT_LOOPBACK);
+    ad9361_bist_loopback(ad9361_phy, loopback);
 
     /* Debug/Tests */
     printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
@@ -519,70 +495,124 @@ static void init(void)
 
 static void help(void)
 {
-    printf("M2SDR utilities\n"
+    printf("M2SDR RF init/config utility\n"
            "usage: m2sdr_rf [options] cmd [args...]\n"
            "\n"
-           "options:\n"
-           "-h                                Help.\n"
-           "-c device_num                     Select the device (default = 0).\n"
+           "Options:\n"
+           "-h                    Help.\n"
+           "-c device_num         Select the device (default=0).\n"
+           "-x                    Execute and exit.\n"
            "\n"
-           "available commands:\n"
-           "info                              Get Board information.\n"
-           "init                              Init AD9361/RF.\n"
-           );
+           "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
+           "-bandwidth bandwidth  Set RF Bandwidth 18e6 (default=%d).\n"
+           "-tx_freq freq         Set the TX (TX1/2) frequency in Hz (default=%" PRId64 ").\n"
+           "-rx_freq freq         Set the RX (RX1/2) frequency in Hz (default=%" PRId64 ").\n"
+           "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
+           "-rx_gain gain         Set the RX gain in dB (default=%d).\n"
+           "-loopback enable      Set the internal loopback (JESD Deframer -> Framer) (default=%d).\n"
+           "\n",
+           DEFAULT_REFCLK_FREQ,
+           DEFAULT_BANDWIDTH,
+           DEFAULT_TX_FREQ,
+           DEFAULT_RX_FREQ,
+           DEFAULT_TX_GAIN,
+           DEFAULT_RX_GAIN,
+           DEFAULT_LOOPBACK);
     exit(1);
 }
+
+static struct option options[] = {
+    { "help",             no_argument, NULL, 'h' },   /*  0 */
+    { "execute_and_exit", no_argument, NULL, 'x' },   /*  1 */
+    { "refclk_freq",      required_argument },        /*  2 */
+    { "bandwidth",        required_argument },        /*  3 */
+    { "tx_freq",          required_argument },        /*  4 */
+    { "rx_freq",          required_argument },        /*  5 */
+    { "tx_gain",          required_argument },        /*  6 */
+    { "rx_gain",          required_argument },        /*  7 */
+    { "loopback",         required_argument },        /*  8 */
+    { NULL },
+};
 
 /* Main */
 /*------*/
 
 int main(int argc, char **argv)
 {
-    const char *cmd;
     int c;
+    int option_index;
 
-    litepcie_device_num = 0;
+    litepcie_device_num       = 0;
+    litepcie_execute_and_exit = 0;
 
-    /* Parameters. */
+    int64_t  refclk_freq;
+    uint32_t bandwidth;
+    int64_t  tx_freq, rx_freq;
+    int64_t  tx_gain, rx_gain;
+    uint8_t  loopback;
+
+    refclk_freq  = DEFAULT_REFCLK_FREQ;
+    bandwidth    = DEFAULT_BANDWIDTH;
+    tx_freq      = DEFAULT_TX_FREQ;
+    rx_freq      = DEFAULT_RX_FREQ;
+    tx_gain      = DEFAULT_TX_GAIN;
+    rx_gain      = DEFAULT_RX_GAIN;
+    loopback     = DEFAULT_LOOPBACK;
+
+    /* Parse/Handle Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:w:zea");
+        c = getopt_long_only(argc, argv, "hx", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
+        case 0 :
+            switch(option_index) {
+                case 2: /* refclk_freq */
+                    refclk_freq = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 3: /* bandwidth */
+                    bandwidth = (uint32_t)strtod(optarg, NULL);
+                    break;
+                case 4: /* tx_freq */
+                    tx_freq = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 5: /* rx_freq */
+                    rx_freq = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 6: /* tx_gain */
+                    tx_gain = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 7: /* rx_gain */
+                    rx_gain = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 8: /* loopback */
+                    loopback = (uint8_t)strtod(optarg, NULL);
+                    break;
+                default:
+                    fprintf(stderr, "unknown option index: %d\n", option_index);
+                    exit(1);
+            }
+            break;
         case 'h':
             help();
+            exit(1);
             break;
         case 'c':
             litepcie_device_num = atoi(optarg);
+            break;
+        case 'x':
+            litepcie_execute_and_exit = 1;
             break;
         default:
             exit(1);
         }
     }
 
-    /* Show help when too much args. */
-    if (optind >= argc)
-        help();
-
     /* Select device. */
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
-    cmd = argv[optind++];
-
-    /* Info cmds. */
-    if (!strcmp(cmd, "info"))
-        info();
-    /* Init cmds. */
-    if (!strcmp(cmd, "init"))
-        init();
-    /* Show help otherwise. */
-    else
-        goto show_help;
-
-    return 0;
-
-show_help:
-        help();
+    /* Initialize RF. */
+    m2sdr_init(bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit);
 
     return 0;
 }
