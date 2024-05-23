@@ -1,0 +1,16 @@
+*.d
+*.o
+*.a
+*.ko
+*.swp
+*.mod.cmd
+*.ko.cmd
+*.mod
+*.mod.c
+*.symvers.cmd
+modules.order
+*.symvers
+*.o.cmd
+*.order.cmd
+__pycache__
+*.csv
