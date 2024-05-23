@@ -143,6 +143,7 @@ AD9361_InitParam default_init_param = {
     /* LO Control */
     2400000000UL,   //rx_synthesizer_frequency_hz *** adi,rx-synthesizer-frequency-hz
     2400000000UL,   //tx_synthesizer_frequency_hz *** adi,tx-synthesizer-frequency-hz
+    1,              //tx_lo_powerdown_managed_enable *** adi,tx-lo-powerdown-managed-enable
     /* Rate & BW Control */
     {983040000, 245760000, 122880000, 61440000, 30720000, 30720000},// rx_path_clock_frequencies[6] *** adi,rx-path-clock-frequencies
     {983040000, 122880000, 122880000, 61440000, 30720000, 30720000},// tx_path_clock_frequencies[6] *** adi,tx-path-clock-frequencies
@@ -397,7 +398,6 @@ AD9361_TXFIRConfig tx_fir_config = {    // BPF PASSBAND 3/20 fs to 1/4 fs
      {0, 0, 0, 0, 0, 0}, // tx_path_clks[6]
      0 // tx_bandwidth
 };
-
 
 /* Info */
 /*------*/
