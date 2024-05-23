@@ -7,7 +7,7 @@ from litex.soc.integration.export import get_csr_header, get_soc_header, get_mem
 from litepcie.software import copy_litepcie_software
 
 def generate_litepcie_software_headers(soc, dst):
-    csr_header = get_csr_header(soc.csr_regions, soc.constants, with_access_functions=False)
+    csr_header = get_csr_header(soc.csr_regions, soc.constants, with_csr_base_define=False, with_access_functions=False)
     tools.write_to_file(os.path.join(dst, "csr.h"), csr_header)
     soc_header = get_soc_header(soc.constants, with_access_functions=False)
     tools.write_to_file(os.path.join(dst, "soc.h"), soc_header)
