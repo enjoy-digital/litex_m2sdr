@@ -76,6 +76,27 @@ class CRG(LiteXModule):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
+    SoCCore.csr_map = {
+        # SoC.
+        "uart"        : 0,
+        "icap"        : 1,
+        "flash"       : 2,
+        "xadc"        : 3,
+        "dna"         : 4,
+
+        # PCIe.
+        "pcie_phy"    : 10,
+        "pcie_msi"    : 11,
+        "pcie_dma0"   : 12,
+
+        # SDR.
+        "header"      : 20,
+        "ad9361"      : 21,
+
+        # Analyzer.
+        "analyzer"    : 30,
+    }
+
     def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=1, with_ethernet=True, ethernet_sfp=0, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
