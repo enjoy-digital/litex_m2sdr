@@ -46,8 +46,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-
 #include "ad9361.h"
 #include "common.h"
 
@@ -79,8 +77,6 @@
 
 struct device {
 };
-
-struct gpio_device;
 
 struct spi_device {
 	struct device dev;

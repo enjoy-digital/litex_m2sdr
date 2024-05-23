@@ -252,7 +252,8 @@ typedef struct
 	uint32_t rx;			/* 1, 2, 3(both) */
 	int32_t rx_gain;		/* -12, -6, 0, 6 */
 	uint32_t rx_dec;		/* 1, 2, 4 */
-	int16_t rx_coef[64];
+	int16_t rx_coef[128];
+	uint8_t rx_coef_size;
 }AD9361_RXFIRConfig;
 
 typedef struct
@@ -260,7 +261,8 @@ typedef struct
 	uint32_t tx;			/* 1, 2, 3(both) */
 	int32_t tx_gain;		/* -6, 0 */
 	uint32_t tx_int;		/* 1, 2, 4 */
-	int16_t tx_coef[64];
+	int16_t tx_coef[128];
+	uint8_t tx_coef_size;
 }AD9361_TXFIRConfig;
 
 /******************************************************************************/
@@ -296,6 +298,8 @@ int32_t ad9361_set_rx_gain_control_mode (struct ad9361_rf_phy *phy, uint8_t ch, 
 int32_t ad9361_get_rx_gain_control_mode (struct ad9361_rf_phy *phy, uint8_t ch, uint8_t *gc_mode);
 /* Set the RX FIR filter configuration. */
 int32_t ad9361_set_rx_fir_config (struct ad9361_rf_phy *phy, AD9361_RXFIRConfig fir_cfg);
+/* Get the RX FIR filter configuration. */
+int32_t ad9361_get_rx_fir_config(struct ad9361_rf_phy *phy, uint8_t rx_ch, AD9361_RXFIRConfig *fir_cfg);
 /* Enable/disable the RX FIR filter. */
 int32_t ad9361_set_rx_fir_en_dis (struct ad9361_rf_phy *phy, uint8_t en_dis);
 /* Get the status of the RX FIR filter. */
@@ -330,6 +334,8 @@ int32_t ad9361_set_tx_lo_freq (struct ad9361_rf_phy *phy, uint64_t lo_freq_hz);
 int32_t ad9361_get_tx_lo_freq (struct ad9361_rf_phy *phy, uint64_t *lo_freq_hz);
 /* Set the TX FIR filter configuration. */
 int32_t ad9361_set_tx_fir_config (struct ad9361_rf_phy *phy, AD9361_TXFIRConfig fir_cfg);
+/* Get the TX FIR filter configuration. */
+int32_t ad9361_get_tx_fir_config(struct ad9361_rf_phy *phy, uint8_t tx_ch, AD9361_TXFIRConfig *fir_cfg);
 /* Enable/disable the TX FIR filter. */
 int32_t ad9361_set_tx_fir_en_dis (struct ad9361_rf_phy *phy, uint8_t en_dis);
 /* Get the status of the TX FIR filter. */
