@@ -3096,12 +3096,6 @@ static int32_t ad9361_tx_quad_calib(struct ad9361_rf_phy *phy,
 		ad9361_spi_write(spi, REG_INVERT_BITS, reg_inv_bits);
 	}
 
-	if (phy->pdata->rx1rx2_phase_inversion_en ||
-		(phy->pdata->port_ctrl.pp_conf[1] & INVERT_RX2)) {
-		ad9361_spi_writef(spi, REG_PARALLEL_PORT_CONF_2, INVERT_RX2, 1);
-		ad9361_spi_write(spi, REG_INVERT_BITS, reg_inv_bits);
-	}
-
 	if (txnco_freq > (int64_t)(bw_rx / 4) || txnco_freq > (int64_t)(bw_tx / 4)) {
 		__ad9361_update_rf_bandwidth(phy,
 			phy->current_rx_bw_Hz,
@@ -3202,44 +3196,99 @@ static int32_t ad9361_trx_ext_lo_control(struct ad9361_rf_phy *phy,
 
 	if (tx) {
 		ret = ad9361_spi_writef(phy->spi, REG_ENSM_CONFIG_2,
-				POWER_DOWN_TX_SYNTH, mcs_rf_enable ? 0 : enable);
+					POWER_DOWN_TX_SYNTH, mcs_rf_enable ? 0 : enable);
 
 		ret |= ad9361_spi_writef(phy->spi, REG_RFPLL_DIVIDERS,
-				TX_VCO_DIVIDER(~0), enable ? 7 :
-				phy->cached_tx_rfpll_div);
+					 TX_VCO_DIVIDER(~0), enable ? 7 :
+					 phy->cached_tx_rfpll_div);
+
+		if (enable)
+			phy->cached_synth_pd[0] |= TX_SYNTH_VCO_ALC_POWER_DOWN |
+				TX_SYNTH_PTAT_POWER_DOWN |
+				TX_SYNTH_VCO_POWER_DOWN;
+		else
+			phy->cached_synth_pd[0] &= ~(TX_SYNTH_VCO_ALC_POWER_DOWN |
+				TX_SYNTH_PTAT_POWER_DOWN |
+				TX_SYNTH_VCO_POWER_DOWN);
+
 
 		ret |= ad9361_spi_write(phy->spi, REG_TX_SYNTH_POWER_DOWN_OVERRIDE,
-				enable ? TX_SYNTH_VCO_ALC_POWER_DOWN |
-				TX_SYNTH_PTAT_POWER_DOWN |
-				TX_SYNTH_VCO_POWER_DOWN : 0);
+					phy->cached_synth_pd[0]);
 
 		ret |= ad9361_spi_writef(phy->spi, REG_ANALOG_POWER_DOWN_OVERRIDE,
-				TX_EXT_VCO_BUFFER_POWER_DOWN, !enable);
+					 TX_EXT_VCO_BUFFER_POWER_DOWN, !enable);
 
 		ret |= ad9361_spi_write(phy->spi, REG_TX_LO_GEN_POWER_MODE,
-				TX_LO_GEN_POWER_MODE(val));
-	}
-	else {
+					TX_LO_GEN_POWER_MODE(val));
+	} else {
 		ret = ad9361_spi_writef(phy->spi, REG_ENSM_CONFIG_2,
-				POWER_DOWN_RX_SYNTH, mcs_rf_enable ? 0 : enable);
+					POWER_DOWN_RX_SYNTH, mcs_rf_enable ? 0 : enable);
 
 		ret |= ad9361_spi_writef(phy->spi, REG_RFPLL_DIVIDERS,
-				RX_VCO_DIVIDER(~0), enable ? 7 :
-				phy->cached_rx_rfpll_div);
+					 RX_VCO_DIVIDER(~0), enable ? 7 :
+					 phy->cached_rx_rfpll_div);
+
+		if (enable)
+			phy->cached_synth_pd[1] |= RX_SYNTH_VCO_ALC_POWER_DOWN |
+				RX_SYNTH_PTAT_POWER_DOWN |
+				RX_SYNTH_VCO_POWER_DOWN;
+		else
+			phy->cached_synth_pd[1] &= ~(TX_SYNTH_VCO_ALC_POWER_DOWN |
+				RX_SYNTH_PTAT_POWER_DOWN |
+				RX_SYNTH_VCO_POWER_DOWN);
 
 		ret |= ad9361_spi_write(phy->spi, REG_RX_SYNTH_POWER_DOWN_OVERRIDE,
-				enable ? RX_SYNTH_VCO_ALC_POWER_DOWN |
-				RX_SYNTH_PTAT_POWER_DOWN |
-				RX_SYNTH_VCO_POWER_DOWN : 0);
+					phy->cached_synth_pd[1]);
 
 		ret |= ad9361_spi_writef(phy->spi, REG_ANALOG_POWER_DOWN_OVERRIDE,
-				RX_EXT_VCO_BUFFER_POWER_DOWN, !enable);
+					 RX_EXT_VCO_BUFFER_POWER_DOWN, !enable);
 
 		ret |= ad9361_spi_write(phy->spi, REG_RX_LO_GEN_POWER_MODE,
-				RX_LO_GEN_POWER_MODE(val));
+					RX_LO_GEN_POWER_MODE(val));
 	}
 
 	return ret;
+}
+
+/**
+ * Selectively Power Down RX/TX LO/Synthesizers.
+ * @param phy The AD9361 state structure.
+ * @param rx Synthesizer PD enum
+ * @param tx Synthesizer PD enum
+ * @return 0 in case of success, negative error code otherwise.
+ */
+
+int32_t ad9361_synth_lo_powerdown(struct ad9361_rf_phy *phy,
+				     enum synth_pd_ctrl rx,
+				     enum synth_pd_ctrl tx)
+{
+
+	dev_dbg(&phy->spi->dev, "%s : RX(%d) TX(%d)",__func__, rx, tx);
+
+	switch (rx) {
+		case LO_OFF:
+			phy->cached_synth_pd[1] |= RX_LO_POWER_DOWN;
+			break;
+		case LO_ON:
+			phy->cached_synth_pd[1] &= ~RX_LO_POWER_DOWN;
+			break;
+		case LO_DONTCARE:
+			break;
+	}
+
+	switch (tx) {
+		case LO_OFF:
+			phy->cached_synth_pd[0] |= TX_LO_POWER_DOWN;
+			break;
+		case LO_ON:
+			phy->cached_synth_pd[0] &= ~TX_LO_POWER_DOWN;
+			break;
+		case LO_DONTCARE:
+			break;
+	}
+
+	return ad9361_spi_writem(phy->spi, REG_TX_SYNTH_POWER_DOWN_OVERRIDE,
+				 phy->cached_synth_pd, 2);
 }
 
 /**
@@ -3521,7 +3570,7 @@ static int32_t ad9361_gc_setup(struct ad9361_rf_phy *phy, struct gain_control *c
 	ad9361_spi_write(spi, REG_RX2_MANUAL_LMT_FULL_GAIN, reg); // Rx2 Full/LMT Gain Index
 
 	ctrl->mgc_dec_gain_step = clamp_t(uint8_t, ctrl->mgc_dec_gain_step, 1U, 8U);
-	reg = MANUAL_CTRL_IN_DECR_GAIN_STP_SIZE(ctrl->mgc_dec_gain_step);
+	reg = MANUAL_CTRL_IN_DECR_GAIN_STP_SIZE(ctrl->mgc_dec_gain_step - 1);
 	ad9361_spi_write(spi, REG_PEAK_WAIT_TIME, reg); // Decr Step Size, Peak Overload Time
 
 	if (ctrl->dig_gain_en)
@@ -4048,7 +4097,7 @@ struct rssi_control *ctrl,
 	int32_t val, ret, i, j = 0;
 	uint32_t rssi_delay;
 	uint32_t rssi_wait;
-	uint32_t rssi_duration;
+	int32_t rssi_duration;
 	uint32_t rate;
 
 	dev_dbg(&phy->spi->dev, "%s", __func__);
@@ -4091,10 +4140,14 @@ struct rssi_control *ctrl,
 
 	} while (j < 4 && rssi_duration > 0);
 
-	for (i = 0, total_weight = 0; i < 4; i++)
-		total_weight += weight[i] =
-		DIV_ROUND_CLOSEST(RSSI_MAX_WEIGHT *
-		(1 << dur_buf[i]), total_dur);
+	for (i = 0, total_weight = 0; i < 4; i++) {
+		if (i < j)
+			total_weight += weight[i] =
+				DIV_ROUND_CLOSEST(RSSI_MAX_WEIGHT *
+					(1 << dur_buf[i]), total_dur);
+		else
+			total_weight += weight[i] = 0;
+	}
 
 	/* total of all weights must be 0xFF */
 	val = total_weight - 0xFF;
@@ -4114,6 +4167,9 @@ struct rssi_control *ctrl,
 	temp = RSSI_MODE_SELECT(ctrl->restart_mode);
 	if (ctrl->restart_mode == SPI_WRITE_TO_REGISTER)
 		temp |= START_RSSI_MEAS;
+
+	if (rssi_duration == 0 && j == 1) /* Power of two */
+		temp |= DEFAULT_RSSI_MEAS_MODE;
 
 	ret = ad9361_spi_write(spi, REG_RSSI_CONFIG, temp); // RSSI Mode Select
 
@@ -5004,6 +5060,8 @@ void ad9361_clear_state(struct ad9361_rf_phy *phy)
 	phy->current_rx_lo_freq = 0;
 	phy->current_tx_use_tdd_table = false;
 	phy->current_rx_use_tdd_table = false;
+	phy->cached_synth_pd[0] = 0;
+	phy->cached_synth_pd[1] = 0;
 
 	memset(&phy->fastlock, 0, sizeof(phy->fastlock));
 }
@@ -6782,7 +6840,7 @@ int32_t ad9361_rfpll_set_rate(struct refclk_scale *clk_priv, uint32_t rate)
 		/* For RX LO we typically have the tracking option enabled
 		* so for now do nothing here.
 		*/
-		if (phy->auto_cal_en && (clk_priv->source == TX_RFPLL_INT))
+		if (phy->auto_cal_en && !phy->pdata->use_ext_tx_lo)
 			if (abs((int64_t)(phy->last_tx_quad_cal_freq - ad9361_from_clk(rate))) >
 				(int64_t)phy->cal_threshold_freq) {
 				ret = ad9361_do_calib_run(phy, TX_QUAD_CAL, -1);
