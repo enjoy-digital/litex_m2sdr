@@ -217,21 +217,13 @@ class RFICPHY(LiteXModule):
         self.comb += sink.ready.eq(tx_ce)
 
         # Dynamic Loopback Logic
-        self.comb += [
+        self.sync.rfic += [
             If(loopback,
-                source.valid.eq(sink.valid),
+                source.valid.eq(sink.valid & sink.ready),
                 source.ia.eq(sink.ia),
                 source.qa.eq(sink.qa),
                 source.ib.eq(sink.ib),
                 source.qb.eq(sink.qb),
-                sink.ready.eq(source.ready)
-            ).Else(
-                source.valid.eq(rx_data_valid[3]),
-                source.ia.eq(rx_data_ia),
-                source.qa.eq(rx_data_qa),
-                source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb),
-                sink.ready.eq(tx_ce)
             )
         ]
 
