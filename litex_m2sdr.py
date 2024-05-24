@@ -258,10 +258,6 @@ class BaseSoC(SoCMini):
                 self.ad9361.phy.sink,   # TX.
                 self.ad9361.phy.source, # RX.
                 self.ad9361.prbs_rx.fields.synced,
-                self.ad9361.ia,
-                self.ad9361.qa,
-                self.ad9361.ib,
-                self.ad9361.qb,
             ]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
                 depth        = 4096,
