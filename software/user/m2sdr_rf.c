@@ -112,9 +112,9 @@ void gpio_set_value(unsigned gpio, int value)
 /* M2SDR Init */
 /*------------*/
 
-//#define BIST_RX_TONE
 //#define BIST_TX_TONE
-#define BIST_PRBS_TEST
+#define BIST_RX_TONE
+//#define BIST_PRBS_TEST
 
 static void m2sdr_init(
     uint32_t samplerate,
@@ -173,31 +173,22 @@ static void m2sdr_init(
 
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
+#ifdef BIST_TX_TONE
+    printf("BIST_TX_TONE_TEST...\n");
+    ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
+#endif
+
 #ifdef BIST_RX_TONE
+    printf("BIST_RX_TONE_TEST...\n");
     ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
 #endif
 
-#ifdef BIST_TX_TONE
-#endif
-
-//#ifdef BIST_PRBS
-//    int i;
-//    ad9361_bist_loopback(ad9361_phy, 1);
-//    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-//    for (i=0; i<10; i++) {
-//        int synced;
-//        synced = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
-//        printf("PRBS RX Synced: %d\n", synced);
-//        mdelay(1000);
-//    }
-//#endif
-
 #ifdef BIST_PRBS_TEST
-
     int rx_clk_delay;
     int rx_dat_delay;
     int tx_clk_delay;
     int tx_dat_delay;
+    printf("BIST_PRBS_TEST...\n");
 
     /* Enable AD9361 RX-PRBS */
     ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
