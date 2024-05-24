@@ -113,7 +113,7 @@ void gpio_set_value(unsigned gpio, int value)
 /*------------*/
 
 //#define BIST_TX_TONE
-#define BIST_RX_TONE
+//#define BIST_RX_TONE
 //#define BIST_PRBS_TEST
 
 static void m2sdr_init(
