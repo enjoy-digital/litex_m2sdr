@@ -134,15 +134,17 @@ static void m2sdr_init(
         exit(1);
     }
 
-    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync    = -1;
-    default_init_param.gpio_cal_sw1 = -1;
-    default_init_param.gpio_cal_sw2 = -1;
+    /* Initialize SI531 Clocking */
+    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
 
     /* Initialize AD9361 SPI */
     m2sdr_ad9361_spi_init(fd);
 
     /* Initialize AD9361 RFIC */
+    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync    = -1;
+    default_init_param.gpio_cal_sw1 = -1;
+    default_init_param.gpio_cal_sw2 = -1;
     ad9361_init(&ad9361_phy, &default_init_param);
 
     /* Configure AD9361 TX/RX FIRs */
