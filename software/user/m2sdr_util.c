@@ -48,8 +48,6 @@ void intHandler(int dummy) {
 /* SI5351 */
 /*--------*/
 
-#define SI5351_I2C_ADDR 0x60
-
 static void test_si5351_scan(void)
 {
     int fd;
@@ -70,7 +68,6 @@ static void test_si5351_scan(void)
 
 static void test_si5351_init(void)
 {
-    int i;
     int fd;
 
     fd = open(litepcie_device, O_RDWR);
@@ -79,15 +76,9 @@ static void test_si5351_init(void)
         exit(1);
     }
 
-    printf("\e[1m[> SI53512 Init:\e[0m\n");
-    for (i=0; i<sizeof(si5351_config)/sizeof(si5351_config[0]); i++) {
-        uint8_t addr = si5351_config[i][0];
-        uint8_t data = si5351_config[i][1];
-        printf("Writing 0x%02X to register 0x%02X\n", data, addr);
-        if (!m2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, addr, &data, 1)) {
-            fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
-        }
-    }
+    printf("\e[1m[> SI53512 Init...\e[0m\n");
+    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+    printf("Done.\n");
 
     close(fd);
 }

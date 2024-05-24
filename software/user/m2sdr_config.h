@@ -43,6 +43,8 @@
 /* SI5351 Default Config (38.4MHz on all outputs) */
 /*------------------------------------------------*/
 
+#define SI5351_I2C_ADDR 0x60
+
 const uint8_t si5351_config[][2] = {
     { 0x02, 0x33 },
     { 0x03, 0x00 },

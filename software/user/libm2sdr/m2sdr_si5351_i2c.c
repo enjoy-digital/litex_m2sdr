@@ -243,4 +243,21 @@ void m2sdr_si5351_i2c_scan(int fd)
 	printf("\n");
 }
 
+/*
+ * I2C Config
+ */
+
+void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length)
+{
+	int i;
+    for (i=0; i<i2c_length; i++) {
+        uint8_t addr = i2c_config[i][0];
+        uint8_t data = i2c_config[i][1];
+        if (!m2sdr_si5351_i2c_write(fd, i2c_addr, addr, &data, 1)) {
+            fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
+        }
+    }
+}
+
+
 #endif
