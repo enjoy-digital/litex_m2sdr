@@ -35,7 +35,7 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
-from liteeth.phy.a7_gtp import QPLLSettings, QPLL
+from liteeth.phy.a7_gtp       import QPLLSettings, QPLL
 from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litescope import LiteScopeAnalyzer
@@ -69,6 +69,28 @@ class CRG(LiteXModule):
 # BaseSoC -----------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
+    SoCCore.csr_map = {
+        # SoC.
+        "uart"        : 0,
+        "icap"        : 1,
+        "flash"       : 2,
+        "xadc"        : 3,
+        "dna"         : 4,
+
+        # PCIe.
+        "pcie_phy"    : 10,
+        "pcie_msi"    : 11,
+        "pcie_dma0"   : 12,
+
+        # SDR.
+        "timestamp"   : 20,
+        "header"      : 21,
+        "ad9361"      : 22,
+
+        # Analyzer.
+        "analyzer"    : 30,
+    }
+
     def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=1, with_jtagbone=True):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform()
@@ -157,6 +179,31 @@ class BaseSoC(SoCMini):
                 platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       jtag_clk] -asynchronous")
                 platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       icap_clk] -asynchronous")
 
+
+        # Timestamp --------------------------------------------------------------------------------
+
+        self.timestamp = Timestamp(clk_domain="rfic")
+
+        # TX/RX Header Extracter/Inserter ----------------------------------------------------------
+
+        self.header = TXRXHeader(data_width=64)
+        self.comb += [
+            self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
+            self.header.rx.timestamp.eq(self.timestamp.time),
+        ]
+        if with_pcie:
+            # PCIe TX -> Header TX.
+            self.comb += [
+                self.header.tx.reset.eq(~self.pcie_dma0.reader.enable),
+                self.pcie_dma0.source.connect(self.header.tx.sink),
+            ]
+
+            # Header RX -> PCIe RX.
+            self.comb += [
+                self.header.rx.reset.eq(~self.pcie_dma0.writer.enable),
+                self.header.rx.source.connect(self.pcie_dma0.sink),
+            ]
+
         # AD9361 RFIC ------------------------------------------------------------------------------
 
         self.ad9361 = AD9361RFIC(
@@ -167,13 +214,15 @@ class BaseSoC(SoCMini):
         self.ad9361.add_prbs()
         if with_pcie:
             self.comb += [
-                self.pcie_dma0.source.connect(self.ad9361.sink),
-                self.ad9361.source.connect(self.pcie_dma0.sink),
+                # Header TX -> AD9361 TX.
+                self.header.tx.source.connect(self.ad9361.sink),
+                # AD9361 RX -> Header RX.
+                self.ad9361.source.connect(self.header.rx.sink),
         ]
 
         # Debug.
         with_spi_analyzer  = False
-        with_rfic_analyzer = False
+        with_rfic_analyzer = True
         with_dma_analyzer  = False
         if with_spi_analyzer:
             analyzer_signals = [platform.lookup_request("ad9361_spi")]
