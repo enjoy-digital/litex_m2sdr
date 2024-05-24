@@ -114,8 +114,8 @@ class AD9361RFIC(LiteXModule):
 
         # # #
 
+        # Clocking ---------------------------------------------------------------------------------
         self.cd_rfic = ClockDomain("rfic")
-        self.cd_rfic.rst_buf = "bufg"
 
         # PHY --------------------------------------------------------------------------------------
         self.phy = RFICPHY(rfic_pads)
@@ -142,6 +142,18 @@ class AD9361RFIC(LiteXModule):
 
         def _16b_sign_extend(data):
             return Cat(data, Replicate(data[-1], 16 - len(data)))
+
+        # Debug.
+        self.ia = Signal(16)
+        self.qa = Signal(16)
+        self.ib = Signal(16)
+        self.qb = Signal(16)
+        self.comb += [
+            self.ia.eq(rx_cdc.sink.data[0*16:1*16]),
+            self.qa.eq(rx_cdc.sink.data[1*16:2*16]),
+            self.ib.eq(rx_cdc.sink.data[2*16:3*16]),
+            self.qb.eq(rx_cdc.sink.data[3*16:4*16]),
+        ]
 
         self.comb += [
             self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
