@@ -40,8 +40,8 @@ def tone_check(filename, nchannels, nbits, samplerate, frame_header, frame_size,
                 break
             _re = int.from_bytes(_bytes[0:2], "little")
             _im = int.from_bytes(_bytes[2:4], "little")
-            re[j].append(two_complement_decode(_re, nbits))
-            im[j].append(two_complement_decode(_im, nbits))
+            re[j].append(two_complement_decode(_re, 16))
+            im[j].append(two_complement_decode(_im, 16))
         i += 1
         if done:
             break

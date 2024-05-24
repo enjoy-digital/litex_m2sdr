@@ -32,8 +32,8 @@ def tone_gen(filename, nchannels, nbits, frequency, amplitude, samplerate, nsamp
             insert_header_timestamp(f, header, timestamp)
         re = cos(phi) * amplitude * (2**(nbits - 1))
         im = sin(phi) * amplitude * (2**(nbits - 1))
-        re = two_complement_encode(int(re), nbits)
-        im = two_complement_encode(int(im), nbits)
+        re = two_complement_encode(int(re), 16)
+        im = two_complement_encode(int(im), 16)
         for j in range(nchannels):
             f.write(re.to_bytes(2, byteorder="little"))
             f.write(im.to_bytes(2, byteorder="little"))
