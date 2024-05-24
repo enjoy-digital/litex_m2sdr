@@ -46,6 +46,11 @@
 #define RX_GAIN_MIN          0 /* dB */
 #define RX_GAIN_MAX         76 /* dB */
 
+#define TX_CLK_DELAY  3
+#define TX_DAT_DELAY 13
+#define RX_CLK_DELAY  6
+#define RX_DAT_DELAY  9
+
 /* Variables */
 /*-----------*/
 
@@ -310,10 +315,10 @@ AD9361_InitParam default_init_param = {
     0,      //full_port_enable *** adi,full-port-enable
     0,      //full_duplex_swap_bits_enable *** adi,full-duplex-swap-bits-enable
     0,      //delay_rx_data *** adi,delay-rx-data
-    0,      //rx_data_clock_delay *** adi,rx-data-clock-delay
-    4,      //rx_data_delay *** adi,rx-data-delay
-    7,      //tx_fb_clock_delay *** adi,tx-fb-clock-delay
-    0,      //tx_data_delay *** adi,tx-data-delay
+    RX_CLK_DELAY, //rx_data_clock_delay *** adi,rx-data-clock-delay
+    RX_DAT_DELAY, //rx_data_delay *** adi,rx-data-delay
+    TX_CLK_DELAY, //tx_fb_clock_delay *** adi,tx-fb-clock-delay
+    TX_DAT_DELAY, //tx_data_delay *** adi,tx-data-delay
     150,    //lvds_bias_mV *** adi,lvds-bias-mV
     1,      //lvds_rx_onchip_termination_enable *** adi,lvds-rx-onchip-termination-enable
     0,      //rx1rx2_phase_inversion_en *** adi,rx1-rx2-phase-inversion-enable
@@ -529,7 +534,7 @@ static void m2sdr_init(
     }
 
     /* Configure RX Clk/Dat delays */
-    m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(0) | RX_DATA_DELAY(0));
+    m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(RX_CLK_DELAY) | RX_DATA_DELAY(RX_DAT_DELAY));
 
     /* Enable RX->TX AD9361 loopback */
     ad9361_bist_loopback(ad9361_phy, 1);
