@@ -147,12 +147,16 @@ static void m2sdr_init(
     default_init_param.gpio_cal_sw2 = -1;
     ad9361_init(&ad9361_phy, &default_init_param);
 
+    /* Configure AD9361 Samplerate */
+    ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
+
+    /* Configure AD9361 TX/RX Frequencies */
+    ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
+    ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
+
     /* Configure AD9361 TX/RX FIRs */
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-
-    /* Configure AD9361 Samplerate */
-    ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
 
     /* Configure AD9361 TX Attenuation */
     ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
