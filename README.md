@@ -83,6 +83,12 @@ litescope_cli
 ./test_clks.py
 ```
 
+[> Reboot or Rescan PCIe Bus
+----------------------------
+```bash
+echo 1 | sudo tee /sys/bus/pci/devices/0000\:0X\:00.0/remove (replace X with actual value)
+echo 1 | sudo tee /sys/bus/pci/rescan
+```
 
 [> Contact
 ----------
