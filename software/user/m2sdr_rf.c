@@ -112,10 +112,6 @@ void gpio_set_value(unsigned gpio, int value)
 /* M2SDR Init */
 /*------------*/
 
-//#define BIST_TX_TONE
-//#define BIST_RX_TONE
-//#define BIST_PRBS_TEST
-
 static void m2sdr_init(
     uint32_t samplerate,
     int64_t  refclk_freq,
@@ -124,7 +120,10 @@ static void m2sdr_init(
     int64_t  tx_gain,
     int64_t  rx_gain,
     uint8_t  loopback,
-    uint8_t  execute_and_exit
+    uint8_t  execute_and_exit,
+    bool     bist_tx_tone,
+    bool     bist_rx_tone,
+    bool     bist_prbs_test
 ) {
     int fd;
 
@@ -177,91 +176,90 @@ static void m2sdr_init(
 
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
-#ifdef BIST_TX_TONE
-    printf("BIST_TX_TONE_TEST...\n");
-    ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
-#endif
-
-#ifdef BIST_RX_TONE
-    printf("BIST_RX_TONE_TEST...\n");
-    ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
-#endif
-
-#ifdef BIST_PRBS_TEST
-    int rx_clk_delay;
-    int rx_dat_delay;
-    int tx_clk_delay;
-    int tx_dat_delay;
-    printf("BIST_PRBS_TEST...\n");
-
-    /* Enable AD9361 RX-PRBS */
-    ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
-
-    /* RX Clk/Dat delays scan */
-    printf("\n");
-    printf("RX Clk/Dat delays scan...\n");
-    printf("-------------------------\n");
-
-    /* Loop on RX Clk delay */
-    printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-    for (rx_clk_delay=0; rx_clk_delay<16; rx_clk_delay++){
-        /* Loop on RX Dat delay */
-        printf(" %2d     |", rx_clk_delay);
-        for (rx_dat_delay=0; rx_dat_delay<16; rx_dat_delay++) {
-            /* Configure Clk/Dat delays */
-            m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
-
-            /* Small sleep to let PRBS synchronize */
-            mdelay(10);
-
-            /* Check PRBS checker synchronization */
-            printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
-        }
-        printf("\n");
+    if (bist_tx_tone) {
+        printf("BIST_TX_TONE_TEST...\n");
+        ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
     }
 
-    /* Configure RX Clk/Dat delays */
-    m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(RX_CLK_DELAY) | RX_DATA_DELAY(RX_DAT_DELAY));
-
-    /* Enable RX->TX AD9361 loopback */
-    ad9361_bist_loopback(ad9361_phy, 1);
-
-    /* Enable FPGA TX-PRBS */
-    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-
-    /* TX Clk/Dat delays scan */
-    printf("\n");
-    printf("TX Clk/Dat delays scan...\n");
-    printf("-------------------------\n");
-
-    /* Loop on TX Clk delay */
-    printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-    for (tx_clk_delay=0; tx_clk_delay<16; tx_clk_delay++){
-        /* Loop on TX Dat delay */
-        printf(" %2d     |", tx_clk_delay);
-        for (tx_dat_delay=0; tx_dat_delay<16; tx_dat_delay++) {
-            /* Configure Clk/Dat delays */
-            m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
-
-            /* Small sleep to let PRBS synchronize */
-            mdelay(10);
-
-            /* Check PRBS checker synchronization */
-            printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
-        }
-        printf("\n");
+    if (bist_rx_tone) {
+        printf("BIST_RX_TONE_TEST...\n");
+        ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
     }
 
-    /* Disable FPGA TX-PRBS */
-    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+    if (bist_prbs_test) {
+        int rx_clk_delay;
+        int rx_dat_delay;
+        int tx_clk_delay;
+        int tx_dat_delay;
+        printf("BIST_PRBS_TEST...\n");
 
-    /* Enable RX->TX AD9361 loopback */
-    ad9361_bist_loopback(ad9361_phy, 0);
+        /* Enable AD9361 RX-PRBS */
+        ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
 
-    /* Disable AD9361 RX-PRBS */
-    ad9361_bist_prbs(ad9361_phy, 0);
+        /* RX Clk/Dat delays scan */
+        printf("\n");
+        printf("RX Clk/Dat delays scan...\n");
+        printf("-------------------------\n");
 
-#endif
+        /* Loop on RX Clk delay */
+        printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
+        for (rx_clk_delay=0; rx_clk_delay<16; rx_clk_delay++){
+            /* Loop on RX Dat delay */
+            printf(" %2d     |", rx_clk_delay);
+            for (rx_dat_delay=0; rx_dat_delay<16; rx_dat_delay++) {
+                /* Configure Clk/Dat delays */
+                m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
+
+                /* Small sleep to let PRBS synchronize */
+                mdelay(10);
+
+                /* Check PRBS checker synchronization */
+                printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
+            }
+            printf("\n");
+        }
+
+        /* Configure RX Clk/Dat delays */
+        m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(RX_CLK_DELAY) | RX_DATA_DELAY(RX_DAT_DELAY));
+
+        /* Enable RX->TX AD9361 loopback */
+        ad9361_bist_loopback(ad9361_phy, 1);
+
+        /* Enable FPGA TX-PRBS */
+        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+
+        /* TX Clk/Dat delays scan */
+        printf("\n");
+        printf("TX Clk/Dat delays scan...\n");
+        printf("-------------------------\n");
+
+        /* Loop on TX Clk delay */
+        printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
+        for (tx_clk_delay=0; tx_clk_delay<16; tx_clk_delay++){
+            /* Loop on TX Dat delay */
+            printf(" %2d     |", tx_clk_delay);
+            for (tx_dat_delay=0; tx_dat_delay<16; tx_dat_delay++) {
+                /* Configure Clk/Dat delays */
+                m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
+
+                /* Small sleep to let PRBS synchronize */
+                mdelay(10);
+
+                /* Check PRBS checker synchronization */
+                printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
+            }
+            printf("\n");
+        }
+
+        /* Disable FPGA TX-PRBS */
+        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+
+        /* Enable RX->TX AD9361 loopback */
+        ad9361_bist_loopback(ad9361_phy, 0);
+
+        /* Disable AD9361 RX-PRBS */
+        ad9361_bist_prbs(ad9361_phy, 0);
+    }
 
     close(fd);
 }
@@ -286,6 +284,9 @@ static void help(void)
            "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
            "-rx_gain gain         Set the RX gain in dB (default=%d).\n"
            "-loopback enable      Set the internal loopback (JESD Deframer -> Framer) (default=%d).\n"
+           "-bist_tx_tone         Enable TX tone generation.\n"
+           "-bist_rx_tone         Enable RX tone generation.\n"
+           "-bist_prbs_test       Enable PRBS test.\n"
            "\n",
            DEFAULT_REFCLK_FREQ,
            DEFAULT_SAMPLERATE,
@@ -307,6 +308,9 @@ static struct option options[] = {
     { "tx_gain",          required_argument },        /*  6 */
     { "rx_gain",          required_argument },        /*  7 */
     { "loopback",         required_argument },        /*  8 */
+    { "bist_tx_tone",     no_argument },              /*  9 */
+    { "bist_rx_tone",     no_argument },              /* 10 */
+    { "bist_prbs_test",   no_argument },              /* 11 */
     { NULL },
 };
 
@@ -326,6 +330,9 @@ int main(int argc, char **argv)
     int64_t  tx_freq, rx_freq;
     int64_t  tx_gain, rx_gain;
     uint8_t  loopback;
+    bool     bist_tx_tone = false;
+    bool     bist_rx_tone = false;
+    bool     bist_prbs_test = false;
 
     refclk_freq  = DEFAULT_REFCLK_FREQ;
     samplerate   = DEFAULT_SAMPLERATE;
@@ -364,6 +371,15 @@ int main(int argc, char **argv)
                 case 8: /* loopback */
                     loopback = (uint8_t)strtod(optarg, NULL);
                     break;
+                case 9: /* bist_tx_tone */
+                    bist_tx_tone = true;
+                    break;
+                case 10: /* bist_rx_tone */
+                    bist_rx_tone = true;
+                    break;
+                case 11: /* bist_prbs_test */
+                    bist_prbs_test = true;
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -388,7 +404,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit);
+    m2sdr_init(samplerate, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test);
 
     return 0;
 }
