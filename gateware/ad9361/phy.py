@@ -27,9 +27,9 @@ def phy_layout():
         ("qb", 12)]
     return stream.EndpointDescription(layout)
 
-# RFICPHY ------------------------------------------------------------------------------------------
+# AD9361PHY ----------------------------------------------------------------------------------------
 
-class RFICPHY(LiteXModule):
+class AD9361PHY(LiteXModule):
     """7-Series AD9361 RFIC PHY
 
     This module implements a PHY for the AD9361 RFIC in LVDS mode on 7-series FPGAs. It supports

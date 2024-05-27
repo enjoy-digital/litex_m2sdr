@@ -12,9 +12,9 @@ from litex.gen import *
 
 from litex.soc.interconnect.csr import *
 
-# SPIMaster ----------------------------------------------------------------------------------------
+# AD9361 SPI Master --------------------------------------------------------------------------------
 
-class SPIMaster(LiteXModule):
+class AD9361SPIMaster(LiteXModule):
     """4-wire SPI Master
 
     This module implements a 4-wire SPI Master with CPOL=0 and CPHA=1. It supports configurable data
