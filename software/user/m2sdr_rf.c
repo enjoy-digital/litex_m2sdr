@@ -167,15 +167,6 @@ static void m2sdr_init(
     /* Configure AD9361 RX->TX Loopback */
     ad9361_bist_loopback(ad9361_phy, loopback);
 
-    /* Debug/Tests */
-    printf("SPI Register 0x010—Parallel Port Configuration 1: %08x\n", m2sdr_ad9361_spi_read(fd, 0x10));
-    printf("SPI Register 0x011—Parallel Port Configuration 2: %08x\n", m2sdr_ad9361_spi_read(fd, 0x11));
-    printf("SPI Register 0x012—Parallel Port Configuration 3: %08x\n", m2sdr_ad9361_spi_read(fd, 0x12));
-
-    printf("AD9361 Control: %08x\n", litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR));
-
-    litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-
     if (bist_tx_tone) {
         printf("BIST_TX_TONE_TEST...\n");
         ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
@@ -194,6 +185,7 @@ static void m2sdr_init(
         printf("BIST_PRBS_TEST...\n");
 
         /* Enable AD9361 RX-PRBS */
+        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
         ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
 
         /* RX Clk/Dat delays scan */
