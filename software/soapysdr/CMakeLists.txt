@@ -31,25 +31,6 @@ include_directories(${LITEPCIE_INCLUDE_DIR})
 
 
 ########################################################################
-## LMS7002MNG discovery
-########################################################################
-
-#message(STATUS "Looking for LMS7002MNG in ${LMS7002MNG_ROOT}...")
-#
-#find_path(LMS7002MNG_INCLUDE_DIR lms7002mNG/LMS7002M.h
-#          HINTS ${LMS7002MNG_ROOT}
-#          PATH_SUFFIXES include
-#          REQUIRED)
-#
-#find_library(LMS7002MNG_LIBRARY lms7002mNG
-#             HINTS ${LMS7002MNG_ROOT}
-#             PATH_SUFFIXES lib
-#             REQUIRED)
-#
-#include_directories(${LMS7002MNG_INCLUDE_DIR})
-
-
-########################################################################
 ## SoapySDR library
 ########################################################################
 
