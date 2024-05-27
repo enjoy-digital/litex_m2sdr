@@ -367,6 +367,35 @@ blocks:
     coordinate: [360, 516.0]
     rotation: 0
     state: enabled
+- name: qtgui_sink_x_0
+  id: qtgui_sink_x
+  parameters:
+    affinity: ''
+    alias: ''
+    bw: samp_rate
+    comment: ''
+    fc: '0'
+    fftsize: '1024'
+    gui_hint: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    name: '""'
+    plotconst: 'True'
+    plotfreq: 'True'
+    plottime: 'True'
+    plotwaterfall: 'True'
+    rate: '10'
+    showports: 'False'
+    showrf: 'False'
+    type: complex
+    wintype: window.WIN_BLACKMAN_hARRIS
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [760, 376.0]
+    rotation: 0
+    state: true
 - name: qtgui_time_sink_x_0
   id: qtgui_time_sink_x
   parameters:
@@ -632,6 +661,7 @@ connections:
 - [rational_resampler_xxx_0, '0', blocks_multiply_const_vxx_0, '0']
 - [soapy_custom_source_0, '0', low_pass_filter_0, '0']
 - [soapy_custom_source_0, '0', qtgui_freq_sink_x_0, '0']
+- [soapy_custom_source_0, '0', qtgui_sink_x_0, '0']
 - [soapy_custom_source_0, '0', qtgui_time_sink_x_0, '0']
 - [soapy_custom_source_0, '1', qtgui_freq_sink_x_0_0, '0']
 - [soapy_custom_source_0, '1', qtgui_time_sink_x_0_0, '0']
