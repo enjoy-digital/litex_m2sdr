@@ -69,18 +69,26 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     this->setMasterClockRate(64e6*2);
 
     // some defaults to avoid throwing
-    _cachedSampleRates[SOAPY_SDR_RX] = 1e6;
-    _cachedSampleRates[SOAPY_SDR_TX] = 1e6;
-    for (size_t i = 0; i < 2; i++) {
-        _cachedFreqValues[SOAPY_SDR_RX][i]["RF"] = 1e9;
-        _cachedFreqValues[SOAPY_SDR_TX][i]["RF"] = 1e9;
-        this->setAntenna(SOAPY_SDR_RX, i, "A_BALANCED");
-        this->setAntenna(SOAPY_SDR_TX, i, "A");
-        this->setBandwidth(SOAPY_SDR_RX, i, 2e6);
-        this->setBandwidth(SOAPY_SDR_TX, i, 2e6);
+    _cachedSampleRates[SOAPY_SDR_RX] = 30.72e6;
+    _cachedSampleRates[SOAPY_SDR_TX] = 30.72e6;
 
-        this->setGain(SOAPY_SDR_RX, 0, false);
-    }
+    /* TX/RX 1 */
+    _cachedFreqValues[SOAPY_SDR_RX][0]["RF"] = 1e9;
+    _cachedFreqValues[SOAPY_SDR_TX][0]["RF"] = 1e9;
+    this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
+    this->setAntenna(SOAPY_SDR_TX,   0, "A");
+    this->setBandwidth(SOAPY_SDR_RX, 0, 30.72e6);
+    this->setBandwidth(SOAPY_SDR_TX, 0, 30.72e6);
+
+    /* TX/RX 2 */
+    _cachedFreqValues[SOAPY_SDR_RX][1]["RF"] = 1e9;
+    _cachedFreqValues[SOAPY_SDR_TX][1]["RF"] = 1e9;
+    this->setAntenna(SOAPY_SDR_RX,   1, "B_BALANCED");
+    this->setAntenna(SOAPY_SDR_TX,   1, "B");
+    this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
+    this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
+
+    this->setGain(SOAPY_SDR_RX, 0, false);
 
     // set-up the DMA
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
