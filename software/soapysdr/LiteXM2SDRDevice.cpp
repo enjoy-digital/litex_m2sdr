@@ -83,12 +83,23 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* TX/RX 2 */
     _cachedFreqValues[SOAPY_SDR_RX][1]["RF"] = 1e9;
     _cachedFreqValues[SOAPY_SDR_TX][1]["RF"] = 1e9;
-    this->setAntenna(SOAPY_SDR_RX,   1, "B_BALANCED");
-    this->setAntenna(SOAPY_SDR_TX,   1, "B");
+    this->setAntenna(SOAPY_SDR_RX,   1, "A_BALANCED");
+    this->setAntenna(SOAPY_SDR_TX,   1, "A");
     this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
     this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
 
     this->setGain(SOAPY_SDR_RX, 0, false);
+    this->setGain(SOAPY_SDR_RX, 1, false);
+
+    this->setFrequency(SOAPY_SDR_RX, 0, "BB", 0.0);
+    this->setFrequency(SOAPY_SDR_RX, 0, "BB", 0.0);
+    this->setFrequency(SOAPY_SDR_TX, 1, "BB", 0.0);
+    this->setFrequency(SOAPY_SDR_TX, 1, "BB", 0.0);
+
+    this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
+    this->setIQBalance(SOAPY_SDR_RX, 1, 1.0);
+    this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
+    this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
 
     // set-up the DMA
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
@@ -153,6 +164,7 @@ void SoapyLiteXM2SDR::setAntenna(const int direction, const size_t channel,
 
 std::string SoapyLiteXM2SDR::getAntenna(const int direction,
                                   const size_t channel) const {
+    printf("here1");
     return _cachedAntValues.at(direction).at(channel);
 }
 
@@ -189,9 +201,11 @@ void SoapyLiteXM2SDR::setGain(int direction, size_t channel, const double value)
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLiteXM2SDR::setGain(%s, ch%d, %f dB)",
                    dir2Str(direction), channel, value);
 
-    if (SOAPY_SDR_TX == direction) {
-    } else {
-    }
+    _cachedFreqValues[direction][channel]["PGA"] = value;
+
+    //if (SOAPY_SDR_TX == direction) {
+    //} else {
+    //}
 }
 
 void SoapyLiteXM2SDR::setGain(const int direction, const size_t channel,
@@ -199,11 +213,17 @@ void SoapyLiteXM2SDR::setGain(const int direction, const size_t channel,
     std::lock_guard<std::mutex> lock(_mutex);
     SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLiteXM2SDR::setGain(%s, ch%d, %s, %f dB)",
                    dir2Str(direction), channel, name.c_str(), value);
+    _cachedFreqValues[direction][channel][name] = value;
 }
 
 double SoapyLiteXM2SDR::getGain(const int direction, const size_t channel,
                           const std::string &name) const {
-    return _cachedGainValues.at(direction).at(channel).at(name);
+
+    return 0;
+    printf("here2");
+    //printf("%lf", _cachedGainValues.at(direction).at(channel).at(name));
+    printf("here2.5");
+    //return _cachedGainValues.at(direction).at(channel).at(name);
 }
 
 SoapySDR::Range SoapyLiteXM2SDR::getGainRange(const int direction,
@@ -236,6 +256,7 @@ void SoapyLiteXM2SDR::setFrequency(const int direction, const size_t channel,
 
 double SoapyLiteXM2SDR::getFrequency(const int direction, const size_t channel,
                                const std::string &name) const {
+    printf("here3");
     return _cachedFreqValues.at(direction).at(channel).at(name);
 }
 
@@ -268,6 +289,7 @@ void SoapyLiteXM2SDR::setSampleRate(const int direction, const size_t channel,
 }
 
 double SoapyLiteXM2SDR::getSampleRate(const int direction, const size_t) const {
+    printf("here4");
     return _cachedSampleRates.at(direction);
 }
 
@@ -314,6 +336,7 @@ void SoapyLiteXM2SDR::setBandwidth(const int direction, const size_t channel,
 
 double SoapyLiteXM2SDR::getBandwidth(const int direction,
                                const size_t channel) const {
+    printf("here5");
     return _cachedFilterBws.at(direction).at(channel);
 }
 
