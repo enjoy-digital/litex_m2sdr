@@ -140,14 +140,10 @@ class AD9361RFIC(LiteXModule):
 
         # Data Flow --------------------------------------------------------------------------------
 
+        # TX.
+        # ---
         def _16b_sign_extend(data):
             return Cat(data, Replicate(data[-1], 16 - len(data)))
-
-        self.rx_pipeline = stream.Pipeline(
-            rx_cdc,
-            rx_buffer,
-            self.source
-        )
 
         self.tx_pipeline = stream.Pipeline(
             self.sink,
@@ -161,6 +157,22 @@ class AD9361RFIC(LiteXModule):
             self.phy.sink.ib.eq(tx_cdc.source.data[2*16:3*16]),
             self.phy.sink.qa.eq(tx_cdc.source.data[3*16:4*16]),
         ]
+
+
+        # RX.
+        # ---
+        self.comb += [
+            self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
+            rx_cdc.sink.data[0*16:1*16].eq(_16b_sign_extend(self.phy.source.ia)),
+            rx_cdc.sink.data[1*16:2*16].eq(_16b_sign_extend(self.phy.source.qa)),
+            rx_cdc.sink.data[2*16:3*16].eq(_16b_sign_extend(self.phy.source.ib)),
+            rx_cdc.sink.data[3*16:4*16].eq(_16b_sign_extend(self.phy.source.qb)),
+        ]
+        self.rx_pipeline = stream.Pipeline(
+            rx_cdc,
+            rx_buffer,
+            self.source
+        )
 
         # Config / Status --------------------------------------------------------------------------
         self.sync += [
