@@ -116,9 +116,6 @@ void gpio_set_value(unsigned gpio, int value)
 //#define BIST_RX_TONE
 //#define BIST_PRBS_TEST
 
-//#define X2_UP_DOWN_SAMPLING
-//#define X8_UP_DOWN_SAMPLING
-
 static void m2sdr_init(
     uint32_t samplerate,
     int64_t  refclk_freq,
@@ -179,14 +176,6 @@ static void m2sdr_init(
     printf("AD9361 Control: %08x\n", litepcie_readl(fd, CSR_AD9361_CONFIG_ADDR));
 
     litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-
-    litepcie_writel(fd, CSR_AD9361_SAMPLING_ADDR, (1 << 4) | (1 << 0));
-#ifdef X2_UP_DOWN_SAMPLING
-    litepcie_writel(fd, CSR_AD9361_SAMPLING_ADDR, (2 << 4) | (2 << 0));
-#endif
-#ifdef X8_UP_DOWN_SAMPLING
-    litepcie_writel(fd, CSR_AD9361_SAMPLING_ADDR, (8 << 4) | (8 << 0));
-#endif
 
 #ifdef BIST_TX_TONE
     printf("BIST_TX_TONE_TEST...\n");

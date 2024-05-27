@@ -17,8 +17,6 @@ from litepcie.common import *
 from gateware.ad9361.phy import AD9361PHY
 from gateware.ad9361.spi import AD9361SPIMaster
 
-from gateware.sampling import UpSampling, DownSampling
-
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
 class AD9361RFIC(LiteXModule):
@@ -61,10 +59,6 @@ class AD9361RFIC(LiteXModule):
                 ("``0b11111111``", "All status pins high"),
             ], description="AD9361's status pins")
         ])
-        self._sampling = CSRStorage(fields=[
-            CSRField("tx_ratio", size=4, offset=0, description="TX   Up-Sampling Ratio.", reset=1),
-            CSRField("rx_ratio", size=4, offset=4, description="RX Down-Sampling Ratio.", reset=1),
-        ])
 
         # # #
 
@@ -102,14 +96,6 @@ class AD9361RFIC(LiteXModule):
             with_common_rst = True
         )
 
-        # Up/Down-Sampling -------------------------------------------------------------------------
-        self.tx_upsampling   = tx_upsampling   = UpSampling()
-        self.rx_downsampling = rx_downsampling = DownSampling()
-        self.comb += [
-            self.tx_upsampling.ratio.eq(self._sampling.fields.tx_ratio),
-            self.rx_downsampling.ratio.eq(self._sampling.fields.rx_ratio),
-        ]
-
         # Buffers (For Timings) --------------------------------------------------------------------
         self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
@@ -124,7 +110,6 @@ class AD9361RFIC(LiteXModule):
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
-            tx_upsampling,
             tx_cdc,
         )
         self.comb += [
@@ -146,7 +131,6 @@ class AD9361RFIC(LiteXModule):
         ]
         self.rx_pipeline = stream.Pipeline(
             rx_cdc,
-            rx_downsampling,
             rx_buffer,
             self.source
         )
