@@ -1,4 +1,3 @@
-//
 // SoapySDR driver for the LiteX M2SDR.
 //
 // Copyright (c) 2021-2024 Enjoy Digital.
@@ -22,7 +21,10 @@
 
 #define MAX_DEVICES 8
 
-std::string readFPGAData(int fd, unsigned int baseAddr, size_t size) {
+std::string readFPGAData(
+    int fd,
+    unsigned int baseAddr,
+    size_t size) {
     std::string data(size, 0);
     for (size_t i = 0; i < size; i++)
         data[i] = static_cast<char>(litepcie_readl(fd, baseAddr + 4 * i));
@@ -41,12 +43,16 @@ std::string getLiteXM2SDRSerial(int fd) {
     return std::string(serial);
 }
 
-std::string generateDeviceLabel(const SoapySDR::Kwargs& dev, const std::string& path) {
+std::string generateDeviceLabel(
+    const SoapySDR::Kwargs &dev,
+    const std::string &path) {
     std::string serialTrimmed = dev.at("serial").substr(dev.at("serial").find_first_not_of('0'));
     return dev.at("device") + " " + path + " " + serialTrimmed + " " + dev.at("identification");
 }
 
-SoapySDR::Kwargs createDeviceKwargs(int fd, const std::string& path) {
+SoapySDR::Kwargs createDeviceKwargs(
+    int fd,
+    const std::string &path) {
     SoapySDR::Kwargs dev = {
         {"device",         "LiteX-M2SDR"},
         {"path",           path},
@@ -59,10 +65,11 @@ SoapySDR::Kwargs createDeviceKwargs(int fd, const std::string& path) {
     return dev;
 }
 
-std::vector<SoapySDR::Kwargs> findLiteXM2SDR(const SoapySDR::Kwargs &args) {
+std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
+    const SoapySDR::Kwargs &args) {
     std::vector<SoapySDR::Kwargs> discovered;
 
-    auto attemptToAddDevice = [&](const std::string& path) {
+    auto attemptToAddDevice = [&](const std::string &path) {
         int fd = open(path.c_str(), O_RDWR);
         if (fd < 0) return false;
         auto dev = createDeviceKwargs(fd, path);
@@ -90,14 +97,17 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(const SoapySDR::Kwargs &args) {
  * Make device instance
  **********************************************************************/
 
-SoapySDR::Device *makeLiteXM2SDR(const SoapySDR::Kwargs &args) {
+SoapySDR::Device *makeLiteXM2SDR(
+    const SoapySDR::Kwargs &args) {
     return new SoapyLiteXM2SDR(args);
 }
-
 
 /***********************************************************************
  * Registration
  **********************************************************************/
 
-static SoapySDR::Registry registerLiteXM2SDR("LiteXM2SDR", &findLiteXM2SDR, &makeLiteXM2SDR,
-                                       SOAPY_SDR_ABI_VERSION);
+static SoapySDR::Registry registerLiteXM2SDR(
+    "LiteXM2SDR",
+    &findLiteXM2SDR,
+    &makeLiteXM2SDR,
+    SOAPY_SDR_ABI_VERSION);
