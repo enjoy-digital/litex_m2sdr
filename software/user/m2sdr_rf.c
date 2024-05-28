@@ -144,7 +144,7 @@ static void m2sdr_init(
     default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
     default_init_param.gpio_cal_sw2 = -1;
-    ad9361_init(&ad9361_phy, &default_init_param);
+    ad9361_init(&ad9361_phy, &default_init_param, 1);
 
     /* Configure AD9361 Samplerate */
     ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);

@@ -74,7 +74,7 @@ extern struct gain_table_info ad9361_adi_gt_info[];
  * Note: This function will/may affect the data path.
  */
 int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
-		     AD9361_InitParam *init_param)
+		     AD9361_InitParam *init_param, int do_init)
 {
 	struct ad9361_rf_phy *phy;
 	int32_t ret = 0;
@@ -517,7 +517,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->bist_tone_level_dB = 0;
 	phy->bist_tone_mask = 0;
 
-	ad9361_reset(phy);
+	if (do_init)
+		ad9361_reset(phy);
 
 	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
@@ -531,18 +532,22 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->ad9361_rfpll_ext_round_rate = init_param->ad9361_rfpll_ext_round_rate;
 	phy->ad9361_rfpll_ext_set_rate = init_param->ad9361_rfpll_ext_set_rate;
 
-	ret = register_clocks(phy);
-	if (ret < 0)
-		goto out;
+	if (do_init) {
+		ret = register_clocks(phy);
+		if (ret < 0)
+			goto out;
+	}
 
 #ifndef AXI_ADC_NOT_PRESENT
 	axiadc_init(phy);
 	phy->adc_state->pcore_version = axiadc_read(phy->adc_state, ADI_REG_VERSION);
 #endif
 
-	ret = ad9361_setup(phy);
-	if (ret < 0)
-		goto out;
+	if (do_init) {
+		ret = ad9361_setup(phy);
+		if (ret < 0)
+			goto out;
+	}
 
 #ifndef AXI_ADC_NOT_PRESENT
 	/* platform specific wrapper to call ad9361_post_setup() */
