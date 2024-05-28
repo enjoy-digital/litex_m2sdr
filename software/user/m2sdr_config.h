@@ -289,7 +289,7 @@ AD9361_InitParam default_init_param = {
     /* Temperature Sensor Control */
     256,    //temp_sense_decimation *** adi,temp-sense-decimation
     1000,   //temp_sense_measurement_interval_ms *** adi,temp-sense-measurement-interval-ms
-    0xCE,   //temp_sense_offset_signed *** adi,temp-sense-offset-signed
+    (int8_t)0xCE, //temp_sense_offset_signed *** adi,temp-sense-offset-signed
     1,      //temp_sense_periodic_measurement_enable *** adi,temp-sense-periodic-measurement-enable
     /* Control Out Setup */
     0xFF,   //ctrl_outs_enable_mask *** adi,ctrl-outs-enable-mask
