@@ -20,6 +20,8 @@
  **********************************************************************/
 
 #define MAX_DEVICES 8
+#define LITEX_IDENTIFIER_SIZE 256
+#define LITEX_IDENTIFIER      "LiteX SoC on LiteX-M2SDR"
 
 std::string readFPGAData(
     int fd,
@@ -32,7 +34,7 @@ std::string readFPGAData(
 }
 
 std::string getLiteXM2SDRIdentification(int fd) {
-    return readFPGAData(fd, CSR_IDENTIFIER_MEM_BASE, 256);
+    return readFPGAData(fd, CSR_IDENTIFIER_MEM_BASE, LITEX_IDENTIFIER_SIZE);
 }
 
 std::string getLiteXM2SDRSerial(int fd) {
@@ -75,7 +77,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
         auto dev = createDeviceKwargs(fd, path);
         close(fd);
 
-        if (dev["identification"].find("LiteX SoC on LiteX-M2SDR") != std::string::npos) {
+        if (dev["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
             discovered.push_back(std::move(dev));
             return true;
         }
