@@ -1,4 +1,3 @@
-//
 // SoapySDR driver for the LiteX M2SDR.
 //
 // Copyright (c) 2021-2024 Enjoy Digital.
@@ -102,16 +101,16 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     if (_rx_stream.opened) {
         litepcie_release_dma(_fd, 0, 1);
 
-            munmap(_rx_stream.buf, _dma_mmap_info.dma_rx_buf_size *
-                                    _dma_mmap_info.dma_rx_buf_count);
+        munmap(_rx_stream.buf,
+               _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
         _rx_stream.opened = false;
     }
     if (_tx_stream.opened) {
         // release the DMA engine
         litepcie_release_dma(_fd, 1, 0);
 
-        munmap(_tx_stream.buf, _dma_mmap_info.dma_tx_buf_size *
-                                   _dma_mmap_info.dma_tx_buf_count);
+        munmap(_tx_stream.buf,
+               _dma_mmap_info.dma_tx_buf_size * _dma_mmap_info.dma_tx_buf_count);
         _tx_stream.opened = false;
     }
 
@@ -133,16 +132,19 @@ SoapySDR::Kwargs SoapyLiteXM2SDR::getHardwareInfo(void) const {
  *                                     Antenna API
  **************************************************************************************************/
 
-std::vector<std::string> SoapyLiteXM2SDR::listAntennas(const int direction,
-                                                 const size_t) const {
+std::vector<std::string> SoapyLiteXM2SDR::listAntennas(
+    const int direction,
+    const size_t) const {
     std::vector<std::string> ants;
     if(direction == SOAPY_SDR_RX) ants.push_back( "A_BALANCED" );
     if(direction == SOAPY_SDR_TX) ants.push_back( "A" );
     return ants;
 }
 
-void SoapyLiteXM2SDR::setAntenna(const int direction, const size_t channel,
-                           const std::string &name) {
+void SoapyLiteXM2SDR::setAntenna(
+    const int direction,
+    const size_t channel,
+    const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
     if (direction == SOAPY_SDR_RX) {
     }
@@ -151,8 +153,9 @@ void SoapyLiteXM2SDR::setAntenna(const int direction, const size_t channel,
     _cachedAntValues[direction][channel] = name;
 }
 
-std::string SoapyLiteXM2SDR::getAntenna(const int direction,
-                                  const size_t channel) const {
+std::string SoapyLiteXM2SDR::getAntenna(
+    const int direction,
+    const size_t channel) const {
     printf("here1");
     return _cachedAntValues.at(direction).at(channel);
 }
@@ -162,8 +165,9 @@ std::string SoapyLiteXM2SDR::getAntenna(const int direction,
  *                                 Frontend corrections API
  **************************************************************************************************/
 
-bool SoapyLiteXM2SDR::hasDCOffsetMode(const int /*direction*/,
-                                const size_t /*channel*/) const {
+bool SoapyLiteXM2SDR::hasDCOffsetMode(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
     return false;
 }
 
@@ -171,24 +175,32 @@ bool SoapyLiteXM2SDR::hasDCOffsetMode(const int /*direction*/,
  *                                           Gain API
  **************************************************************************************************/
 
-std::vector<std::string> SoapyLiteXM2SDR::listGains(const int /*direction*/,
-                                              const size_t) const {
+std::vector<std::string> SoapyLiteXM2SDR::listGains(
+    const int /*direction*/,
+    const size_t) const {
     std::vector<std::string> gains;
     gains.push_back("PGA");
     return gains;
 }
 
-bool SoapyLiteXM2SDR::hasGainMode(const int direction, const size_t /*channel*/) const
-{
+bool SoapyLiteXM2SDR::hasGainMode(
+    const int direction,
+    const size_t /*channel*/) const {
     if (direction == SOAPY_SDR_RX)
         return true;
     return false;
 }
 
-void SoapyLiteXM2SDR::setGain(int direction, size_t channel, const double value) {
+void SoapyLiteXM2SDR::setGain(
+    int direction,
+    size_t channel,
+    const double value) {
     std::lock_guard<std::mutex> lock(_mutex);
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLiteXM2SDR::setGain(%s, ch%d, %f dB)",
-                   dir2Str(direction), channel, value);
+    SoapySDR::logf(SOAPY_SDR_DEBUG,
+                   "SoapyLiteXM2SDR::setGain(%s, ch%d, %f dB)",
+                   dir2Str(direction),
+                   channel,
+                   value);
 
     _cachedFreqValues[direction][channel]["PGA"] = value;
 
@@ -197,16 +209,25 @@ void SoapyLiteXM2SDR::setGain(int direction, size_t channel, const double value)
     //}
 }
 
-void SoapyLiteXM2SDR::setGain(const int direction, const size_t channel,
-                        const std::string &name, const double value) {
+void SoapyLiteXM2SDR::setGain(
+    const int direction,
+    const size_t channel,
+    const std::string &name,
+    const double value) {
     std::lock_guard<std::mutex> lock(_mutex);
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "SoapyLiteXM2SDR::setGain(%s, ch%d, %s, %f dB)",
-                   dir2Str(direction), channel, name.c_str(), value);
+    SoapySDR::logf(SOAPY_SDR_DEBUG,
+                   "SoapyLiteXM2SDR::setGain(%s, ch%d, %s, %f dB)",
+                   dir2Str(direction),
+                   channel,
+                   name.c_str(),
+                   value);
     _cachedFreqValues[direction][channel][name] = value;
 }
 
-double SoapyLiteXM2SDR::getGain(const int direction, const size_t channel,
-                          const std::string &name) const {
+double SoapyLiteXM2SDR::getGain(
+    const int direction,
+    const size_t channel,
+    const std::string &name) const {
 
     return 0;
     printf("here2");
@@ -215,10 +236,11 @@ double SoapyLiteXM2SDR::getGain(const int direction, const size_t channel,
     //return _cachedGainValues.at(direction).at(channel).at(name);
 }
 
-SoapySDR::Range SoapyLiteXM2SDR::getGainRange(const int direction,
-                                        const size_t /*channel*/,
-                                        const std::string &/*name*/) const {
-	if(direction==SOAPY_SDR_RX)
+SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
+    const int direction,
+    const size_t /*channel*/,
+    const std::string &/*name*/) const {
+    if(direction==SOAPY_SDR_RX)
         return(SoapySDR::Range(0, 73));
     return(SoapySDR::Range(0,89));
 }
@@ -228,39 +250,51 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(const int direction,
  *                                     Frequency API
  **************************************************************************************************/
 
-void SoapyLiteXM2SDR::setFrequency(int direction, size_t channel, double frequency,
-                             const SoapySDR::Kwargs &args) {
+void SoapyLiteXM2SDR::setFrequency(
+    int direction,
+    size_t channel,
+    double frequency,
+    const SoapySDR::Kwargs &args) {
     setFrequency(direction, channel, "RF", frequency, args);
 }
 
-void SoapyLiteXM2SDR::setFrequency(const int direction, const size_t channel,
-                             const std::string &name, const double frequency,
-                             const SoapySDR::Kwargs &/*args*/) {
+void SoapyLiteXM2SDR::setFrequency(
+    const int direction,
+    const size_t channel,
+    const std::string &name,
+    const double frequency,
+    const SoapySDR::Kwargs &/*args*/) {
     std::unique_lock<std::mutex> lock(_mutex);
 
     SoapySDR::logf(SOAPY_SDR_DEBUG,
                    "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s, %f MHz)",
-                   dir2Str(direction), channel, name.c_str(), frequency / 1e6);
+                   dir2Str(direction),
+                   channel,
+                   name.c_str(),
+                   frequency / 1e6);
 }
 
-double SoapyLiteXM2SDR::getFrequency(const int direction, const size_t channel,
-                               const std::string &name) const {
+double SoapyLiteXM2SDR::getFrequency(
+    const int direction,
+    const size_t channel,
+    const std::string &name) const {
     printf("here3");
     return _cachedFreqValues.at(direction).at(channel).at(name);
 }
 
-std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(const int /*direction*/,
-                                                    const size_t /*channel*/) const {
+std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
     std::vector<std::string> opts;
     opts.push_back("RF");
     return opts;
 }
 
-SoapySDR::RangeList
-SoapyLiteXM2SDR::getFrequencyRange(const int /*direction*/, const size_t /*channel*/,
-                             const std::string &/*name*/) const
-{
-	return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
+SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
+    const int /*direction*/,
+    const size_t /*channel*/,
+    const std::string &/*name*/) const {
+    return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
 }
 
 
@@ -268,42 +302,50 @@ SoapyLiteXM2SDR::getFrequencyRange(const int /*direction*/, const size_t /*chann
  *                                        Sample Rate API
  **************************************************************************************************/
 
-void SoapyLiteXM2SDR::setSampleRate(const int direction, const size_t channel,
-                              const double rate) {
+void SoapyLiteXM2SDR::setSampleRate(
+    const int direction,
+    const size_t channel,
+    const double rate) {
     std::lock_guard<std::mutex> lock(_mutex);
     std::string dirName ((direction == SOAPY_SDR_RX) ? "Rx" : "Tx");
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "setSampleRate(%s, %ld, %g MHz)", dirName, channel, rate / 1e6);
+    SoapySDR::logf(SOAPY_SDR_DEBUG,
+                   "setSampleRate(%s, %ld, %g MHz)",
+                   dirName,
+                   channel,
+                   rate / 1e6);
 
     _cachedSampleRates[direction] = rate;
 }
 
-double SoapyLiteXM2SDR::getSampleRate(const int direction, const size_t) const {
+double SoapyLiteXM2SDR::getSampleRate(
+    const int direction,
+    const size_t) const {
     printf("here4");
     return _cachedSampleRates.at(direction);
 }
 
-std::vector<double> SoapyLiteXM2SDR::listSampleRates(const int /*direction*/,
-		const size_t /*channel*/) const
-{
+std::vector<double> SoapyLiteXM2SDR::listSampleRates(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
     std::vector<double> options;
 
     options.push_back(65105);//25M/48/8+1
-	for (int i = 0; i <= 10; i++)
-    	options.push_back(static_cast<double>(i) * 1e6);
+    for (int i = 0; i <= 10; i++)
+        options.push_back(static_cast<double>(i) * 1e6);
     return(options);
 }
 
-SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(const int ,
-                                               const size_t) const
-{
-	SoapySDR::RangeList results;
+SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
+    const int,
+    const size_t) const {
+    SoapySDR::RangeList results;
     results.push_back(SoapySDR::Range(25e6 / 96, 61440000));
-	return results;
+    return results;
 }
 
-std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(const int /*direction*/,
-                                                     const size_t /*channel*/) const
-{
+std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
     std::vector<std::string> formats;
     formats.push_back(SOAPY_SDR_CS16);
     formats.push_back(SOAPY_SDR_CF32);
@@ -314,8 +356,10 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(const int /*direction
  *                                        BW filter API
  **************************************************************************************************/
 
-void SoapyLiteXM2SDR::setBandwidth(const int direction, const size_t channel,
-                             const double bw) {
+void SoapyLiteXM2SDR::setBandwidth(
+    const int direction,
+    const size_t channel,
+    const double bw) {
     if (bw == 0.0)
         return;
     double &actualBw = _cachedFilterBws[direction][channel];
@@ -323,18 +367,20 @@ void SoapyLiteXM2SDR::setBandwidth(const int direction, const size_t channel,
     actualBw = lpf;
 }
 
-double SoapyLiteXM2SDR::getBandwidth(const int direction,
-                               const size_t channel) const {
+double SoapyLiteXM2SDR::getBandwidth(
+    const int direction,
+    const size_t channel) const {
     printf("here5");
     return _cachedFilterBws.at(direction).at(channel);
 }
 
-std::vector<double> SoapyLiteXM2SDR::listBandwidths(const int /*direction*/,
-                                              const size_t) const {
+std::vector<double> SoapyLiteXM2SDR::listBandwidths(
+    const int /*direction*/,
+    const size_t) const {
     std::vector<double> bws;
-	bws.push_back(0.2e6);
-	for (int i = 1; i < 11; i++)
-		bws.push_back(static_cast<double>(i) * 1e6);
+    bws.push_back(0.2e6);
+    for (int i = 1; i < 11; i++)
+        bws.push_back(static_cast<double>(i) * 1e6);
 
     return bws;
 }
@@ -344,26 +390,33 @@ std::vector<double> SoapyLiteXM2SDR::listBandwidths(const int /*direction*/,
  *                                        Clocking API
  **************************************************************************************************/
 
-double SoapyLiteXM2SDR::getTSPRate(const int direction) const {
+double SoapyLiteXM2SDR::getTSPRate(
+    const int direction) const {
     return (direction == SOAPY_SDR_TX) ? _masterClockRate
                                        : _masterClockRate / 4;
 }
 
-void SoapyLiteXM2SDR::setMasterClockRate(const double rate) {
+void SoapyLiteXM2SDR::setMasterClockRate(
+    const double rate) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     _masterClockRate = rate;
-    SoapySDR::logf(SOAPY_SDR_TRACE, "LMS7002M_set_data_clock(%f MHz) -> %f MHz",
-                   rate / 1e6, _masterClockRate / 1e6);
+    SoapySDR::logf(SOAPY_SDR_TRACE,
+                   "LMS7002M_set_data_clock(%f MHz) -> %f MHz",
+                   rate / 1e6,
+                   _masterClockRate / 1e6);
 }
 
-double SoapyLiteXM2SDR::getMasterClockRate(void) const { return _masterClockRate; }
+double SoapyLiteXM2SDR::getMasterClockRate(void) const {
+    return _masterClockRate;
+}
 
 /*!
  * Set the reference clock rate of the device.
  * \param rate the clock rate in Hz
  */
-void SoapyLiteXM2SDR::setReferenceClockRate(const double rate) {
+void SoapyLiteXM2SDR::setReferenceClockRate(
+    const double rate) {
     _refClockRate = rate;
 }
 
@@ -371,7 +424,9 @@ void SoapyLiteXM2SDR::setReferenceClockRate(const double rate) {
  * Get the reference clock rate of the device.
  * \return the clock rate in Hz
  */
-double SoapyLiteXM2SDR::getReferenceClockRate(void) const { return _refClockRate; }
+double SoapyLiteXM2SDR::getReferenceClockRate(void) const {
+    return _refClockRate;
+}
 
 /*!
  * Get the range of available reference clock rates.
@@ -383,8 +438,6 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getReferenceClockRates(void) const {
     ranges.push_back(SoapySDR::Range(25e6, 27e6));
     return ranges;
 }
-
-
 
 /*!
  * Get the list of available clock sources.
@@ -401,8 +454,9 @@ std::vector<std::string> SoapyLiteXM2SDR::listClockSources(void) const {
  * Set the clock source on the device
  * \param source the name of a clock source
  */
-void SoapyLiteXM2SDR::setClockSource(const std::string &source) {
-	(void)source;
+void SoapyLiteXM2SDR::setClockSource(
+    const std::string &source) {
+    (void)source;
 }
 
 /*!
@@ -410,7 +464,7 @@ void SoapyLiteXM2SDR::setClockSource(const std::string &source) {
  * \return the name of a clock source
  */
 std::string SoapyLiteXM2SDR::getClockSource(void) const {
-	return "internal";
+    return "internal";
 }
 
 /***************************************************************************************************
@@ -428,7 +482,8 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     return sensors;
 }
 
-SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(const std::string &key) const {
+SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
+    const std::string &key) const {
     SoapySDR::ArgInfo info;
 
     std::size_t dash = key.find("_");
@@ -477,7 +532,8 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(const std::string &key) const {
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
 }
 
-std::string SoapyLiteXM2SDR::readSensor(const std::string &key) const {
+std::string SoapyLiteXM2SDR::readSensor(
+    const std::string &key) const {
     std::string sensorValue;
 
     std::size_t dash = key.find("_");
