@@ -44,6 +44,10 @@
 #include <stdint.h>
 #include "common.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /******************************************************************************/
 /********************** Macros and Constants Definitions **********************/
 /******************************************************************************/
@@ -3541,4 +3545,8 @@ int32_t ad9361_get_temp(struct ad9361_rf_phy *phy);
 int ad9361_synth_lo_powerdown(struct ad9361_rf_phy *phy,
 			      enum synth_pd_ctrl rx,
 			      enum synth_pd_ctrl tx);
+
+#ifdef __cplusplus
+}
+#endif
 #endif
