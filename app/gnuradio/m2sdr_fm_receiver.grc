@@ -100,7 +100,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: int(8e6)
+    value: int(16e6)
   states:
     bus_sink: false
     bus_source: false
@@ -628,7 +628,7 @@ blocks:
     dc_offset1: '0'
     dc_removal0: 'False'
     dc_removal1: 'False'
-    dev_args: ''
+    dev_args: bypass_init=1
     driver: LiteXM2SDR
     freq_correction0: '0'
     freq_correction1: '0'
@@ -668,3 +668,4 @@ connections:
 
 metadata:
   file_format: 1
+  grc_version: 3.10.10.0
