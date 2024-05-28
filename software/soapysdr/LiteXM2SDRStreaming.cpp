@@ -1,4 +1,3 @@
-//
 // SoapySDR driver for the LiteX M2SDR.
 //
 // Copyright (c) 2021-2024 Enjoy Digital.
@@ -17,10 +16,11 @@
 #include "LiteXM2SDRDevice.hpp"
 
 /* Setup and configure a stream for RX or TX. */
-SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(const int direction,
-                                              const std::string &format,
-                                              const std::vector<size_t> &channels,
-                                              const SoapySDR::Kwargs &/*args*/) {
+SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
+    const int direction,
+    const std::string &format,
+    const std::vector<size_t> &channels,
+    const SoapySDR::Kwargs &/*args*/) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (direction == SOAPY_SDR_RX) {
@@ -38,10 +38,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(const int direction,
         }
 
         /* Memory-map the DMA buffers. */
-        _rx_stream.buf = mmap(NULL,
-                              _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size,
-                              PROT_READ | PROT_WRITE, MAP_SHARED, _fd,
-                              _dma_mmap_info.dma_rx_buf_offset);
+        _rx_stream.buf = mmap(
+            NULL,
+            _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size,
+            PROT_READ | PROT_WRITE, MAP_SHARED, _fd,
+            _dma_mmap_info.dma_rx_buf_offset);
         if (_rx_stream.buf == MAP_FAILED) {
             throw std::runtime_error("MMAP failed.");
         }
@@ -75,10 +76,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(const int direction,
         }
 
         /* Memory-map the DMA buffers. */
-        _tx_stream.buf = mmap(NULL,
-                              _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size,
-                              PROT_WRITE, MAP_SHARED, _fd,
-                              _dma_mmap_info.dma_tx_buf_offset);
+        _tx_stream.buf = mmap(
+            NULL,
+            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size,
+            PROT_WRITE, MAP_SHARED, _fd,
+            _dma_mmap_info.dma_tx_buf_offset);
         if (_tx_stream.buf == MAP_FAILED) {
             throw std::runtime_error("MMAP failed.");
         }
@@ -110,23 +112,27 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 0, 1);
 
-        munmap(_rx_stream.buf,
-               _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
+        munmap(
+            _rx_stream.buf,
+            _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
 
-        munmap(_tx_stream.buf,
-               _dma_mmap_info.dma_tx_buf_size * _dma_mmap_info.dma_tx_buf_count);
+        munmap(
+            _tx_stream.buf,
+            _dma_mmap_info.dma_tx_buf_size * _dma_mmap_info.dma_tx_buf_count);
         _tx_stream.opened = false;
     }
 }
 
 /* Activate the specified stream (enable DMA engine). */
-int SoapyLiteXM2SDR::activateStream(SoapySDR::Stream *stream, const int /*flags*/,
-                                   const long long /*timeNs*/,
-                                   const size_t /*numElems*/) {
+int SoapyLiteXM2SDR::activateStream(
+    SoapySDR::Stream *stream,
+    const int /*flags*/,
+    const long long /*timeNs*/,
+    const size_t /*numElems*/) {
     if (stream == RX_STREAM) {
         /* Enable the DMA engine for RX. */
         litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
@@ -141,8 +147,10 @@ int SoapyLiteXM2SDR::activateStream(SoapySDR::Stream *stream, const int /*flags*
 }
 
 /* Deactivate the specified stream (disable DMA engine). */
-int SoapyLiteXM2SDR::deactivateStream(SoapySDR::Stream *stream, const int /*flags*/,
-                                     const long long /*timeNs*/) {
+int SoapyLiteXM2SDR::deactivateStream(
+    SoapySDR::Stream *stream,
+    const int /*flags*/,
+    const long long /*timeNs*/) {
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
@@ -181,8 +189,10 @@ size_t SoapyLiteXM2SDR::getNumDirectAccessBuffers(SoapySDR::Stream *stream) {
 }
 
 /* Retrieve buffer addresses for a direct access buffer. */
-int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
-                                               const size_t handle, void **buffs) {
+int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
+    SoapySDR::Stream *stream,
+    const size_t handle,
+    void **buffs) {
     if (stream == RX_STREAM) {
         buffs[0] = (char *)_rx_stream.buf + handle * _dma_mmap_info.dma_rx_buf_size;
     } else if (stream == TX_STREAM) {
@@ -217,9 +227,13 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(SoapySDR::Stream *stream,
 #define DETECT_EVERY_UNDERFLOW true  /* Detect underflow every time it occurs. */
 
 /* Acquire a buffer for reading. */
-int SoapyLiteXM2SDR::acquireReadBuffer(SoapySDR::Stream *stream, size_t &handle,
-                                      const void **buffs, int &flags,
-                                      long long &/*timeNs*/, const long timeoutUs) {
+int SoapyLiteXM2SDR::acquireReadBuffer(
+    SoapySDR::Stream *stream,
+    size_t &handle,
+    const void **buffs,
+    int &flags,
+    long long &/*timeNs*/,
+    const long timeoutUs) {
     if (stream != RX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
     }
@@ -280,7 +294,9 @@ int SoapyLiteXM2SDR::acquireReadBuffer(SoapySDR::Stream *stream, size_t &handle,
 }
 
 /* Release a read buffer after use. */
-void SoapyLiteXM2SDR::releaseReadBuffer(SoapySDR::Stream */*stream*/, size_t handle) {
+void SoapyLiteXM2SDR::releaseReadBuffer(
+    SoapySDR::Stream */*stream*/,
+    size_t handle) {
     assert(handle != (size_t)-1 && "Attempt to release an invalid buffer (e.g., from an overflow).");
 
     /* Update the DMA counters. */
@@ -290,8 +306,11 @@ void SoapyLiteXM2SDR::releaseReadBuffer(SoapySDR::Stream */*stream*/, size_t han
 }
 
 /* Acquire a buffer for writing. */
-int SoapyLiteXM2SDR::acquireWriteBuffer(SoapySDR::Stream *stream, size_t &handle,
-                                       void **buffs, const long timeoutUs) {
+int SoapyLiteXM2SDR::acquireWriteBuffer(
+    SoapySDR::Stream *stream,
+    size_t &handle,
+    void **buffs,
+    const long timeoutUs) {
     if (stream != TX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
     }
@@ -342,9 +361,12 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(SoapySDR::Stream *stream, size_t &handle
 }
 
 /* Release a write buffer after use. */
-void SoapyLiteXM2SDR::releaseWriteBuffer(SoapySDR::Stream */*stream*/, size_t handle,
-                                        const size_t /*numElems*/, int &/*flags*/,
-                                        const long long /*timeNs*/) {
+void SoapyLiteXM2SDR::releaseWriteBuffer(
+    SoapySDR::Stream */*stream*/,
+    size_t handle,
+    const size_t /*numElems*/,
+    int &/*flags*/,
+    const long long /*timeNs*/) {
     /* XXX: Inspect user-provided numElems and flags, and act upon them? */
 
     /* Update the DMA counters so that the engine can submit this buffer. */
@@ -354,7 +376,11 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(SoapySDR::Stream */*stream*/, size_t ha
 }
 
 /* Interleave CS16 samples. */
-void interleaveCS16(const int16_t *src, int8_t *dst, uint32_t len, size_t offset) {
+void interleaveCS16(
+    const int16_t *src,
+    int8_t *dst,
+    uint32_t len,
+    size_t offset) {
     int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 4);
     const int16_t *samples_cs16 = src + (offset * BYTES_PER_SAMPLE);
     for (uint32_t i = 0; i < len; i++) {
@@ -366,7 +392,11 @@ void interleaveCS16(const int16_t *src, int8_t *dst, uint32_t len, size_t offset
 }
 
 /* Interleave CF32 samples. */
-void interleaveCF32(const float *src, int8_t *dst, uint32_t len, size_t offset) {
+void interleaveCF32(
+    const float *src,
+    int8_t *dst,
+    uint32_t len,
+    size_t offset) {
     int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 4);
     const float *samples_cf32 = src + (offset * BYTES_PER_SAMPLE);
     for (uint32_t i = 0; i < len; i++) {
@@ -378,7 +408,12 @@ void interleaveCF32(const float *src, int8_t *dst, uint32_t len, size_t offset) 
 }
 
 /* Generic interleave function. */
-void interleave(const void *src, void *dst, uint32_t len, const std::string &format, size_t offset) {
+void interleave(
+    const void *src,
+    void *dst,
+    uint32_t len,
+    const std::string &format,
+    size_t offset) {
     if (format == SOAPY_SDR_CS16) {
         interleaveCS16(reinterpret_cast<const int16_t*>(src), reinterpret_cast<int8_t*>(dst), len, offset);
     } else if (format == SOAPY_SDR_CF32) {
@@ -389,7 +424,11 @@ void interleave(const void *src, void *dst, uint32_t len, const std::string &for
 }
 
 /* Deinterleave CS16 samples. */
-void deinterleaveCS16(const int8_t *src, int16_t *dst, uint32_t len, size_t offset) {
+void deinterleaveCS16(
+    const int8_t *src,
+    int16_t *dst,
+    uint32_t len,
+    size_t offset) {
     int16_t *samples_cs16 = dst + (offset * BYTES_PER_SAMPLE);
     const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
     for (uint32_t i = 0; i < len; i++) {
@@ -401,7 +440,11 @@ void deinterleaveCS16(const int8_t *src, int16_t *dst, uint32_t len, size_t offs
 }
 
 /* Deinterleave CF32 samples. */
-void deinterleaveCF32(const int8_t *src, float *dst, uint32_t len, size_t offset) {
+void deinterleaveCF32(
+    const int8_t *src,
+    float *dst,
+    uint32_t len,
+    size_t offset) {
     float *samples_cf32 = dst + (offset * BYTES_PER_SAMPLE);
     const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
     for (uint32_t i = 0; i < len; i++) {
@@ -413,7 +456,12 @@ void deinterleaveCF32(const int8_t *src, float *dst, uint32_t len, size_t offset
 }
 
 /* Generic deinterleave function. */
-void deinterleave(const void *src, void *dst, uint32_t len, const std::string &format, size_t offset) {
+void deinterleave(
+    const void *src,
+    void *dst,
+    uint32_t len,
+    const std::string &format,
+    size_t offset) {
     if (format == SOAPY_SDR_CS16) {
         deinterleaveCS16(reinterpret_cast<const int8_t*>(src), reinterpret_cast<int16_t*>(dst), len, offset);
     } else if (format == SOAPY_SDR_CF32) {
@@ -424,12 +472,13 @@ void deinterleave(const void *src, void *dst, uint32_t len, const std::string &f
 }
 
 /* Read from the RX stream. */
-int SoapyLiteXM2SDR::readStream(SoapySDR::Stream *stream,
-                               void *const *buffs,
-                               const size_t numElems,
-                               int &flags,
-                               long long &timeNs,
-                               const long timeoutUs) {
+int SoapyLiteXM2SDR::readStream(
+    SoapySDR::Stream *stream,
+    void *const *buffs,
+    const size_t numElems,
+    int &flags,
+    long long &timeNs,
+    const long timeoutUs) {
     if (stream != RX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
@@ -471,7 +520,13 @@ int SoapyLiteXM2SDR::readStream(SoapySDR::Stream *stream,
 
     /* Acquire a new read buffer from the DMA engine. */
     size_t handle;
-    int ret = this->acquireReadBuffer(stream, handle, (const void **)&_rx_stream.remainderBuff, flags, timeNs, timeoutUs);
+    int ret = this->acquireReadBuffer(
+        stream,
+        handle,
+        (const void **)&_rx_stream.remainderBuff,
+        flags,
+        timeNs,
+        timeoutUs);
 
     if (ret < 0) {
         if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
@@ -504,12 +559,13 @@ int SoapyLiteXM2SDR::readStream(SoapySDR::Stream *stream,
 }
 
 /* Write to the TX stream. */
-int SoapyLiteXM2SDR::writeStream(SoapySDR::Stream *stream,
-                                const void *const *buffs,
-                                const size_t numElems,
-                                int &flags,
-                                const long long timeNs,
-                                const long timeoutUs) {
+int SoapyLiteXM2SDR::writeStream(
+    SoapySDR::Stream *stream,
+    const void *const *buffs,
+    const size_t numElems,
+    int &flags,
+    const long long timeNs,
+    const long timeoutUs) {
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
@@ -551,7 +607,11 @@ int SoapyLiteXM2SDR::writeStream(SoapySDR::Stream *stream,
     /* Acquire a new write buffer from the DMA engine. */
     size_t handle;
 
-    int ret = this->acquireWriteBuffer(stream, handle, (void **)&_tx_stream.remainderBuff, timeoutUs);
+    int ret = this->acquireWriteBuffer(
+        stream,
+        handle,
+        (void **)&_tx_stream.remainderBuff,
+        timeoutUs);
     if (ret < 0) {
         if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
             return samp_avail;
