@@ -114,80 +114,81 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
 
-    /* Initialize Si531 Clocking */
-    m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+    bool do_init = true;
+    if (args.count("bypass_init") != 0) {
+        //do_init = !args.at("bypass_init");
+        std::cout << args.at("bypass_init")[0] << std::endl;
+        do_init = args.at("bypass_init")[0] == '0';
+    }
+    do_init = true;
+    if (do_init) {
+        /* Initialize Si531 Clocking */
+        m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
 
-    /* Initialize AD9361 SPI */
-    m2sdr_ad9361_spi_init(_fd);
+        /* Initialize AD9361 SPI */
+        m2sdr_ad9361_spi_init(_fd);
+    }
 
     /* Initialize AD9361 RFIC */
     default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
     default_init_param.gpio_cal_sw2 = -1;
-    ad9361_init(&ad9361_phy, &default_init_param);
+    ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
-    /* Configure AD9361 Samplerate */
-    //ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
+    if (do_init) {
+        /* Configure AD9361 Samplerate */
+        //ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
 
-    ///* Configure AD9361 TX/RX Frequencies */
-    //ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
-    //ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
+        ///* Configure AD9361 TX/RX Frequencies */
+        //ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
+        //ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
 
-    ///* Configure AD9361 TX/RX FIRs */
-    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+        /* Configure AD9361 TX/RX FIRs */
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
-    ///* Configure AD9361 TX Attenuation */
-    //ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
+        ///* Configure AD9361 TX Attenuation */
+        //ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
 
-    ///* Configure AD9361 RX Gain */
-    //ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
-    //ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
+        ///* Configure AD9361 RX Gain */
+        //ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
+        //ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
 
-    ///* Configure AD9361 RX->TX Loopback */
-    //ad9361_bist_loopback(ad9361_phy, loopback);
+        ///* Configure AD9361 RX->TX Loopback */
+        //ad9361_bist_loopback(ad9361_phy, loopback);
 
+        // set clock to Internal Reference Clock
+        this->setClockSource("internal");
 
+        this->setMasterClockRate(64e6*2);
 
+        // some defaults to avoid throwing
+        setSampleRate(SOAPY_SDR_TX, 0, 30.72e6);
+        setSampleRate(SOAPY_SDR_RX, 0, 30.72e6);
 
-    // set clock to Internal Reference Clock
-    this->setClockSource("internal");
+        /* TX/RX 1 */
+        this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
+        this->setAntenna(SOAPY_SDR_TX,   0, "A");
+        this->setFrequency(SOAPY_SDR_RX, 0, "BB", 1e6);
+        this->setFrequency(SOAPY_SDR_TX, 0, "BB", 1e6);
+        this->setBandwidth(SOAPY_SDR_RX, 0, 30.72e6);
+        this->setBandwidth(SOAPY_SDR_TX, 0, 30.72e6);
+        this->setGain(SOAPY_SDR_RX, 0, false);
+        this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
+        this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
 
-    this->setMasterClockRate(64e6*2);
-
-    // some defaults to avoid throwing
-    _cachedSampleRates[SOAPY_SDR_RX] = 30.72e6;
-    _cachedSampleRates[SOAPY_SDR_TX] = 30.72e6;
-
-    /* TX/RX 1 */
-    _cachedFreqValues[SOAPY_SDR_RX][0]["RF"] = 1e9;
-    _cachedFreqValues[SOAPY_SDR_TX][0]["RF"] = 1e9;
-    this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
-    this->setAntenna(SOAPY_SDR_TX,   0, "A");
-    this->setBandwidth(SOAPY_SDR_RX, 0, 30.72e6);
-    this->setBandwidth(SOAPY_SDR_TX, 0, 30.72e6);
-
-    /* TX/RX 2 */
-    _cachedFreqValues[SOAPY_SDR_RX][1]["RF"] = 1e9;
-    _cachedFreqValues[SOAPY_SDR_TX][1]["RF"] = 1e9;
-    this->setAntenna(SOAPY_SDR_RX,   1, "A_BALANCED");
-    this->setAntenna(SOAPY_SDR_TX,   1, "A");
-    this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
-    this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
-
-    this->setGain(SOAPY_SDR_RX, 0, false);
-    this->setGain(SOAPY_SDR_RX, 1, false);
-
-    this->setFrequency(SOAPY_SDR_RX, 0, "BB", 0.0);
-    this->setFrequency(SOAPY_SDR_RX, 0, "BB", 0.0);
-    this->setFrequency(SOAPY_SDR_TX, 1, "BB", 0.0);
-    this->setFrequency(SOAPY_SDR_TX, 1, "BB", 0.0);
-
-    this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
-    this->setIQBalance(SOAPY_SDR_RX, 1, 1.0);
-    this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
-    this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
+        /* TX/RX 2 */
+        this->setAntenna(SOAPY_SDR_RX,   1, "A_BALANCED");
+        this->setAntenna(SOAPY_SDR_TX,   1, "A");
+        this->setFrequency(SOAPY_SDR_RX, 1, "BB", 1e6);
+        this->setFrequency(SOAPY_SDR_TX, 1, "BB", 1e6);
+        this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
+        this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
+        this->setGain(SOAPY_SDR_RX, 1, false);
+        this->setIQBalance(SOAPY_SDR_RX, 1, 1.0);
+        this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
+    }
 
     // set-up the DMA
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
@@ -323,7 +324,7 @@ void SoapyLiteXM2SDR::setGain(
                    channel,
                    name.c_str(),
                    value);
-    _cachedFreqValues[direction][channel][name] = value;
+    setGain(direction, channel, value);
 }
 
 double SoapyLiteXM2SDR::getGain(
@@ -331,11 +332,13 @@ double SoapyLiteXM2SDR::getGain(
     const size_t channel,
     const std::string &name) const {
 
-    return 0;
-    printf("here2");
-    //printf("%lf", _cachedGainValues.at(direction).at(channel).at(name));
-    printf("here2.5");
-    //return _cachedGainValues.at(direction).at(channel).at(name);
+    int32_t gain = 0;
+    if (direction == SOAPY_SDR_TX) {
+    } else {
+        gain = ad9361_get_rx_rf_gain(ad9361_phy, channel, &gain);
+    }
+
+    return static_cast<double>(gain);
 }
 
 SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
@@ -374,20 +377,28 @@ void SoapyLiteXM2SDR::setFrequency(
                    channel,
                    name.c_str(),
                    frequency / 1e6);
-    if (direction == SOAPY_SDR_RX) {
-        ad9361_set_rx_lo_freq(ad9361_phy, frequency);
-    } else {
-        ad9361_set_rx_lo_freq(ad9361_phy, frequency);
-    }
     _cachedFreqValues[direction][channel][name] = frequency;
+
+    uint64_t lo_freq = static_cast<uint64_t>(frequency);
+
+    if (direction == SOAPY_SDR_RX)
+        ad9361_set_rx_lo_freq(ad9361_phy, lo_freq);
+    else
+        ad9361_set_tx_lo_freq(ad9361_phy, lo_freq);
 }
 
 double SoapyLiteXM2SDR::getFrequency(
     const int direction,
     const size_t channel,
-    const std::string &name) const {
-    printf("here3");
-    return _cachedFreqValues.at(direction).at(channel).at(name);
+    const std::string &/*name*/) const {
+    uint64_t lo_freq;
+
+    if (direction == SOAPY_SDR_RX)
+        ad9361_get_rx_lo_freq(ad9361_phy, &lo_freq);
+    else
+        ad9361_get_tx_lo_freq(ad9361_phy, &lo_freq);
+
+    return static_cast<double>(lo_freq);
 }
 
 std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
@@ -422,15 +433,14 @@ void SoapyLiteXM2SDR::setSampleRate(
                    channel,
                    rate / 1e6);
 
-    ad9361_set_trx_clock_chain_freq(ad9361_phy, rate);
     _cachedSampleRates[SOAPY_SDR_RX] = rate;
     _cachedSampleRates[SOAPY_SDR_TX] = rate;
+    ad9361_set_trx_clock_chain_freq(ad9361_phy, rate);
 }
 
 double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
-    printf("here4");
     return _cachedSampleRates.at(direction);
 }
 
