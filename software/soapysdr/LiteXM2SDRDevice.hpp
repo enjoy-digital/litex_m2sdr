@@ -328,6 +328,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     }
 
     int _fd;
+	struct ad9361_rf_phy *ad9361_phy;
     double _masterClockRate;
     double _refClockRate;
 

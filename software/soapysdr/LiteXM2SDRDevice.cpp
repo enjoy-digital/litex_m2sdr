@@ -12,10 +12,79 @@
 #include <memory>
 #include <sys/mman.h>
 
+#include "ad9361/platform.h"
+#include "ad9361/ad9361.h"
+#include "ad9361/ad9361_api.h"
+
+#include "m2sdr_config.h"
+
+#include "liblitepcie.h"
+#include "libm2sdr.h"
+
 #include "LiteXM2SDRDevice.hpp"
 
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Logger.hpp>
+
+#define AD9361_GPIO_RESET_PIN 0
+
+int spi_write_then_read(struct spi_device *spi,
+                        const unsigned char *txbuf, unsigned n_tx,
+                        unsigned char *rxbuf, unsigned n_rx)
+{
+#if 0
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (n_tx == 2 && n_rx == 1) {
+        /* read */
+        rxbuf[0] = m2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
+    } else if (n_tx == 3 && n_rx == 0) {
+        /* write */
+        m2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+    } else {
+        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
+                n_tx, n_rx);
+        exit(1);
+    }
+
+    close(fd);
+#endif
+    return 0;
+}
+
+void udelay(unsigned long usecs)
+{
+    usleep(usecs);
+}
+
+void mdelay(unsigned long msecs)
+{
+    usleep(msecs * 1000);
+}
+
+unsigned long msleep_interruptible(unsigned int msecs)
+{
+    usleep(msecs * 1000);
+    return 0;
+}
+
+bool gpio_is_valid(int number)
+{
+    switch(number) {
+       case AD9361_GPIO_RESET_PIN:
+           return true;
+       default:
+           return false;
+    }
+}
+
+void gpio_set_value(unsigned gpio, int value){}
 
 /***************************************************************************************************
  *                                     Constructor
@@ -31,7 +100,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
-    : _fd(-1),
+    : _fd(-1), ad9361_phy(NULL),
     _masterClockRate(1.0e6), _refClockRate(26e6) {
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -50,6 +119,45 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     /* bypass synchro */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
+
+
+    /* Initialize Si531 Clocking */
+
+    m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+
+    ///* Initialize AD9361 SPI */
+    m2sdr_ad9361_spi_init(_fd);
+
+    /* Initialize AD9361 RFIC */
+    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync    = -1;
+    default_init_param.gpio_cal_sw1 = -1;
+    default_init_param.gpio_cal_sw2 = -1;
+    ad9361_init(&ad9361_phy, &default_init_param);
+
+    /* Configure AD9361 Samplerate */
+    //ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
+
+    ///* Configure AD9361 TX/RX Frequencies */
+    //ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
+    //ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
+
+    ///* Configure AD9361 TX/RX FIRs */
+    //ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    //ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+
+    ///* Configure AD9361 TX Attenuation */
+    //ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
+
+    ///* Configure AD9361 RX Gain */
+    //ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
+    //ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
+
+    ///* Configure AD9361 RX->TX Loopback */
+    //ad9361_bist_loopback(ad9361_phy, loopback);
+
+
+
 
     // set clock to Internal Reference Clock
     this->setClockSource("internal");
@@ -204,9 +312,11 @@ void SoapyLiteXM2SDR::setGain(
 
     _cachedFreqValues[direction][channel]["PGA"] = value;
 
-    //if (SOAPY_SDR_TX == direction) {
-    //} else {
-    //}
+    if (SOAPY_SDR_TX == direction) {
+        ad9361_set_tx_atten(ad9361_phy, -value*1000, channel==0, channel==1, 1);
+    } else {
+        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+    }
 }
 
 void SoapyLiteXM2SDR::setGain(
@@ -272,6 +382,12 @@ void SoapyLiteXM2SDR::setFrequency(
                    channel,
                    name.c_str(),
                    frequency / 1e6);
+    if (direction == SOAPY_SDR_RX) {
+        ad9361_set_rx_lo_freq(ad9361_phy, frequency);
+    } else {
+        ad9361_set_rx_lo_freq(ad9361_phy, frequency);
+    }
+    _cachedFreqValues[direction][channel][name] = frequency;
 }
 
 double SoapyLiteXM2SDR::getFrequency(
@@ -314,7 +430,9 @@ void SoapyLiteXM2SDR::setSampleRate(
                    channel,
                    rate / 1e6);
 
-    _cachedSampleRates[direction] = rate;
+    ad9361_set_trx_clock_chain_freq(ad9361_phy, rate);
+    _cachedSampleRates[SOAPY_SDR_RX] = rate;
+    _cachedSampleRates[SOAPY_SDR_TX] = rate;
 }
 
 double SoapyLiteXM2SDR::getSampleRate(
