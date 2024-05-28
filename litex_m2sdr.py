@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
+import time
 import argparse
 
 from migen import *
@@ -48,6 +49,7 @@ from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 
 from software import generate_litepcie_software
+from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -394,6 +396,7 @@ def main():
     parser.add_argument("--build",  action="store_true", help="Build bitstream.")
     parser.add_argument("--load",   action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",  action="store_true", help="Flash bitstream.")
+    parser.add_argument("--rescan", action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
     comopts = parser.add_mutually_exclusive_group()
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
@@ -415,6 +418,12 @@ def main():
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
 
+    # Remove PCIe Driver/Device.
+    if (args.load or args.flash) and args.rescan:
+        device_id = get_pcie_device_id(vendor="10ee", device="7021")
+        if device_id:
+            remove_pcie_device(device_id, driver="litepcie")
+
     # Load Bistream.
     if args.load:
         prog = soc.platform.create_programmer()
@@ -424,6 +433,11 @@ def main():
     if args.flash:
         prog = soc.platform.create_programmer()
         prog.flash(0, os.path.join(builder.gateware_dir, soc.build_name + ".bin"))
+
+    # Rescan PCIe Bus.
+    if args.rescan:
+        time.sleep(2)
+        rescan_pcie_bus()
 
 if __name__ == "__main__":
     main()
