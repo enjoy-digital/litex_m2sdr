@@ -3,7 +3,7 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-PROGS=m2sdr_util m2sdr_rf m2sdr_play m2sdr_record libm2sdr/libm2sdr.a ad9361/libad9361.a
+PROGS=m2sdr_util m2sdr_rf m2sdr_play m2sdr_record libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
 all: $(PROGS)
 
@@ -15,7 +15,7 @@ libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o lib
 	ar rcs $@ $+
 	ranlib $@
 
-ad9361/libad9361.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
+ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
 	ar rcs $@ $+
 	ranlib $@
 
