@@ -56,12 +56,16 @@
 /******************************************************************************/
 #define SUCCESS									0
 #define ARRAY_SIZE(arr)							(sizeof(arr) / sizeof((arr)[0]))
+#if (__cplusplus >= 201703L)
+/* pass */
+#else
 #define min(x, y)								(((x) < (y)) ? (x) : (y))
 #define min_t(type, x, y)						(type)min((type)(x), (type)(y))
 #define max(x, y)								(((x) > (y)) ? (x) : (y))
 #define max_t(type, x, y)						(type)max((type)(x), (type)(y))
 #define clamp(val, min_val, max_val)			(max(min((val), (max_val)), (min_val)))
 #define clamp_t(type, val, min_val, max_val)	(type)clamp((type)(val), (type)(min_val), (type)(max_val))
+#endif
 #define DIV_ROUND_UP(x, y)						(((x) + (y) - 1) / (y))
 #define DIV_ROUND_CLOSEST(x, divisor)			(((x) + (divisor) / 2) / (divisor))
 #define BIT(x)									(1 << (x))

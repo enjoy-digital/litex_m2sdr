@@ -44,6 +44,10 @@
 /******************************************************************************/
 #include "util.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /******************************************************************************/
 /*************************** Types Declarations *******************************/
 /******************************************************************************/
@@ -539,4 +543,9 @@ int32_t ad9361_do_dcxo_tune_fine(struct ad9361_rf_phy *phy,
 /* Get the temperature. */
 int32_t ad9361_get_temperature(struct ad9361_rf_phy *phy,
 			       int32_t *temp);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

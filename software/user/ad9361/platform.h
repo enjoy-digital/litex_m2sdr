@@ -116,6 +116,10 @@
 /* PCORE Version > 8.00 */
 #define ADI_REG_DELAY(l)			(0x0800 + (l) * 0x4)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 enum adc_pn_sel {
 	ADC_PN9 = 0,
 	ADC_PN23A = 1,
@@ -157,4 +161,9 @@ unsigned int axiadc_read(struct axiadc_state *st, unsigned long reg);
 void axiadc_write(struct axiadc_state *st, unsigned reg, unsigned val);
 int axiadc_set_pnsel(struct axiadc_state *st, int channel, enum adc_pn_sel sel);
 void axiadc_idelay_set(struct axiadc_state *st, unsigned lane, unsigned val);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
