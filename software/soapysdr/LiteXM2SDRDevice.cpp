@@ -452,11 +452,15 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 
     if (direction == SOAPY_SDR_RX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
+
+    return(SoapySDR::RangeList(1, SoapySDR::Range(0, 0)));
 }
 
 /***************************************************************************************************
  *                                        Sample Rate API
  **************************************************************************************************/
+
+// FIXME: Improve listFrequencies.
 
 void SoapyLiteXM2SDR::setSampleRate(
     const int direction,
@@ -465,10 +469,10 @@ void SoapyLiteXM2SDR::setSampleRate(
     std::lock_guard<std::mutex> lock(_mutex);
     std::string dirName ((direction == SOAPY_SDR_RX) ? "Rx" : "Tx");
     SoapySDR::logf(SOAPY_SDR_DEBUG,
-                   "setSampleRate(%s, %ld, %g MHz)",
-                   dirName,
-                   channel,
-                   rate / 1e6);
+        "setSampleRate(%s, %ld, %g MHz)",
+        dirName,
+        channel,
+        rate / 1e6);
 
     _cachedSampleRates[SOAPY_SDR_RX] = rate;
     _cachedSampleRates[SOAPY_SDR_TX] = rate;
@@ -484,21 +488,29 @@ double SoapyLiteXM2SDR::getSampleRate(
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     const int /*direction*/,
     const size_t /*channel*/) const {
-    std::vector<double> options;
-
-    options.push_back(65105);//25M/48/8+1
-    for (int i = 0; i <= 10; i++)
-        options.push_back(static_cast<double>(i) * 1e6);
-    return(options);
+    std::vector<double> sampleRates;
+    sampleRates.push_back(25e6 / 96); // 260.42 KSPS (Minimum sample rate).
+    sampleRates.push_back(1.0e6);     //   1    MSPS.
+    sampleRates.push_back(2.5e6);     //   2.5  MSPS.
+    sampleRates.push_back(5.0e6);     //   5    MSPS.
+    sampleRates.push_back(10.0e6);    //  10    MSPS.
+    sampleRates.push_back(20.0e6);    //  20    MSPS.
+    sampleRates.push_back(30.72e6);   //  30.72 MSPS.
+    sampleRates.push_back(61.44e6);   //  61.44 MSPS (Maximum sample rate).
+    return sampleRates;
 }
 
 SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
-    const int,
-    const size_t) const {
+    const int /*direction*/,
+    const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
-    results.push_back(SoapySDR::Range(25e6 / 96, 61440000));
+    results.push_back(SoapySDR::Range(25e6 / 96, 61.44e6));
     return results;
 }
+
+/***************************************************************************************************
+*                                          Stream API
+***************************************************************************************************/
 
 std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
     const int /*direction*/,
