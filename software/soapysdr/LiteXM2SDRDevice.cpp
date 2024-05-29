@@ -36,7 +36,7 @@
 
 static int spi_fd;
 
-int spi_write_then_read(struct spi_device *spi,
+int spi_write_then_read(struct spi_device * /*spi*/,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
@@ -81,7 +81,7 @@ bool gpio_is_valid(int number)
     }
 }
 
-void gpio_set_value(unsigned gpio, int value){}
+void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 
 /***************************************************************************************************
  *                                     Constructor
@@ -447,7 +447,7 @@ void SoapyLiteXM2SDR::setFrequency(
 
 double SoapyLiteXM2SDR::getFrequency(
     const int direction,
-    const size_t channel,
+    const size_t /*channel*/,
     const std::string &/*name*/) const {
 
     uint64_t lo_freq = 0;
@@ -501,15 +501,25 @@ void SoapyLiteXM2SDR::setSampleRate(
         channel,
         rate / 1e6);
 
-    _cachedSampleRates[SOAPY_SDR_RX] = rate;
-    _cachedSampleRates[SOAPY_SDR_TX] = rate;
-    ad9361_set_trx_clock_chain_freq(ad9361_phy, rate);
+    uint32_t sample_rate = static_cast<uint32_t>(rate);
+    if (direction == SOAPY_SDR_TX)
+        ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate);
+    if (direction == SOAPY_SDR_RX)
+        ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate);
 }
 
 double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
-    return _cachedSampleRates.at(direction);
+
+    uint32_t sample_rate = 0;
+
+    if (direction == SOAPY_SDR_TX)
+        ad9361_get_tx_sampling_freq(ad9361_phy, &sample_rate);
+    if (direction == SOAPY_SDR_RX)
+        ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
+
+    return static_cast<double>(sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
