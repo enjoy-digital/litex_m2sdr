@@ -372,11 +372,11 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const size_t /*channel*/,
     const std::string &/*name*/) const {
 
-    if (direction == SOAPY_SDR_RX)
-        return(SoapySDR::Range(0, 73));
-
     if (direction == SOAPY_SDR_TX)
         return(SoapySDR::Range(-89, 0)); /* FIXME/CHECKME: Attenuation -> negative? How are SoapySDR's compatible software handling it? */
+
+    if (direction == SOAPY_SDR_RX)
+        return(SoapySDR::Range(0, 73));
 
     return(SoapySDR::Range(0,0));
 }
@@ -402,31 +402,34 @@ void SoapyLiteXM2SDR::setFrequency(
     std::unique_lock<std::mutex> lock(_mutex);
 
     SoapySDR::logf(SOAPY_SDR_DEBUG,
-                   "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s, %f MHz)",
-                   dir2Str(direction),
-                   channel,
-                   name.c_str(),
-                   frequency / 1e6);
+        "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s, %f MHz)",
+        dir2Str(direction),
+        channel,
+        name.c_str(),
+        frequency / 1e6);
     _cachedFreqValues[direction][channel][name] = frequency;
 
     uint64_t lo_freq = static_cast<uint64_t>(frequency);
 
+    if (direction == SOAPY_SDR_TX)
+        ad9361_set_tx_lo_freq(ad9361_phy, lo_freq);
+
     if (direction == SOAPY_SDR_RX)
         ad9361_set_rx_lo_freq(ad9361_phy, lo_freq);
-    else
-        ad9361_set_tx_lo_freq(ad9361_phy, lo_freq);
 }
 
 double SoapyLiteXM2SDR::getFrequency(
     const int direction,
     const size_t channel,
     const std::string &/*name*/) const {
-    uint64_t lo_freq;
+
+    uint64_t lo_freq = 0;
+
+    if (direction == SOAPY_SDR_TX)
+        ad9361_get_tx_lo_freq(ad9361_phy, &lo_freq);
 
     if (direction == SOAPY_SDR_RX)
         ad9361_get_rx_lo_freq(ad9361_phy, &lo_freq);
-    else
-        ad9361_get_tx_lo_freq(ad9361_phy, &lo_freq);
 
     return static_cast<double>(lo_freq);
 }
@@ -440,12 +443,16 @@ std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
 }
 
 SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
-    const int /*direction*/,
+    const int direction,
     const size_t /*channel*/,
     const std::string &/*name*/) const {
-    return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
-}
 
+    if (direction == SOAPY_SDR_TX)
+        return(SoapySDR::RangeList(1, SoapySDR::Range(47000000, 6000000000ull)));
+
+    if (direction == SOAPY_SDR_RX)
+        return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
+}
 
 /***************************************************************************************************
  *                                        Sample Rate API
