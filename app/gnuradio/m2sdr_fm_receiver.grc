@@ -628,7 +628,7 @@ blocks:
     dc_offset1: '0'
     dc_removal0: 'False'
     dc_removal1: 'False'
-    dev_args: bypass_init=1
+    dev_args: bypass_init=0
     driver: LiteXM2SDR
     freq_correction0: '0'
     freq_correction1: '0'
