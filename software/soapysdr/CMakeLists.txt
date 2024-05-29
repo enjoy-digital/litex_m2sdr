@@ -55,13 +55,6 @@ find_path(AD9361_INCLUDE_DIR ad9361.h
 
 include_directories(${AD9361_INCLUDE_DIR})
 
-find_library(AD9361_LIBRARY ad9361_m2sdr
-             REQUIRED
-             HINTS
-               ${CMAKE_CURRENT_SOURCE_DIR}/../..
-             PATH_SUFFIXES
-               software/user/ad9361)
-
 ########################################################################
 ## LIBM2SDR discovery
 ########################################################################
@@ -88,9 +81,17 @@ find_library(LIBM2SDR_LIBRARY m2sdr
 
 find_package(SoapySDR "0.2.1" REQUIRED)
 
+set(LITEXM2SDR_SOURCE
+	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_api.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
+	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
+)
+
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
-	SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp LiteXM2SDRRegistration.cpp
-	LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} ${AD9361_LIBRARY} m
+	SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
+	LiteXM2SDRRegistration.cpp ${LITEXM2SDR_SOURCE}
+	LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} m
 )
 
