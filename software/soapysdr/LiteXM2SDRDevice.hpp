@@ -158,9 +158,12 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int direction,
         const size_t channel) const override;
 
-	void setGainMode(const int direction,
-		const size_t channel,
-		const bool automatic) override;
+    void setGainMode(const int direction,
+        const size_t channel,
+        const bool automatic) override;
+
+    bool getGainMode(const int direction,
+        const size_t channel) const override;
 
     void setGain(
         int direction,
@@ -172,6 +175,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const size_t channel,
         const std::string &name,
         const double value) override;
+
+    double getGain(
+        const int direction,
+        const size_t channel) const override;
 
     double getGain(
         const int direction,
@@ -344,7 +351,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     }
 
     int _fd;
-	struct ad9361_rf_phy *ad9361_phy;
+    struct ad9361_rf_phy *ad9361_phy;
     double _masterClockRate;
     double _refClockRate;
 
