@@ -187,6 +187,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     SoapySDR::Range getGainRange(
         const int direction,
+        const size_t channel) const override;
+
+    SoapySDR::Range getGainRange(
+        const int direction,
         const size_t channel,
         const std::string &name) const override;
 

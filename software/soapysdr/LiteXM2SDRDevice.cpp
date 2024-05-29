@@ -396,11 +396,10 @@ double SoapyLiteXM2SDR::getGain(
 
 SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const int direction,
-    const size_t /*channel*/,
-    const std::string &/*name*/) const {
+    const size_t /*channel*/) const {
 
     if (direction == SOAPY_SDR_TX)
-        return(SoapySDR::Range(0, 89));
+        return(SoapySDR::Range(-89, 0));
 
     if (direction == SOAPY_SDR_RX)
         return(SoapySDR::Range(0, 73));
@@ -408,6 +407,13 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     return(SoapySDR::Range(0,0));
 }
 
+SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
+    const int direction,
+    const size_t channel,
+    const std::string &/*name*/) const {
+
+	return getGainRange(direction, channel);
+}
 /***************************************************************************************************
  *                                     Frequency API
  **************************************************************************************************/
