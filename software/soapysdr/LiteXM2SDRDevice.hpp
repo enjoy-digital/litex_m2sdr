@@ -158,6 +158,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int direction,
         const size_t channel) const override;
 
+	void setGainMode(const int direction,
+		const size_t channel,
+		const bool automatic) override;
+
     void setGain(
         int direction,
         size_t channel,

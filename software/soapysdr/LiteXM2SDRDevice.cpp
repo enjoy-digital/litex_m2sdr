@@ -316,6 +316,18 @@ bool SoapyLiteXM2SDR::hasGainMode(
     return false;
 }
 
+void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
+	const bool automatic)
+{
+	// N/A
+	if (direction == SOAPY_SDR_TX)
+		return;
+
+	// FIXME: AGC gain mode
+	ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
+		(automatic ? RF_GAIN_FASTATTACK_AGC : RF_GAIN_MGC));
+}
+
 void SoapyLiteXM2SDR::setGain(
     int direction,
     size_t channel,
