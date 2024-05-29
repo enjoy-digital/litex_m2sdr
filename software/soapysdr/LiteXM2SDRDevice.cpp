@@ -122,11 +122,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     bool do_init = true;
     if (args.count("bypass_init") != 0) {
-        //do_init = !args.at("bypass_init");
         std::cout << args.at("bypass_init")[0] << std::endl;
         do_init = args.at("bypass_init")[0] == '0';
     }
-    do_init = true;
+
     if (do_init) {
         /* Initialize Si531 Clocking */
         m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
