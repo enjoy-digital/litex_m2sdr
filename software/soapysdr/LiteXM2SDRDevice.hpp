@@ -20,24 +20,28 @@
 #include <SoapySDR/Formats.hpp>
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
-#define BYTES_PER_SAMPLE 2 // TODO validate this
-
-enum class TargetDevice { CPU, GPU };
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
   public:
     SoapyLiteXM2SDR(const SoapySDR::Kwargs &args);
     ~SoapyLiteXM2SDR(void);
 
-    // Identification API
+    /***********************************************************************************************
+    *                              Identification API
+    ***********************************************************************************************/
     std::string getDriverKey(void) const { return "LiteX-M2SDR"; }
     std::string getHardwareKey(void) const { return "R01"; }
     SoapySDR::Kwargs getHardwareInfo(void) const;
 
-    // Channels API
+    /***********************************************************************************************
+    *                                  Channel API
+    ***********************************************************************************************/
     size_t getNumChannels(const int) const { return 2; }
     bool getFullDuplex(const int, const size_t) const { return true; }
 
+    /***********************************************************************************************
+    *                                  Stream API
+    ***********************************************************************************************/
     std::string getNativeStreamFormat(
         const int /*direction*/,
         const size_t /*channel*/,
@@ -46,7 +50,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         return SOAPY_SDR_CS16;
     }
 
-    // Stream API
     SoapySDR::Stream *setupStream(
         const int direction,
         const std::string &format,
@@ -104,7 +107,25 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int direction,
         const size_t channel) const;
 
-    // Antenna API
+    int readStream(
+        SoapySDR::Stream *stream,
+        void * const *buffs,
+        const size_t numElems,
+        int &flags,
+        long long &timeNs,
+        const long timeoutUs = 100000);
+
+    int writeStream(
+        SoapySDR::Stream *stream,
+        const void * const *buffs,
+        const size_t numElems,
+        int &flags,
+        const long long timeNs = 0,
+        const long timeoutUs = 100000);
+
+    /***********************************************************************************************
+    *                                Antenna API
+    ***********************************************************************************************/
     std::vector<std::string> listAntennas(
         const int direction,
         const size_t channel) const override;
@@ -120,12 +141,16 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::map<int, std::map<size_t, std::string>> _cachedAntValues;
 
-    // Frontend corrections API
+    /***********************************************************************************************
+    *                               Frontend corrections API
+    ***********************************************************************************************/
     bool hasDCOffsetMode(
         const int direction,
         const size_t channel) const override;
 
-    // Gain API
+    /***********************************************************************************************
+    *                                      Gain API
+    ***********************************************************************************************/
     std::vector<std::string> listGains(
         const int direction,
         const size_t channel) const override;
@@ -157,7 +182,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::map<int, std::map<size_t, std::map<std::string, double>>> _cachedGainValues;
 
-    // Frequency API
+    /***********************************************************************************************
+    *                                    Frequency API
+    ***********************************************************************************************/
     void setFrequency(
         int direction,
         size_t channel,
@@ -187,7 +214,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::map<int, std::map<size_t, std::map<std::string, double>>> _cachedFreqValues;
 
-    // Sample Rate API
+    /***********************************************************************************************
+    *                                    Sample Rate  API
+    ***********************************************************************************************/
     void setSampleRate(
         const int direction,
         const size_t,
@@ -207,7 +236,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::map<int, double> _cachedSampleRates;
 
-    // BW filter API
+    /***********************************************************************************************
+    *                                    Bandwidth API
+    ***********************************************************************************************/
     void setBandwidth(
         const int direction,
         const size_t channel,
@@ -223,7 +254,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::map<int, std::map<size_t, double>> _cachedFilterBws;
 
-    // Clocking API
+    /***********************************************************************************************
+    *                                    Clocking API
+    ***********************************************************************************************/
     double getTSPRate(const int direction) const;
 
     void setMasterClockRate(const double rate) override;
@@ -242,38 +275,18 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::string getClockSource(void) const override;
 
-    // Sensor API
+    /***********************************************************************************************
+    *                                    Sensor API
+    ***********************************************************************************************/
     std::vector<std::string> listSensors(void) const override;
 
     SoapySDR::ArgInfo getSensorInfo(const std::string &key) const override;
 
     std::string readSensor(const std::string &key) const override;
 
-    int readStream(
-        SoapySDR::Stream *stream,
-        void * const *buffs,
-        const size_t numElems,
-        int &flags,
-        long long &timeNs,
-        const long timeoutUs = 100000);
-
-    int writeStream(
-        SoapySDR::Stream *stream,
-        const void * const *buffs,
-        const size_t numElems,
-        int &flags,
-        const long long timeNs = 0,
-        const long timeoutUs = 100000);
-
   private:
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
-
-    void set_iq_correction(
-        const int direction,
-        const size_t channel,
-        const double phase,
-        const double gain);
 
     struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
     void *_dma_buf;

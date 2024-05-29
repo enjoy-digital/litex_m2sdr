@@ -15,6 +15,8 @@
 
 #include "LiteXM2SDRDevice.hpp"
 
+#define BYTES_PER_SAMPLE 2
+
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const int direction,
