@@ -285,8 +285,6 @@ std::string SoapyLiteXM2SDR::getAntenna(
  *                                 Frontend corrections API
  **************************************************************************************************/
 
-// FIXME: Implement.
-
 bool SoapyLiteXM2SDR::hasDCOffsetMode(
     const int /*direction*/,
     const size_t /*channel*/) const {
@@ -350,8 +348,10 @@ void SoapyLiteXM2SDR::setGain(
         channel,
         value);
 
-    if (SOAPY_SDR_TX == direction)
-        ad9361_set_tx_attenuation(ad9361_phy, -value*1000, channel);
+    if (SOAPY_SDR_TX == direction) {
+		uint32_t atten = static_cast<uint32_t>(-value * 1000);
+        ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+	}
     if (SOAPY_SDR_RX == direction)
         ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
 }
