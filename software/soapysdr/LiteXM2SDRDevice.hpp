@@ -29,15 +29,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /***********************************************************************************************
     *                              Identification API
     ***********************************************************************************************/
-    std::string getDriverKey(void) const { return "LiteX-M2SDR"; }
-    std::string getHardwareKey(void) const { return "R01"; }
-    SoapySDR::Kwargs getHardwareInfo(void) const;
+    std::string getDriverKey(void) const;
+    std::string getHardwareKey(void) const;
 
     /***********************************************************************************************
     *                                  Channel API
     ***********************************************************************************************/
-    size_t getNumChannels(const int) const { return 2; }
-    bool getFullDuplex(const int, const size_t) const { return true; }
+    size_t getNumChannels(const int) const;
+    bool getFullDuplex(const int, const size_t) const;
 
     /***********************************************************************************************
     *                                  Stream API

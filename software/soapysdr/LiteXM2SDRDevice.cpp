@@ -26,6 +26,12 @@
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Logger.hpp>
 
+/***************************************************************************************************
+ *                                    AD9361 GPIO/SPI
+ **************************************************************************************************/
+
+// FIXME: Cleanup and try to share common approach/code with m2sdr_rf.
+
 #define AD9361_GPIO_RESET_PIN 0
 
 static int spi_fd;
@@ -218,15 +224,28 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     close(_fd);
 }
 
-
 /***************************************************************************************************
  *                                  Identification API
  **************************************************************************************************/
 
-SoapySDR::Kwargs SoapyLiteXM2SDR::getHardwareInfo(void) const {
-    SoapySDR::Kwargs args;
-    args["identification"] = getLiteXM2SDRIdentification(_fd);
-    return args;
+std::string SoapyLiteXM2SDR::getDriverKey(void) const {
+    return "LiteX-M2SDR";
+}
+
+std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
+    return "R01";
+}
+
+/***************************************************************************************************
+*                                     Channel API
+***************************************************************************************************/
+
+size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
+    return 2;
+}
+
+bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
+    return true;
 }
 
 /***************************************************************************************************
@@ -260,7 +279,6 @@ std::string SoapyLiteXM2SDR::getAntenna(
     printf("here1");
     return _cachedAntValues.at(direction).at(channel);
 }
-
 
 /***************************************************************************************************
  *                                 Frontend corrections API
