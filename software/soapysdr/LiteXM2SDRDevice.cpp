@@ -361,7 +361,6 @@ void SoapyLiteXM2SDR::setGain(
     const size_t channel,
     const std::string &name,
     const double value) {
-    std::lock_guard<std::mutex> lock(_mutex);
     SoapySDR::logf(SOAPY_SDR_DEBUG,
         "SoapyLiteXM2SDR::setGain(%s, ch%d, %s, %f dB)",
         dir2Str(direction),
