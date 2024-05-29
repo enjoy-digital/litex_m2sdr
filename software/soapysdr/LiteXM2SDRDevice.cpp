@@ -554,20 +554,31 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
 
 void SoapyLiteXM2SDR::setBandwidth(
     const int direction,
-    const size_t channel,
+    const size_t /*channel*/,
     const double bw) {
     if (bw == 0.0)
         return;
-    double &actualBw = _cachedFilterBws[direction][channel];
-    double lpf = bw;
-    actualBw = lpf;
+
+    uint32_t bwi = static_cast<uint32_t>(bw);
+
+    if (direction == SOAPY_SDR_TX)
+        ad9361_set_tx_rf_bandwidth(ad9361_phy, bwi);
+    if (direction == SOAPY_SDR_RX)
+        ad9361_set_rx_rf_bandwidth(ad9361_phy, bwi);
 }
 
 double SoapyLiteXM2SDR::getBandwidth(
     const int direction,
-    const size_t channel) const {
-    printf("here5");
-    return _cachedFilterBws.at(direction).at(channel);
+    const size_t /*channel*/) const {
+
+    uint32_t bw = 0;
+
+    if (direction == SOAPY_SDR_TX)
+        ad9361_get_tx_rf_bandwidth(ad9361_phy, &bw);
+    if (direction == SOAPY_SDR_RX)
+        ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw);
+
+    return static_cast<double>(bw);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listBandwidths(
