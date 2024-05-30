@@ -27,12 +27,12 @@
 #include <SoapySDR/Types.hpp>
 
 /***************************************************************************************************
- *                                    AD9361 GPIO/SPI
+ *                                    AD9361
  **************************************************************************************************/
 
 /* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
 
-#define AD9361_GPIO_RESET_PIN 0
+/* AD9361 SPI */
 
 static int spi_fd;
 
@@ -40,12 +40,15 @@ int spi_write_then_read(struct spi_device * /*spi*/,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
+
+    /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-        /* Read. */
         rxbuf[0] = m2sdr_ad9361_spi_read(spi_fd, txbuf[0] << 8 | txbuf[1]);
+
+    /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-        /* Write. */
         m2sdr_ad9361_spi_write(spi_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+    /* Unsupported. */
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
                 n_tx, n_rx);
@@ -54,6 +57,8 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
     return 0;
 }
+
+/* AD9361 Delays */
 
 void udelay(unsigned long usecs)
 {
@@ -70,6 +75,10 @@ unsigned long msleep_interruptible(unsigned int msecs)
     usleep(msecs * 1000);
     return 0;
 }
+
+/* AD9361 GPIO */
+
+#define AD9361_GPIO_RESET_PIN 0
 
 bool gpio_is_valid(int number)
 {
