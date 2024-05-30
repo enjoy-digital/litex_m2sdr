@@ -247,17 +247,12 @@ void SoapyLiteXM2SDR::setAntenna(
     const size_t channel,
     const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (direction == SOAPY_SDR_RX) {
-    }
-    if (direction == SOAPY_SDR_TX) {
-    }
     _cachedAntValues[direction][channel] = name;
 }
 
 std::string SoapyLiteXM2SDR::getAntenna(
     const int direction,
     const size_t channel) const {
-    printf("here1");
     return _cachedAntValues.at(direction).at(channel);
 }
 
