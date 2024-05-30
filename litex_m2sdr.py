@@ -11,8 +11,6 @@ import time
 import argparse
 
 from migen import *
-from migen.genlib.resetsync import AsyncResetSynchronizer
-from migen.genlib.cdc import PulseSynchronizer, MultiReg
 
 from litex.gen import *
 
@@ -49,6 +47,7 @@ from litescope import LiteScopeAnalyzer
 from gateware.ad9361.core import AD9361RFIC
 from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
+from gateware.measurement import ClkMeasurement
 
 from software import generate_litepcie_software
 from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
@@ -93,17 +92,22 @@ class CRG(LiteXModule):
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
         # SoC.
-        "uart"        : 0,
-        "icap"        : 1,
-        "flash"       : 2,
-        "xadc"        : 3,
-        "dna"         : 4,
-        "flash"       : 5,
+        "ctrl"        : 0,
+        "uart"        : 1,
+        "icap"        : 2,
+        "flash"       : 3,
+        "xadc"        : 4,
+        "dna"         : 5,
+        "flash"       : 6,
+        "leds"        : 7,
 
         # PCIe.
         "pcie_phy"    : 10,
         "pcie_msi"    : 11,
         "pcie_dma0"   : 12,
+
+        # Eth.
+        "eth_phy"     : 14,
 
         # SATA.
         "sata_phy"    : 15,
@@ -151,7 +155,6 @@ class BaseSoC(SoCMini):
             default_width  = 1024,
             default_period = 2048,
         )
-        #self.comb += platform.request("si5351_pwm").eq(1)
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -366,37 +369,10 @@ class BaseSoC(SoCMini):
 
         # Clk Measurements -------------------------------------------------------------------------
 
-        class ClkMeasurement(LiteXModule):
-            def __init__(self, clk, increment=1):
-                self.latch = CSR()
-                self.value = CSRStatus(64)
-
-                # # #
-
-                # Create Clock Domain.
-                self.cd_counter = ClockDomain()
-                self.comb += self.cd_counter.clk.eq(clk)
-                self.specials += AsyncResetSynchronizer(self.cd_counter, ResetSignal())
-
-                # Free-running Clock Counter.
-                counter = Signal(64)
-                self.sync.counter += counter.eq(counter + increment)
-
-                # Latch Clock Counter.
-                latch_value = Signal(64)
-                latch_sync  = PulseSynchronizer("sys", "counter")
-                self.submodules += latch_sync
-                self.comb += latch_sync.i.eq(self.latch.re)
-                self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
-                self.specials += MultiReg(latch_value, self.value.status)
-
         self.clk0_measurement = ClkMeasurement(clk=platform.request("si5351_clk0"))
         self.clk1_measurement = ClkMeasurement(clk=ClockSignal("rfic"))
         self.clk2_measurement = ClkMeasurement(clk=0)
         self.clk3_measurement = ClkMeasurement(clk=0)
-
-        #self.comb += platform.request("debug").eq(platform.lookup_request("si5351_clk0"))
-        self.comb += platform.request("debug").eq(ClockSignal("rfic"))
 
 # Build --------------------------------------------------------------------------------------------
 
