@@ -98,8 +98,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
-    : _fd(-1), ad9361_phy(NULL),
-    _masterClockRate(1.0e6), _refClockRate(26e6) {
+    : _fd(-1), ad9361_phy(NULL) {
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
