@@ -124,7 +124,8 @@ static void m2sdr_init(
     uint8_t  execute_and_exit,
     bool     bist_tx_tone,
     bool     bist_rx_tone,
-    bool     bist_prbs_test
+    bool     bist_prbs_test,
+    int32_t  bist_tone_freq
 ) {
     int fd;
 
@@ -173,16 +174,19 @@ static void m2sdr_init(
     /* Configure AD9361 RX->TX Loopback */
     ad9361_bist_loopback(ad9361_phy, loopback);
 
+    /* Enable BIST TX Tone (Optional: For RF TX Tests) */
     if (bist_tx_tone) {
         printf("BIST_TX_TONE_TEST...\n");
-        ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
+        ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, bist_tone_freq, 0, 0x0); /* tone / 0dB / RX1&2 */
     }
 
+    /* Enable BIST RX Tone (Optional: For Software RX Tests) */
     if (bist_rx_tone) {
         printf("BIST_RX_TONE_TEST...\n");
-        ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, 1000000, 0, 0x0); /* 1MHz tone / 0dB / RX1&2 */
+        ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, bist_tone_freq, 0, 0x0); /* tone / 0dB / RX1&2 */
     }
 
+    /* Enable BIST PRBS Test (Optional: For FPGA <-> AD9361 interface calibration) */
     if (bist_prbs_test) {
         int rx_clk_delay;
         int rx_dat_delay;
@@ -286,6 +290,7 @@ static void help(void)
            "-bist_tx_tone         Enable TX tone generation.\n"
            "-bist_rx_tone         Enable RX tone generation.\n"
            "-bist_prbs_test       Enable PRBS test.\n"
+           "-bist_tone_freq freq  Set the BIST tone frequency in Hz (default=%d).\n"
            "\n",
            DEFAULT_REFCLK_FREQ,
            DEFAULT_SAMPLERATE,
@@ -294,6 +299,7 @@ static void help(void)
            DEFAULT_RX_FREQ,
            DEFAULT_TX_GAIN,
            DEFAULT_RX_GAIN,
+           DEFAULT_BIST_TONE_FREQ,
            DEFAULT_LOOPBACK);
     exit(1);
 }
@@ -312,6 +318,7 @@ static struct option options[] = {
     { "bist_tx_tone",     no_argument },              /* 10 */
     { "bist_rx_tone",     no_argument },              /* 11 */
     { "bist_prbs_test",   no_argument },              /* 12 */
+    { "bist_tone_freq",   required_argument },        /* 13 */
     { NULL },
 };
 
@@ -328,22 +335,24 @@ int main(int argc, char **argv)
 
     int64_t  refclk_freq;
     uint32_t samplerate;
-    uint32_t  bandwidth;
+    int32_t  bandwidth;
     int64_t  tx_freq, rx_freq;
     int64_t  tx_gain, rx_gain;
     uint8_t  loopback;
     bool     bist_tx_tone = false;
     bool     bist_rx_tone = false;
     bool     bist_prbs_test = false;
+    int32_t  bist_tone_freq;
 
-    refclk_freq  = DEFAULT_REFCLK_FREQ;
-    samplerate   = DEFAULT_SAMPLERATE;
-    bandwidth    = DEFAULT_BANDWIDTH;
-    tx_freq      = DEFAULT_TX_FREQ;
-    rx_freq      = DEFAULT_RX_FREQ;
-    tx_gain      = DEFAULT_TX_GAIN;
-    rx_gain      = DEFAULT_RX_GAIN;
-    loopback     = DEFAULT_LOOPBACK;
+    refclk_freq    = DEFAULT_REFCLK_FREQ;
+    samplerate     = DEFAULT_SAMPLERATE;
+    bandwidth      = DEFAULT_BANDWIDTH;
+    tx_freq        = DEFAULT_TX_FREQ;
+    rx_freq        = DEFAULT_RX_FREQ;
+    tx_gain        = DEFAULT_TX_GAIN;
+    rx_gain        = DEFAULT_RX_GAIN;
+    loopback       = DEFAULT_LOOPBACK;
+    bist_tone_freq = DEFAULT_BIST_TONE_FREQ;
 
     /* Parse/Handle Parameters. */
     for (;;) {
@@ -386,6 +395,9 @@ int main(int argc, char **argv)
                 case 12: /* bist_prbs_test */
                     bist_prbs_test = true;
                     break;
+                case 13: /* bist_tone_freq */
+                    bist_tone_freq = (int32_t)strtod(optarg, NULL);
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -410,7 +422,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test, bist_tone_freq);
 
     return 0;
 }

@@ -26,6 +26,7 @@
 #define DEFAULT_TX_GAIN                       -20  /* TX Gain in dB -89 ->  0 dB */
 #define DEFAULT_RX_GAIN                         0  /* RX Gain in dB   0 -> 76 dB */
 #define DEFAULT_LOOPBACK                        0  /* Internal loopback */
+#define DEFAULT_BIST_TONE_FREQ            1000000  /* BIST Tone Freq in Hz */
 
 #define TX_FREQ_MIN   47000000 /* Hz */
 #define TX_FREQ_MAX 6000000000 /* Hz */
