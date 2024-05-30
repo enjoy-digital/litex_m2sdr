@@ -20,6 +20,7 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Time.hpp>
 #include <SoapySDR/Formats.hpp>
+#include <SoapySDR/Types.hpp>
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
@@ -267,11 +268,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int direction,
         const size_t channel) const override;
 
-    std::vector<double> listBandwidths(
+    SoapySDR::RangeList getBandwidthRange(
         const int direction,
         const size_t channel) const override;
-
-    std::map<int, std::map<size_t, double>> _cachedFilterBws;
 
     /***********************************************************************************************
     *                                    Clocking API

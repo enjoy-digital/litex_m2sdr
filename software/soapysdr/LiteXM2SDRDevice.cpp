@@ -8,7 +8,6 @@
 
 #include <fcntl.h>
 #include <unistd.h>
-
 #include <fstream>
 #include <memory>
 #include <sys/mman.h>
@@ -26,6 +25,7 @@
 
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Logger.hpp>
+#include <SoapySDR/Types.hpp>
 
 /***************************************************************************************************
  *                                    AD9361 GPIO/SPI
@@ -149,6 +149,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         /* Some defaults to avoid throwing. */
         setSampleRate(SOAPY_SDR_TX, 0, 30.72e6);
         setSampleRate(SOAPY_SDR_RX, 0, 30.72e6);
+        setSampleRate(SOAPY_SDR_TX, 1, 30.72e6);
+        setSampleRate(SOAPY_SDR_RX, 1, 30.72e6);
 
         this->setClockSource("internal");
 
@@ -527,7 +529,7 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
 }
 
 /***************************************************************************************************
-*                                          Stream API
+*                                        Stream API
 ***************************************************************************************************/
 
 std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
@@ -540,7 +542,7 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
 }
 
 /***************************************************************************************************
- *                                        BW filter API
+ *                                      Bandwidth API
  **************************************************************************************************/
 
 void SoapyLiteXM2SDR::setBandwidth(
@@ -572,17 +574,14 @@ double SoapyLiteXM2SDR::getBandwidth(
     return static_cast<double>(bw);
 }
 
-std::vector<double> SoapyLiteXM2SDR::listBandwidths(
+SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
     const int /*direction*/,
-    const size_t) const {
-    std::vector<double> bws;
-    bws.push_back(0.2e6);
-    for (int i = 1; i < 11; i++)
-        bws.push_back(static_cast<double>(i) * 1e6);
-
-    return bws;
+    const size_t /*channel*/) const {
+    SoapySDR::RangeList results;
+        /* AD9361 supports a bandwidth range from 200 kHz to 56 MHz. */
+        results.push_back(SoapySDR::Range(0.2e6, 56.0e6));
+    return results;
 }
-
 
 /***************************************************************************************************
  *                                   Clocking API
