@@ -594,11 +594,12 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     std::vector<std::string> sensors;
 #ifdef CSR_XADC_BASE
-    sensors.push_back("xadc_temp");
-    sensors.push_back("xadc_vccint");
-    sensors.push_back("xadc_vccaux");
-    sensors.push_back("xadc_vccbram");
+    sensors.push_back("fpga_temp");
+    sensors.push_back("fpga_vccint");
+    sensors.push_back("fpga_vccaux");
+    sensors.push_back("fpga_vccbram");
 #endif
+    sensors.push_back("ad9361_temp");
     return sensors;
 }
 
@@ -611,13 +612,14 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
         std::string deviceStr = key.substr(0, dash);
         std::string sensorStr = key.substr(dash + 1);
 
+        /* FPGA Sensors */
 #ifdef CSR_XADC_BASE
-        if (deviceStr == "xadc") {
+        if (deviceStr == "fpga") {
             /* Temp. */
             if (sensorStr == "temp") {
                 info.key         = "temp";
                 info.value       = "0.0";
-                info.units       = "C";
+                info.units       = "°C";
                 info.description = "FPGA temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
             /* VCCINT. */
@@ -639,7 +641,7 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.key         = "vccbram";
                 info.value       = "0.0";
                 info.units       = "V";
-                info.description = "FPGA supply voltage for block RAM memories";
+                info.description = "FPGA block RAM supply voltage";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
@@ -647,6 +649,21 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 #endif
+        /* AD9361 Sensors */
+        if (deviceStr == "ad9361") {
+            /* Temp. */
+            if (sensorStr == "temp") {
+                info.key         = "temp";
+                info.value       = "0.0";
+                info.units       = "°C";
+                info.description = "AD9361 temperature";
+                info.type        = SoapySDR::ArgInfo::FLOAT;
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return info;
+        }
+
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
@@ -661,8 +678,9 @@ std::string SoapyLiteXM2SDR::readSensor(
         std::string deviceStr = key.substr(0, dash);
         std::string sensorStr = key.substr(dash + 1);
 
+         /* FPGA Sensors */
 #ifdef CSR_XADC_BASE
-        if (deviceStr == "xadc") {
+        if (deviceStr == "fpga") {
             /* Temp. */
             if (sensorStr == "temp") {
                 sensorValue = std::to_string(
@@ -689,6 +707,17 @@ std::string SoapyLiteXM2SDR::readSensor(
             return sensorValue;
         }
 #endif
+        /* AD9361 Sensors */
+        if (deviceStr == "ad9361") {
+            /* Temp. */
+            if (sensorStr == "temp") {
+                sensorValue = std::to_string(ad9361_get_temp(ad9361_phy)/1000); /* FIXME/CHECKME*/
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return sensorValue;
+        }
+
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
