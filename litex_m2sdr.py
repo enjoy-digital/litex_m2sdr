@@ -195,7 +195,7 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 }
             )
-            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1,
+            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -402,12 +402,14 @@ def main():
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
     comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Ethernet Communication.")
     comopts.add_argument("--with-sata",      action="store_true", help="Enable SATA Storage.")
+    parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.",   choices=[1, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
     args = parser.parse_args()
 
     # Build SoC.
     soc = BaseSoC(
         with_pcie     = args.with_pcie,
+        pcie_lanes    = args.pcie_lanes,
         with_ethernet = args.with_ethernet,
         ethernet_sfp  = args.ethernet_sfp,
         with_sata     = args.with_sata,
@@ -420,7 +422,7 @@ def main():
 
     # Remove PCIe Driver/Device.
     if (args.load or args.flash) and args.rescan:
-        device_id = get_pcie_device_id(vendor="10ee", device="7021")
+        device_id = get_pcie_device_id(vendor="10ee", device="7021") # FIXME: Handle X4  case.
         if device_id:
             remove_pcie_device(device_id, driver="litepcie")
 
