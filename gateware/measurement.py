@@ -38,3 +38,10 @@ class ClkMeasurement(LiteXModule):
         self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
         self.specials += MultiReg(latch_value, self.value.status)
 
+# Multi Clk Measurement ----------------------------------------------------------------------------
+
+class MultiClkMeasurement(LiteXModule):
+    def __init__(self, clks):
+        assert isinstance(clks, dict)
+        for name, clk in clks.items():
+            self.add_module(name=name, module=ClkMeasurement(clk))

@@ -13,17 +13,17 @@ bus = RemoteClient()
 bus.open()
 
 def latch_all():
-    bus.regs.clk0_measurement_latch.write(1)
-    bus.regs.clk1_measurement_latch.write(1)
-    bus.regs.clk2_measurement_latch.write(1)
-    bus.regs.clk3_measurement_latch.write(1)
+    bus.regs.clk_measurement_clk0_latch.write(1)
+    bus.regs.clk_measurement_clk1_latch.write(1)
+    bus.regs.clk_measurement_clk2_latch.write(1)
+    bus.regs.clk_measurement_clk3_latch.write(1)
 
 def read_all():
     values = [
-        bus.regs.clk0_measurement_value.read(),
-        bus.regs.clk1_measurement_value.read(),
-        bus.regs.clk2_measurement_value.read(),
-        bus.regs.clk3_measurement_value.read()
+        bus.regs.clk_measurement_clk0_value.read(),
+        bus.regs.clk_measurement_clk1_value.read(),
+        bus.regs.clk_measurement_clk2_value.read(),
+        bus.regs.clk_measurement_clk3_value.read()
     ]
     return values
 

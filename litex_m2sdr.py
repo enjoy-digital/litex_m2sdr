@@ -47,7 +47,7 @@ from litescope import LiteScopeAnalyzer
 from gateware.ad9361.core import AD9361RFIC
 from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
-from gateware.measurement import ClkMeasurement
+from gateware.measurement import MultiClkMeasurement
 
 from software import generate_litepcie_software
 from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
@@ -120,8 +120,9 @@ class BaseSoC(SoCMini):
         "header"      : 23,
         "ad9361"      : 24,
 
-        # Analyzer.
-        "analyzer"    : 30,
+        # Measurements/Analyzer.
+        "clk_measurement" : 30,
+        "analyzer"        : 31,
     }
 
     def __init__(self, sys_clk_freq=int(125e6),
@@ -369,10 +370,12 @@ class BaseSoC(SoCMini):
 
         # Clk Measurements -------------------------------------------------------------------------
 
-        self.clk0_measurement = ClkMeasurement(clk=platform.request("si5351_clk0"))
-        self.clk1_measurement = ClkMeasurement(clk=ClockSignal("rfic"))
-        self.clk2_measurement = ClkMeasurement(clk=0)
-        self.clk3_measurement = ClkMeasurement(clk=0)
+        self.clk_measurement = MultiClkMeasurement(clks={
+            "clk0" : platform.request("si5351_clk0"),
+            "clk1" : ClockSignal("rfic"),
+            "clk2" : 0,
+            "clk3" : 0,
+        })
 
 # Build --------------------------------------------------------------------------------------------
 
