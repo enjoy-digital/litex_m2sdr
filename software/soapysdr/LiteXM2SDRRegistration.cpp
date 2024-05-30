@@ -1,12 +1,13 @@
-// SoapySDR driver for the LiteX M2SDR.
-//
-// Copyright (c) 2021-2024 Enjoy Digital.
-// Copyright (c) 2021 Julia Computing.
-// Copyright (c) 2015-2015 Fairwaves, Inc.
-// Copyright (c) 2015-2015 Rice University
-// SPDX-License-Identifier: Apache-2.0
-// http://www.apache.org/licenses/LICENSE-2.0
-//
+/*
+ * SoapySDR driver for the LiteX M2SDR.
+ *
+ * Copyright (c) 2021-2024 Enjoy Digital.
+ * Copyright (c) 2021 Julia Computing.
+ * Copyright (c) 2015-2015 Fairwaves, Inc.
+ * Copyright (c) 2015-2015 Rice University
+ * SPDX-License-Identifier: Apache-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
+ */
 
 #include <fcntl.h>
 #include <unistd.h>

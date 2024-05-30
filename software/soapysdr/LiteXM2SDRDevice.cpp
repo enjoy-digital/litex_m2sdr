@@ -1,9 +1,10 @@
-// SoapySDR driver for the LiteX M2SDR.
-//
-// Copyright (c) 2021-2024 Enjoy Digital.
-// SPDX-License-Identifier: Apache-2.0
-// http://www.apache.org/licenses/LICENSE-2.0
-//
+/*
+ * SoapySDR driver for the LiteX M2SDR.
+ *
+ * Copyright (c) 2021-2024 Enjoy Digital.
+ * SPDX-License-Identifier: Apache-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
+ */
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -30,7 +31,7 @@
  *                                    AD9361 GPIO/SPI
  **************************************************************************************************/
 
-// FIXME: Cleanup and try to share common approach/code with m2sdr_rf.
+/* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
 
 #define AD9361_GPIO_RESET_PIN 0
 
@@ -41,10 +42,10 @@ int spi_write_then_read(struct spi_device * /*spi*/,
                         unsigned char *rxbuf, unsigned n_rx)
 {
     if (n_tx == 2 && n_rx == 1) {
-        /* read */
+        /* Read. */
         rxbuf[0] = m2sdr_ad9361_spi_read(spi_fd, txbuf[0] << 8 | txbuf[1]);
     } else if (n_tx == 3 && n_rx == 0) {
-        /* write */
+        /* Write. */
         m2sdr_ad9361_spi_write(spi_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
@@ -102,23 +103,22 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
-    // open LitePCIe descriptor
+    /* Open LitePCIe descriptor. */
     if (args.count("path") == 0) {
-        // if path is not present, then findLiteXM2SDR had zero devices enumerated
+        /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
         throw std::runtime_error("No LitePCIe devices found!");
     }
     std::string path = args.at("path");
     _fd = open(path.c_str(), O_RDWR);
     if (_fd < 0)
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
-    /* global file descriptor for AD9361 lib */
+    /* Global file descriptor for AD9361 lib. */
     spi_fd = _fd;
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 
-    /* bypass synchro */
+    /* Bypass synchro. */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
-
 
     bool do_init = true;
     if (args.count("bypass_init") != 0) {
@@ -127,14 +127,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     if (do_init) {
-        /* Initialize Si531 Clocking */
+        /* Initialize Si531 Clocking. */
         m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
 
-        /* Initialize AD9361 SPI */
+        /* Initialize AD9361 SPI. */
         m2sdr_ad9361_spi_init(_fd);
     }
 
-    /* Initialize AD9361 RFIC */
+    /* Initialize AD9361 RFIC. */
     default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
@@ -142,37 +142,23 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
     if (do_init) {
-        /* Configure AD9361 Samplerate */
-        //ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
+        /* Configure AD9361 Samplerate. */
+        // ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
 
-        ///* Configure AD9361 TX/RX Frequencies */
-        //ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
-        //ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
-
-        /* Configure AD9361 TX/RX FIRs */
+        /* Configure AD9361 TX/RX FIRs. */
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
-        ///* Configure AD9361 TX Attenuation */
-        //ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
-
-        ///* Configure AD9361 RX Gain */
-        //ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
-        //ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
-
-        ///* Configure AD9361 RX->TX Loopback */
-        //ad9361_bist_loopback(ad9361_phy, loopback);
-
-        // set clock to Internal Reference Clock
+        /* Set clock to Internal Reference Clock. */
         this->setClockSource("internal");
 
         this->setMasterClockRate(64e6*2);
 
-        // some defaults to avoid throwing
+        /* Some defaults to avoid throwing. */
         setSampleRate(SOAPY_SDR_TX, 0, 30.72e6);
         setSampleRate(SOAPY_SDR_RX, 0, 30.72e6);
 
-        /* TX/RX 1 */
+        /* TX1/RX1. */
         this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
         this->setAntenna(SOAPY_SDR_TX,   0, "A");
         this->setFrequency(SOAPY_SDR_RX, 0, "BB", 1e6);
@@ -183,7 +169,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
         this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
 
-        /* TX/RX 2 */
+        /* TX2/RX2. */
         this->setAntenna(SOAPY_SDR_RX,   1, "A_BALANCED");
         this->setAntenna(SOAPY_SDR_TX,   1, "A");
         this->setFrequency(SOAPY_SDR_RX, 1, "BB", 1e6);
@@ -195,7 +181,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
     }
 
-    // set-up the DMA
+    /* Set-up the DMA. */
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
     _dma_buf = NULL;
 
@@ -212,7 +198,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         _rx_stream.opened = false;
     }
     if (_tx_stream.opened) {
-        // release the DMA engine
+        /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
 
         munmap(_tx_stream.buf,
@@ -251,7 +237,7 @@ bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
  *                                     Antenna API
  **************************************************************************************************/
 
-// FIXME: Correctly handle A/B Antennas.
+/* FIXME: Correctly handle A/B Antennas. */
 
 std::vector<std::string> SoapyLiteXM2SDR::listAntennas(
     const int direction,
@@ -316,11 +302,11 @@ bool SoapyLiteXM2SDR::hasGainMode(
 void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     const bool automatic)
 {
-    // N/A
+    /* N/A. */
     if (direction == SOAPY_SDR_TX)
         return;
 
-    // FIXME: AGC gain mode
+    /* FIXME: AGC gain mode. */
     ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
         (automatic ? RF_GAIN_SLOWATTACK_AGC : RF_GAIN_MGC));
 }
@@ -349,9 +335,9 @@ void SoapyLiteXM2SDR::setGain(
         value);
 
     if (SOAPY_SDR_TX == direction) {
-		uint32_t atten = static_cast<uint32_t>(-value * 1000);
+        uint32_t atten = static_cast<uint32_t>(-value * 1000);
         ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
-	}
+    }
     if (SOAPY_SDR_RX == direction)
         ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
 }
@@ -412,7 +398,7 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const size_t channel,
     const std::string &/*name*/) const {
 
-	return getGainRange(direction, channel);
+    return getGainRange(direction, channel);
 }
 /***************************************************************************************************
  *                                     Frequency API
@@ -493,7 +479,7 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
  *                                        Sample Rate API
  **************************************************************************************************/
 
-// FIXME: Improve listFrequencies.
+/* FIXME: Improve listFrequencies. */
 
 void SoapyLiteXM2SDR::setSampleRate(
     const int direction,
@@ -532,14 +518,14 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     const int /*direction*/,
     const size_t /*channel*/) const {
     std::vector<double> sampleRates;
-    sampleRates.push_back(25e6 / 96); // 260.42 KSPS (Minimum sample rate).
-    sampleRates.push_back(1.0e6);     //   1    MSPS.
-    sampleRates.push_back(2.5e6);     //   2.5  MSPS.
-    sampleRates.push_back(5.0e6);     //   5    MSPS.
-    sampleRates.push_back(10.0e6);    //  10    MSPS.
-    sampleRates.push_back(20.0e6);    //  20    MSPS.
-    sampleRates.push_back(30.72e6);   //  30.72 MSPS.
-    sampleRates.push_back(61.44e6);   //  61.44 MSPS (Maximum sample rate).
+    sampleRates.push_back(25e6 / 96); /* 260.42 KSPS (Minimum sample rate). */
+    sampleRates.push_back(1.0e6);     /* 1 MSPS. */
+    sampleRates.push_back(2.5e6);     /* 2.5 MSPS. */
+    sampleRates.push_back(5.0e6);     /* 5 MSPS. */
+    sampleRates.push_back(10.0e6);    /* 10 MSPS. */
+    sampleRates.push_back(20.0e6);    /* 20 MSPS. */
+    sampleRates.push_back(30.72e6);   /* 30.72 MSPS. */
+    sampleRates.push_back(61.44e6);   /* 61.44 MSPS (Maximum sample rate). */
     return sampleRates;
 }
 
@@ -657,7 +643,7 @@ double SoapyLiteXM2SDR::getReferenceClockRate(void) const {
  */
 SoapySDR::RangeList SoapyLiteXM2SDR::getReferenceClockRates(void) const {
     SoapySDR::RangeList ranges;
-    // Really whatever you want to try...
+    /* Really whatever you want to try... */
     ranges.push_back(SoapySDR::Range(25e6, 27e6));
     return ranges;
 }
@@ -716,28 +702,28 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
 
 #ifdef CSR_XADC_BASE
         if (deviceStr == "xadc") {
-            /* Temp */
+            /* Temp. */
             if (sensorStr == "temp") {
                 info.key         = "temp";
                 info.value       = "0.0";
                 info.units       = "C";
                 info.description = "FPGA temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
-            /* VCCINT */
+            /* VCCINT. */
             } else if (sensorStr == "vccint") {
                 info.key         = "vccint";
                 info.value       = "0.0";
                 info.units       = "V";
                 info.description = "FPGA internal supply voltage";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
-            /* VCCAUX */
+            /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
                 info.key         = "vccaux";
                 info.value       = "0.0";
                 info.units       = "V";
                 info.description = "FPGA auxiliary supply voltage";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
-            /* VCCBRAM */
+            /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
                 info.key         = "vccbram";
                 info.value       = "0.0";
@@ -766,22 +752,22 @@ std::string SoapyLiteXM2SDR::readSensor(
 
 #ifdef CSR_XADC_BASE
         if (deviceStr == "xadc") {
-            /* Temp */
+            /* Temp. */
             if (sensorStr == "temp") {
                 sensorValue = std::to_string(
                     (double)litepcie_readl(_fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
                 );
-            /* VCCINT */
+            /* VCCINT. */
             } else if (sensorStr == "vccint") {
                 sensorValue = std::to_string(
                     (double)litepcie_readl(_fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3
                 );
-            /* VCCAUX */
+            /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
                 sensorValue = std::to_string(
                     (double)litepcie_readl(_fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3
                 );
-            /* VCCBRAM */
+            /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
                 sensorValue = std::to_string(
                     (double)litepcie_readl(_fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
