@@ -276,23 +276,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /***********************************************************************************************
     *                                    Clocking API
     ***********************************************************************************************/
-    double getTSPRate(const int direction) const;
-
-    void setMasterClockRate(const double rate) override;
-
-    double getMasterClockRate(void) const override;
-
-    void setReferenceClockRate(const double rate) override;
-
-    double getReferenceClockRate(void) const override;
-
-    SoapySDR::RangeList getReferenceClockRates(void) const override;
-
-    std::vector<std::string> listClockSources(void) const override;
-
-    void setClockSource(const std::string &source) override;
-
-    std::string getClockSource(void) const override;
 
     /***********************************************************************************************
     *                                     Time API

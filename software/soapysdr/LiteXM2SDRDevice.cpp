@@ -142,21 +142,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
     if (do_init) {
-        /* Configure AD9361 Samplerate. */
-        // ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
-
         /* Configure AD9361 TX/RX FIRs. */
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
-        /* Set clock to Internal Reference Clock. */
-        this->setClockSource("internal");
-
-        this->setMasterClockRate(64e6*2);
-
         /* Some defaults to avoid throwing. */
         setSampleRate(SOAPY_SDR_TX, 0, 30.72e6);
         setSampleRate(SOAPY_SDR_RX, 0, 30.72e6);
+
+        this->setClockSource("internal");
 
         /* TX1/RX1. */
         this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
@@ -596,88 +590,11 @@ std::vector<double> SoapyLiteXM2SDR::listBandwidths(
 
 
 /***************************************************************************************************
- *                                        Clocking API
+ *                                   Clocking API
  **************************************************************************************************/
 
-double SoapyLiteXM2SDR::getTSPRate(
-    const int direction) const {
-    return (direction == SOAPY_SDR_TX) ? _masterClockRate
-                                       : _masterClockRate / 4;
-}
-
-void SoapyLiteXM2SDR::setMasterClockRate(
-    const double rate) {
-    std::lock_guard<std::mutex> lock(_mutex);
-
-    _masterClockRate = rate;
-    SoapySDR::logf(SOAPY_SDR_TRACE,
-                   "LMS7002M_set_data_clock(%f MHz) -> %f MHz",
-                   rate / 1e6,
-                   _masterClockRate / 1e6);
-}
-
-double SoapyLiteXM2SDR::getMasterClockRate(void) const {
-    return _masterClockRate;
-}
-
-/*!
- * Set the reference clock rate of the device.
- * \param rate the clock rate in Hz
- */
-void SoapyLiteXM2SDR::setReferenceClockRate(
-    const double rate) {
-    _refClockRate = rate;
-}
-
-/*!
- * Get the reference clock rate of the device.
- * \return the clock rate in Hz
- */
-double SoapyLiteXM2SDR::getReferenceClockRate(void) const {
-    return _refClockRate;
-}
-
-/*!
- * Get the range of available reference clock rates.
- * \return a list of clock rate ranges in Hz
- */
-SoapySDR::RangeList SoapyLiteXM2SDR::getReferenceClockRates(void) const {
-    SoapySDR::RangeList ranges;
-    /* Really whatever you want to try... */
-    ranges.push_back(SoapySDR::Range(25e6, 27e6));
-    return ranges;
-}
-
-/*!
- * Get the list of available clock sources.
- * \return a list of clock source names
- */
-std::vector<std::string> SoapyLiteXM2SDR::listClockSources(void) const {
-    std::vector<std::string> sources;
-    sources.push_back("internal");
-    sources.push_back("external");
-    return sources;
-}
-
-/*!
- * Set the clock source on the device
- * \param source the name of a clock source
- */
-void SoapyLiteXM2SDR::setClockSource(
-    const std::string &source) {
-    (void)source;
-}
-
-/*!
- * Get the clock source of the device
- * \return the name of a clock source
- */
-std::string SoapyLiteXM2SDR::getClockSource(void) const {
-    return "internal";
-}
-
 /***************************************************************************************************
- *                                  Sensors API
+ *                                    Sensors API
  **************************************************************************************************/
 
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
