@@ -114,6 +114,7 @@ void gpio_set_value(unsigned gpio, int value)
 
 static void m2sdr_init(
     uint32_t samplerate,
+    int64_t  bandwidth,
     int64_t  refclk_freq,
     int64_t  tx_freq,
     int64_t  rx_freq,
@@ -149,6 +150,10 @@ static void m2sdr_init(
     /* Configure AD9361 Samplerate */
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
     ad9361_set_rx_sampling_freq(ad9361_phy, samplerate);
+
+    /* Configure AD9361 TX/RX Bandwidth */
+    ad9361_set_rx_rf_bandwidth(ad9361_phy, bandwidth);
+    ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth);
 
     /* Configure AD9361 TX/RX Frequencies */
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
@@ -272,6 +277,7 @@ static void help(void)
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
            "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
+           "-bandwidth bw         Set the RF bandwidth in Hz (default=%d).\n"
            "-tx_freq freq         Set the TX (TX1/2) frequency in Hz (default=%" PRId64 ").\n"
            "-rx_freq freq         Set the RX (RX1/2) frequency in Hz (default=%" PRId64 ").\n"
            "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
@@ -283,6 +289,7 @@ static void help(void)
            "\n",
            DEFAULT_REFCLK_FREQ,
            DEFAULT_SAMPLERATE,
+           DEFAULT_BANDWIDTH,
            DEFAULT_TX_FREQ,
            DEFAULT_RX_FREQ,
            DEFAULT_TX_GAIN,
@@ -296,14 +303,15 @@ static struct option options[] = {
     { "execute_and_exit", no_argument, NULL, 'x' },   /*  1 */
     { "refclk_freq",      required_argument },        /*  2 */
     { "samplerate",       required_argument },        /*  3 */
-    { "tx_freq",          required_argument },        /*  4 */
-    { "rx_freq",          required_argument },        /*  5 */
-    { "tx_gain",          required_argument },        /*  6 */
-    { "rx_gain",          required_argument },        /*  7 */
-    { "loopback",         required_argument },        /*  8 */
-    { "bist_tx_tone",     no_argument },              /*  9 */
-    { "bist_rx_tone",     no_argument },              /* 10 */
-    { "bist_prbs_test",   no_argument },              /* 11 */
+    { "bandwidth",        required_argument },        /*  4 */
+    { "tx_freq",          required_argument },        /*  5 */
+    { "rx_freq",          required_argument },        /*  6 */
+    { "tx_gain",          required_argument },        /*  7 */
+    { "rx_gain",          required_argument },        /*  8 */
+    { "loopback",         required_argument },        /*  9 */
+    { "bist_tx_tone",     no_argument },              /* 10 */
+    { "bist_rx_tone",     no_argument },              /* 11 */
+    { "bist_prbs_test",   no_argument },              /* 12 */
     { NULL },
 };
 
@@ -320,6 +328,7 @@ int main(int argc, char **argv)
 
     int64_t  refclk_freq;
     uint32_t samplerate;
+    uint32_t  bandwidth;
     int64_t  tx_freq, rx_freq;
     int64_t  tx_gain, rx_gain;
     uint8_t  loopback;
@@ -329,6 +338,7 @@ int main(int argc, char **argv)
 
     refclk_freq  = DEFAULT_REFCLK_FREQ;
     samplerate   = DEFAULT_SAMPLERATE;
+    bandwidth    = DEFAULT_BANDWIDTH;
     tx_freq      = DEFAULT_TX_FREQ;
     rx_freq      = DEFAULT_RX_FREQ;
     tx_gain      = DEFAULT_TX_GAIN;
@@ -349,28 +359,31 @@ int main(int argc, char **argv)
                 case 3: /* samplerate */
                     samplerate = (uint32_t)strtod(optarg, NULL);
                     break;
-                case 4: /* tx_freq */
+                case 4: /* bandwidth */
+                    bandwidth = (int32_t)strtod(optarg, NULL);
+                    break;
+                case 5: /* tx_freq */
                     tx_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 5: /* rx_freq */
+                case 6: /* rx_freq */
                     rx_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 6: /* tx_gain */
+                case 7: /* tx_gain */
                     tx_gain = (int64_t)strtod(optarg, NULL);
                     break;
-                case 7: /* rx_gain */
+                case 8: /* rx_gain */
                     rx_gain = (int64_t)strtod(optarg, NULL);
                     break;
-                case 8: /* loopback */
+                case 9: /* loopback */
                     loopback = (uint8_t)strtod(optarg, NULL);
                     break;
-                case 9: /* bist_tx_tone */
+                case 10: /* bist_tx_tone */
                     bist_tx_tone = true;
                     break;
-                case 10: /* bist_rx_tone */
+                case 11: /* bist_rx_tone */
                     bist_rx_tone = true;
                     break;
-                case 11: /* bist_prbs_test */
+                case 12: /* bist_prbs_test */
                     bist_prbs_test = true;
                     break;
                 default:
@@ -397,7 +410,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test);
 
     return 0;
 }

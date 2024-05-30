@@ -20,6 +20,7 @@
 
 #define DEFAULT_REFCLK_FREQ    ((int64_t)38400000) /* Reference Clock */
 #define DEFAULT_SAMPLERATE               30720000  /* RF Samplerate */
+#define DEFAULT_BANDWIDTH                56000000  /* RF Bandwidth */
 #define DEFAULT_TX_FREQ      ((int64_t)  98200000) /* TX (TX1/2) Center Freq in Hz */
 #define DEFAULT_RX_FREQ      ((int64_t)  98200000) /* RX (RX1/2) Center Freq in Hz */
 #define DEFAULT_TX_GAIN                       -20  /* TX Gain in dB -89 ->  0 dB */
