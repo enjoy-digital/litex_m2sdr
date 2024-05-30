@@ -82,16 +82,25 @@ find_library(LIBM2SDR_LIBRARY m2sdr
 find_package(SoapySDR "0.2.1" REQUIRED)
 
 set(LITEXM2SDR_SOURCE
-	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_api.c
-	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
-	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
-	${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_api.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
 )
 
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
-	SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
-	LiteXM2SDRRegistration.cpp ${LITEXM2SDR_SOURCE}
-	LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} m
+    SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
+    LiteXM2SDRRegistration.cpp ${LITEXM2SDR_SOURCE}
+    LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} m
 )
 
+# Suppress specific warnings
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(SoapyLiteXM2SDR PRIVATE
+        -Wno-sign-compare
+        -Wno-implicit-fallthrough
+        -Wno-maybe-uninitialized
+        -Wno-unused-parameter
+    )
+endif()
