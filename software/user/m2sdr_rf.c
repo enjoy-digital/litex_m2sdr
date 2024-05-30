@@ -147,7 +147,8 @@ static void m2sdr_init(
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
     /* Configure AD9361 Samplerate */
-    ad9361_set_trx_clock_chain_freq(ad9361_phy, samplerate);
+    ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
+    ad9361_set_rx_sampling_freq(ad9361_phy, samplerate);
 
     /* Configure AD9361 TX/RX Frequencies */
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
