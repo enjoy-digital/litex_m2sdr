@@ -17,6 +17,55 @@ from litepcie.common import *
 from gateware.ad9361.phy import AD9361PHY
 from gateware.ad9361.spi import AD9361SPIMaster
 
+# AD9361 TX Format ---------------------------------------------------------------------------------
+
+def _sign_extend(data, nbits=16):
+    return Cat(data, Replicate(data[-1], nbits - len(data)))
+
+class AD9361TXFormat(LiteXModule):
+    def __init__(self):
+        self.sink   = sink   = stream.Endpoint(dma_layout(64))
+        self.source = source = stream.Endpoint(dma_layout(64))
+        self.mode   = mode   = Signal()
+
+        # # #
+
+        # 16-bit mode.
+        self.comb += If(mode == 0, sink.connect(source))
+
+        # 8-bit mode.
+        self.conv = conv = stream.Converter(64, 32)
+        self.comb += If(mode == 1,
+            sink.connect(conv.sink),
+            conv.source.connect(source, omit={"data"}),
+            source.data[0*16+4:1*16].eq(_sign_extend(conv.source.data[0*8:1*8], 12)),
+            source.data[1*16+4:2*16].eq(_sign_extend(conv.source.data[1*8:2*8], 12)),
+            source.data[2*16+4:3*16].eq(_sign_extend(conv.source.data[2*8:3*8], 12)),
+            source.data[3*16+4:4*16].eq(_sign_extend(conv.source.data[3*8:4*8], 12)),
+        )
+
+class AD9361RXFormat(LiteXModule):
+    def __init__(self):
+        self.sink   = sink   = stream.Endpoint(dma_layout(64))
+        self.source = source = stream.Endpoint(dma_layout(64))
+        self.mode   = mode   = Signal()
+
+        # # #
+
+        # 16-bit mode.
+        self.comb += If(mode == 0, sink.connect(source))
+
+        # 8-bit mode.
+        self.conv = conv = stream.Converter(32, 64)
+        self.comb += If(mode == 1,
+            sink.connect(conv.sink, omit={"data"}),
+            conv.sink.data[0*8:1*8].eq(sink.data[0*16+4:1*16]),
+            conv.sink.data[1*8:2*8].eq(sink.data[1*16+4:2*16]),
+            conv.sink.data[2*8:3*8].eq(sink.data[2*16+4:3*16]),
+            conv.sink.data[3*8:4*8].eq(sink.data[3*16+4:4*16]),
+            conv.source.connect(source),
+        )
+
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
 class AD9361RFIC(LiteXModule):
@@ -59,6 +108,12 @@ class AD9361RFIC(LiteXModule):
                 ("``0b11111111``", "All status pins high"),
             ], description="AD9361's status pins")
         ])
+        self._format = CSRStorage(fields=[
+            CSRField("mode", size=1, offset=0, values=[
+                ("``0b0``", "12-bit mode."),
+                ("``0b1``", " 8-bit mode."),
+            ], description="Sample format.")
+        ])
 
         # # #
 
@@ -76,7 +131,7 @@ class AD9361RFIC(LiteXModule):
             rfic_pads.en_agc.eq(self._config.fields.en_agc),
 
             rfic_pads.ctrl.eq(self._ctrl.storage),
-            self._stat.status.eq(rfic_pads.stat)
+            self._stat.fields.stat.eq(rfic_pads.stat)
         ]
 
         # PHY --------------------------------------------------------------------------------------
@@ -100,16 +155,20 @@ class AD9361RFIC(LiteXModule):
         self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
 
+        # Format -----------------------------------------------------------------------------------
+        self.tx_format = tx_format = AD9361TXFormat()
+        self.rx_format = rx_format = AD9361RXFormat()
+        self.comb += tx_format.mode.eq(self._format.fields.mode)
+        self.comb += rx_format.mode.eq(self._format.fields.mode)
+
         # Data Flow --------------------------------------------------------------------------------
 
         # TX.
         # ---
-        def _16b_sign_extend(data):
-            return Cat(data, Replicate(data[-1], 16 - len(data)))
-
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
+            tx_format,
             tx_cdc,
         )
         self.comb += [
@@ -124,13 +183,14 @@ class AD9361RFIC(LiteXModule):
         # ---
         self.comb += [
             self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
-            rx_cdc.sink.data[0*16:1*16].eq(_16b_sign_extend(self.phy.source.ia)),
-            rx_cdc.sink.data[1*16:2*16].eq(_16b_sign_extend(self.phy.source.qa)),
-            rx_cdc.sink.data[2*16:3*16].eq(_16b_sign_extend(self.phy.source.ib)),
-            rx_cdc.sink.data[3*16:4*16].eq(_16b_sign_extend(self.phy.source.qb)),
+            rx_cdc.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
+            rx_cdc.sink.data[1*16:2*16].eq(_sign_extend(self.phy.source.qa, 16)),
+            rx_cdc.sink.data[2*16:3*16].eq(_sign_extend(self.phy.source.ib, 16)),
+            rx_cdc.sink.data[3*16:4*16].eq(_sign_extend(self.phy.source.qb, 16)),
         ]
         self.rx_pipeline = stream.Pipeline(
             rx_cdc,
+            rx_format,
             rx_buffer,
             self.source
         )
