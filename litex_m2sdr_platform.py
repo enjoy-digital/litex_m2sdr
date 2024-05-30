@@ -32,6 +32,16 @@ _io = [
     ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_3.
     ("si5351_clk3", 0, Pins("R4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_4.
 
+    # SPIFlash.
+    ("flash_cs_n", 0, Pins("T19"), IOStandard("LVCMOS33")),
+    ("flash", 0,
+        Subsignal("mosi", Pins("P22")),
+        Subsignal("miso", Pins("R22")),
+        Subsignal("wp",   Pins("P21")),
+        Subsignal("hold", Pins("R21")),
+        IOStandard("LVCMOS33")
+    ),
+
     # PCIe (M2 Connector).
     ("pcie_x1", 0,
         Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.

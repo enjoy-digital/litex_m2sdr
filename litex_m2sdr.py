@@ -32,6 +32,8 @@ from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 from litex.soc.cores.pwm       import PWM
 from litex.soc.cores.bitbang   import I2CMaster
+from litex.soc.cores.gpio      import GPIOOut
+from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
@@ -96,6 +98,7 @@ class BaseSoC(SoCMini):
         "flash"       : 2,
         "xadc"        : 3,
         "dna"         : 4,
+        "flash"       : 5,
 
         # PCIe.
         "pcie_phy"    : 10,
@@ -107,9 +110,11 @@ class BaseSoC(SoCMini):
         "sata_core"   : 16,
 
         # SDR.
-        "timestamp"   : 20,
-        "header"      : 21,
-        "ad9361"      : 22,
+        "si5351_i2c"  : 20,
+        "si5351_pwm"  : 21,
+        "timestamp"   : 22,
+        "header"      : 23,
+        "ad9361"      : 24,
 
         # Analyzer.
         "analyzer"    : 30,
@@ -176,6 +181,10 @@ class BaseSoC(SoCMini):
 
         self.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+
+        # SPI Flash --------------------------------------------------------------------------------
+        self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
+        self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
 
         # PCIe -------------------------------------------------------------------------------------
 
