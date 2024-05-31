@@ -370,7 +370,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _samplesPerComplex = 2;
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
-    float    _CF32Scaling       = 2047.0;
+    float    _samplesScaling    = 2047.0;
 
     // register protection
     std::mutex _mutex;
