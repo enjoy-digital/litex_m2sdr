@@ -17,6 +17,16 @@ _io = [
     # Leds.
     ("user_led", 0, Pins("D22"),  IOStandard("LVCMOS33")),
 
+    # SPIFlash.
+    ("flash_cs_n", 0, Pins("T19"), IOStandard("LVCMOS33")),
+    ("flash", 0,
+        Subsignal("mosi", Pins("P22")),
+        Subsignal("miso", Pins("R22")),
+        Subsignal("wp",   Pins("P21")),
+        Subsignal("hold", Pins("R21")),
+        IOStandard("LVCMOS33")
+    ),
+
     # PCIe.
     ("pcie_x1", 0,
         Subsignal("rst_n", Pins("A13"), IOStandard("LVCMOS33")),

@@ -7,11 +7,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
+import time
 import argparse
 
 from migen import *
-from migen.genlib.resetsync import AsyncResetSynchronizer
-from migen.genlib.cdc import PulseSynchronizer, MultiReg
 
 from litex.gen import *
 
@@ -30,6 +29,8 @@ from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
 from litex.soc.cores.pwm       import PWM
 from litex.soc.cores.bitbang   import I2CMaster
+from litex.soc.cores.gpio      import GPIOOut
+from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
@@ -41,7 +42,10 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX
 from litescope import LiteScopeAnalyzer
 
 from gateware.ad9361.core import AD9361RFIC
-from gateware.cdcm6208 import CDCM6208
+from gateware.cdcm6208    import CDCM6208
+from gateware.timestamp   import Timestamp
+from gateware.header      import TXRXHeader
+from gateware.measurement import MultiClkMeasurement
 
 from software import generate_litepcie_software
 
@@ -71,24 +75,37 @@ class CRG(LiteXModule):
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
         # SoC.
-        "uart"        : 0,
-        "icap"        : 1,
-        "flash"       : 2,
-        "xadc"        : 3,
-        "dna"         : 4,
+        "ctrl"        : 0,
+        "uart"        : 1,
+        "icap"        : 2,
+        "flash"       : 3,
+        "xadc"        : 4,
+        "dna"         : 5,
+        "flash"       : 6,
+        "leds"        : 7,
 
         # PCIe.
         "pcie_phy"    : 10,
         "pcie_msi"    : 11,
         "pcie_dma0"   : 12,
 
-        # SDR.
-        "timestamp"   : 20,
-        "header"      : 21,
-        "ad9361"      : 22,
+        # Eth.
+        "eth_phy"     : 14,
 
-        # Analyzer.
-        "analyzer"    : 30,
+        # SATA.
+        "sata_phy"    : 15,
+        "sata_core"   : 16,
+
+        # SDR.
+        "si5351_i2c"  : 20,
+        "si5351_pwm"  : 21,
+        "timestamp"   : 22,
+        "header"      : 23,
+        "ad9361"      : 24,
+
+        # Measurements/Analyzer.
+        "clk_measurement" : 30,
+        "analyzer"        : 31,
     }
 
     def __init__(self, sys_clk_freq=int(125e6), with_pcie=True, pcie_lanes=1, with_jtagbone=True):
@@ -96,12 +113,14 @@ class BaseSoC(SoCMini):
         platform = Platform()
 
         # SoCMini ----------------------------------------------------------------------------------
+
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident         = f"LiteX SoC on PCIe-Radio",
             ident_version = True,
         )
 
         # Clocking ---------------------------------------------------------------------------------
+
         self.crg = CRG(platform, sys_clk_freq)
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_clkin}}]")
 
@@ -125,30 +144,40 @@ class BaseSoC(SoCMini):
         self.cdcm6208 = CDCM6208(pads=platform.request("cdcm6208"), sys_clk_freq=sys_clk_freq)
 
         # JTAGBone ---------------------------------------------------------------------------------
+
         if with_jtagbone:
             self.add_jtagbone()
             platform.add_period_constraint(self.jtagbone_phy.cd_jtag.clk, 1e9/20e6)
             platform.add_false_path_constraints(self.jtagbone_phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
+
         self.leds = LedChaser(
             pads         = platform.request_all("user_led"),
             sys_clk_freq = sys_clk_freq
         )
 
         # ICAP -------------------------------------------------------------------------------------
+
         self.icap = ICAP()
         self.icap.add_reload()
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # XADC -------------------------------------------------------------------------------------
+
         self.xadc = XADC()
 
         # DNA --------------------------------------------------------------------------------------
+
         self.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
+        # SPI Flash --------------------------------------------------------------------------------
+        self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
+        self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
+
         # PCIe -------------------------------------------------------------------------------------
+
         if with_pcie:
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}"),
                 data_width  = {1: 64, 4: 128}[pcie_lanes],
@@ -165,7 +194,7 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 }
             )
-            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1,
+            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -222,7 +251,7 @@ class BaseSoC(SoCMini):
 
         # Debug.
         with_spi_analyzer  = False
-        with_rfic_analyzer = True
+        with_rfic_analyzer = False
         with_dma_analyzer  = False
         if with_spi_analyzer:
             analyzer_signals = [platform.lookup_request("ad9361_spi")]
@@ -236,7 +265,7 @@ class BaseSoC(SoCMini):
             analyzer_signals = [
                 self.ad9361.phy.sink,   # TX.
                 self.ad9361.phy.source, # RX.
-                self.ad9361.prbs_rx.fields.synced
+                self.ad9361.prbs_rx.fields.synced,
             ]
             self.analyzer = LiteScopeAnalyzer(analyzer_signals,
                 depth        = 4096,
@@ -260,34 +289,12 @@ class BaseSoC(SoCMini):
 
         # Clk Measurements -------------------------------------------------------------------------
 
-        class ClkMeasurement(LiteXModule):
-            def __init__(self, clk, increment=1):
-                self.latch = CSR()
-                self.value = CSRStatus(64)
-
-                # # #
-
-                # Create Clock Domain.
-                self.cd_counter = ClockDomain()
-                self.comb += self.cd_counter.clk.eq(clk)
-                self.specials += AsyncResetSynchronizer(self.cd_counter, ResetSignal())
-
-                # Free-running Clock Counter.
-                counter = Signal(64)
-                self.sync.counter += counter.eq(counter + increment)
-
-                # Latch Clock Counter.
-                latch_value = Signal(64)
-                latch_sync  = PulseSynchronizer("sys", "counter")
-                self.submodules += latch_sync
-                self.comb += latch_sync.i.eq(self.latch.re)
-                self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
-                self.specials += MultiReg(latch_value, self.value.status)
-
-        self.clk0_measurement = ClkMeasurement(clk=0)
-        self.clk1_measurement = ClkMeasurement(clk=ClockSignal("rfic"))
-        self.clk2_measurement = ClkMeasurement(clk=0)
-        self.clk3_measurement = ClkMeasurement(clk=0)
+        self.clk_measurement = MultiClkMeasurement(clks={
+            "clk0" : 0,
+            "clk1" : ClockSignal("rfic"),
+            "clk2" : 0,
+            "clk3" : 0,
+        })
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -296,6 +303,7 @@ def main():
     parser.add_argument("--build",  action="store_true", help="Build bitstream.")
     parser.add_argument("--load",   action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",  action="store_true", help="Flash bitstream.")
+    parser.add_argument("--rescan", action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
     comopts = parser.add_mutually_exclusive_group()
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
@@ -311,6 +319,12 @@ def main():
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
 
+    # Remove PCIe Driver/Device.
+    if (args.load or args.flash) and args.rescan:
+        device_id = get_pcie_device_id(vendor="10ee", device="7021") # FIXME: Handle X4  case.
+        if device_id:
+            remove_pcie_device(device_id, driver="litepcie")
+
     # Load Bistream.
     if args.load:
         prog = soc.platform.create_programmer()
@@ -320,6 +334,11 @@ def main():
     if args.flash:
         prog = soc.platform.create_programmer()
         prog.flash(0, os.path.join(builder.gateware_dir, soc.build_name + ".bin"))
+
+    # Rescan PCIe Bus.
+    if args.rescan:
+        time.sleep(2)
+        rescan_pcie_bus()
 
 if __name__ == "__main__":
     main()
