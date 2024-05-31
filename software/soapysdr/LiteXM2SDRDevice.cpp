@@ -486,6 +486,26 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 
 /* FIXME: Improve listFrequencies. */
 
+void SoapyLiteXM2SDR::setSampleMode(double sampleRate) {
+    /* Select 8-bit/16-bit mode based on configured SampleRate */
+    if (sampleRate > SAMPLE_RATE_8BIT_16BIT_THRESHOLD) {
+        /* 8-bit mode */
+        _bytesPerSample  = 1;
+        _bytesPerComplex = 2;
+        _samplesScaling  = 128.0;
+    } else {
+        /* 16-bit mode */
+        _bytesPerSample  = 2;
+        _bytesPerComplex = 4;
+        _samplesScaling  = 2047.0;
+    }
+    /* Write the mode to the hardware */
+    if (_bytesPerSample == 1)
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
+    if (_bytesPerSample == 2)
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
+}
+
 void SoapyLiteXM2SDR::setSampleRate(
     const int direction,
     const size_t channel,
@@ -503,6 +523,8 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate);
     if (direction == SOAPY_SDR_RX)
         ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate);
+
+    setSampleMode(rate);
 }
 
 double SoapyLiteXM2SDR::getSampleRate(
