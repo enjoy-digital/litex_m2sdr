@@ -345,6 +345,20 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     RXStream _rx_stream;
     TXStream _tx_stream;
 
+    void interleaveCF32(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        const std::string &format,
+        size_t offset);
+
+    void deinterleaveCF32(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        const std::string &format,
+        size_t offset);
+
     const char *dir2Str(const int direction) const {
         return (direction == SOAPY_SDR_RX) ? "RX" : "TX";
     }
