@@ -193,10 +193,10 @@ static void m2sdr_init(
 
     /* Enable BIST PRBS Test (Optional: For FPGA <-> AD9361 interface calibration) */
     if (bist_prbs) {
-        int rx_clk_delay;
-        int rx_dat_delay;
-        int tx_clk_delay;
-        int tx_dat_delay;
+        int rx_clk_delay, rx_dat_delay, tx_clk_delay, tx_dat_delay;
+        int rx_valid_delays[16][16] = {{0}};
+        int tx_valid_delays[16][16] = {{0}};
+
         printf("BIST_PRBS TEST...\n");
 
         /* Enable AD9361 RX-PRBS */
@@ -210,10 +210,10 @@ static void m2sdr_init(
 
         /* Loop on RX Clk delay */
         printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-        for (rx_clk_delay=0; rx_clk_delay<16; rx_clk_delay++){
+        for (rx_clk_delay = 0; rx_clk_delay < 16; rx_clk_delay++) {
             /* Loop on RX Dat delay */
             printf(" %2d     |", rx_clk_delay);
-            for (rx_dat_delay=0; rx_dat_delay<16; rx_dat_delay++) {
+            for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
                 /* Configure Clk/Dat delays */
                 m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
 
@@ -221,13 +221,39 @@ static void m2sdr_init(
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
+                int prbs_sync = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                printf(" %2d", prbs_sync);
+
+                /* Record valid delay settings */
+                rx_valid_delays[rx_clk_delay][rx_dat_delay] = prbs_sync;
             }
             printf("\n");
         }
 
-        /* Configure RX Clk/Dat delays */
-        m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(RX_CLK_DELAY) | RX_DATA_DELAY(RX_DAT_DELAY));
+        /* Find optimal RX Clk/Dat delays */
+        int optimal_rx_clk_delay = -1, optimal_rx_dat_delay = -1;
+        for (rx_clk_delay = 0; rx_clk_delay < 16; rx_clk_delay++) {
+            for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
+                if (rx_valid_delays[rx_clk_delay][rx_dat_delay] == 1) {
+                    optimal_rx_clk_delay = rx_clk_delay;
+                    optimal_rx_dat_delay = rx_dat_delay;
+                    break;
+                }
+            }
+            if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
+                break;
+            }
+        }
+
+        /* Display optimal RX Clk/Dat delays */
+        if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
+            printf("Optimal RX Clk Delay: %d, Optimal RX Dat Delay: %d\n", optimal_rx_clk_delay, optimal_rx_dat_delay);
+        }
+
+        /* Configure optimal RX Clk/Dat delays */
+        if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
+            m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
+        }
 
         /* Enable RX->TX AD9361 loopback */
         ad9361_bist_loopback(ad9361_phy, 1);
@@ -242,10 +268,10 @@ static void m2sdr_init(
 
         /* Loop on TX Clk delay */
         printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-        for (tx_clk_delay=0; tx_clk_delay<16; tx_clk_delay++){
+        for (tx_clk_delay = 0; tx_clk_delay < 16; tx_clk_delay++) {
             /* Loop on TX Dat delay */
             printf(" %2d     |", tx_clk_delay);
-            for (tx_dat_delay=0; tx_dat_delay<16; tx_dat_delay++) {
+            for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
                 /* Configure Clk/Dat delays */
                 m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
 
@@ -253,19 +279,50 @@ static void m2sdr_init(
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                printf(" %2d", litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1);
+                int prbs_sync = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                printf(" %2d", prbs_sync);
+
+                /* Record valid delay settings */
+                tx_valid_delays[tx_clk_delay][tx_dat_delay] = prbs_sync;
             }
             printf("\n");
         }
 
-        /* Disable FPGA TX-PRBS */
-        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        /* Find optimal TX Clk/Dat delays */
+        int optimal_tx_clk_delay = -1, optimal_tx_dat_delay = -1;
+        for (tx_clk_delay = 0; tx_clk_delay < 16; tx_clk_delay++) {
+            for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
+                if (tx_valid_delays[tx_clk_delay][tx_dat_delay] == 1) {
+                    optimal_tx_clk_delay = tx_clk_delay;
+                    optimal_tx_dat_delay = tx_dat_delay;
+                    break;
+                }
+            }
+            if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
+                break;
+            }
+        }
 
-        /* Enable RX->TX AD9361 loopback */
-        ad9361_bist_loopback(ad9361_phy, 0);
+        /* Configure optimal TX Clk/Dat delays */
+        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
+            m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
+        }
 
-        /* Disable AD9361 RX-PRBS */
-        ad9361_bist_prbs(ad9361_phy, 0);
+        /* Display optimal TX Clk/Dat delays */
+        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
+            printf("Optimal TX Clk Delay: %d, Optimal TX Dat Delay: %d\n", optimal_tx_clk_delay, optimal_tx_dat_delay);
+        }
+
+        /* Display calibration results */
+        printf("\n");
+        printf("Calibration completed:\n");
+        printf("----------------------\n");
+        printf("RX Clk:%d/Dat:%d, TX Clk:%d/Dat:%d\n",
+               optimal_rx_clk_delay,
+               optimal_rx_dat_delay,
+               optimal_tx_clk_delay,
+               optimal_tx_dat_delay
+        );
     }
 
     close(fd);
