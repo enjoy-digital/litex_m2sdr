@@ -378,24 +378,6 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
 
 /* Interleave CF32 samples. */
 void interleaveCF32(
-    const float *src,
-    int8_t *dst,
-    uint32_t len,
-    uint32_t bytes_per_sample,
-    uint32_t n_channels,
-    size_t offset) {
-    int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * bytes_per_sample);
-    const float *samples_cf32 = src + (offset * bytes_per_sample);
-    for (uint32_t i = 0; i < len; i++) {
-        dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * 2047.0); /* I. */
-        dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * 2047.0); /* Q. */
-        samples_cf32 += 2;
-        dst_int16 += n_channels * 2;
-    }
-}
-
-/* Generic interleave function. */
-void interleave(
     const void *src,
     void *dst,
     uint32_t len,
@@ -404,7 +386,15 @@ void interleave(
     uint32_t n_channels,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        interleaveCF32(reinterpret_cast<const float*>(src), reinterpret_cast<int8_t*>(dst), len, bytes_per_sample, n_channels, offset);
+        const float *samples_cf32 = reinterpret_cast<const float*>(src) + (offset * bytes_per_sample);
+        int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * bytes_per_sample);
+
+        for (uint32_t i = 0; i < len; i++) {
+            dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * 2047.0); /* I. */
+            dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * 2047.0); /* Q. */
+            samples_cf32 += 2;
+            dst_int16 += n_channels * 2;
+        }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
@@ -412,24 +402,6 @@ void interleave(
 
 /* Deinterleave CF32 samples. */
 void deinterleaveCF32(
-    const int8_t *src,
-    float *dst,
-    uint32_t len,
-    uint32_t bytes_per_sample,
-    uint32_t n_channels,
-    size_t offset) {
-    float *samples_cf32 = dst + (offset * bytes_per_sample);
-    const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
-    for (uint32_t i = 0; i < len; i++) {
-        samples_cf32[0] = static_cast<float>(src_int16[0]) / 2047.0; /* I. */
-        samples_cf32[1] = static_cast<float>(src_int16[1]) / 2047.0; /* Q. */
-        samples_cf32 += 2;
-        src_int16 += n_channels * 2;
-    }
-}
-
-/* Generic deinterleave function. */
-void deinterleave(
     const void *src,
     void *dst,
     uint32_t len,
@@ -438,7 +410,15 @@ void deinterleave(
     const std::string &format,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        deinterleaveCF32(reinterpret_cast<const int8_t*>(src), reinterpret_cast<float*>(dst), len, bytes_per_sample, n_channels, offset);
+        float *samples_cf32 = reinterpret_cast<float*>(dst) + (offset * bytes_per_sample);
+        const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
+
+        for (uint32_t i = 0; i < len; i++) {
+            samples_cf32[0] = static_cast<float>(src_int16[0]) / 2047.0; /* I. */
+            samples_cf32[1] = static_cast<float>(src_int16[1]) / 2047.0; /* Q. */
+            samples_cf32 += 2;
+            src_int16 += n_channels * 2;
+        }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
@@ -473,7 +453,7 @@ int SoapyLiteXM2SDR::readStream(
         /* Read out channels from the remainder buffer. */
         for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
             const uint32_t chan = _rx_stream.channels[i];
-            deinterleave(
+            deinterleaveCF32(
                 _rx_stream.remainderBuff + (remainderOffset + chan * _bytesPerComplex),
                 buffs[i],
                 n,
@@ -522,7 +502,7 @@ int SoapyLiteXM2SDR::readStream(
     /* Read out channels from the new buffer. */
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
         const uint32_t chan = _rx_stream.channels[i];
-        deinterleave(
+        deinterleaveCF32(
             _rx_stream.remainderBuff + (chan * _bytesPerComplex),
             buffs[i],
             n,
@@ -572,7 +552,7 @@ int SoapyLiteXM2SDR::writeStream(
 
         /* Write out channels to the remainder buffer. */
         for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-            interleave(
+            interleaveCF32(
                 buffs[i],
                 _tx_stream.remainderBuff + remainderOffset + (_tx_stream.channels[i] * _bytesPerComplex),
                 n,
@@ -618,7 +598,7 @@ int SoapyLiteXM2SDR::writeStream(
 
     /* Write out channels to the new buffer. */
     for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-        interleave(
+        interleaveCF32(
             buffs[i],
             _tx_stream.remainderBuff + (_tx_stream.channels[i] * _bytesPerComplex),
             n,
