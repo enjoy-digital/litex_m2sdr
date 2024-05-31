@@ -352,6 +352,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     int _fd;
     struct ad9361_rf_phy *ad9361_phy;
 
+    uint32_t _nChannels         = 2;
+    uint32_t _samplesPerComplex = 2;
+    uint32_t _bytesPerSample    = 2;
+    uint32_t _bytesPerComplex   = 4;
+
     // register protection
     std::mutex _mutex;
 };

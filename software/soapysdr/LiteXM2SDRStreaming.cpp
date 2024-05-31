@@ -16,8 +16,6 @@
 
 #include "LiteXM2SDRDevice.hpp"
 
-#define BYTES_PER_SAMPLE 2
-
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const int direction,
@@ -172,9 +170,9 @@ int SoapyLiteXM2SDR::deactivateStream(
 size_t SoapyLiteXM2SDR::getStreamMTU(SoapySDR::Stream *stream) const {
     if (stream == RX_STREAM) {
         /* Each sample is 2 * Complex{Int16}. */
-        return _dma_mmap_info.dma_rx_buf_size / (2 * 2 * sizeof(int16_t));
+        return _dma_mmap_info.dma_rx_buf_size / (_nChannels * _bytesPerComplex);
     } else if (stream == TX_STREAM) {
-        return _dma_mmap_info.dma_tx_buf_size / (2 * 2 * sizeof(int16_t));
+        return _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
     } else {
         throw std::runtime_error("SoapySDR::getStreamMTU(): Invalid stream.");
     }
@@ -383,14 +381,16 @@ void interleaveCF32(
     const float *src,
     int8_t *dst,
     uint32_t len,
+    uint32_t bytes_per_sample,
+    uint32_t n_channels,
     size_t offset) {
-    int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 4);
-    const float *samples_cf32 = src + (offset * BYTES_PER_SAMPLE);
+    int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * bytes_per_sample);
+    const float *samples_cf32 = src + (offset * bytes_per_sample);
     for (uint32_t i = 0; i < len; i++) {
         dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * 2047.0); /* I. */
         dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * 2047.0); /* Q. */
         samples_cf32 += 2;
-        dst_int16 += 4;
+        dst_int16 += n_channels * 2;
     }
 }
 
@@ -400,9 +400,11 @@ void interleave(
     void *dst,
     uint32_t len,
     const std::string &format,
+    uint32_t bytes_per_sample,
+    uint32_t n_channels,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        interleaveCF32(reinterpret_cast<const float*>(src), reinterpret_cast<int8_t*>(dst), len, offset);
+        interleaveCF32(reinterpret_cast<const float*>(src), reinterpret_cast<int8_t*>(dst), len, bytes_per_sample, n_channels, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
@@ -413,14 +415,16 @@ void deinterleaveCF32(
     const int8_t *src,
     float *dst,
     uint32_t len,
+    uint32_t bytes_per_sample,
+    uint32_t n_channels,
     size_t offset) {
-    float *samples_cf32 = dst + (offset * BYTES_PER_SAMPLE);
+    float *samples_cf32 = dst + (offset * bytes_per_sample);
     const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
     for (uint32_t i = 0; i < len; i++) {
         samples_cf32[0] = static_cast<float>(src_int16[0]) / 2047.0; /* I. */
         samples_cf32[1] = static_cast<float>(src_int16[1]) / 2047.0; /* Q. */
         samples_cf32 += 2;
-        src_int16 += 4;
+        src_int16 += n_channels * 2;
     }
 }
 
@@ -429,10 +433,12 @@ void deinterleave(
     const void *src,
     void *dst,
     uint32_t len,
+    uint32_t bytes_per_sample,
+    uint32_t n_channels,
     const std::string &format,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        deinterleaveCF32(reinterpret_cast<const int8_t*>(src), reinterpret_cast<float*>(dst), len, offset);
+        deinterleaveCF32(reinterpret_cast<const int8_t*>(src), reinterpret_cast<float*>(dst), len, bytes_per_sample, n_channels, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
@@ -452,14 +458,13 @@ int SoapyLiteXM2SDR::readStream(
 
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
-    const uint32_t cplx_size = BYTES_PER_SAMPLE * 2;
 
     size_t samp_avail = 0;
 
     /* If there's a remainder buffer from a previous read, process that first. */
     if (_rx_stream.remainderHandle >= 0) {
         const size_t n = std::min(_rx_stream.remainderSamps, returnedElems);
-        const uint32_t remainderOffset = _tx_stream.remainderOffset * cplx_size * 2;
+        const uint32_t remainderOffset = _tx_stream.remainderOffset *  _nChannels *_bytesPerComplex;
 
         if (n < returnedElems) {
             samp_avail = n;
@@ -468,8 +473,15 @@ int SoapyLiteXM2SDR::readStream(
         /* Read out channels from the remainder buffer. */
         for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
             const uint32_t chan = _rx_stream.channels[i];
-            deinterleave(_rx_stream.remainderBuff + (remainderOffset + chan * cplx_size),
-                         buffs[i], n, _rx_stream.format, 0);
+            deinterleave(
+                _rx_stream.remainderBuff + (remainderOffset + chan * _bytesPerComplex),
+                buffs[i],
+                n,
+                _bytesPerSample,
+                _nChannels,
+                _rx_stream.format,
+                0
+            );
         }
         _rx_stream.remainderSamps -= n;
         _rx_stream.remainderOffset += n;
@@ -510,8 +522,15 @@ int SoapyLiteXM2SDR::readStream(
     /* Read out channels from the new buffer. */
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
         const uint32_t chan = _rx_stream.channels[i];
-        deinterleave(_rx_stream.remainderBuff + (chan * cplx_size),
-                     buffs[i], n, _rx_stream.format, samp_avail);
+        deinterleave(
+            _rx_stream.remainderBuff + (chan * _bytesPerComplex),
+            buffs[i],
+            n,
+            _bytesPerSample,
+            _nChannels,
+            _rx_stream.format,
+            samp_avail
+        );
     }
     _rx_stream.remainderSamps -= n;
     _rx_stream.remainderOffset += n;
@@ -539,14 +558,13 @@ int SoapyLiteXM2SDR::writeStream(
 
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
-    const uint32_t cplx_size = BYTES_PER_SAMPLE * 2;
 
     size_t samp_avail = 0;
 
     /* If there's a remainder buffer from a previous write, process that first. */
     if (_tx_stream.remainderHandle >= 0) {
         const size_t n = std::min(_tx_stream.remainderSamps, returnedElems);
-        const uint32_t remainderOffset = _tx_stream.remainderOffset * cplx_size * 2;
+        const uint32_t remainderOffset = _tx_stream.remainderOffset * _nChannels * _bytesPerComplex;
 
         if (n < returnedElems) {
             samp_avail = n;
@@ -554,8 +572,15 @@ int SoapyLiteXM2SDR::writeStream(
 
         /* Write out channels to the remainder buffer. */
         for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-            interleave(buffs[i], _tx_stream.remainderBuff + remainderOffset + ((cplx_size * _tx_stream.channels[i])),
-                       n, _tx_stream.format, 0);
+            interleave(
+                buffs[i],
+                _tx_stream.remainderBuff + remainderOffset + (_tx_stream.channels[i] * _bytesPerComplex),
+                n,
+                _tx_stream.format,
+                _bytesPerSample,
+                _nChannels,
+                0
+            );
         }
         _tx_stream.remainderSamps -= n;
         _tx_stream.remainderOffset += n;
@@ -593,7 +618,15 @@ int SoapyLiteXM2SDR::writeStream(
 
     /* Write out channels to the new buffer. */
     for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-        interleave(buffs[i], _tx_stream.remainderBuff + (cplx_size * _tx_stream.channels[i]), n, _tx_stream.format, samp_avail);
+        interleave(
+            buffs[i],
+            _tx_stream.remainderBuff + (_tx_stream.channels[i] * _bytesPerComplex),
+            n,
+            _tx_stream.format,
+            _bytesPerSample,
+            _nChannels,
+            samp_avail
+        );
     }
     _tx_stream.remainderSamps -= n;
     _tx_stream.remainderOffset += n;
