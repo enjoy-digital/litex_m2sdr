@@ -37,10 +37,10 @@
 #define RX_GAIN_MIN          0 /* dB */
 #define RX_GAIN_MAX         76 /* dB */
 
-#define TX_CLK_DELAY  3
-#define TX_DAT_DELAY 13
-#define RX_CLK_DELAY  6
-#define RX_DAT_DELAY  9
+#define TX_CLK_DELAY  0
+#define TX_DAT_DELAY  5
+#define RX_CLK_DELAY  2
+#define RX_DAT_DELAY  3
 
 //#define _1T1R_MODE
 
