@@ -232,22 +232,29 @@ static void m2sdr_init(
 
         /* Find optimal RX Clk/Dat delays */
         int optimal_rx_clk_delay = -1, optimal_rx_dat_delay = -1;
+        int max_valid_delays = 0;
+
         for (rx_clk_delay = 0; rx_clk_delay < 16; rx_clk_delay++) {
             for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
                 if (rx_valid_delays[rx_clk_delay][rx_dat_delay] == 1) {
-                    optimal_rx_clk_delay = rx_clk_delay;
-                    optimal_rx_dat_delay = rx_dat_delay;
-                    break;
+                    int valid_count = 0;
+                    for (int i = rx_dat_delay; i < 16 && rx_valid_delays[rx_clk_delay][i] == 1; i++) {
+                        valid_count++;
+                    }
+                    if (valid_count > max_valid_delays) {
+                        max_valid_delays = valid_count;
+                        optimal_rx_clk_delay = rx_clk_delay;
+                        optimal_rx_dat_delay = rx_dat_delay + valid_count / 2; // Center of the valid range
+                    }
                 }
-            }
-            if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
-                break;
             }
         }
 
         /* Display optimal RX Clk/Dat delays */
         if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
             printf("Optimal RX Clk Delay: %d, Optimal RX Dat Delay: %d\n", optimal_rx_clk_delay, optimal_rx_dat_delay);
+        } else {
+            printf("No valid RX Clk/Dat delay settings found.\n");
         }
 
         /* Configure optimal RX Clk/Dat delays */
@@ -290,39 +297,35 @@ static void m2sdr_init(
 
         /* Find optimal TX Clk/Dat delays */
         int optimal_tx_clk_delay = -1, optimal_tx_dat_delay = -1;
+        max_valid_delays = 0;
+
         for (tx_clk_delay = 0; tx_clk_delay < 16; tx_clk_delay++) {
             for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
                 if (tx_valid_delays[tx_clk_delay][tx_dat_delay] == 1) {
-                    optimal_tx_clk_delay = tx_clk_delay;
-                    optimal_tx_dat_delay = tx_dat_delay;
-                    break;
+                    int valid_count = 0;
+                    for (int i = tx_dat_delay; i < 16 && tx_valid_delays[tx_clk_delay][i] == 1; i++) {
+                        valid_count++;
+                    }
+                    if (valid_count > max_valid_delays) {
+                        max_valid_delays = valid_count;
+                        optimal_tx_clk_delay = tx_clk_delay;
+                        optimal_tx_dat_delay = tx_dat_delay + valid_count / 2; // Center of the valid range
+                    }
                 }
             }
-            if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-                break;
-            }
+        }
+
+        /* Display optimal TX Clk/Dat delays */
+        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
+            printf("Optimal TX Clk Delay: %d, Optimal TX Dat Delay: %d\n", optimal_tx_clk_delay, optimal_tx_dat_delay);
+        } else {
+            printf("No valid TX Clk/Dat delay settings found.\n");
         }
 
         /* Configure optimal TX Clk/Dat delays */
         if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
             m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
         }
-
-        /* Display optimal TX Clk/Dat delays */
-        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-            printf("Optimal TX Clk Delay: %d, Optimal TX Dat Delay: %d\n", optimal_tx_clk_delay, optimal_tx_dat_delay);
-        }
-
-        /* Display calibration results */
-        printf("\n");
-        printf("Calibration completed:\n");
-        printf("----------------------\n");
-        printf("RX Clk:%d/Dat:%d, TX Clk:%d/Dat:%d\n",
-               optimal_rx_clk_delay,
-               optimal_rx_dat_delay,
-               optimal_tx_clk_delay,
-               optimal_tx_dat_delay
-        );
     }
 
     close(fd);
