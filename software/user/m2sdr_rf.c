@@ -33,7 +33,6 @@
 
 static char litepcie_device[1024];
 static int litepcie_device_num;
-static int litepcie_execute_and_exit;
 
 sig_atomic_t keep_running = 1;
 
@@ -121,10 +120,9 @@ static void m2sdr_init(
     int64_t  tx_gain,
     int64_t  rx_gain,
     uint8_t  loopback,
-    uint8_t  execute_and_exit,
     bool     bist_tx_tone,
     bool     bist_rx_tone,
-    bool     bist_prbs_test,
+    bool     bist_prbs,
     int32_t  bist_tone_freq
 ) {
     int fd;
@@ -194,12 +192,12 @@ static void m2sdr_init(
     }
 
     /* Enable BIST PRBS Test (Optional: For FPGA <-> AD9361 interface calibration) */
-    if (bist_prbs_test) {
+    if (bist_prbs) {
         int rx_clk_delay;
         int rx_dat_delay;
         int tx_clk_delay;
         int tx_dat_delay;
-        printf("BIST_PRBS_TEST...\n");
+        printf("BIST_PRBS TEST...\n");
 
         /* Enable AD9361 RX-PRBS */
         litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
@@ -284,7 +282,6 @@ static void help(void)
            "Options:\n"
            "-h                    Help.\n"
            "-c device_num         Select the device (default=0).\n"
-           "-x                    Execute and exit.\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
            "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
@@ -294,9 +291,9 @@ static void help(void)
            "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
            "-rx_gain gain         Set the RX gain in dB (default=%d).\n"
            "-loopback enable      Set the internal loopback (JESD Deframer -> Framer) (default=%d).\n"
-           "-bist_tx_tone         Enable TX tone generation.\n"
-           "-bist_rx_tone         Enable RX tone generation.\n"
-           "-bist_prbs_test       Enable PRBS test.\n"
+           "-bist_tx_tone         Run TX tone test.\n"
+           "-bist_rx_tone         Run RX tone test.\n"
+           "-bist_prbs            Run PRBS test.\n"
            "-bist_tone_freq freq  Set the BIST tone frequency in Hz (default=%d).\n"
            "\n",
            DEFAULT_REFCLK_FREQ,
@@ -313,19 +310,18 @@ static void help(void)
 
 static struct option options[] = {
     { "help",             no_argument, NULL, 'h' },   /*  0 */
-    { "execute_and_exit", no_argument, NULL, 'x' },   /*  1 */
-    { "refclk_freq",      required_argument },        /*  2 */
-    { "samplerate",       required_argument },        /*  3 */
-    { "bandwidth",        required_argument },        /*  4 */
-    { "tx_freq",          required_argument },        /*  5 */
-    { "rx_freq",          required_argument },        /*  6 */
-    { "tx_gain",          required_argument },        /*  7 */
-    { "rx_gain",          required_argument },        /*  8 */
-    { "loopback",         required_argument },        /*  9 */
-    { "bist_tx_tone",     no_argument },              /* 10 */
-    { "bist_rx_tone",     no_argument },              /* 11 */
-    { "bist_prbs_test",   no_argument },              /* 12 */
-    { "bist_tone_freq",   required_argument },        /* 13 */
+    { "refclk_freq",      required_argument },        /*  1 */
+    { "samplerate",       required_argument },        /*  2 */
+    { "bandwidth",        required_argument },        /*  3 */
+    { "tx_freq",          required_argument },        /*  4 */
+    { "rx_freq",          required_argument },        /*  5 */
+    { "tx_gain",          required_argument },        /*  6 */
+    { "rx_gain",          required_argument },        /*  7 */
+    { "loopback",         required_argument },        /*  8 */
+    { "bist_tx_tone",     no_argument },              /*  9 */
+    { "bist_rx_tone",     no_argument },              /* 10 */
+    { "bist_prbs",        no_argument },              /* 11 */
+    { "bist_tone_freq",   required_argument },        /* 12 */
     { NULL },
 };
 
@@ -337,8 +333,7 @@ int main(int argc, char **argv)
     int c;
     int option_index;
 
-    litepcie_device_num       = 0;
-    litepcie_execute_and_exit = 0;
+    litepcie_device_num = 0;
 
     int64_t  refclk_freq;
     uint32_t samplerate;
@@ -348,7 +343,7 @@ int main(int argc, char **argv)
     uint8_t  loopback;
     bool     bist_tx_tone = false;
     bool     bist_rx_tone = false;
-    bool     bist_prbs_test = false;
+    bool     bist_prbs    = false;
     int32_t  bist_tone_freq;
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
@@ -369,40 +364,40 @@ int main(int argc, char **argv)
         switch(c) {
         case 0 :
             switch(option_index) {
-                case 2: /* refclk_freq */
+                case 1: /* refclk_freq */
                     refclk_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 3: /* samplerate */
+                case 2: /* samplerate */
                     samplerate = (uint32_t)strtod(optarg, NULL);
                     break;
-                case 4: /* bandwidth */
+                case 3: /* bandwidth */
                     bandwidth = (int32_t)strtod(optarg, NULL);
                     break;
-                case 5: /* tx_freq */
+                case 4: /* tx_freq */
                     tx_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 6: /* rx_freq */
+                case 5: /* rx_freq */
                     rx_freq = (int64_t)strtod(optarg, NULL);
                     break;
-                case 7: /* tx_gain */
+                case 6: /* tx_gain */
                     tx_gain = (int64_t)strtod(optarg, NULL);
                     break;
-                case 8: /* rx_gain */
+                case 7: /* rx_gain */
                     rx_gain = (int64_t)strtod(optarg, NULL);
                     break;
-                case 9: /* loopback */
+                case 8: /* loopback */
                     loopback = (uint8_t)strtod(optarg, NULL);
                     break;
-                case 10: /* bist_tx_tone */
+                case 9: /* bist_tx_tone */
                     bist_tx_tone = true;
                     break;
-                case 11: /* bist_rx_tone */
+                case 10: /* bist_rx_tone */
                     bist_rx_tone = true;
                     break;
-                case 12: /* bist_prbs_test */
-                    bist_prbs_test = true;
+                case 11: /* bist_prbs */
+                    bist_prbs = true;
                     break;
-                case 13: /* bist_tone_freq */
+                case 12: /* bist_tone_freq */
                     bist_tone_freq = (int32_t)strtod(optarg, NULL);
                     break;
                 default:
@@ -417,9 +412,6 @@ int main(int argc, char **argv)
         case 'c':
             litepcie_device_num = atoi(optarg);
             break;
-        case 'x':
-            litepcie_execute_and_exit = 1;
-            break;
         default:
             exit(1);
         }
@@ -429,7 +421,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, litepcie_execute_and_exit, bist_tx_tone, bist_rx_tone, bist_prbs_test, bist_tone_freq);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq);
 
     return 0;
 }
