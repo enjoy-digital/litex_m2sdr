@@ -51,8 +51,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int /*direction*/,
         const size_t /*channel*/,
         double &fullScale) const {
-        fullScale = 4096;
-        return SOAPY_SDR_CS16;
+        fullScale = 1.0;
+        return SOAPY_SDR_CF32;
     }
 
     SoapySDR::Stream *setupStream(

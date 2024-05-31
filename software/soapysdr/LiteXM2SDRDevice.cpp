@@ -543,7 +543,6 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
     const int /*direction*/,
     const size_t /*channel*/) const {
     std::vector<std::string> formats;
-    formats.push_back(SOAPY_SDR_CS16);
     formats.push_back(SOAPY_SDR_CF32);
     return formats;
 }

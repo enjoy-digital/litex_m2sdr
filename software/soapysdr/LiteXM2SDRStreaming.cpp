@@ -378,22 +378,6 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
 }
 
-/* Interleave CS16 samples. */
-void interleaveCS16(
-    const int16_t *src,
-    int8_t *dst,
-    uint32_t len,
-    size_t offset) {
-    int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 4);
-    const int16_t *samples_cs16 = src + (offset * BYTES_PER_SAMPLE);
-    for (uint32_t i = 0; i < len; i++) {
-        dst_int16[0] = samples_cs16[0]; /* I. */
-        dst_int16[1] = samples_cs16[1]; /* Q. */
-        samples_cs16 += 2;
-        dst_int16 += 4;
-    }
-}
-
 /* Interleave CF32 samples. */
 void interleaveCF32(
     const float *src,
@@ -417,28 +401,10 @@ void interleave(
     uint32_t len,
     const std::string &format,
     size_t offset) {
-    if (format == SOAPY_SDR_CS16) {
-        interleaveCS16(reinterpret_cast<const int16_t*>(src), reinterpret_cast<int8_t*>(dst), len, offset);
-    } else if (format == SOAPY_SDR_CF32) {
+    if (format == SOAPY_SDR_CF32) {
         interleaveCF32(reinterpret_cast<const float*>(src), reinterpret_cast<int8_t*>(dst), len, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
-    }
-}
-
-/* Deinterleave CS16 samples. */
-void deinterleaveCS16(
-    const int8_t *src,
-    int16_t *dst,
-    uint32_t len,
-    size_t offset) {
-    int16_t *samples_cs16 = dst + (offset * BYTES_PER_SAMPLE);
-    const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
-    for (uint32_t i = 0; i < len; i++) {
-        samples_cs16[0] = src_int16[0]; /* I. */
-        samples_cs16[1] = src_int16[1]; /* Q. */
-        samples_cs16 += 2;
-        src_int16 += 4;
     }
 }
 
@@ -465,9 +431,7 @@ void deinterleave(
     uint32_t len,
     const std::string &format,
     size_t offset) {
-    if (format == SOAPY_SDR_CS16) {
-        deinterleaveCS16(reinterpret_cast<const int8_t*>(src), reinterpret_cast<int16_t*>(dst), len, offset);
-    } else if (format == SOAPY_SDR_CF32) {
+    if (format == SOAPY_SDR_CF32) {
         deinterleaveCF32(reinterpret_cast<const int8_t*>(src), reinterpret_cast<float*>(dst), len, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
