@@ -383,6 +383,7 @@ void interleaveCF32(
     uint32_t len,
     const std::string &format,
     uint32_t bytes_per_sample,
+    uint32_t samples_per_complex,
     uint32_t n_channels,
     float scaling,
     size_t offset) {
@@ -394,7 +395,7 @@ void interleaveCF32(
             dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * scaling); /* I. */
             dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * scaling); /* Q. */
             samples_cf32 += 2;
-            dst_int16 += n_channels * 2;
+            dst_int16 += n_channels * samples_per_complex;
         }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
@@ -407,6 +408,7 @@ void deinterleaveCF32(
     void *dst,
     uint32_t len,
     uint32_t bytes_per_sample,
+    uint32_t samples_per_complex,
     uint32_t n_channels,
     float scaling,
     const std::string &format,
@@ -419,7 +421,7 @@ void deinterleaveCF32(
             samples_cf32[0] = static_cast<float>(src_int16[0]) / scaling; /* I. */
             samples_cf32[1] = static_cast<float>(src_int16[1]) / scaling; /* Q. */
             samples_cf32 += 2;
-            src_int16 += n_channels * 2;
+            src_int16 += n_channels * samples_per_complex;
         }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
@@ -460,6 +462,7 @@ int SoapyLiteXM2SDR::readStream(
                 buffs[i],
                 n,
                 _bytesPerSample,
+                _samplesPerComplex,
                 _nChannels,
                 _CF32Scaling,
                 _rx_stream.format,
@@ -510,6 +513,7 @@ int SoapyLiteXM2SDR::readStream(
             buffs[i],
             n,
             _bytesPerSample,
+             _samplesPerComplex,
             _nChannels,
             _CF32Scaling,
             _rx_stream.format,
@@ -562,6 +566,7 @@ int SoapyLiteXM2SDR::writeStream(
                 n,
                 _tx_stream.format,
                 _bytesPerSample,
+                 _samplesPerComplex,
                 _nChannels,
                 _CF32Scaling,
                 0
@@ -609,6 +614,7 @@ int SoapyLiteXM2SDR::writeStream(
             n,
             _tx_stream.format,
             _bytesPerSample,
+             _samplesPerComplex,
             _nChannels,
             _CF32Scaling,
             samp_avail
