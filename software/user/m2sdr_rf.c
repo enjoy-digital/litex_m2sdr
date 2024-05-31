@@ -51,7 +51,6 @@ int spi_write_then_read(struct spi_device *spi,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
-
     int fd;
 
     fd = open(litepcie_device, O_RDWR);
@@ -123,7 +122,8 @@ static void m2sdr_init(
     bool     bist_tx_tone,
     bool     bist_rx_tone,
     bool     bist_prbs,
-    int32_t  bist_tone_freq
+    int32_t  bist_tone_freq,
+    bool     enable_8bit_mode
 ) {
     int fd;
 
@@ -171,6 +171,13 @@ static void m2sdr_init(
 
     /* Configure AD9361 RX->TX Loopback */
     ad9361_bist_loopback(ad9361_phy, loopback);
+
+    /* Configure 8-bit mode */
+    if (enable_8bit_mode) {
+        litepcie_writel(fd, CSR_AD9361_FORMAT_ADDR, 1);
+    } else {
+        litepcie_writel(fd, CSR_AD9361_FORMAT_ADDR, 0);
+    }
 
     /* Configure 2T2R/1T1R mode */
 #ifdef _1T1R_MODE
@@ -342,6 +349,7 @@ static void help(void)
            "Options:\n"
            "-h                    Help.\n"
            "-c device_num         Select the device (default=0).\n"
+           "-8bit                 Enable 8-bit mode (default=disabled).\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
            "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
@@ -382,6 +390,7 @@ static struct option options[] = {
     { "bist_rx_tone",     no_argument },              /* 10 */
     { "bist_prbs",        no_argument },              /* 11 */
     { "bist_tone_freq",   required_argument },        /* 12 */
+    { "8bit",             no_argument, NULL, '8' },   /* 13 */
     { NULL },
 };
 
@@ -405,6 +414,7 @@ int main(int argc, char **argv)
     bool     bist_rx_tone = false;
     bool     bist_prbs    = false;
     int32_t  bist_tone_freq;
+    bool     enable_8bit_mode = false;
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
     samplerate     = DEFAULT_SAMPLERATE;
@@ -418,7 +428,7 @@ int main(int argc, char **argv)
 
     /* Parse/Handle Parameters. */
     for (;;) {
-        c = getopt_long_only(argc, argv, "hx", options, &option_index);
+        c = getopt_long_only(argc, argv, "hc8", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
@@ -460,6 +470,9 @@ int main(int argc, char **argv)
                 case 12: /* bist_tone_freq */
                     bist_tone_freq = (int32_t)strtod(optarg, NULL);
                     break;
+                case 13: /* 8bit */
+                    enable_8bit_mode = true;
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -472,6 +485,9 @@ int main(int argc, char **argv)
         case 'c':
             litepcie_device_num = atoi(optarg);
             break;
+        case '8': /* 8-bit mode */
+            enable_8bit_mode = true;
+            break;
         default:
             exit(1);
         }
@@ -481,7 +497,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode);
 
     return 0;
 }
