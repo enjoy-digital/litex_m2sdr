@@ -910,8 +910,8 @@ static int litepcie_alloc_chdev(struct litepcie_device *s)
 
 	index = litepcie_minor_idx;
 	for (i = 0; i < s->channels; i++) {
-		dev_info(&s->dev->dev, "Creating /dev/litepcie%d\n", index);
-		if (!device_create(litepcie_class, NULL, MKDEV(litepcie_major, index), NULL, "litepcie%d", index)) {
+		dev_info(&s->dev->dev, "Creating /dev/m2sdr%d\n", index);
+		if (!device_create(litepcie_class, NULL, MKDEV(litepcie_major, index), NULL, "m2sdr%d", index)) {
 			ret = -EINVAL;
 			dev_err(&s->dev->dev, "Failed to create device\n");
 			goto fail_create;

@@ -89,7 +89,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
         attemptToAddDevice(args.at("path"));
     } else {
         for (int i = 0; i < MAX_DEVICES; i++) {
-            if (!attemptToAddDevice("/dev/litepcie" + std::to_string(i)))
+            if (!attemptToAddDevice("/dev/m2sdr" + std::to_string(i)))
                 break; // Stop trying if a device fails to open, assuming sequential device numbering
         }
     }

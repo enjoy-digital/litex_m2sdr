@@ -184,7 +184,7 @@ int main(int argc, char **argv)
         help();
 
     /* Select device. */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/litepcie%d", litepcie_device_num);
+    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
 
     /* Interpret cmd and play. */
     const char *filename;
