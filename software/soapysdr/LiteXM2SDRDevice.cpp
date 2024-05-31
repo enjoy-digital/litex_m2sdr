@@ -124,6 +124,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 
+    /* Configure Mode */
+#ifdef _8BIT_MODE
+    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
+#else
+    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
+#endif
+
     /* Bypass synchro. */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 

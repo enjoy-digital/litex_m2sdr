@@ -22,6 +22,8 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
 
+//#define _8BIT_MODE
+
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
@@ -368,9 +370,19 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
+
+
+#ifdef _8BIT_MODE
+    /* 8-bit mode */
+    uint32_t _bytesPerSample    = 1;
+    uint32_t _bytesPerComplex   = 2;
+    float    _samplesScaling    = 128.0;
+#else
+    /* 16-bit mode */
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
     float    _samplesScaling    = 2047.0;
+#endif
 
     // register protection
     std::mutex _mutex;

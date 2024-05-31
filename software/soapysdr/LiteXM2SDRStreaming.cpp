@@ -384,14 +384,28 @@ void SoapyLiteXM2SDR::interleaveCF32(
     const std::string &format,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        const float *samples_cf32 = reinterpret_cast<const float*>(src) + (offset * _bytesPerSample);
-        int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * _bytesPerSample);
+        const float *samples_cf32 = reinterpret_cast<const float*>(src) + (offset * _samplesPerComplex);
 
-        for (uint32_t i = 0; i < len; i++) {
-            dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * _samplesScaling); /* I. */
-            dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * _samplesScaling); /* Q. */
-            samples_cf32 += 2;
-            dst_int16 += _nChannels * _samplesPerComplex;
+        if (_bytesPerSample == 2) {
+            int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * _samplesPerComplex);
+
+            for (uint32_t i = 0; i < len; i++) {
+                dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * _samplesScaling); /* I. */
+                dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * _samplesScaling); /* Q. */
+                samples_cf32 += 2;
+                dst_int16 += _nChannels * _samplesPerComplex;
+            }
+        } else if (_bytesPerSample == 1) {
+            int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst) + (offset * 2 * _samplesPerComplex);
+
+            for (uint32_t i = 0; i < len; i++) {
+                dst_int8[0] = static_cast<int8_t>(samples_cf32[0] * (_samplesScaling)); /* I. */
+                dst_int8[1] = static_cast<int8_t>(samples_cf32[1] * (_samplesScaling)); /* Q. */
+                samples_cf32 += 2;
+                dst_int8 += _nChannels * _samplesPerComplex;
+            }
+        } else {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
         }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
@@ -406,14 +420,28 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
     const std::string &format,
     size_t offset) {
     if (format == SOAPY_SDR_CF32) {
-        float *samples_cf32 = reinterpret_cast<float*>(dst) + (offset * _bytesPerSample);
-        const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
+        float *samples_cf32 = reinterpret_cast<float*>(dst) + (offset * _samplesPerComplex);
 
-        for (uint32_t i = 0; i < len; i++) {
-            samples_cf32[0] = static_cast<float>(src_int16[0]) / _samplesScaling; /* I. */
-            samples_cf32[1] = static_cast<float>(src_int16[1]) / _samplesScaling; /* Q. */
-            samples_cf32 += 2;
-            src_int16 += _nChannels * _samplesPerComplex;
+        if (_bytesPerSample == 2) {
+            const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
+
+            for (uint32_t i = 0; i < len; i++) {
+                samples_cf32[0] = static_cast<float>(src_int16[0]) / _samplesScaling; /* I. */
+                samples_cf32[1] = static_cast<float>(src_int16[1]) / _samplesScaling; /* Q. */
+                samples_cf32 += 2;
+                src_int16 += _nChannels * _samplesPerComplex;
+            }
+        } else if (_bytesPerSample == 1) {
+            const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
+
+            for (uint32_t i = 0; i < len; i++) {
+                samples_cf32[0] = static_cast<float>(src_int8[0]) / (_samplesScaling); /* I. */
+                samples_cf32[1] = static_cast<float>(src_int8[1]) / (_samplesScaling); /* Q. */
+                samples_cf32 += 2;
+                src_int8 += _nChannels * _samplesPerComplex;
+            }
+        } else {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
         }
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
