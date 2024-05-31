@@ -174,6 +174,13 @@ static void m2sdr_init(
     /* Configure AD9361 RX->TX Loopback */
     ad9361_bist_loopback(ad9361_phy, loopback);
 
+    /* Configure 2T2R/1T1R mode */
+#ifdef _1T1R_MODE
+    litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+#else
+    litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+#endif
+
     /* Enable BIST TX Tone (Optional: For RF TX Tests) */
     if (bist_tx_tone) {
         printf("BIST_TX_TONE_TEST...\n");
