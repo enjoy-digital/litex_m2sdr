@@ -653,10 +653,10 @@ static int litepcie_flash_send(struct litepcie_device *s, uint64_t data, int len
 	udelay(16);
 	for (i = 0; i < SPI_TIMEOUT; i++) {
 		if (litepcie_readl(s, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE)
-			break;
+			return 0;
 		udelay(1);
 	}
-	return 0;
+	return -1;
 }
 
 static int litepcie_flash_page_program(struct litepcie_device *s, struct litepcie_ioctl_flash_page *m)
@@ -665,14 +665,12 @@ static int litepcie_flash_page_program(struct litepcie_device *s, struct litepci
 	int i;
 	int ret = 0;
 
-	//s->flash_spi_done = 0;
-
-	/* To do a 256 bytes page program, we need the CS to stay low during the whole command */
 	/* Set Chip Select. */
-	litepcie_writel(s, CSR_FLASH_SPI_CS_ADDR, 0b1* (1 << CSR_FLASH_SPI_CS_MODE_OFFSET) | 0b1);
+	litepcie_writel(s, CSR_FLASH_CS_N_OUT_ADDR, 0);
 
 	/* 0x02: FLASH_PP */
-	data64 = ((uint64_t)0x02) | m->page_addr;
+	data64 = ((uint64_t)0x02 << 32) | (m->page_addr << 8);
+
 	/* send cmd and 3Byte address: 32 bits */
 	if (litepcie_flash_send(s, data64, 32) < 0) {
 		ret = -EFAULT;
@@ -684,6 +682,7 @@ static int litepcie_flash_page_program(struct litepcie_device *s, struct litepci
 		/* order 4 bytes so that first byte written is LSB */
 		data64 = ((uint64_t)m->page_data[i] << 24) | ((uint64_t)m->page_data[i+1] << 16) |
 			((uint64_t)m->page_data[i+2] << 8) | ((uint64_t)m->page_data[i+3] << 0);
+		data64 <<= 8;
 		if (litepcie_flash_send(s, data64, 32) < 0) {
 			ret = -EFAULT;
 			break;
@@ -691,8 +690,7 @@ static int litepcie_flash_page_program(struct litepcie_device *s, struct litepci
 	}
  done:
 	/* Release Chip Select. */
-	litepcie_writel(s, CSR_FLASH_SPI_CS_ADDR, 0b1* (1 << CSR_FLASH_SPI_CS_MODE_OFFSET) | 0b1);
-	litepcie_writel(s, CSR_FLASH_SPI_CS_ADDR, 0b0* (1 << CSR_FLASH_SPI_CS_MODE_OFFSET) | 0b1);
+	litepcie_writel(s, CSR_FLASH_CS_N_OUT_ADDR, 1);
 
 	return ret;
 }
