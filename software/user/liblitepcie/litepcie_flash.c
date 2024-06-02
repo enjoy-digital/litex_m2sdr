@@ -84,6 +84,7 @@ static void flash_write(int fd, uint32_t addr, uint8_t byte)
 }
 
 //#define FLASH_PAGE
+#define FLASH_32BITS
 static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     if (size == 1) {
@@ -107,9 +108,16 @@ static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t siz
         checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
 
         /* send bytes */
+#ifdef FLASH_32BITS
+        for (i=0; i<size; i+=4) {
+            m.tx_len = 32;
+			m.tx_data = ((uint64_t)buf[i] << 32) | ((uint64_t)buf[i+1] << 24) |
+            ((uint64_t)buf[i+2] << 16) | ((uint64_t)buf[i+3] << 8);
+#else
         for (i=0; i<size; i++) {
             m.tx_len = 8;
             m.tx_data = ((uint64_t)buf[i] << 32);
+#endif
             checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
         }
 
