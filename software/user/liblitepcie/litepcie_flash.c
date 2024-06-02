@@ -83,7 +83,7 @@ static void flash_write(int fd, uint32_t addr, uint8_t byte)
     flash_spi(fd, 40, FLASH_PP, (addr << 8) | byte);
 }
 
-#define FLASH_PAGE
+//#define FLASH_PAGE
 static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     if (size == 1) {
