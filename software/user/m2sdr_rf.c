@@ -123,7 +123,8 @@ static void m2sdr_init(
     bool     bist_rx_tone,
     bool     bist_prbs,
     int32_t  bist_tone_freq,
-    bool     enable_8bit_mode
+    bool     enable_8bit_mode,
+    bool     enable_oversample
 ) {
     int fd;
 
@@ -335,6 +336,44 @@ static void m2sdr_init(
         }
     }
 
+    /* Configure oversample feature if enabled */
+    if (enable_oversample) {
+        m2sdr_ad9361_spi_write(fd, 0x003, 0x54); // OC Register
+
+        /* TX Register Assignments */
+        m2sdr_ad9361_spi_write(fd, 0x02, 0xc0);  // TX Enable and Filter Control
+        m2sdr_ad9361_spi_write(fd, 0xc2, 0x9f);  // TX BBF R1
+        m2sdr_ad9361_spi_write(fd, 0xc3, 0x9f);  // TX baseband filter R2
+        m2sdr_ad9361_spi_write(fd, 0xc4, 0x9f);  // TX baseband filter R3
+        m2sdr_ad9361_spi_write(fd, 0xc5, 0x9f);  // TX baseband filter R4
+        m2sdr_ad9361_spi_write(fd, 0xc6, 0x9f);  // TX baseband filter real pole word
+        m2sdr_ad9361_spi_write(fd, 0xc7, 0x00);  // TX baseband filter C1
+        m2sdr_ad9361_spi_write(fd, 0xc8, 0x00);  // TX baseband filter C2
+        m2sdr_ad9361_spi_write(fd, 0xc9, 0x00);  // TX baseband filter real pole word
+
+        /* RX Register Assignments */
+        // Gain and calibration
+        m2sdr_ad9361_spi_write(fd, 0x1e0, 0xBF);
+        m2sdr_ad9361_spi_write(fd, 0x1e4, 0xFF);
+        m2sdr_ad9361_spi_write(fd, 0x1f2, 0xFF);
+        // m2sdr_ad9361_spi_write(fd, 0x1e6, 0x87); // Causes gr-osmosdr to freak out
+
+        // Miller and BBF caps
+        m2sdr_ad9361_spi_write(fd, 0x1e7, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1e8, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1e9, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1ea, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1eb, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1ec, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1ed, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1ee, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1ef, 0x00);
+        m2sdr_ad9361_spi_write(fd, 0x1e0, 0xBF);
+
+        // BIST and Data Port Test Config [D1:D0] "Must be 2’b00"
+        m2sdr_ad9361_spi_write(fd, 0x3f6, 0x03);
+    }
+
     close(fd);
 }
 
@@ -350,6 +389,7 @@ static void help(void)
            "-h                    Help.\n"
            "-c device_num         Select the device (default=0).\n"
            "-8bit                 Enable 8-bit mode (default=disabled).\n"
+           "-oversample           Enable oversample mode (default=disabled).\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
            "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
@@ -391,6 +431,7 @@ static struct option options[] = {
     { "bist_prbs",        no_argument },              /* 11 */
     { "bist_tone_freq",   required_argument },        /* 12 */
     { "8bit",             no_argument, NULL, '8' },   /* 13 */
+    { "oversample",       no_argument },              /* 14 */
     { NULL },
 };
 
@@ -415,6 +456,7 @@ int main(int argc, char **argv)
     bool     bist_prbs    = false;
     int32_t  bist_tone_freq;
     bool     enable_8bit_mode = false;
+    bool     enable_oversample = false;
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
     samplerate     = DEFAULT_SAMPLERATE;
@@ -473,6 +515,9 @@ int main(int argc, char **argv)
                 case 13: /* 8bit */
                     enable_8bit_mode = true;
                     break;
+                case 14: /* oversample */
+                    enable_oversample = true;
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -497,7 +542,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample);
 
     return 0;
 }
