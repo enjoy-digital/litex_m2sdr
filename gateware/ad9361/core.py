@@ -19,6 +19,62 @@ from gateware.ad9361.spi     import AD9361SPIMaster
 from gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from gateware.ad9361.bitmode import _sign_extend
 
+# Architecture -------------------------------------------------------------------------------------
+#
+# The AD9361 PHY has the following simplified architecture:
+#                                                                 ┌───────────────────┐
+#                                                                 │                   │
+#                                                                 │     SPI Core      ├──► SPI
+#                                                                 │                   │
+#                                                                 └───────────────────┘
+#                               ┌────────────┐  ┌───┐
+#                               │            │  │   │      ┌──────────────────────────┐
+#                               │  RX PRBS   ◄──┤   │      │                          │
+#                               │            │  │ D │      │          ┌───────────┐   │
+#                               └────────────┘  │ E │      │          │  RX Data  │   │
+#                                               │ M ◄──────┼──────────┤    2:1    ◄───┼── RX Data
+#                         ┌──────┐    ┌──────┐  │ U │      │          │    DDR    │   │
+#                   Source│      │    │      │  │ X │      │          └───────────┘   │
+#    To DMA    ◄──────────┤ BUF  ◄────┤ CDC  ◄──┤   ◄─┐    │                    X6    │
+#                         │      │    │      │  │   │ │    │                          │  From AD9361
+#                         └──────┘    └──────┘  └───┘ │    │                          │
+#                                                     │    │          ┌───────────┐   │
+#                                                     │    │          │  RX Clk   │   │
+#                                                     │    │      ┌───┤    BUF    ◄───┼── RX Clk
+#                                                    T│    │      │   │           │   │
+#                                                    X│    │      │   └───────────┘   │
+#                                                    -│    │      │                   │
+#                                                    R│    │      │                   │
+#                                                    X│    │      │RFIC Clk           │
+#                                                    -│    │      │                   │
+#                                                    L│    │      │                   │
+#                                                    o│    │      │                   │
+#                                                    o│    │      │   ┌───────────┐   │
+#                                                    p│    │      │   │  TX Clk   │   │
+#                                                    b│    │      └───►    2:1    ├───┼─► TX Clk
+#                                                    a│    │          │    DDR    │   │
+#                                                    c│    │          └───────────┘   │
+#                                                    k│    │                          │
+#                              ┌────────────┐  ┌───┐  │    │                          │
+#                              │            │  │   │  │    │                          │  To AD9361
+#                              │  TX PRBS   ├──►   │  │    │                          │
+#                              │            │  │   │  │    │          ┌───────────┐   │
+#                              └────────────┘  │ M │  │    │          │  TX Data  │   │
+#                                              │ U ├──┴────┼──────────►    2:1    ├───┼─► TX Data
+#                        ┌──────┐    ┌──────┐  │ X │       │          │    DDR    │   │
+#                    Sink│      │    │      │  │   │       │          └───────────┘   │
+#   From DMA   ──────────►  BUF ├────► CDC  ├──►   │       │                    X6    │
+#                        │      │    │      │  │   │       │                          │
+#                        └──────┘    └──────┘  └───┘       │            PHY           │
+#                                                          └──────────────────────────┘
+# - The rfic_clk is recovered from the AD9361 RX Clk through a Clk buffer.
+# - The rfic_clk is used for both TX/RX.
+# - 2:1 Serialization/Deserialiation is used on TX/RX.
+# - RX sampling (on the FPGA) is adjusted through AD9361 registers.
+# - TX sampling (on the AD931) is adjusted through AD9361 registers.
+# - An optional TX-RX loopback is implemented.
+# - Sink/Source stream operate in sys_clk domain @ 64-bit and are converted to/from rfic_clk.
+
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
 class AD9361RFIC(LiteXModule):

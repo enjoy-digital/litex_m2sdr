@@ -43,7 +43,6 @@ class AD9361PHY(LiteXModule):
     """
 
     def __init__(self, pads):
-        self.dw      = 64
         self.sink    = sink   = stream.Endpoint(phy_layout())
         self.source  = source = stream.Endpoint(phy_layout())
         self.control = CSRStorage(fields=[
