@@ -175,9 +175,9 @@ static void m2sdr_init(
 
     /* Configure 8-bit mode */
     if (enable_8bit_mode) {
-        litepcie_writel(fd, CSR_AD9361_FORMAT_ADDR, 1);
+        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
     } else {
-        litepcie_writel(fd, CSR_AD9361_FORMAT_ADDR, 0);
+        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 0);
     }
 
     /* Configure 2T2R/1T1R mode */

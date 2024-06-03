@@ -14,57 +14,10 @@ from litex.soc.interconnect.csr import *
 
 from litepcie.common import *
 
-from gateware.ad9361.phy import AD9361PHY
-from gateware.ad9361.spi import AD9361SPIMaster
-
-# AD9361 TX Format ---------------------------------------------------------------------------------
-
-def _sign_extend(data, nbits=16):
-    return Cat(data, Replicate(data[-1], nbits - len(data)))
-
-class AD9361TXFormat(LiteXModule):
-    def __init__(self):
-        self.sink   = sink   = stream.Endpoint(dma_layout(64))
-        self.source = source = stream.Endpoint(dma_layout(64))
-        self.mode   = mode   = Signal()
-
-        # # #
-
-        # 16-bit mode.
-        self.comb += If(mode == 0, sink.connect(source))
-
-        # 8-bit mode.
-        self.conv = conv = stream.Converter(64, 32)
-        self.comb += If(mode == 1,
-            sink.connect(conv.sink),
-            conv.source.connect(source, omit={"data"}),
-            source.data[0*16+4:1*16].eq(_sign_extend(conv.source.data[0*8:1*8], 12)),
-            source.data[1*16+4:2*16].eq(_sign_extend(conv.source.data[1*8:2*8], 12)),
-            source.data[2*16+4:3*16].eq(_sign_extend(conv.source.data[2*8:3*8], 12)),
-            source.data[3*16+4:4*16].eq(_sign_extend(conv.source.data[3*8:4*8], 12)),
-        )
-
-class AD9361RXFormat(LiteXModule):
-    def __init__(self):
-        self.sink   = sink   = stream.Endpoint(dma_layout(64))
-        self.source = source = stream.Endpoint(dma_layout(64))
-        self.mode   = mode   = Signal()
-
-        # # #
-
-        # 16-bit mode.
-        self.comb += If(mode == 0, sink.connect(source))
-
-        # 8-bit mode.
-        self.conv = conv = stream.Converter(32, 64)
-        self.comb += If(mode == 1,
-            sink.connect(conv.sink, omit={"data"}),
-            conv.sink.data[0*8:1*8].eq(sink.data[0*16+4:1*16]),
-            conv.sink.data[1*8:2*8].eq(sink.data[1*16+4:2*16]),
-            conv.sink.data[2*8:3*8].eq(sink.data[2*16+4:3*16]),
-            conv.sink.data[3*8:4*8].eq(sink.data[3*16+4:4*16]),
-            conv.source.connect(source),
-        )
+from gateware.ad9361.phy     import AD9361PHY
+from gateware.ad9361.spi     import AD9361SPIMaster
+from gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
+from gateware.ad9361.bitmode import _sign_extend
 
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
@@ -108,7 +61,7 @@ class AD9361RFIC(LiteXModule):
                 ("``0b11111111``", "All status pins high"),
             ], description="AD9361's status pins")
         ])
-        self._format = CSRStorage(fields=[
+        self._bitmode = CSRStorage(fields=[
             CSRField("mode", size=1, offset=0, values=[
                 ("``0b0``", "12-bit mode."),
                 ("``0b1``", " 8-bit mode."),
@@ -155,11 +108,11 @@ class AD9361RFIC(LiteXModule):
         self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
 
-        # Format -----------------------------------------------------------------------------------
-        self.tx_format = tx_format = AD9361TXFormat()
-        self.rx_format = rx_format = AD9361RXFormat()
-        self.comb += tx_format.mode.eq(self._format.fields.mode)
-        self.comb += rx_format.mode.eq(self._format.fields.mode)
+        # BitMode ----------------------------------------------------------------------------------
+        self.tx_bitmode = tx_bitmode = AD9361TXBitMode()
+        self.rx_bitmode = rx_bitmode = AD9361RXBitMode()
+        self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
+        self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
 
         # Data Flow --------------------------------------------------------------------------------
 
@@ -168,7 +121,7 @@ class AD9361RFIC(LiteXModule):
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
-            tx_format,
+            tx_bitmode,
             tx_cdc,
         )
         self.comb += [
@@ -190,7 +143,7 @@ class AD9361RFIC(LiteXModule):
         ]
         self.rx_pipeline = stream.Pipeline(
             rx_cdc,
-            rx_format,
+            rx_bitmode,
             rx_buffer,
             self.source
         )

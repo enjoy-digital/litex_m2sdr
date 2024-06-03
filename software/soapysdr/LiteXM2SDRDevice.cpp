@@ -126,9 +126,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     /* Configure Mode based on _bitMode */
     if (_bitMode == 8) {
-        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1); /* 8-bit mode */
+        litepcie_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
     } else {
-        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0); /* 16-bit mode */
+        litepcie_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
     /* Bypass synchro. */
@@ -496,13 +496,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 128.0;
-        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
+        litepcie_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2047.0;
-        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
+        litepcie_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0);
     }
 }
 
