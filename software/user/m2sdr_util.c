@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <time.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -649,6 +650,74 @@ end:
     litepcie_dma_cleanup(&dma);
 }
 
+/* Clk Measurement */
+/*-----------------*/
+
+static void clk_measurement_test(int num_measurements, int delay_between_tests)
+{
+    int fd;
+    int i;
+    int64_t start_time, current_time, elapsed_time;
+    uint32_t previous_values[4];
+    uint32_t current_values[4];
+
+    /* Open LitePCIe device. */
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("\e[1m[> Clk Measurement Test:\e[0m\n");
+    printf("-------------------------\n");
+
+    /* Latch and read initial values for each clock */
+    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR, 1);
+    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR, 1);
+    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR, 1);
+    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR, 1);
+    previous_values[0] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+    previous_values[1] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR);
+    previous_values[2] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR);
+    previous_values[3] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR);
+    start_time = time(NULL);
+
+    printf("%d\n", previous_values[3]);
+
+    for (i = 0; i < num_measurements; i++) {
+        sleep(delay_between_tests);
+
+        /* Latch and read current values for each clock */
+        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR, 1);
+        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR, 1);
+        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR, 1);
+        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR, 1);
+        current_values[0] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+        current_values[1] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR);
+        current_values[2] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR);
+        current_values[3] = litepcie_readl(fd, CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR);
+        current_time = time(NULL);
+
+        printf("%d\n", current_values[3]);
+
+        /* Calculate the actual elapsed time */
+        elapsed_time = current_time - start_time;
+        start_time = current_time;  // Update the start_time for the next iteration
+
+        for (int clk_index = 0; clk_index < 4; clk_index++) {
+            /* Compute the difference between the current and previous values */
+            uint32_t delta_value = current_values[clk_index] - previous_values[clk_index];
+            double frequency_mhz = delta_value / (elapsed_time * 1e6);
+            printf("Measurement %d, Clock %d: Frequency: %.2f MHz\n", i + 1, clk_index, frequency_mhz);
+
+            /* Update the previous value for the next iteration */
+            previous_values[clk_index] = current_values[clk_index];
+        }
+    }
+
+    close(fd);
+}
+
 /* Help */
 /*------*/
 
@@ -670,6 +739,7 @@ static void help(void)
            "\n"
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
+           "clks                              Test Clks frequencies.\n"
            "\n"
 #ifdef  CSR_SI5351_I2C_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
@@ -755,6 +825,19 @@ int main(int argc, char **argv)
     /* Scratch cmds. */
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
+
+    /* Clks measurement cmds. */
+    else if (!strcmp(cmd, "clks")) {
+        int num_measurements = 10;
+        int delay_between_tests = 1;
+
+        if (optind < argc)
+            num_measurements = atoi(argv[optind++]);
+        if (optind < argc)
+            delay_between_tests = atoi(argv[optind++]);
+
+        clk_measurement_test(num_measurements, delay_between_tests);
+    }
 
     /* SI5351 cmds. */
 #ifdef CSR_SI5351_I2C_BASE
