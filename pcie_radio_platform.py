@@ -88,8 +88,13 @@ class Platform(Xilinx7SeriesPlatform):
     default_clk_name   = "clk38p4"
     default_clk_period = 1e9/38.4e6
 
-    def __init__(self, toolchain="vivado"):
-        Xilinx7SeriesPlatform.__init__(self, "xc7a35t-fgg484-2", _io, toolchain=toolchain)
+    def __init__(self, device="xc7a35t", build_multiboot=False):
+        assert device in ["xc7a35t"]
+        Xilinx7SeriesPlatform.__init__(self, "{device}-fgg484-2", _io, toolchain="vivado")
+        self.device     = device
+        self.image_size = {
+            "xc7a35t"  : 0x00400000,
+        }[device]
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
@@ -103,9 +108,23 @@ class Platform(Xilinx7SeriesPlatform):
             "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
             {build_name}.bit\" -file {build_name}.bin",
         ]
+        if build_multiboot:
+            self.toolchain.additional_commands += [
+                # Build Operational-Multiboot Bitstream.
+                "set_property BITSTREAM.CONFIG.TIMER_CFG 0x0001FBD0 [current_design]",
+                "set_property BITSTREAM.CONFIG.CONFIGFALLBACK Enable [current_design]",
+                "write_bitstream -force {build_name}_operational.bit ",
+                "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
+                {build_name}_operational.bit\" -file {build_name}_operational.bin",
+
+                # Build Fallback-Multiboot Bitstream.
+                "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR {} [current_design]".format(self.image_size),
+                "write_bitstream -force {build_name}_fallback.bit ",
+                "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
+                {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
 
     def create_programmer(self):
-        return OpenFPGALoader(cable="digilent_hs2", fpga_part=f"xc7a35tfgg484", freq=10e6)
+        return OpenFPGALoader(cable="digilent_hs2", fpga_part=f"{self.device}fgg484", freq=10e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
