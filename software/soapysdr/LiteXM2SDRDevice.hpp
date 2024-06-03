@@ -24,12 +24,6 @@
 
 #define AD9361_OVERSAMPLING
 
-#ifdef AD9361_OVERSAMPLING
-#define AD9361_RATE_MULT 2
-#else
-#define AD9361_RATE_MULT 1
-#endif
-
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
@@ -383,6 +377,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
     float    _samplesScaling    = 2047.0;
+    float    _rateMult          = 1;
 
     // register protection
     std::mutex _mutex;
