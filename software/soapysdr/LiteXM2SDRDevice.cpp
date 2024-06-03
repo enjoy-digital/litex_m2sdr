@@ -124,12 +124,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 
-    /* Configure Mode */
-#ifdef _8BIT_MODE
-    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
-#else
-    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
-#endif
+    /* Configure Mode based on _bitMode */
+    if (_bitMode == 8) {
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1); /* 8-bit mode */
+    } else {
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0); /* 16-bit mode */
+    }
 
     /* Bypass synchro. */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
@@ -138,6 +138,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("bypass_init") != 0) {
         std::cout << args.at("bypass_init")[0] << std::endl;
         do_init = args.at("bypass_init")[0] == '0';
+    }
+
+    if (args.count("bitmode") != 0) {
+        _bitMode = std::stoi(args.at("bitmode"));
     }
 
     if (do_init) {
@@ -486,21 +490,20 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 
 /* FIXME: Improve listFrequencies. */
 
-void SoapyLiteXM2SDR::setSampleMode(double sampleRate) {
-    /* Select 8-bit/16-bit mode */
-#ifdef AD9361_8BIT_MODE
+void SoapyLiteXM2SDR::setSampleMode() {
     /* 8-bit mode */
-    _bytesPerSample  = 1;
-    _bytesPerComplex = 2;
-    _samplesScaling  = 128.0;
-    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
-#else
+    if (_bitMode == 8) {
+        _bytesPerSample  = 1;
+        _bytesPerComplex = 2;
+        _samplesScaling  = 128.0;
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 1);
     /* 16-bit mode */
-    _bytesPerSample  = 2;
-    _bytesPerComplex = 4;
-    _samplesScaling  = 2047.0;
-    litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
-#endif
+    } else {
+        _bytesPerSample  = 2;
+        _bytesPerComplex = 4;
+        _samplesScaling  = 2047.0;
+        litepcie_writel(_fd, CSR_AD9361_FORMAT_ADDR, 0);
+    }
 }
 
 void SoapyLiteXM2SDR::setSampleRate(
@@ -574,7 +577,7 @@ void SoapyLiteXM2SDR::setSampleRate(
     m2sdr_ad9361_spi_write(_fd, 0x3f6, 0x03);
 #endif
 
-    setSampleMode(rate/AD9361_RATE_MULT);
+    setSampleMode();
 }
 
 double SoapyLiteXM2SDR::getSampleRate(

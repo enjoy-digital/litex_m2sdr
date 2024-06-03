@@ -22,7 +22,6 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
 
-//#define AD9361_8BIT_MODE
 #define AD9361_OVERSAMPLING
 
 #ifdef AD9361_OVERSAMPLING
@@ -368,7 +367,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const std::string &format,
         size_t offset);
 
-    void setSampleMode(double sampleRate);
+    void setSampleMode();
 
     const char *dir2Str(const int direction) const {
         return (direction == SOAPY_SDR_RX) ? "RX" : "TX";
@@ -377,6 +376,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     int _fd;
     struct ad9361_rf_phy *ad9361_phy;
 
+    uint32_t _bitMode           = 16;
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
 
