@@ -132,7 +132,7 @@ class BaseSoC(SoCMini):
         with_jtagbone = True
     ):
         # Platform ---------------------------------------------------------------------------------
-        platform = Platform()
+        platform = Platform(build_multiboot=True)
 
         # SoCMini ----------------------------------------------------------------------------------
 
