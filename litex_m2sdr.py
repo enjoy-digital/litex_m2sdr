@@ -329,7 +329,8 @@ class BaseSoC(SoCMini):
                 # AD9361 RX -> Header RX.
                 self.ad9361.source.connect(self.header.rx.sink),
         ]
-        self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/245e6)
+        #self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/245.76e6)
+        self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/491.52e6)
         self.platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ad9361.cd_rfic.clk)
 
         # Debug.
