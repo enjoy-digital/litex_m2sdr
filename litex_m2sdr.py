@@ -189,6 +189,7 @@ class BaseSoC(SoCMini):
         # SPI Flash --------------------------------------------------------------------------------
         self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
         self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
+        self.add_config("FLASH_IMAGE_SIZE", platform.image_size)
 
         # PCIe -------------------------------------------------------------------------------------
 
