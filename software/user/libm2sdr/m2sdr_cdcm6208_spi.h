@@ -29,4 +29,31 @@ void m2sdr_cdcm6208_spi_init(int fd);
 void m2sdr_cdcm6208_spi_write(int fd, uint16_t reg, uint16_t dat);
 uint8_t m2sdr_cdcm6208_spi_read(int fd, uint16_t reg);
 
+/* CDCM6208 38.4MHz internal VCXO Config */
+/*---------------------------------------*/
+static const uint16_t cdcm6208_regs_vcxo_38p4[][2] =
+{
+    { 0,  0x01B9 },
+    { 1,  0x0000 },
+    { 2,  0x0013 },
+    { 3,  0x00F0 },
+    { 4,  0x30AF | (2 << 3)},
+    { 5,  0x019B },
+    { 6,  0x0013 },
+    { 7,  0x0000 },
+    { 8,  0x0013 },
+    { 9,  0x0053 },
+    { 10, 0x0130 },
+    { 11, 0x0000 },
+    { 12, 0x0053 },
+    { 13, 0x0130 },
+    { 14, 0x0000 },
+    { 15, 0x0003 },
+    { 16, 0x0130 },
+    { 17, 0x0000 },
+    { 18, 0x0000 },
+    { 19, 0x0130 },
+    { 20, 0x0000 },
+};
+
 #endif /* M2SDR_LIB_CDCM6208_SPI_H */

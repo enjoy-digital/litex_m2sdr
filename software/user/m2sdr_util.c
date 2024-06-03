@@ -114,40 +114,6 @@ static void test_cdcm6208_dump(void)
     close(fd);
 }
 
-/* 38.4MHz internal VCXO */
-static const uint16_t cdcm_regs_vcxo_38[][2] =
-{
- //  { 0, 0x0079 },  /* PLL: 35pf/4010R internal filter, 2.5mA */
-    { 0, 0x01B9 },  /*  PLL: 245pf/100R internal filter, 2.5mA  for 38.4MHz PFD (38.4MHz ref input) */
-    { 1, 0x0000 },  /* PLL: M = 1 => PFD = 38.4MHz */
-    { 2, 0x0013 },  /* PLL: N10= 1; N8 = 20; Distribution clock = 20 * PFD = 768 MHz */
-                   /* 0x18 for 30.72MHz VCXO input */
-    { 3, 0x00F0 },  /* PLL: PS = 1/4, no sync, cal enable; VCO = 3072 MHz */
-    { 4, 0x30AF | (2 << 3)}, // Secondary Input (internal VCXO)  in LVCMOS */
-    { 5, 0x019B },  /* Y0 => CPRI LVDS (not used ?) */
-    { 6, 0x0013 },
-    { 7, 0x0000 },  /* Y2 and Y3 disabled */
-    { 8, 0x0013 },
-    { 9, 0x0053 },  /* Y4 (RFIC): LVCMOS out from PLL */
-    { 10, 0x0130 }, /* Divider: 20 => 38.4 MHz out */
-    { 11, 0x0000 },
-#if 1
-    { 12, 0x0053 }, // Y5 (REFCLK_OUT):  LVCMOS + out from PLL (to fix clock distribution problem) */
-    { 13, 0x0130 }, /* Divider: 20 => 38.4 MHz out */
-    { 14, 0x0000 },
-#else    /* output 10MHz (+40ppm) to test ext synchro on 10MHz */
-    { 12, 0x0253 }, // Y5 (REFCLK_OUT):  LVCMOS + out from PLL */
-    { 13, 0x0256 }, /* Divider: frac => 10 MHz out */
-    { 14, 0x6000 },
-#endif
-    { 15, 0x0003 }, /* Y6 (FPGA_AUXCLK): LVDS out from PLL */
-    { 16, 0x0130 }, /* Divider: 20 => 38.4 MHz out */
-    { 17, 0x0000 },
-    { 18, 0x0000 }, /* Y7 disabled */
-    { 19, 0x0130 },
-    { 20, 0x0000 },
-};
-
 /* CDCM6208 Init */
 /*---------------*/
 
@@ -166,8 +132,8 @@ static void test_cdcm6208_init(void)
     m2sdr_cdcm6208_spi_init(fd);
 
     /* CDCM6208 SPI Init */
-    for (i = 0; i < sizeof(cdcm_regs_vcxo_38) / sizeof(cdcm_regs_vcxo_38[0]); i++) {
-        m2sdr_cdcm6208_spi_write(fd, cdcm_regs_vcxo_38[i][0], cdcm_regs_vcxo_38[i][1]);
+    for (i = 0; i < sizeof(cdcm6208_regs_vcxo_38p4) / sizeof(cdcm6208_regs_vcxo_38p4[0]); i++) {
+        m2sdr_cdcm6208_spi_write(fd, cdcm6208_regs_vcxo_38p4[i][0], cdcm6208_regs_vcxo_38p4[i][1]);
     }
 
     printf("CDCM6208 SPI initialization completed.\n");
