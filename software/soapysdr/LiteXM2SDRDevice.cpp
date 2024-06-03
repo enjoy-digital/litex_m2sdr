@@ -134,6 +134,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* Bypass synchro. */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
+    /* Disable DMA Loopback. */
+    litepcie_writel(_fd, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+
     bool do_init = true;
     if (args.count("bypass_init") != 0) {
         std::cout << args.at("bypass_init")[0] << std::endl;
