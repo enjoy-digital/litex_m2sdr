@@ -121,6 +121,7 @@ class Platform(Xilinx7SeriesPlatform):
         assert device in ["xc7a35t", "xc7a200t"]
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, toolchain="vivado")
 
+        self.device     = device
         self.image_size = {
             "xc7a35t"  : 0x00400000,
             "xc7a200t" : 0x00800000,
@@ -154,7 +155,7 @@ class Platform(Xilinx7SeriesPlatform):
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
 
     def create_programmer(self):
-        return OpenFPGALoader(cable="ft2232", fpga_part=f"xc7a200tsbg484", freq=10e6)
+        return OpenFPGALoader(cable="ft2232", fpga_part=f"{self.device}sbg484", freq=10e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
