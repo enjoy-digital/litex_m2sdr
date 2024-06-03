@@ -338,27 +338,43 @@ static void m2sdr_init(
 
     /* Configure oversample feature if enabled */
     if (enable_oversample) {
-        m2sdr_ad9361_spi_write(fd, 0x003, 0x54); // OC Register
+       /*  Note: This oversampling code is borrowed from the BladeRF project, allowing a samplerate of
+        *  122.88MSPS. It should be used with care and is intended for experienced developers.
+        *
+        *  More information:
+        *  - https://www.nuand.com/2023-02-release-122-88mhz-bandwidth
+        *  - https://destevez.net/2023/02/running-the-ad9361-at-122-88-msps
+        *
+        * One key difference from BladeRF is that M2SDR, in X4 mode, has sufficient bandwidth on the
+        * PCIe link to avoid truncating data from 12-bit to 8-bit.
+        *
+        * When operating in 2T2R mode, the FPGA to RFIC interface is overclocked from 245.76MHz to
+        * 491.52MHz. Surprisingly, this seems to work well with updated timing constraints. However,
+        * switching to 1T1R mode avoids overclocking this interface and limits overclocking to the
+        * AD9631 part.
+        *
+        */
 
-        /* TX Register Assignments */
-        m2sdr_ad9361_spi_write(fd, 0x02, 0xc0);  // TX Enable and Filter Control
-        m2sdr_ad9361_spi_write(fd, 0xc2, 0x9f);  // TX BBF R1
-        m2sdr_ad9361_spi_write(fd, 0xc3, 0x9f);  // TX baseband filter R2
-        m2sdr_ad9361_spi_write(fd, 0xc4, 0x9f);  // TX baseband filter R3
-        m2sdr_ad9361_spi_write(fd, 0xc5, 0x9f);  // TX baseband filter R4
-        m2sdr_ad9361_spi_write(fd, 0xc6, 0x9f);  // TX baseband filter real pole word
-        m2sdr_ad9361_spi_write(fd, 0xc7, 0x00);  // TX baseband filter C1
-        m2sdr_ad9361_spi_write(fd, 0xc8, 0x00);  // TX baseband filter C2
-        m2sdr_ad9361_spi_write(fd, 0xc9, 0x00);  // TX baseband filter real pole word
+        /* OC Register: General oversampling control. */
+        m2sdr_ad9361_spi_write(fd, 0x003, 0x54);
 
-        /* RX Register Assignments */
-        // Gain and calibration
+        /* TX Register Assignments: Configuring TX path for oversampling. */
+        m2sdr_ad9361_spi_write(fd, 0x02, 0xc0);  /* TX Enable and Filter Control. */
+        m2sdr_ad9361_spi_write(fd, 0xc2, 0x9f);  /* TX BBF (Baseband Filter) R1.  */
+        m2sdr_ad9361_spi_write(fd, 0xc3, 0x9f);  /* TX BBF R2.                    */
+        m2sdr_ad9361_spi_write(fd, 0xc4, 0x9f);  /* TX BBF R3.                    */
+        m2sdr_ad9361_spi_write(fd, 0xc5, 0x9f);  /* TX BBF R4.                    */
+        m2sdr_ad9361_spi_write(fd, 0xc6, 0x9f);  /* TX BBF Real Pole Word.        */
+        m2sdr_ad9361_spi_write(fd, 0xc7, 0x00);  /* TX BBF Capacitor C1.          */
+        m2sdr_ad9361_spi_write(fd, 0xc8, 0x00);  /* TX BBF Capacitor C2.          */
+        m2sdr_ad9361_spi_write(fd, 0xc9, 0x00);  /* TX BBF Real Pole Word.        */
+
+        /* RX Register Assignments: Configuring RX path for oversampling. */
         m2sdr_ad9361_spi_write(fd, 0x1e0, 0xBF);
         m2sdr_ad9361_spi_write(fd, 0x1e4, 0xFF);
         m2sdr_ad9361_spi_write(fd, 0x1f2, 0xFF);
-        // m2sdr_ad9361_spi_write(fd, 0x1e6, 0x87); // Causes gr-osmosdr to freak out
 
-        // Miller and BBF caps
+        /* Miller and BBF capacitors settings. */
         m2sdr_ad9361_spi_write(fd, 0x1e7, 0x00);
         m2sdr_ad9361_spi_write(fd, 0x1e8, 0x00);
         m2sdr_ad9361_spi_write(fd, 0x1e9, 0x00);
@@ -370,7 +386,7 @@ static void m2sdr_init(
         m2sdr_ad9361_spi_write(fd, 0x1ef, 0x00);
         m2sdr_ad9361_spi_write(fd, 0x1e0, 0xBF);
 
-        // BIST and Data Port Test Config [D1:D0] "Must be 2’b00"
+        /* BIST and Data Port Test Config: Must be set to 0x03. */
         m2sdr_ad9361_spi_write(fd, 0x3f6, 0x03);
     }
 
