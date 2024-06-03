@@ -863,7 +863,7 @@ int main(int argc, char **argv)
 #if CSR_FLASH_BASE
     else if (!strcmp(cmd, "flash_write")) {
         const char *filename;
-        uint32_t offset = 0;
+        uint32_t offset = 0x00800000;  /* Operational */
         if (optind + 1 > argc)
             goto show_help;
         filename = argv[optind++];
@@ -874,7 +874,7 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "flash_read")) {
         const char *filename;
         uint32_t size = 0;
-        uint32_t offset = 0;
+        uint32_t offset = 0x00800000; /* Operational */
         if (optind + 2 > argc)
             goto show_help;
         filename = argv[optind++];
