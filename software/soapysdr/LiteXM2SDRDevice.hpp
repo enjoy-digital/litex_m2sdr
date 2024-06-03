@@ -22,7 +22,15 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
 
+//#define SAMPLE_RATE_8BIT_16BIT_THRESHOLD 30720000*16 // FIXME: Disabled for now.
 #define SAMPLE_RATE_8BIT_16BIT_THRESHOLD 30720000
+
+#define AD9361_OVERSAMPLING
+#ifdef AD9361_OVERSAMPLING
+#define AD9361_RATE_MULT 2
+#else
+#define AD9361_RATE_MULT 1
+#endif
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 

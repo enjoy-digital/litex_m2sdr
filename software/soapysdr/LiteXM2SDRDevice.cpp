@@ -520,11 +520,48 @@ void SoapyLiteXM2SDR::setSampleRate(
 
     uint32_t sample_rate = static_cast<uint32_t>(rate);
     if (direction == SOAPY_SDR_TX)
-        ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate);
+        ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/AD9361_RATE_MULT);
     if (direction == SOAPY_SDR_RX)
-        ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate);
+        ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/AD9361_RATE_MULT);
 
-    setSampleMode(rate);
+#ifdef AD9361_OVERSAMPLING
+    m2sdr_ad9361_spi_write(_fd, 0x003, 0x54); // OC Register
+
+    /* TX Register Assignments */
+    m2sdr_ad9361_spi_write(_fd, 0x02, 0xc0);  // TX Enable and Filter Control
+    m2sdr_ad9361_spi_write(_fd, 0xc2, 0x9f);  // TX BBF R1
+    m2sdr_ad9361_spi_write(_fd, 0xc3, 0x9f);  // TX baseband filter R2
+    m2sdr_ad9361_spi_write(_fd, 0xc4, 0x9f);  // TX baseband filter R3
+    m2sdr_ad9361_spi_write(_fd, 0xc5, 0x9f);  // TX baseband filter R4
+    m2sdr_ad9361_spi_write(_fd, 0xc6, 0x9f);  // TX baseband filter real pole word
+    m2sdr_ad9361_spi_write(_fd, 0xc7, 0x00);  // TX baseband filter C1
+    m2sdr_ad9361_spi_write(_fd, 0xc8, 0x00);  // TX baseband filter C2
+    m2sdr_ad9361_spi_write(_fd, 0xc9, 0x00);  // TX baseband filter real pole word
+
+    /* RX Register Assignments */
+    // Gain and calibration
+    m2sdr_ad9361_spi_write(_fd, 0x1e0, 0xBF);
+    m2sdr_ad9361_spi_write(_fd, 0x1e4, 0xFF);
+    m2sdr_ad9361_spi_write(_fd, 0x1f2, 0xFF);
+
+    // m2sdr_ad9361_spi_write(fd, 0x1e6, 0x87); // Causes gr-osmosdr to freak out
+    // Miller and BBF caps
+    m2sdr_ad9361_spi_write(_fd, 0x1e7, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1e8, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1e9, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1ea, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1eb, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1ec, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1ed, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1ee, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1ef, 0x00);
+    m2sdr_ad9361_spi_write(_fd, 0x1e0, 0xBF);
+
+    // BIST and Data Port Test Config [D1:D0] "Must be 2’b00"
+    m2sdr_ad9361_spi_write(_fd, 0x3f6, 0x03);
+#endif
+
+    setSampleMode(rate/AD9361_RATE_MULT);
 }
 
 double SoapyLiteXM2SDR::getSampleRate(
@@ -538,7 +575,7 @@ double SoapyLiteXM2SDR::getSampleRate(
     if (direction == SOAPY_SDR_RX)
         ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
 
-    return static_cast<double>(sample_rate);
+    return static_cast<double>(AD9361_RATE_MULT*sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
@@ -553,6 +590,9 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     sampleRates.push_back(20.0e6);    /* 20 MSPS. */
     sampleRates.push_back(30.72e6);   /* 30.72 MSPS. */
     sampleRates.push_back(61.44e6);   /* 61.44 MSPS (Maximum sample rate). */
+#ifdef AD9361_OVERSAMPLING
+    sampleRates.push_back(122.88e6);  /* 122.88 MSPS (Maximum sample rate). */
+#endif
     return sampleRates;
 }
 
@@ -560,7 +600,11 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
     const int /*direction*/,
     const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
+#ifdef AD9361_OVERSAMPLING
     results.push_back(SoapySDR::Range(25e6 / 96, 61.44e6));
+#else
+    results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
+#endif
     return results;
 }
 
