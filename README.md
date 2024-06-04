@@ -17,6 +17,8 @@ connectivity to directly record/play samples to/from an SSD!
 
 Dive in and start enjoying your SDR projects like never before!
 
+![](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/fa688df9-071e-40b9-b846-c0532f5e95eb)
+
 [> Ethernet Tests
 -----------------
 
