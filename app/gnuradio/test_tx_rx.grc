@@ -11,7 +11,7 @@ options:
     gen_linking: dynamic
     generate_options: qt_gui
     hier_block_src_path: '.:'
-    id: m2sdr_Tx_Rx_Test
+    id: test_tx_rx
     max_nouts: '0'
     output_language: python
     placement: (0,0)
@@ -45,13 +45,13 @@ blocks:
     start: 88e6
     step: 50e3
     stop: 500e6
-    value: 97.4e6
+    value: 433e6
     widget: counter_slider
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [296, 28.0]
+    coordinate: [264, 8.0]
     rotation: 0
     state: enabled
 - name: freqTX
@@ -66,13 +66,13 @@ blocks:
     start: 88e6
     step: 50e3
     stop: 500e6
-    value: 97.4e6
+    value: 433e6
     widget: counter_slider
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [440, 28.0]
+    coordinate: [392, 8.0]
     rotation: 0
     state: enabled
 - name: gainRx
@@ -93,7 +93,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [624, 28.0]
+    coordinate: [520, 8.0]
     rotation: 0
     state: enabled
 - name: gainTX
@@ -114,7 +114,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [760, 28.0]
+    coordinate: [624, 8.0]
     rotation: 0
     state: enabled
 - name: samp_rate
@@ -126,7 +126,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [184, 12]
+    coordinate: [168, 8.0]
     rotation: 0
     state: enabled
 - name: analog_const_source_x_0
@@ -143,24 +143,29 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [80, 276.0]
+    coordinate: [16, 248.0]
     rotation: 0
     state: enabled
-- name: blocks_null_sink_0
-  id: blocks_null_sink
+- name: note_0
+  id: note
   parameters:
-    affinity: ''
     alias: ''
-    bus_structure_sink: '[[0,],]'
-    comment: ''
-    num_inputs: '1'
-    type: complex
-    vlen: '1'
+    comment: 'TX1 must be connected to RX1
+
+
+      - sink and source are configured with the same default freq
+
+      - sink receive a constant value: only carrier frequency is visible
+
+      - by playing with freqRX/freqTx sliders carrier will moved
+
+      - by playing with gainTX/gainRX sliders carrier amplitude will increase/decrease'
+    note: TX -> RX ext loopback
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [288, 216.0]
+    coordinate: [392, 132.0]
     rotation: 0
     state: enabled
 - name: qtgui_sink_x_0
@@ -176,7 +181,7 @@ blocks:
     maxoutbuf: '0'
     minoutbuf: '0'
     name: '"RX"'
-    plotconst: 'True'
+    plotconst: 'False'
     plotfreq: 'True'
     plottime: 'True'
     plotwaterfall: 'True'
@@ -189,7 +194,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [384, 148.0]
+    coordinate: [224, 128.0]
     rotation: 0
     state: true
 - name: soapy_custom_sink_0
@@ -226,7 +231,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [360, 276.0]
+    coordinate: [208, 248.0]
     rotation: 0
     state: enabled
 - name: soapy_custom_source_0
@@ -257,7 +262,7 @@ blocks:
     iq_balance1: '0'
     maxoutbuf: '0'
     minoutbuf: '0'
-    nchan: '2'
+    nchan: '1'
     samp_rate: samp_rate
     settings0: ''
     settings1: ''
@@ -269,15 +274,14 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [48, 164.0]
+    coordinate: [16, 136.0]
     rotation: 0
     state: enabled
 
 connections:
 - [analog_const_source_x_0, '0', soapy_custom_sink_0, '0']
 - [soapy_custom_source_0, '0', qtgui_sink_x_0, '0']
-- [soapy_custom_source_0, '1', blocks_null_sink_0, '0']
 
 metadata:
   file_format: 1
-  grc_version: 3.10.9.2
+  grc_version: 3.10.10.0
