@@ -398,10 +398,10 @@ static void flash_reload(void)
     /* Reload FPGA through ICAP.*/
     litepcie_reload(fd);
 
-    /* Notice user to reboot the hardware.*/
-    printf("================================================================\n");
-    printf("= PLEASE REBOOT YOUR HARDWARE TO START WITH NEW FPGA GATEWARE  =\n");
-    printf("================================================================\n");
+    /* Notice user to reboot/rescan the hardware.*/
+    printf("===========================================================================\n");
+    printf("= PLEASE REBOOT YOUR HARDWARE OR RESCAN PCIe BUS TO USE NEW FPGA GATEWARE =\n");
+    printf("===========================================================================\n");
 
     /* Close LitePCIe device. */
     close(fd);
