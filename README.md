@@ -90,6 +90,13 @@ litescope_cli
 ./test_clks.py
 ```
 
+[> Flash board over PCIe
+------------------------
+```bash
+./flash.py build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
+```
+
+
 [> Reboot or Rescan PCIe Bus
 ----------------------------
 ```bash
