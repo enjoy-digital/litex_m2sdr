@@ -11,16 +11,20 @@ from litepcie.software import copy_litepcie_software
 # Generic PCIe Utilities ---------------------------------------------------------------------------
 
 def get_pcie_device_id(vendor, device):
-    lspci_output = subprocess.check_output(["lspci", "-d", f"{vendor}:{device}"]).decode()
-    device_id = lspci_output.split()[0]
-    return device_id
+    try:
+        lspci_output = subprocess.check_output(["lspci", "-d", f"{vendor}:{device}"]).decode()
+        device_id = lspci_output.split()[0]
+        return device_id
+    except:
+        return None
 
 def remove_pcie_device(device_id, driver="litepcie"):
-    subprocess.run(["sudo", "rmmod", driver])
-    subprocess.run(["echo", "1", "|", "sudo", "tee", f"/sys/bus/pci/devices/0000:{device_id}/remove"])
+    if not device_id:
+        return
+    subprocess.run(f"echo 1 | sudo tee /sys/bus/pci/devices/0000:{device_id}/remove > /dev/null", shell=True)
 
 def rescan_pcie_bus():
-    subprocess.run(["echo", "1", "|", "sudo", "tee", "/sys/bus/pci/rescan"])
+    subprocess.run("echo 1 | sudo tee /sys/bus/pci/rescan > /dev/null", shell=True)
 
 # LitePCIe Software Generation ---------------------------------------------------------------------
 
