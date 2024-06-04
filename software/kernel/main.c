@@ -34,6 +34,10 @@
 #include <linux/platform_device.h>
 #include <linux/version.h>
 
+#if defined(__arm__) || defined(__aarch64__)
+#include <linux/dma-direct.h>
+#endif
+
 #include "litepcie.h"
 #include "csr.h"
 #include "config.h"
@@ -568,10 +572,19 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
+#if defined(__arm__) || defined(__aarch64__)
+		void *va;
+		if (is_tx)
+			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.reader_handle[i]));
+		else
+			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.writer_handle[i]));
+		pfn = page_to_pfn(virt_to_page(va));
+#else
 		if (is_tx)
 			pfn = __pa(chan->dma.reader_addr[i]) >> PAGE_SHIFT;
 		else
 			pfn = __pa(chan->dma.writer_addr[i]) >> PAGE_SHIFT;
+#endif
 		/*
 		 * Note: the memory is cached, so the user must explicitly
 		 * flush the CPU caches on architectures which require it.
