@@ -22,7 +22,7 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
 
-#define AD9361_OVERSAMPLING
+#define DEBUG
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
@@ -371,6 +371,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct ad9361_rf_phy *ad9361_phy;
 
     uint32_t _bitMode           = 16;
+    uint32_t _oversampling      = 0;
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
 

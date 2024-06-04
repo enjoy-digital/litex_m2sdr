@@ -40,7 +40,7 @@ std::string getLiteXM2SDRIdentification(int fd) {
 
 std::string getLiteXM2SDRSerial(int fd) {
     unsigned int high = litepcie_readl(fd, CSR_DNA_ID_ADDR);
-    unsigned int low = litepcie_readl(fd, CSR_DNA_ID_ADDR + 4);
+    unsigned int low  = litepcie_readl(fd, CSR_DNA_ID_ADDR + 4);
     char serial[32];
     snprintf(serial, sizeof(serial), "%x%08x", high, low);
     return std::string(serial);
@@ -62,7 +62,9 @@ SoapySDR::Kwargs createDeviceKwargs(
         {"serial",         getLiteXM2SDRSerial(fd)},
         {"identification", getLiteXM2SDRIdentification(fd)},
         {"version",        "1234"},
-        {"label",          ""}
+        {"label",          ""},
+        {"bitmode",        "16"},
+        {"oversampling",   "0"},
     };
     dev["label"] = generateDeviceLabel(dev, path);
     return dev;

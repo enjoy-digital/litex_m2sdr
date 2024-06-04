@@ -110,6 +110,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
+#ifdef DEBUG
+    SoapySDR::logf(SOAPY_SDR_INFO, "Received arguments:");
+    for (const auto &arg : args) {
+        SoapySDR::logf(SOAPY_SDR_INFO, "  %s: %s", arg.first.c_str(), arg.second.c_str());
+    }
+#endif
+
     /* Open LitePCIe descriptor. */
     if (args.count("path") == 0) {
         /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
@@ -138,13 +145,17 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     litepcie_writel(_fd, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
 
     bool do_init = true;
-    if (args.count("bypass_init") != 0) {
+    if (args.count("bypass_init") > 0) {
         std::cout << args.at("bypass_init")[0] << std::endl;
         do_init = args.at("bypass_init")[0] == '0';
     }
 
-    if (args.count("bitmode") != 0) {
+    if (args.count("bitmode") > 0) {
         _bitMode = std::stoi(args.at("bitmode"));
+    }
+
+    if (args.count("oversampling") > 0) {
+        _oversampling = std::stoi(args.at("oversampling"));
     }
 
     if (do_init) {
@@ -522,14 +533,13 @@ void SoapyLiteXM2SDR::setSampleRate(
         rate / 1e6);
     uint32_t sample_rate = static_cast<uint32_t>(rate);
     _rateMult = 1.0;
-    if (rate > 61.44e6)
+    if (_oversampling & (rate > 61.44e6))
         _rateMult = 2.0;
     if (direction == SOAPY_SDR_TX)
         ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     if (direction == SOAPY_SDR_RX)
         ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
 
-#ifdef AD9361_OVERSAMPLING
    /*  Note: This oversampling code is borrowed from the BladeRF project, allowing a samplerate of
     *  122.88MSPS. It should be used with care and is intended for experienced developers.
     *
@@ -546,7 +556,7 @@ void SoapyLiteXM2SDR::setSampleRate(
     * AD9631 part.
     *
     */
-    if (_rateMult == 2.0) {
+    if (_oversampling & (_rateMult == 2.0)) {
         /* OC Register: General oversampling control. */
         m2sdr_ad9361_spi_write(_fd, 0x003, 0x54);
 
@@ -581,7 +591,6 @@ void SoapyLiteXM2SDR::setSampleRate(
         /* BIST and Data Port Test Config: Must be set to 0x03. */
         m2sdr_ad9361_spi_write(_fd, 0x3f6, 0x03);
     }
-#endif
 
     setSampleMode();
 }
@@ -611,10 +620,9 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     sampleRates.push_back(10.0e6);    /* 10 MSPS. */
     sampleRates.push_back(20.0e6);    /* 20 MSPS. */
     sampleRates.push_back(30.72e6);   /* 30.72 MSPS. */
-    sampleRates.push_back(61.44e6);   /* 61.44 MSPS (Maximum sample rate). */
-#ifdef AD9361_OVERSAMPLING
-    sampleRates.push_back(122.88e6);  /* 122.88 MSPS (Maximum sample rate). */
-#endif
+    sampleRates.push_back(61.44e6);   /* 61.44 MSPS (Maximum sample rate without oversampling). */
+    if (_oversampling)
+        sampleRates.push_back(122.88e6);  /* 122.88 MSPS (Maximum sample rate with oversampling). */
     return sampleRates;
 }
 
@@ -622,11 +630,10 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
     const int /*direction*/,
     const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
-#ifdef AD9361_OVERSAMPLING
-    results.push_back(SoapySDR::Range(25e6 / 96, 61.44e6));
-#else
-    results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
-#endif
+    if (_oversampling)
+        results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
+    else
+        results.push_back(SoapySDR::Range(25e6 / 96, 61.44e6));
     return results;
 }
 
