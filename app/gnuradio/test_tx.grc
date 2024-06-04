@@ -1,0 +1,259 @@
+options:
+  parameters:
+    author: gwe
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: ''
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: qt_gui
+    hier_block_src_path: '.:'
+    id: test_tx_rx
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: Not titled yet
+    window_size: (1000,1000)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: freqTX
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: ''
+    label: ''
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: 88e6
+    step: 50e3
+    stop: 500e6
+    value: 433e6
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [264, 12.0]
+    rotation: 0
+    state: enabled
+- name: gainTX
+  id: variable_qtgui_range
+  parameters:
+    comment: ''
+    gui_hint: ''
+    label: ''
+    min_len: '200'
+    orient: QtCore.Qt.Horizontal
+    rangeType: float
+    start: int(-89)
+    step: int(1)
+    stop: int(0)
+    value: int(-89)
+    widget: counter_slider
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [392, 12.0]
+    rotation: 0
+    state: enabled
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: int(10e6)
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [168, 8.0]
+    rotation: 0
+    state: enabled
+- name: analog_const_source_x_0
+  id: analog_const_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    const: '1'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    type: complex
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [16, 248.0]
+    rotation: 0
+    state: enabled
+- name: analog_sig_source_x_0
+  id: analog_sig_source_x
+  parameters:
+    affinity: ''
+    alias: ''
+    amp: '1'
+    comment: ''
+    freq: 1e6
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    phase: '0'
+    samp_rate: samp_rate
+    showports: 'False'
+    type: complex
+    waveform: analog.GR_COS_WAVE
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [16, 300.0]
+    rotation: 0
+    state: disabled
+- name: blocks_file_source_0
+  id: blocks_file_source
+  parameters:
+    affinity: ''
+    alias: ''
+    begin_tag: pmt.PMT_NIL
+    comment: ''
+    file: /tmp/dataTx.bin
+    length: '0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    repeat: 'True'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [16, 132.0]
+    rotation: 0
+    state: disabled
+- name: note_0
+  id: note
+  parameters:
+    alias: ''
+    comment: 'Both Tx receives same signal
+
+
+      - with constant source only the carrier is visible
+
+      - with signal source a 1MHz cosine is mixed to carrier
+
+      - with file source an arbitrary complex signal is produces
+
+      (Uses ''D'' to disable and ''E'' to enable a source)
+
+
+      - freqTx slider is used to change center frequency
+
+      - gainTX slider is used to increase/decrease attenuation/gain'
+    note: Dual Channels TX test
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [464, 132.0]
+    rotation: 0
+    state: enabled
+- name: qtgui_sink_x_0
+  id: qtgui_sink_x
+  parameters:
+    affinity: ''
+    alias: ''
+    bw: samp_rate
+    comment: ''
+    fc: '0'
+    fftsize: '1024'
+    gui_hint: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    name: '""'
+    plotconst: 'True'
+    plotfreq: 'True'
+    plottime: 'True'
+    plotwaterfall: 'True'
+    rate: '10'
+    showports: 'False'
+    showrf: 'False'
+    type: complex
+    wintype: window.WIN_BLACKMAN_hARRIS
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [320, 356.0]
+    rotation: 0
+    state: enabled
+- name: soapy_custom_sink_0
+  id: soapy_custom_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    antenna0: A
+    antenna1: A
+    bandwidth0: 10e6
+    bandwidth1: 10e6
+    center_freq0: freqTX
+    center_freq1: freqTX
+    comment: ''
+    dc_offset0: '0'
+    dc_offset1: '0'
+    dev_args: ''
+    driver: LiteXM2SDR
+    freq_correction0: '0'
+    freq_correction1: '0'
+    gain0: gainTX
+    gain1: gainTX
+    iq_balance0: '0'
+    iq_balance1: '0'
+    nchan: '2'
+    samp_rate: samp_rate
+    settings0: ''
+    settings1: ''
+    stream_args: ''
+    tune_args0: ''
+    tune_args1: ''
+    type: fc32
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [288, 232.0]
+    rotation: 0
+    state: enabled
+
+connections:
+- [analog_const_source_x_0, '0', qtgui_sink_x_0, '0']
+- [analog_const_source_x_0, '0', soapy_custom_sink_0, '0']
+- [analog_const_source_x_0, '0', soapy_custom_sink_0, '1']
+- [analog_sig_source_x_0, '0', qtgui_sink_x_0, '0']
+- [analog_sig_source_x_0, '0', soapy_custom_sink_0, '0']
+- [analog_sig_source_x_0, '0', soapy_custom_sink_0, '1']
+- [blocks_file_source_0, '0', qtgui_sink_x_0, '0']
+- [blocks_file_source_0, '0', soapy_custom_sink_0, '0']
+- [blocks_file_source_0, '0', soapy_custom_sink_0, '1']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.10.0
