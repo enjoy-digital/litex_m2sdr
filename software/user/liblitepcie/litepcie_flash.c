@@ -83,18 +83,11 @@ static void flash_write(int fd, uint32_t addr, uint8_t byte)
     flash_spi(fd, 40, FLASH_PP, (addr << 8) | byte);
 }
 
-//#define FLASH_PAGE
 static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     if (size == 1) {
         flash_write(fd, addr, buf[0]);
     } else {
-#ifdef FLASH_PAGE
-        struct litepcie_ioctl_flash_page m;
-        m.page_addr = addr;
-        memcpy(m.page_data, buf, size);
-        checked_ioctl(fd, LITEPCIE_IOCTL_FLASH_PAGE, &m);
-#else
         int i;
         struct litepcie_ioctl_flash m;
 
@@ -116,7 +109,6 @@ static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t siz
 
         /* release cs_n */
         flash_spi_cs(fd, 1);
-#endif
     }
 }
 
