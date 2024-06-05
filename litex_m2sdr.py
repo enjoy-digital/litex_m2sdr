@@ -432,9 +432,14 @@ def main():
 
     # Remove PCIe Driver/Device.
     if (args.load or args.flash) and args.rescan:
-        device_id = get_pcie_device_id(vendor="10ee", device="7021") # FIXME: Handle X4  case.
-        if device_id:
-            remove_pcie_device(device_id, driver="litepcie")
+        device_ids = [
+            get_pcie_device_id("0x10ee", "0x7021"),
+            get_pcie_device_id("0x10ee", "0x7022"),
+            get_pcie_device_id("0x10ee", "0x7024"),
+        ]
+        for device_id in device_ids:
+            if device_id:
+                remove_pcie_device(device_id, driver="litepcie")
 
     # Load Bistream.
     if args.load:

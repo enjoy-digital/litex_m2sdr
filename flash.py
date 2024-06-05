@@ -22,6 +22,7 @@ def main():
     subprocess.run("sudo rmmod litepcie", shell=True)
     device_ids = [
         get_pcie_device_id("0x10ee", "0x7021"),
+        get_pcie_device_id("0x10ee", "0x7022"),
         get_pcie_device_id("0x10ee", "0x7024"),
     ]
 
