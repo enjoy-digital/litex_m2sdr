@@ -25,16 +25,24 @@ Dive in and start enjoying your SDR projects like never before!
 
 LiteX can be installed by following the installation instructions from the LiteX Wiki: https://github.com/enjoy-digital/litex/wiki/Installation
 
+#### [> Installing the RISC-V toolchain for the Soft-CPU:
+
+To get and install a RISC-V toolchain, please install it manually of follow the
+LiteX's wiki: https://github.com/enjoy-digital/litex/wiki/Installation:
+```bash
+./litex_setup.py --gcc=riscv
+```
+
 #### [> Clone repository:
 
 ```bash
-git clone --recursive https://github.com/enjoy-digital/litex_xtrx
+git clone --recursive https://github.com/enjoy-digital/litex_m2sdr
 ```
 
 #### [> Software Prerequisites
 
 ```bash
-apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1
+apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1 gqrx
 ```
 
 [> Ethernet Tests
