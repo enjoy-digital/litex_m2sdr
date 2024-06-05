@@ -96,9 +96,7 @@ make clean all
 [> GNU Radio FM Test
 --------------------
 ```bash
-./m2sdr_rf -samplerate=16e6 -rx_freq=88.6e6
-./m2sdr_rf -samplerate=16e6 -rx_freq=98.2e6
-gnuradio gnuradio-companion ../../app/gnuradio/m2sdr_fm_receiver.grc
+gnuradio gnuradio-companion ../gnuradio/test_fm_rx.grc
 ```
 
 [> Enable Debug in Kernel
