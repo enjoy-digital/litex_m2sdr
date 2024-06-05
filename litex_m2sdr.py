@@ -209,7 +209,7 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 }
             )
-            self.add_pcie(phy=self.pcie_phy, address_width=32, ndmas=1, data_width=64,
+            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=1, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
