@@ -384,11 +384,12 @@ class BaseSoC(SoCMini):
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.")
     # Build/Load/Utilities.
-    parser.add_argument("--build",   action="store_true", help="Build bitstream.")
-    parser.add_argument("--load",    action="store_true", help="Load bitstream.")
-    parser.add_argument("--flash",   action="store_true", help="Flash bitstream.")
-    parser.add_argument("--rescan",  action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
-    parser.add_argument("--driver",  action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+    parser.add_argument("--build",           action="store_true", help="Build bitstream.")
+    parser.add_argument("--load",            action="store_true", help="Load bitstream.")
+    parser.add_argument("--flash",           action="store_true", help="Flash bitstream.")
+    parser.add_argument("--flash-multiboot", action="store_true", help="Flash multiboot bitstreams.")
+    parser.add_argument("--rescan",          action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
+    parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
 
     # Communication interfaces/features.
     comopts = parser.add_mutually_exclusive_group()
@@ -442,6 +443,12 @@ def main():
     if args.flash:
         prog = soc.platform.create_programmer()
         prog.flash(0, os.path.join(builder.gateware_dir, soc.build_name + ".bin"))
+
+    # Flash Multiboot Bitstreams.
+    if args.flash_multiboot:
+        prog = soc.platform.create_programmer()
+        prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),   verify=True)
+        prog.flash(soc.platform.image_size, builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
 
     # Rescan PCIe Bus.
     if args.rescan:
