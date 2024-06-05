@@ -15,7 +15,7 @@ Three sliders are present to dynamically changes parameters:
 - `gain` to adapt RFIC gain when signal is too small or to avoid antenna saturate
 - `volume` to configure *Audio Sink* level
 
-![test_fm_rx_fig](figs/test_fm_rx.png)
+![test_fm_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/ce074aad-ec68-4110-90c3-633a7b48bc50)
 
 ]> Test RX TX (external loopback)
 ---------------------------------
@@ -31,7 +31,7 @@ Four sliders are present to adapt:
 - RX center frequency (*freqRx*)
 - RX gain (*gainRx*)
 
-![test_tx_rx_fig](figs/test_tx_rx.png)
+![test_tx_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/942339b8-3d0b-4aa6-aade-e607bab4035e)
 
 ]> Test RX
 ----------
@@ -43,7 +43,7 @@ Each channel's stream are displayed and at the same time stored in a file (*/tmp
 As for previous demonstrations two sliders are present: one for center frequency and another one
 for gain
 
-![test_rx_fig](figs/test_rx.png)
+![test_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/e8178f7f-de92-4d28-b9ed-230f485925bd)
 
 ]> Test TX
 ----------
@@ -59,4 +59,4 @@ disable to a block):
 
 As for previous demonstrations, two sliders are present to configure frequency and gain/attenuation.
 
-![test_tx_fig](figs/test_tx.png)
+![test_tx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/ff7b4a2f-f0db-4c11-b3db-b0c5a6e4bef1)
