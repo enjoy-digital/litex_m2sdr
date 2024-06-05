@@ -125,14 +125,14 @@ class BaseSoC(SoCMini):
         "analyzer"        : 31,
     }
 
-    def __init__(self, sys_clk_freq=int(125e6),
+    def __init__(self, version="ultra", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
         with_ethernet = False, ethernet_sfp=0,
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True
     ):
         # Platform ---------------------------------------------------------------------------------
-        platform = Platform(build_multiboot=True)
+        platform = Platform(version=version, build_multiboot=True)
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -384,11 +384,12 @@ class BaseSoC(SoCMini):
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.")
     # Build/Load/Utilities.
-    parser.add_argument("--build",  action="store_true", help="Build bitstream.")
-    parser.add_argument("--load",   action="store_true", help="Load bitstream.")
-    parser.add_argument("--flash",  action="store_true", help="Flash bitstream.")
-    parser.add_argument("--rescan", action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
-    parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+    parser.add_argument("--version", default="ultra",     help="Board version.", choices=["classic", "ultra"])
+    parser.add_argument("--build",   action="store_true", help="Build bitstream.")
+    parser.add_argument("--load",    action="store_true", help="Load bitstream.")
+    parser.add_argument("--flash",   action="store_true", help="Flash bitstream.")
+    parser.add_argument("--rescan",  action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
+    parser.add_argument("--driver",  action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
 
     # Communication interfaces/features.
     comopts = parser.add_mutually_exclusive_group()
@@ -408,6 +409,7 @@ def main():
 
     # Build SoC.
     soc = BaseSoC(
+        version       = args.version,
         with_pcie     = args.with_pcie,
         pcie_lanes    = args.pcie_lanes,
         with_ethernet = args.with_ethernet,

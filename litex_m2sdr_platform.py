@@ -117,10 +117,13 @@ class Platform(Xilinx7SeriesPlatform):
     default_clk_name   = "clk100"
     default_clk_period = 1e9/100e6
 
-    def __init__(self, device="xc7a200t", build_multiboot=False):
-        assert device in ["xc7a35t", "xc7a200t"]
+    def __init__(self, version="ultra", build_multiboot=False):
+        assert version in ["classic", "ultra"]
+        device = {
+            "classic" : "xc7a35t",
+            "ultra"   : "xc7a200t",
+        }[version]
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, toolchain="vivado")
-
         self.device     = device
         self.image_size = {
             "xc7a35t"  : 0x00400000,
