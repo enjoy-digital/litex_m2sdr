@@ -396,7 +396,7 @@ def main():
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
     comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Ethernet Communication.")
     comopts.add_argument("--with-sata",      action="store_true", help="Enable SATA Storage.")
-    parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.",   choices=[1, 4])
+    parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
 
     # Litescope Probes.
