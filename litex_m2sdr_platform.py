@@ -140,7 +140,7 @@ class Platform(Xilinx7SeriesPlatform):
         if build_multiboot:
             self.toolchain.additional_commands += [
                 # Build Operational-Multiboot Bitstream.
-                "set_property BITSTREAM.CONFIG.TIMER_CFG 0x0001FBD0 [current_design]",
+                "set_property BITSTREAM.CONFIG.TIMER_CFG 0x01000000 [current_design]",
                 "set_property BITSTREAM.CONFIG.CONFIGFALLBACK Enable [current_design]",
                 "write_bitstream -force {build_name}_operational.bit ",
                 "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
