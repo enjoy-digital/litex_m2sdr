@@ -86,63 +86,6 @@ static void test_si5351_init(void)
 
 #endif
 
-#ifdef CSR_CDCM6208_BASE
-
-/* CDCM6208 Dump */
-/*---------------*/
-
-static void test_cdcm6208_dump(void)
-{
-    int i;
-    int fd;
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    /* CDCM6208 SPI Init */
-    m2sdr_cdcm6208_spi_init(fd);
-
-    /* CDCM6208 SPI Dump */
-    for (i=0; i<128; i++)
-        printf("Reg 0x%02x: 0x%04x\n", i, m2sdr_cdcm6208_spi_read(fd, i));
-
-    printf("\n");
-
-    close(fd);
-}
-
-/* CDCM6208 Init */
-/*---------------*/
-
-static void test_cdcm6208_init(void)
-{
-    int i;
-    int fd;
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    /* CDCM6208 SPI Init */
-    m2sdr_cdcm6208_spi_init(fd);
-
-    /* CDCM6208 SPI Init */
-    for (i = 0; i < sizeof(cdcm6208_regs_vcxo_38p4) / sizeof(cdcm6208_regs_vcxo_38p4[0]); i++) {
-        m2sdr_cdcm6208_spi_write(fd, cdcm6208_regs_vcxo_38p4[i][0], cdcm6208_regs_vcxo_38p4[i][1]);
-    }
-
-    printf("CDCM6208 SPI initialization completed.\n");
-
-    close(fd);
-}
-
-#endif
-
 /* AD9361 Dump */
 /*-------------*/
 
@@ -712,11 +655,6 @@ static void help(void)
            "si5351_init                       Init SI5351.\n"
            "\n"
 #endif
-#ifdef CSR_CDCM6208_BASE
-           "cdcm6208_dump                     Dump CDCM6208 Registers.\n"
-           "cdcm6208_init                     Init CDCM6208.\n"
-           "\n"
-#endif
            "ad9361_dump                       Dump AD9361 Registers.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
@@ -811,14 +749,6 @@ int main(int argc, char **argv)
         test_si5351_scan();
     else if (!strcmp(cmd, "si5351_init"))
         test_si5351_init();
-#endif
-
-    /* CDCM6208 cmds. */
-#ifdef CSR_CDCM6208_BASE
-    else if (!strcmp(cmd, "cdcm6208_dump"))
-        test_cdcm6208_dump();
-    else if (!strcmp(cmd, "cdcm6208_init"))
-        test_cdcm6208_init();
 #endif
 
     /* AD9361 cmds. */

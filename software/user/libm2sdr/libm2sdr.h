@@ -18,7 +18,6 @@ extern "C" {
 
 /* Libs */
 #include "m2sdr_si5351_i2c.h"
-#include "m2sdr_cdcm6208_spi.h"
 #include "m2sdr_ad9361_spi.h"
 
 #ifdef __cplusplus
