@@ -125,7 +125,7 @@ class BaseSoC(SoCMini):
         "analyzer"        : 31,
     }
 
-    def __init__(self, sys_clk_freq=int(125e6),
+    def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
         with_ethernet = False, ethernet_sfp=0,
         with_sata     = False, sata_gen="gen2",
@@ -194,12 +194,12 @@ class BaseSoC(SoCMini):
         # PCIe -------------------------------------------------------------------------------------
 
         if with_pcie:
-            self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}"),
-                data_width  = {1: 64, 4: 128}[pcie_lanes],
+            self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
+                data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size   = 0x20000,
                 cd          = "sys",
             )
-            if pcie_lanes == 1:
+            if variant == "baseboard":
                 platform.toolchain.pre_placement_commands.append("reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
                 platform.toolchain.pre_placement_commands.append("set_property LOC GTPE2_CHANNEL_X0Y4 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
             self.pcie_phy.update_config({
@@ -384,6 +384,7 @@ class BaseSoC(SoCMini):
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.")
     # Build/Load/Utilities.
+    parser.add_argument("--variant",         default="m2",        help="Design variant.", choices=["m2", "baseboard"])
     parser.add_argument("--build",           action="store_true", help="Build bitstream.")
     parser.add_argument("--load",            action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",           action="store_true", help="Flash bitstream.")
@@ -396,7 +397,7 @@ def main():
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
     comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Ethernet Communication.")
     comopts.add_argument("--with-sata",      action="store_true", help="Enable SATA Storage.")
-    parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 4])
+    parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 2, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
 
     # Litescope Probes.
@@ -409,6 +410,7 @@ def main():
 
     # Build SoC.
     soc = BaseSoC(
+        variant       = args.variant,
         with_pcie     = args.with_pcie,
         pcie_lanes    = args.pcie_lanes,
         with_ethernet = args.with_ethernet,

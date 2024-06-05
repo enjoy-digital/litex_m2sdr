@@ -43,7 +43,7 @@ _io = [
     ),
 
     # PCIe (M2 Connector).
-    ("pcie_x1", 0,
+    ("pcie_x1_baseboard", 0,
         Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
@@ -52,7 +52,25 @@ _io = [
         Subsignal("tx_p",  Pins("B4")), # PCIe_TX3_P.
         Subsignal("tx_n",  Pins("A4")), # PCIe_TX3_N.
     ),
-    ("pcie_x4", 0,
+    ("pcie_x1_m2", 0,
+        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("D9")), # PCIe_RX0_P
+        Subsignal("rx_n",  Pins("C9")), # PCIe_RX0_N.
+        Subsignal("tx_p",  Pins("D7")), # PCIe_TX0_P.
+        Subsignal("tx_n",  Pins("C7")), # PCIe_TX0_N.
+    ),
+    ("pcie_x2_m2", 0,
+        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("D9 D11")), # PCIe_RX0-1_P
+        Subsignal("rx_n",  Pins("C9 C11")), # PCIe_RX0-1_N.
+        Subsignal("tx_p",  Pins("D7  D5")), # PCIe_TX0-1_P.
+        Subsignal("tx_n",  Pins("C7  C5")), # PCIe_TX0-1_N.
+    ),
+    ("pcie_x4_m2", 0,
         Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
