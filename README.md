@@ -25,12 +25,6 @@ Dive in and start enjoying your SDR projects like never before!
 
 LiteX can be installed by following the installation instructions from the LiteX Wiki: https://github.com/enjoy-digital/litex/wiki/Installation
 
-#### [> Installing the RISC-V toolchain for the Soft-CPU:
-
-To get and install a RISC-V toolchain, please install it manually of follow the LiteX's wiki: https://github.com/enjoy-digital/litex/wiki/Installation:
-```bash
-./litex_setup.py --gcc=riscv
-```
 #### [> Clone repository:
 
 ```bash
