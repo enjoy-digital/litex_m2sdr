@@ -62,16 +62,18 @@ ping 192.168.1.50
 Board mounted in Acorn Mini Baseboard:
 
 ```bash
-./litex_m2sdr.py --with-pcie --pcie-lanes=1 --build --load
+./litex_m2sdr.py --with-pcie --variant=baseboard --pcie-lanes=1 --build --load
 lspci
 ```
 
 Board mounted in directly in M2 slot:
 
 ```bash
-./litex_m2sdr.py --with-pcie --pcie-lanes=4 --build --load
+./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
 lspci
 ```
+
+where `N_LANES` may be 1, 2, 4 for `m2` variant or 1 for `baseboard`
 
 [> Software Tests
 ------------------
