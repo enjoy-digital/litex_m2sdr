@@ -334,44 +334,6 @@ class BaseSoC(SoCMini):
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/491.52e6)
         self.platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ad9361.cd_rfic.clk)
 
-        # Debug.
-        with_spi_analyzer  = False
-        with_rfic_analyzer = False
-        with_dma_analyzer  = False
-        if with_spi_analyzer:
-            analyzer_signals = [platform.lookup_request("ad9361_spi")]
-            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 4096,
-                clock_domain = "sys",
-                register     = True,
-                csr_csv      = "analyzer.csv"
-            )
-        if with_rfic_analyzer:
-            analyzer_signals = [
-                self.ad9361.phy.sink,   # TX.
-                self.ad9361.phy.source, # RX.
-                self.ad9361.prbs_rx.fields.synced,
-            ]
-            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 4096,
-                clock_domain = "rfic",
-                register     = True,
-                csr_csv      = "analyzer.csv"
-            )
-        if with_dma_analyzer:
-            assert with_pcie
-            analyzer_signals = [
-                self.pcie_dma0.sink,   # RX.
-                self.pcie_dma0.source, # TX.
-                self.pcie_dma0.synchronizer.synced,
-            ]
-            self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-                depth        = 1024,
-                clock_domain = "sys",
-                register     = True,
-                csr_csv      = "analyzer.csv"
-            )
-
         # Clk Measurements -------------------------------------------------------------------------
 
         self.clk_measurement = MultiClkMeasurement(clks={
@@ -381,21 +343,67 @@ class BaseSoC(SoCMini):
             "clk3" : 0,
         })
 
+    def add_ad9361_spi_probe(self):
+        analyzer_signals = [self.platform.lookup_request("ad9361_spi")]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 4096,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
+    def add_ad96361_data_probe(self):
+        analyzer_signals = [
+            self.ad9361.phy.sink,   # TX.
+            self.ad9361.phy.source, # RX.
+            self.ad9361.prbs_rx.fields.synced,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 4096,
+            clock_domain = "rfic",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
+    def add_pcie_dma_probe(self):
+        assert hasattr(self, "pcie_dma0")
+        analyzer_signals = [
+            self.pcie_dma0.sink,   # RX.
+            self.pcie_dma0.source, # TX.
+            self.pcie_dma0.synchronizer.synced,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.")
+    # Build/Load/Utilities.
     parser.add_argument("--build",  action="store_true", help="Build bitstream.")
     parser.add_argument("--load",   action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",  action="store_true", help="Flash bitstream.")
     parser.add_argument("--rescan", action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver", action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+
+    # Communication interfaces/features.
     comopts = parser.add_mutually_exclusive_group()
     comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
     comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Ethernet Communication.")
     comopts.add_argument("--with-sata",      action="store_true", help="Enable SATA Storage.")
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.",   choices=[1, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
+
+    # Litescope Probes.
+    probeopts = parser.add_mutually_exclusive_group()
+    probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
+    probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-pcie-dma-probe",    action="store_true", help="Enable PCIe DMA Probe.")
+
     args = parser.parse_args()
 
     # Build SoC.
@@ -406,6 +414,13 @@ def main():
         ethernet_sfp  = args.ethernet_sfp,
         with_sata     = args.with_sata,
     )
+    if args.with_ad9361_spi_probe:
+        soc.add_ad9361_spi_probe()
+    if args.with_ad9361_data_probe:
+        soc.add_ad96361_data_probe()
+    if args.with_pcie_dma_probe:
+        soc.add_pcie_dma_probe()
+
     builder = Builder(soc, csr_csv="csr.csv")
     builder.build(run=args.build)
 
