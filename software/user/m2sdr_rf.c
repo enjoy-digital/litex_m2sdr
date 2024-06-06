@@ -135,12 +135,15 @@ static void m2sdr_init(
     }
 
     /* Initialize SI531 Clocking */
+    printf("Initializing SI5351 Clocking to 38.4MHz...\n");
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
 
     /* Initialize AD9361 SPI */
+    printf("Initializing AD9361 SPI...\n");
     m2sdr_ad9361_spi_init(fd);
 
     /* Initialize AD9361 RFIC */
+    printf("Initializing AD9361 RFIC...\n");
     default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
@@ -148,14 +151,18 @@ static void m2sdr_init(
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
     /* Configure AD9361 Samplerate */
+    printf("Setting TX/RX Samplerate to %f MSPS.\n", samplerate/1e6);
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
     ad9361_set_rx_sampling_freq(ad9361_phy, samplerate);
 
     /* Configure AD9361 TX/RX Bandwidth */
+    printf("Setting TX/RX Bandwidth to %f MHz.\n", bandwidth/1e6);
     ad9361_set_rx_rf_bandwidth(ad9361_phy, bandwidth);
     ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth);
 
     /* Configure AD9361 TX/RX Frequencies */
+    printf("Setting TX LO Freq to %f MHz.\n", tx_freq/1e6);
+    printf("Setting RX LO Freq to %f MHz.\n", rx_freq/1e6);
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
     ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
 
@@ -164,19 +171,24 @@ static void m2sdr_init(
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
     /* Configure AD9361 TX Attenuation */
+    printf("Setting TX Gain to %ld dB.\n", tx_gain);
     ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
 
     /* Configure AD9361 RX Gain */
+    printf("Setting RX Gain to %ld dB.\n", rx_gain);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
     ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
 
     /* Configure AD9361 RX->TX Loopback */
+    printf("Setting Loopback to %d\n", loopback);
     ad9361_bist_loopback(ad9361_phy, loopback);
 
     /* Configure 8-bit mode */
     if (enable_8bit_mode) {
+        printf("Enabling 8-bit mode.\n");
         litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
     } else {
+        printf("Enabling 16-bit mode.\n");
         litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 0);
     }
 
