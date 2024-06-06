@@ -11,9 +11,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
+#include "../ad9361/platform.h"
+#include "../ad9361/ad9361.h"
+#include "../ad9361/ad9361_api.h"
 
 /* Parameters */
 /*------------*/
