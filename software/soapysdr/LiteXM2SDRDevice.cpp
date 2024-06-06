@@ -15,7 +15,7 @@
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
 
-#include "m2sdr_config.h"
+#include "libm2sdr/m2sdr_config.h"
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"

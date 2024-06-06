@@ -33,7 +33,7 @@ include_directories(${LITEPCIE_INCLUDE_DIR})
 ## USER discovery
 ########################################################################
 
-find_path(USER_INCLUDE_DIR m2sdr_config.h
+find_path(USER_INCLUDE_DIR libm2sdr/m2sdr_config.h
           REQUIRED
           HINTS
             ${CMAKE_CURRENT_SOURCE_DIR}/../..
