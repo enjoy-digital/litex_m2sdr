@@ -152,6 +152,8 @@ static void m2sdr_init(
 
     /* Configure AD9361 Samplerate */
     printf("Setting TX/RX Samplerate to %f MSPS.\n", samplerate/1e6);
+    if (enable_oversample)
+        samplerate /=2; /* Oversampling disable FIR decimation by 2 */
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
     ad9361_set_rx_sampling_freq(ad9361_phy, samplerate);
 
