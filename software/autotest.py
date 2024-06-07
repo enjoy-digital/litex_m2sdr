@@ -15,10 +15,10 @@ SAMPLERATES = [
     61.44e6,
 ]
 
-VCC_INT_NOMINAL  = 1.00
-VCC_AUX_NOMINAL  = 1.80
-VCC_BRAM_NOMINAL = 1.00
-VCC_MARGIN       = 0.10
+VCC_INT_NOMINAL  = 1.00 # V
+VCC_AUX_NOMINAL  = 1.80 # V
+VCC_BRAM_NOMINAL = 1.00 # V
+VCC_MARGIN       =   10 # %
 
 FPGA_PCIE_VENDOR_ID          = "0x10ee"
 FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
@@ -26,6 +26,9 @@ FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
 FPGA_PCIE_LINK_WIDTH_NOMINAL = "4"
 
 AD9361_PRODUCT_ID = "000a"
+
+DMA_TEST_DURATION   = 2   # Seconds
+DMA_SPEED_THRESHOLD = 4.0 # Gbps
 
 # Color Constants ----------------------------------------------------------------------------------
 
@@ -50,8 +53,8 @@ def print_result(condition):
         print_fail()
     return not condition
 
-def within_margin(value, nominal, margin=0.10):
-    return nominal * (1 - margin) <= value <= nominal * (1 + margin)
+def within_margin(value, nominal, margin=10):
+    return nominal * (1 - margin/100) <= value <= nominal * (1 + margin/100)
 
 def get_pcie_device_id(vendor, device):
     try:
@@ -160,6 +163,41 @@ def m2sdr_rf_autotest():
         errors += print_result("AD936x Rev 2 successfully initialized" in log.stdout)
     return errors
 
+# M2SDR DMA Test -----------------------------------------------------------------------------------
+
+def m2sdr_dma_autotest():
+    print("M2SDR DMA Test...")
+
+    result = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_TEST_DURATION}", shell=True, capture_output=True, text=True)
+    output = result.stdout
+
+    errors = 0
+    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", output, re.MULTILINE)
+    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", output, re.MULTILINE)
+
+    total_speed  = 0.0
+    total_errors = 0
+
+    if dma_speeds and dma_errors:
+        for speed, error in zip(dma_speeds, dma_errors):
+            speed = float(speed)
+            error = int(error)
+            total_speed += speed
+            total_errors += error
+            print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
+            errors += print_result(speed > DMA_SPEED_THRESHOLD)
+            print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
+            errors += print_result(error == 0)
+
+        mean_speed = total_speed / len(dma_speeds)
+        print(f"\tMean DMA speed: [{ANSI_COLOR_BLUE}{mean_speed} Gbps{ANSI_COLOR_RESET}]")
+        print(f"\tTotal DMA errors: [{ANSI_COLOR_BLUE}{total_errors}{ANSI_COLOR_RESET}]")
+    else:
+        print_fail()
+        errors += 1
+
+    return errors
+
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
@@ -178,6 +216,9 @@ def main():
 
     # M2SDR RF Autotest.
     errors += m2sdr_rf_autotest()
+
+    # M2SDR DMA Autotest.
+    errors += m2sdr_dma_autotest()
 
     print("\n" + "-"*40)
 
