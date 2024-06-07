@@ -9,11 +9,16 @@
 
 Say hello to the LiteX based M2 SDR FPGA board!
 
+![](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/1a3f2d76-b406-4928-b3ed-2767d317757e)
+
+
 Perfect for SDR enthusiasts, this versatile board fits directly in an M2 slot or can team up with
 others in a PCIe M2 carrier for more complex SDR projects.
 
 Mount it on the LiteX Acorn Mini Baseboard for Ethernet support with 1000BaseX/2500BaseX and SATA
 connectivity to directly record/play samples to/from an SSD!
+
+![](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/6ad09754-7aaf-4257-ba12-afbd93ebe75d)
 
 Dive in and start enjoying your SDR projects like never before!
 
@@ -236,3 +241,6 @@ echo 1 | sudo tee /sys/bus/pci/rescan
 [> Contact
 ----------
 E-mail: florent@enjoy-digital.fr
+
+
+![](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978)
