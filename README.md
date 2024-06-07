@@ -47,9 +47,19 @@ Dive in and start enjoying your SDR projects like never before! 🎉
 [> PCIe SoC Architecture
 ------------------------
 
+The PCIe SoC is the first SoC variant developed for the board and does not require an additional baseboard. Just pop the M2SDR into a PCIe M2 slot, connect your antennas, and you're ready to go! 🚀
+
+The SoC has the following architecture:
+
 <div align="center">
   <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/fa688df9-071e-40b9-b846-c0532f5e95eb" width="80%">
 </div>
+
+- The SoC is built with the LiteX framework, allowing highly efficient HDL coding and integration. 💡
+- You'll also find that most of the complexity is managed by LiteX and LitePCIe. The SoC itself only has an MMAP interface, DMA interface, and integrates the specific SDR/RFIC cores and features. ⚙️
+- It provides debugging over PCIe or JTAG for MMAP peek & poke or LiteScope. 🛠️
+- LitePCIe and its Linux driver (sorry, we only provide Linux support for now 😅) have been battle-tested on several commercial projects. 🏆
+
 
 [> Getting started
 ------------------
