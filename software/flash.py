@@ -11,8 +11,8 @@ from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 def flash_bitstream(bitstream, offset):
     print("Flashing Board over PCIe...")
-    subprocess.run(f"cd software/user && ./m2sdr_util flash_write ../../{bitstream} {offset}", shell=True)
-    subprocess.run("cd software/user && ./m2sdr_util flash_reload", shell=True)
+    subprocess.run(f"cd user && ./m2sdr_util flash_write ../../{bitstream} {offset}", shell=True)
+    subprocess.run("cd user && ./m2sdr_util flash_reload", shell=True)
     time.sleep(1)
 
 def remove_driver():
@@ -31,7 +31,7 @@ def rescan_bus():
 
 def load_driver():
     print("Loading Driver...")
-    subprocess.run("sudo sh -c 'cd software/kernel && ./init.sh'", shell=True)
+    subprocess.run("sudo sh -c 'cd kernel && ./init.sh'", shell=True)
 
 def get_device_ids():
     return [

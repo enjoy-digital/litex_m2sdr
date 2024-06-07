@@ -232,7 +232,8 @@ litescope_cli
 [> Flash board over PCIe
 ------------------------
 ```bash
-./flash.py build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
+cd software
+./flash.py ../build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
 ```
 
 
