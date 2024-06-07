@@ -20,6 +20,11 @@ VCC_AUX_NOMINAL  = 1.80
 VCC_BRAM_NOMINAL = 1.00
 VCC_MARGIN       = 0.10
 
+FPGA_PCIE_VENDOR_ID          = "0x10ee"
+FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
+FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
+FPGA_PCIE_LINK_WIDTH_NOMINAL = "4"
+
 AD9361_PRODUCT_ID = "000a"
 
 # Color Constants ----------------------------------------------------------------------------------
@@ -30,7 +35,7 @@ ANSI_COLOR_YELLOW = "\x1b[33m"
 ANSI_COLOR_BLUE   = "\x1b[34m"
 ANSI_COLOR_RESET  = "\x1b[0m"
 
-# Utilities ----------------------------------------------------------------------------------------
+# Helpers ------------------------------------------------------------------------------------------
 
 def print_pass():
     print(f"{ANSI_COLOR_GREEN}[PASS]{ANSI_COLOR_RESET}")
@@ -47,6 +52,47 @@ def print_result(condition):
 
 def within_margin(value, nominal, margin=0.10):
     return nominal * (1 - margin) <= value <= nominal * (1 + margin)
+
+def get_pcie_device_id(vendor, device):
+    try:
+        lspci_output = subprocess.check_output(["lspci", "-d", f"{vendor}:{device}"]).decode()
+        device_id = lspci_output.split()[0]
+        return device_id
+    except:
+        return None
+
+def verify_pcie_speed(device_id):
+    try:
+        device_path = f"/sys/bus/pci/devices/0000:{device_id}"
+        current_link_speed = subprocess.check_output(f"cat {device_path}/current_link_speed", shell=True).decode().strip()
+        current_link_width = subprocess.check_output(f"cat {device_path}/current_link_width", shell=True).decode().strip()
+
+        speed_check = (current_link_speed == FPGA_PCIE_SPEED_NOMINAL)
+        width_check = (current_link_width == FPGA_PCIE_LINK_WIDTH_NOMINAL)
+
+        return current_link_speed, current_link_width, speed_check and width_check
+    except:
+        return None, None, False
+
+# PCIe Device Test ---------------------------------------------------------------------------------
+
+def pcie_device_autotest():
+    print("PCIe Device Autotest...", end="")
+
+    errors = 1
+    device_ids = [get_pcie_device_id(FPGA_PCIE_VENDOR_ID, device_id) for device_id in FPGA_PCIE_DEVICE_IDS]
+    for device_id in device_ids:
+        if device_id:
+            print(f"\n\tChecking PCIe Device {device_id}: ", end="")
+            device_present = device_id is not None
+            errors += print_result(device_present)
+            if device_present:
+                print(f"\tVerifying PCIe speed for {device_id}: ", end="")
+                current_link_speed, current_link_width, speed_check = verify_pcie_speed(device_id)
+                print(f"[{ANSI_COLOR_BLUE}{current_link_speed} x{current_link_width}{ANSI_COLOR_RESET}] ", end="")
+                return print_result(speed_check)
+    print_fail()
+    return errors
 
 # M2SDR Util Test ----------------------------------------------------------------------------------
 
@@ -123,6 +169,9 @@ def main():
     print("\nLITEX M2SDR AUTOTEST\n" + "-"*40)
 
     errors = 0
+
+    # PCIe Device Autotest.
+    errors += pcie_device_autotest()
 
     # M2SDR Util Info Autotest.
     errors += m2sdr_util_info_autotest()
