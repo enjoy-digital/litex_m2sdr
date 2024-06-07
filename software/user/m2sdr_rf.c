@@ -140,7 +140,7 @@ static void m2sdr_init(
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init(fd);
+    m2sdr_ad9361_spi_init(fd, 1);
 
     /* Initialize AD9361 RFIC */
     printf("Initializing AD9361 RFIC...\n");

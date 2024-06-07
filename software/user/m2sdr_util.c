@@ -101,7 +101,7 @@ static void test_ad9361_dump(void)
     }
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(fd);
+    m2sdr_ad9361_spi_init(fd, 0);
 
     /* AD9361 SPI Dump */
     for (i=0; i<128; i++)
@@ -154,7 +154,7 @@ static void info(void)
 
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
-
+    m2sdr_ad9361_spi_init(fd, 0);
     printf("AD9361 Product ID  : %04x \n", m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID));
     printf("AD9361 Temperature : %0.1f °C\n",
         (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);

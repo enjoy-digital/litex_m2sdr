@@ -25,7 +25,7 @@
 /* SPI functions */
 /*---------------*/
 
-void m2sdr_ad9361_spi_init(int fd);
+void m2sdr_ad9361_spi_init(int fd, uint8_t reset);
 void m2sdr_ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso);
 void m2sdr_ad9361_spi_write(int fd, uint16_t reg, uint8_t dat);
 uint8_t m2sdr_ad9361_spi_read(int fd, uint16_t reg);

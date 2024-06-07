@@ -21,10 +21,12 @@
 
 /* Public Functions */
 
-void m2sdr_ad9361_spi_init(int fd) {
-    /* Reset Through GPIO */
-    litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, 0b00);
-    usleep(1000);
+void m2sdr_ad9361_spi_init(int fd, uint8_t reset) {
+    if (reset) {
+        /* Reset Through GPIO */
+        litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, 0b00);
+        usleep(1000);
+    }
     litepcie_writel(fd, CSR_AD9361_CONFIG_ADDR, 0b11);
     usleep(1000);
 
