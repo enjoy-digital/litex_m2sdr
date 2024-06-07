@@ -4,6 +4,11 @@
                       /____/_/\__/\__/_/|_|   /_/  /_/____/___/____/_/|_|
                              LiteX based M2 SDR FPGA board
                           Copyright (c) 2024 Enjoy-Digital.
+
+# Disclaimer: Work in Progress
+
+**Note:** This project is still under active development and may undergo significant changes. Use at your own risk and feel free to contribute!
+
 [> Intro
 --------
 
