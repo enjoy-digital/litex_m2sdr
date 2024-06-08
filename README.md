@@ -1,4 +1,4 @@
-                            __   _ __      _  __    __  ______  _______  ___
+                             __   _ __      _  __    __  ______  _______  ___
                            / /  (_) /____ | |/_/___/  |/  /_  |/ __/ _ \/ _ \
                           / /__/ / __/ -_)>  </___/ /|_/ / __/_\ \/ // / , _/
                          /____/_/\__/\__/_/|_|   /_/  /_/____/___/____/_/|_|
@@ -23,7 +23,7 @@ Why yet another SDR based on this RFIC? Because we've been designing FPGA-based 
 Imagine a minimalist AD9361-based SDR with:
 - A compact form factor (M2 2280). 📏
 - Minimal on-board RF frontend that could be specialized externally.
-- 2T2R / 12-bit @ 61.44MSPS (and 2T2R / 12-bit @ 122.88MSPS for those wanted to use/explore Cellwizard/BladeRF [findings](https://www.nuand.com/2023-02-release-122-88mhz-bandwidth/)).
+- 2T2R / 12-bit @ 61.44MSPS (and 2T2R / 12-bit @ 122.88MSPS for those wanting to use/explore Cellwizard/BladeRF [findings](https://www.nuand.com/2023-02-release-122-88mhz-bandwidth/)).
 - PCIe Gen 2 X4 (~14Gbps of TX/RX bandwidth) with [LitePCIe](https://github.com/enjoy-digital/litepcie), providing MMAP and several possible DMAs (for direct I/Q samples transfer or processed I/Q samples). ⚡
 - A large XC7A200T FPGA where the base infrastructure only uses a fraction of the available resources, allowing you to integrate large RF processing blocks. 💪
 - The option to reuse some of the PCIe lanes of the M2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
@@ -62,17 +62,16 @@ The SoC has the following architecture:
 - It provides debugging over PCIe or JTAG for MMAP peek & poke or LiteScope. 🛠️
 - [LitePCIe](https://github.com/enjoy-digital/litepcie) and its Linux driver (sorry, we only provide Linux support for now 😅) have been battle-tested on several commercial projects. 🏆
 
-The PCIe design has already been validated at the maximum AD9361 specified samplerate: 2T2R @ 61.44MSPS (And also seems to correctly handle the oversampling at 2T2R @ 122.88MSPS with 7.9 Gbps of bandwidh on the PCIe bus; this oversampling feature is already in place and more tests/experiments will be done with it in the future).
+The PCIe design has already been validated at the maximum AD9361 specified sample rate: 2T2R @ 61.44MSPS (and also seems to correctly handle the oversampling at 2T2R @ 122.88MSPS with 7.9 Gbps of bandwidth on the PCIe bus; this oversampling feature is already in place and more tests/experiments will be done with it in the future).
 
 [> 1/2.5Gbps Ethernet Design
 ----------------------------
 
-The Ethernet design variant will be developped to allow more flexibiity when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most case used for... PCIe :) But these are 4 classical GTP transceiver of the Artix7 FPGA that are connected to the PCie Hardened PHY in a case of a PCIe application but that can be used for any other SerDes based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
+The Ethernet design variant will be developed to allow more flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe Hardened PHY in the case of a PCIe application but that can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
 
-In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providint the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone frontends cores.
+In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
 
 TODO: Add diagram and more info.
-
 
 [> Getting started
 ------------------
