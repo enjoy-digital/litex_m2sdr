@@ -96,6 +96,32 @@ git clone --recursive https://github.com/enjoy-digital/litex_m2sdr
 apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1 gqrx
 ```
 
+#### [> Software Build/Install
+
+
+Software build use make and cmake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top if it to simplify our developpment and installation:
+
+```bash
+cd software
+./build.py
+```
+
+Will build the C kernel driver, liblitepcie, libm2sdr, C user-space utilities, the SoapySDR driver and also install it, just need to load the kernel driver:
+
+```bash
+cd software/kernel
+sudo ./init.sh
+```
+
+you're ready to go! 🚀
+
+From there, you can just run your favorite SDR software and select the LiteXM2SDR board through SoapySDR.
+
+> [!WARNING]
+>
+> **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
+
+
 [> Software Tests
 ------------------
 
