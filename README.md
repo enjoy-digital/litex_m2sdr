@@ -34,7 +34,7 @@ Imagine a minimalist AD9361-based SDR with:
 
 OK, you probably also realized this project is a showcase for LiteX capabilities, haha. 😅 Rest assured, we'll do our best to gather and implement your requests to make this SDR as flexible and versatile as possible!
 
-This board is proudly developed in France 🇫🇷 by Enjoy-Digital, managing the project and gateware/software development, and our partner Lambdaconcept designing the hardware. 🥖🍷
+This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/), managing the project and gateware/software development, and our partner [Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
 
 Ideal for SDR enthusiasts, this versatile board fits directly into an M2 slot or can team up with others in a PCIe M2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
 
@@ -54,7 +54,7 @@ The PCIe design is the first variant developed for the board and does not requir
 The SoC has the following architecture:
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/fa688df9-071e-40b9-b846-c0532f5e95eb" width="80%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/df5eb55e-16b2-4724-b4c1-28e06c45279c" width="80%">
 </div>
 
 - The SoC is built with the LiteX framework, allowing highly efficient HDL coding and integration. 💡
@@ -64,10 +64,15 @@ The SoC has the following architecture:
 
 The PCIe design has already been validated at the maximum AD9361 specified sample rate: 2T2R @ 61.44MSPS (and also seems to correctly handle the oversampling at 2T2R @ 122.88MSPS with 7.9 Gbps of bandwidth on the PCIe bus; this oversampling feature is already in place and more tests/experiments will be done with it in the future).
 
-[> 1/2.5Gbps Ethernet Design
-----------------------------
+[> Ethernet SoC Design (1/2.5Gbps x 1 or 2).
+--------------------------------------------
 
-The Ethernet design variant will be developed to allow more flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe Hardened PHY in the case of a PCIe application but that can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
+> [!WARNING]
+>
+> **WiP** 🧪 Still in the lab, all the cores required are already developped and interfaces have been validated but the SoC still need to be assembled/tested and software developped.
+
+
+The Ethernet design variant will gives flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe Hardened PHY in the case of a PCIe application but that can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
 
 In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
 
@@ -90,36 +95,6 @@ git clone --recursive https://github.com/enjoy-digital/litex_m2sdr
 ```bash
 apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1 gqrx
 ```
-
-[> Ethernet Tests
------------------
-
-Board mounted in Acorn Mini Baseboard:
-
-```bash
-./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
-./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
-ping 192.168.1.50
-```
-
-[> PCIe Tests
--------------
-
-Board mounted in Acorn Mini Baseboard:
-
-```bash
-./litex_m2sdr.py --with-pcie --variant=baseboard --pcie-lanes=1 --build --load
-lspci
-```
-
-Board mounted in directly in M2 slot:
-
-```bash
-./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
-lspci
-```
-
-where `N_LANES` may be 1, 2, 4 for `m2` variant or 1 for `baseboard`
 
 [> Software Tests
 ------------------
@@ -248,6 +223,38 @@ ad9361_init : AD936x Rev 2 successfully initialized
 gnuradio gnuradio-companion ../gnuradio/test_fm_rx.grc
 ```
 
+[> Ethernet Tests
+-----------------
+
+Board mounted in Acorn Mini Baseboard:
+
+bash
+```
+./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
+./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
+ping 192.168.1.50
+```
+
+[> PCIe Tests
+-------------
+
+Board mounted in Acorn Mini Baseboard:
+
+```bash
+./litex_m2sdr.py --with-pcie --variant=baseboard --pcie-lanes=1 --build --load
+lspci
+```
+
+Board mounted in directly in M2 slot:
+
+```bash
+./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
+lspci
+```
+
+where `N_LANES` may be 1, 2, 4 for `m2` variant or 1 for `baseboard`
+
+
 [> Enable Debug in Kernel
 -------------------------
 
@@ -285,6 +292,6 @@ echo 1 | sudo tee /sys/bus/pci/rescan
 E-mail: florent@enjoy-digital.fr
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="50%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="80%">
 </div>
 
