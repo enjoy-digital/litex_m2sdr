@@ -580,6 +580,13 @@ static const uint32_t value_addrs[N_CLKS] =
     CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR
 };
 
+static const char* clk_names[N_CLKS] = {
+    "AD9361 Ref Clk",
+    "AD9361 Dat Clk",
+    "-             ",
+    "-             "
+};
+
 static uint64_t read_64bit_register(int fd, uint32_t addr)
 {
     uint32_t lower = litepcie_readl(fd, addr + 4);
@@ -634,14 +641,13 @@ static void clk_measurement_test(int num_measurements, int delay_between_tests)
         for (int clk_index = 0; clk_index < N_CLKS; clk_index++) {
             uint64_t delta_value = current_values[clk_index] - previous_values[clk_index];
             double frequency_mhz = delta_value / (elapsed_time * 1e6);
-            printf("Measurement %d, Clock %d: Frequency: %.2f MHz\n", i + 1, clk_index, frequency_mhz);
+            printf("Measurement %d, %s: Frequency: %3.2f MHz\n", i + 1, clk_names[clk_index], frequency_mhz);
             previous_values[clk_index] = current_values[clk_index];
         }
     }
 
     close(fd);
 }
-
 /* Help */
 /*------*/
 
