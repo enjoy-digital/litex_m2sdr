@@ -19,7 +19,7 @@ We know what you'll first ask when discovering this new SDR project: what's the 
 Why yet another SDR based on this RFIC? Because we've been designing FPGA-based projects for clients with this chip for almost 10 years now and still think this RFIC has incredible capabilities and possibilities that haven't been fully tapped by open-source projects. We believe it can provide a fantastic and simple solution when paired with the [LiteX](https://github.com/enjoy-digital/litex) framework we're developing. 🚀
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/1a3f2d76-b406-4928-b3ed-2767d317757e" width="80%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/1a3f2d76-b406-4928-b3ed-2767d317757e" width="100%">
 </div>
 
 Imagine a minimalist AD9361-based SDR with:
@@ -32,6 +32,7 @@ Imagine a minimalist AD9361-based SDR with:
 - Or ... for SATA through [LiteSATA](https://github.com/enjoy-digital/litesata). 💾
 - Or ... for inter-board SerDes-based communication through [LiteICLink](https://github.com/enjoy-digital/liteiclink). 🔗
 - Powerful debug capabilities through LiteX [Host <-> FPGA bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC) and [LiteScope](https://github.com/enjoy-digital/litescope) logic analyzer. 🛠️
+- Multiboot support to allow secure remove update over PCIe (or Ethernet).
 - ...and we hope a welcoming/friendly community as we strive to encourage in LiteX! 🤗
 
 OK, you probably also realized this project is a showcase for LiteX capabilities, haha. 😅 Rest assured, we'll do our best to gather and implement your requests to make this SDR as flexible and versatile as possible!
@@ -43,7 +44,7 @@ Ideal for SDR enthusiasts, this versatile board fits directly into an M2 slot or
 For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/6ad09754-7aaf-4257-ba12-afbd93ebe75d" width="80%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/6ad09754-7aaf-4257-ba12-afbd93ebe75d" width="100%">
 </div>
 
 Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
@@ -56,7 +57,7 @@ The PCIe design is the first variant developed for the board and does not requir
 The SoC has the following architecture:
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/df5eb55e-16b2-4724-b4c1-28e06c45279c" width="80%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/df5eb55e-16b2-4724-b4c1-28e06c45279c" width="100%">
 </div>
 
 - The SoC is built with the LiteX framework, allowing highly efficient HDL coding and integration. 💡
@@ -320,6 +321,6 @@ echo 1 | sudo tee /sys/bus/pci/rescan
 E-mail: florent@enjoy-digital.fr
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="80%">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="100%">
 </div>
 
