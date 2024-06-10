@@ -562,23 +562,48 @@ end:
 /* Clk Measurement */
 /*-----------------*/
 
-static uint64_t read_64bit_register(int fd, uint32_t addr) {
+#define N_CLKS 4
+
+static const uint32_t latch_addrs[N_CLKS] =
+{
+    CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR,
+    CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR,
+    CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR,
+    CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR
+};
+
+static const uint32_t value_addrs[N_CLKS] =
+{
+    CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR,
+    CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR,
+    CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR,
+    CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR
+};
+
+static uint64_t read_64bit_register(int fd, uint32_t addr)
+{
     uint32_t lower = litepcie_readl(fd, addr + 4);
     uint32_t upper = litepcie_readl(fd, addr + 0);
     return ((uint64_t)upper << 32) | lower;
 }
 
+static void latch_all_clocks(int fd)
+{
+    for (int i = 0; i < N_CLKS; i++) {
+        litepcie_writel(fd, latch_addrs[i], 1);
+    }
+}
+
+static void read_all_clocks(int fd, uint64_t *values)
+{
+    for (int i = 0; i < N_CLKS; i++) {
+        values[i] = read_64bit_register(fd, value_addrs[i]);
+    }
+}
+
 static void clk_measurement_test(int num_measurements, int delay_between_tests)
 {
-    int fd;
-    int i;
-    struct timespec start_time, current_time;
-    double elapsed_time;
-    uint64_t previous_values[4];
-    uint64_t current_values[4];
-
-    /* Open LitePCIe device. */
-    fd = open(litepcie_device, O_RDWR);
+    int fd = open(litepcie_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -587,43 +612,29 @@ static void clk_measurement_test(int num_measurements, int delay_between_tests)
     printf("\e[1m[> Clk Measurement Test:\e[0m\n");
     printf("-------------------------\n");
 
-    /* Latch and read initial values for each clock */
-    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR, 1);
-    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR, 1);
-    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR, 1);
-    litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR, 1);
-    previous_values[0] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
-    previous_values[1] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR);
-    previous_values[2] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR);
-    previous_values[3] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR);
+    uint64_t previous_values[N_CLKS], current_values[N_CLKS];
+    struct timespec start_time, current_time;
+    double elapsed_time;
+
+    latch_all_clocks(fd);
+    read_all_clocks(fd, previous_values);
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
-    for (i = 0; i < num_measurements; i++) {
+    for (int i = 0; i < num_measurements; i++) {
         sleep(delay_between_tests);
 
-        /* Latch and read current values for each clock */
-        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR, 1);
-        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR, 1);
-        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR, 1);
-        litepcie_writel(fd, CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR, 1);
-        current_values[0] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
-        current_values[1] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR);
-        current_values[2] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR);
-        current_values[3] = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR);
+        latch_all_clocks(fd);
+        read_all_clocks(fd, current_values);
         clock_gettime(CLOCK_MONOTONIC, &current_time);
 
-        /* Calculate the actual elapsed time in seconds */
         elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
                        (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
-        start_time = current_time;  // Update the start_time for the next iteration
+        start_time = current_time;
 
-        for (int clk_index = 0; clk_index < 4; clk_index++) {
-            /* Compute the difference between the current and previous values */
+        for (int clk_index = 0; clk_index < N_CLKS; clk_index++) {
             uint64_t delta_value = current_values[clk_index] - previous_values[clk_index];
             double frequency_mhz = delta_value / (elapsed_time * 1e6);
             printf("Measurement %d, Clock %d: Frequency: %.2f MHz\n", i + 1, clk_index, frequency_mhz);
-
-            /* Update the previous value for the next iteration */
             previous_values[clk_index] = current_values[clk_index];
         }
     }
