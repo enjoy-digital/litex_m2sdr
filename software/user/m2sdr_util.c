@@ -608,7 +608,7 @@ static void read_all_clocks(int fd, uint64_t *values)
     }
 }
 
-static void clk_measurement_test(int num_measurements, int delay_between_tests)
+static void clk_test(int num_measurements, int delay_between_tests)
 {
     int fd = open(litepcie_device, O_RDWR);
     if (fd < 0) {
@@ -648,6 +648,10 @@ static void clk_measurement_test(int num_measurements, int delay_between_tests)
 
     close(fd);
 }
+
+
+
+
 /* Help */
 /*------*/
 
@@ -670,7 +674,7 @@ static void help(void)
            "\n"
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
-           "clks                              Test Clks frequencies.\n"
+           "clk_test                          Test Clks frequencies.\n"
            "\n"
 #ifdef  CSR_SI5351_I2C_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
@@ -757,7 +761,7 @@ int main(int argc, char **argv)
         scratch_test();
 
     /* Clks measurement cmds. */
-    else if (!strcmp(cmd, "clks")) {
+    else if (!strcmp(cmd, "clk_test")) {
         int num_measurements = 10;
         int delay_between_tests = 1;
 
@@ -766,7 +770,7 @@ int main(int argc, char **argv)
         if (optind < argc)
             delay_between_tests = atoi(argv[optind++]);
 
-        clk_measurement_test(num_measurements, delay_between_tests);
+        clk_test(num_measurements, delay_between_tests);
     }
 
     /* SI5351 cmds. */
