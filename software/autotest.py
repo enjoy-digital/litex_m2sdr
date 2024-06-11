@@ -30,6 +30,8 @@ AD9361_PRODUCT_ID = "000a"
 DMA_TEST_DURATION   = 2   # Seconds
 DMA_SPEED_THRESHOLD = 4.0 # Gbps
 
+VCXO_PPM_THRESHOLD = 20.0 # PPM
+
 # Color Constants ----------------------------------------------------------------------------------
 
 ANSI_COLOR_RED    = "\x1b[31m"
@@ -152,6 +154,40 @@ def m2sdr_util_info_autotest():
 
     return errors
 
+# M2SDR Util VCXO Test ----------------------------------------------------------------------------------
+
+def m2sdr_util_vcxo_autotest():
+    print("M2SDR Util VCXO Test...")
+
+    result = subprocess.run(f"cd user && ./m2sdr_util vcxo_test", shell=True, capture_output=True, text=True)
+    output = result.stdout
+
+    # Parse the final variation in Hz and PPM
+    hz_variation_match = re.search(r"Hz Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*Hz\s*/\s*\+\s*([\d.]+)\s*Hz", output)
+    ppm_variation_match = re.search(r"PPM Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*PPM\s*/\s*\+\s*([\d.]+)\s*PPM", output)
+
+    if not (hz_variation_match and ppm_variation_match):
+        print("Failed to retrieve necessary information from vcxo_test.")
+        print_fail()
+        return 1
+
+    hz_variation_min = float(hz_variation_match.group(1))
+    hz_variation_max = float(hz_variation_match.group(2))
+    ppm_variation_min = float(ppm_variation_match.group(1))
+    ppm_variation_max = float(ppm_variation_match.group(2))
+
+    errors = 0
+
+    # Print/Verify Hz variation
+    print(f"\tHz Variation from Nominal (50% PWM): -[{ANSI_COLOR_BLUE}{hz_variation_min:.2f} Hz{ANSI_COLOR_RESET}] / +[{ANSI_COLOR_BLUE}{hz_variation_max:.2f} Hz{ANSI_COLOR_RESET}]")
+
+    # Print/Verify PPM variation
+    print(f"\tPPM Variation from Nominal (50% PWM): -[{ANSI_COLOR_BLUE}{ppm_variation_min:.2f} PPM{ANSI_COLOR_RESET}] / +[{ANSI_COLOR_BLUE}{ppm_variation_max:.2f} PPM{ANSI_COLOR_RESET}] ", end="")
+    ppm_condition = ppm_variation_min >= VCXO_PPM_THRESHOLD and ppm_variation_max >= VCXO_PPM_THRESHOLD
+    errors += print_result(ppm_condition)
+
+    return errors
+
 # M2SDR RF Test ------------------------------------------------------------------------------------
 
 def m2sdr_rf_autotest():
@@ -213,6 +249,9 @@ def main():
 
     # M2SDR Util Info Autotest.
     errors += m2sdr_util_info_autotest()
+
+    # M2SDR Util VCXO Autotest.
+    errors += m2sdr_util_vcxo_autotest()
 
     # M2SDR RF Autotest.
     errors += m2sdr_rf_autotest()
