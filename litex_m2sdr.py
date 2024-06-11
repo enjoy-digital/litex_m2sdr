@@ -129,7 +129,8 @@ class BaseSoC(SoCMini):
         with_pcie     = True,  pcie_lanes=1,
         with_ethernet = False, ethernet_sfp=0,
         with_sata     = False, sata_gen="gen2",
-        with_jtagbone = True
+        with_jtagbone = True,
+        with_rfic_oversampling = True,
     ):
         # Platform ---------------------------------------------------------------------------------
         platform = Platform(build_multiboot=True)
@@ -333,8 +334,11 @@ class BaseSoC(SoCMini):
                 # AD9361 RX -> Header RX.
                 self.ad9361.source.connect(self.header.rx.sink),
         ]
-        #self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/245.76e6)
-        self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/491.52e6)
+        rfic_clk_freq = {
+            False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
+            True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
+        }[with_rfic_oversampling]
+        self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
         self.platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ad9361.cd_rfic.clk)
 
         # Clk Measurements -------------------------------------------------------------------------
