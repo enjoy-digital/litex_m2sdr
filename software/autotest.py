@@ -159,29 +159,28 @@ def m2sdr_util_info_autotest():
 def m2sdr_util_vcxo_autotest():
     print("M2SDR Util VCXO Test...")
 
-    result = subprocess.run(f"cd user && ./m2sdr_util vcxo_test", shell=True, capture_output=True, text=True)
-    output = result.stdout
+    log = subprocess.run(f"cd user && ./m2sdr_util vcxo_test", shell=True, capture_output=True, text=True)
 
-    # Parse the final variation in Hz and PPM
-    hz_variation_match = re.search(r"Hz Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*Hz\s*/\s*\+\s*([\d.]+)\s*Hz", output)
-    ppm_variation_match = re.search(r"PPM Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*PPM\s*/\s*\+\s*([\d.]+)\s*PPM", output)
+    # Parse the variation in Hz and PPM.
+    hz_variation_match  = re.search(r"Hz Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*Hz\s*/\s*\+\s*([\d.]+)\s*Hz", log.stdout)
+    ppm_variation_match = re.search(r"PPM Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*PPM\s*/\s*\+\s*([\d.]+)\s*PPM", log.stdout)
 
     if not (hz_variation_match and ppm_variation_match):
         print("Failed to retrieve necessary information from vcxo_test.")
         print_fail()
         return 1
 
-    hz_variation_min = float(hz_variation_match.group(1))
-    hz_variation_max = float(hz_variation_match.group(2))
+    hz_variation_min  = float(hz_variation_match.group(1))
+    hz_variation_max  = float(hz_variation_match.group(2))
     ppm_variation_min = float(ppm_variation_match.group(1))
     ppm_variation_max = float(ppm_variation_match.group(2))
 
     errors = 0
 
-    # Print/Verify Hz variation
+    # Print Hz variation.
     print(f"\tHz Variation from Nominal (50% PWM): -[{ANSI_COLOR_BLUE}{hz_variation_min:.2f} Hz{ANSI_COLOR_RESET}] / +[{ANSI_COLOR_BLUE}{hz_variation_max:.2f} Hz{ANSI_COLOR_RESET}]")
 
-    # Print/Verify PPM variation
+    # Print/Verify PPM variation.
     print(f"\tPPM Variation from Nominal (50% PWM): -[{ANSI_COLOR_BLUE}{ppm_variation_min:.2f} PPM{ANSI_COLOR_RESET}] / +[{ANSI_COLOR_BLUE}{ppm_variation_max:.2f} PPM{ANSI_COLOR_RESET}] ", end="")
     ppm_condition = ppm_variation_min >= VCXO_PPM_THRESHOLD and ppm_variation_max >= VCXO_PPM_THRESHOLD
     errors += print_result(ppm_condition)
@@ -204,12 +203,11 @@ def m2sdr_rf_autotest():
 def m2sdr_dma_autotest():
     print("M2SDR DMA Test...")
 
-    result = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_TEST_DURATION}", shell=True, capture_output=True, text=True)
-    output = result.stdout
+    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_TEST_DURATION}", shell=True, capture_output=True, text=True)
 
     errors = 0
-    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", output, re.MULTILINE)
-    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", output, re.MULTILINE)
+    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
+    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", log.stdout, re.MULTILINE)
 
     total_speed  = 0.0
     total_errors = 0
