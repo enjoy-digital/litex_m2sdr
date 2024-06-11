@@ -158,6 +158,7 @@ class BaseSoC(SoCMini):
             default_period = 2048,
         )
         platform.add_period_constraint(si5351_clk0, 1e9/38.4e6)
+        platform.add_false_path_constraints(si5351_clk0, self.crg.cd_sys.clk)
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -221,9 +222,9 @@ class BaseSoC(SoCMini):
 
             # Timing Constraints/False Paths -------------------------------------------------------
             for i in range(4):
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks        dna_clk] -asynchronous")
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       jtag_clk] -asynchronous")
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks       icap_clk] -asynchronous")
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks   dna_clk] -asynchronous")
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  jtag_clk] -asynchronous")
+                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  icap_clk] -asynchronous")
 
         # Ethernet/SATA Shared Clocking ------------------------------------------------------------
 
