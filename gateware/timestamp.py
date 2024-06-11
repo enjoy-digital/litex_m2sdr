@@ -19,7 +19,6 @@ class Timestamp(LiteXModule):
     def __init__(self, clk_domain, with_csr=True):
         self.time = time = Signal(64) # o
         self.pps  = pps  = Signal()   # i
-        self.rate = rate = Signal()   # i
 
         self.enable    = Signal()   # i
         self.set       = Signal()   # i
@@ -34,16 +33,29 @@ class Timestamp(LiteXModule):
             self.cd_time.rst.eq(ResetSignal(clk_domain)),
         ]
 
+        # Internal 32-bit counters.
+        time_low  = Signal(32)
+        time_high = Signal(32)
+
         # Time Handling.
         self.sync.time += [
             # Disable: Reset Time to 0.
             If(~self.enable,
-                time.eq(0),
+                time_low.eq(0),
+                time_high.eq(0),
             # Increment.
             ).Else(
-                time.eq(time + 1)
+                If(time_low == 0xffffffff,
+                    time_low.eq(0),
+                    time_high.eq(time_high + 1)
+                ).Else(
+                    time_low.eq(time_low + 1)
+                )
             )
         ]
+
+        # Combine low and high counters into 64-bit time signal.
+        self.comb += time.eq(Cat(time_low, time_high))
 
         # PPS Resync/Edge.
         _pps      = Signal()
@@ -63,7 +75,8 @@ class Timestamp(LiteXModule):
             # Set time and set _set until next PPS edge.
             If(self.set | _set,
                 _set.eq(1),
-                time.eq(self.set_time),
+                time_low.eq(self.set_time[:32]),
+                time_high.eq(self.set_time[32:]),
                 If(_pps_edge,
                     _set.eq(0)
                 ),
@@ -74,7 +87,6 @@ class Timestamp(LiteXModule):
         if with_csr:
             self.add_csr(clk_domain)
 
-
     def add_csr(self, clk_domain, default_enable=1):
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, values=[
@@ -84,7 +96,6 @@ class Timestamp(LiteXModule):
             CSRField("latch", size=1, offset=1, pulse=True, description="Latch Timestamp."),
             CSRField("set",   size=1, offset=2, pulse=True, description="Set Timestamp on next PPS edge."),
         ])
-        self._rate       = CSRStatus(32,  description="Timestamp rate (in Hz).")
         self._latch_time = CSRStatus(64,  description="Timestamp of last Time latch (in JESD Clk Cycles).")
         self._set_time   = CSRStorage(64, description="Timestamp to set on next PPS edge (in JESD Clk Cycles).")
 
@@ -92,12 +103,6 @@ class Timestamp(LiteXModule):
 
         # Timestamp Enable.
         self.specials += MultiReg(self._control.fields.enable, self.enable)
-
-        # Timestamp Rate.
-        self.comb += Case(self.rate, {
-            0 : self._rate.status.eq(int(122.88e6)),
-            1 : self._rate.status.eq(int(245.76e6)),
-        })
 
         # Timestamp Latch.
         time_latch    = Signal(64)
