@@ -291,11 +291,12 @@ where `N_LANES` may be 1, 2, 4 for `m2` variant or 1 for `baseboard`
 sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
 ```
 
-[> Use JTAGBone
----------------
+[> Use JTAGBone/PCIeBone
+------------------------
 
 ```bash
-litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
+litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg # JTABone
+sudo litex_server --pcie --pcie-bar=04:00.0              # PCIeBone (Adapt bar)
 litex_cli --regs
 litescope_cli
 ./test_clks.py
