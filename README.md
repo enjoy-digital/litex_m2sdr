@@ -81,241 +81,131 @@ In this design, the PCIe core will then be replaced with [LiteEth](https://githu
 
 TODO: Add diagram and more info.
 
-[> Getting started
+[> Getting Started
 ------------------
-#### [> Installing LiteX:
 
-LiteX can be installed by following the installation instructions from the LiteX Wiki: https://github.com/enjoy-digital/litex/wiki/Installation
+#### For SDR Enthusiasts
 
-#### [> Clone repository:
+If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
 
-```bash
-git clone --recursive https://github.com/enjoy-digital/litex_m2sdr
-```
+1. **Connect the Board:**
+   - Insert the LiteX-M2SDR board into an available M2 slot on your Linux computer and connect your antennas.
 
-#### [> Software Prerequisites
+2. **Install Required Software:**
+   - Ensure you have the necessary software installed on your Linux system. You can do this by running the following command in your terminal:
+   ```
+   sudo apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1 gqrx
+   ```
 
-```bash
-apt install gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.1 gqrx
-```
+3. **Clone the Repository:**
+   - Clone the LiteX-M2SDR repository using the following command:
+   ```
+   git clone https://github.com/enjoy-digital/litex_m2sdr
+   ```
 
-#### [> Software Build/Install
+4. **Build and Install Software:**
+    Software build use make and cmake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top if it to simplify our developpment and installation:
+   - Navigate to the software directory and run the build script:
+   ```
+   cd software
+   ./build.py
+   ```
+   - This will build the necessary components including the kernel driver, user-space utilities, and the SoapySDR driver.
 
+5. **Load the Kernel Driver:**
+   - Load the kernel driver with the following commands:
+   ```
+   cd software/kernel
+   sudo ./init.sh
+   ```
+   - 🚀 Ready for launch!
 
-Software build use make and cmake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top if it to simplify our developpment and installation:
-
-```bash
-cd software
-./build.py
-```
-
-Will build the C kernel driver, liblitepcie, libm2sdr, C user-space utilities, the SoapySDR driver and also install it, just need to load the kernel driver:
-
-```bash
-cd software/kernel
-sudo ./init.sh
-```
-
-you're ready to go! 🚀
-
-From there, you can just run your favorite SDR software and select the LiteXM2SDR board through SoapySDR.
+6. **Run Your SDR Software:**
+   - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
 
 > [!WARNING]
 >
 > **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
 
+### For Software Developers
 
-[> Software Tests
-------------------
+For those who want to dive deeper into development with the LiteX-M2SDR board, follow these additional steps after completing the SDR enthusiast steps:
 
-Kernel
-```bash
-cd software/kernel
-make clean all
-sudo ./init.sh
-```
+1. **Run Software Tests:**
+   - Test the kernel:
+   ```
+   cd software/kernel
+   make clean all
+   sudo ./init.sh
+   ```
+   - Test the user-space utilities:
+   ```
+   cd software/user
+   make clean all
+   ./m2sdr_util info
+   ./m2sdr_rf init -samplerate=30720000
+   ./tone_gen.py tone_tx.bin
+   ./m2sdr_play tone_tx.bin 100000
+   ```
 
-User
-```bash
-cd software/user
-make clean all
-./m2sdr_util info
-./m2sdr_rf init -samplerate=30720000
-./tone_gen.py tone_tx.bin
-./m2sdr_play tone_tx.bin 100000
-```
+2. **SoapySDR Detection/Probe:**
+   - Detect the LiteX-M2SDR board:
+   ```
+   SoapySDRUtil --probe="driver=LiteXM2SDR"
+   ```
 
-[> SoapySDR detection/probe
---------------------------------
+3. **Run GNU Radio FM Test:**
+   - Open and run the GNU Radio FM test:
+   ```
+   gnuradio-companion ../gnuradio/test_fm_rx.grc
+   ```
 
-```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR"
-######################################################
-##     Soapy SDR -- the SDR abstraction library     ##
-######################################################
+4. **Enable Debugging in Kernel:**
+    - Enable debugging:
+    ```
+    sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
+    ```
 
-Probe device driver=LiteXM2SDR
-[INFO] SoapyLiteXM2SDR initializing...
-[INFO] Opened devnode /dev/m2sdr0, serial 8550c7af9e854
-ad9361_init : AD936x Rev 2 successfully initialized
-[INFO] SoapyLiteXM2SDR initialization complete
+### For Software & FPGA Developers
 
-----------------------------------------------------
--- Device identification
-----------------------------------------------------
-  driver=LiteX-M2SDR
-  hardware=R01
+For those who want to explore the full potential of the LiteX-M2SDR board, including FPGA development, follow these additional steps after completing the software developer steps:
 
-----------------------------------------------------
--- Peripheral summary
-----------------------------------------------------
-  Channels: 2 Rx, 2 Tx
-  Timestamps: NO
-  Sensors: fpga_temp, fpga_vccint, fpga_vccaux, fpga_vccbram, ad9361_temp
-     * fpga_temp: 63.120428 °C
-        FPGA temperature
-     * fpga_vccint: 1.002686 V
-        FPGA internal supply voltage
-     * fpga_vccaux: 1.787842 V
-        FPGA auxiliary supply voltage
-     * fpga_vccbram: 1.002686 V
-        FPGA block RAM supply voltage
-     * ad9361_temp: 32 °C
-        AD9361 temperature
-
-----------------------------------------------------
--- RX Channel 0
-----------------------------------------------------
-  Full-duplex: YES
-  Supports AGC: YES
-  Stream formats: CF32
-  Native format: CF32 [full-scale=1]
-  Antennas: A_BALANCED
-  Full gain range: [0, 73] dB
-    PGA gain range: [0, 73] dB
-  Full freq range: [70, 6000] MHz
-    RF freq range: [70, 6000] MHz
-  Sample rates: [0.260417, 61.44] MSps
-  Filter bandwidths: [0.2, 56] MHz
-
-----------------------------------------------------
--- RX Channel 1
-----------------------------------------------------
-  Full-duplex: YES
-  Supports AGC: YES
-  Stream formats: CF32
-  Native format: CF32 [full-scale=1]
-  Antennas: A_BALANCED
-  Full gain range: [0, 73] dB
-    PGA gain range: [0, 73] dB
-  Full freq range: [70, 6000] MHz
-    RF freq range: [70, 6000] MHz
-  Sample rates: [0.260417, 61.44] MSps
-  Filter bandwidths: [0.2, 56] MHz
-
-----------------------------------------------------
--- TX Channel 0
-----------------------------------------------------
-  Full-duplex: YES
-  Supports AGC: NO
-  Stream formats: CF32
-  Native format: CF32 [full-scale=1]
-  Antennas: A
-  Full gain range: [-89, 0] dB
-    PGA gain range: [-89, 0] dB
-  Full freq range: [47, 6000] MHz
-    RF freq range: [47, 6000] MHz
-  Sample rates: [0.260417, 61.44] MSps
-  Filter bandwidths: [0.2, 56] MHz
-
-----------------------------------------------------
--- TX Channel 1
-----------------------------------------------------
-  Full-duplex: YES
-  Supports AGC: NO
-  Stream formats: CF32
-  Native format: CF32 [full-scale=1]
-  Antennas: A
-  Full gain range: [-89, 0] dB
-    PGA gain range: [-89, 0] dB
-  Full freq range: [47, 6000] MHz
-    RF freq range: [47, 6000] MHz
-  Sample rates: [0.260417, 61.44] MSps
-  Filter bandwidths: [0.2, 56] MHz
-
-[INFO] Power down and cleanup
-```
-
-[> GNU Radio FM Test
---------------------
-```bash
-gnuradio gnuradio-companion ../gnuradio/test_fm_rx.grc
-```
-
-[> Ethernet Tests
------------------
-
-Board mounted in Acorn Mini Baseboard:
-
-bash
-```
-./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
-./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
-ping 192.168.1.50
-```
-
-[> PCIe Tests
--------------
-
-Board mounted in Acorn Mini Baseboard:
-
-```bash
-./litex_m2sdr.py --with-pcie --variant=baseboard --pcie-lanes=1 --build --load
-lspci
-```
-
-Board mounted in directly in M2 slot:
-
-```bash
-./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
-lspci
-```
-
-where `N_LANES` may be 1, 2, 4 for `m2` variant or 1 for `baseboard`
+1. **Install LiteX:**
+   - Follow the installation instructions from the LiteX Wiki: [LiteX Installation](https://github.com/enjoy-digital/litex/wiki/Installation). 📘
 
 
-[> Enable Debug in Kernel
--------------------------
+2. **Ethernet and PCIe Tests:**
+   - For Ethernet tests, if the board is mounted in an Acorn Mini Baseboard:
+   ```
+   ./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
+   ping 192.168.1.50
+   ```
+   - For PCIe tests, if the board is mounted directly in an M2 slot:
+   ```
+   ./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
+   lspci
+   ```
 
-```bash
-sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
-```
+4. **Use JTAGBone/PCIeBone:**
+    - Start the LiteX server for JTAG or PCIe:
+    ```
+    litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg # JTAGBone
+    sudo litex_server --pcie --pcie-bar=04:00.0              # PCIeBone (Adapt bar)
+    ```
 
-[> Use JTAGBone/PCIeBone
-------------------------
+5. **Flash the Board Over PCIe:**
+    - Flash the board:
+    ```
+    cd software
+    ./flash.py ../build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
+    ```
 
-```bash
-litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg # JTABone
-sudo litex_server --pcie --pcie-bar=04:00.0              # PCIeBone (Adapt bar)
-litex_cli --regs
-litescope_cli
-./test_clks.py
-```
-
-[> Flash board over PCIe
-------------------------
-```bash
-cd software
-./flash.py ../build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
-```
-
-
-[> Reboot or Rescan PCIe Bus
-----------------------------
-```bash
-echo 1 | sudo tee /sys/bus/pci/devices/0000\:0X\:00.0/remove (replace X with actual value)
-echo 1 | sudo tee /sys/bus/pci/rescan
-```
+6. **Reboot or Rescan PCIe Bus:**
+    - Rescan the PCIe bus:
+    ```
+    echo 1 | sudo tee /sys/bus/pci/devices/0000\:0X\:00.0/remove # Replace X with actual value
+    echo 1 | sudo tee /sys/bus/pci/rescan
+    ```
 
 [> Contact
 ----------
