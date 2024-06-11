@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <time.h>
+#include <math.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -649,7 +650,86 @@ static void clk_test(int num_measurements, int delay_between_tests)
     close(fd);
 }
 
+/* VCXO Test  */
+/*------------*/
 
+#define PWM_PERIOD 4096  // Define the PWM period
+
+static void vcxo_test() {
+    int fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("\e[1m[> VCXO Test:\e[0m\n");
+    printf("-------------\n");
+
+    uint32_t nominal_pwm_width = (uint32_t)((50.0 / 100.0) * PWM_PERIOD);
+    double nominal_frequency_hz = 0;
+
+    uint64_t previous_value, current_value;
+    struct timespec start_time, current_time;
+    double elapsed_time, min_frequency = 1e12, max_frequency = 0, previous_frequency_hz = 0;
+
+    /* Set PWM period. */
+    litepcie_writel(fd, CSR_SI5351_PWM_PERIOD_ADDR, PWM_PERIOD);
+    /* Enable PWM. */
+    litepcie_writel(fd, CSR_SI5351_PWM_ENABLE_ADDR, 1);
+
+    for (double pwm_width_percent = 0.0; pwm_width_percent <= 100.0; pwm_width_percent += 10.0) {
+        uint32_t pwm_width = (uint32_t)((pwm_width_percent / 100.0) * PWM_PERIOD);
+
+        /* Set PWM width. */
+        litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
+
+        latch_all_clocks(fd);
+        previous_value = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+        sleep(1);
+
+        latch_all_clocks(fd);
+        current_value = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+
+        elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
+                       (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+        uint64_t delta_value = current_value - previous_value;
+        double frequency_hz = delta_value / elapsed_time;
+
+        if (pwm_width == nominal_pwm_width) {
+            nominal_frequency_hz = frequency_hz;
+        }
+
+        double variation_hz = (pwm_width_percent != 0.0) ? frequency_hz - previous_frequency_hz : 0;
+
+        printf("PWM Width: %6.2f%%, Frequency: %10.6f MHz, Variation: %c%7.2f Hz\n",
+               pwm_width_percent, frequency_hz / 1e6, (variation_hz >= 0 ? '+' : '-'), fabs(variation_hz));
+
+        if (frequency_hz < min_frequency) min_frequency = frequency_hz;
+        if (frequency_hz > max_frequency) max_frequency = frequency_hz;
+
+        previous_frequency_hz = frequency_hz;
+    }
+
+    /* Set back PWM to nominal width. */
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, nominal_pwm_width);
+
+    close(fd);
+
+    /* Calculate PPM and Hz variation from nominal at 50% PWM. */
+    double hz_variation_from_nominal_max = max_frequency - nominal_frequency_hz;
+    double hz_variation_from_nominal_min = nominal_frequency_hz - min_frequency;
+    double ppm_variation_from_nominal_max = (hz_variation_from_nominal_max / nominal_frequency_hz) * 1e6;
+    double ppm_variation_from_nominal_min = (hz_variation_from_nominal_min / nominal_frequency_hz) * 1e6;
+
+    printf("\e[1m[>Report:\e[0m\n");
+    printf("-------------------------\n");
+    printf(" Hz Variation from Nominal (50%% PWM): -%10.2f  Hz / +%10.2f  Hz\n", hz_variation_from_nominal_min, hz_variation_from_nominal_max);
+    printf("PPM Variation from Nominal (50%% PWM): -%10.2f PPM / +%10.2f PPM\n", ppm_variation_from_nominal_min, ppm_variation_from_nominal_max);
+}
 
 
 /* Help */
@@ -675,6 +755,7 @@ static void help(void)
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
            "clk_test                          Test Clks frequencies.\n"
+           "vcxo_test                         Test VCXO frequency variation.\n"
            "\n"
 #ifdef  CSR_SI5351_I2C_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
@@ -760,7 +841,7 @@ int main(int argc, char **argv)
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
 
-    /* Clks measurement cmds. */
+    /* Clk cmds. */
     else if (!strcmp(cmd, "clk_test")) {
         int num_measurements = 10;
         int delay_between_tests = 1;
@@ -771,6 +852,11 @@ int main(int argc, char **argv)
             delay_between_tests = atoi(argv[optind++]);
 
         clk_test(num_measurements, delay_between_tests);
+    }
+
+    /* VCXO test cmd. */
+    else if (!strcmp(cmd, "vcxo_test")) {
+        vcxo_test();
     }
 
     /* SI5351 cmds. */
