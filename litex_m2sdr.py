@@ -150,12 +150,14 @@ class BaseSoC(SoCMini):
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
+        si5351_clk0 = platform.request("si5351_clk0")
         self.si5351_i2c = I2CMaster(pads=platform.request("si5351_i2c"))
         self.si5351_pwm = PWM(platform.request("si5351_pwm"),
             default_enable = 1,
             default_width  = 1024,
             default_period = 2048,
         )
+        platform.add_period_constraint(si5351_clk0, 1e9/38.4e6)
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -337,8 +339,8 @@ class BaseSoC(SoCMini):
         # Clk Measurements -------------------------------------------------------------------------
 
         self.clk_measurement = MultiClkMeasurement(clks={
-            "clk0" : platform.request("si5351_clk0"),
-            "clk1" : ClockSignal("rfic"),
+            "clk0" : si5351_clk0,
+            "clk1" : self.ad9361.cd_rfic.clk,
             "clk2" : 0,
             "clk3" : 0,
         })
