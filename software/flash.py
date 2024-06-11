@@ -5,13 +5,13 @@ import time
 import argparse
 import subprocess
 
-from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
+from __init__ import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 # Flash Utilities ----------------------------------------------------------------------------------
 
 def flash_bitstream(bitstream, offset):
     print("Flashing Board over PCIe...")
-    subprocess.run(f"cd user && ./m2sdr_util flash_write ../../{bitstream} {offset}", shell=True)
+    subprocess.run(f"cd user && ./m2sdr_util flash_write ../{bitstream} {offset}", shell=True)
     subprocess.run("cd user && ./m2sdr_util flash_reload", shell=True)
     time.sleep(1)
 
