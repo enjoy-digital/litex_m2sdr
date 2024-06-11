@@ -339,10 +339,10 @@ class BaseSoC(SoCMini):
         # Clk Measurements -------------------------------------------------------------------------
 
         self.clk_measurement = MultiClkMeasurement(clks={
-            "clk0" : si5351_clk0,
-            "clk1" : self.ad9361.cd_rfic.clk,
-            "clk2" : 0,
-            "clk3" : 0,
+            "clk0" : ClockSignal("sys"),
+            "clk1" : ClockSignal("pcie"),
+            "clk2" : si5351_clk0,
+            "clk3" : ClockSignal("rfic"),
         })
 
     def add_ad9361_spi_probe(self):

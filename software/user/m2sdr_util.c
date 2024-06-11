@@ -582,10 +582,10 @@ static const uint32_t value_addrs[N_CLKS] =
 };
 
 static const char* clk_names[N_CLKS] = {
+    "       Sys Clk",
+    "      PCIe Clk",
     "AD9361 Ref Clk",
-    "AD9361 Dat Clk",
-    "-             ",
-    "-             "
+    "AD9361 Dat Clk"
 };
 
 static uint64_t read_64bit_register(int fd, uint32_t addr)
