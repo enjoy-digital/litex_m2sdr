@@ -207,10 +207,16 @@ class AD9361PHY(LiteXModule):
                 tx_data_valid.eq(0)
             ),
             If(tx_ce,
-                tx_data_ia.eq(sink.ia),
-                tx_data_qa.eq(sink.qa),
-                tx_data_ib.eq(sink.ib),
-                tx_data_qb.eq(sink.qb)
+                tx_data_ia.eq(0),
+                tx_data_qa.eq(0),
+                tx_data_ib.eq(0),
+                tx_data_qb.eq(0),
+                If(sink.valid,
+                    tx_data_ia.eq(sink.ia),
+                    tx_data_qa.eq(sink.qa),
+                    tx_data_ib.eq(sink.ib),
+                    tx_data_qb.eq(sink.qb),
+                )
             )
         ]
         self.comb += sink.ready.eq(tx_ce)
