@@ -55,7 +55,7 @@ from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, with_ethernet=False, with_sata=False):
+    def __init__(self, platform, sys_clk_freq, with_eth=False, with_sata=False):
         self.cd_sys         = ClockDomain()
         self.cd_idelay      = ClockDomain()
         self.cd_refclk_pcie = ClockDomain()
@@ -77,13 +77,13 @@ class CRG(LiteXModule):
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
         # Ethernet PLL.
-        if with_ethernet or with_sata:
+        if with_eth or with_sata:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, 156.25e6, margin=0)
 
         # SATA PLL.
-        if with_sata or with_ethernet:
+        if with_sata or with_eth:
             self.sata_pll = sata_pll = S7PLL()
             sata_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             sata_pll.create_clkout(self.cd_refclk_sata, 150e6, margin=0)
@@ -128,7 +128,7 @@ class BaseSoC(SoCMini):
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
-        with_ethernet = False, ethernet_sfp=0, ethernet_phy="1000basex",
+        with_eth      = False, eth_sfp=0, eth_phy="1000basex",
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
         with_rfic_oversampling = True,
@@ -148,15 +148,15 @@ class BaseSoC(SoCMini):
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
-            with_ethernet = with_ethernet,
-            with_sata     = with_sata,
+            with_eth  = with_eth,
+            with_sata = with_sata,
         )
 
         # Shared QPLL.
         self.qpll = SharedQPLL(platform,
-            with_pcie     = with_pcie,
-            with_ethernet = with_ethernet,
-            with_sata     = with_sata,
+            with_pcie = with_pcie,
+            with_eth  = with_eth,
+            with_sata = with_sata,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -241,14 +241,14 @@ class BaseSoC(SoCMini):
 
         # Ethernet ---------------------------------------------------------------------------------
 
-        if with_ethernet:
+        if with_eth:
             eth_phy_cls = {
                 "1000basex" : A7_1000BASEX,
                 "2500basex" : A7_2500BASEX,
-            }[ethernet_phy]
+            }[eth_phy]
             self.ethphy = eth_phy_cls(
-                qpll_channel = self.qpll.get_channel("ethernet"),
-                data_pads    = self.platform.request("sfp", ethernet_sfp),
+                qpll_channel = self.qpll.get_channel("eth"),
+                data_pads    = self.platform.request("sfp", eth_sfp),
                 sys_clk_freq = sys_clk_freq,
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
@@ -392,11 +392,11 @@ def main():
 
     # Communication interfaces/features.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
-    parser.add_argument("--with-ethernet",   action="store_true", help="Enable Ethernet Communication.")
+    parser.add_argument("--with-eth",        action="store_true", help="Enable Ethernet Communication.")
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
     parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 2, 4])
-    parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
-    parser.add_argument("--ethernet-phy",    default="100basex",  help="Ethernet PHY.", choices=["1000basex", "2500basex"])
+    parser.add_argument("--eth-sfp",         default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
+    parser.add_argument("--eth-phy",         default="1000basex", help="Ethernet PHY.", choices=["1000basex", "2500basex"])
 
     # Litescope Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -408,13 +408,13 @@ def main():
 
     # Build SoC.
     soc = BaseSoC(
-        variant       = args.variant,
-        with_pcie     = args.with_pcie,
-        pcie_lanes    = args.pcie_lanes,
-        with_ethernet = args.with_ethernet,
-        ethernet_sfp  = args.ethernet_sfp,
-        ethernet_phy  = args.ethernet_phy,
-        with_sata     = args.with_sata,
+        variant    = args.variant,
+        with_pcie  = args.with_pcie,
+        pcie_lanes = args.pcie_lanes,
+        with_eth   = args.with_eth,
+        eth_sfp    = args.eth_sfp,
+        eth_phy    = args.eth_phy,
+        with_sata  = args.with_sata,
     )
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
