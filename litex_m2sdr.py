@@ -37,7 +37,6 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
-from liteeth.phy.a7_gtp       import QPLLSettings, QPLL
 from liteeth.phy.a7_1000basex import A7_1000BASEX
 
 from litesata.phy import LiteSATAPHY
@@ -45,6 +44,7 @@ from litesata.phy import LiteSATAPHY
 from litescope import LiteScopeAnalyzer
 
 from gateware.ad9361.core import AD9361RFIC
+from gateware.qpll        import SharedQPLL
 from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 from gateware.measurement import MultiClkMeasurement
@@ -87,107 +87,6 @@ class CRG(LiteXModule):
             self.sata_pll = sata_pll = S7PLL()
             sata_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             sata_pll.create_clkout(self.cd_refclk_sata, 150e6, margin=0)
-
-# Shared QPLL --------------------------------------------------------------------------------------
-
-class SharedQPLL(LiteXModule):
-    def __init__(self, platform, with_pcie=False, with_ethernet=False, with_sata=False):
-        assert not (with_pcie and with_ethernet and with_sata) # QPLL only has 2 PLLs :(
-
-        # PCIe QPLL Settings.
-        qpll_pcie_settings = QPLLSettings(
-            refclksel  = 0b001,
-            fbdiv      = 5,
-            fbdiv_45   = 5,
-            refclk_div = 1,
-        )
-
-        # Ethernet QPLL Settings.
-        qpll_eth_settings = QPLLSettings(
-            refclksel  = 0b111,
-            fbdiv      = 4,
-            fbdiv_45   = 4,
-            refclk_div = 1,
-        )
-
-        # SATA QPLL Settings.
-        qpll_sata_settings = QPLLSettings(
-            refclksel  = 0b111,
-            fbdiv      = 5,
-            fbdiv_45   = 4,
-            refclk_div = 1,
-        )
-
-        # QPLL Configs.
-        class QPLLConfig:
-            def __init__(self, refclk, settings):
-                self.refclk   = refclk
-                self.settings = settings
-
-        self.configs = configs = {}
-        if with_pcie:
-            configs["pcie"] = QPLLConfig(
-                refclk   = ClockSignal("refclk_pcie"),
-                settings = qpll_pcie_settings,
-            )
-        if with_ethernet:
-            configs["ethernet"] = QPLLConfig(
-                refclk   = ClockSignal("refclk_eth"),
-                settings = qpll_eth_settings,
-            )
-        if with_sata:
-            configs["sata"] = QPLLConfig(
-                refclk   = ClockSignal("refclk_sata"),
-                settings = qpll_sata_settings,
-            )
-
-        # Shared QPLL.
-        self.qpll        = None
-        self.channel_map = {}
-        # Single QPLL configuration.
-        if len(configs) == 1:
-            name, config = next(iter(configs.items()))
-            gtrefclk0, gtgrefclk0 = self.get_gt_refclks(config)
-            self.qpll = QPLL(
-                gtrefclk0     = gtrefclk0,
-                gtgrefclk0    = gtgrefclk0,
-                qpllsettings0 = config.settings,
-                gtrefclk1     = None,
-                gtgrefclk1    = None,
-                qpllsettings1 = None,
-            )
-            self.channel_map[name] = 0
-         # Dual QPLL configuration.
-        elif len(configs) == 2:
-            config_items = list(configs.items())
-            gtrefclk0, gtgrefclk0 = self.get_gt_refclks(config_items[0][1])
-            gtrefclk1, gtgrefclk1 = self.get_gt_refclks(config_items[1][1])
-            self.qpll = QPLL(
-                gtrefclk0     = gtrefclk0,
-                gtgrefclk0    = gtgrefclk0,
-                qpllsettings0 = config_items[0][1].settings,
-                gtrefclk1     = gtrefclk1,
-                gtgrefclk1    = gtgrefclk1,
-                qpllsettings1 = config_items[1][1].settings,
-            )
-            self.channel_map[config_items[0][0]] = 0
-            self.channel_map[config_items[1][0]] = 1
-
-        platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
-
-    @staticmethod
-    def get_gt_refclks(config):
-        if config.settings.refclksel == 0b111:
-            return None, config.refclk
-        else:
-            return config.refclk, None
-
-    def get_channel(self, name):
-        if name in self.channel_map:
-            channel_index = self.channel_map[name]
-            return self.qpll.channels[channel_index]
-        else:
-            raise ValueError(f"Invalid QPLL name: {name}")
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
