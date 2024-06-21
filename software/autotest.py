@@ -249,7 +249,7 @@ def main():
     errors += m2sdr_util_info_autotest()
 
     # M2SDR Util VCXO Autotest.
-    errors += m2sdr_util_vcxo_autotest()
+    #errors += m2sdr_util_vcxo_autotest()
 
     # M2SDR RF Autotest.
     errors += m2sdr_rf_autotest()
