@@ -135,7 +135,7 @@ class Platform(Xilinx7SeriesPlatform):
     default_clk_name   = "clk100"
     default_clk_period = 1e9/100e6
 
-    def __init__(self,build_multiboot=False):
+    def __init__(self, build_multiboot=False):
         device = "xc7a200t"
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, toolchain="vivado")
         self.device     = device

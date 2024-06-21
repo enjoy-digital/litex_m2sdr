@@ -136,6 +136,10 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
+        if (with_eth or with_sata) and (variant != "baseboard"):
+            msg = "Ethernet and SATA are only supported when mounted in the LiteX Acorn Baseboard Mini! "
+            msg += "Available here: https://enjoy-digital-shop.myshopify.com/products/litex-acorn-baseboard-mini"
+            raise ValueError(msg)
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -208,6 +212,8 @@ class BaseSoC(SoCMini):
         # PCIe -------------------------------------------------------------------------------------
 
         if with_pcie:
+            if variant == "baseboard":
+                pcie_lanes = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size   = 0x20000,
