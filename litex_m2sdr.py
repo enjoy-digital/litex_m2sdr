@@ -56,10 +56,11 @@ from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 class CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_ethernet=False, with_sata=False):
-        self.cd_sys      = ClockDomain()
-        self.cd_idelay   = ClockDomain()
-        self.cd_eth_ref  = ClockDomain()
-        self.cd_sata_ref = ClockDomain()
+        self.cd_sys         = ClockDomain()
+        self.cd_idelay      = ClockDomain()
+        self.cd_refclk_pcie = ClockDomain()
+        self.cd_refclk_eth  = ClockDomain()
+        self.cd_refclk_sata = ClockDomain()
 
         # # #
 
@@ -79,15 +80,116 @@ class CRG(LiteXModule):
         if with_ethernet or with_sata:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
-            eth_pll.create_clkout(self.cd_eth_ref, 156.25e6, margin=0)
+            eth_pll.create_clkout(self.cd_refclk_eth, 156.25e6, margin=0)
 
         # SATA PLL.
         if with_sata or with_ethernet:
             self.sata_pll = sata_pll = S7PLL()
             sata_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
-            sata_pll.create_clkout(self.cd_sata_ref, 150e6, margin=0)
+            sata_pll.create_clkout(self.cd_refclk_sata, 150e6, margin=0)
 
-# BaseSoC -----------------------------------------------------------------------------------------
+# Shared QPLL --------------------------------------------------------------------------------------
+
+class SharedQPLL(LiteXModule):
+    def __init__(self, platform, with_pcie=False, with_ethernet=False, with_sata=False):
+        assert not (with_pcie and with_ethernet and with_sata) # QPLL only has 2 PLLs :(
+
+        # PCIe QPLL Settings.
+        qpll_pcie_settings = QPLLSettings(
+            refclksel  = 0b001,
+            fbdiv      = 5,
+            fbdiv_45   = 5,
+            refclk_div = 1,
+        )
+
+        # Ethernet QPLL Settings.
+        qpll_eth_settings = QPLLSettings(
+            refclksel  = 0b111,
+            fbdiv      = 4,
+            fbdiv_45   = 4,
+            refclk_div = 1,
+        )
+
+        # SATA QPLL Settings.
+        qpll_sata_settings = QPLLSettings(
+            refclksel  = 0b111,
+            fbdiv      = 5,
+            fbdiv_45   = 4,
+            refclk_div = 1,
+        )
+
+        # QPLL Configs.
+        class QPLLConfig:
+            def __init__(self, refclk, settings):
+                self.refclk   = refclk
+                self.settings = settings
+
+        self.configs = configs = {}
+        if with_pcie:
+            configs["pcie"] = QPLLConfig(
+                refclk   = ClockSignal("refclk_pcie"),
+                settings = qpll_pcie_settings,
+            )
+        if with_ethernet:
+            configs["ethernet"] = QPLLConfig(
+                refclk   = ClockSignal("refclk_eth"),
+                settings = qpll_eth_settings,
+            )
+        if with_sata:
+            configs["sata"] = QPLLConfig(
+                refclk   = ClockSignal("refclk_sata"),
+                settings = qpll_sata_settings,
+            )
+
+        # Shared QPLL.
+        self.qpll        = None
+        self.channel_map = {}
+        # Single QPLL configuration.
+        if len(configs) == 1:
+            name, config = next(iter(configs.items()))
+            gtrefclk0, gtgrefclk0 = self.get_gt_refclks(config)
+            self.qpll = QPLL(
+                gtrefclk0     = gtrefclk0,
+                gtgrefclk0    = gtgrefclk0,
+                qpllsettings0 = config.settings,
+                gtrefclk1     = None,
+                gtgrefclk1    = None,
+                qpllsettings1 = None,
+            )
+            self.channel_map[name] = 0
+         # Dual QPLL configuration.
+        elif len(configs) == 2:
+            config_items = list(configs.items())
+            gtrefclk0, gtgrefclk0 = self.get_gt_refclks(config_items[0][1])
+            gtrefclk1, gtgrefclk1 = self.get_gt_refclks(config_items[1][1])
+            self.qpll = QPLL(
+                gtrefclk0     = gtrefclk0,
+                gtgrefclk0    = gtgrefclk0,
+                qpllsettings0 = config_items[0][1].settings,
+                gtrefclk1     = gtrefclk1,
+                gtgrefclk1    = gtgrefclk1,
+                qpllsettings1 = config_items[1][1].settings,
+            )
+            self.channel_map[config_items[0][0]] = 0
+            self.channel_map[config_items[1][0]] = 1
+
+        platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
+
+    @staticmethod
+    def get_gt_refclks(config):
+        if config.settings.refclksel == 0b111:
+            return None, config.refclk
+        else:
+            return config.refclk, None
+
+    def get_channel(self, name):
+        if name in self.channel_map:
+            channel_index = self.channel_map[name]
+            return self.qpll.channels[channel_index]
+        else:
+            raise ValueError(f"Invalid QPLL name: {name}")
+
+# BaseSoC ------------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
@@ -144,7 +246,15 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
+        # General.
         self.crg = CRG(platform, sys_clk_freq,
+            with_ethernet = with_ethernet,
+            with_sata     = with_sata,
+        )
+
+        # Shared QPLL.
+        self.qpll = SharedQPLL(platform,
+            with_pcie     = with_pcie,
             with_ethernet = with_ethernet,
             with_sata     = with_sata,
         )
@@ -203,6 +313,7 @@ class BaseSoC(SoCMini):
                 bar0_size   = 0x20000,
                 cd          = "sys",
             )
+            self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
                 platform.toolchain.pre_placement_commands.append("reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
                 platform.toolchain.pre_placement_commands.append("set_property LOC GTPE2_CHANNEL_X0Y4 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
@@ -219,6 +330,7 @@ class BaseSoC(SoCMini):
                 with_dma_synchronizer = True,
                 with_msi              = True
             )
+            self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
 
             # Timing Constraints/False Paths -------------------------------------------------------
@@ -227,37 +339,11 @@ class BaseSoC(SoCMini):
                 platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  jtag_clk] -asynchronous")
                 platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  icap_clk] -asynchronous")
 
-        # Ethernet/SATA Shared Clocking ------------------------------------------------------------
-
-        if with_ethernet or with_sata:
-           # Ethernet QPLL Settings.
-            qpll_eth_settings = QPLLSettings(
-                refclksel  = 0b111,
-                fbdiv      = 4,
-                fbdiv_45   = 4,
-                refclk_div = 1,
-            )
-            # SATA QPLL Settings.
-            qpll_sata_settings = QPLLSettings(
-                refclksel  = 0b111,
-                fbdiv      = 5,
-                fbdiv_45   = 4,
-                refclk_div = 1,
-            )
-
-            # Shared QPLL.
-            self.qpll = qpll = QPLL(
-                gtgrefclk0    = self.crg.cd_eth_ref.clk,
-                qpllsettings0 = qpll_eth_settings,
-                qpllsettings1 = qpll_sata_settings,
-            )
-            platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-49]")
-
         # Ethernet ---------------------------------------------------------------------------------
 
         if with_ethernet:
             self.ethphy = A7_1000BASEX(
-                qpll_channel = qpll.channels[0],
+                qpll_channel = self.qpll.get_channel("ethernet"),
                 data_pads    = self.platform.request("sfp", ethernet_sfp),
                 sys_clk_freq = sys_clk_freq,
                 rx_polarity  = 1, # Inverted on M2SDR.
@@ -283,14 +369,13 @@ class BaseSoC(SoCMini):
 
             # PHY
             self.sata_phy = LiteSATAPHY(platform.device,
-                refclk     = self.crg.cd_sata_ref.clk,
+                refclk     = ClockSignal("refclk_sata"),
                 pads       = platform.request("sata"),
                 gen        = sata_gen,
                 clk_freq   = sys_clk_freq,
                 data_width = 16,
-                qpll       = qpll.channels[1],
+                qpll       = self.qpll.get_channel("sata"),
             )
-            platform.add_platform_command("set_property SEVERITY {{WARNING}} [get_drc_checks REQP-49]")
 
             # Core
             self.add_sata(phy=self.sata_phy, mode="read+write")
@@ -345,7 +430,7 @@ class BaseSoC(SoCMini):
 
         self.clk_measurement = MultiClkMeasurement(clks={
             "clk0" : ClockSignal("sys"),
-            "clk1" : ClockSignal("pcie"),
+            "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
             "clk3" : ClockSignal("rfic"),
         })
@@ -400,10 +485,9 @@ def main():
     parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
 
     # Communication interfaces/features.
-    comopts = parser.add_mutually_exclusive_group()
-    comopts.add_argument("--with-pcie",      action="store_true", help="Enable PCIe Communication.")
-    comopts.add_argument("--with-ethernet",  action="store_true", help="Enable Ethernet Communication.")
-    comopts.add_argument("--with-sata",      action="store_true", help="Enable SATA Storage.")
+    parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
+    parser.add_argument("--with-ethernet",   action="store_true", help="Enable Ethernet Communication.")
+    parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
     parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 2, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
 
