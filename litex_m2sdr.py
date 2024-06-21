@@ -37,7 +37,7 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
-from liteeth.phy.a7_1000basex import A7_1000BASEX
+from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 
 from litesata.phy import LiteSATAPHY
 
@@ -128,12 +128,13 @@ class BaseSoC(SoCMini):
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
-        with_ethernet = False, ethernet_sfp=0,
+        with_ethernet = False, ethernet_sfp=0, ethernet_phy="1000basex",
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
         with_rfic_oversampling = True,
     ):
         # Platform ---------------------------------------------------------------------------------
+
         platform = Platform(build_multiboot=True)
 
         # SoCMini ----------------------------------------------------------------------------------
@@ -241,7 +242,11 @@ class BaseSoC(SoCMini):
         # Ethernet ---------------------------------------------------------------------------------
 
         if with_ethernet:
-            self.ethphy = A7_1000BASEX(
+            eth_phy_cls = {
+                "1000basex" : A7_1000BASEX,
+                "2500basex" : A7_2500BASEX,
+            }[ethernet_phy]
+            self.ethphy = eth_phy_cls(
                 qpll_channel = self.qpll.get_channel("ethernet"),
                 data_pads    = self.platform.request("sfp", ethernet_sfp),
                 sys_clk_freq = sys_clk_freq,
@@ -334,6 +339,8 @@ class BaseSoC(SoCMini):
             "clk3" : ClockSignal("rfic"),
         })
 
+    # LiteScope Probes (Debug) ---------------------------------------------------------------------
+
     def add_ad9361_spi_probe(self):
         analyzer_signals = [self.platform.lookup_request("ad9361_spi")]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
@@ -389,6 +396,7 @@ def main():
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
     parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.",   choices=[1, 2, 4])
     parser.add_argument("--ethernet-sfp",    default=0, type=int, help="Ethernet SFP.", choices=[0, 1])
+    parser.add_argument("--ethernet-phy",    default="100basex",  help="Ethernet PHY.", choices=["1000basex", "2500basex"])
 
     # Litescope Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -405,6 +413,7 @@ def main():
         pcie_lanes    = args.pcie_lanes,
         with_ethernet = args.with_ethernet,
         ethernet_sfp  = args.ethernet_sfp,
+        ethernet_phy  = args.ethernet_phy,
         with_sata     = args.with_sata,
     )
     if args.with_ad9361_spi_probe:
