@@ -160,6 +160,7 @@ class BaseSoC(SoCMini):
         self.qpll = SharedQPLL(platform,
             with_pcie = with_pcie,
             with_eth  = with_eth,
+            eth_phy   = eth_phy,
             with_sata = with_sata,
         )
 
