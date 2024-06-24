@@ -173,6 +173,7 @@ class BaseSoC(SoCMini):
             default_width  = 1024,
             default_period = 2048,
         )
+        self.comb += platform.request("si5351_en").eq(1)
         platform.add_period_constraint(si5351_clk0, 1e9/38.4e6)
         platform.add_false_path_constraints(si5351_clk0, self.crg.cd_sys.clk)
 
