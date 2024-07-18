@@ -9,8 +9,6 @@ from migen import *
 from litex.gen import *
 from litex.gen.genlib.misc import WaitTimer
 
-from litepcie.common import *
-
 # AD9361 PRBS Generator ----------------------------------------------------------------------------
 
 class AD9361PRBSGenerator(LiteXModule):
@@ -20,6 +18,7 @@ class AD9361PRBSGenerator(LiteXModule):
 
         # # #
 
+        # PRBS Generation.
         data = Signal(16, reset=seed)
         self.sync += If(self.ce, data.eq(Cat((
             data[1]  ^ data[2]  ^ data[4]  ^ data[5]  ^
@@ -45,7 +44,7 @@ class AD9361PRBSChecker(LiteXModule):
 
         # # #
 
-        # PRBS reference
+        # PRBS reference.
         prbs = AD9361PRBSGenerator(seed=seed)
         prbs = ResetInserter()(prbs)
         self.submodules += prbs
