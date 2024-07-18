@@ -5,12 +5,13 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from litex.gen import *
 
 from litex.soc.interconnect.csr import *
-from litex.soc.interconnect import stream
+from litex.soc.interconnect     import stream
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -24,7 +25,8 @@ def phy_layout():
         ("ia", 12),
         ("qa", 12),
         ("ib", 12),
-        ("qb", 12)]
+        ("qb", 12),
+    ]
     return stream.EndpointDescription(layout)
 
 # AD9361PHY ----------------------------------------------------------------------------------------
@@ -60,12 +62,14 @@ class AD9361PHY(LiteXModule):
 
         # Signals.
         # --------
-        mode     = self.control.fields.mode     # FIXME: Add MultiReg.
-        loopback = self.control.fields.loopback # FIXME: Add MultiReg.
+        mode     = Signal()
+        loopback = Signal()
+        self.specials += [
+            MultiReg(self.control.fields.mode, mode),
+            MultiReg(self.control.fields.loopback, loopback),
+        ]
 
         # RX ---------------------------------------------------------------------------------------
-        # Due to use of IDDR, AD9361 needs to be configured with a delay of ~4ns on data.
-        # With 122.8MHz clk, it means a rx_data_delay of 13 (0.3ns LSB)
 
         # Clocking.
         # ---------
@@ -173,7 +177,7 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
-        # Drive Source
+        # Drive Source.
         self.sync.rfic += [
             source.valid.eq(0),
             If(rx_data_valid[3],
@@ -186,10 +190,8 @@ class AD9361PHY(LiteXModule):
         ]
 
         # TX ---------------------------------------------------------------------------------------
-        # Due to use of ODDR, AD9361 needs to be configured with a delay of ~4ns on data.
-        # With 122.8MHz clk, it means a tx_data_delay of 13 (0.3ns LSB)
 
-        # Generate signals from sink (always supposed valid)
+        # Generate signals from sink (always supposed valid).
         tx_ce  = Signal()
         tx_cnt = Signal(2)
         self.sync.rfic += tx_cnt.eq(tx_cnt + 1)
@@ -221,7 +223,7 @@ class AD9361PHY(LiteXModule):
         ]
         self.comb += sink.ready.eq(tx_ce)
 
-        # Dynamic Loopback Logic
+        # Dynamic Loopback Logic.
         self.sync.rfic += [
             If(loopback,
                 source.valid.eq(sink.valid & sink.ready),
