@@ -7,9 +7,8 @@
 from migen import *
 
 from litex.gen import *
-from litex.gen.genlib.misc import WaitTimer
 
-from litex.soc.interconnect import stream
+from litex.soc.interconnect     import stream
 from litex.soc.interconnect.csr import *
 
 from litepcie.common import *
@@ -107,15 +106,15 @@ class AD9361RFIC(LiteXModule):
         ])
         self._ctrl = CSRStorage(fields=[
             CSRField("ctrl", size=4, offset=0, values=[
-                ("``0b0000``", "All control pins low"),
-                ("``0b1111``", "All control pins high"),
-            ], description="AD9361's control pins")
+                ("``0b0000``", "All control pins low."),
+                ("``0b1111``", "All control pins high."),
+            ], description="AD9361's control pins.")
         ])
         self._stat = CSRStatus(fields=[
             CSRField("stat", size=8, offset=0, values=[
-                ("``0b00000000``", "All status pins low"),
-                ("``0b11111111``", "All status pins high"),
-            ], description="AD9361's status pins")
+                ("``0b00000000``", "All status pins low."),
+                ("``0b11111111``", "All status pins high."),
+            ], description="AD9361's status pins.")
         ])
         self._bitmode = CSRStorage(fields=[
             CSRField("mode", size=1, offset=0, values=[
@@ -134,13 +133,15 @@ class AD9361RFIC(LiteXModule):
 
         # Config / Status --------------------------------------------------------------------------
         self.sync += [
+            # AD9361 Control.
             rfic_pads.rst_n.eq(self._config.fields.rst_n),
             rfic_pads.enable.eq(self._config.fields.enable),
             rfic_pads.txnrx.eq(self._config.fields.txnrx),
             rfic_pads.en_agc.eq(self._config.fields.en_agc),
 
+            # AD9361 Control/Status IOs.
             rfic_pads.ctrl.eq(self._ctrl.storage),
-            self._stat.fields.stat.eq(rfic_pads.stat)
+            self._stat.fields.stat.eq(rfic_pads.stat),
         ]
 
         # PHY --------------------------------------------------------------------------------------
@@ -174,6 +175,7 @@ class AD9361RFIC(LiteXModule):
 
         # TX.
         # ---
+        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> PHY.
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
@@ -190,6 +192,7 @@ class AD9361RFIC(LiteXModule):
 
         # RX.
         # ---
+        # PHY -> RX CDC -> RX BitMode -> RX Buffer -> Source.
         self.comb += [
             self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
             rx_cdc.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
@@ -201,7 +204,7 @@ class AD9361RFIC(LiteXModule):
             rx_cdc,
             rx_bitmode,
             rx_buffer,
-            self.source
+            self.source,
         )
 
     def add_prbs(self):
@@ -222,24 +225,32 @@ class AD9361RFIC(LiteXModule):
         phy = self.phy
 
         # PRBS TX.
+        # --------
         prbs_generator = AD9361PRBSGenerator()
         prbs_generator = ResetInserter()(prbs_generator)
         prbs_generator = ClockDomainsRenamer("rfic")(prbs_generator)
-        self.comb += prbs_generator.reset.eq(~self.prbs_tx.fields.enable)
         self.submodules += prbs_generator
-        self.comb += prbs_generator.ce.eq(phy.sink.ready)
-        self.comb += If(self.prbs_tx.fields.enable,
-            phy.sink.valid.eq(1),
-            phy.sink.ia.eq(prbs_generator.o),
-            phy.sink.ib.eq(prbs_generator.o),
-        )
+        self.comb += [
+            prbs_generator.reset.eq(~self.prbs_tx.fields.enable),
+            prbs_generator.ce.eq(phy.sink.ready),
+            If(self.prbs_tx.fields.enable,
+                phy.sink.valid.eq(1),
+                phy.sink.ia.eq(prbs_generator.o),
+                phy.sink.ib.eq(prbs_generator.o),
+            )
+        ]
 
         # PRBS RX.
+        # --------
         self.comb += self.prbs_rx.fields.synced.eq(1)
         for data in [phy.source.ia, phy.source.ib]:
             prbs_checker = AD9361PRBSChecker()
             prbs_checker = ClockDomainsRenamer("rfic")(prbs_checker)
             self.submodules += prbs_checker
-            self.comb += prbs_checker.i.eq(data)
-            self.comb += prbs_checker.ce.eq(phy.source.valid)
-            self.comb += If(~prbs_checker.synced, self.prbs_rx.fields.synced.eq(0))
+            self.comb += [
+                prbs_checker.i.eq(data),
+                prbs_checker.ce.eq(phy.source.valid),
+                If(~prbs_checker.synced,
+                    self.prbs_rx.fields.synced.eq(0)
+                ),
+            ]
