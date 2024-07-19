@@ -4,9 +4,11 @@
 # Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import subprocess
+
 from litex.build.generic_platform import *
-from litex.build.xilinx import Xilinx7SeriesPlatform
-from litex.build.openfpgaloader import OpenFPGALoader
+from litex.build.xilinx           import Xilinx7SeriesPlatform
+from litex.build.openfpgaloader   import OpenFPGALoader
 
 # IOs ----------------------------------------------------------------------------------------------
 
@@ -171,8 +173,18 @@ class Platform(Xilinx7SeriesPlatform):
                 "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
 
+    def detect_ftdi_chip(self):
+        lsusb_log = subprocess.run(['lsusb'], capture_output=True, text=True)
+        for ftdi_chip in ["ft2232", "ft4232"]:
+            if f"Future Technology Devices International, Ltd {ftdi_chip.upper()}" in lsusb_log.stdout:
+                return ftdi_chip
+        return None
+
     def create_programmer(self):
-        return OpenFPGALoader(cable="ft2232", fpga_part=f"{self.device}sbg484", freq=10e6)
+        ftdi_chip = self.detect_ftdi_chip()
+        if ftdi_chip is None:
+            raise RuntimeError("No compatible FTDI device found.")
+        return OpenFPGALoader(cable=ftdi_chip, fpga_part=f"{self.device}sbg484", freq=10e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
