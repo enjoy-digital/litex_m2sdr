@@ -182,7 +182,13 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
    - For PCIe tests, if the board is mounted directly in an M2 slot:
    ```
-   ./litex_m2sdr.py --with-pcie --variant=m2 --pcie-lanes=N_LANES --build --load
+   ./litex_m2sdr.py --with-pcie --variant=m2 --build --load
+   lspci
+   ```
+
+   - For PCIe tests, if the board is mounted directly in a LiteX Acorn Baseboard:
+   ```
+   ./litex_m2sdr.py --with-pcie --variant=baseboard --build --load
    lspci
    ```
 
