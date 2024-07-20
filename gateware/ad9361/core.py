@@ -187,7 +187,7 @@ class AD9361RFIC(LiteXModule):
             self.phy.sink.ia.eq(tx_cdc.source.data[0*16:1*16]),
             self.phy.sink.qa.eq(tx_cdc.source.data[1*16:2*16]),
             self.phy.sink.ib.eq(tx_cdc.source.data[2*16:3*16]),
-            self.phy.sink.qa.eq(tx_cdc.source.data[3*16:4*16]),
+            self.phy.sink.qb.eq(tx_cdc.source.data[3*16:4*16]),
         ]
 
         # RX.
