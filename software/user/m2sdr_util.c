@@ -30,8 +30,10 @@
 /* Parameters */
 /*------------*/
 
-#define DMA_CHECK_DATA   /* Un-comment to disable data check */
-#define DMA_RANDOM_DATA  /* Un-comment to disable data random */
+#define DMA_CHECK_DATA   /* Enable Data Check when defined */
+#define DMA_RANDOM_DATA  /* Enable Random Data when defined */
+
+//#define FLASH_WRITE /* Enable Flash Write when defined */
 
 /* Variables */
 /*-----------*/
@@ -199,6 +201,8 @@ void scratch_test(void)
 
 #ifdef CSR_FLASH_BASE
 
+#ifdef FLASH_WRITE
+
 static void flash_progress(void *opaque, const char *fmt, ...)
 {
     va_list ap;
@@ -285,6 +289,8 @@ static void flash_write(const char *filename, uint32_t offset)
     /* Free buffer */
     free(data);
 }
+
+#endif
 
 static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 {
@@ -765,7 +771,9 @@ static void help(void)
            "ad9361_dump                       Dump AD9361 Registers.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
+#ifdef FLASH_WRITE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
+#endif
            "flash_read filename size [offset] Read from SPI Flash and write contents to file.\n"
            "flash_reload                      Reload FPGA Image.\n"
 #endif
@@ -873,6 +881,7 @@ int main(int argc, char **argv)
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
+#ifdef FLASH_WRITE
     else if (!strcmp(cmd, "flash_write")) {
         const char *filename;
         uint32_t offset = CONFIG_FLASH_IMAGE_SIZE;  /* Operational */
@@ -883,6 +892,7 @@ int main(int argc, char **argv)
             offset = strtoul(argv[optind++], NULL, 0);
         flash_write(filename, offset);
     }
+#endif
     else if (!strcmp(cmd, "flash_read")) {
         const char *filename;
         uint32_t size = 0;
