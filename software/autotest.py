@@ -27,8 +27,11 @@ FPGA_PCIE_LINK_WIDTH_NOMINAL = "4"
 
 AD9361_PRODUCT_ID = "000a"
 
-DMA_TEST_DURATION   = 2   # Seconds
-DMA_SPEED_THRESHOLD = 4.0 # Gbps
+DMA_LOOPBACK_TEST_DURATION   = 2   # Seconds
+DMA_LOOPBACK_SPEED_THRESHOLD = 4.0 # Gbps
+
+RFIC_LOOPBACK_TEST_DURATION   = 2   # Seconds
+RFIC_LOOPBACK_SPEED_THRESHOLD = 1.0 # Gbps
 
 VCXO_PPM_THRESHOLD = 20.0 # PPM
 
@@ -198,12 +201,12 @@ def m2sdr_rf_autotest():
         errors += print_result("AD936x Rev 2 successfully initialized" in log.stdout)
     return errors
 
-# M2SDR DMA Test -----------------------------------------------------------------------------------
+# M2SDR DMA Loopback Test --------------------------------------------------------------------------
 
-def m2sdr_dma_autotest():
-    print("M2SDR DMA Test...")
+def m2sdr_dma_loopback_autotest():
+    print("M2SDR DMA Loopback Test...")
 
-    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_TEST_DURATION}", shell=True, capture_output=True, text=True)
+    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
 
     errors = 0
     dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
@@ -219,7 +222,42 @@ def m2sdr_dma_autotest():
             total_speed += speed
             total_errors += error
             print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(speed > DMA_SPEED_THRESHOLD)
+            errors += print_result(speed > DMA_LOOPBACK_SPEED_THRESHOLD)
+            print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
+            errors += print_result(error == 0)
+
+        mean_speed = total_speed / len(dma_speeds)
+        print(f"\tMean DMA speed: [{ANSI_COLOR_BLUE}{mean_speed} Gbps{ANSI_COLOR_RESET}]")
+        print(f"\tTotal DMA errors: [{ANSI_COLOR_BLUE}{total_errors}{ANSI_COLOR_RESET}]")
+    else:
+        print_fail()
+        errors += 1
+
+    return errors
+
+# M2SDR RFIC Loopback Test -------------------------------------------------------------------------
+
+def m2sdr_rfic_loopback_autotest():
+    print("M2SDR RFIC Loopback Test...")
+
+    log = subprocess.run("cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
+    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -w 12 -e -a -t {RFIC_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
+
+    errors = 0
+    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
+    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", log.stdout, re.MULTILINE)
+
+    total_speed  = 0.0
+    total_errors = 0
+
+    if dma_speeds and dma_errors:
+        for speed, error in zip(dma_speeds, dma_errors):
+            speed = float(speed)
+            error = int(error)
+            total_speed += speed
+            total_errors += error
+            print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
+            errors += print_result(speed > RFIC_LOOPBACK_SPEED_THRESHOLD)
             print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
             errors += print_result(error == 0)
 
@@ -254,8 +292,11 @@ def main():
     # M2SDR RF Autotest.
     errors += m2sdr_rf_autotest()
 
-    # M2SDR DMA Autotest.
-    errors += m2sdr_dma_autotest()
+    # M2SDR DMA Loopback Autotest.
+    errors += m2sdr_dma_loopback_autotest()
+
+    # M2SDR RFIC Loopback Autotest.
+    errors += m2sdr_rfic_loopback_autotest()
 
     print("\n" + "-"*40)
 
