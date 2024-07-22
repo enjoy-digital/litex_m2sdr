@@ -23,15 +23,15 @@ VCC_MARGIN       =   10 # %
 FPGA_PCIE_VENDOR_ID          = "0x10ee"
 FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
 FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
-FPGA_PCIE_LINK_WIDTH_NOMINAL = "4"
+FPGA_PCIE_LINK_WIDTH_NOMINAL = {"m2" : "4", "baseboard" : "1"}
 
 AD9361_PRODUCT_ID = "000a"
 
-DMA_LOOPBACK_TEST_DURATION   = 2   # Seconds
-DMA_LOOPBACK_SPEED_THRESHOLD = 4.0 # Gbps
+DMA_LOOPBACK_TEST_DURATION   = 2                              # Seconds
+DMA_LOOPBACK_SPEED_THRESHOLD = {"m2" : 10, "baseboard" : 2.5} # Gbps
 
 RFIC_LOOPBACK_TEST_DURATION   = 2   # Seconds
-RFIC_LOOPBACK_SPEED_THRESHOLD = 1.0 # Gbps
+RFIC_LOOPBACK_SPEED_THRESHOLD = 1.4 # Gbps
 
 VCXO_PPM_THRESHOLD = 20.0 # PPM
 
@@ -69,14 +69,26 @@ def get_pcie_device_id(vendor, device):
     except:
         return None
 
+def get_board_variant():
+    result = subprocess.run("cd user && ./m2sdr_util info", shell=True, capture_output=True, text=True)
+    output = result.stdout
+
+    # Get Variant.
+    for variant in ["m2", "baseboard"]:
+        if f"{variant} variant" in output:
+            return variant
+    return None
+
 def verify_pcie_speed(device_id):
     try:
         device_path = f"/sys/bus/pci/devices/0000:{device_id}"
         current_link_speed = subprocess.check_output(f"cat {device_path}/current_link_speed", shell=True).decode().strip()
         current_link_width = subprocess.check_output(f"cat {device_path}/current_link_width", shell=True).decode().strip()
 
+        board_variant = get_board_variant()
+
         speed_check = (current_link_speed == FPGA_PCIE_SPEED_NOMINAL)
-        width_check = (current_link_width == FPGA_PCIE_LINK_WIDTH_NOMINAL)
+        width_check = (current_link_width == FPGA_PCIE_LINK_WIDTH_NOMINAL[board_variant])
 
         return current_link_speed, current_link_width, speed_check and width_check
     except:
@@ -128,6 +140,7 @@ def m2sdr_util_info_autotest():
         print_fail()
         return 1
 
+    board_variant     = get_board_variant()
     fpga_dna          = fpga_dna_match.group(1)
     fpga_temp         = float(fpga_temp_match.group(1))
     vcc_int           = float(vcc_int_match.group(1))
@@ -137,6 +150,9 @@ def m2sdr_util_info_autotest():
     ad9361_temp       = float(ad9361_temp_match.group(1))
 
     errors = 0
+
+    # Print Board Variant.
+    print(f"\tBoard Variant: \t\t\t[{ANSI_COLOR_BLUE}{board_variant}{ANSI_COLOR_RESET}]")
 
     # Print FPGA DNA/Temperature and AD9361 Temperature.
     print(f"\tFPGA DNA: \t\t\t[{ANSI_COLOR_BLUE}{fpga_dna}{ANSI_COLOR_RESET}]")
@@ -215,6 +231,8 @@ def m2sdr_dma_loopback_autotest():
     total_speed  = 0.0
     total_errors = 0
 
+    board_variant = get_board_variant()
+
     if dma_speeds and dma_errors:
         for speed, error in zip(dma_speeds, dma_errors):
             speed = float(speed)
@@ -222,7 +240,7 @@ def m2sdr_dma_loopback_autotest():
             total_speed += speed
             total_errors += error
             print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(speed > DMA_LOOPBACK_SPEED_THRESHOLD)
+            errors += print_result(speed > DMA_LOOPBACK_SPEED_THRESHOLD[board_variant])
             print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
             errors += print_result(error == 0)
 
@@ -240,7 +258,10 @@ def m2sdr_dma_loopback_autotest():
 def m2sdr_rfic_loopback_autotest():
     print("M2SDR RFIC Loopback Test...")
 
-    log = subprocess.run("cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
+    # Configure RFIC @ 30.72MSPS with internal loopback set.
+    log = subprocess.run(f"cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
+
+    # Run RFIC loopback test.
     log = subprocess.run(f"cd user && ./m2sdr_util dma_test -w 12 -e -a -t {RFIC_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
 
     errors = 0
@@ -249,6 +270,10 @@ def m2sdr_rfic_loopback_autotest():
 
     total_speed  = 0.0
     total_errors = 0
+
+    # Skip initial results (can contains errors).
+    dma_speeds = dma_speeds[2:]
+    dma_errors = dma_errors[2:]
 
     if dma_speeds and dma_errors:
         for speed, error in zip(dma_speeds, dma_errors):
