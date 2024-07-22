@@ -102,8 +102,11 @@ static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t siz
         /* send bytes */
         for (i=0; i<size; i+=4) {
             m.tx_len = 32;
-            m.tx_data = ((uint64_t)buf[i] << 32) | ((uint64_t)buf[i+1] << 24) |
-                ((uint64_t)buf[i+2] << 16) | ((uint64_t)buf[i+3] << 8);
+            m.tx_data = (
+                ((uint64_t)buf[i+0] << 32) |
+                ((uint64_t)buf[i+1] << 24) |
+                ((uint64_t)buf[i+2] << 16) |
+                ((uint64_t)buf[i+3] << 8));
             checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
         }
 
@@ -119,7 +122,7 @@ uint8_t litepcie_flash_read(int fd, uint32_t addr)
 
 static void litepcie_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
 {
-    int i, ii;
+    int i;
 
     struct litepcie_ioctl_flash m;
 
@@ -139,8 +142,10 @@ static void litepcie_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint
         for (i=0; i<size; i+=4) {
             m.tx_len = 32;
             checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
-            for (ii = 0; ii < 4; ii++)
-                buf[i+ii] = (m.rx_data >> (24-(ii*8))) & 0xFF;
+            buf[i+0] = (m.rx_data >> 24 & 0xff);
+            buf[i+1] = (m.rx_data >> 16 & 0xff);
+            buf[i+2] = (m.rx_data >>  8 & 0xff);
+            buf[i+3] = (m.rx_data >>  0 & 0xff);
         }
 
         /* release cs_n */
