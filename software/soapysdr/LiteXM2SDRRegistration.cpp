@@ -22,7 +22,7 @@
 
 #define MAX_DEVICES 8
 #define LITEX_IDENTIFIER_SIZE 256
-#define LITEX_IDENTIFIER      "LiteX SoC on LiteX-M2SDR"
+#define LITEX_IDENTIFIER      "LiteX-M2SDR"
 
 std::string readFPGAData(
     int fd,
