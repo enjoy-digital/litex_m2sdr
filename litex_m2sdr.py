@@ -144,7 +144,7 @@ class BaseSoC(SoCMini):
         # SoCMini ----------------------------------------------------------------------------------
 
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LiteX SoC on LiteX-M2SDR",
+            ident         = f"LiteX-M2SDR SoC / {variant} variant / built on",
             ident_version = True,
         )
 
