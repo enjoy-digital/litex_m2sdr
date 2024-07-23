@@ -136,7 +136,15 @@ static void m2sdr_init(
 
     /* Initialize SI531 Clocking */
     printf("Initializing SI5351 Clocking to 38.4MHz...\n");
+#if 1 /* FIXME: Add detection. */
+    /* SI5351B */
+    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR, 0);
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+#else
+    /* SI5351C */
+    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR, 1);
+    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
+#endif
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
