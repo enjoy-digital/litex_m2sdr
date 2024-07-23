@@ -13,7 +13,7 @@
 
 #include "m2sdr_si5351_i2c.h"
 
-#ifdef CSR_SI5351_I2C_BASE
+#ifdef CSR_SI5351_I2C_W_ADDR
 
 extern void nanosleep(int n);
 

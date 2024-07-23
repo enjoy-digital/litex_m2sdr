@@ -28,8 +28,6 @@ from litex.soc.cores.led       import LedChaser
 from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
-from litex.soc.cores.pwm       import PWM
-from litex.soc.cores.bitbang   import I2CMaster
 from litex.soc.cores.gpio      import GPIOOut
 from litex.soc.cores.spi_flash import S7SPIFlash
 
@@ -43,6 +41,7 @@ from litesata.phy import LiteSATAPHY
 
 from litescope import LiteScopeAnalyzer
 
+from gateware.si5351      import SI5351
 from gateware.ad9361.core import AD9361RFIC
 from gateware.qpll        import SharedQPLL
 from gateware.timestamp   import Timestamp
@@ -115,8 +114,7 @@ class BaseSoC(SoCMini):
         "sata_core"   : 16,
 
         # SDR.
-        "si5351_i2c"  : 20,
-        "si5351_pwm"  : 21,
+        "si5351"      : 20,
         "timestamp"   : 22,
         "header"      : 23,
         "ad9361"      : 24,
@@ -166,14 +164,8 @@ class BaseSoC(SoCMini):
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
+        self.si5351 = SI5351(platform)
         si5351_clk0 = platform.request("si5351_clk0")
-        self.si5351_i2c = I2CMaster(pads=platform.request("si5351_i2c"))
-        self.si5351_pwm = PWM(platform.request("si5351_pwm"),
-            default_enable = 1,
-            default_width  = 1024,
-            default_period = 2048,
-        )
-        self.comb += platform.request("si5351_en_clkin").eq(1)
         platform.add_period_constraint(si5351_clk0, 1e9/38.4e6)
         platform.add_false_path_constraints(si5351_clk0, self.crg.cd_sys.clk)
 
