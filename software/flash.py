@@ -14,10 +14,10 @@ from __init__ import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 # Flash Utilities ----------------------------------------------------------------------------------
 
-def flash_bitstream(bitstream, offset):
+def flash_bitstream(bitstream, offset, device_num):
     print("Flashing Board over PCIe...")
-    subprocess.run(f"cd user && ./m2sdr_util flash_write ../{bitstream} {offset}", shell=True)
-    subprocess.run("cd user && ./m2sdr_util flash_reload", shell=True)
+    subprocess.run(f"cd user && ./m2sdr_util flash_write -c {device_num} ../{bitstream} {offset}", shell=True)
+    subprocess.run(f"cd user && ./m2sdr_util flash_reload -c {device_num}", shell=True)
     time.sleep(1)
 
 def remove_driver():
@@ -49,8 +49,9 @@ def get_device_ids():
 
 def main():
     parser = argparse.ArgumentParser(description="FPGA flashing over PCIe.")
-    parser.add_argument('bitstream', help='Path to the bitstream file')
-    parser.add_argument('-o', '--offset', type=lambda x: int(x, 0), default=0x00000000, help='Offset for flashing (default: 0x00000000)')
+    parser.add_argument('bitstream',                                                        help='Path to the bitstream file.')
+    parser.add_argument('-o', '--offset',     type=lambda x: int(x, 0), default=0x00000000, help='Offset for flashing (default: 0x00000000).')
+    parser.add_argument('-c', '--device_num', type=int,                 default=0,          help='Select the device number (default = 0).')
     args = parser.parse_args()
 
     # Ask for confirmation before flashing.
@@ -59,8 +60,8 @@ def main():
         print("Flashing aborted.")
         return
 
-    # Flash.
-    flash_bitstream(args.bitstream, args.offset)
+    # Flash with selected device.
+    flash_bitstream(args.bitstream, args.offset, args.device_num)
 
     # PCIe Rescan and driver Remove/Reload.
     remove_driver()
