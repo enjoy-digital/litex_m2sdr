@@ -70,7 +70,7 @@ def tone_check(filename, nchannels, nbits, samplerate, frame_header, frame_size,
 # Run ----------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Tone Checker utility.")
+    parser = argparse.ArgumentParser(description="Tone Checker utility.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("filename", help="Ouptut filename.")
     parser.add_argument("--nchannels",    type=int,   default=2,               help="Number of RF channels.")
     parser.add_argument("--nbits",        type=int,   default=12,              help="Number of bits per Sample resolution (in bits per I/Q).")

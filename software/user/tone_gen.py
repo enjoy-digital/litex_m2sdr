@@ -51,7 +51,7 @@ def tone_gen(filename, nchannels, nbits, frequency, amplitude, samplerate, nsamp
 # Run ----------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Tone Generator utility.")
+    parser = argparse.ArgumentParser(description="Tone Generator utility.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("filename", help="Ouptut filename.")
     parser.add_argument("--nchannels",    type=int,   default=2,             help="Number of RF channels.")
     parser.add_argument("--nbits",        type=int,   default=12,            help="Number of bits per Sample resolution (in bits per I/Q).")
