@@ -53,6 +53,12 @@ def main():
     parser.add_argument('-o', '--offset', type=lambda x: int(x, 0), default=0x00000000, help='Offset for flashing (default: 0x00000000)')
     args = parser.parse_args()
 
+    # Ask for confirmation before flashing.
+    confirm = input("Are you sure you want to flash the bitstream? (yes/no): ")
+    if confirm.lower() not in ['yes', 'y']:
+        print("Flashing aborted.")
+        return
+
     # Flash.
     flash_bitstream(args.bitstream, args.offset)
 
