@@ -136,7 +136,7 @@ static void m2sdr_init(
 
     /* Initialize SI531 Clocking */
     printf("Initializing SI5351 Clocking to 38.4MHz...\n");
-    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");

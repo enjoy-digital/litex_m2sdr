@@ -49,7 +49,7 @@
 
 #define SI5351_I2C_ADDR 0x60
 
-const uint8_t si5351_config[][2] = {
+const uint8_t si5351_xo_config[][2] = {
     { 0x02, 0x33 },
     { 0x03, 0x00 },
     { 0x04, 0x10 },

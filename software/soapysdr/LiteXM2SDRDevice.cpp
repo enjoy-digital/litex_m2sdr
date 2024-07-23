@@ -159,8 +159,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     if (do_init) {
-        /* Initialize Si531 Clocking. */
-        m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+        /* Initialize SI531 Clocking. */
+        m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
         /* Initialize AD9361 SPI. */
         m2sdr_ad9361_spi_init(_fd, 1);

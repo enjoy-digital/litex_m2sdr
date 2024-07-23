@@ -81,7 +81,7 @@ static void test_si5351_init(void)
     }
 
     printf("\e[1m[> SI53512 Init...\e[0m\n");
-    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_config, sizeof(si5351_config)/sizeof(si5351_config[0]));
+    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
 
     close(fd);
