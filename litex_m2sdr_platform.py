@@ -28,12 +28,12 @@ _io = [
         Subsignal("sda", Pins("AB21")), # SI5351_SDA.
         IOStandard("LVCMOS33")
     ),
-    ("si5351_en",   0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_EN.
-    ("si5351_pwm",  0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
-    ("si5351_clk0", 0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
-    ("si5351_clk1", 0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
-    ("si5351_clk2", 0, Pins("H4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_3.
-    ("si5351_clk3", 0, Pins("R4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_4.
+    ("si5351_en_clkin", 0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_EN (B) / SI5351_CLKIN (C).
+    ("si5351_pwm",      0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
+    ("si5351_clk0",     0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
+    ("si5351_clk1",     0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
+    ("si5351_clk2",     0, Pins("H4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_3.
+    ("si5351_clk3",     0, Pins("R4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_4.
 
     # SPIFlash.
     ("flash_cs_n", 0, Pins("T19"), IOStandard("LVCMOS33")),
