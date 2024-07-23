@@ -11,7 +11,27 @@ import subprocess
 
 # Test Constants -----------------------------------------------------------------------------------
 
-SAMPLERATES = [
+# VCC Constants.
+VCC_INT_NOMINAL  = 1.00 # V.
+VCC_AUX_NOMINAL  = 1.80 # V.
+VCC_BRAM_NOMINAL = 1.00 # V.
+VCC_MARGIN       =   10 # %.
+
+# FPGA/PCIe Constants.
+FPGA_PCIE_VENDOR_ID          = "0x10ee"
+FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
+FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
+FPGA_PCIE_LINK_WIDTH_NOMINAL = {"m2" : "4", "baseboard" : "1"}
+
+# AD9361 Constants.
+AD9361_PRODUCT_ID = "000a"
+
+# DMA Loopback Test Constants.
+DMA_LOOPBACK_TEST_DURATION   = 2                              # Seconds.
+DMA_LOOPBACK_SPEED_THRESHOLD = {"m2" : 10, "baseboard" : 2.5} # Gbps.
+
+# RFIC Test Constants.
+RFIC_SAMPLERATES = [
     2.5e6,
     5.0e6,
     10.0e6,
@@ -20,25 +40,12 @@ SAMPLERATES = [
     61.44e6,
 ]
 
-VCC_INT_NOMINAL  = 1.00 # V
-VCC_AUX_NOMINAL  = 1.80 # V
-VCC_BRAM_NOMINAL = 1.00 # V
-VCC_MARGIN       =   10 # %
+# RFIC Loopback Test Constants.
+RFIC_LOOPBACK_TEST_DURATION   = 2   # Seconds.
+RFIC_LOOPBACK_SPEED_THRESHOLD = 1.4 # Gbps.
 
-FPGA_PCIE_VENDOR_ID          = "0x10ee"
-FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
-FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
-FPGA_PCIE_LINK_WIDTH_NOMINAL = {"m2" : "4", "baseboard" : "1"}
-
-AD9361_PRODUCT_ID = "000a"
-
-DMA_LOOPBACK_TEST_DURATION   = 2                              # Seconds
-DMA_LOOPBACK_SPEED_THRESHOLD = {"m2" : 10, "baseboard" : 2.5} # Gbps
-
-RFIC_LOOPBACK_TEST_DURATION   = 2   # Seconds
-RFIC_LOOPBACK_SPEED_THRESHOLD = 1.4 # Gbps
-
-VCXO_PPM_THRESHOLD = 20.0 # PPM
+# VCXO Constants.
+VCXO_PPM_THRESHOLD = 20.0 # PPM.
 
 # Color Constants ----------------------------------------------------------------------------------
 
@@ -216,7 +223,7 @@ def m2sdr_util_vcxo_autotest():
 def m2sdr_rf_autotest():
     print("M2SDR RF Autotest...")
     errors = 0
-    for samplerate in SAMPLERATES:
+    for samplerate in RFIC_SAMPLERATES:
         print(f"\tRF Init @ {samplerate/1e6:3.2f}MSPS...", end="")
         log = subprocess.run(f"cd user && ./m2sdr_rf -samplerate={samplerate}", shell=True, capture_output=True, text=True)
         errors += print_result("AD936x Rev 2 successfully initialized" in log.stdout)
