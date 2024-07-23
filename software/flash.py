@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+# This file is part of LiteX-M2SDR.
+#
+# Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
+
 import os
 import time
 import argparse
