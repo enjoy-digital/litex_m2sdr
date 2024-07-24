@@ -9,11 +9,16 @@
  */
 
 #include <time.h>
+
 #include <sys/ioctl.h>
+
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+
+#include "flags.h"
+
 #include "litepcie_helpers.h"
 #include "litepcie.h"
 
@@ -42,8 +47,8 @@ void litepcie_writel(int fd, uint32_t addr, uint32_t val) {
 
 void litepcie_reload(int fd) {
     struct litepcie_ioctl_icap m;
-    m.addr = 0x4;
-    m.data = 0xf;
+    m.addr = ICAP_CMD_REG;
+    m.data = ICAP_CMD_IPROG;
     checked_ioctl(fd, LITEPCIE_IOCTL_ICAP, &m);
 }
 

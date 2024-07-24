@@ -22,6 +22,8 @@
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
 
+#include "flags.h"
+
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 
@@ -118,6 +120,16 @@ static void test_ad9361_dump(void)
 /* Info */
 /*------*/
 
+static uint32_t icap_read(int fd, uint32_t reg)
+{
+    litepcie_writel(fd, CSR_ICAP_ADDR_ADDR, reg);
+    litepcie_writel(fd, CSR_ICAP_READ_ADDR, 1);
+    while (litepcie_readl(fd, CSR_ICAP_DONE_ADDR) != 0)
+        usleep(1000);
+    litepcie_writel(fd, CSR_ICAP_READ_ADDR, 0);
+    return litepcie_readl(fd, CSR_ICAP_DATA_ADDR);
+}
+
 static void info(void)
 {
     int fd;
@@ -152,6 +164,11 @@ static void info(void)
            (double)litepcie_readl(fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
     printf("FPGA VCC-BRAM    : %0.2f V\n",
            (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
+#endif
+#ifdef CSR_ICAP_BASE
+    uint32_t status;
+    status = icap_read(fd, ICAP_BOOTSTS_REG);
+    printf("FPGA Status      : %s\n", (status & ICAP_BOOTSTS_FALLBACK)? "Fallback" : "Operational");
 #endif
     printf("\n");
 
