@@ -35,7 +35,7 @@
 #define DMA_CHECK_DATA   /* Enable Data Check when defined */
 #define DMA_RANDOM_DATA  /* Enable Random Data when defined */
 
-//#define FLASH_WRITE /* Enable Flash Write when defined */
+#define FLASH_WRITE /* Enable Flash Write when defined */
 
 /* Variables */
 /*-----------*/

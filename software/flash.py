@@ -50,7 +50,7 @@ def get_device_ids():
 def main():
     parser = argparse.ArgumentParser(description="FPGA flashing over PCIe.")
     parser.add_argument('bitstream',                                                        help='Path to the bitstream file.')
-    parser.add_argument('-o', '--offset',     type=lambda x: int(x, 0), default=0x00000000, help='Offset for flashing (default: 0x00000000).')
+    parser.add_argument('-o', '--offset',     type=lambda x: int(x, 0), default=0x00800000, help='Offset for flashing (default: 0x00800000).')
     parser.add_argument('-c', '--device_num', type=int,                 default=0,          help='Select the device number (default = 0).')
     args = parser.parse_args()
 
@@ -59,6 +59,13 @@ def main():
     if confirm.lower() not in ['yes', 'y']:
         print("Flashing aborted.")
         return
+
+    # Ask for confirmation when non-default offset.
+    if args.offset != 0x00800000:
+        confirm = input(f"You are flashing bitstream at non-default Operational offset: 0x{args.offset:08x} vs 0x00800000, are you sure? (yes/no): ")
+        if confirm.lower() not in ['yes', 'y']:
+            print("Flashing aborted.")
+            return
 
     # Flash with selected device.
     flash_bitstream(args.bitstream, args.offset, args.device_num)
