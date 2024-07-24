@@ -124,7 +124,8 @@ static void m2sdr_init(
     bool     bist_prbs,
     int32_t  bist_tone_freq,
     bool     enable_8bit_mode,
-    bool     enable_oversample
+    bool     enable_oversample,
+    const char *sync_mode
 ) {
     int fd;
 
@@ -135,21 +136,31 @@ static void m2sdr_init(
     }
 
     /* Initialize SI531 Clocking */
-    printf("Initializing SI5351 Clocking to 38.4MHz...\n");
-#if 1 /* FIXME: Add detection. */
-    /* SI5351B */
-    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
-        SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
-    );
-    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
-#else
-    /* SI5351C */
-    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
-          SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
-          SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLK_IN_SRC_OFFSET)   /* ClkIn from uFL. */
-    );
-    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
-#endif
+    printf("Initializing SI5351 Clocking...\n");
+
+    /* Internal Sync */
+    if (strcmp(sync_mode, "internal") == 0) {
+        /* Supported by SI5351B & C Versions */
+        printf("Using internal XO for as SI5351 RefClk...\n");
+        litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
+        );
+        m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+
+    /* External Sync */
+    } else if (strcmp(sync_mode, "external") == 0) {
+        /* Only Supported by SI5351C Version */
+        printf("Using 10MHz input as SI5351 RefClk...\n");
+        litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
+              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLK_IN_SRC_OFFSET)   /* ClkIn from uFL. */
+        );
+        m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
+    /* Invalid Sync */
+    } else {
+        fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
+        exit(1);
+    }
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
@@ -433,6 +444,7 @@ static void help(void)
            "-c device_num         Select the device (default=0).\n"
            "-8bit                 Enable 8-bit mode (default=disabled).\n"
            "-oversample           Enable oversample mode (default=disabled).\n"
+           "-sync mode            Set synchronization mode (internal or external, default=internal).\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
            "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
@@ -475,6 +487,7 @@ static struct option options[] = {
     { "bist_tone_freq",   required_argument },        /* 12 */
     { "8bit",             no_argument, NULL, '8' },   /* 13 */
     { "oversample",       no_argument },              /* 14 */
+    { "sync",             required_argument },        /* 15 */
     { NULL },
 };
 
@@ -500,6 +513,7 @@ int main(int argc, char **argv)
     int32_t  bist_tone_freq;
     bool     enable_8bit_mode = false;
     bool     enable_oversample = false;
+    char     sync_mode[16] = "internal";
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
     samplerate     = DEFAULT_SAMPLERATE;
@@ -561,6 +575,10 @@ int main(int argc, char **argv)
                 case 14: /* oversample */
                     enable_oversample = true;
                     break;
+                case 15: /* sync */
+                    strncpy(sync_mode, optarg, sizeof(sync_mode));
+                    sync_mode[sizeof(sync_mode) - 1] = '\0';
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -585,7 +603,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, sync_mode);
 
     return 0;
 }
