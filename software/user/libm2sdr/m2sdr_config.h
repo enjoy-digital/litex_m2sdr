@@ -45,6 +45,10 @@
 //#define _1T1R_MODE
 
 #define SI5351_I2C_ADDR 0x60
+#define SI5351B_VERSION 0b0
+#define SI5351C_VERSION 0b1
+#define SI5351C_10MHZ_CLK_IN_FROM_PLL 0b0
+#define SI5351C_10MHZ_CLK_IN_FROM_UFL 0b1
 
 /* SI5351B-C Default Config from XO (38.4MHz on all outputs) */
 /*--------------------------------------------------------*/

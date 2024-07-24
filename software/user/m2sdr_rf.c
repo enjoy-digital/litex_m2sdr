@@ -138,11 +138,16 @@ static void m2sdr_init(
     printf("Initializing SI5351 Clocking to 38.4MHz...\n");
 #if 1 /* FIXME: Add detection. */
     /* SI5351B */
-    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR, 0);
+    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+        SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
+    );
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 #else
     /* SI5351C */
-    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR, 1);
+    litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+          SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
+          SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLK_IN_SRC_OFFSET)   /* ClkIn from uFL. */
+    );
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
 #endif
 
