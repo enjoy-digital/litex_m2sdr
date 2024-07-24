@@ -22,6 +22,9 @@ _io = [
     # Debug.
     ("debug", 0, Pins("V13"),  IOStandard("LVCMOS33")), # SYNCDBG_CLK.
 
+    # Ext Sync/ClkIn..
+    ("sync_clk_in", 0, Pins("V13"),  IOStandard("LVCMOS33")), # SYNCDBG_CLK.
+
     # SI5351 Clocking.
     ("si5351_i2c", 0,
         Subsignal("scl", Pins("AA20")), # SI5351_SCL.
