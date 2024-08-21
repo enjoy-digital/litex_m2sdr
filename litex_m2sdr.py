@@ -382,7 +382,7 @@ class BaseSoC(SoCMini):
 # Build --------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.")
+    parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",         default="m2",        help="Design variant.", choices=["m2", "baseboard"])
     parser.add_argument("--build",           action="store_true", help="Build bitstream.")
