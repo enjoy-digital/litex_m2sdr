@@ -311,29 +311,36 @@ def m2sdr_rfic_loopback_autotest():
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX M2SDR board Autotest.")
+    parser.add_argument("--disable-pcie", action="store_true", help="Disable PCIe Device Autotest.")
+    parser.add_argument("--disable-info", action="store_true", help="Disable Util Info Autotest.")
+    parser.add_argument("--disable-vcxo", action="store_true", help="Disable Util VCXO Autotest.")
+    parser.add_argument("--disable-rf",   action="store_true", help="Disable RF Autotest.")
+    parser.add_argument("--disable-dma",  action="store_true", help="Disable DMA Loopback Autotest.")
+    parser.add_argument("--disable-rfic", action="store_true", help="Disable RFIC Loopback Autotest.")
     args = parser.parse_args()
 
     print("\nLITEX M2SDR AUTOTEST\n" + "-"*40)
 
     errors = 0
 
-    # PCIe Device Autotest.
-    errors += pcie_device_autotest()
+    # Run tests.
+    if not args.disable_pcie:
+        errors += pcie_device_autotest()
 
-    # M2SDR Util Info Autotest.
-    errors += m2sdr_util_info_autotest()
+    if not args.disable_info:
+        errors += m2sdr_util_info_autotest()
 
-    # M2SDR Util VCXO Autotest.
-    #errors += m2sdr_util_vcxo_autotest()
+    if not args.disable_vcxo:
+        errors += m2sdr_util_vcxo_autotest()
 
-    # M2SDR RF Autotest.
-    errors += m2sdr_rf_autotest()
+    if not args.disable_rf:
+        errors += m2sdr_rf_autotest()
 
-    # M2SDR DMA Loopback Autotest.
-    errors += m2sdr_dma_loopback_autotest()
+    if not args.disable_dma:
+        errors += m2sdr_dma_loopback_autotest()
 
-    # M2SDR RFIC Loopback Autotest.
-    errors += m2sdr_rfic_loopback_autotest()
+    if not args.disable_rfic:
+        errors += m2sdr_rfic_loopback_autotest()
 
     print("\n" + "-"*40)
 
