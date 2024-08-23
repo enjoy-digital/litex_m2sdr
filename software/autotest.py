@@ -20,7 +20,7 @@ VCC_MARGIN       =   10 # %.
 # FPGA/PCIe Constants.
 FPGA_PCIE_VENDOR_ID          = "0x10ee"
 FPGA_PCIE_DEVICE_IDS         = ["0x7021", "0x7022", "0x7024"]
-FPGA_PCIE_SPEED_NOMINAL      = "5.0 GT/s PCIe"
+FPGA_PCIE_SPEED_NOMINAL      = ["5.0 GT/s PCIe", "5 GT/s"]
 FPGA_PCIE_LINK_WIDTH_NOMINAL = {"m2" : "4", "baseboard" : "1"}
 
 # AD9361 Constants.
@@ -99,8 +99,8 @@ def verify_pcie_speed(device_id):
 
         board_variant = get_board_variant()
 
-        speed_check = (current_link_speed == FPGA_PCIE_SPEED_NOMINAL)
-        width_check = (current_link_width == FPGA_PCIE_LINK_WIDTH_NOMINAL[board_variant])
+        speed_check = (current_link_speed in FPGA_PCIE_SPEED_NOMINAL)
+        width_check = (current_link_width in FPGA_PCIE_LINK_WIDTH_NOMINAL[board_variant])
 
         return current_link_speed, current_link_width, speed_check and width_check
     except:
