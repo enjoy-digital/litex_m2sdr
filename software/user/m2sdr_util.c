@@ -378,13 +378,24 @@ static void flash_reload(void)
 /* DMA */
 /*-----*/
 
+#if (DMA_BUFFER_SIZE & (DMA_BUFFER_SIZE - 1)) == 0
 static inline int64_t add_mod_int(int64_t a, int64_t b, int64_t m)
 {
+    /* Optimized for power of 2 */
+    int64_t result;
+    result = a + b;
+    return result & (m - 1);
+}
+#else
+static inline int64_t add_mod_int(int64_t a, int64_t b, int64_t m)
+{
+    /* Generic */
     a += b;
     if (a >= m)
         a -= m;
     return a;
 }
+#endif
 
 static int get_next_pow2(int data_width)
 {
