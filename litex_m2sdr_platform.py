@@ -50,40 +50,40 @@ _io = [
 
     # PCIe (M2 Connector).
     ("pcie_x1_baseboard", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("B8")), # PCIe_RX3_P
-        Subsignal("rx_n",  Pins("A8")), # PCIe_RX3_N.
-        Subsignal("tx_p",  Pins("B4")), # PCIe_TX3_P.
-        Subsignal("tx_n",  Pins("A4")), # PCIe_TX3_N.
+        Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("M2:PERn3")), # PCIe_RX3_P
+        Subsignal("rx_n",  Pins("M2:PERp3")), # PCIe_RX3_N.
+        Subsignal("tx_p",  Pins("M2:PETn3")), # PCIe_TX3_P.
+        Subsignal("tx_n",  Pins("M2:PETp3")), # PCIe_TX3_N.
     ),
     ("pcie_x1_m2", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("D9")), # PCIe_RX0_P
-        Subsignal("rx_n",  Pins("C9")), # PCIe_RX0_N.
-        Subsignal("tx_p",  Pins("D7")), # PCIe_TX0_P.
-        Subsignal("tx_n",  Pins("C7")), # PCIe_TX0_N.
+        Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("M2:PERn0")), # PCIe_RX0_P
+        Subsignal("rx_n",  Pins("M2:PERp0")), # PCIe_RX0_N.
+        Subsignal("tx_p",  Pins("M2:PETn0")), # PCIe_TX0_P.
+        Subsignal("tx_n",  Pins("M2:PETp0")), # PCIe_TX0_N.
     ),
     ("pcie_x2_m2", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("D9 D11")), # PCIe_RX0-1_P
-        Subsignal("rx_n",  Pins("C9 C11")), # PCIe_RX0-1_N.
-        Subsignal("tx_p",  Pins("D7  D5")), # PCIe_TX0-1_P.
-        Subsignal("tx_n",  Pins("C7  C5")), # PCIe_TX0-1_N.
+        Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("M2:PERn0 M2:PERn1")), # PCIe_RX0-1_P
+        Subsignal("rx_n",  Pins("M2:PERp0 M2:PERp1")), # PCIe_RX0-1_N.
+        Subsignal("tx_p",  Pins("M2:PETn0 M2:PETn1")), # PCIe_TX0-1_P.
+        Subsignal("tx_n",  Pins("M2:PETp0 M2:PETp1")), # PCIe_TX0-1_N.
     ),
     ("pcie_x4_m2", 0,
-        Subsignal("rst_n", Pins("A15"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("F6")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("E6")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("D9 D11 B10 B8")), # PCIe_RX0-3_P.
-        Subsignal("rx_n",  Pins("C9 C11 A10 A8")), # PCIe_RX0-3_N.
-        Subsignal("tx_p",  Pins("D7  D5  B6 B4")), # PCIe_TX0-3_P.
-        Subsignal("tx_n",  Pins("C7  C5  A6 A4")), # PCIe_TX0-3_N.
+        Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
+        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("rx_p",  Pins("M2:PERn0 M2:PERn1 M2:PERn2 M2:PERn3")), # PCIe_RX0-3_P.
+        Subsignal("rx_n",  Pins("M2:PERp0 M2:PERp1 M2:PERp2 M2:PERp3")), # PCIe_RX0-3_N.
+        Subsignal("tx_p",  Pins("M2:PETn0 M2:PETn1 M2:PETn2 M2:PETn3")), # PCIe_TX0-3_P.
+        Subsignal("tx_n",  Pins("M2:PETp0 M2:PETp1 M2:PETp2 M2:PETp3")), # PCIe_TX0-3_N.
     ),
 
     # SFP 0 (When plugged in Acorn Baseboard Mini).
@@ -135,6 +135,44 @@ _io = [
     ),
 ]
 
+_connectors = [
+    ("M2", {
+        # PCIe.
+        "PETn3"   : " A4", #  5 / PCIe_TX3_P.
+        "PETp3"   : " B4", #  7 / PCIe_TX3_N.
+        "PERn3"   : " A8", # 11 / PCIe_RX3_P.
+        "PERp3"   : " B8", # 13 / PCIe_RX3_N.
+        "PETn2"   : " A6", # 17 / PCIe_TX2_P.
+        "PETp2"   : " B6", # 19 / PCIe_TX2_N.
+        "PERn2"   : "A10", # 23 / PCIe_RX2_P.
+        "PERp2"   : "B10", # 25 / PCIe_RX2_N.
+        "PETn1"   : " C5", # 29 / PCIe_TX1_P.
+        "PETp1"   : " D5", # 31 / PCIe_TX1_N.
+        "PERn1"   : "C11", # 35 / PCIe_RX1_P.
+        "PERp1"   : "D11", # 37 / PCIe_RX1_N.
+        "PETn0"   : " C7", # 41 / PCIe_TX0_P.
+        "PETp0"   : " D7", # 43 / PCIe_TX0_N.
+        "PERn0"   : " C9", # 47 / PCIe_RX0_P.
+        "PERp0"   : " D9", # 49 / PCIe_RX0_N.
+        "REFClkn" : " E6", # 53 / PCIe_REF_CLK_N.
+        "REFClkp" : " F6", # 55 / PCIe_REF_CLK_N.
+        "PERSTn"  : "A15", # 50 / PCIe_PERST.
+
+        # SMB.
+        "SMB_CLK" : "A13", # 40 / PCIe_SMCLK. /!\ Requires 0 Ohm on R82, not mounted by default /!\.
+        "SMB_DAT" : "A14", # 40 / PCIe_SMDAT. /!\ Requures 0 Ohm on R83, not mounted by default /!\.
+
+        # Synchro.
+        "NC22"    : "K18", # 22 / PPS_IN.
+        "NC24"    : "Y18", # 24 / PPS_OUT.
+        "NC28"    : "A19", # 28 / Synchro_GPIO1.
+        "NC30"    : "A18", # 30 / Synchro_GPIO2.
+        "NC32"    : "A21", # 32 / Synchro_GPIO3.
+        "NC34"    : "A20", # 34 / Synchro_GPIO4.
+        "NC36"    : "B20", # 36 / Synchro_GPIO5.
+    })
+]
+
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
@@ -143,7 +181,7 @@ class Platform(Xilinx7SeriesPlatform):
 
     def __init__(self, build_multiboot=False):
         device = "xc7a200t"
-        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, toolchain="vivado")
+        Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain="vivado")
         self.device     = device
         self.image_size = {
             "xc7a200t" : 0x00800000,
