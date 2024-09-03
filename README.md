@@ -9,7 +9,7 @@
 
 > [!WARNING]
 >
-> **LiteX-M2SDR** is still in the lab, engineering new features. 🧪 Expect things to change or break, but feel free to contribute! Hardware will be available on the webshop soon.
+> **LiteX-M2SDR** is still in the lab, engineering new features. 🧪 Expect things to change or break, but feel free to contribute!
 
 [> Intro
 --------
@@ -48,6 +48,16 @@ For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly 
 </div>
 
 Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
+
+[> Availability
+-----------------
+The boards are now available in our webshop: https://enjoy-digital-shop.myshopify.com
+
+We have two variants:
+- **SI5351B Variant**: The SI5351 can be clocked from the local XO with VCXO control from the FPGA, ideal for software-regulated loop. More details here: https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b
+- **SI5351C Variant**: The SI5351 can be clocked from the local XO or from the FPGA/uFL connector (ex from an external 10MHz source on the uFL connector) More details here: https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c
+
+Both variants are perfectly fine for general use, with differences becoming relevant only when synchronization with another system or hardware is required. For common usage, **SI5351C** variant is recommended.
 
 [> PCIe SoC Design
 ------------------
