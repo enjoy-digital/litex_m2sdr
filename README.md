@@ -84,7 +84,7 @@ TODO: Add diagram and more info.
 [> Getting Started
 ------------------
 
-#### For SDR Enthusiasts
+### For SDR Enthusiasts
 
 If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
 
@@ -126,6 +126,12 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 > [!WARNING]
 >
 > **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
+
+### Tutorials for your platform
+
+For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
+
+- [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
 
 ### For Software Developers
 
