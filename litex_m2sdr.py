@@ -425,8 +425,16 @@ def main():
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
 
-    builder = Builder(soc, csr_csv="csr.csv")
-    builder.build(run=args.build)
+    def get_build_name():
+        r = f"litex_m2sdr_{args.variant}"
+        if args.with_pcie:
+            r += f"_pcie"
+        if args.with_eth:
+            r += f"_eth"
+        return r
+
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="csr.csv")
+    builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
