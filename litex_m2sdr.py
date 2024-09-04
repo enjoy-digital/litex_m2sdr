@@ -126,7 +126,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie     = True,  pcie_lanes=1,
+        with_pcie     = True,  pcie_lanes=1, pcie_obs=True,
         with_eth      = False, eth_sfp=0, eth_phy="1000basex",
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
@@ -209,6 +209,8 @@ class BaseSoC(SoCMini):
         if with_pcie:
             if variant == "baseboard":
                 pcie_lanes = 1
+            pcie_dmas = {True : 2, False : 1}[pcie_obs]
+
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size   = 0x20000,
@@ -225,7 +227,7 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 }
             )
-            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=1, data_width=64,
+            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -233,6 +235,8 @@ class BaseSoC(SoCMini):
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
+            if pcie_obs:
+                self.comb += self.pcie_dma1.synchronizer.pps.eq(1)
 
             # Timing Constraints/False Paths -------------------------------------------------------
             for i in range(4):
@@ -308,6 +312,10 @@ class BaseSoC(SoCMini):
                 self.header.rx.reset.eq(~self.pcie_dma0.writer.enable),
                 self.header.rx.source.connect(self.pcie_dma0.sink),
             ]
+
+            # Header RX -> PCIe Obs RX.
+            if pcie_obs:
+                self.comb += self.header.rx.source.connect(self.pcie_dma1.sink, omit={"ready"})
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
