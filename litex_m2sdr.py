@@ -49,7 +49,6 @@ from gateware.header      import TXRXHeader
 from gateware.measurement import MultiClkMeasurement
 
 from software import generate_litepcie_software
-from software import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -439,17 +438,6 @@ def main():
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
 
-    # Remove PCIe Driver/Device.
-    if (args.load or args.flash) and args.rescan:
-        device_ids = [
-            get_pcie_device_id("0x10ee", "0x7021"),
-            get_pcie_device_id("0x10ee", "0x7022"),
-            get_pcie_device_id("0x10ee", "0x7024"),
-        ]
-        for device_id in device_ids:
-            if device_id:
-                remove_pcie_device(device_id, driver="litepcie")
-
     # Load Bistream.
     if args.load:
         prog = soc.platform.create_programmer()
@@ -463,13 +451,12 @@ def main():
     # Flash Multiboot Bitstreams.
     if args.flash_multiboot:
         prog = soc.platform.create_programmer()
-        prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),   verify=True)
-        prog.flash(soc.platform.image_size, builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
+        prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),    verify=True)
+        prog.flash(soc.platform.image_size,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
 
     # Rescan PCIe Bus.
     if args.rescan:
-        time.sleep(2)
-        rescan_pcie_bus()
+        subprocess.run("sudo sh -c 'cd software && ./rescan.py'", shell=True)
 
 if __name__ == "__main__":
     main()
