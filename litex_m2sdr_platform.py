@@ -209,7 +209,7 @@ class Platform(Xilinx7SeriesPlatform):
                 {build_name}_operational.bit\" -file {build_name}_operational.bin",
 
                 # Build Fallback-Multiboot Bitstream.
-                "set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR {} [current_design]".format(self.image_size),
+                f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{self.image_size:08x} [current_design]",
                 "write_bitstream -force {build_name}_fallback.bit ",
                 "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
