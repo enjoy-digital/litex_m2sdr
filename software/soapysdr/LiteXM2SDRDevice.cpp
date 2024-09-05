@@ -194,6 +194,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         this->setBandwidth(SOAPY_SDR_RX, 0, 30.72e6);
         this->setBandwidth(SOAPY_SDR_TX, 0, 30.72e6);
         this->setGainMode(SOAPY_SDR_RX,  0, false);
+        this->setGain(SOAPY_SDR_RX,      0, 0);
+        this->setGain(SOAPY_SDR_TX,      0, -20);
         this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
         this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
 
@@ -205,6 +207,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
         this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
         this->setGainMode(SOAPY_SDR_RX,  1, false);
+        this->setGain(SOAPY_SDR_RX,      1, 0);
+        this->setGain(SOAPY_SDR_TX,      1, -20);
         this->setIQBalance(SOAPY_SDR_RX, 1, 1.0);
         this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
     }
