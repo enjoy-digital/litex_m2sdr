@@ -138,6 +138,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         litepcie_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
+    /* Configure 2T2R/1T1R mode */
+#ifdef _1T1R_MODE
+    litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+#else
+    litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+#endif
+
     /* Bypass synchro. */
     litepcie_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
@@ -179,38 +186,42 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
         /* Some defaults to avoid throwing. */
-        setSampleRate(SOAPY_SDR_TX, 0, 30.72e6);
-        setSampleRate(SOAPY_SDR_RX, 0, 30.72e6);
-        setSampleRate(SOAPY_SDR_TX, 1, 30.72e6);
-        setSampleRate(SOAPY_SDR_RX, 1, 30.72e6);
 
         this->setClockSource("internal");
 
         /* TX1/RX1. */
-        this->setAntenna(SOAPY_SDR_RX,   0, "A_BALANCED");
-        this->setAntenna(SOAPY_SDR_TX,   0, "A");
-        this->setFrequency(SOAPY_SDR_RX, 0, "BB", 1e6);
-        this->setFrequency(SOAPY_SDR_TX, 0, "BB", 1e6);
-        this->setBandwidth(SOAPY_SDR_RX, 0, 30.72e6);
-        this->setBandwidth(SOAPY_SDR_TX, 0, 30.72e6);
-        this->setGainMode(SOAPY_SDR_RX,  0, false);
-        this->setGain(SOAPY_SDR_RX,      0, 0);
-        this->setGain(SOAPY_SDR_TX,      0, -20);
-        this->setIQBalance(SOAPY_SDR_RX, 0, 1.0);
-        this->setIQBalance(SOAPY_SDR_TX, 0, 1.0);
+        if (this->getNumChannels(0) >= 1) {
+            this->setSampleRate(SOAPY_SDR_TX,  0, 30.72e6);
+            this->setSampleRate(SOAPY_SDR_RX,  0, 30.72e6);
+            this->setAntenna(SOAPY_SDR_RX,     0, "A_BALANCED");
+            this->setAntenna(SOAPY_SDR_TX,     0, "A");
+            this->setFrequency(SOAPY_SDR_RX,   0, "BB", 1e6);
+            this->setFrequency(SOAPY_SDR_TX,   0, "BB", 1e6);
+            this->setBandwidth(SOAPY_SDR_RX,   0, 30.72e6);
+            this->setBandwidth(SOAPY_SDR_TX,   0, 30.72e6);
+            this->setGainMode(SOAPY_SDR_RX,    0, false);
+            this->setGain(SOAPY_SDR_RX,        0, 0);
+            this->setGain(SOAPY_SDR_TX,        0, -20);
+            this->setIQBalance(SOAPY_SDR_RX,   0, 1.0);
+            this->setIQBalance(SOAPY_SDR_TX,   0, 1.0);
+        }
 
         /* TX2/RX2. */
-        this->setAntenna(SOAPY_SDR_RX,   1, "A_BALANCED");
-        this->setAntenna(SOAPY_SDR_TX,   1, "A");
-        this->setFrequency(SOAPY_SDR_RX, 1, "BB", 1e6);
-        this->setFrequency(SOAPY_SDR_TX, 1, "BB", 1e6);
-        this->setBandwidth(SOAPY_SDR_RX, 1, 30.72e6);
-        this->setBandwidth(SOAPY_SDR_TX, 1, 30.72e6);
-        this->setGainMode(SOAPY_SDR_RX,  1, false);
-        this->setGain(SOAPY_SDR_RX,      1, 0);
-        this->setGain(SOAPY_SDR_TX,      1, -20);
-        this->setIQBalance(SOAPY_SDR_RX, 1, 1.0);
-        this->setIQBalance(SOAPY_SDR_TX, 1, 1.0);
+        if (this->getNumChannels(0) >= 2) {
+            this->setSampleRate(SOAPY_SDR_TX,  1, 30.72e6);
+            this->setSampleRate(SOAPY_SDR_RX,  1, 30.72e6);
+            this->setAntenna(SOAPY_SDR_RX,     1, "A_BALANCED");
+            this->setAntenna(SOAPY_SDR_TX,     1, "A");
+            this->setFrequency(SOAPY_SDR_RX,   1, "BB", 1e6);
+            this->setFrequency(SOAPY_SDR_TX,   1, "BB", 1e6);
+            this->setBandwidth(SOAPY_SDR_RX,   1, 30.72e6);
+            this->setBandwidth(SOAPY_SDR_TX,   1, 30.72e6);
+            this->setGainMode(SOAPY_SDR_RX,    1, false);
+            this->setGain(SOAPY_SDR_RX,        1, 0);
+            this->setGain(SOAPY_SDR_TX,        1, -20);
+            this->setIQBalance(SOAPY_SDR_RX,   1, 1.0);
+            this->setIQBalance(SOAPY_SDR_TX,   1, 1.0);
+        }
     }
 
     /* Set-up the DMA. */
@@ -258,7 +269,7 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 ***************************************************************************************************/
 
 size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
-    return 2;
+    return this->_nChannels;
 }
 
 bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
