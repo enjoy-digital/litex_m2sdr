@@ -126,7 +126,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie     = True,  pcie_lanes=1, pcie_obs=True,
+        with_pcie     = True,  pcie_lanes=1, pcie_obs=False,
         with_eth      = False, eth_sfp=0, eth_phy="1000basex",
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
