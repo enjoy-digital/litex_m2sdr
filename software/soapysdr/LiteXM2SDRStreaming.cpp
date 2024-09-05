@@ -14,6 +14,9 @@
 #include <thread>
 #include <sys/mman.h>
 
+#include "ad9361/ad9361.h"
+#include "ad9361/ad9361_api.h"
+
 #include "LiteXM2SDRDevice.hpp"
 
 /* Setup and configure a stream for RX or TX. */
@@ -61,7 +64,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             _rx_stream.channels = channels;
         }
 
-        return RX_STREAM;
+        if (_nChannels != 0 && _rx_stream.channels.size() != _nChannels) {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Mismatch number of channels configuration between RX and TX.");
+            throw std::runtime_error("Invalid number of channels.");
+        }
+
+        _nChannels = _rx_stream.channels.size();
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
@@ -99,10 +107,23 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             _tx_stream.channels = channels;
         }
 
-        return TX_STREAM;
+        if (_nChannels != 0 && _tx_stream.channels.size() != _nChannels) {
+            SoapySDR_logf(SOAPY_SDR_ERROR, "Mismatch number of channels configuration between RX and TX.");
+            throw std::runtime_error("Invalid number of channels.");
+        }
+
+        _nChannels = _tx_stream.channels.size();
     } else {
         throw std::runtime_error("Invalid direction.");
     }
+
+    /* Configure 2T2R/1T1R mode (PHY) */
+    litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+    if (direction == SOAPY_SDR_RX)
+        ad9361_en_dis_rx(ad9361_phy, RX_1 | RX_2, _nChannels == 2 ? RX_1 | RX_2 : (_rx_stream.channels[0] == 0 ? RX_1 : RX_2));
+    else if (direction == SOAPY_SDR_TX)
+        ad9361_en_dis_tx(ad9361_phy, TX_1 | TX_2, _nChannels == 2 ? TX_1 | TX_2 : (_tx_stream.channels[0] == 0 ? TX_1 : TX_2));
+    return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }
 
 /* Close the specified stream and release associated resources. */
