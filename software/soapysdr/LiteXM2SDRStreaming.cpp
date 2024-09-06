@@ -119,17 +119,29 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
     /* Configure 2T2R/1T1R mode (PHY) */
     litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+
+    /* AD9361 Channel en/dis */
+    ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
     if (_nChannels == 1) {
         if (direction == SOAPY_SDR_RX)
-            ad9361_en_dis_rx(ad9361_phy, RX_1 | RX_2, _rx_stream.channels[0] == 0 ? RX_1 : RX_2);
+            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
         else if (direction == SOAPY_SDR_TX)
-            ad9361_en_dis_tx(ad9361_phy, TX_1 | TX_2, _tx_stream.channels[0] == 0 ? TX_1 : TX_2);
+            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? TX_1 : TX_2;
     } else {
         if (direction == SOAPY_SDR_RX)
-            ad9361_en_dis_rx(ad9361_phy, RX_1 | RX_2, RX_1 | RX_2);
+            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
         else if (direction == SOAPY_SDR_TX)
-            ad9361_en_dis_tx(ad9361_phy, TX_1 | TX_2, TX_1 | TX_2);
+            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = TX_1 | TX_2;
     }
+
+    /* AD9361 Port Control 2t2r timing enable */
+    struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
+    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
+    if (_nChannels == 2)
+        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+
+    ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
+
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }
 
@@ -163,10 +175,14 @@ int SoapyLiteXM2SDR::activateStream(
     const long long /*timeNs*/,
     const size_t /*numElems*/) {
     if (stream == RX_STREAM) {
+        for (size_t i = 0; i < _rx_stream.channels.size(); i++)
+            channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
         /* Enable the DMA engine for RX. */
         litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
         _rx_stream.user_count = 0;
     } else if (stream == TX_STREAM) {
+        for (size_t i = 0; i < _tx_stream.channels.size(); i++)
+            channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
         /* Enable the DMA engine for TX. */
         litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;

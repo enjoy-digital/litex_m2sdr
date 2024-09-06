@@ -35,6 +35,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     ~SoapyLiteXM2SDR(void);
 
     /***********************************************************************************************
+    *                                 Channel configuration
+    ***********************************************************************************************/
+    void channel_configure(const int direction, const size_t channel);
+
+    /***********************************************************************************************
     *                              Identification API
     ***********************************************************************************************/
     std::string getDriverKey(void) const;
@@ -320,23 +325,26 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     };
 
     struct RXStream: Stream {
-        uint32_t vga_gain;
-        uint32_t lna_gain;
-        uint8_t amp_gain;
-        double samplerate;
-        uint32_t bandwidth;
-        uint64_t frequency;
+        double gain[2];
+        bool gainMode[2];
+        double iqbalance[2];
+        double samplerate[2];
+        double bandwidth[2];
+        double bb_frequency[2];
+        double rf_frequency[2];
+        std::string antenna[2];
 
         bool overflow;
     };
 
     struct TXStream: Stream {
-        uint32_t vga_gain;
-        uint8_t amp_gain;
-        double samplerate;
-        uint32_t bandwidth;
-        uint64_t frequency;
-        bool bias;
+        double gain[2];
+        double iqbalance[2];
+        double samplerate[2];
+        double bandwidth[2];
+        double bb_frequency[2];
+        double rf_frequency[2];
+        std::string antenna[2];
 
         bool underflow;
 
