@@ -17,6 +17,8 @@ from gateware.ad9361.phy     import AD9361PHY
 from gateware.ad9361.spi     import AD9361SPIMaster
 from gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from gateware.ad9361.bitmode import _sign_extend
+from gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
+from gateware.ad9361.agc     import AGCSaturationCount
 
 # Architecture -------------------------------------------------------------------------------------
 #
@@ -208,7 +210,6 @@ class AD9361RFIC(LiteXModule):
         )
 
     def add_prbs(self):
-        from gateware.ad9361.prbs import AD9361PRBSGenerator, AD9361PRBSChecker
         self.prbs_tx = CSRStorage(fields=[
             CSRField("enable", size=1, offset= 0, values=[
                 ("``0b0``", "Disable PRBS TX."),
@@ -254,3 +255,22 @@ class AD9361RFIC(LiteXModule):
                     self.prbs_rx.fields.synced.eq(0)
                 ),
             ]
+
+    def add_agc(self):
+        rx_cdc = self.rx_cdc
+        self.agc_count_rx1_low = AGCSaturationCount(
+            ce  = rx_cdc.source.valid & rx_cdc.source.ready,
+            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]]
+        )
+        self.agc_count_rx1_high = AGCSaturationCount(
+            ce  = rx_cdc.source.valid & rx_cdc.source.ready,
+            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]]
+        )
+        self.agc_count_rx2_low = AGCSaturationCount(
+            ce  = rx_cdc.source.valid & rx_cdc.source.ready,
+            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]]
+        )
+        self.agc_count_rx2_high = AGCSaturationCount(
+            ce  = rx_cdc.source.valid & rx_cdc.source.ready,
+            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]]
+        )

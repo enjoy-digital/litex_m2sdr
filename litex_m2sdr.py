@@ -325,6 +325,7 @@ class BaseSoC(SoCMini):
             sys_clk_freq = sys_clk_freq,
         )
         self.ad9361.add_prbs()
+        self.ad9361.add_agc()
         if with_pcie:
             self.comb += [
                 # Header TX -> AD9361 TX.
