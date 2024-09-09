@@ -125,6 +125,7 @@ static void m2sdr_init(
     int32_t  bist_tone_freq,
     bool     enable_8bit_mode,
     bool     enable_oversample,
+    const char *chan_mode,
     const char *sync_mode
 ) {
     int fd;
@@ -172,6 +173,23 @@ static void m2sdr_init(
     default_init_param.gpio_sync    = -1;
     default_init_param.gpio_cal_sw1 = -1;
     default_init_param.gpio_cal_sw2 = -1;
+
+    if (strcmp(chan_mode, "1t1r") == 0) {
+        printf("Setting Channel Mode to 1T1R.\n");
+        default_init_param.two_rx_two_tx_mode_enable     = 0;
+        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
+        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
+        default_init_param.two_t_two_r_timing_enable     = 0;
+        litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+    }
+    if (strcmp(chan_mode, "2t2r") == 0) {
+        printf("Setting Channel Mode to 2T2R.\n");
+        default_init_param.two_rx_two_tx_mode_enable     = 1;
+        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
+        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
+        default_init_param.two_t_two_r_timing_enable     = 1;
+        litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+    }
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
     /* Configure AD9361 Samplerate */
@@ -444,6 +462,7 @@ static void help(void)
            "-c device_num         Select the device (default=0).\n"
            "-8bit                 Enable 8-bit mode (default=disabled).\n"
            "-oversample           Enable oversample mode (default=disabled).\n"
+           "-chan mode            Set channel mode: '1t1r'(1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default='2t2r').\n"
            "-sync mode            Set synchronization mode (internal or external, default=internal).\n"
            "\n"
            "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
@@ -487,7 +506,8 @@ static struct option options[] = {
     { "bist_tone_freq",   required_argument },        /* 12 */
     { "8bit",             no_argument, NULL, '8' },   /* 13 */
     { "oversample",       no_argument },              /* 14 */
-    { "sync",             required_argument },        /* 15 */
+    { "chan",             required_argument },        /* 15 */
+    { "sync",             required_argument },        /* 16 */
     { NULL },
 };
 
@@ -513,6 +533,7 @@ int main(int argc, char **argv)
     int32_t  bist_tone_freq;
     bool     enable_8bit_mode = false;
     bool     enable_oversample = false;
+    char     chan_mode[16] = "2t2r";
     char     sync_mode[16] = "internal";
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
@@ -575,7 +596,11 @@ int main(int argc, char **argv)
                 case 14: /* oversample */
                     enable_oversample = true;
                     break;
-                case 15: /* sync */
+                case 15: /* chan */
+                    strncpy(chan_mode, optarg, sizeof(chan_mode));
+                    chan_mode[sizeof(sync_mode) - 1] = '\0';
+                    break;
+                case 16: /* sync */
                     strncpy(sync_mode, optarg, sizeof(sync_mode));
                     sync_mode[sizeof(sync_mode) - 1] = '\0';
                     break;
@@ -603,7 +628,7 @@ int main(int argc, char **argv)
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
 
     /* Initialize RF. */
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, sync_mode);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
 
     return 0;
 }

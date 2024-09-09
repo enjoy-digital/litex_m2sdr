@@ -42,8 +42,6 @@
 #define RX_CLK_DELAY  2
 #define RX_DAT_DELAY  3
 
-//#define _1T1R_MODE
-
 #define SI5351_I2C_ADDR 0x60
 #define SI5351B_VERSION 0b0
 #define SI5351C_VERSION 0b1
@@ -249,15 +247,9 @@ AD9361_InitParam default_init_param = {
     /* Reference Clock */
     DEFAULT_REFCLK_FREQ, //reference_clk_rate
     /* Base Configuration */
-#ifdef _1T1R_MODE
-    0,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
-    0,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
-    0,      //one_rx_one_tx_mode_use_tx_num *** adi,1rx-1tx-mode-use-tx-num
-#else
     1,      //two_rx_two_tx_mode_enable *** adi,2rx-2tx-mode-enable
     1,      //one_rx_one_tx_mode_use_rx_num *** adi,1rx-1tx-mode-use-rx-num
     1,      //one_rx_one_tx_mode_use_tx_num *** adi,1rx-1tx-mode-use-tx-num
-#endif
     1,      //frequency_division_duplex_mode_enable *** adi,frequency-division-duplex-mode-enable
     0,      //frequency_division_duplex_independent_mode_enable *** adi,frequency-division-duplex-independent-mode-enable
     0,      //tdd_use_dual_synth_mode_enable *** adi,tdd-use-dual-synth-mode-enable
@@ -416,11 +408,7 @@ AD9361_InitParam default_init_param = {
     0,      //tx_channel_swap_enable *** adi,tx-channel-swap-enable
     0,      //rx_channel_swap_enable *** adi,rx-channel-swap-enable
     1,      //rx_frame_pulse_mode_enable *** adi,rx-frame-pulse-mode-enable
-#ifdef _1T1R_MODE
-    0,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
-#else
     1,      //two_t_two_r_timing_enable *** adi,2t2r-timing-enable
-#endif
     0,      //invert_data_bus_enable *** adi,invert-data-bus-enable
     0,      //invert_data_clk_enable *** adi,invert-data-clk-enable
     0,      //fdd_alt_word_order_enable *** adi,fdd-alt-word-order-enable
