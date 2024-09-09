@@ -126,12 +126,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (direction == SOAPY_SDR_RX)
             ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
         else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? TX_1 : TX_2;
+            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _rx_stream.channels[0] == 0 ? TX_1 : TX_2;
     } else {
         if (direction == SOAPY_SDR_RX)
             ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
         else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = TX_1 | TX_2;
+            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
     }
 
     /* AD9361 Port Control 2t2r timing enable */

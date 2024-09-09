@@ -182,41 +182,33 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         this->setClockSource("internal");
 
+        /* Common for TX1/TX2 and RX1/RX2 */
+        _rx_stream.samplerate   = 30.72e6;
+        _tx_stream.samplerate   = 30.72e6;
+        _rx_stream.frequency    = 1e6;
+        _tx_stream.frequency    = 1e6;
+        _rx_stream.bandwidth    = 30.72e6;
+        _tx_stream.bandwidth    = 30.72e6;
+
         /* TX1/RX1. */
-        _rx_stream.samplerate[0]   = 30.72e6;
-        _tx_stream.samplerate[0]   = 30.72e6;
-        _rx_stream.antenna[0]      = "A_BALANCED";
-        _tx_stream.antenna[0]      = "A";
-        _rx_stream.bb_frequency[0] = 1e6;
-        _tx_stream.bb_frequency[0] = 1e6;
-        _rx_stream.rf_frequency[0] = 100e6;
-        _tx_stream.rf_frequency[0] = 100e6;
-        _rx_stream.bandwidth[0]    = 30.72e6;
-        _tx_stream.bandwidth[0]    = 30.72e6;
-        _rx_stream.gainMode[0]     = false;
-        _rx_stream.gain[0]         = 0;
-        _tx_stream.gain[0]         = -20;
-        _rx_stream.iqbalance[0]    = 1.0;
-        _tx_stream.iqbalance[0]    = 1.0;
+        _rx_stream.antenna[0]   = "A_BALANCED";
+        _tx_stream.antenna[0]   = "A";
+        _rx_stream.gainMode[0]  = false;
+        _rx_stream.gain[0]      = 0;
+        _tx_stream.gain[0]      = -20;
+        _rx_stream.iqbalance[0] = 1.0;
+        _tx_stream.iqbalance[0] = 1.0;
         channel_configure(SOAPY_SDR_RX, 0);
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.samplerate[1]   = 30.72e6;
-        _tx_stream.samplerate[1]   = 30.72e6;
-        _rx_stream.antenna[1]      = "A_BALANCED";
-        _tx_stream.antenna[1]      = "A";
-        _rx_stream.bb_frequency[1] = 100e6;
-        _tx_stream.bb_frequency[1] = 100e6;
-        _rx_stream.rf_frequency[1] = 100e6;
-        _tx_stream.rf_frequency[1] = 100e6;
-        _rx_stream.bandwidth[1]    = 30.72e6;
-        _tx_stream.bandwidth[1]    = 30.72e6;
-        _rx_stream.gainMode[1]     = false;
-        _rx_stream.gain[1]         = 0;
-        _tx_stream.gain[1]         = -20;
-        _rx_stream.iqbalance[1]    = 1.0;
-        _tx_stream.iqbalance[1]    = 1.0;
+        _rx_stream.antenna[1]   = "A_BALANCED";
+        _tx_stream.antenna[1]   = "A";
+        _rx_stream.gainMode[1]  = false;
+        _rx_stream.gain[1]      = 0;
+        _tx_stream.gain[1]      = -20;
+        _rx_stream.iqbalance[1] = 1.0;
+        _tx_stream.iqbalance[1] = 1.0;
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);
     }
@@ -255,20 +247,18 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
 void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channel) {
     if (direction == SOAPY_SDR_TX) {
-        this->setSampleRate(SOAPY_SDR_TX, channel, _tx_stream.samplerate[channel]);
+        this->setSampleRate(SOAPY_SDR_TX, channel, _tx_stream.samplerate);
         this->setAntenna(SOAPY_SDR_TX,    channel, _tx_stream.antenna[channel]);
-        this->setFrequency(SOAPY_SDR_TX,  channel, "BB", _tx_stream.bb_frequency[channel]);
-        this->setFrequency(SOAPY_SDR_TX,  channel, "RF", _tx_stream.rf_frequency[channel]);
-        this->setBandwidth(SOAPY_SDR_TX,  channel, _tx_stream.bandwidth[channel]);
+        this->setFrequency(SOAPY_SDR_TX,  channel, "BB", _tx_stream.frequency);
+        this->setBandwidth(SOAPY_SDR_TX,  channel, _tx_stream.bandwidth);
         this->setGain(SOAPY_SDR_TX,       channel, _tx_stream.gain[channel]);
         this->setIQBalance(SOAPY_SDR_TX,  channel, _tx_stream.iqbalance[channel]);
     }
     if (direction == SOAPY_SDR_RX) {
-        this->setSampleRate(SOAPY_SDR_RX, channel, _rx_stream.samplerate[channel]);
+        this->setSampleRate(SOAPY_SDR_RX, channel, _rx_stream.samplerate);
         this->setAntenna(SOAPY_SDR_RX,    channel, _rx_stream.antenna[channel]);
-        this->setFrequency(SOAPY_SDR_RX,  channel, "BB", _rx_stream.bb_frequency[channel]);
-        this->setFrequency(SOAPY_SDR_RX,  channel, "RF", _rx_stream.rf_frequency[channel]);
-        this->setBandwidth(SOAPY_SDR_RX,  channel, _rx_stream.bandwidth[channel]);
+        this->setFrequency(SOAPY_SDR_RX,  channel, "BB", _rx_stream.frequency);
+        this->setBandwidth(SOAPY_SDR_RX,  channel, _rx_stream.bandwidth);
         this->setGainMode(SOAPY_SDR_RX,   channel, _rx_stream.gainMode[channel]);
         this->setGain(SOAPY_SDR_RX,       channel, _rx_stream.gain[channel]);
         this->setIQBalance(SOAPY_SDR_RX,  channel, _rx_stream.iqbalance[channel]);
@@ -498,19 +488,10 @@ void SoapyLiteXM2SDR::setFrequency(
         name.c_str(),
         frequency / 1e6);
     _cachedFreqValues[direction][channel][name] = frequency;
-    if (name == "RF") {
-        if (direction == SOAPY_SDR_TX)
-            _tx_stream.rf_frequency[channel] = frequency;
-        if (direction == SOAPY_SDR_RX)
-            _rx_stream.rf_frequency[channel] = frequency;
-    } else if (name == "BB") {
-        if (direction == SOAPY_SDR_TX)
-            _tx_stream.bb_frequency[channel] = frequency;
-        if (direction == SOAPY_SDR_RX)
-            _rx_stream.bb_frequency[channel] = frequency;
-    } else {
-        throw std::runtime_error("SoapyLiteXM2SDR::setFrequency: Error unknown " + name);
-    }
+    if (direction == SOAPY_SDR_TX)
+        _tx_stream.frequency = frequency;
+    if (direction == SOAPY_SDR_RX)
+        _rx_stream.frequency = frequency;
 
     uint64_t lo_freq = static_cast<uint64_t>(frequency);
 
@@ -597,11 +578,11 @@ void SoapyLiteXM2SDR::setSampleRate(
     if (_oversampling & (rate > 61.44e6))
         _rateMult = 2.0;
     if (direction == SOAPY_SDR_TX) {
-        _tx_stream.samplerate[channel] = rate;
+        _tx_stream.samplerate = rate;
         ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
     if (direction == SOAPY_SDR_RX) {
-        _rx_stream.samplerate[channel] = rate;
+        _rx_stream.samplerate = rate;
         ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
 
@@ -729,11 +710,11 @@ void SoapyLiteXM2SDR::setBandwidth(
     uint32_t bwi = static_cast<uint32_t>(bw);
 
     if (direction == SOAPY_SDR_TX) {
-        _tx_stream.bandwidth[channel] = bw;
+        _tx_stream.bandwidth = bw;
         ad9361_set_tx_rf_bandwidth(ad9361_phy, bwi);
     }
     if (direction == SOAPY_SDR_RX) {
-        _rx_stream.bandwidth[channel] = bw;
+        _rx_stream.bandwidth = bw;
         ad9361_set_rx_rf_bandwidth(ad9361_phy, bwi);
     }
 }

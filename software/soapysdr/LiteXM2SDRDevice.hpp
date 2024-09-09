@@ -328,10 +328,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         double gain[2];
         bool gainMode[2];
         double iqbalance[2];
-        double samplerate[2];
-        double bandwidth[2];
-        double bb_frequency[2];
-        double rf_frequency[2];
+        double samplerate;
+        double bandwidth;
+        double frequency;
         std::string antenna[2];
 
         bool overflow;
@@ -340,10 +339,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct TXStream: Stream {
         double gain[2];
         double iqbalance[2];
-        double samplerate[2];
-        double bandwidth[2];
-        double bb_frequency[2];
-        double rf_frequency[2];
+        double samplerate;
+        double bandwidth;
+        double frequency;
         std::string antenna[2];
 
         bool underflow;
