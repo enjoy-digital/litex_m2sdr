@@ -108,9 +108,9 @@ static void test_ad9361_dump(void)
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(fd, 0);
 
-    /* AD9361 SPI Dump */
-    for (i=0; i<128; i++)
-        printf("Reg 0x%02x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
+    /* AD9361 SPI Dump of all the Registers */
+    for (i=0; i<1024; i++)
+        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
 
     printf("\n");
 
