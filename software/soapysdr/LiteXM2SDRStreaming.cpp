@@ -63,12 +63,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         } else {
             _rx_stream.channels = channels;
         }
-
-        if (_nChannels != 0 && _rx_stream.channels.size() != _nChannels) {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Mismatch number of channels configuration between RX and TX.");
-            throw std::runtime_error("Invalid number of channels.");
-        }
-
         _nChannels = _rx_stream.channels.size();
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
@@ -106,12 +100,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         } else {
             _tx_stream.channels = channels;
         }
-
-        if (_nChannels != 0 && _tx_stream.channels.size() != _nChannels) {
-            SoapySDR_logf(SOAPY_SDR_ERROR, "Mismatch number of channels configuration between RX and TX.");
-            throw std::runtime_error("Invalid number of channels.");
-        }
-
         _nChannels = _tx_stream.channels.size();
     } else {
         throw std::runtime_error("Invalid direction.");
