@@ -26,6 +26,8 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 
+//#define _122P88MSPS_TEST
+
 /***************************************************************************************************
  *                                    AD9361
  **************************************************************************************************/
@@ -157,6 +159,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("oversampling") > 0) {
         _oversampling = std::stoi(args.at("oversampling"));
     }
+
+#ifdef _122P88MSPS_TEST
+    _bitMode      = 8;
+    _oversampling = 1;
+#endif
 
     if (do_init) {
         /* Initialize SI531 Clocking. */
