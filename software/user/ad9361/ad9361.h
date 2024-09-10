@@ -3546,6 +3546,8 @@ int ad9361_synth_lo_powerdown(struct ad9361_rf_phy *phy,
 			      enum synth_pd_ctrl rx,
 			      enum synth_pd_ctrl tx);
 
+void ad9361_enable_oversampling(struct ad9361_rf_phy *phy);
+
 #ifdef __cplusplus
 }
 #endif

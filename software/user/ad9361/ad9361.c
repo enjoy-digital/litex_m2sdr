@@ -7459,3 +7459,57 @@ int32_t ad9361_rssi_gain_step_calib(struct ad9361_rf_phy *phy)
 
 	return 0;
 }
+
+/*  Note: This oversampling code is borrowed from the BladeRF project, allowing a samplerate of
+ *  122.88MSPS. It should be used with care and is intended for experienced developers.
+ *
+ *  More information:
+ *  - https://www.nuand.com/2023-02-release-122-88mhz-bandwidth
+ *  - https://destevez.net/2023/02/running-the-ad9361-at-122-88-msps
+ *
+ * One key difference from BladeRF is that M2SDR, in X4 mode, has sufficient bandwidth on the
+ * PCIe link to avoid truncating data from 12-bit to 8-bit.
+ *
+ * When operating in 2T2R mode, the FPGA to RFIC interface is overclocked from 245.76MHz to
+ * 491.52MHz. Surprisingly, this seems to work well with updated timing constraints. However,
+ * switching to 1T1R mode avoids overclocking this interface and limits overclocking to the
+ * AD9631 part.
+ *
+ */
+void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
+{
+    /* OC Register: General oversampling control. */
+    ad9361_spi_write(phy->spi, 0x003, 0x54);
+
+#if 0 /* CHECKME: Enabling following configuration seems to degrade things. */
+    /* TX Register Assignments: Configuring TX path for oversampling. */
+    ad9361_spi_write(phy->spi, 0x02, 0xc0);  /* TX Enable and Filter Control. */
+    ad9361_spi_write(phy->spi, 0xc2, 0x9f);  /* TX BBF (Baseband Filter) R1.  */
+    ad9361_spi_write(phy->spi, 0xc3, 0x9f);  /* TX BBF R2.                    */
+    ad9361_spi_write(phy->spi, 0xc4, 0x9f);  /* TX BBF R3.                    */
+    ad9361_spi_write(phy->spi, 0xc5, 0x9f);  /* TX BBF R4.                    */
+    ad9361_spi_write(phy->spi, 0xc6, 0x9f);  /* TX BBF Real Pole Word.        */
+    ad9361_spi_write(phy->spi, 0xc7, 0x00);  /* TX BBF Capacitor C1.          */
+    ad9361_spi_write(phy->spi, 0xc8, 0x00);  /* TX BBF Capacitor C2.          */
+    ad9361_spi_write(phy->spi, 0xc9, 0x00);  /* TX BBF Real Pole Word.        */
+
+    /* RX Register Assignments: Configuring RX path for oversampling. */
+    ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
+    ad9361_spi_write(phy->spi, 0x1e4, 0xFF);
+    ad9361_spi_write(phy->spi, 0x1f2, 0xFF);
+
+    /* Miller and BBF capacitors settings. */
+    ad9361_spi_write(phy->spi, 0x1e7, 0x00);
+    ad9361_spi_write(phy->spi, 0x1e8, 0x00);
+    ad9361_spi_write(phy->spi, 0x1e9, 0x00);
+    ad9361_spi_write(phy->spi, 0x1ea, 0x00);
+    ad9361_spi_write(phy->spi, 0x1eb, 0x00);
+    ad9361_spi_write(phy->spi, 0x1ec, 0x00);
+    ad9361_spi_write(phy->spi, 0x1ed, 0x00);
+    ad9361_spi_write(phy->spi, 0x1ee, 0x00);
+    ad9361_spi_write(phy->spi, 0x1ef, 0x00);
+    ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
+#endif
+    /* BIST and Data Port Test Config: Must be set to 0x03. */
+    ad9361_spi_write(phy->spi, 0x3f6, 0x03);
+}
