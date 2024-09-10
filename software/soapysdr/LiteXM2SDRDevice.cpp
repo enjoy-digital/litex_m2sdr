@@ -606,6 +606,7 @@ void SoapyLiteXM2SDR::setSampleRate(
         /* OC Register: General oversampling control. */
         m2sdr_ad9361_spi_write(_fd, 0x003, 0x54);
 
+#if 0 /* CHECKME: Enabling following configuration seems to degrade things. */
         /* TX Register Assignments: Configuring TX path for oversampling. */
         m2sdr_ad9361_spi_write(_fd, 0x02, 0xc0);  /* TX Enable and Filter Control. */
         m2sdr_ad9361_spi_write(_fd, 0xc2, 0x9f);  /* TX BBF (Baseband Filter) R1.  */
@@ -633,7 +634,7 @@ void SoapyLiteXM2SDR::setSampleRate(
         m2sdr_ad9361_spi_write(_fd, 0x1ee, 0x00);
         m2sdr_ad9361_spi_write(_fd, 0x1ef, 0x00);
         m2sdr_ad9361_spi_write(_fd, 0x1e0, 0xBF);
-
+#endif
         /* BIST and Data Port Test Config: Must be set to 0x03. */
         m2sdr_ad9361_spi_write(_fd, 0x3f6, 0x03);
     }
