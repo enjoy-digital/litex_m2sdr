@@ -7481,7 +7481,7 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
     /* OC Register: General oversampling control. */
     ad9361_spi_write(phy->spi, 0x003, 0x54);
 
-#if 0 /* CHECKME: Enabling following configuration seems to degrade things. */
+#if 0 /* Note: Creates a symmetry in the spectrum for some gains values...*/
     /* TX Register Assignments: Configuring TX path for oversampling. */
     ad9361_spi_write(phy->spi, 0x02, 0xc0);  /* TX Enable and Filter Control. */
     ad9361_spi_write(phy->spi, 0xc2, 0x9f);  /* TX BBF (Baseband Filter) R1.  */
@@ -7492,12 +7492,16 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
     ad9361_spi_write(phy->spi, 0xc7, 0x00);  /* TX BBF Capacitor C1.          */
     ad9361_spi_write(phy->spi, 0xc8, 0x00);  /* TX BBF Capacitor C2.          */
     ad9361_spi_write(phy->spi, 0xc9, 0x00);  /* TX BBF Real Pole Word.        */
+#endif
 
+#if 0 /* Note: Creates a symmetry in the spectrum for some gains values... */
     /* RX Register Assignments: Configuring RX path for oversampling. */
     ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
     ad9361_spi_write(phy->spi, 0x1e4, 0xFF);
     ad9361_spi_write(phy->spi, 0x1f2, 0xFF);
+#endif
 
+#if 0 /* Note: Improves RF Bandwidth but creates a symmetry in the spectrum for some gains values... */
     /* Miller and BBF capacitors settings. */
     ad9361_spi_write(phy->spi, 0x1e7, 0x00);
     ad9361_spi_write(phy->spi, 0x1e8, 0x00);
@@ -7510,6 +7514,9 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
     ad9361_spi_write(phy->spi, 0x1ef, 0x00);
     ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
 #endif
+
+#if 0 /* Note: Hidden feature? Does not seems to impact spectrum. */
     /* BIST and Data Port Test Config: Must be set to 0x03. */
     ad9361_spi_write(phy->spi, 0x3f6, 0x03);
+#endif
 }
