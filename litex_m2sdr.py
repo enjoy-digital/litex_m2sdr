@@ -35,7 +35,9 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
+from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
+from liteeth.frontend.stream  import LiteEthStream2UDPTX
 
 from litesata.phy import LiteSATAPHY
 
@@ -244,6 +246,7 @@ class BaseSoC(SoCMini):
         # Ethernet ---------------------------------------------------------------------------------
 
         if with_eth:
+            # PHY.
             eth_phy_cls = {
                 "1000basex" : A7_1000BASEX,
                 "2500basex" : A7_2500BASEX,
@@ -255,7 +258,18 @@ class BaseSoC(SoCMini):
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
-            self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50")
+
+            # Core + MMAP (Etherbone).
+            self.add_etherbone(phy=self.ethphy, ip_address="192.168.1.50", data_width=32) # FIXME: Add parameter.
+
+            # Streamer (RF RX -> UDP).
+            eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(2345, dw=32, cd="sys") # FIXME: Add parameter.
+            self.eth_streamer = LiteEthStream2UDPTX(
+                ip_address = convert_ip("192.168.1.100"), # FIXME: Add parameter.
+                udp_port   = 2345,      # FIXME: Add parameter.
+                fifo_depth = 2*1024//4, # FIXME: Add parameter.
+                data_width = 32,
+            )
 
         # SATA -------------------------------------------------------------------------------------
 
@@ -325,7 +339,15 @@ class BaseSoC(SoCMini):
                 self.header.tx.source.connect(self.ad9361.sink),
                 # AD9361 RX -> Header RX.
                 self.ad9361.source.connect(self.header.rx.sink),
-        ]
+            ]
+        if with_eth:
+            self.eth_streamer_conv = stream.Converter(64, 32)
+            self.comb += [
+                # AD9361 RX -> Converter.
+                self.ad9361.source.connect(self.eth_streamer_conv.sink),
+                # Converter -> Streamer.
+                self.eth_streamer_conv.source.connect(self.eth_streamer.sink),
+            ]
         rfic_clk_freq = {
             False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
