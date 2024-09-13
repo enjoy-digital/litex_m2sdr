@@ -251,7 +251,7 @@ class BaseSoC(SoCMini):
                 "1000basex" : A7_1000BASEX,
                 "2500basex" : A7_2500BASEX,
             }[eth_phy]
-            self.ethphy = eth_phy_cls(
+            self.eth_phy = eth_phy_cls(
                 qpll_channel = self.qpll.get_channel("eth"),
                 data_pads    = self.platform.request("sfp", eth_sfp),
                 sys_clk_freq = sys_clk_freq,
@@ -260,7 +260,7 @@ class BaseSoC(SoCMini):
             )
 
             # Core + MMAP (Etherbone).
-            self.add_etherbone(phy=self.ethphy, ip_address=eth_local_ip, data_width=32)
+            self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32)
 
             # Streamer (RF RX -> UDP).
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=32, cd="sys")
