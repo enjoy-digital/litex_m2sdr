@@ -33,6 +33,7 @@ from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
+from litepcie.common        import *
 from litepcie.phy.s7pciephy import S7PCIEPHY
 
 from liteeth.common           import convert_ip
@@ -121,6 +122,7 @@ class BaseSoC(SoCMini):
         "timestamp"   : 22,
         "header"      : 23,
         "ad9361"      : 24,
+        "crossbar"    : 25,
 
         # Measurements/Analyzer.
         "clk_measurement" : 30,
@@ -262,15 +264,18 @@ class BaseSoC(SoCMini):
             # Core + MMAP (Etherbone).
             self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
 
-            # Streamer (RF RX -> UDP).
-            eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=32, cd="sys")
+            # UDP Streamer RX.
+            eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=64, cd="sys")
             self.eth_streamer = LiteEthStream2UDPTX(
                 ip_address = convert_ip(eth_remote_ip),
                 udp_port   = eth_udp_port,
-                fifo_depth = 1024//4,
-                data_width = 32,
+                fifo_depth = 1024//8,
+                data_width = 64,
             )
             self.comb += self.eth_streamer.source.connect(eth_streamer_port.sink)
+
+            # UDP Streamer TX.
+            # TODO.
 
         # SATA -------------------------------------------------------------------------------------
 
@@ -305,26 +310,6 @@ class BaseSoC(SoCMini):
 
         self.timestamp = Timestamp(clk_domain="rfic")
 
-        # TX/RX Header Extracter/Inserter ----------------------------------------------------------
-
-        self.header = TXRXHeader(data_width=64)
-        self.comb += [
-            self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
-            self.header.rx.timestamp.eq(self.timestamp.time),
-        ]
-        if with_pcie:
-            # PCIe TX -> Header TX.
-            self.comb += [
-                self.header.tx.reset.eq(~self.pcie_dma0.reader.enable),
-                self.pcie_dma0.source.connect(self.header.tx.sink),
-            ]
-
-            # Header RX -> PCIe RX.
-            self.comb += [
-                self.header.rx.reset.eq(~self.pcie_dma0.writer.enable),
-                self.header.rx.source.connect(self.pcie_dma0.sink),
-            ]
-
         # AD9361 RFIC ------------------------------------------------------------------------------
 
         self.ad9361 = AD9361RFIC(
@@ -334,29 +319,51 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
-        if with_pcie:
-            self.comb += [
-                # Header TX -> AD9361 TX.
-                self.header.tx.source.connect(self.ad9361.sink),
-                # AD9361 RX -> Header RX.
-                self.ad9361.source.connect(self.header.rx.sink),
-            ]
-        if with_eth:
-            # FIXME: Temporary code for initial Software RX tests over Ethernet.
-            self.eth_streamer_enable = CSRStorage()
-            self.eth_streamer_conv = stream.Converter(64, 32)
-            self.comb += If(self.eth_streamer_enable.storage,
-                # AD9361 RX -> Converter.
-                self.ad9361.source.connect(self.eth_streamer_conv.sink),
-                # Converter -> Streamer.
-                self.eth_streamer_conv.source.connect(self.eth_streamer.sink),
-            )
         rfic_clk_freq = {
             False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
         self.platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ad9361.cd_rfic.clk)
+
+        # TX/RX Header Extracter/Inserter ----------------------------------------------------------
+
+        self.header = TXRXHeader(data_width=64)
+        self.comb += [
+            self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
+            self.header.rx.timestamp.eq(self.timestamp.time),
+        ]
+
+        # TX/RX Datapath ---------------------------------------------------------------------------
+
+        # AD9361 <-> Header.
+        # ------------------
+        self.comb += [
+            self.header.tx.source.connect(self.ad9361.sink),
+            self.ad9361.source.connect(self.header.rx.sink),
+        ]
+
+        # Crossbar.
+        # ---------
+        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+
+        # RX: Header -> Crossbar -> Comms.
+        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+        if with_pcie:
+            self.comb += self.crossbar.demux.source0.connect(self.pcie_dma0.sink)
+        if with_eth:
+            self.comb += self.crossbar.demux.source1.connect(self.eth_streamer.sink)
+        if with_sata:
+            pass # TODO.
+
+        # RX: Comms -> Crossbar -> Header.
+        if with_pcie:
+            self.comb += self.pcie_dma0.source.connect(self.crossbar.mux.sink0)
+        if with_eth:
+            pass # TODO.
+        if with_sata:
+            pass # TODO.
+        self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
 
         # Clk Measurements -------------------------------------------------------------------------
 
