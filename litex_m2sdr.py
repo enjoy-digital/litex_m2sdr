@@ -403,6 +403,18 @@ class BaseSoC(SoCMini):
             csr_csv      = "analyzer.csv"
         )
 
+    def add_eth_tx_streamer_probe(self):
+        assert hasattr(self, "eth_streamer")
+        analyzer_signals = [
+            self.eth_streamer.sink,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -429,9 +441,10 @@ def main():
 
     # Litescope Probes.
     probeopts = parser.add_mutually_exclusive_group()
-    probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
-    probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
-    probeopts.add_argument("--with-pcie-dma-probe",    action="store_true", help="Enable PCIe DMA Probe.")
+    probeopts.add_argument("--with-ad9361-spi-probe",      action="store_true", help="Enable AD9361 SPI Probe.")
+    probeopts.add_argument("--with-ad9361-data-probe",     action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-pcie-dma-probe",        action="store_true", help="Enable PCIe DMA Probe.")
+    probeopts.add_argument("--with-eth-tx-streamer-probe", action="store_true", help="Enable Ethernet Tx streamer Probe.")
 
     args = parser.parse_args()
 
@@ -454,6 +467,8 @@ def main():
         soc.add_ad96361_data_probe()
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
+    if args.with_eth_tx_streamer_probe:
+        soc.add_eth_tx_streamer_probe()
 
     def get_build_name():
         r = f"litex_m2sdr_{args.variant}"
