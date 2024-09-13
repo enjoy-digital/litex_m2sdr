@@ -260,16 +260,17 @@ class BaseSoC(SoCMini):
             )
 
             # Core + MMAP (Etherbone).
-            self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32)
+            self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
 
             # Streamer (RF RX -> UDP).
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=32, cd="sys")
             self.eth_streamer = LiteEthStream2UDPTX(
                 ip_address = convert_ip(eth_remote_ip),
                 udp_port   = eth_udp_port,
-                fifo_depth = 2*1024//4, # FIXME: Add parameter.
+                fifo_depth = 1024//4,
                 data_width = 32,
             )
+            self.comb += self.eth_streamer.source.connect(eth_streamer_port.sink)
 
         # SATA -------------------------------------------------------------------------------------
 
@@ -341,13 +342,15 @@ class BaseSoC(SoCMini):
                 self.ad9361.source.connect(self.header.rx.sink),
             ]
         if with_eth:
+            # FIXME: Temporary code for initial Software RX tests over Ethernet.
+            self.eth_streamer_enable = CSRStorage()
             self.eth_streamer_conv = stream.Converter(64, 32)
-            self.comb += [
+            self.comb += If(self.eth_streamer_enable.storage,
                 # AD9361 RX -> Converter.
                 self.ad9361.source.connect(self.eth_streamer_conv.sink),
                 # Converter -> Streamer.
                 self.eth_streamer_conv.source.connect(self.eth_streamer.sink),
-            ]
+            )
         rfic_clk_freq = {
             False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
@@ -406,9 +409,13 @@ class BaseSoC(SoCMini):
         assert hasattr(self, "eth_streamer")
         analyzer_signals = [
             self.eth_streamer.sink,
+            self.eth_streamer.fsm,
+            self.eth_streamer.source,
+            self.ethcore_etherbone.udp.tx.sink,
+            self.ethcore_etherbone.arp.tx.sink.valid,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 1024,
+            depth        = 128,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "analyzer.csv"
