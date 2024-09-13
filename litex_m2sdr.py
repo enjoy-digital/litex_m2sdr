@@ -129,8 +129,7 @@ class BaseSoC(SoCMini):
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
-        with_eth      = False, eth_sfp=0, eth_phy="1000basex",
-        eth_ip="192.168.1.50", remote_ip="192.168.1.100", dst_port=2345,
+        with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_remote_ip="192.168.1.100", eth_udp_port=2345,
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
         with_rfic_oversampling = True,
@@ -261,13 +260,13 @@ class BaseSoC(SoCMini):
             )
 
             # Core + MMAP (Etherbone).
-            self.add_etherbone(phy=self.ethphy, ip_address=eth_ip, data_width=32)
+            self.add_etherbone(phy=self.ethphy, ip_address=eth_local_ip, data_width=32)
 
             # Streamer (RF RX -> UDP).
-            eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(dst_port, dw=32, cd="sys")
+            eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=32, cd="sys")
             self.eth_streamer = LiteEthStream2UDPTX(
-                ip_address = convert_ip(remote_ip),
-                udp_port   = dst_port,
+                ip_address = convert_ip(eth_remote_ip),
+                udp_port   = eth_udp_port,
                 fifo_depth = 2*1024//4, # FIXME: Add parameter.
                 data_width = 32,
             )
@@ -428,16 +427,20 @@ def main():
     parser.add_argument("--rescan",          action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
 
-    # Communication interfaces/features.
-    parser.add_argument("--with-pcie",       action="store_true",     help="Enable PCIe Communication.")
+    # PCIe parameters.
+    parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
+    parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+
+    # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
-    parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
-    parser.add_argument("--pcie-lanes",      default=4, type=int,     help="PCIe Lanes.",   choices=[1, 2, 4])
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
     parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
-    parser.add_argument("--eth-ip",          default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
-    parser.add_argument("--remote-ip",       default="192.168.1.100", help="Ethernet Remote IP address.")
-    parser.add_argument("--dst-port",        default=2345, type=int,  help="Ethernet Remote port.")
+    parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
+    parser.add_argument("--eth-remote-ip",   default="192.168.1.100", help="Ethernet Remote IP address.")
+    parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
+
+    # SATA parameters.
+    parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
 
     # Litescope Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -450,16 +453,19 @@ def main():
 
     # Build SoC.
     soc = BaseSoC(
-        variant    = args.variant,
-        with_pcie  = args.with_pcie,
-        pcie_lanes = args.pcie_lanes,
-        with_eth   = args.with_eth,
-        eth_sfp    = args.eth_sfp,
-        eth_phy    = args.eth_phy,
-        eth_ip     = args.eth_ip,
-        remote_ip  = args.remote_ip,
-        dst_port   = args.dst_port,
-        with_sata  = args.with_sata,
+        variant       = args.variant,
+
+        with_pcie     = args.with_pcie,
+        pcie_lanes    = args.pcie_lanes,
+
+        with_eth      = args.with_eth,
+        eth_sfp       = args.eth_sfp,
+        eth_phy       = args.eth_phy,
+        eth_local_ip  = args.eth_local_ip,
+        eth_remote_ip = args.eth_remote_ip,
+        eth_udp_port  = args.eth_udp_port,
+
+        with_sata     = args.with_sata,
     )
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
