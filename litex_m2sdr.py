@@ -347,16 +347,8 @@ class BaseSoC(SoCMini):
         # ---------
         self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
 
-        # RX: Header -> Crossbar -> Comms.
-        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
-        if with_pcie:
-            self.comb += self.crossbar.demux.source0.connect(self.pcie_dma0.sink)
-        if with_eth:
-            self.comb += self.crossbar.demux.source1.connect(self.eth_streamer.sink)
-        if with_sata:
-            pass # TODO.
-
-        # RX: Comms -> Crossbar -> Header.
+        # TX: Comms -> Crossbar -> Header.
+        # --------------------------------
         if with_pcie:
             self.comb += self.pcie_dma0.source.connect(self.crossbar.mux.sink0)
         if with_eth:
@@ -364,6 +356,17 @@ class BaseSoC(SoCMini):
         if with_sata:
             pass # TODO.
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
+
+
+        # RX: Header -> Crossbar -> Comms.
+        # --------------------------------
+        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+        if with_pcie:
+            self.comb += self.crossbar.demux.source0.connect(self.pcie_dma0.sink)
+        if with_eth:
+            self.comb += self.crossbar.demux.source1.connect(self.eth_streamer.sink)
+        if with_sata:
+            pass # TODO.
 
         # Clk Measurements -------------------------------------------------------------------------
 
