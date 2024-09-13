@@ -405,17 +405,13 @@ class BaseSoC(SoCMini):
             csr_csv      = "analyzer.csv"
         )
 
-    def add_eth_tx_streamer_probe(self):
+    def add_eth_tx_probe(self):
         assert hasattr(self, "eth_streamer")
         analyzer_signals = [
             self.eth_streamer.sink,
-            self.eth_streamer.fsm,
-            self.eth_streamer.source,
-            self.ethcore_etherbone.udp.tx.sink,
-            self.ethcore_etherbone.arp.tx.sink.valid,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 128,
+            depth        = 1024,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "analyzer.csv"
@@ -449,22 +445,25 @@ def main():
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
 
-    # Litescope Probes.
+    # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
     probeopts.add_argument("--with-ad9361-spi-probe",      action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe",     action="store_true", help="Enable AD9361 Data Probe.")
     probeopts.add_argument("--with-pcie-dma-probe",        action="store_true", help="Enable PCIe DMA Probe.")
-    probeopts.add_argument("--with-eth-tx-streamer-probe", action="store_true", help="Enable Ethernet Tx streamer Probe.")
+    probeopts.add_argument("--with-eth-tx-probe",          action="store_true", help="Enable Ethernet Tx Probe.")
 
     args = parser.parse_args()
 
     # Build SoC.
     soc = BaseSoC(
+        # Generic.
         variant       = args.variant,
 
+        # PCIe.
         with_pcie     = args.with_pcie,
         pcie_lanes    = args.pcie_lanes,
 
+        # Ethernet.
         with_eth      = args.with_eth,
         eth_sfp       = args.eth_sfp,
         eth_phy       = args.eth_phy,
@@ -472,17 +471,21 @@ def main():
         eth_remote_ip = args.eth_remote_ip,
         eth_udp_port  = args.eth_udp_port,
 
+        # SATA.
         with_sata     = args.with_sata,
     )
+
+    # LiteScope Analyzer Probes.
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
         soc.add_ad96361_data_probe()
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
-    if args.with_eth_tx_streamer_probe:
-        soc.add_eth_tx_streamer_probe()
+    if args.with_eth_tx_probe:
+        soc.add_eth_tx_probe()
 
+    # Builder.
     def get_build_name():
         r = f"litex_m2sdr_{args.variant}"
         if args.with_pcie:
