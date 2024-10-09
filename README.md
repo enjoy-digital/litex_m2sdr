@@ -133,11 +133,20 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 6. **Run Your SDR Software:**
    - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
 
+> [!TIP]
+>
+> If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
+>
+> ```
+> GRUB_CMDLINE_LINUX="iommu=pt"
+> ```
+> Then run `sudo update-grub` and reboot.
+
+### Tutorials for your platform
+
 > [!WARNING]
 >
 > **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
-
-### Tutorials for your platform
 
 For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
 
