@@ -165,13 +165,24 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _oversampling = 1;
 #endif
 
-    if (do_init) {
-        /* Initialize SI531 Clocking. */
-        m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+    /* Supported by SI5351B & C Versions */
+    SoapySDR::logf(SOAPY_SDR_INFO, "Using internal XO for as SI5351 RefClk...");
+    litepcie_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+        SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
+    );
 
-        /* Initialize AD9361 SPI. */
-        m2sdr_ad9361_spi_init(_fd, 1);
-    }
+    /* Initialize SI531 Clocking. */
+    m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+
+    /* Initialize AD9361 SPI. */
+    m2sdr_ad9361_spi_init(_fd, 1);
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "Setting Channel Mode to 2T2R.");
+    default_init_param.two_rx_two_tx_mode_enable     = 1;
+    default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
+    default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
+    default_init_param.two_t_two_r_timing_enable     = 1;
+    litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
 
     /* Initialize AD9361 RFIC. */
     default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
@@ -180,7 +191,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     default_init_param.gpio_cal_sw2 = -1;
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
-    if (do_init) {
+    /* Configure AD9361 TX/RX FIRs. */
+    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+
+    //if (do_init) {
+    if (false) {
         /* Configure AD9361 TX/RX FIRs. */
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);

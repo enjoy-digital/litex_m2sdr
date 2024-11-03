@@ -27,6 +27,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const SoapySDR::Kwargs &/*args*/) {
     std::lock_guard<std::mutex> lock(_mutex);
 
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "setupStream: %d", direction);
+
     if (direction == SOAPY_SDR_RX) {
         if (_rx_stream.opened) {
             throw std::runtime_error("RX stream already opened.");
@@ -135,6 +137,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
 /* Close the specified stream and release associated resources. */
 void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "closeStream: %d", stream);
+    
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (stream == RX_STREAM) {
@@ -162,6 +166,8 @@ int SoapyLiteXM2SDR::activateStream(
     const int /*flags*/,
     const long long /*timeNs*/,
     const size_t /*numElems*/) {
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "activateStream: %d", stream);
+    
     if (stream == RX_STREAM) {
         for (size_t i = 0; i < _rx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
@@ -184,6 +190,8 @@ int SoapyLiteXM2SDR::deactivateStream(
     SoapySDR::Stream *stream,
     const int /*flags*/,
     const long long /*timeNs*/) {
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "deactivateStream: %d", stream);
+    
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
@@ -570,6 +578,9 @@ int SoapyLiteXM2SDR::readStream(
     int &flags,
     long long &timeNs,
     const long timeoutUs) {
+
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "readStream: numElems %lu", numElems);
+
     if (stream != RX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
@@ -609,6 +620,7 @@ int SoapyLiteXM2SDR::readStream(
         }
 
         if (n == returnedElems) {
+	    SoapySDR_logf(SOAPY_SDR_DEBUG, "readStream: returnedElems %lu", returnedElems);
             return returnedElems;
         }
     }
@@ -624,6 +636,7 @@ int SoapyLiteXM2SDR::readStream(
         timeoutUs);
 
     if (ret < 0) {
+	SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: could not acquire read buffer %d", ret);
         if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
             return samp_avail;
         }
@@ -655,6 +668,8 @@ int SoapyLiteXM2SDR::readStream(
         _rx_stream.remainderOffset = 0;
     }
 
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "readStream: returnedElems %lu", returnedElems);
+
     return returnedElems;
 }
 
@@ -666,6 +681,8 @@ int SoapyLiteXM2SDR::writeStream(
     int &flags,
     const long long timeNs,
     const long timeoutUs) {
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: numElems %lu", numElems);
+    
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
@@ -704,6 +721,7 @@ int SoapyLiteXM2SDR::writeStream(
         }
 
         if (n == returnedElems) {
+	    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: returnedElems %lu", returnedElems);
             return returnedElems;
         }
     }
@@ -717,6 +735,7 @@ int SoapyLiteXM2SDR::writeStream(
         (void **)&_tx_stream.remainderBuff,
         timeoutUs);
     if (ret < 0) {
+	SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: could not acquire write buffer %d", ret);
         if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
             return samp_avail;
         }
@@ -746,6 +765,8 @@ int SoapyLiteXM2SDR::writeStream(
         _tx_stream.remainderHandle = -1;
         _tx_stream.remainderOffset = 0;
     }
+
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: returnedElems %lu", returnedElems);
 
     return returnedElems;
 }
