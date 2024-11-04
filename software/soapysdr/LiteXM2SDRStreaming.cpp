@@ -366,6 +366,12 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
     }
 
+    SoapySDR_logf(SOAPY_SDR_DEBUG,
+        "acquireWriteBuffer: _tx_stream.hw_count %ld, _tx_stream.sw_count %ld, _dma_mmap_info.dma_tx_buf_count %llu",
+        _tx_stream.hw_count,
+        _tx_stream.sw_count,
+        _dma_mmap_info.dma_tx_buf_count);
+
     /* If no buffers available, wait for new buffers to become available. */
     if (buffers_pending == ((int64_t)_dma_mmap_info.dma_tx_buf_count)) {
         if (timeoutUs == 0) {
@@ -384,6 +390,12 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
         assert(buffers_pending < ((int64_t)_dma_mmap_info.dma_tx_buf_count));
     }
+
+    SoapySDR_logf(SOAPY_SDR_DEBUG,
+        "acquireWriteBuffer: _tx_stream.hw_count %ld, _tx_stream.sw_count %ld, _dma_mmap_info.dma_tx_buf_count %llu",
+        _tx_stream.hw_count,
+        _tx_stream.sw_count,
+        _dma_mmap_info.dma_tx_buf_count);
 
     /* Get the buffer. */
     int buf_offset = _tx_stream.user_count % _dma_mmap_info.dma_tx_buf_count;
