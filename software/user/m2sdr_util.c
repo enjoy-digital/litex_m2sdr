@@ -49,7 +49,7 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-#ifdef CSR_SI5351_I2C_BASE
+#ifdef CSR_SI5351_BASE
 
 /* SI5351 */
 /*--------*/
@@ -791,7 +791,7 @@ static void help(void)
            "clk_test                          Test Clks frequencies.\n"
            "vcxo_test                         Test VCXO frequency variation.\n"
            "\n"
-#ifdef  CSR_SI5351_I2C_BASE
+#ifdef  CSR_SI5351_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
            "si5351_init                       Init SI5351.\n"
            "\n"
@@ -896,7 +896,7 @@ int main(int argc, char **argv)
     }
 
     /* SI5351 cmds. */
-#ifdef CSR_SI5351_I2C_BASE
+#ifdef CSR_SI5351_BASE
     else if (!strcmp(cmd, "si5351_scan"))
         test_si5351_scan();
     else if (!strcmp(cmd, "si5351_init"))
