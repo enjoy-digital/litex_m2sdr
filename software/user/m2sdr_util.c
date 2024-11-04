@@ -124,7 +124,7 @@ static uint32_t icap_read(int fd, uint32_t reg)
 {
     litepcie_writel(fd, CSR_ICAP_ADDR_ADDR, reg);
     litepcie_writel(fd, CSR_ICAP_READ_ADDR, 1);
-    while (litepcie_readl(fd, CSR_ICAP_DONE_ADDR) != 0)
+    while (litepcie_readl(fd, CSR_ICAP_DONE_ADDR) == 0)
         usleep(1000);
     litepcie_writel(fd, CSR_ICAP_READ_ADDR, 0);
     return litepcie_readl(fd, CSR_ICAP_DATA_ADDR);
