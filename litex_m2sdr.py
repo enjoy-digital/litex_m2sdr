@@ -149,6 +149,8 @@ class BaseSoC(SoCMini):
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident         = f"LiteX-M2SDR SoC / {variant} variant / built on",
             ident_version = True,
+            with_timer    = True,
+            timer_uptime  = True
         )
 
         # Clocking ---------------------------------------------------------------------------------

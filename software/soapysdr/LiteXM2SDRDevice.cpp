@@ -177,12 +177,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* Initialize AD9361 SPI. */
     m2sdr_ad9361_spi_init(_fd, 1);
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Setting Channel Mode to 2T2R.");
-    default_init_param.two_rx_two_tx_mode_enable     = 1;
-    default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
-    default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
-    default_init_param.two_t_two_r_timing_enable     = 1;
-    litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+    // SoapySDR::logf(SOAPY_SDR_INFO, "Setting Channel Mode to 2T2R.");
+    // default_init_param.two_rx_two_tx_mode_enable     = 1;
+    // default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
+    // default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
+    // default_init_param.two_t_two_r_timing_enable     = 1;
+    // litepcie_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
 
     /* Initialize AD9361 RFIC. */
     default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
@@ -191,12 +191,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     default_init_param.gpio_cal_sw2 = -1;
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
-    /* Configure AD9361 TX/RX FIRs. */
-    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-
-    //if (do_init) {
-    if (false) {
+    if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
@@ -720,6 +715,16 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
 /***************************************************************************************************
  *                                   Clocking API
  **************************************************************************************************/
+
+long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const {
+    litepcie_writel(_fd, CSR_TIMER0_UPTIME_LATCH_ADDR, 1);
+    
+    int64_t r = litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
+    r <<= 32;
+    r |= litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
+
+    return r;
+};
 
 /***************************************************************************************************
  *                                    Sensors API
