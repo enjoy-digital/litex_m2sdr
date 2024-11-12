@@ -366,6 +366,7 @@ bool SoapyLiteXM2SDR::hasGainMode(
 void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     const bool automatic)
 {
+    std::lock_guard<std::mutex> lock(_mutex);
     /* N/A. */
     if (direction == SOAPY_SDR_TX)
         return;
@@ -665,6 +666,7 @@ void SoapyLiteXM2SDR::setBandwidth(
     const double bw) {
     if (bw == 0.0)
         return;
+    std::lock_guard<std::mutex> lock(_mutex);
 
     uint32_t bwi = static_cast<uint32_t>(bw);
 
