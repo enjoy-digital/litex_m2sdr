@@ -29,6 +29,7 @@ _io = [
     ("si5351_i2c", 0,
         Subsignal("scl", Pins("AA20")), # SI5351_SCL.
         Subsignal("sda", Pins("AB21")), # SI5351_SDA.
+        Misc("PULLUP=TRUE"),
         IOStandard("LVCMOS33")
     ),
     ("si5351_en_clkin", 0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_EN (B) / SI5351_CLKIN (C).
