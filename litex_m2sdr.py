@@ -173,7 +173,6 @@ class BaseSoC(SoCMini):
 
         self.si5351 = SI5351(platform, clk_in=platform.request("sync_clk_in"))
         si5351_clk0 = platform.request("si5351_clk0")
-        platform.add_period_constraint(si5351_clk0, 1e9/38.4e6)
         platform.add_false_path_constraints(si5351_clk0, self.crg.cd_sys.clk)
 
         # JTAGBone ---------------------------------------------------------------------------------
