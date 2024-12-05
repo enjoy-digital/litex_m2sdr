@@ -458,8 +458,8 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
         const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
 
         for (uint32_t i = 0; i < len; i++) {
-            samples_cf32[0] = static_cast<float>(src_int8[0]) / (_samplesScaling); /* I. */
-            samples_cf32[1] = static_cast<float>(src_int8[1]) / (_samplesScaling); /* Q. */
+            samples_cf32[0] = static_cast<float>(src_int8[0]) / _samplesScaling; /* I. */
+            samples_cf32[1] = static_cast<float>(src_int8[1]) / _samplesScaling; /* Q. */
             samples_cf32 += 2;
             src_int8 += _nChannels * _samplesPerComplex;
         }
