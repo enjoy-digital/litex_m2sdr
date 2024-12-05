@@ -173,14 +173,12 @@ class BaseSoC(SoCMini):
 
         self.si5351 = SI5351(platform, clk_in=platform.request("sync_clk_in"))
         si5351_clk0 = platform.request("si5351_clk0")
-        platform.add_false_path_constraints(si5351_clk0, self.crg.cd_sys.clk)
 
         # JTAGBone ---------------------------------------------------------------------------------
 
         if with_jtagbone:
             self.add_jtagbone()
             platform.add_period_constraint(self.jtagbone_phy.cd_jtag.clk, 1e9/20e6)
-            platform.add_false_path_constraints(self.jtagbone_phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
 
@@ -239,12 +237,6 @@ class BaseSoC(SoCMini):
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
-
-            # Timing Constraints/False Paths -------------------------------------------------------
-            for i in range(4):
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks   dna_clk] -asynchronous")
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  jtag_clk] -asynchronous")
-                platform.toolchain.pre_placement_commands.append(f"set_clock_groups -group [get_clocks {{{{*s7pciephy_clkout{i}}}}}] -group [get_clocks  icap_clk] -asynchronous")
 
         # Ethernet ---------------------------------------------------------------------------------
 
@@ -325,7 +317,6 @@ class BaseSoC(SoCMini):
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
-        self.platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ad9361.cd_rfic.clk)
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -368,6 +359,33 @@ class BaseSoC(SoCMini):
             self.comb += self.crossbar.demux.source1.connect(self.eth_streamer.sink)
         if with_sata:
             pass # TODO.
+
+
+        # Timing Constraints/False Paths -----------------------------------------------------------
+
+        platform.add_false_path_constraints(
+            # PCIe.
+            #"main_s7pciephy_clkout0", # FIXME.
+            #"main_s7pciephy_clkout1", # FIXME.
+            #"main_s7pciephy_clkout2", # FIXME.
+            #"main_s7pciephy_clkout3", # FIXME.
+
+            # CRG.
+            "main_crg_clkout0",
+            "main_crg_clkout1",
+
+            # RFIC.
+            "rfic_clk",
+
+            # Internal Primitives.
+            "dna_clk",
+            "jtag_clk",
+            "icap_clk",
+
+            # Sync.
+            "si5351_clk0",
+            "sync_clk_in",
+        )
 
         # Clk Measurements -------------------------------------------------------------------------
 
