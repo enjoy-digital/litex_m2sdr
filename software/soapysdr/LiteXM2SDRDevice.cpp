@@ -707,6 +707,16 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
  *                                   Clocking API
  **************************************************************************************************/
 
+long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const {
+    litepcie_writel(_fd, CSR_TIMER0_UPTIME_LATCH_ADDR, 1);
+
+    int64_t r = litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
+    r <<= 32;
+    r |= litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
+
+    return r;
+};
+
 /***************************************************************************************************
  *                                    Sensors API
  **************************************************************************************************/
