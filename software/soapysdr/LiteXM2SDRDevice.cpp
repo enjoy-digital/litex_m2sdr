@@ -707,15 +707,34 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
  *                                   Clocking API
  **************************************************************************************************/
 
+/***************************************************************************************************
+ *                                    Time API
+ **************************************************************************************************/
+
+bool SoapyLiteXM2SDR::hasHardwareTime(const std::string &) const {
+    return true;
+}
+
 long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const {
+    int64_t uptime_cycles = 0;
+    int64_t uptime_ns     = 0;
+
+    /* Latch the 64-bit uptime value. */
     litepcie_writel(_fd, CSR_TIMER0_UPTIME_LATCH_ADDR, 1);
 
-    int64_t r = litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
-    r <<= 32;
-    r |= litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR);
+    /* Read the upper/lower 32 bits of the uptime value. */
+    uptime_cycles |= (static_cast<int64_t>(litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR + 0)) << 32);
+    uptime_cycles |= (static_cast<int64_t>(litepcie_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR + 4)) <<  0);
 
-    return r;
-};
+    /* Convert cycles to nanoseconds. */
+    const int64_t clock_frequency_hz = CONFIG_CLOCK_FREQUENCY;
+    uptime_ns = (uptime_cycles * 1000000000LL) / clock_frequency_hz;
+
+    /* Debug log uptime in cycles and nanoseconds. */
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware uptime (cycles): %lld, (ns): %lld", uptime_cycles, uptime_ns);
+
+    return uptime_ns;
+}
 
 /***************************************************************************************************
  *                                    Sensors API
