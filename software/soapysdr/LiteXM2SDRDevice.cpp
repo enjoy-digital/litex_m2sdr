@@ -235,7 +235,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 #ifdef WITH_ETH_CTRL
     /* EtherBone */
-    _eb_fd = eb_connect(eth_ip.c_str(), "2345", 1);
+    _eb_fd = eb_connect(eth_ip.c_str(), "1234", 1);
     if (!_eb_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
     eb_fd = _eb_fd;
