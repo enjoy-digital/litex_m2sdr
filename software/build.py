@@ -5,6 +5,7 @@
 # Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import argparse
 import os
 import subprocess
 
@@ -26,6 +27,22 @@ def build_driver(path, cmake_options=""):
     for command in commands:
         run_command(command)
 
+parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("--data-path",    default="pcie", help="Data path interface",    choices=["pcie", "ethernet"])
+parser.add_argument("--control-path", default="pcie", help="Control path interface", choices=["pcie", "ethernet"])
+
+args = parser.parse_args()
+
+if args.data_path == "pcie":
+    data_path = "-DWITH_ETH_STREAM=OFF"
+else:
+    data_path = "-DWITH_ETH_STREAM=ON"
+
+if args.control_path == "pcie":
+    control_path = "-DWITH_ETH_CTRL=OFF"
+else:
+    control_path = "-DWITH_ETH_CTRL=ON"
+
 run_command("cd kernel && make clean all")
 run_command("cd user   && make clean all")
-build_driver("soapysdr", "-DCMAKE_INSTALL_PREFIX=/usr")
+build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {data_path} {control_path}")

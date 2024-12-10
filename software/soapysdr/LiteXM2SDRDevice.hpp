@@ -15,6 +15,8 @@
 #include <memory>
 
 #include "liblitepcie.h"
+#include "etherbone.h"
+#include "LiteXM2SDRUDPRx.hpp"
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
@@ -25,6 +27,14 @@
 #define DEBUG
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
+
+#ifndef WITH_ETH_CTRL
+#define reg_writel(_addr, _val) litepcie_writel(_fd, _addr, _val)
+#define reg_readl(_addr) litepcie_readl(_fd, _addr)
+#else
+#define reg_writel(_addr, _val) eb_write32(_eb_fd, _val, _addr)
+#define reg_readl(_addr) eb_read32(_eb_fd, _addr)
+#endif
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  /**************************************************************************************************
@@ -309,6 +319,12 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
     void *_dma_buf;
 
+    size_t _rx_buf_size;
+    size_t _tx_buf_size;
+    size_t _rx_buf_count;
+    size_t _tx_buf_count;
+    LiteXM2SDRUPDRx *_rx_udp_receiver;
+
     struct Stream {
         Stream() : opened(false), remainderHandle(-1), remainderSamps(0),
                    remainderOffset(0), remainderBuff(nullptr) {}
@@ -400,6 +416,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     }
 
     int _fd;
+    struct eb_connection *_eb_fd;
     struct ad9361_rf_phy *ad9361_phy;
 
     uint32_t _bitMode           = 16;
