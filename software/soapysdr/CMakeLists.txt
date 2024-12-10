@@ -3,6 +3,9 @@ project(SoapySDRLiteXM2SDR CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 
+option(WITH_ETH_STREAM "Uses Ethernet interface for the stream" OFF)
+option(WITH_ETH_CTRL   "Uses Ethernet interface for the control" OFF)
+
 ########################################################################
 ## LitePCIe discovery
 ########################################################################
@@ -88,10 +91,20 @@ set(LITEXM2SDR_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
 )
 
+if(WITH_ETH_STREAM)
+    add_definitions(-DWITH_ETH_STREAM=1)
+endif()
+
+if(WITH_ETH_CTRL)
+	add_definitions(-DWITH_ETH_CTRL=1)
+endif()
+
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
-    LiteXM2SDRRegistration.cpp ${LITEXM2SDR_SOURCE}
+    LiteXM2SDRRegistration.cpp etherbone.c
+	LiteXM2SDRUDPRx.cpp
+	${LITEXM2SDR_SOURCE}
     LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} m
 )
 

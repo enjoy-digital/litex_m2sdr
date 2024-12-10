@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "LiteXM2SDRDevice.hpp"
+#include "etherbone.h"
 
 #include <SoapySDR/Registry.hpp>
 
@@ -25,22 +26,40 @@
 #define LITEX_IDENTIFIER      "LiteX-M2SDR"
 
 std::string readFPGAData(
+#ifndef WITH_ETH_CTRL
     int fd,
+#else
+    struct eb_connection *fd,
+#endif
     unsigned int baseAddr,
     size_t size) {
     std::string data(size, 0);
     for (size_t i = 0; i < size; i++)
+#ifndef WITH_ETH_CTRL
         data[i] = static_cast<char>(litepcie_readl(fd, baseAddr + 4 * i));
+#else
+        data[i] = static_cast<char>(eb_read32(fd, baseAddr + 4 * i));
+#endif
     return data;
 }
 
+#ifndef WITH_ETH_CTRL
 std::string getLiteXM2SDRIdentification(int fd) {
+#else
+std::string getLiteXM2SDRIdentification(struct eb_connection *fd) {
+#endif
     return readFPGAData(fd, CSR_IDENTIFIER_MEM_BASE, LITEX_IDENTIFIER_SIZE);
 }
 
+#ifndef WITH_ETH_CTRL
 std::string getLiteXM2SDRSerial(int fd) {
     unsigned int high = litepcie_readl(fd, CSR_DNA_ID_ADDR);
     unsigned int low  = litepcie_readl(fd, CSR_DNA_ID_ADDR + 4);
+#else
+std::string getLiteXM2SDRSerial(struct eb_connection *fd) {
+    unsigned int high = eb_read32(fd, CSR_DNA_ID_ADDR);
+    unsigned int low  = eb_read32(fd, CSR_DNA_ID_ADDR + 4);
+#endif
     char serial[32];
     snprintf(serial, sizeof(serial), "%x%08x", high, low);
     return std::string(serial);
@@ -54,11 +73,21 @@ std::string generateDeviceLabel(
 }
 
 SoapySDR::Kwargs createDeviceKwargs(
+#ifndef WITH_ETH_CTRL
     int fd,
-    const std::string &path) {
+#else
+    struct eb_connection *fd,
+#endif
+    const std::string &path,
+    const std::string &eth_ip) {
     SoapySDR::Kwargs dev = {
         {"device",         "LiteX-M2SDR"},
+#if defined(WITH_ETH_CTRL) || defined(WITH_ETH_STREAM)
+        {"eth_ip",         eth_ip},
+#endif
+#if not (defined(WITH_ETH_CTRL) && defined(WITH_ETH_STREAM))
         {"path",           path},
+#endif
         {"serial",         getLiteXM2SDRSerial(fd)},
         {"identification", getLiteXM2SDRIdentification(fd)},
         {"version",        "1234"},
@@ -74,10 +103,23 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     const SoapySDR::Kwargs &args) {
     std::vector<SoapySDR::Kwargs> discovered;
 
-    auto attemptToAddDevice = [&](const std::string &path) {
+    std::string eth_ip = "192.168.1.50";
+    std::string path   = "/dev/m2sdr0";
+
+#if defined(WITH_ETH_CTRL) || defined(WITH_ETH_STREAM)
+    if (args.count("eth_ip") == 0) {
+        std::cout << "When using ethernet mode eth_ip parameter is required\n";
+        //throw std::runtime_error("plop");
+    } else {
+        eth_ip = args.at("eth_ip");
+    }
+#endif
+
+#ifndef WITH_ETH_CTRL
+    auto attemptToAddDevice = [&](const std::string &path, const std::string &eth_ip) {
         int fd = open(path.c_str(), O_RDWR);
         if (fd < 0) return false;
-        auto dev = createDeviceKwargs(fd, path);
+        auto dev = createDeviceKwargs(fd, path, eth_ip);
         close(fd);
 
         if (dev["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
@@ -88,13 +130,40 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     };
 
     if (args.count("path") != 0) {
-        attemptToAddDevice(args.at("path"));
+        attemptToAddDevice(args.at("path"), eth_ip);
     } else {
         for (int i = 0; i < MAX_DEVICES; i++) {
-            if (!attemptToAddDevice("/dev/m2sdr" + std::to_string(i)))
+            if (!attemptToAddDevice("/dev/m2sdr" + std::to_string(i), eth_ip))
                 break; // Stop trying if a device fails to open, assuming sequential device numbering
         }
     }
+#else
+#ifndef WITH_ETH_STREAM
+    if (args.count("path") == 0) {
+        std::cout << "When using ethernet for control and PCIe for stream path parameter is required\n";
+        //throw std::runtime_error("plop");
+    } else {
+        path = args.at("path");
+    }
+#endif
+    auto attemptToAddDevice = [&](const std::string &path, const std::string &eth_ip) {
+        struct eb_connection *fd = eb_connect(eth_ip.c_str(), "1234", 1);
+        if (!fd) {
+            std::cerr << "Can't connect to EtherBone!\n";
+            return false;
+        }
+        auto dev = createDeviceKwargs(fd, path, eth_ip);
+        eb_disconnect(&fd);
+
+        if (dev["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
+            discovered.push_back(std::move(dev));
+            return true;
+        }
+        return false;
+    };
+
+    attemptToAddDevice(path, eth_ip);
+#endif
     return discovered;
 }
 
