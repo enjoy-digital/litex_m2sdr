@@ -264,6 +264,7 @@ class BaseSoC(SoCMini):
                 udp_port   = eth_udp_port,
                 fifo_depth = 1024//8,
                 data_width = 64,
+                with_csr   = True,
             )
             self.comb += self.eth_streamer.source.connect(eth_streamer_port.sink)
 
