@@ -638,7 +638,7 @@ int SoapyLiteXM2SDR::readStream(
     /* If there's a remainder buffer from a previous read, process that first. */
     if (_rx_stream.remainderHandle >= 0) {
         const size_t n = std::min(_rx_stream.remainderSamps, returnedElems);
-        const uint32_t remainderOffset = _tx_stream.remainderOffset *  _nChannels *_bytesPerComplex;
+        const uint32_t remainderOffset = _rx_stream.remainderOffset *  _nChannels *_bytesPerComplex;
 
         if (n < returnedElems) {
             samp_avail = n;
