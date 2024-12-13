@@ -28,20 +28,22 @@ def build_driver(path, cmake_options=""):
         run_command(command)
 
 parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("--data-path",    default="pcie", help="Data path interface",    choices=["pcie", "ethernet"])
-parser.add_argument("--control-path", default="pcie", help="Control path interface", choices=["pcie", "ethernet"])
+parser.add_argument("--control-path", default="pcie", help="Control path interface", choices=["pcie", "eth"])
+parser.add_argument("--data-path",    default="pcie", help="Data path interface",    choices=["pcie", "eth"])
 
 args = parser.parse_args()
 
-if args.data_path == "pcie":
-    data_path = "-DWITH_ETH_STREAM=OFF"
-else:
-    data_path = "-DWITH_ETH_STREAM=ON"
-
+# Control path flag.
 if args.control_path == "pcie":
     control_path = "-DWITH_ETH_CTRL=OFF"
 else:
     control_path = "-DWITH_ETH_CTRL=ON"
+
+# Data path flag.
+if args.data_path == "pcie":
+    data_path = "-DWITH_ETH_STREAM=OFF"
+else:
+    data_path = "-DWITH_ETH_STREAM=ON"
 
 run_command("cd kernel && make clean all")
 run_command("cd user   && make clean all")
