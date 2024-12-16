@@ -213,20 +213,23 @@ class I2CMaster(Module):
     ]
 
     # I/O
-    self.scl_t = TSTriple()
-    self.specials += self.scl_t.get_tristate(pads.scl)
-    self.comb += [
-      self.scl_t.oe.eq(~i2c.scl_o),
-      self.scl_t.o.eq(0),
-    ]
+    #self.scl_t = TSTriple()
+    #self.specials += self.scl_t.get_tristate(pads.scl)
+    #self.comb += [
+    #  self.scl_t.oe.eq(~i2c.scl_o),
+    #  self.scl_t.o.eq(0),
+    #]
+    self.comb += pads.scl_o.eq(i2c.scl_o)
 
-    self.sda_t = TSTriple()
-    self.specials += self.sda_t.get_tristate(pads.sda)
-    self.comb += [
-      self.sda_t.oe.eq(~i2c.sda_o),
-      self.sda_t.o.eq(0),
-      i2c.sda_i.eq(self.sda_t.i),
-    ]
+    #self.sda_t = TSTriple()
+    #self.specials += self.sda_t.get_tristate(pads.sda)
+    #self.comb += [
+    #  self.sda_t.oe.eq(~i2c.sda_o),
+    #  self.sda_t.o.eq(0),
+    #  i2c.sda_i.eq(self.sda_t.i),
+    #]
+    self.comb += pads.sda_o.eq(i2c.sda_o)
+    self.comb += i2c.sda_i.eq(pads.sda_i)
 
 I2C_XFER_ADDR, I2C_CONFIG_ADDR = range(2)
 (
@@ -273,7 +276,8 @@ class Sequencer(Module):
   def __init__(self, program, bus=None):
     if bus is None:
       bus = wishbone.Interface()
-    self.bus = bus
+    self.bus  = bus
+    self.done = Signal()
 
     ###
 
@@ -325,7 +329,7 @@ class Sequencer(Module):
         NextState("FETCH")
       )
     )
-    fsm.act("END", NextState("END"))
+    fsm.act("END", self.done.eq(1))
 
 # SI5351 Config ------------------------------------------------------------------------------------
 
@@ -449,9 +453,7 @@ class SI5351I2C(Module):
   def __init__(self, pads, program, sys_clk_freq):
     if hasattr(pads, "cs_n"):
       self.comb += pads.cs_n.eq(0)
-    reset_val = int(sys_clk_freq/20e3)
-    reset_ctr = Signal(max=reset_val+1, reset=reset_val)
-    i2c_master = I2CMaster(pads)
-    sequencer = Sequencer(program(sys_clk_freq))
+    self.i2c_master = i2c_master = I2CMaster(pads)
+    self.sequencer = sequencer = Sequencer(program(sys_clk_freq))
     self.submodules += i2c_master, sequencer
     self.comb += sequencer.bus.connect(i2c_master.bus)
