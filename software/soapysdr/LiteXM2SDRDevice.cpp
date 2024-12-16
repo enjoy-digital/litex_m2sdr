@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <memory>
 #include <sys/mman.h>
+#include <arpa/inet.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -176,6 +177,40 @@ void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
  *                                     Constructor
  **************************************************************************************************/
 
+static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16_t remote_port)
+{
+    struct sockaddr_in remote_addr;
+    memset(&remote_addr, 0, sizeof(remote_addr));
+    remote_addr.sin_family = AF_INET;
+    remote_addr.sin_port = htons(remote_port);
+    if (inet_pton(AF_INET, remote_ip.c_str(), &remote_addr.sin_addr) != 1)
+        throw std::runtime_error("Invalid remote IP address");
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        throw std::runtime_error("Failed to create socket");
+
+    if (connect(sock, (struct sockaddr*)&remote_addr, sizeof(remote_addr)) < 0) {
+        close(sock);
+        throw std::runtime_error("Failed to connect socket");
+    }
+
+    struct sockaddr_in local_addr;
+    socklen_t addr_len = sizeof(local_addr);
+    if (getsockname(sock, (struct sockaddr*)&local_addr, &addr_len) < 0) {
+        close(sock);
+        throw std::runtime_error("getsockname() failed");
+    }
+
+    close(sock);
+
+    char buf[INET_ADDRSTRLEN];
+    if (!inet_ntop(AF_INET, &local_addr.sin_addr, buf, sizeof(buf)))
+        throw std::runtime_error("inet_ntop failed");
+
+    return std::string(buf);
+}
+
 #ifndef WITH_ETH_CTRL
 std::string getLiteXM2SDRSerial(int fd);
 std::string getLiteXM2SDRIdentification(int fd);
@@ -251,11 +286,29 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     } catch (std::exception &e) {
         throw std::runtime_error("can't prepare UDP RX Receiver");
     }
+
 #ifndef WITH_ETH_CTRL
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 #else
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_eb_fd).c_str());
 #endif
+
+    /* Ethernet FPGA streamer configuration */
+
+    /* Determine the local IP that the board sees */
+    std::string local_ip = getLocalIPAddressToReach(eth_ip, 1234);
+
+    struct in_addr ip_addr_struct;
+    if (inet_pton(AF_INET, local_ip.c_str(), &ip_addr_struct) != 1) {
+        throw std::runtime_error("Invalid local IP address determined");
+    }
+
+    uint32_t ip_addr_val = ntohl(ip_addr_struct.s_addr);
+
+    /* Write the PC's IP to the FPGA's ETH_STREAMER IP register */
+    eb_write32(_eb_fd, ip_addr_val, CSR_ETH_STREAMER_IP_ADDRESS_ADDR);
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
 #endif
 
     /* Configure Mode based on _bitMode */
