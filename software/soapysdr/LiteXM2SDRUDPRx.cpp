@@ -57,6 +57,16 @@ LiteXM2SDRUPDRx::LiteXM2SDRUPDRx(std::string ip_addr, std::string port, size_t m
         throw std::runtime_error(mess);
     }
 
+    /* Enable address reuse on Sock, FIXME: Close socket properly */
+    int opt = 1;
+    if (setsockopt(_read_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        char mess[256];
+        snprintf(mess, 256, "Unable to set SO_REUSEADDR on Rx socket: %s\n", strerror(errno));
+        close(_read_sock);
+        freeaddrinfo(_addr);
+        throw std::runtime_error(mess);
+    }
+
     if (bind(_read_sock, (struct sockaddr*)&si_read, sizeof(si_read)) == -1) {
         char mess[256];
         snprintf(mess, 256, "Unable to bind Rx socket to port: %s\n", strerror(errno));
@@ -70,7 +80,7 @@ LiteXM2SDRUPDRx::~LiteXM2SDRUPDRx(void)
 {
     /* thread must be disabled/stopped to avoid errors */
     stop();
-    /* clock socket */
+    /* close socket */
     close(_read_sock);
     freeaddrinfo(_addr);
 }
