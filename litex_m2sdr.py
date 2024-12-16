@@ -134,7 +134,7 @@ class BaseSoC(SoCMini):
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
-        with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_remote_ip="192.168.1.100", eth_udp_port=2345,
+        with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
         with_rfic_oversampling = True,
@@ -263,7 +263,6 @@ class BaseSoC(SoCMini):
             # UDP Streamer RX.
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=64, cd="sys")
             self.eth_streamer = LiteEthStream2UDPTX(
-                ip_address = convert_ip(eth_remote_ip),
                 udp_port   = eth_udp_port,
                 fifo_depth = 1024//8,
                 data_width = 64,
@@ -472,7 +471,6 @@ def main():
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
     parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
-    parser.add_argument("--eth-remote-ip",   default="192.168.1.100", help="Ethernet Remote IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
 
     # SATA parameters.
@@ -501,7 +499,6 @@ def main():
         eth_sfp       = args.eth_sfp,
         eth_phy       = args.eth_phy,
         eth_local_ip  = args.eth_local_ip,
-        eth_remote_ip = args.eth_remote_ip,
         eth_udp_port  = args.eth_udp_port,
 
         # SATA.
