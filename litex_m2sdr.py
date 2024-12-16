@@ -45,6 +45,7 @@ from litesata.phy import LiteSATAPHY
 from litescope import LiteScopeAnalyzer
 
 from gateware.si5351      import SI5351
+from gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from gateware.ad9361.core import AD9361RFIC
 from gateware.qpll        import SharedQPLL
 from gateware.timestamp   import Timestamp
@@ -174,7 +175,17 @@ class BaseSoC(SoCMini):
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
-        self.si5351 = SI5351(platform, clk_in=platform.request("sync_clk_in"))
+        # FIXME: For test, make it dynamic and switch to I2C BitBanging Master when sequencer is done.
+        with_si5531_gateware_init = False
+        if with_si5531_gateware_init:
+            self.si5351 = SI5351I2C(
+                pads         = platform.request("si5351_i2c"),
+                program      = i2c_program_si5351,
+                sys_clk_freq = sys_clk_freq
+            )
+            #platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE BACKBONE [get_nets crg_s7pll0_clkin]")
+        else:
+            self.si5351 = SI5351(platform, clk_in=platform.request("sync_clk_in"))
         si5351_clk0 = platform.request("si5351_clk0")
 
         # JTAGBone ---------------------------------------------------------------------------------

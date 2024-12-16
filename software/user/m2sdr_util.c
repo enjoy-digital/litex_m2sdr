@@ -687,6 +687,8 @@ static void clk_test(int num_measurements, int delay_between_tests)
 /* VCXO Test  */
 /*------------*/
 
+#ifdef CSR_SI5351_BASE
+
 #define PWM_PERIOD 4096  // Define the PWM period
 
 static void vcxo_test() {
@@ -765,6 +767,7 @@ static void vcxo_test() {
     printf("PPM Variation from Nominal (50%% PWM): -%10.2f PPM / +%10.2f PPM\n", ppm_variation_from_nominal_min, ppm_variation_from_nominal_max);
 }
 
+#endif
 
 /* Help */
 /*------*/
@@ -789,7 +792,9 @@ static void help(void)
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
            "clk_test                          Test Clks frequencies.\n"
+#ifdef  CSR_SI5351_BASE
            "vcxo_test                         Test VCXO frequency variation.\n"
+#endif
            "\n"
 #ifdef  CSR_SI5351_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
@@ -890,10 +895,12 @@ int main(int argc, char **argv)
         clk_test(num_measurements, delay_between_tests);
     }
 
+#ifdef  CSR_SI5351_BASE
     /* VCXO test cmd. */
     else if (!strcmp(cmd, "vcxo_test")) {
         vcxo_test();
     }
+#endif
 
     /* SI5351 cmds. */
 #ifdef CSR_SI5351_BASE
