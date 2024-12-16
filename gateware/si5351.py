@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
+from migen.fhdl.specials import Tristate
 
 from litex.gen import *
 
@@ -17,17 +18,60 @@ from litex.soc.interconnect.csr import *
 from litex.soc.cores.pwm     import PWM
 from litex.soc.cores.bitbang import I2CMaster
 
+from gateware.si5351_i2c import SI5351I2C, i2c_program_si5351
+
 # SI5351 -------------------------------------------------------------------------------------------
 
 class SI5351(LiteXModule):
-    def __init__(self, platform, clk_in=0, with_csr=True):
+    def __init__(self, platform, sys_clk_freq, clk_in=0, with_csr=True):
         self.version    = Signal() # SI5351 Version (0=B, 1=C).
         self.clk_in_src = Signal() # SI5351 ClkIn Source.
 
         # # #
 
+        # I2C Pads.
+        i2c_pads = platform.request("si5351_i2c")
+
         # I2C Master.
-        self.i2c = I2CMaster(pads=platform.request("si5351_i2c"))
+        fake_i2c_pads = Record([("scl", 1), ("sda", 1)])
+        self.i2c = I2CMaster(pads=fake_i2c_pads, connect_pads=False)
+
+        # I2C Gateware Init.
+        fake_i2c_init_pads = Record([("scl_o", 1), ("sda_o", 1), ("sda_i", 1)])
+        self.i2c_init = SI5351I2C(
+            pads         = fake_i2c_init_pads,
+            program      = i2c_program_si5351,
+            sys_clk_freq = sys_clk_freq,
+        )
+
+        # I2C Muxing.
+        i2c_scl_o = Signal()
+        i2c_sda_o = Signal()
+        i2c_sda_i = Signal()
+        self.sync += [
+            # Give access to I2C Master when Gateware sequencer is done.
+            If(self.i2c_init.sequencer.done,
+                i2c_scl_o.eq(self.i2c._w.fields.scl),
+                i2c_sda_o.eq(~(self.i2c._w.fields.oe & ~self.i2c._w.fields.sda)),
+                self.i2c._r.fields.sda.eq(i2c_sda_i),
+            # Else give access to Gateware sequencer.
+            ).Else(
+                i2c_scl_o.eq(fake_i2c_init_pads.scl_o),
+                i2c_sda_o.eq(fake_i2c_init_pads.sda_o),
+                fake_i2c_init_pads.sda_i.eq(i2c_sda_i),
+            )
+        ]
+
+        # I2C Tristates.
+        self.specials += Tristate(i2c_pads.scl,
+            o  = 0,         # I2C uses Pull-ups, only drive low.
+            oe = ~i2c_scl_o # Drive when scl is low.
+        )
+        self.specials += Tristate(i2c_pads.sda,
+            o  = 0,          # I2C uses Pull-ups, only drive low.
+            oe = ~i2c_sda_o, # Drive when oe and sda is low.
+            i  = i2c_sda_i
+        )
 
         # VCXO PWM.
         self.pwm = PWM(platform.request("si5351_pwm"),
