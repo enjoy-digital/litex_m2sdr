@@ -96,33 +96,36 @@ class CRG(LiteXModule):
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
         # SoC.
-        "ctrl"        : 0,
-        "uart"        : 1,
-        "icap"        : 2,
-        "flash"       : 3,
-        "xadc"        : 4,
-        "dna"         : 5,
-        "flash"       : 6,
-        "leds"        : 7,
+        "ctrl"            : 0,
+        "uart"            : 1,
+        "icap"            : 2,
+        "flash_cs_n"      : 3,
+        "xadc"            : 4,
+        "dna"             : 5,
+        "flash"           : 6,
+        "leds"            : 7,
+        "identifier_mem"  : 8,
+        "timer"           : 9,
 
         # PCIe.
-        "pcie_phy"    : 10,
-        "pcie_msi"    : 11,
-        "pcie_dma0"   : 12,
+        "pcie_phy"        : 10,
+        "pcie_msi"        : 11,
+        "pcie_dma0"       : 12,
 
         # Eth.
-        "eth_phy"     : 14,
+        "eth_phy"         : 14,
+        "eth_streamer"    : 15,
 
         # SATA.
-        "sata_phy"    : 15,
-        "sata_core"   : 16,
+        "sata_phy"        : 18,
+        "sata_core"       : 19,
 
         # SDR.
-        "si5351"      : 20,
-        "timestamp"   : 22,
-        "header"      : 23,
-        "ad9361"      : 24,
-        "crossbar"    : 25,
+        "si5351"          : 20,
+        "timestamp"       : 22,
+        "header"          : 23,
+        "ad9361"          : 24,
+        "crossbar"        : 25,
 
         # Measurements/Analyzer.
         "clk_measurement" : 30,
