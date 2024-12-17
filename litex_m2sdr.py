@@ -267,6 +267,8 @@ class BaseSoC(SoCMini):
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
+            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
 
             # Core + MMAP (Etherbone).
             self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
