@@ -216,13 +216,8 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
     return std::string(buf);
 }
 
-#ifndef WITH_ETH_CTRL
-std::string getLiteXM2SDRSerial(int fd);
-std::string getLiteXM2SDRIdentification(int fd);
-#else
-std::string getLiteXM2SDRSerial(struct eb_connection *fd);
-std::string getLiteXM2SDRIdentification(struct eb_connection *fd);
-#endif
+std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
+std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
 
 #ifndef WITH_ETH_CTRL
 void dma_set_loopback(int fd, bool loopback_enable) {
