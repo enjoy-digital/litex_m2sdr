@@ -31,10 +31,10 @@ LiteXM2SDRUPDRx::LiteXM2SDRUPDRx(std::string ip_addr, std::string port, size_t m
     int err;
 
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;                            
+    hints.ai_family   = AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_protocol = IPPROTO_UDP;
-    hints.ai_flags = AI_ADDRCONFIG;                   
+    hints.ai_flags    = AI_ADDRCONFIG;
     err = getaddrinfo(ip_addr.c_str(), port.c_str(), &hints, &_addr);
     if (err != 0) {     
         char mess[256];                 
@@ -46,10 +46,10 @@ LiteXM2SDRUPDRx::LiteXM2SDRUPDRx(std::string ip_addr, std::string port, size_t m
     struct sockaddr_in si_read;
     memset((char *) &si_read, 0, sizeof(si_read));
     si_read.sin_family = _addr->ai_family;
-    si_read.sin_port = ((struct sockaddr_in *)_addr->ai_addr)->sin_port;
+    si_read.sin_port   = ((struct sockaddr_in *)_addr->ai_addr)->sin_port;
     si_read.sin_addr.s_addr = htobe32(INADDR_ANY);
 
-    /* Read Sock */
+    /* Read Socket */
     _read_sock = socket(_addr->ai_family, _addr->ai_socktype, _addr->ai_protocol);
     if (_read_sock == -1) {
         char mess[256];
@@ -78,9 +78,9 @@ LiteXM2SDRUPDRx::LiteXM2SDRUPDRx(std::string ip_addr, std::string port, size_t m
 
 LiteXM2SDRUPDRx::~LiteXM2SDRUPDRx(void)
 {
-    /* thread must be disabled/stopped to avoid errors */
+    /* Thread must be disabled/stopped to avoid errors */
     stop();
-    /* close socket */
+    /* Close socket */
     close(_read_sock);
     freeaddrinfo(_addr);
 }
