@@ -29,11 +29,13 @@
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 #ifndef WITH_ETH_CTRL
-#define litex_m2sdr_writel(_addr, _val) litepcie_writel(_fd, _addr, _val)
-#define litex_m2sdr_readl(_addr) litepcie_readl(_fd, _addr)
+#define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
+#define litex_m2sdr_readl(_fd, _addr) litepcie_readl(_fd, _addr)
+typedef int litex_m2sdr_device_desc_t;
 #else
-#define litex_m2sdr_writel(_addr, _val) eb_write32(_eb_fd, _val, _addr)
-#define litex_m2sdr_readl(_addr) eb_read32(_eb_fd, _addr)
+#define litex_m2sdr_writel(_fd, _addr, _val) eb_write32(_fd, _val, _addr)
+#define litex_m2sdr_readl(_fd, _addr) eb_read32(_fd, _addr)
+typedef struct eb_connection *litex_m2sdr_device_desc_t;
 #endif
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
@@ -415,8 +417,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         return (direction == SOAPY_SDR_RX) ? "RX" : "TX";
     }
 
-    int _fd;
-    struct eb_connection *_eb_fd;
+    litex_m2sdr_device_desc_t _fd;
     struct ad9361_rf_phy *ad9361_phy;
 
     uint32_t _bitMode           = 16;
