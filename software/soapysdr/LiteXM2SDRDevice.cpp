@@ -318,17 +318,17 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     /* Configure Mode based on _bitMode */
     if (_bitMode == 8) {
-        reg_writel(CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
+        litex_m2sdr_writel(CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
     } else {
-        reg_writel(CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
+        litex_m2sdr_writel(CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
 #ifndef WITH_ETH_CTRL
     /* Bypass synchro. */
-    reg_writel(CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
+    litex_m2sdr_writel(CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
     /* Disable DMA Loopback. */
-    reg_writel(CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+    litex_m2sdr_writel(CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
 #endif
 
     bool do_init = true;
@@ -441,7 +441,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
 
     /* Crossbar Demux: Select PCIe streaming */
-    reg_writel(CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    litex_m2sdr_writel(CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
     close(_fd);
 }
@@ -758,13 +758,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 128.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        reg_writel(CSR_AD9361_BITMODE_ADDR, 1);
+        litex_m2sdr_writel(CSR_AD9361_BITMODE_ADDR, 1);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2048.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        reg_writel(CSR_AD9361_BITMODE_ADDR, 0);
+        litex_m2sdr_writel(CSR_AD9361_BITMODE_ADDR, 0);
     }
 }
 
@@ -1031,22 +1031,22 @@ std::string SoapyLiteXM2SDR::readSensor(
             /* Temp. */
             if (sensorStr == "temp") {
                 sensorValue = std::to_string(
-                    (double)reg_readl(CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
+                    (double)litex_m2sdr_readl(CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
                 );
             /* VCCINT. */
             } else if (sensorStr == "vccint") {
                 sensorValue = std::to_string(
-                    (double)reg_readl(CSR_XADC_VCCINT_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(CSR_XADC_VCCINT_ADDR) / 4096 * 3
                 );
             /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
                 sensorValue = std::to_string(
-                    (double)reg_readl(CSR_XADC_VCCAUX_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(CSR_XADC_VCCAUX_ADDR) / 4096 * 3
                 );
             /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
                 sensorValue = std::to_string(
-                    (double)reg_readl(CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
                 );
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");

@@ -29,11 +29,11 @@
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 #ifndef WITH_ETH_CTRL
-#define reg_writel(_addr, _val) litepcie_writel(_fd, _addr, _val)
-#define reg_readl(_addr) litepcie_readl(_fd, _addr)
+#define litex_m2sdr_writel(_addr, _val) litepcie_writel(_fd, _addr, _val)
+#define litex_m2sdr_readl(_addr) litepcie_readl(_fd, _addr)
 #else
-#define reg_writel(_addr, _val) eb_write32(_eb_fd, _val, _addr)
-#define reg_readl(_addr) eb_read32(_eb_fd, _addr)
+#define litex_m2sdr_writel(_addr, _val) eb_write32(_eb_fd, _val, _addr)
+#define litex_m2sdr_readl(_addr) eb_read32(_eb_fd, _addr)
 #endif
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
