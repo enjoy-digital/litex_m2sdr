@@ -33,18 +33,24 @@ parser.add_argument("--data-path",    default="pcie", help="Data path interface"
 
 args = parser.parse_args()
 
-# Control path flag.
+# Control path flags.
 if args.control_path == "pcie":
     control_path = "-DWITH_ETH_CTRL=OFF"
 else:
     control_path = "-DWITH_ETH_CTRL=ON"
 
-# Data path flag.
+# Data path flags.
 if args.data_path == "pcie":
     data_path = "-DWITH_ETH_STREAM=OFF"
 else:
     data_path = "-DWITH_ETH_STREAM=ON"
 
-run_command("cd kernel && make clean all")
+# Kernel compilation.
+if (args.control_path == "pcie") | (args.data_path == "pcie"):
+    run_command("cd kernel && make clean all")
+
+# Utilities compilation.
 run_command("cd user   && make clean all")
+
+# SoapySDR Driver compilation.
 build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {data_path} {control_path}")
