@@ -241,7 +241,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-#if not (defined(WITH_ETH_CTRL) && defined(WITH_ETH_STREAM))
+#ifndef WITH_ETH_CTRL
     /* Open LitePCIe descriptor. */
     if (args.count("path") == 0) {
         /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
@@ -254,32 +254,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* Global file descriptor for AD9361 lib. */
     spi_fd = _fd;
 
-#ifndef WITH_ETH_CTRL
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 #endif
-#endif
 
-#if defined(WITH_ETH_STREAM) || defined(WITH_ETH_CTRL)
+#ifdef WITH_ETH_CTRL
     /* Prepare EtherBone / Ethernet streamer */
     std::string eth_ip;
     if (args.count("eth_ip") == 0)
         eth_ip = "192.168.1.50";
     else
         eth_ip = args.at("eth_ip");
-#endif
 
-#ifdef WITH_ETH_CTRL
     /* EtherBone */
     _fd = eb_connect(eth_ip.c_str(), "1234", 1);
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
     eb_fd = _fd;
-#ifndef WITH_ETH_STREAM
+#ifndef WITH_ETH_CTRL
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(fd).c_str());
 #endif
 #endif
 
-#ifdef WITH_ETH_STREAM
+#ifdef WITH_ETH_CTRL
     /* Ethernet streamer */
     try {
         _rx_udp_receiver = new LiteXM2SDRUPDRx(eth_ip, "2345", 0, 20, 1024/8, 8);
@@ -302,7 +298,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     uint32_t ip_addr_val = ntohl(ip_addr_struct.s_addr);
 
     /* Write the PC's IP to the FPGA's ETH_STREAMER IP register */
-    litex_m2sdr_writel(_fd, ip_addr_val, CSR_ETH_STREAMER_IP_ADDRESS_ADDR);
+    litex_m2sdr_writel(_fd, CSR_ETH_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
 #endif
@@ -400,7 +396,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 1);
     }
 
-#ifndef WITH_ETH_STREAM
+#ifndef WITH_ETH_CTRL
     /* Set-up the DMA. */
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
     _dma_buf = NULL;
@@ -412,7 +408,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     if (_rx_stream.opened) {
-#ifndef WITH_ETH_STREAM
+#ifndef WITH_ETH_CTRL
         litepcie_release_dma(_fd, 0, 1);
 
         munmap(_rx_stream.buf,
@@ -423,7 +419,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         _rx_stream.opened = false;
     }
 
-#ifndef WITH_ETH_STREAM
+#ifndef WITH_ETH_CTRL
     if (_tx_stream.opened) {
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);

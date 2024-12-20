@@ -3,8 +3,7 @@ project(SoapySDRLiteXM2SDR CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 
-option(WITH_ETH_STREAM "Uses Ethernet interface for the stream" OFF)
-option(WITH_ETH_CTRL   "Uses Ethernet interface for the control" OFF)
+option(WITH_ETH_CTRL "Uses Ethernet interface for control and streaming" OFF)
 
 ########################################################################
 ## LitePCIe discovery
@@ -91,12 +90,8 @@ set(LITEXM2SDR_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
 )
 
-if(WITH_ETH_STREAM)
-    add_definitions(-DWITH_ETH_STREAM=1)
-endif()
-
 if(WITH_ETH_CTRL)
-	add_definitions(-DWITH_ETH_CTRL=1)
+    add_definitions(-DWITH_ETH_CTRL=1)
 endif()
 
 SOAPY_SDR_MODULE_UTIL(

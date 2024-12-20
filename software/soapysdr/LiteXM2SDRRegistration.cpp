@@ -60,12 +60,10 @@ SoapySDR::Kwargs createDeviceKwargs(
     const std::string &eth_ip) {
     SoapySDR::Kwargs dev = {
         {"device",         "LiteX-M2SDR"},
-#if defined(WITH_ETH_CTRL) || defined(WITH_ETH_STREAM)
+#ifdef WITH_ETH_CTRL
         {"eth_ip",         eth_ip},
 #endif
-#if not (defined(WITH_ETH_CTRL) && defined(WITH_ETH_STREAM))
         {"path",           path},
-#endif
         {"serial",         getLiteXM2SDRSerial(fd)},
         {"identification", getLiteXM2SDRIdentification(fd)},
         {"version",        "1234"},
@@ -84,7 +82,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     std::string eth_ip = "192.168.1.50";
     std::string path   = "/dev/m2sdr0";
 
-#if defined(WITH_ETH_CTRL) || defined(WITH_ETH_STREAM)
+#ifdef WITH_ETH_CTRL
     if (args.count("eth_ip") == 0) {
         std::cout << "When using ethernet mode eth_ip parameter is required\n";
         //throw std::runtime_error("plop");
@@ -116,7 +114,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
         }
     }
 #else
-#ifndef WITH_ETH_STREAM
+#ifndef WITH_ETH_CTRL
     if (args.count("path") == 0) {
         std::cout << "When using ethernet for control and PCIe for stream path parameter is required\n";
         //throw std::runtime_error("plop");
