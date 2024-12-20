@@ -33,12 +33,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         /* Configure the file descriptor watcher. */
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         _rx_stream.fds.fd = _fd;
 #endif
         _rx_stream.fds.events = POLLIN;
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Initialize the DMA engine. */
         if ((litepcie_request_dma(_fd, 0, 1) == 0)) {
             throw std::runtime_error("DMA not available.");
@@ -83,12 +83,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         /* Configure the file descriptor watcher. */
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         _tx_stream.fds.fd = _fd;
 #endif
         _tx_stream.fds.events = POLLOUT;
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Initialize the DMA engine. */
         if ((litepcie_request_dma(_fd, 1, 0) == 0)) {
             throw std::runtime_error("DMA not available.");
@@ -157,7 +157,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (stream == RX_STREAM) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 0, 1);
 
@@ -169,7 +169,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
 
@@ -190,7 +190,7 @@ int SoapyLiteXM2SDR::activateStream(
     if (stream == RX_STREAM) {
         for (size_t i = 0; i < _rx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Crossbar Demux: Select PCIe streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
         /* Enable the DMA engine for RX. */
@@ -202,7 +202,7 @@ int SoapyLiteXM2SDR::activateStream(
 #endif
         _rx_stream.user_count = 0;
     } else if (stream == TX_STREAM) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         for (size_t i = 0; i < _tx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
         /* Enable the DMA engine for TX. */
@@ -221,13 +221,13 @@ int SoapyLiteXM2SDR::deactivateStream(
     const long long /*timeNs*/) {
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #else
         _rx_udp_receiver->stop();
 #endif
     } else if (stream == TX_STREAM) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Disable the DMA engine for TX. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
 #endif
@@ -312,7 +312,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
-#ifdef WITH_ETH_CTRL
+#ifdef USE_LITEETH
 #ifdef USE_THREAD
     int buffers_available = _rx_udp_receiver->buffers_available();
     /* No buffer: fails */
@@ -399,7 +399,7 @@ void SoapyLiteXM2SDR::releaseReadBuffer(
     size_t handle) {
     assert(handle != (size_t)-1 && "Attempt to release an invalid buffer (e.g., from an overflow).");
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     /* Update the DMA counters. */
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
     mmap_dma_update.sw_count = handle + 1;
@@ -417,7 +417,7 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     /* Check if there are buffers available. */
     int buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
     assert(buffers_pending <= (int)_dma_mmap_info.dma_tx_buf_count);
@@ -473,7 +473,7 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const long long /*timeNs*/) {
     /* XXX: Inspect user-provided numElems and flags, and act upon them? */
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
 
     /* Update the DMA counters so that the engine can submit this buffer. */
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;

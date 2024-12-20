@@ -28,7 +28,7 @@
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
 #define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
 #define litex_m2sdr_readl(_fd, _addr) litepcie_readl(_fd, _addr)
 typedef int litex_m2sdr_device_desc_t;

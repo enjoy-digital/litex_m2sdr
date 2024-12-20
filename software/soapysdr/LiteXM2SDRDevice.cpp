@@ -52,7 +52,7 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         rxbuf[0] = m2sdr_ad9361_spi_read(spi_fd, txbuf[0] << 8 | txbuf[1]);
 #else
         rxbuf[0] = eb_m2sdr_ad9361_spi_read(eb_fd, txbuf[0] << 8 | txbuf[1]);
@@ -60,7 +60,7 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
     /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         m2sdr_ad9361_spi_write(spi_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
 #else
         eb_m2sdr_ad9361_spi_write(eb_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
@@ -219,7 +219,7 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
 std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
 void dma_set_loopback(int fd, bool loopback_enable) {
     struct litepcie_ioctl_dma m;
     m.loopback_enable = loopback_enable ? 1 : 0;
@@ -241,7 +241,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     /* Open LitePCIe descriptor. */
     if (args.count("path") == 0) {
         /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
@@ -257,7 +257,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 #endif
 
-#ifdef WITH_ETH_CTRL
+#ifdef USE_LITEETH
     /* Prepare EtherBone / Ethernet streamer */
     std::string eth_ip;
     if (args.count("eth_ip") == 0)
@@ -270,12 +270,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
     eb_fd = _fd;
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(fd).c_str());
 #endif
 #endif
 
-#ifdef WITH_ETH_CTRL
+#ifdef USE_LITEETH
     /* Ethernet streamer */
     try {
         _rx_udp_receiver = new LiteXM2SDRUPDRx(eth_ip, "2345", 0, 20, 1024/8, 8);
@@ -310,7 +310,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     /* Bypass synchro. */
     litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
@@ -338,7 +338,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
     if (do_init) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         /* Initialize SI531 Clocking. */
         m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
@@ -396,7 +396,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 1);
     }
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     /* Set-up the DMA. */
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
     _dma_buf = NULL;
@@ -408,7 +408,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     if (_rx_stream.opened) {
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
         litepcie_release_dma(_fd, 0, 1);
 
         munmap(_rx_stream.buf,
@@ -419,7 +419,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         _rx_stream.opened = false;
     }
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     if (_tx_stream.opened) {
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
@@ -433,7 +433,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     /* Crossbar Demux: Select PCIe streaming */
     litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-#ifndef WITH_ETH_CTRL
+#ifndef USE_LITEETH
     close(_fd);
 #endif
 }

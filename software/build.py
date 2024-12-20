@@ -34,9 +34,9 @@ args = parser.parse_args()
 
 # Control/Data path flags.
 if args.interface == "litepcie":
-    flags = "-DWITH_ETH_CTRL=OFF"
+    flags = "-DUSE_LITEETH=OFF"
 else:
-    flags = "-DWITH_ETH_CTRL=ON"
+    flags = "-DUSE_LITEETH=ON"
 
 # Kernel compilation.
 if (args.interface == "litepcie"):
