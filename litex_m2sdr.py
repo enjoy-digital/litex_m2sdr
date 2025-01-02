@@ -38,7 +38,7 @@ from litepcie.phy.s7pciephy import S7PCIEPHY
 
 from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
-from liteeth.frontend.stream  import LiteEthStream2UDPTX
+from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 
 from litesata.phy import LiteSATAPHY
 
@@ -106,7 +106,7 @@ class BaseSoC(SoCMini):
         "flash"           : 6,
         "leds"            : 7,
         "identifier_mem"  : 8,
-        "timer"           : 9,
+        "timer0"          : 9,
 
         # PCIe.
         "pcie_phy"        : 10,
@@ -115,7 +115,8 @@ class BaseSoC(SoCMini):
 
         # Eth.
         "eth_phy"         : 14,
-        "eth_streamer"    : 15,
+        "eth_rx_streamer" : 15,
+        "eth_tx_streamer" : 16,
 
         # SATA.
         "sata_phy"        : 18,
@@ -263,18 +264,26 @@ class BaseSoC(SoCMini):
             # Core + MMAP (Etherbone).
             self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
 
-            # UDP Streamer RX.
+            # UDP Streamer.
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=64, cd="sys")
-            self.eth_streamer = LiteEthStream2UDPTX(
+
+            # RFIC -> UDP TX.
+            self.eth_rx_streamer = LiteEthStream2UDPTX(
                 udp_port   = eth_udp_port,
                 fifo_depth = 1024//8,
                 data_width = 64,
                 with_csr   = True,
             )
-            self.comb += self.eth_streamer.source.connect(eth_streamer_port.sink)
+            self.comb += self.eth_rx_streamer.source.connect(eth_streamer_port.sink)
 
-            # UDP Streamer TX.
-            # TODO.
+            # UDP RX -> RFIC.
+            self.eth_tx_streamer = LiteEthUDP2StreamRX(
+                udp_port   = eth_udp_port,
+                fifo_depth = 1024//8,
+                data_width = 64,
+                with_csr   = True,
+            )
+            self.comb += eth_streamer_port.source.connect(self.eth_tx_streamer.sink)
 
         # SATA -------------------------------------------------------------------------------------
 
@@ -350,7 +359,7 @@ class BaseSoC(SoCMini):
         if with_pcie:
             self.comb += self.pcie_dma0.source.connect(self.crossbar.mux.sink0)
         if with_eth:
-            pass # TODO.
+            self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
             pass # TODO.
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
@@ -362,7 +371,7 @@ class BaseSoC(SoCMini):
         if with_pcie:
             self.comb += self.crossbar.demux.source0.connect(self.pcie_dma0.sink)
         if with_eth:
-            self.comb += self.crossbar.demux.source1.connect(self.eth_streamer.sink)
+            self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             pass # TODO.
 
