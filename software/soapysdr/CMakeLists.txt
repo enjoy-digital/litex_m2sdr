@@ -91,7 +91,9 @@ set(LITEXM2SDR_SOURCE
 )
 
 if(USE_LITEETH)
-    add_definitions(-DUSE_LITEETH)
+    add_definitions(-DUSE_LITEPCIE=0 -DUSE_LITEETH=1)
+else()
+    add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=0)
 endif()
 
 SOAPY_SDR_MODULE_UTIL(

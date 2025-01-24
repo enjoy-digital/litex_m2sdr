@@ -33,12 +33,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         /* Configure the file descriptor watcher. */
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         _rx_stream.fds.fd = _fd;
 #endif
         _rx_stream.fds.events = POLLIN;
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Initialize the DMA engine. */
         if ((litepcie_request_dma(_fd, 0, 1) == 0)) {
             throw std::runtime_error("DMA not available.");
@@ -58,7 +58,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         /* Ensure the DMA is disabled initially to avoid counters being in a bad state. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
-#else
+#elif USE_LITEETH
         _rx_buf_size = _rx_udp_receiver->buffer_size();
         _rx_buf_count = _rx_udp_receiver->buffer_count();
         _rx_stream.buf = malloc(_rx_buf_size * _rx_buf_count);
@@ -83,12 +83,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         /* Configure the file descriptor watcher. */
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         _tx_stream.fds.fd = _fd;
 #endif
         _tx_stream.fds.events = POLLOUT;
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Initialize the DMA engine. */
         if ((litepcie_request_dma(_fd, 1, 0) == 0)) {
             throw std::runtime_error("DMA not available.");
@@ -157,19 +157,19 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (stream == RX_STREAM) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 0, 1);
 
         munmap(
             _rx_stream.buf,
             _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
-#else
+#elif USE_LITEETH
         free(_rx_stream.buf);
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
 
@@ -190,19 +190,19 @@ int SoapyLiteXM2SDR::activateStream(
     if (stream == RX_STREAM) {
         for (size_t i = 0; i < _rx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Crossbar Demux: Select PCIe streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
         /* Enable the DMA engine for RX. */
         litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
-#else
+#elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
         _rx_udp_receiver->start();
 #endif
         _rx_stream.user_count = 0;
     } else if (stream == TX_STREAM) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         for (size_t i = 0; i < _tx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
         /* Enable the DMA engine for TX. */
@@ -221,13 +221,13 @@ int SoapyLiteXM2SDR::deactivateStream(
     const long long /*timeNs*/) {
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
-#else
+#elif USE_LITEETH
         _rx_udp_receiver->stop();
 #endif
     } else if (stream == TX_STREAM) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Disable the DMA engine for TX. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
 #endif
@@ -312,7 +312,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
-#ifdef USE_LITEETH
+#if USE_LITEETH
 #ifdef USE_THREAD
     int buffers_available = _rx_udp_receiver->buffers_available();
     /* No buffer: fails */
@@ -335,7 +335,8 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
     handle = pos;
     return getStreamMTU(stream);
-#else
+
+#elif USE_LITEPCIE
 
     /* Check if there are buffers available. */
     int buffers_available = _rx_stream.hw_count - _rx_stream.user_count;
@@ -399,7 +400,7 @@ void SoapyLiteXM2SDR::releaseReadBuffer(
     size_t handle) {
     assert(handle != (size_t)-1 && "Attempt to release an invalid buffer (e.g., from an overflow).");
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     /* Update the DMA counters. */
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
     mmap_dma_update.sw_count = handle + 1;
@@ -417,7 +418,7 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     /* Check if there are buffers available. */
     int buffers_pending = _tx_stream.user_count - _tx_stream.hw_count;
     assert(buffers_pending <= (int)_dma_mmap_info.dma_tx_buf_count);
@@ -461,7 +462,7 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     } else {
         return getStreamMTU(stream);
     }
-#else
+#elif USE_LITEETH
     return SOAPY_SDR_NOT_SUPPORTED;
 #endif
 }
@@ -475,13 +476,11 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const long long /*timeNs*/) {
     /* XXX: Inspect user-provided numElems and flags, and act upon them? */
 
-#ifndef USE_LITEETH
-
+#if USE_LITEPCIE
     /* Update the DMA counters so that the engine can submit this buffer. */
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
     mmap_dma_update.sw_count = handle + 1;
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
-
 #endif
 }
 

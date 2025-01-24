@@ -38,11 +38,9 @@
 
 /* AD9361 SPI */
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
 static int spi_fd;
-#endif
-
-#ifdef USE_LITEETH
+#elif USE_LITEETH
 static struct eb_connection *eb_fd;
 #endif
 
@@ -57,15 +55,15 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         rxbuf[0] = m2sdr_ad9361_spi_read(spi_fd, txbuf[0] << 8 | txbuf[1]);
-#else
+#elif USE_LITEETH
         rxbuf[0] = eb_m2sdr_ad9361_spi_read(eb_fd, txbuf[0] << 8 | txbuf[1]);
 #endif
 
     /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         m2sdr_ad9361_spi_write(spi_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
 #else
         eb_m2sdr_ad9361_spi_write(eb_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
@@ -187,7 +185,7 @@ void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
  *                                     Constructor
  **************************************************************************************************/
 
-#ifdef USE_LITEETH
+#if USE_LITEETH
 static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16_t remote_port)
 {
     struct sockaddr_in remote_addr;
@@ -226,7 +224,7 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
 std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
 void dma_set_loopback(int fd, bool loopback_enable) {
     struct litepcie_ioctl_dma m;
     m.loopback_enable = loopback_enable ? 1 : 0;
@@ -248,7 +246,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     /* Open LitePCIe descriptor. */
     if (args.count("path") == 0) {
         /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
@@ -262,9 +260,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     spi_fd = _fd;
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
-#endif
-
-#ifdef USE_LITEETH
+#elif USE_LITEETH
     /* Prepare EtherBone / Ethernet streamer */
     std::string eth_ip;
     if (args.count("eth_ip") == 0)
@@ -277,12 +273,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
     eb_fd = _fd;
-#ifndef USE_LITEETH
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(fd).c_str());
-#endif
-#endif
 
-#ifdef USE_LITEETH
     /* Ethernet streamer */
     try {
         _rx_udp_receiver = new LiteXM2SDRUPDRx(eth_ip, "2345", 0, 20, 1024/8, 8);
@@ -317,7 +308,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     /* Bypass synchro. */
     litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
 
@@ -345,7 +336,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
     if (do_init) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         /* Initialize SI531 Clocking. */
         m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
@@ -403,7 +394,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 1);
     }
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     /* Set-up the DMA. */
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
     _dma_buf = NULL;
@@ -415,18 +406,18 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     if (_rx_stream.opened) {
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
         litepcie_release_dma(_fd, 0, 1);
 
         munmap(_rx_stream.buf,
                _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
-#else
+#elif USE_LITEETH
         _rx_udp_receiver->stop();
 #endif
         _rx_stream.opened = false;
     }
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     if (_tx_stream.opened) {
         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 1, 0);
@@ -440,7 +431,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     /* Crossbar Demux: Select PCIe streaming */
     litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-#ifndef USE_LITEETH
+#if USE_LITEPCIE
     close(_fd);
 #endif
 }
