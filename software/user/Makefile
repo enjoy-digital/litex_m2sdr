@@ -1,4 +1,4 @@
-CFLAGS  = -O0 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
+CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
