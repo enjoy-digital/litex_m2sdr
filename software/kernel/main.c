@@ -589,12 +589,16 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
 #if defined(__arm__) || defined(__aarch64__)
 		void *va;
+		if (i == 0)
+			dev_info(&s->dev->dev, "Using ARM/AArch64 DMA buffer handling");
 		if (is_tx)
 			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.reader_handle[i]));
 		else
 			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.writer_handle[i]));
 		pfn = page_to_pfn(virt_to_page(va));
 #else
+		if (i == 0)
+			dev_info(&s->dev->dev, "Using non-ARM DMA buffer handling");
 		if (is_tx)
 			pfn = __pa(chan->dma.reader_addr[i]) >> PAGE_SHIFT;
 		else
