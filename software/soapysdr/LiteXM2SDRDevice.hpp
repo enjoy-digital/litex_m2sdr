@@ -344,6 +344,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         int8_t* remainderBuff;
         std::string format;
         std::vector<size_t> channels;
+#if USE_LITEPCIE
+        struct litepcie_dma_ctrl dma;
+#endif
     };
 
     struct RXStream: Stream {

@@ -34,30 +34,29 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         /* Configure the file descriptor watcher. */
 #if USE_LITEPCIE
-        _rx_stream.fds.fd = _fd;
+        _rx_stream.fds.fd     = _fd;
+        _rx_stream.dma.fds.fd = _fd;
 #endif
         _rx_stream.fds.events = POLLIN;
 
 #if USE_LITEPCIE
-        /* Initialize the DMA engine. */
-        if ((litepcie_request_dma(_fd, 0, 1) == 0)) {
-            throw std::runtime_error("DMA not available.");
-        }
+        /* Initialize RX DMA Writer */
+        _rx_stream.dma.shared_fd  = 1;
+        _rx_stream.dma.use_reader = 0;
+        _rx_stream.dma.use_writer = 1;
+        _rx_stream.dma.loopback   = 0;
+        _rx_stream.dma.zero_copy  = 1;
+        if (litepcie_dma_init(&_rx_stream.dma, "", _rx_stream.dma.zero_copy) < 0)
+            throw std::runtime_error("DMA Writer/RX not available (litepcie_dma_init failed).");
 
-        /* Memory-map the DMA buffers. */
-        _rx_stream.buf = mmap(
-            NULL,
-            _dma_mmap_info.dma_rx_buf_count * _dma_mmap_info.dma_rx_buf_size,
-            PROT_READ | PROT_WRITE, MAP_SHARED, _fd,
-            _dma_mmap_info.dma_rx_buf_offset);
-        if (_rx_stream.buf == MAP_FAILED) {
-            throw std::runtime_error("MMAP failed.");
-        }
-        _rx_buf_size = _dma_mmap_info.dma_rx_buf_size;
-        _rx_buf_count = _dma_mmap_info.dma_rx_buf_count;
+        /* Get Buffer and Parameters from RX DMA Writer */
+        _rx_stream.buf = _rx_stream.dma.buf_rd;
+        _rx_buf_size   = _rx_stream.dma.mmap_dma_info.dma_rx_buf_size;
+        _rx_buf_count  = _rx_stream.dma.mmap_dma_info.dma_rx_buf_count;
 
         /* Ensure the DMA is disabled initially to avoid counters being in a bad state. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
+
 #elif USE_LITEETH
         _rx_buf_size = _rx_udp_receiver->buffer_size();
         _rx_buf_count = _rx_udp_receiver->buffer_count();
@@ -84,27 +83,25 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         /* Configure the file descriptor watcher. */
 
 #if USE_LITEPCIE
-        _tx_stream.fds.fd = _fd;
+        _tx_stream.fds.fd     = _fd;
+        _tx_stream.dma.fds.fd = _fd;
 #endif
         _tx_stream.fds.events = POLLOUT;
 
 #if USE_LITEPCIE
-        /* Initialize the DMA engine. */
-        if ((litepcie_request_dma(_fd, 1, 0) == 0)) {
-            throw std::runtime_error("DMA not available.");
-        }
+        /* Initialize TX DMA Reader */
+        _tx_stream.dma.shared_fd  = 1;
+        _tx_stream.dma.use_reader = 1;
+        _tx_stream.dma.use_writer = 0;
+        _tx_stream.dma.loopback   = 0;
+        _tx_stream.dma.zero_copy  = 1;
+        if (litepcie_dma_init(&_tx_stream.dma, "", _tx_stream.dma.zero_copy) < 0)
+            throw std::runtime_error("DMA Reader/TX not available (litepcie_dma_init failed).");
 
-        /* Memory-map the DMA buffers. */
-        _tx_stream.buf = mmap(
-            NULL,
-            _dma_mmap_info.dma_tx_buf_count * _dma_mmap_info.dma_tx_buf_size,
-            PROT_WRITE, MAP_SHARED, _fd,
-            _dma_mmap_info.dma_tx_buf_offset);
-        if (_tx_stream.buf == MAP_FAILED) {
-            throw std::runtime_error("MMAP failed.");
-        }
-        _tx_buf_size = _dma_mmap_info.dma_tx_buf_size;
-        _tx_buf_count = _dma_mmap_info.dma_tx_buf_count;
+        /* Get Buffer and Parameters from TX DMA Reader */
+        _tx_stream.buf = _tx_stream.dma.buf_wr;
+        _tx_buf_size   = _tx_stream.dma.mmap_dma_info.dma_tx_buf_size;
+        _tx_buf_count  = _tx_stream.dma.mmap_dma_info.dma_tx_buf_count;
 
         /* Ensure the DMA is disabled initially to avoid counters being in a bad state. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
@@ -158,25 +155,14 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 
     if (stream == RX_STREAM) {
 #if USE_LITEPCIE
-        /* Release the DMA engine. */
-        litepcie_release_dma(_fd, 0, 1);
-
-        munmap(
-            _rx_stream.buf,
-            _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
+        litepcie_dma_cleanup(&_rx_stream.dma);
 #elif USE_LITEETH
         free(_rx_stream.buf);
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
-        /* Release the DMA engine. */
-        litepcie_release_dma(_fd, 1, 0);
-
-        munmap(
-            _tx_stream.buf,
-            _dma_mmap_info.dma_tx_buf_size * _dma_mmap_info.dma_tx_buf_count);
-        _tx_stream.opened = false;
+        litepcie_dma_cleanup(&_tx_stream.dma);
 #endif
     }
 }

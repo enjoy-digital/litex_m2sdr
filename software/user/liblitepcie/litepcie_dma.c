@@ -74,7 +74,8 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
     if (dma->use_writer)
         dma->fds.events |= POLLIN;
 
-    dma->fds.fd = open(device_name, O_RDWR | O_CLOEXEC);
+    if (dma->shared_fd != 1)
+        dma->fds.fd = open(device_name, O_RDWR | O_CLOEXEC);
     if (dma->fds.fd < 0) {
         fprintf(stderr, "Could not open device\n");
         return -1;
@@ -148,7 +149,8 @@ void litepcie_dma_cleanup(struct litepcie_dma_ctrl *dma)
         free(dma->buf_wr);
     }
 
-    close(dma->fds.fd);
+    if (dma->shared_fd != 1)
+        close(dma->fds.fd);
 }
 
 void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
