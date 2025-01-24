@@ -29,10 +29,12 @@
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 #ifndef USE_LITEETH
+#define FD_INIT -1
 #define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
 #define litex_m2sdr_readl(_fd, _addr) litepcie_readl(_fd, _addr)
 typedef int litex_m2sdr_device_desc_t;
 #else
+#define FD_INIT NULL
 #define litex_m2sdr_writel(_fd, _addr, _val) eb_write32(_fd, _val, _addr)
 #define litex_m2sdr_readl(_fd, _addr) eb_read32(_fd, _addr)
 typedef struct eb_connection *litex_m2sdr_device_desc_t;

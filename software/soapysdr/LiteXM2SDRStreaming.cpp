@@ -461,6 +461,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     } else {
         return getStreamMTU(stream);
     }
+#else
+    return SOAPY_SDR_NOT_SUPPORTED;
 #endif
 }
 

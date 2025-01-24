@@ -57,7 +57,9 @@
 #define EFAULT		14	/* Bad address */
 #define ENODEV		19	/* No such device */
 #define EINVAL		22	/* Invalid argument */
+#ifndef EOPNOTSUPP
 #define EOPNOTSUPP	45	/* Operation not supported on transport endpoint */
+#endif
 #define ETIMEDOUT	110	/* Connection timed out */
 
 /******************************************************************************/

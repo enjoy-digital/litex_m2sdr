@@ -38,9 +38,14 @@
 
 /* AD9361 SPI */
 
+#ifndef USE_LITEETH
 static int spi_fd;
+#endif
 
+#ifdef USE_LITEETH
 static struct eb_connection *eb_fd;
+#endif
+
 void m2sdr_ad9361_spi_xfer(struct eb_connection *eb, uint8_t len, uint8_t *mosi, uint8_t *miso);
 void eb_m2sdr_ad9361_spi_write(struct eb_connection *eb, uint16_t reg, uint8_t dat);
 uint8_t eb_m2sdr_ad9361_spi_read(struct eb_connection *eb, uint16_t reg);
@@ -182,6 +187,7 @@ void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
  *                                     Constructor
  **************************************************************************************************/
 
+#ifdef USE_LITEETH
 static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16_t remote_port)
 {
     struct sockaddr_in remote_addr;
@@ -215,6 +221,7 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 
     return std::string(buf);
 }
+#endif
 
 std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
 std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
@@ -230,7 +237,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
     _rx_udp_receiver(NULL),
-    _fd(NULL), ad9361_phy(NULL) {
+    _fd(FD_INIT), ad9361_phy(NULL) {
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
