@@ -28,7 +28,7 @@ def build_driver(path, cmake_options=""):
         run_command(command)
 
 parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("--interface", default="liteeth", help="Control/Data path interface", choices=["litepcie", "liteeth"])
+parser.add_argument("--interface", default="litepcie", help="Control/Data path interface", choices=["litepcie", "liteeth"])
 
 args = parser.parse_args()
 
