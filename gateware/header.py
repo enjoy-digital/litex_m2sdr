@@ -79,6 +79,7 @@ class HeaderInserterExtracter(LiteXModule):
         if mode == "inserter":
             fsm.act("HEADER",
                 source.valid.eq(1),
+                source.first.eq(1),
                 source.data[0:64].eq(self.header),
                 If(source.valid & source.ready,
                     NextState("TIMESTAMP"),
@@ -97,13 +98,14 @@ class HeaderInserterExtracter(LiteXModule):
             If(self.header_enable & source.valid & source.ready,
                 NextValue(cycles, cycles + 1),
                 If(cycles == (self.frame_cycles - 1),
+                    source.last.eq(1),
                     NextValue(cycles, 0),
                     NextState("HEADER")
                 )
             )
         )
 
-    def add_csr(self, default_enable=1, default_header_enable=0, default_frame_cycles=30.72e6*1e-3/2):
+    def add_csr(self, default_enable=1, default_header_enable=0, default_frame_cycles=8192/8 - 2):
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, values=[
                 ("``0b0``", "Module Disabled."),

@@ -241,7 +241,7 @@ class BaseSoC(SoCMini):
                 with_msi              = True
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pcie_dma0.sink.valid & self.pcie_dma0.sink.last) # CHECKME.
 
         # Ethernet ---------------------------------------------------------------------------------
 
