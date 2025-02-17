@@ -19,6 +19,12 @@
 
 #include "LiteXM2SDRDevice.hpp"
 
+#if USE_LITEPCIE && defined(_RX_DMA_HEADER_TEST)
+static constexpr size_t RX_DMA_HEADER_SIZE = 16;
+#else
+static constexpr size_t RX_DMA_HEADER_SIZE = 0;
+#endif
+
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const int direction,
@@ -51,7 +57,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         /* Get Buffer and Parameters from RX DMA Writer */
         _rx_stream.buf = _rx_stream.dma.buf_rd;
-        _rx_buf_size   = _rx_stream.dma.mmap_dma_info.dma_rx_buf_size;
+        _rx_buf_size   = _rx_stream.dma.mmap_dma_info.dma_rx_buf_size - RX_DMA_HEADER_SIZE;
         _rx_buf_count  = _rx_stream.dma.mmap_dma_info.dma_rx_buf_count;
 
         /* Ensure the DMA is disabled initially to avoid counters being in a bad state. */
@@ -254,7 +260,7 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
     const size_t handle,
     void **buffs) {
     if (stream == RX_STREAM) {
-        buffs[0] = (char *)_rx_stream.buf + handle * _dma_mmap_info.dma_rx_buf_size;
+        buffs[0] = (char *)_rx_stream.buf + handle * _dma_mmap_info.dma_rx_buf_size + RX_DMA_HEADER_SIZE;
     } else if (stream == TX_STREAM) {
         buffs[0] = (char *)_tx_stream.buf + handle * _dma_mmap_info.dma_tx_buf_size;
     } else {

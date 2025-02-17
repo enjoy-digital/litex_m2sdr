@@ -28,8 +28,6 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 
-//#define _122P88MSPS_TEST
-
 /***************************************************************************************************
  *                                    AD9361
  **************************************************************************************************/
@@ -309,8 +307,25 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
 #if USE_LITEPCIE
-    /* Bypass synchro. */
-    litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
+    #if defined(_RX_DMA_HEADER_TEST)
+        /* Enable Synchronizer */
+        litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+
+        /* Enable DMA RX Header */
+        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
+           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (1 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
+        );
+    #else
+        /* Bypass Synchronizer */
+        litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 1);
+
+        /* Disable DMA RX Header */
+        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
+           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
+        );
+    #endif
 
     /* Disable DMA Loopback. */
     litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);

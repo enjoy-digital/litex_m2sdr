@@ -26,6 +26,9 @@
 
 #define DEBUG
 
+//#define _122P88MSPS_TEST
+//#define _RX_DMA_HEADER_TEST
+
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 #if USE_LITEPCIE
