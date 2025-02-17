@@ -1,46 +1,43 @@
 #!/usr/bin/env python3
 
 import time
+import argparse
+import datetime
 import SoapySDR
 
-def format_hw_time(time_ns):
+def parse_set_time(arg: str) -> int:
+    """Parse 'arg' into an integer nanosecond value.
+       - 'now': use current system time in ns.
+       - otherwise: parse as a float, then convert to int (to handle 10e12, etc.).
     """
-    Convert a nanosecond timestamp into hh:mm:ss.us:ns notation.
-    """
-    # Calculate hours, minutes, seconds.
-    ns_per_sec = 1_000_000_000
-    hours      = time_ns // (3600 * ns_per_sec)
-    remainder  = time_ns %  (3600 * ns_per_sec)
-    minutes    = remainder // (60 * ns_per_sec)
-    remainder  = remainder %  (60 * ns_per_sec)
-    seconds    = remainder // ns_per_sec
-    remainder  = remainder %  ns_per_sec
+    if arg.lower() == "now":
+        return int(time.time_ns())
+    return int(float(arg))
 
-    # Split remainder into microseconds and leftover nanoseconds.
-    microseconds = remainder // 1000
-    leftover_ns  = remainder %  1000
-
-    return f"{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}:" \
-           f"{int(microseconds):06d}:{int(leftover_ns):03d}"
+def format_epoch_time_ns(t_ns: int) -> str:
+    """Convert a Unix nanosecond timestamp into local date/time: YYYY-MM-DD HH:MM:SS.nnn"""
+    s = t_ns // 1_000_000_000
+    n = t_ns %  1_000_000_000
+    dt = datetime.datetime.fromtimestamp(s) + datetime.timedelta(microseconds=(n // 1000))
+    return dt.strftime("%Y-%m-%d %H:%M:%S") + f".{n % 1000:03d}"
 
 def main():
-    # Open the device with the LiteXM2SDR driver.
-    args = dict(driver="LiteXM2SDR")
-    sdr  = SoapySDR.Device(args)
+    parser = argparse.ArgumentParser(description="Set/read LiteXM2SDR hardware time (ns).")
+    parser.add_argument("--set", help="Set time to 'now' or a numeric value (e.g. 10e12).", default=None)
+    args = parser.parse_args()
 
-    # Poll hardware time every 200ms for a total of 5 seconds.
-    interval_s   = 0.2
-    total_time_s = 5.0
-    steps        = int(total_time_s / interval_s)
+    sdr = SoapySDR.Device({"driver": "LiteXM2SDR"})
+    if args.set:
+        t_ns = parse_set_time(args.set)
+        sdr.setHardwareTime(t_ns, "")
 
-    print(f"Polling hardware time every {interval_s}s for {total_time_s}s...\n")
-
+    interval = 0.2
+    total    = 5
+    steps    = int(total / interval)
     for i in range(steps):
-        # Read hardware time (ns).
-        t_ns = sdr.getHardwareTime("")
-        # Format and print the timestamp.
-        print(f"{i+1:2d}> {t_ns} ns  ({format_hw_time(t_ns)})")
-        time.sleep(interval_s)
+        hw_ns = sdr.getHardwareTime("")
+        print(f"{i+1:2d}> {hw_ns} ns  ({format_epoch_time_ns(hw_ns)})")
+        time.sleep(interval)
 
 if __name__ == "__main__":
     main()
