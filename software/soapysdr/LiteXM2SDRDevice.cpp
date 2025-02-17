@@ -912,6 +912,8 @@ long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const
     control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
     litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
     time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
@@ -934,6 +936,8 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
     /* Pulse the WRITE bit Control Register. */
     control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
     litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Optional debug log. */
