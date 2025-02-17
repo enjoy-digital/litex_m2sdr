@@ -239,8 +239,8 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 1);
 
 	/* Start DMA Synchronizer. */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b10); /* RX only */
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10); /* RX only */
 }
 
 static void litepcie_dma_writer_stop(struct litepcie_device *s, int chan_num)
@@ -255,6 +255,14 @@ static void litepcie_dma_writer_stop(struct litepcie_device *s, int chan_num)
 	udelay(1000);
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 0);
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_TABLE_FLUSH_OFFSET, 1);
+
+	/* Disable DMA Synchronizer only if the Reader is not active */
+	if (!dmachan->reader_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_BYPASS_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Reader is active; skipping disabling synchronizer in writer_stop\n");
+	}
 
 	/* Clear counters. */
 	dmachan->writer_hw_count = 0;
@@ -297,8 +305,8 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
 
 	/* Start DMA Synchronizer. */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_ADDR, 0b01); /* TX & RX */
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01); /* TX & RX */
 }
 
 static void litepcie_dma_reader_stop(struct litepcie_device *s, int chan_num)
@@ -313,6 +321,14 @@ static void litepcie_dma_reader_stop(struct litepcie_device *s, int chan_num)
 	udelay(1000);
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 0);
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_TABLE_FLUSH_OFFSET, 1);
+
+	/* Disable DMA Synchronizer only if the Writer is not active */
+	if (!dmachan->writer_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_BYPASS_OFFSET, 0b0);
+        litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+    } else {
+        dev_dbg(&s->dev->dev, "DMA Writer is active; skipping disabling synchronizer in reader_stop\n");
+    }
 
 	/* clear counters */
 	dmachan->reader_hw_count = 0;
