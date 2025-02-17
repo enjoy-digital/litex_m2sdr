@@ -109,10 +109,10 @@ class HeaderInserterExtracter(LiteXModule):
 
         # Frame.
         fsm.act("FRAME",
-            sink.connect(source),
+            sink.connect(source, omit={"first"}),
             NextValue(self.update, 0),
             If(self.header_enable,
-                source.first.eq(cycles == 0 & (mode == "extracter")),
+                source.first.eq((cycles == 0) & (mode == "extracter")),
                 source.last.eq( cycles == (self.frame_cycles - 1)),
                 If(source.valid & source.ready,
                     NextValue(cycles, cycles + 1),
