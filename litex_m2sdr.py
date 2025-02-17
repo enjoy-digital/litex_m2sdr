@@ -364,8 +364,6 @@ class BaseSoC(SoCMini):
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.timestamp.time),
-            self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced), # FIXME: Will probably break Ethernet.
-            self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced), # FIXME: Will probably break Ethernet.
         ]
 
         # TX/RX Datapath ---------------------------------------------------------------------------
@@ -390,7 +388,9 @@ class BaseSoC(SoCMini):
         if with_sata:
             pass # TODO.
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
-
+        self.comb += If(self.crossbar.mux.sel == 0,
+            self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+        )
 
         # RX: Header -> Crossbar -> Comms.
         # --------------------------------
@@ -401,7 +401,9 @@ class BaseSoC(SoCMini):
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             pass # TODO.
-
+        self.comb += If(self.crossbar.demux.sel == 0,
+            self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+        )
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
