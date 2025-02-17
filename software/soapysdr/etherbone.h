@@ -1,7 +1,7 @@
 /*
  * Etherbone C Library.
  *
- * Copyright (c) 2020-2024 LiteX-Hub community.
+ * Copyright (c) 2020-2025 LiteX-Hub community.
  * SPDX-License-Identifier: Apache-2.0
  * http://www.apache.org/licenses/LICENSE-2.0
  *

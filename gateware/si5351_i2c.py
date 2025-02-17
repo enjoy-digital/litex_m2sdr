@@ -1,7 +1,7 @@
 #
 # This file is part of LiteX-M2SDR.
 #
-# Copyright (c) 2024 Enjoy-Digital <enjoy-digital.fr>
+# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
 # Copyright (c) 2016 M-Labs Ltd
 # SPDX-License-Identifier: BSD-2-Clause
 
