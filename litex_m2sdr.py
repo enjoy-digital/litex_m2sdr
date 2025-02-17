@@ -49,6 +49,7 @@ from gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from gateware.ad9361.core import AD9361RFIC
 from gateware.qpll        import SharedQPLL
 from gateware.time        import TimeGenerator
+from gateware.pps         import PPSGenerator
 from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 from gateware.measurement import MultiClkMeasurement
@@ -188,6 +189,21 @@ class BaseSoC(SoCMini):
             with_csr   = True,
         )
 
+        # PPS Generator ----------------------------------------------------------------------------
+
+        self.pps_gen = ClockDomainsRenamer("time_gen_time")(PPSGenerator(
+            clk_freq = 100e6,
+            time     = self.time_gen.time,
+            reset    = self.time_gen.time_change,
+        ))
+        # FIXME: Improve.
+        pps_sys   = Signal()
+        pps_sys_d = Signal()
+        pps_rise  = Signal()
+        self.specials += MultiReg(self.pps_gen.pps, pps_sys)
+        self.sync += pps_sys_d.eq(pps_sys)
+        self.comb += pps_rise.eq(pps_sys & ~pps_sys_d)
+
         # JTAGBone ---------------------------------------------------------------------------------
 
         if with_jtagbone:
@@ -250,7 +266,7 @@ class BaseSoC(SoCMini):
                 with_msi              = True
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
 
         # Ethernet ---------------------------------------------------------------------------------
 
@@ -348,6 +364,8 @@ class BaseSoC(SoCMini):
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.timestamp.time),
+            self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced), # FIXME: Will probably break Ethernet.
+            self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced), # FIXME: Will probably break Ethernet.
         ]
 
         # TX/RX Datapath ---------------------------------------------------------------------------
@@ -449,9 +467,12 @@ class BaseSoC(SoCMini):
     def add_pcie_dma_probe(self):
         assert hasattr(self, "pcie_dma0")
         analyzer_signals = [
+            self.pps_gen.pps,      # PPS.
             self.pcie_dma0.sink,   # RX.
             self.pcie_dma0.source, # TX.
             self.pcie_dma0.synchronizer.synced,
+            self.header.rx.reset,
+            self.header.tx.reset,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = 1024,
