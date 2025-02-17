@@ -298,7 +298,11 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     size_t &handle,
     const void **buffs,
     int &flags,
-    long long &/*timeNs*/,
+#if USE_LITEPCIE && defined(_RX_DMA_HEADER_TEST)
+     long long &timeNs,
+#else
+     long long &/*timeNs*/,
+#endif
     const long timeoutUs) {
     if (stream != RX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
@@ -375,6 +379,21 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     } else {
         /* Get the buffer. */
         int buf_offset = _rx_stream.user_count % _dma_mmap_info.dma_rx_buf_count;
+
+        /* Extract timestamp from the DMA header */
+#if defined(_RX_DMA_HEADER_TEST)
+        {
+            /* Header is at the beginning of the DMA buffer */
+            const uint8_t *header_ptr = reinterpret_cast<const uint8_t *>(_rx_stream.buf) + buf_offset * _dma_mmap_info.dma_rx_buf_size;
+            /* Timestamp is stored in bytes 8 to 16 of the header */
+            uint64_t timestamp = *reinterpret_cast<const uint64_t *>(header_ptr + 8);
+            /* Assign the extracted timestamp to the provided timeNs reference. */
+            timeNs = static_cast<long long>(timestamp);
+            SoapySDR_logf(SOAPY_SDR_DEBUG, "Extracted DMA timestamp: %llu ns", timestamp);
+        }
+#endif
+
+        /* Get the pointer to the actual sample data (skipping the header). */
         getDirectAccessBufferAddrs(stream, buf_offset, (void **)buffs);
 
         /* Update the DMA counters. */
