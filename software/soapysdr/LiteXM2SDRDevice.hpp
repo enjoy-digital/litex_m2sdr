@@ -302,6 +302,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     ***********************************************************************************************/
     bool hasHardwareTime(const std::string &) const override;
     long long getHardwareTime(const std::string &) const override;
+    void setHardwareTime(const long long timeNs, const std::string &);
 
     /***********************************************************************************************
     *                                    Sensor API
