@@ -48,6 +48,7 @@ from gateware.si5351      import SI5351
 from gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from gateware.ad9361.core import AD9361RFIC
 from gateware.qpll        import SharedQPLL
+from gateware.time        import TimeGenerator
 from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 from gateware.measurement import MultiClkMeasurement
@@ -124,6 +125,7 @@ class BaseSoC(SoCMini):
 
         # SDR.
         "si5351"          : 20,
+        "time"            : 21,
         "timestamp"       : 22,
         "header"          : 23,
         "ad9361"          : 24,
@@ -154,8 +156,6 @@ class BaseSoC(SoCMini):
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident         = f"LiteX-M2SDR SoC / {variant} variant / built on",
             ident_version = True,
-            with_timer    = True,
-            timer_uptime  = True
         )
 
         # Clocking ---------------------------------------------------------------------------------
@@ -178,6 +178,15 @@ class BaseSoC(SoCMini):
 
         self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=platform.request("sync_clk_in"))
         si5351_clk0 = platform.request("si5351_clk0")
+        si5351_clk1 = platform.request("si5351_clk1")
+
+        # Time Generator ---------------------------------------------------------------------------
+
+        self.time_gen = TimeGenerator(
+            clk        = si5351_clk1,
+            clk_freq   = 100e6,
+            with_csr   = True,
+        )
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -399,6 +408,7 @@ class BaseSoC(SoCMini):
 
             # Sync.
             "si5351_clk0",
+            "si5351_clk1",
             "sync_clk_in",
         )
 
@@ -409,6 +419,7 @@ class BaseSoC(SoCMini):
             "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
             "clk3" : ClockSignal("rfic"),
+            "clk4" : si5351_clk1,
         })
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------

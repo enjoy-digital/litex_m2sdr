@@ -47,7 +47,7 @@ for i in range(num_measurements):
     elapsed_time = current_time - start_time
     start_time = current_time  # Update the start_time for the next iteration
 
-    for clk_index in range(4):
+    for clk_index in range(5):
         # Compute the difference between the current and previous values
         delta_value = current_values[clk_index] - previous_values[clk_index]
         frequency_mhz = delta_value / (elapsed_time * 1e6)

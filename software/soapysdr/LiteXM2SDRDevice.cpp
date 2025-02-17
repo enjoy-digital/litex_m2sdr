@@ -903,25 +903,45 @@ bool SoapyLiteXM2SDR::hasHardwareTime(const std::string &) const {
     return true;
 }
 
-long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const {
-    int64_t uptime_cycles = 0;
-    int64_t uptime_ns     = 0;
+long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const
+{
+    uint32_t control_reg = 0;
+    int64_t time_ns = 0;
 
-    /* Latch the 64-bit uptime value. */
-    litex_m2sdr_writel(_fd, CSR_TIMER0_UPTIME_LATCH_ADDR, 1);
+    /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
+    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
-    /* Read the upper/lower 32 bits of the uptime value. */
-    uptime_cycles |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR + 0)) << 32);
-    uptime_cycles |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIMER0_UPTIME_CYCLES_ADDR + 4)) <<  0);
+    /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
 
-    /* Convert cycles to nanoseconds. */
-    const int64_t clock_frequency_hz = CONFIG_CLOCK_FREQUENCY;
-    uptime_ns = (uptime_cycles * 1000000000LL) / clock_frequency_hz;
+    /* Debug log the hardware time in nanoseconds. */
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", (long long)time_ns);
 
-    /* Debug log uptime in cycles and nanoseconds. */
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware uptime (cycles): %lld, (ns): %lld", uptime_cycles, uptime_ns);
+    return static_cast<long long>(time_ns);
+}
 
-    return uptime_ns;
+void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string &)
+{
+    uint32_t control_reg = 0;
+
+    /* Write the 64-bit Time (ns). */
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
+
+    /* Pulse the WRITE bit Control Register. */
+    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg |= (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+
+    /* Optional debug log. */
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time set to (ns): %lld", (long long)timeNs);
 }
 
 /***************************************************************************************************

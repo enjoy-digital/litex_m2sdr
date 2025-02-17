@@ -597,14 +597,15 @@ end:
 /* Clk Measurement */
 /*-----------------*/
 
-#define N_CLKS 4
+#define N_CLKS 5
 
 static const uint32_t latch_addrs[N_CLKS] =
 {
     CSR_CLK_MEASUREMENT_CLK0_LATCH_ADDR,
     CSR_CLK_MEASUREMENT_CLK1_LATCH_ADDR,
     CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR,
-    CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR
+    CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR,
+    CSR_CLK_MEASUREMENT_CLK4_LATCH_ADDR,
 };
 
 static const uint32_t value_addrs[N_CLKS] =
@@ -612,14 +613,16 @@ static const uint32_t value_addrs[N_CLKS] =
     CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR,
     CSR_CLK_MEASUREMENT_CLK1_VALUE_ADDR,
     CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR,
-    CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR
+    CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR,
+    CSR_CLK_MEASUREMENT_CLK4_VALUE_ADDR,
 };
 
 static const char* clk_names[N_CLKS] = {
     "       Sys Clk",
     "      PCIe Clk",
     "AD9361 Ref Clk",
-    "AD9361 Dat Clk"
+    "AD9361 Dat Clk",
+    "  Time Ref Clk",
 };
 
 static uint64_t read_64bit_register(int fd, uint32_t addr)
