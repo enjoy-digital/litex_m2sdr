@@ -27,16 +27,20 @@ STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for capture to start
 # Main ----------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Record I/Q samples using the LiteXM2SDR SoapySDR driver.")
+    parser = argparse.ArgumentParser(
+        description     = "Record I/Q samples using the LiteXM2SDR SoapySDR driver.",
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter,
+    )
     # RF configuration options.
-    parser.add_argument("--samplerate", type=float, default=4e6,     help="RX Sample rate in Hz (default: 4000000)")
-    parser.add_argument("--bandwidth",  type=float, default=56e6,    help="RX Filter bandwidth in Hz (default: 56000000)")
-    parser.add_argument("--freq",       type=float, default=2.4e9,   help="RX frequency in Hz (default: 2400000000)")
-    parser.add_argument("--gain",       type=float, default=20.0,    help="RX gain in dB (default: 20)")
+    parser.add_argument("--samplerate", type=float, default=4e6,     help="RX Sample rate in Hz")
+    parser.add_argument("--bandwidth",  type=float, default=56e6,    help="RX Filter bandwidth in Hz")
+    parser.add_argument("--freq",       type=float, default=2.4e9,   help="RX frequency in Hz")
+    parser.add_argument("--gain",       type=float, default=20.0,    help="RX gain in dB")
     # Additional options.
-    parser.add_argument("--secs",       type=float, default=5.0,     help="Recording duration in seconds (default: 5)")
+    parser.add_argument("--secs",       type=float, default=5.0,     help="Recording duration in seconds")
     parser.add_argument("--check-ts",   action="store_true",         help="Enable timestamp checking and printing")
-    parser.add_argument("filename",   type=str,   help="Output file path for raw CF32 samples")
+    parser.add_argument("filename",     type=str,                    help="Output file path for raw CF32 samples")
+
     args = parser.parse_args()
 
     # Open the LiteXM2SDR device using the SoapySDR driver.

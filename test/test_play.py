@@ -46,22 +46,25 @@ def read_file_cf32(path, amplitude=0.7, chunk_len=1024):
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Transmit I/Q samples using the LiteXM2SDR SoapySDR driver.")
+    parser = argparse.ArgumentParser(
+        description     = "Transmit I/Q samples using the LiteXM2SDR SoapySDR driver.",
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter,
+    )
     # RF configuration options.
-    parser.add_argument("--samplerate", type=float, default=4e6,     help="TX Sample rate in Hz (default: 4000000)")
-    parser.add_argument("--bandwidth",  type=float, default=56e6,    help="TX Filter bandwidth in Hz (default: 56000000)")
-    parser.add_argument("--freq",       type=float, default=2.4e9,   help="TX frequency in Hz (default: 2400000000)")
-    parser.add_argument("--gain",       type=float, default=-20.0,   help="TX gain in dB (default: -20)")
+    parser.add_argument("--samplerate", type=float, default=4e6,   help="TX Sample rate in Hz")
+    parser.add_argument("--bandwidth",  type=float, default=56e6,  help="TX Filter bandwidth in Hz")
+    parser.add_argument("--freq",       type=float, default=2.4e9, help="TX frequency in Hz")
+    parser.add_argument("--gain",       type=float, default=-20.0, help="TX gain in dB")
 
     # Transmission mode: tone generation or file playback.
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--tone-freq",   type=float, help="Generate a tone at this frequency in Hz")
-    group.add_argument("--filename",    nargs="?",  help="Path to a raw CF32 file to play (file mode)")
+    group.add_argument("--tone-freq", type=float, help="Generate a tone at this frequency in Hz")
+    group.add_argument("--filename",  nargs="?",  help="Path to a raw CF32 file to play (file mode)")
 
     # Additional options.
-    parser.add_argument("--ampl", type=float, default=0.8,            help="Amplitude (0..1) (default: 0.7)")
-    parser.add_argument("--secs", type=float, default=5.0,            help="Transmit duration in seconds (tone mode only, default: 5)")
-    parser.add_argument("loops",  type=int,   nargs="?",   default=1, help="Number of times to loop file playback (file mode only, default: 1)")
+    parser.add_argument("--ampl", type=float, default=0.8,          help="Amplitude (0..1)")
+    parser.add_argument("--secs", type=float, default=5.0,          help="Transmit duration in seconds (tone mode only)")
+    parser.add_argument("loops",  type=int,   nargs="?", default=1, help="Number of times to loop file playback (file mode only)")
 
     args = parser.parse_args()
 
