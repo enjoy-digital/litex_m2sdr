@@ -28,6 +28,7 @@
 
 //#define _122P88MSPS_TEST
 //#define _RX_DMA_HEADER_TEST
+//#define _TX_DMA_HEADER_TEST
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
