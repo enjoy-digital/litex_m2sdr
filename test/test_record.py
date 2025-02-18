@@ -3,9 +3,9 @@
 """
 test_record.py - Record I/Q samples using the LiteXM2SDR SoapySDR driver.
 
-This script uses the SoapySDR driver to interface with the LiteXM2SDR hardware.
-It records I/Q samples for a specified duration and writes raw CF32 samples to a file.
-It optionally checks and prints timestamp information along with differences between consecutive valid timestamps.
+This script uses the SoapySDR driver to interface with the LiteXM2SDR hardware. It records I/Q
+samples for a specified duration and writes raw CF32 samples to a file. It optionally checks and
+prints timestamp information along with differences between consecutive valid timestamps.
 Command-line options allow you to configure sample rate, bandwidth, frequency, and gain.
 
 Usage Example:
@@ -19,13 +19,12 @@ import numpy as np
 import SoapySDR
 from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_CF32
 
-# Constants -----------------------------------------------------------------------------------------
+# Constants ----------------------------------------------------------------------------------------
 
-CHUNK_SIZE         = 2048
-STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for capture to start
+DMA_BUFFER_SIZE   = 8192
+PPS_STARTUP_DELAY = 1.0  # Allow up to 1 second for the internal PPS delay before record starts
 
 # Main ----------------------------------------------------------------------------------------------
-
 def main():
     parser = argparse.ArgumentParser(
         description     = "Record I/Q samples using the LiteXM2SDR SoapySDR driver.",
@@ -72,12 +71,13 @@ def main():
 
     with open(args.filename, "wb") as f:
         while time.time() - t_start < args.secs:
-            buf = np.empty(CHUNK_SIZE, dtype=np.complex64)
-            sr = sdr.readStream(rx_stream, [buf], CHUNK_SIZE)
+            # Allocate an array of samples: DMA_BUFFER_SIZE bytes / 4 bytes per sample = sample count.
+            buf = np.empty(DMA_BUFFER_SIZE // 4, dtype=np.complex64)
+            sr = sdr.readStream(rx_stream, [buf], DMA_BUFFER_SIZE // 4)
             # Handle expected startup error (-1) due to waiting for PPS.
             if sr.ret < 0:
                 elapsed = time.time() - t_start
-                if sr.ret == -1 and elapsed < STARTUP_GRACE_SECS:
+                if sr.ret == -1 and elapsed < PPS_STARTUP_DELAY:
                     print(f"Chunk {chunk_index}: readStream returned -1 (startup, elapsed {elapsed:.3f}s), ignoring")
                     continue
                 else:

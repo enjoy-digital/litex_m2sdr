@@ -3,10 +3,10 @@
 """
 test_play.py - Transmit I/Q samples using the LiteXM2SDR SoapySDR driver.
 
-This script uses the SoapySDR driver to interface with the LiteXM2SDR hardware.
-It can either generate a continuous tone or play back a file of raw CF32 samples.
-Command-line options allow you to configure sample rate, bandwidth, frequency, and gain.
-In file playback mode, the file can be looped a specified number of times.
+This script uses the SoapySDR driver to interface with the LiteXM2SDR hardware. It can either
+generate a continuous tone or play back a file of raw CF32 samples. Command-line options allow you
+to configure sample rate, bandwidth, frequency, and gain. In file playback mode, the file can be
+looped a specified number of times.
 
 Usage Examples:
 
@@ -26,19 +26,19 @@ from SoapySDR import SOAPY_SDR_TX, SOAPY_SDR_CF32
 
 # Constants -----------------------------------------------------------------------------------------
 
-CHUNK_SIZE         = 2048
-STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for play to start
+DMA_BUFFER_SIZE   = 8192
+PPS_STARTUP_DELAY = 1.0  # Allow up to 1 second for the internal PPS delay before play starts
 
 # Generate Tone ------------------------------------------------------------------------------------
 
-def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=CHUNK_SIZE):
+def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=DMA_BUFFER_SIZE//4):
     t    = np.arange(length, dtype=np.float32) / sample_rate
     tone = amplitude * np.exp(1j * 2.0 * np.pi * freq_hz * t)
     return tone.astype(np.complex64)
 
 # Read File (CF32) ---------------------------------------------------------------------------------
 
-def read_file_cf32(path, amplitude=0.7, chunk_len=CHUNK_SIZE):
+def read_file_cf32(path, amplitude=0.7, chunk_len=DMA_BUFFER_SIZE//4):
     with open(path, "rb") as f:
         while True:
             # 8 bytes per complex64 sample (I and Q).
@@ -111,7 +111,7 @@ def main():
             sr = sdr.writeStream(tx_stream, [samples], len(samples))
             if sr.ret < 0:
                 elapsed = time.time() - t_start
-                if sr.ret == -1 and elapsed < STARTUP_GRACE_SECS:
+                if sr.ret == -1 and elapsed < PPS_STARTUP_DELAY:
                     print(f"writeStream returned -1 (startup, elapsed {elapsed:.3f}s), ignoring")
                     continue
                 else:
@@ -125,7 +125,7 @@ def main():
             sr = sdr.writeStream(tx_stream, [samples], len(samples))
             if sr.ret < 0:
                 elapsed = time.time() - t_start
-                if sr.ret == -1 and elapsed < STARTUP_GRACE_SECS:
+                if sr.ret == -1 and elapsed < PPS_STARTUP_DELAY:
                     print(f"writeStream returned -1 (startup, elapsed {elapsed:.3f}s), ignoring")
                     continue
                 else:
