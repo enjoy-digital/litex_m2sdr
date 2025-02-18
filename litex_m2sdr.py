@@ -50,7 +50,6 @@ from gateware.ad9361.core import AD9361RFIC
 from gateware.qpll        import SharedQPLL
 from gateware.time        import TimeGenerator
 from gateware.pps         import PPSGenerator
-from gateware.timestamp   import Timestamp
 from gateware.header      import TXRXHeader
 from gateware.measurement import MultiClkMeasurement
 
@@ -127,7 +126,6 @@ class BaseSoC(SoCMini):
         # SDR.
         "si5351"          : 20,
         "time"            : 21,
-        "timestamp"       : 22,
         "header"          : 23,
         "ad9361"          : 24,
         "crossbar"        : 25,
@@ -191,7 +189,7 @@ class BaseSoC(SoCMini):
 
         # PPS Generator ----------------------------------------------------------------------------
 
-        self.pps_gen = ClockDomainsRenamer("time_gen_time")(PPSGenerator(
+        self.pps_gen = ClockDomainsRenamer("time")(PPSGenerator(
             clk_freq = 100e6,
             time     = self.time_gen.time,
             reset    = self.time_gen.time_change,
@@ -339,10 +337,6 @@ class BaseSoC(SoCMini):
             # Core
             self.add_sata(phy=self.sata_phy, mode="read+write")
 
-        # Timestamp --------------------------------------------------------------------------------
-
-        self.timestamp = Timestamp(clk_domain="rfic")
-
         # AD9361 RFIC ------------------------------------------------------------------------------
 
         self.ad9361 = AD9361RFIC(
@@ -363,7 +357,7 @@ class BaseSoC(SoCMini):
         self.header = TXRXHeader(data_width=64)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
-            self.header.rx.timestamp.eq(self.timestamp.time),
+            self.header.rx.timestamp.eq(self.time_gen.time),
         ]
 
         # TX/RX Datapath ---------------------------------------------------------------------------
