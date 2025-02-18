@@ -1,62 +1,81 @@
-[> Intro
---------
+# LiteX M2SDR GNU Radio Flowcharts
 
-These directory provides a set of *GNU Radio*'s flowcharts for demonstrations and tests purpose
-on how to use LiteX-M2SDR with GNURadio through SoapySDR plugin/driver.
+This directory provides a set of GNU Radio flowcharts for demonstration and testing purposes, showing how to use the **LiteX-M2SDR** board with the SoapySDR plugin/driver. These examples leverage the flexibility of the board and its software stack to quickly set up RX, TX, loopback, and FM receiver applications.
 
-]> Test RX
-----------
+---
 
-`test_tx_rx.grc`: is a two channels receiver only (RX1 and RX2).
-Each channel's stream are displayed and at the same time stored in a file (*/tmp/chanA.bin*,
-*/tmp/chanB.bin*). File format are classic binary file in float interleave complex.
+## Intro
 
-As for previous demonstrations two sliders are present: one for center frequency and another one
-for gain
+The provided flowcharts illustrate different usage scenarios:
+- **Test RX**: A two-channel receiver that displays incoming IQ data and stores it to files.
+- **Test TX**: A two-channel transmitter that offers multiple source options.
+- **Test RX TX (External Loopback)**: A single-channel loopback test to verify both TX and RX paths.
+- **FM Radio Receiver**: An FM demodulation example featuring a waterfall display and audio output.
+
+---
+
+## Test RX
+
+**Flowchart:** `test_tx_rx.grc`
+
+This flowchart implements a two-channel receiver (RX1 and RX2). Each channel's stream is simultaneously displayed and saved to a file (e.g., */tmp/chanA.bin* and */tmp/chanB.bin*). The files are standard binary files with interleaved float complex samples.
+
+Two sliders in the flowchart allow dynamic adjustment of:
+- **Center Frequency**
+- **Gain**
 
 ![test_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/e8178f7f-de92-4d28-b9ed-230f485925bd)
 
-]> Test TX
-----------
+---
 
-`test_tx.grc`: is a two channels emitter only (TX1 and TX2).
-Stream for the source is splitted between a scope and the Soapy Sink block
+## Test TX
 
-By updating the flowchart user could change source type ('E' key to enable a block 'D' key to
-disable to a block):
-- *Constant Source* is to have a carrier frequency only
-- *Signal Source* for a 1MHz complex sin
-- *File  Source* to emit a custom signal stored to a file (float complex interleaved)
+**Flowchart:** `test_tx.grc`
 
-As for previous demonstrations, two sliders are present to configure frequency and gain/attenuation.
+This flowchart is a two-channel transmitter (TX1 and TX2). The source stream is split between a scope and a Soapy Sink block. Users can switch the source type dynamically by enabling or disabling blocks using keyboard shortcuts (for example, 'E' to enable, 'D' to disable):
+- **Constant Source**: Emits a steady carrier frequency.
+- **Signal Source**: Emits a 1 MHz complex sine wave.
+- **File Source**: Plays a custom signal stored in a file (float complex interleaved).
+
+Two sliders let you adjust:
+- **Frequency**
+- **Gain/Attenuation**
 
 ![test_tx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/ff7b4a2f-f0db-4c11-b3db-b0c5a6e4bef1)
 
-]> Test RX TX (external loopback)
----------------------------------
+---
 
-`test_rx.grc`: is a one channel loopback test. With only one flowchart it's possible to test/check
-both TX and RX.
-- TX is filled with a constant source so only the carrier frequency is emitted
-- RX stream is connected to a *Qt GUI Sink* to have a direct feedback (time, frequency and waterfall)
+## Test RX TX (External Loopback)
 
-Four sliders are present to adapt:
-- TX center frequency (*freqTx*)
-- TX gain/attenuation (*gainTx*)
-- RX center frequency (*freqRx*)
-- RX gain (*gainRx*)
+**Flowchart:** `test_rx.grc`
+
+This flowchart provides a loopback test using a single channel. It verifies both transmission and reception:
+- **TX Path**: Driven by a constant source (emitting only the carrier).
+- **RX Path**: Connected to a Qt GUI Sink, offering time, frequency, and waterfall displays.
+
+Four sliders allow real-time adjustments of:
+- **TX Center Frequency** (`freqTx`)
+- **TX Gain/Attenuation** (`gainTx`)
+- **RX Center Frequency** (`freqRx`)
+- **RX Gain** (`gainRx`)
 
 ![test_tx_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/942339b8-3d0b-4aa6-aade-e607bab4035e)
 
-[> FM Radio receiver
---------------------
+---
 
-`test_fm_rx.grc`: demonstrate FM demodulation at 8MS/s with a freq/waterfall/time sink (*Qt GUI Sink*
-block) and a audio sink (*Audio Sink* block). Output (audio) is configured at 48kHz.
+## FM Radio Receiver
 
-Three sliders are present to dynamically changes parameters:
-- `freq` to adapt the center frequency
-- `gain` to adapt RFIC gain when signal is too small or to avoid antenna saturate
-- `volume` to configure *Audio Sink* level
+**Flowchart:** `test_fm_rx.grc`
+
+This flowchart demonstrates FM demodulation at 8 MS/s. It uses a Qt GUI Sink to display frequency, waterfall, and time domains, alongside an Audio Sink configured at 48 kHz for sound output.
+
+Three sliders are provided for on-the-fly adjustment of:
+- **Center Frequency** (`freq`)
+- **RFIC Gain** (`gain`) – Adjust to optimize signal level or avoid saturation.
+- **Audio Volume** (`volume`)
 
 ![test_fm_rx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/ce074aad-ec68-4110-90c3-633a7b48bc50)
+
+---
+
+Happy experimenting with your **LiteX-M2SDR** board and GNU Radio!
