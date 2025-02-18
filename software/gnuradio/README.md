@@ -1,6 +1,7 @@
 # LiteX M2SDR GNU Radio Flowcharts
 
-This directory provides a set of GNU Radio flowcharts for demonstration and testing purposes, showing how to use the **LiteX-M2SDR** board with the SoapySDR plugin/driver. These examples leverage the flexibility of the board and its software stack to quickly set up RX, TX, loopback, and FM receiver applications.
+> [!Note]
+> This directory provides a set of GNU Radio flowcharts for demonstration and testing purposes, showing how to use the **LiteX-M2SDR** board with the SoapySDR plugin/driver. These examples leverage the flexibility of the board and its software stack to quickly set up RX, TX, loopback, and FM receiver applications.
 
 ---
 

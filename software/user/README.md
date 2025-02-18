@@ -1,6 +1,7 @@
-# LiteX M2SDR User Utilities
+# LiteX M2SDR Linux User-Space Utilities
 
-This README describes the user-space tools provided by the **LiteX-M2SDR** project and shows examples of how to use them in typical TX/RX scenarios. The utilities rely on several libraries:
+> [!Note]
+> This README describes the user-space tools provided by the **LiteX-M2SDR** project and shows examples of how to use them in typical TX/RX scenarios. The utilities rely on several libraries:
 
 - **ad9361/**: Code adapted from the Analog Devices AD9361 driver, handling low-level RFIC configuration/registers.
 - **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.

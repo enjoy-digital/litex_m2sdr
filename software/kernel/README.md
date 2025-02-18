@@ -1,6 +1,6 @@
-# LiteX M2SDR Kernel Driver
+# LiteX M2SDR Linux Kernel Driver
 
-> [!INFO]
+> [!Note]
 > This kernel driver provides a straightforward and flexible way to interface with the **LiteX-M2SDR** board over PCIe. It is part of the [LitePCIe](https://github.com/enjoy-digital/litepcie) suite, developed with a focus on simplicity for easy integration into your own applications or frameworks.
 
 ## Overview
