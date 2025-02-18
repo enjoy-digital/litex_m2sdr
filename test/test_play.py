@@ -11,10 +11,10 @@ In file playback mode, the file can be looped a specified number of times.
 Usage Examples:
 
 Tone Generation:
-    ./test_play.py --samplerate 30.72e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --tone-freq 1e6 --ampl 0.8 --secs 5
+    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --tone-freq 1e6 --ampl 0.8 --secs 5
 
 File Playback:
-    ./test_play.py --samplerate 30.72e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 path/to/file.bin 10
+    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 path/to/file.bin 10
 """
 
 import time
@@ -48,7 +48,7 @@ def read_file_cf32(path, amplitude=0.7, chunk_len=1024):
 def main():
     parser = argparse.ArgumentParser(description="Transmit I/Q samples using the LiteXM2SDR SoapySDR driver.")
     # RF configuration options.
-    parser.add_argument("--samplerate", type=float, default=30.72e6, help="TX Sample rate in Hz (default: 30720000)")
+    parser.add_argument("--samplerate", type=float, default=4e6,     help="TX Sample rate in Hz (default: 4000000)")
     parser.add_argument("--bandwidth",  type=float, default=56e6,    help="TX Filter bandwidth in Hz (default: 56000000)")
     parser.add_argument("--freq",       type=float, default=2.4e9,   help="TX frequency in Hz (default: 2400000000)")
     parser.add_argument("--gain",       type=float, default=-20.0,   help="TX gain in dB (default: -20)")

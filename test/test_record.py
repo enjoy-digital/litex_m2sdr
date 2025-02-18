@@ -9,7 +9,7 @@ It optionally checks and prints timestamp information along with differences bet
 Command-line options allow you to configure sample rate, bandwidth, frequency, and gain.
 
 Usage Example:
-    ./test_record.py --samplerate 30.72e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --secs 5 --check-ts filename.bin
+    ./test_record.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --secs 5 --check-ts filename.bin
 """
 
 import time
@@ -29,12 +29,12 @@ STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for capture to start
 def main():
     parser = argparse.ArgumentParser(description="Record I/Q samples using the LiteXM2SDR SoapySDR driver.")
     # RF configuration options.
-    parser.add_argument("--samplerate", type=float, default=30.72e6, help="RX Sample rate in Hz (default: 30720000)")
+    parser.add_argument("--samplerate", type=float, default=4e6,     help="RX Sample rate in Hz (default: 4000000)")
     parser.add_argument("--bandwidth",  type=float, default=56e6,    help="RX Filter bandwidth in Hz (default: 56000000)")
     parser.add_argument("--freq",       type=float, default=2.4e9,   help="RX frequency in Hz (default: 2400000000)")
     parser.add_argument("--gain",       type=float, default=20.0,    help="RX gain in dB (default: 20)")
     # Additional options.
-    parser.add_argument("--secs",       type=float, default=5.0,    help="Recording duration in seconds (default: 5)")
+    parser.add_argument("--secs",       type=float, default=5.0,     help="Recording duration in seconds (default: 5)")
     parser.add_argument("--check-ts",   action="store_true",         help="Enable timestamp checking and printing")
     parser.add_argument("filename",   type=str,   help="Output file path for raw CF32 samples")
     args = parser.parse_args()
