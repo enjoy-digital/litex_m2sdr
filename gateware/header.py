@@ -39,7 +39,6 @@ class HeaderInserterExtracter(LiteXModule):
 
         # Signals.
         # --------
-        first  = Signal()
         cycles = Signal(32)
 
         # FSM.
@@ -49,7 +48,6 @@ class HeaderInserterExtracter(LiteXModule):
 
         # Reset.
         fsm.act("RESET",
-            NextValue(first,  1),
             NextValue(cycles, 0),
             If(mode == "inserter",
                 sink.ready.eq(self.reset)
@@ -83,6 +81,7 @@ class HeaderInserterExtracter(LiteXModule):
                 source.valid.eq(1),
                 source.data[0:64].eq(self.timestamp),
                 If(source.valid & source.ready,
+                    NextValue(self.update, 1),
                     NextState("FRAME"),
                 )
             )
@@ -92,8 +91,7 @@ class HeaderInserterExtracter(LiteXModule):
             # Header.
             fsm.act("HEADER",
                 sink.ready.eq(1),
-                If(sink.valid & sink.ready & (sink.first | ~first),
-                    NextValue(first, 0),
+                If(sink.valid & sink.ready & sink.first,
                     NextValue(self.header, sink.data[0:64]),
                     NextState("TIMESTAMP")
                 )
@@ -103,6 +101,7 @@ class HeaderInserterExtracter(LiteXModule):
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready,
                     NextValue(self.timestamp, sink.data[0:64]),
+                    NextValue(self.update, 1),
                     NextState("FRAME")
                 )
             )

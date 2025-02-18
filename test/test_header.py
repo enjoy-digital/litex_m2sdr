@@ -22,13 +22,13 @@ class HeaderDriver:
 
 # Test Header --------------------------------------------------------------------------------------
 
-def test_header(header=0, loops=16):
+def test_header(header="header", loops=16):
     # Create Bus.
     bus = RemoteClient()
     bus.open()
 
     # Header Driver.
-    header = HeaderDriver(bus=bus, name=f"header{header}")
+    header = HeaderDriver(bus=bus, name=f"{header}")
 
     # Status Loop.
     loop = 0
@@ -50,7 +50,7 @@ def test_header(header=0, loops=16):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--header",       default=0,    type=int, help="Header Module (0-3).")
+    parser.add_argument("--header",       default="header",       help="Header Module Name.")
     parser.add_argument("--frame-size",   default=1024, type=int, help="Header Frame Size.")
     parser.add_argument("--loops",        default=8,    type=int, help="Test Loops.")
     args = parser.parse_args()
