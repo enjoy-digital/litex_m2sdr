@@ -14,12 +14,11 @@ def parse_set_time(arg: str) -> int:
         return int(time.time_ns())
     return int(float(arg))
 
-def format_epoch_time_ns(t_ns: int) -> str:
+def unix_to_datetime(unix_timestamp_ns: int) -> str:
     """Convert a Unix nanosecond timestamp into local date/time: YYYY-MM-DD HH:MM:SS.nnn"""
-    s = t_ns // 1_000_000_000
-    n = t_ns %  1_000_000_000
-    dt = datetime.datetime.fromtimestamp(s) + datetime.timedelta(microseconds=(n // 1000))
-    return dt.strftime("%Y-%m-%d %H:%M:%S") + f".{n % 1000:03d}"
+    unix_timestamp_s = unix_timestamp_ns / 1e9
+    dt = datetime.datetime.fromtimestamp(unix_timestamp_s)
+    return dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
 def main():
     parser = argparse.ArgumentParser(description="Set/read LiteXM2SDR hardware time (ns).")
@@ -36,7 +35,7 @@ def main():
     steps    = int(total / interval)
     for i in range(steps):
         hw_ns = sdr.getHardwareTime("")
-        print(f"{i+1:2d}> {hw_ns} ns  ({format_epoch_time_ns(hw_ns)})")
+        print(f"{i+1:2d}> {hw_ns} ns  ({unix_to_datetime(hw_ns)})")
         time.sleep(interval)
 
 if __name__ == "__main__":
