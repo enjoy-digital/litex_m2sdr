@@ -385,11 +385,20 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         {
             /* Header is at the beginning of the DMA buffer */
             const uint8_t *header_ptr = reinterpret_cast<const uint8_t *>(_rx_stream.buf) + buf_offset * _dma_mmap_info.dma_rx_buf_size;
+
             /* Timestamp is stored in bytes 8 to 16 of the header */
             uint64_t timestamp = *reinterpret_cast<const uint64_t *>(header_ptr + 8);
+
             /* Assign the extracted timestamp to the provided timeNs reference. */
             timeNs = static_cast<long long>(timestamp);
-            SoapySDR_logf(SOAPY_SDR_DEBUG, "Extracted DMA timestamp: %llu ns", timestamp);
+
+            /* Track the previous timestamp */
+            static uint64_t prevTimestamp = 0;
+            uint64_t diff = (prevTimestamp == 0) ? 0 : (timestamp - prevTimestamp);
+            prevTimestamp = timestamp;
+
+            /* Debug RX DMA Timestamp and Diff vs previous */
+            SoapySDR_logf(SOAPY_SDR_DEBUG, "RX DMA Timestamp: %llu ns (diff: %llu ns)", timestamp, diff);
         }
 #endif
 
