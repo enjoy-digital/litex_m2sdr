@@ -21,7 +21,7 @@ from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_CF32
 
 # Constants -----------------------------------------------------------------------------------------
 
-CHUNK_SIZE = 1024
+CHUNK_SIZE = 2048
 STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for capture to start
 
 # Main ----------------------------------------------------------------------------------------------

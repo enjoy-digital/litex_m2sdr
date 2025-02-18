@@ -26,7 +26,7 @@ from SoapySDR import SOAPY_SDR_TX, SOAPY_SDR_CF32
 
 # Generate Tone ------------------------------------------------------------------------------------
 
-def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=8192):
+def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=2048):
     t    = np.arange(length, dtype=np.float32) / sample_rate
     tone = amplitude * np.exp(1j * 2.0 * np.pi * freq_hz * t)
     return tone.astype(np.complex64)
