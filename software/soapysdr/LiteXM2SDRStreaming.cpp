@@ -181,32 +181,36 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     }
 }
 
-/* Activate the specified stream (enable DMA engine). */
+/* Activate the specified stream (configure the DMA engines). */
 int SoapyLiteXM2SDR::activateStream(
     SoapySDR::Stream *stream,
     const int /*flags*/,
     const long long /*timeNs*/,
     const size_t /*numElems*/) {
+
+    /* RX */
     if (stream == RX_STREAM) {
         for (size_t i = 0; i < _rx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
 #if USE_LITEPCIE
         /* Crossbar Demux: Select PCIe streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
-        /* Enable the DMA engine for RX. */
-        litepcie_dma_writer(_fd, 1, &_rx_stream.hw_count, &_rx_stream.sw_count);
+        /* Configure the DMA engine for RX, but don't enable it yet. */
+        litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
         _rx_udp_receiver->start();
 #endif
         _rx_stream.user_count = 0;
+
+    /* TX */
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
         for (size_t i = 0; i < _tx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
-        /* Enable the DMA engine for TX. */
-        litepcie_dma_reader(_fd, 1, &_tx_stream.hw_count, &_tx_stream.sw_count);
+        /* Configure the DMA engine for TX, but don't enable it yet. */
+        litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
 #endif
     }
