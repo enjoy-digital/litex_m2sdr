@@ -390,28 +390,32 @@ class BaseSoC(SoCMini):
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
         if with_pcie:
-            self.comb += self.pcie_dma0.source.connect(self.crossbar.mux.sink0)
+            self.comb += [
+                self.pcie_dma0.source.connect(self.crossbar.mux.sink0),
+                If(self.crossbar.mux.sel == 0,
+                    self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+                )
+            ]
         if with_eth:
             self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
             pass # TODO.
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
-        self.comb += If(self.crossbar.mux.sel == 0,
-            self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
-        )
 
         # RX: Header -> Crossbar -> Comms.
         # --------------------------------
         self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
         if with_pcie:
-            self.comb += self.crossbar.demux.source0.connect(self.pcie_dma0.sink)
+            self.comb += [
+                self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
+                If(self.crossbar.demux.sel == 0,
+                    self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+                )
+            ]
         if with_eth:
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             pass # TODO.
-        self.comb += If(self.crossbar.demux.sel == 0,
-            self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
-        )
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
