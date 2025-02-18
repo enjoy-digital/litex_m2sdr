@@ -394,13 +394,13 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         /* Get the buffer. */
         int buf_offset = _rx_stream.user_count % _dma_mmap_info.dma_rx_buf_count;
 
-        /* Extract timestamp from the DMA header */
+        /* Extract Sync Word and Timestamp from the DMA header */
 #if defined(_RX_DMA_HEADER_TEST)
         {
             /* Header is at the beginning of the DMA buffer */
             const uint8_t *header_ptr = reinterpret_cast<const uint8_t *>(_rx_stream.buf) + buf_offset * _dma_mmap_info.dma_rx_buf_size;
 
-            /* Extract sync word from bytes 0 to 8 of the header */
+            /* Extract sync word from bytes 0 to 8 of the Header */
             uint64_t header = *reinterpret_cast<const uint64_t*>(header_ptr);
             if (header != DMA_HEADER_SYNC_WORD) {
                 SoapySDR_logf(SOAPY_SDR_WARNING, "RX DMA Header Sync Word is not matching! Expected 0x%llx, got 0x%llx", DMA_HEADER_SYNC_WORD, header);
@@ -496,20 +496,31 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     handle = _tx_stream.user_count;
     _tx_stream.user_count++;
 
+    /* Write Sync Word and Timestamp to DMA header */
 #if defined(_TX_DMA_HEADER_TEST)
     {
-        /* Insert fake header and timestamp into the TX DMA buffer. */
+        /* Header is at the beginning of the DMA buffer */
         uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
-        /* Write header: bytes 0–8 = DMA_HEADER_SYNC_WORD */
+
+        /* Extract Sync Word to bytes 0 to 8 of the Header */
         uint64_t header = DMA_HEADER_SYNC_WORD;
         *reinterpret_cast<uint64_t*>(tx_buffer) = header;
-        /* Write fake timestamp: bytes 8–16; for example, use a static counter. */
+
+        /* Compute the number of samples per DMA buffer. */
+        uint32_t samples_per_buffer = _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
+
+        /* Compute time increment (in nanoseconds) for this buffer */
+        uint64_t time_increment = static_cast<uint64_t>((samples_per_buffer / _tx_stream.samplerate) * 1e9);
+
+        /* Write Timestamp */
         static uint64_t fakeTimestamp = 0;
-        fakeTimestamp += 100000000ULL; /* Increment by 100 ms (in nanoseconds) */
+        fakeTimestamp += time_increment;
         *reinterpret_cast<uint64_t*>(tx_buffer + 8) = fakeTimestamp;
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: 0x%llx, timestamp: %llu", header, fakeTimestamp);
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp increment: %llu, new timestamp: %llu",
+                      time_increment, fakeTimestamp);
     }
 #endif
+
 
     /* Detect underflows. */
     if (buffers_pending < 0) {
