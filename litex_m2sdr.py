@@ -13,6 +13,7 @@ import argparse
 from migen import *
 
 from litex.gen import *
+from litex.gen.genlib.cdc import BusSynchronizer
 
 from litex.build.generic_platform import Subsignal, Pins
 from litex_m2sdr_platform import Platform
@@ -187,6 +188,18 @@ class BaseSoC(SoCMini):
             with_csr   = True,
         )
 
+        # FIXME: Try to avoid CDC, change sys_clk?
+        time_sys = Signal(64)
+        self.time_sync = BusSynchronizer(
+            width   = 64,
+            idomain = "time",
+            odomain = "sys",
+        )
+        self.comb += [
+            self.time_sync.i.eq(self.time_gen.time),
+            time_sys.eq(self.time_sync.o),
+        ]
+
         # PPS Generator ----------------------------------------------------------------------------
 
         self.pps_gen = ClockDomainsRenamer("time")(PPSGenerator(
@@ -231,6 +244,7 @@ class BaseSoC(SoCMini):
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
         # SPI Flash --------------------------------------------------------------------------------
+
         self.flash_cs_n = GPIOOut(platform.request("flash_cs_n"))
         self.flash      = S7SPIFlash(platform.request("flash"), sys_clk_freq, 25e6)
         self.add_config("FLASH_IMAGE_SIZE", platform.image_size)
@@ -357,7 +371,7 @@ class BaseSoC(SoCMini):
         self.header = TXRXHeader(data_width=64)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
-            self.header.rx.timestamp.eq(self.time_gen.time),
+            self.header.rx.timestamp.eq(time_sys),
         ]
 
         # TX/RX Datapath ---------------------------------------------------------------------------
