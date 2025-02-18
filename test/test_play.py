@@ -24,16 +24,21 @@ import numpy as np
 import SoapySDR
 from SoapySDR import SOAPY_SDR_TX, SOAPY_SDR_CF32
 
+# Constants -----------------------------------------------------------------------------------------
+
+CHUNK_SIZE         = 2048
+STARTUP_GRACE_SECS = 1.0  # Allow up to 1 second for play to start
+
 # Generate Tone ------------------------------------------------------------------------------------
 
-def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=2048):
+def generate_tone(freq_hz, sample_rate, amplitude=0.7, length=CHUNK_SIZE):
     t    = np.arange(length, dtype=np.float32) / sample_rate
     tone = amplitude * np.exp(1j * 2.0 * np.pi * freq_hz * t)
     return tone.astype(np.complex64)
 
 # Read File (CF32) ---------------------------------------------------------------------------------
 
-def read_file_cf32(path, amplitude=0.7, chunk_len=1024):
+def read_file_cf32(path, amplitude=0.7, chunk_len=CHUNK_SIZE):
     with open(path, "rb") as f:
         while True:
             # 8 bytes per complex64 sample (I and Q).
@@ -95,17 +100,23 @@ def main():
     tx_stream = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32, [0])
     sdr.activateStream(tx_stream)
 
+    t_start = time.time()
+
     # Play Tone.
     if mode == "tone":
         print(f"Playing tone for {args.secs} seconds at {args.freq/1e6:.3f} MHz...")
-        t_start = time.time()
         for samples in get_samples():
             if time.time() - t_start > args.secs:
                 break
             sr = sdr.writeStream(tx_stream, [samples], len(samples))
             if sr.ret < 0:
-                print(f"writeStream error: {sr.ret}")
-                break
+                elapsed = time.time() - t_start
+                if sr.ret == -1 and elapsed < STARTUP_GRACE_SECS:
+                    print(f"writeStream returned -1 (startup, elapsed {elapsed:.3f}s), ignoring")
+                    continue
+                else:
+                    print(f"writeStream error: {sr.ret}")
+                    break
 
     # Play File.
     else:
@@ -113,8 +124,13 @@ def main():
         for samples in get_samples():
             sr = sdr.writeStream(tx_stream, [samples], len(samples))
             if sr.ret < 0:
-                print(f"writeStream error: {sr.ret}")
-                break
+                elapsed = time.time() - t_start
+                if sr.ret == -1 and elapsed < STARTUP_GRACE_SECS:
+                    print(f"writeStream returned -1 (startup, elapsed {elapsed:.3f}s), ignoring")
+                    continue
+                else:
+                    print(f"writeStream error: {sr.ret}")
+                    break
 
     # Deactivate TX stream and close.
     sdr.deactivateStream(tx_stream)
