@@ -1,6 +1,10 @@
 # LiteX M2SDR User Utilities
 
-This README describes the user-space tools provided by the **LiteX-M2SDR** project and shows examples of how to use them in typical TX/RX scenarios.
+This README describes the user-space tools provided by the **LiteX-M2SDR** project and shows examples of how to use them in typical TX/RX scenarios. The utilities rely on several libraries:
+
+- **ad9361/**: Code adapted from the Analog Devices AD9361 driver, handling low-level RFIC configuration/registers.
+- **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
+- **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
 ---
 
@@ -131,7 +135,7 @@ Example usage:
 ---
 
 ### tone_check.py
-Python script that analyzes a file of I/Q samples. Can compute frequency, amplitude, SNR, etc.
+Python script that analyzes a file of I/Q samples. Can compute approximate amplitude and plot the time-domain waveform if requested.
 
 **Key arguments**:
 - `--plot`
@@ -195,7 +199,7 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **play** t
                    --samplerate=30720000 \
                    --plot
    ~~~~
-   You should see a ~1MHz peak in the frequency domain if loopback is configured correctly (or if you have an appropriate RF setup over the air). 🛰️
+   If loopback is active (or you have an over-the-air setup), you’ll see a sine wave in the time-domain plot/
 
 ---
 
