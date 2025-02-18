@@ -306,6 +306,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
+
+    /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
     #if defined(_RX_DMA_HEADER_TEST)
         /* Enable Synchronizer */
@@ -313,7 +315,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         /* Enable DMA RX Header */
         litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
            (1 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
         );
     #else
@@ -322,8 +324,22 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         /* Disable DMA RX Header */
         litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
            (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
+        );
+    #endif
+
+    #if defined(_TX_DMA_HEADER_TEST)
+        /* Enable DMA TX Header */
+        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
+           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (1 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
+        );
+    #else
+        /* Disable DMA TX Header */
+        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
+           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+           (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
         );
     #endif
 

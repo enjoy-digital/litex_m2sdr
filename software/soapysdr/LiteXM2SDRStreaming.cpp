@@ -27,7 +27,7 @@ static constexpr size_t RX_DMA_HEADER_SIZE = 0;
 #endif
 
 /* TX DMA Header */
-#if USE_LITEPCIE && defined(_RX_DMA_HEADER_TEST)
+#if USE_LITEPCIE && defined(_TX_DMA_HEADER_TEST)
 static constexpr size_t TX_DMA_HEADER_SIZE = 16;
 #else
 static constexpr size_t TX_DMA_HEADER_SIZE = 0;
@@ -249,7 +249,7 @@ size_t SoapyLiteXM2SDR::getStreamMTU(SoapySDR::Stream *stream) const {
         /* Each sample is 2 * Complex{Int16}. */
         return _rx_buf_size / (_nChannels * _bytesPerComplex);
     } else if (stream == TX_STREAM) {
-        return _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
+        return _tx_buf_size / (_nChannels * _bytesPerComplex);
     } else {
         throw std::runtime_error("SoapySDR::getStreamMTU(): Invalid stream.");
     }
@@ -487,6 +487,21 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     /* Update the DMA counters. */
     handle = _tx_stream.user_count;
     _tx_stream.user_count++;
+
+#if defined(_TX_DMA_HEADER_TEST)
+    {
+        /* Insert fake header and timestamp into the TX DMA buffer. */
+        uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
+        /* Write header: bytes 0–8 = 0x5aa55aa55aa55aa5 */
+        uint64_t header = 0x5aa55aa55aa55aa5ULL;
+        *reinterpret_cast<uint64_t*>(tx_buffer) = header;
+        /* Write fake timestamp: bytes 8–16; for example, use a static counter. */
+        static uint64_t fakeTimestamp = 0;
+        fakeTimestamp += 100000000ULL; /* Increment by 100 ms (in nanoseconds) */
+        *reinterpret_cast<uint64_t*>(tx_buffer + 8) = fakeTimestamp;
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: 0x%llx, timestamp: %llu", header, fakeTimestamp);
+    }
+#endif
 
     /* Detect underflows. */
     if (buffers_pending < 0) {
