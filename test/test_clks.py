@@ -21,44 +21,67 @@ CLOCKS = {
     "clk4": "  Time Ref Clk",
 }
 
+# Clk Driver ---------------------------------------------------------------------------------------
+
+class ClkDriver:
+    """
+    Driver for a clock measurement.
+
+    This driver latches the clock counter, reads its value, and computes the frequency (in MHz)
+    based on the elapsed time and the counter delta.
+    """
+    def __init__(self, bus, clk_key, description):
+        self.bus         = bus
+        self.clk_key     = clk_key
+        self.description = description
+        self.latch_reg   = getattr(self.bus.regs, f"clk_measurement_{clk_key}_latch")
+        self.value_reg   = getattr(self.bus.regs, f"clk_measurement_{clk_key}_value")
+
+        # Initialize by latching and reading the first value.
+        self.latch()
+        self.prev_value = self.read()
+        self.prev_time  = time.time()
+
+    def latch(self):
+        """Latch the current counter value."""
+        self.latch_reg.write(1)
+
+    def read(self):
+        """Read the current counter value."""
+        return self.value_reg.read()
+
+    def update(self):
+        """
+        Latch and read a new counter value, then compute the frequency based on the difference.
+
+        Returns:
+            float: Frequency in MHz.
+        """
+        self.latch()
+        current_value   = self.read()
+        current_time    = time.time()
+        elapsed         = current_time  - self.prev_time
+        delta           = current_value - self.prev_value
+        frequency       = delta / (elapsed * 1e6)  # Convert to MHz
+        self.prev_value = current_value
+        self.prev_time  = current_time
+        return frequency
+
 # Test Frequency -----------------------------------------------------------------------------------
 
 def test_frequency(num_measurements=10, delay_between_tests=1.0):
     bus = RemoteClient()
     bus.open()
 
-    max_name_len = max(len(name) for name in CLOCKS.values())
-
-    def latch_all():
-        for clk in CLOCKS:
-            reg_name = f"clk_measurement_{clk}_latch"
-            getattr(bus.regs, reg_name).write(1)
-
-    def read_all():
-        readings = {}
-        for clk in CLOCKS:
-            reg_name = f"clk_measurement_{clk}_value"
-            readings[clk] = getattr(bus.regs, reg_name).read()
-        return readings
-
-    latch_all()
-    previous_values = read_all()
-    prev_time = time.time()
+    # Create a ClkDriver for each clock.
+    clk_drivers = {clk: ClkDriver(bus, clk, desc) for clk, desc in CLOCKS.items()}
+    max_name_len = max(len(desc) for desc in CLOCKS.values())
 
     for meas in range(num_measurements):
         time.sleep(delay_between_tests)
-        latch_all()
-        current_values = read_all()
-        cur_time = time.time()
-
-        elapsed = cur_time - prev_time
-        prev_time = cur_time
-
-        for clk in CLOCKS:
-            delta = current_values[clk] - previous_values[clk]
-            frequency = delta / (elapsed * 1e6)  # Frequency in MHz.
-            print(f"Measurement {meas + 1}, {CLOCKS[clk]:>{max_name_len}}: Frequency: {frequency:.2f} MHz")
-            previous_values[clk] = current_values[clk]
+        for clk, driver in clk_drivers.items():
+            freq = driver.update()
+            print(f"Measurement {meas+1}, {driver.description:>{max_name_len}}: Frequency: {freq:.2f} MHz")
 
     bus.close()
 
