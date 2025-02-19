@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+#
+# This file is part of LiteX-M2SDR.
+#
+# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
+
+
 """
 test_play.py - Transmit I/Q samples using the LiteXM2SDR SoapySDR driver.
 

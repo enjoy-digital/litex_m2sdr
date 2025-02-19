@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+#
+# This file is part of LiteX-M2SDR.
+#
+# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
+
 """
 test_time.py - Set/read LiteXM2SDR hardware time (ns).
 
