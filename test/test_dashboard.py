@@ -123,19 +123,42 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.add_table_column(label="Clock")
                 dpg.add_table_column(label="Description")
                 dpg.add_table_column(label="Frequency (MHz)")
-                # Create one table row per clock.
                 for clk, desc in CLOCKS.items():
                     with dpg.table_row():
                         dpg.add_text(clk)
                         dpg.add_text(desc)
-                        # Create a text item with a unique tag for the frequency.
                         dpg.add_text("--", tag=f"clock_{clk}_freq")
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
         with dpg.window(label="LiteX M2SDR DMA Header", autosize=True, pos=(550, 500)):
-            dpg.add_text("TX_HEADER     TX_TIMESTAMP        RX_HEADER     RX_TIMESTAMP", tag="dma_header_labels")
-            dpg.add_text("Waiting...", tag="dma_header_values")
+            dpg.add_text("TX DMA Header")
+            with dpg.table(header_row=True, tag="dma_tx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
+                dpg.add_table_column(label="Field")
+                dpg.add_table_column(label="Value")
+                with dpg.table_row():
+                    dpg.add_text("Header")
+                    dpg.add_text("", tag="dma_tx_header")
+                with dpg.table_row():
+                    dpg.add_text("Timestamp")
+                    dpg.add_text("", tag="dma_tx_timestamp")
+                with dpg.table_row():
+                    dpg.add_text("Date/Time")
+                    dpg.add_text("", tag="dma_tx_datetime")
+            dpg.add_spacer(height=10)
+            dpg.add_text("RX DMA Header")
+            with dpg.table(header_row=True, tag="dma_rx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
+                dpg.add_table_column(label="Field")
+                dpg.add_table_column(label="Value")
+                with dpg.table_row():
+                    dpg.add_text("Header")
+                    dpg.add_text("", tag="dma_rx_header")
+                with dpg.table_row():
+                    dpg.add_text("Timestamp")
+                    dpg.add_text("", tag="dma_rx_timestamp")
+                with dpg.table_row():
+                    dpg.add_text("Date/Time")
+                    dpg.add_text("", tag="dma_rx_datetime")
 
     # XADC Window.
     if with_xadc:
@@ -169,7 +192,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Time Window.
     if with_time and time_driver:
         with dpg.window(label="LiteX M2SDR Time", autosize=True, pos=(1000, 700)):
-            dpg.add_text("Time: -- ns",   tag="time_ns")
+            dpg.add_text("Time: -- ns", tag="time_ns")
             dpg.add_text("Date/Time: --", tag="time_str")
 
     # GUI Timer Callback.
@@ -216,7 +239,16 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 rx_header    = header_driver.last_rx_header.read()
                 tx_timestamp = header_driver.last_tx_timestamp.read()
                 rx_timestamp = header_driver.last_rx_timestamp.read()
-                dpg.set_value("dma_header_values", f"{tx_header:016x} {tx_timestamp:016x} {rx_header:016x} {rx_timestamp:016x}")
+                tx_datetime  = unix_to_datetime(tx_timestamp) if tx_timestamp else "N/A"
+                rx_datetime  = unix_to_datetime(rx_timestamp) if rx_timestamp else "N/A"
+
+                dpg.set_value("dma_tx_header", f"{tx_header:016x}")
+                dpg.set_value("dma_tx_timestamp", f"{tx_timestamp:016x}")
+                dpg.set_value("dma_tx_datetime", f"{tx_datetime}")
+
+                dpg.set_value("dma_rx_header", f"{rx_header:016x}")
+                dpg.set_value("dma_rx_timestamp", f"{rx_timestamp:016x}")
+                dpg.set_value("dma_rx_datetime", f"{rx_datetime}")
 
             # Update Board Time.
             if with_time and time_driver:
@@ -242,12 +274,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 # Run ----------------------------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description     = "LiteX M2SDR Dashboard",
-        formatter_class = argparse.ArgumentDefaultsHelpFormatter,
+        description="LiteX M2SDR Dashboard",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--csr-csv", default="csr.csv",   help="CSR configuration file")
-    parser.add_argument("--host",    default="localhost", help="Host IP address")
-    parser.add_argument("--port",    default="1234",      help="Host bind port")
+    parser.add_argument("--csr-csv", default="csr.csv", help="CSR configuration file")
+    parser.add_argument("--host", default="localhost", help="Host IP address")
+    parser.add_argument("--port", default="1234", help="Host bind port")
     args = parser.parse_args()
 
     run_gui(host=args.host, csr_csv=args.csr_csv, port=int(args.port))
