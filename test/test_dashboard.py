@@ -15,6 +15,7 @@ from test_clks   import ClkDriver, CLOCKS
 from test_xadc   import XADCDriver
 from test_header import HeaderDriver
 from test_time   import TimeDriver, unix_to_datetime
+from test_agc    import AGCDriver
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -59,6 +60,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         time_driver = TimeDriver(bus, "time_gen")
     else:
         time_driver = None
+
+    # Create AGC driver instances for each RF AGC module.
+    rf_agc_instances = ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]
+    agc_drivers = {inst: AGCDriver(bus, name=f"ad9361_agc_count_{inst}") for inst in rf_agc_instances}
+    # Dictionary to hold auto_clear state for each instance.
+    agc_auto_clear = {inst: False for inst in rf_agc_instances}
 
     # Board functions.
     def reboot():
@@ -193,7 +200,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # XADC Window.
     if with_xadc:
-        with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(625, 0)):
+        with dpg.window(label="LiteX M2SDR XADC", width=600, height=500, pos=(625, 0)):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
                 # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
@@ -219,6 +226,54 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     with dpg.plot_axis(dpg.mvYAxis, tag="vccbram_y"):
                         dpg.add_line_series([], [], label="vccbram", tag="vccbram")
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
+
+    # RF AGC Panel.
+    with dpg.window(label="RF AGC", autosize=True, pos=(935, 502)):
+        for inst in rf_agc_instances:
+            with dpg.collapsing_header(label=f"AGC {inst.upper()}", default_open=True):
+                dpg.add_text("Saturation Count: --", tag=f"agc_{inst}_count")
+                def make_slider_callback(inst):
+                    def slider_callback(sender, app_data, user_data):
+                        agc_drivers[inst].set_threshold(app_data)
+                    return slider_callback
+
+                dpg.add_slider_int(
+                    label         = "Threshold",
+                    default_value = 1000,
+                    min_value     = 0,
+                    max_value     = 65535,
+                    tag           = f"agc_{inst}_threshold",
+                    callback      = make_slider_callback(inst)
+                )
+                def make_checkbox_callback(inst):
+                    def checkbox_callback(sender, app_data, user_data):
+                        if app_data:
+                            agc_drivers[inst].enable()
+                        else:
+                            agc_drivers[inst].disable()
+                    return checkbox_callback
+
+                dpg.add_checkbox(
+                    label    = "Enable",
+                    tag      = f"agc_{inst}_enable",
+                    callback = make_checkbox_callback(inst)
+                )
+                def make_autoclear_callback(inst):
+                    def autoclear_callback(sender, app_data, user_data):
+                        agc_auto_clear[inst] = bool(app_data)
+                    return autoclear_callback
+
+                dpg.add_checkbox(
+                    label    = "Auto Clear",
+                    tag      = f"agc_{inst}_autoclear",
+                    callback = make_autoclear_callback(inst)
+                )
+                dpg.add_separator()
+
+    # Prepare RF AGC instances.
+    rf_agc_instances = ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]
+    agc_drivers = {inst: AGCDriver(bus, name=f"ad9361_agc_count_{inst}") for inst in rf_agc_instances}
+    agc_auto_clear = {inst: False for inst in rf_agc_instances}
 
     # GUI Timer Callback.
     writer_prev_loops = 0
@@ -265,12 +320,14 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 for clk, driver in clk_drivers.items():
                     freq = driver.update()
                     dpg.set_value(f"clock_{clk}_freq", f"{freq:.2f}")
+
             # Update Time.
             if with_time and time_driver:
                 current_time_ns = time_driver.read_ns()
                 time_str = unix_to_datetime(current_time_ns)
                 dpg.set_value("time_ns", f"Time: {current_time_ns} ns")
                 dpg.set_value("time_str", f"Date/Time: {time_str}")
+
             # Update DMA Header & Timestamps.
             if with_header_reg:
                 tx_header    = header_driver.last_tx_header.read()
@@ -285,6 +342,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.set_value("dma_rx_header", f"{rx_header:016x}")
                 dpg.set_value("dma_rx_timestamp", f"{rx_timestamp:016x}")
                 dpg.set_value("dma_rx_datetime", f"{rx_datetime}")
+
             # Update DMA Info.
             if hasattr(bus.regs, "pcie_dma0_writer_enable"):
                 now = time.time()
@@ -337,6 +395,16 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 sync_enable = bus.regs.pcie_dma0_synchronizer_enable.read()
                 dpg.set_value("dma_sync_enable", str(sync_enable))
             time.sleep(refresh)
+
+            # Update RF AGC Panel.
+            for inst in ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]:
+                count = agc_drivers[inst].read_count()
+                dpg.set_value(f"agc_{inst}_count", f"Saturation Count: {count}")
+                if agc_auto_clear.get(inst, False):
+                    # Instead of directly writing to the CSR,
+                    # use the driver's clear() method to issue a pulse.
+                    agc_drivers[inst].clear()
+
 
     timer_thread = threading.Thread(target=timer_callback)
     timer_thread.start()
