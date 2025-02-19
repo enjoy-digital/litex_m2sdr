@@ -33,6 +33,43 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 
 ---
 
+## Test Utilities
+
+This repository includes several Python utilities to help test and demonstrate the capabilities of the LiteX-M2SDR SoapySDR driver:
+
+- **test_time.py**
+  Sets and reads the LiteXM2SDR hardware time (in nanoseconds). It can set the hardware time to the current time (or a specified value) and then repeatedly read and display the hardware time along with its local date/time representation.
+
+  *Usage Example:*
+  ```bash
+  ./test_time.py --set now --interval 0.2 --duration 5
+  ```
+
+- **test_play.py**
+  Transmits I/Q samples using the SoapySDR driver. It supports two modes:
+  - **Tone Generation**: Generates and transmits a continuous tone.
+  - **File Playback**: Plays back a file of raw CF32 samples, with support for looping.
+
+  *Usage Example:*
+  ```bash
+  ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --channel 0 --tone-freq 1e6 --ampl 0.8 --secs 5
+  ```
+
+- **test_record.py**
+  Records I/Q samples and writes them as raw CF32 data to a file. Optionally, it can check and print timestamp information, including differences between consecutive timestamps.- **test_time.py**
+  Sets and reads the LiteXM2SDR hardware time (in nanoseconds). It can set the hardware time to the current time (or a specified value) and then repeatedly read and display the hardware time along with its local date/time representation.
+
+  *Usage Example:*
+  ```bash
+  ./test_time.py --set now --interval 0.2 --duration 5
+  ```
+
+  *Usage Example:*
+  ```bash
+  ./test_record.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --channel 0 --secs 5 --check-ts output.bin
+  ```
+---
+
 ## File Structure
 
 ```
@@ -45,7 +82,10 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 ├── LiteXM2SDRRegistration.cpp
 ├── LiteXM2SDRStreaming.cpp
 ├── LiteXM2SDRUDPRx.cpp
-└── LiteXM2SDRUDPRx.hpp
+├── LiteXM2SDRUDPRx.hpp
+├── test_play.py
+├── test_record.py
+└── test_time.py
 ```
 
 - **CMakeLists.txt**
@@ -65,6 +105,9 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 
 - **LiteXM2SDRUDPRx.cpp/hpp**
   Implements optional UDP receive routines (via Etherbone or custom protocol).
+
+- **test_play.py, test_record.py, test_time.py**
+  Python scripts to test and demonstrate transmission, recording, and hardware time functionality using the LiteXM2SDR SoapySDR driver.
 
 ---
 
