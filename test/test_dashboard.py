@@ -12,6 +12,7 @@ import argparse
 from litex import RemoteClient
 
 from test_clks import ClkDriver, CLOCKS
+from test_xadc import XADCDriver
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -20,7 +21,8 @@ XADC_WINDOW_SECONDS = 10
 # Update interval (in seconds) for clock frequency measurement.
 clock_update_interval = 1.0
 
-# Header Driver --------------------------------------------------------------------------------------
+# Header Driver ------------------------------------------------------------------------------------
+
 class HeaderDriver:
     def __init__(self, bus, name):
         self.last_tx_header    = getattr(bus.regs, f"{name}_last_tx_header")
@@ -51,6 +53,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     else:
         clk_drivers = None
 
+    # Initialize XADCDriver if available.
+    if with_xadc:
+        xadc_driver = XADCDriver(bus)
+    else:
+        xadc_driver = None
+
     # Initialize DMA Header driver if available.
     if with_header_reg:
         header_driver = HeaderDriver(bus, "header")
@@ -69,26 +77,6 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 if c == "\0":
                     break
             return identifier
-
-    if with_xadc:
-        def get_xadc_temp():
-            return bus.regs.xadc_temperature.read() * 503.975 / 4096 - 273.15
-
-        def get_xadc_vccint():
-            return bus.regs.xadc_vccint.read() * 3 / 4096
-
-        def get_xadc_vccaux():
-            return bus.regs.xadc_vccaux.read() * 3 / 4096
-
-        def get_xadc_vccbram():
-            return bus.regs.xadc_vccbram.read() * 3 / 4096
-
-        def gen_xadc_data(get_cls, n):
-            xadc_data = [get_cls()] * n
-            while True:
-                xadc_data.pop(-1)
-                xadc_data.insert(0, get_cls())
-                yield xadc_data
 
     # Create Main Window.
     dpg.create_context()
@@ -172,12 +160,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
-        if with_xadc:
+        if with_xadc and xadc_driver:
             xadc_points = int(XADC_WINDOW_SECONDS / refresh)
-            temp_gen    = gen_xadc_data(get_xadc_temp, n=xadc_points)
-            vccint_gen  = gen_xadc_data(get_xadc_vccint, n=xadc_points)
-            vccaux_gen  = gen_xadc_data(get_xadc_vccaux, n=xadc_points)
-            vccbram_gen = gen_xadc_data(get_xadc_vccbram, n=xadc_points)
+            temp_gen    = xadc_driver.gen_data("temp", n=xadc_points)
+            vccint_gen  = xadc_driver.gen_data("vccint", n=xadc_points)
+            vccaux_gen  = xadc_driver.gen_data("vccaux", n=xadc_points)
+            vccbram_gen = xadc_driver.gen_data("vccbram", n=xadc_points)
 
         while dpg.is_dearpygui_running():
             # Update CSR Registers.
@@ -185,7 +173,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.set_value(item=name, value=f"0x{reg.read():x}")
 
             # Update XADC data.
-            if with_xadc:
+            if with_xadc and xadc_driver:
                 now = time.time()
                 relative_now = now - start_time
                 for name, gen_data in [
