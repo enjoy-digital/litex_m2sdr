@@ -6,10 +6,10 @@ test_record.py - Record I/Q samples using the LiteXM2SDR SoapySDR driver.
 This script uses the SoapySDR driver to interface with the LiteXM2SDR hardware. It records I/Q
 samples for a specified duration and writes raw CF32 samples to a file. It optionally checks and
 prints timestamp information along with differences between consecutive valid timestamps.
-Command-line options allow you to configure sample rate, bandwidth, frequency, and gain.
+Command-line options allow you to configure sample rate, bandwidth, frequency, gain, and channel.
 
 Usage Example:
-    ./test_record.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --secs 5 --check-ts filename.bin
+    ./test_record.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --channel 0 --secs 5 --check-ts filename.bin
 """
 
 import time
@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--bandwidth",  type=float, default=56e6,    help="RX Filter bandwidth in Hz")
     parser.add_argument("--freq",       type=float, default=2.4e9,   help="RX frequency in Hz")
     parser.add_argument("--gain",       type=float, default=20.0,    help="RX gain in dB")
+    parser.add_argument("--channel",    type=int,   choices=[0, 1],  default=0, help="RX channel index (0 or 1)")
+
     # Additional options.
     parser.add_argument("--secs",       type=float, default=5.0,     help="Recording duration in seconds")
     parser.add_argument("--check-ts",   action="store_true",         help="Enable timestamp checking and printing")
@@ -45,14 +47,14 @@ def main():
     # Open the LiteXM2SDR device using the SoapySDR driver.
     sdr = SoapySDR.Device({"driver": "LiteXM2SDR"})
 
-    # Basic RF configuration.
-    sdr.setSampleRate(SOAPY_SDR_RX, 0, args.samplerate)
-    sdr.setFrequency( SOAPY_SDR_RX, 0, args.freq)
-    sdr.setGain(      SOAPY_SDR_RX, 0, args.gain)
-    sdr.setBandwidth( SOAPY_SDR_RX, 0, args.bandwidth)
+    # Basic RF configuration using the selected channel.
+    sdr.setSampleRate(SOAPY_SDR_RX, args.channel, args.samplerate)
+    sdr.setFrequency( SOAPY_SDR_RX, args.channel, args.freq)
+    sdr.setGain(      SOAPY_SDR_RX, args.channel, args.gain)
+    sdr.setBandwidth( SOAPY_SDR_RX, args.channel, args.bandwidth)
 
-    # Create and activate RX stream.
-    rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32, [0])
+    # Create and activate RX stream on the specified channel.
+    rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32, [args.channel])
     sdr.activateStream(rx_stream)
 
     # If timestamp checking is enabled, print the initial hardware timestamp.
@@ -63,7 +65,7 @@ def main():
         except Exception as e:
             print(f"Unable to get hardware time: {e}")
 
-    print(f"Recording for {args.secs} seconds at {args.freq/1e6:.3f} MHz...")
+    print(f"Recording for {args.secs} seconds at {args.freq/1e6:.3f} MHz on channel {args.channel}...")
     t_start = time.time()
     total_samples = 0
     chunk_index = 0
