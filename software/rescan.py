@@ -10,7 +10,7 @@ import subprocess
 
 from __init__ import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
-# Rescan Utilities ----------------------------------------------------------------------------------
+# Rescan Utilities ---------------------------------------------------------------------------------
 
 def remove_driver():
     print("Removing Driver...")
@@ -37,7 +37,7 @@ def get_device_ids():
         get_pcie_device_id("0x10ee", "0x7024"),
     ]
 
-# Main ----------------------------------------------------------------------------------------------
+# Main ---------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="FPGA PCIe rescan.")

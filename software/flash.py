@@ -17,7 +17,7 @@ def flash_bitstream(bitstream, offset, device_num):
     subprocess.run(f"cd user && ./m2sdr_util flash_reload -c {device_num}", shell=True)
     time.sleep(1)
 
-# Main ----------------------------------------------------------------------------------------------
+# Main ---------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX-M2SDR flashing over PCIe.")

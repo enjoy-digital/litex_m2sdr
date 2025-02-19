@@ -5,9 +5,11 @@
 # Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import argparse
 import os
+import argparse
 import subprocess
+
+# Build Utilities ----------------------------------------------------------------------------------
 
 def run_command(command):
     try:
@@ -27,23 +29,29 @@ def build_driver(path, cmake_options=""):
     for command in commands:
         run_command(command)
 
-parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("--interface", default="litepcie", help="Control/Data path interface", choices=["litepcie", "liteeth"])
+# Main ---------------------------------------------------------------------------------------------
 
-args = parser.parse_args()
+def main():
+    parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--interface", default="litepcie", help="Control/Data path interface", choices=["litepcie", "liteeth"])
 
-# Control/Data path flags.
-if args.interface == "litepcie":
-    flags = "-DUSE_LITEETH=OFF"
-else:
-    flags = "-DUSE_LITEETH=ON"
+    args = parser.parse_args()
 
-# Kernel compilation.
-if (args.interface == "litepcie"):
-    run_command("cd kernel && make clean all")
+    # Control/Data path flags.
+    if args.interface == "litepcie":
+        flags = "-DUSE_LITEETH=OFF"
+    else:
+        flags = "-DUSE_LITEETH=ON"
 
-# Utilities compilation.
-run_command("cd user   && make clean all")
+    # Kernel compilation.
+    if (args.interface == "litepcie"):
+        run_command("cd kernel && make clean all")
 
-# SoapySDR Driver compilation.
-build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {flags}")
+    # Utilities compilation.
+    run_command("cd user   && make clean all")
+
+    # SoapySDR Driver compilation.
+    build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {flags}")
+
+if __name__ == "__main__":
+    main()
