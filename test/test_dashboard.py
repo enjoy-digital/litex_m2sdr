@@ -11,18 +11,11 @@ import argparse
 
 from litex import RemoteClient
 
+from test_clks import ClkDriver, CLOCKS
+
 # Constants ----------------------------------------------------------------------------------------
 
 XADC_WINDOW_SECONDS = 10
-
-# Define the clocks to measure.
-CLOCKS = {
-    "clk0": "Sys Clk",
-    "clk1": "PCIe Clk",
-    "clk2": "AD9361 Ref Clk",
-    "clk3": "AD9361 Dat Clk",
-    "clk4": "Time Ref Clk",
-}
 
 # Update interval (in seconds) for clock frequency measurement.
 clock_update_interval = 1.0
@@ -52,26 +45,11 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
     with_header_reg = hasattr(bus.regs, "header_last_tx_header")
 
-    # Initialize clock measurement variables if available.
+    # Initialize ClkDriver if available.
     if with_clks:
-        def latch_all():
-            for clk in CLOCKS:
-                reg_name = f"clk_measurement_{clk}_latch"
-                getattr(bus.regs, reg_name).write(1)
-        def read_all():
-            ret = {}
-            for clk in CLOCKS:
-                reg_name = f"clk_measurement_{clk}_value"
-                ret[clk] = getattr(bus.regs, reg_name).read()
-            return ret
-        latch_all()
-        prev_clk_values = read_all()
-        prev_clk_time   = time.time()
-        last_clk_update = prev_clk_time
+        clk_drivers = {clk: ClkDriver(bus, clk, CLOCKS[clk]) for clk in CLOCKS}
     else:
-        prev_clk_values = None
-        prev_clk_time   = None
-        last_clk_update = None
+        clk_drivers = None
 
     # Initialize DMA Header driver if available.
     if with_header_reg:
@@ -194,7 +172,6 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
-        nonlocal last_clk_update, prev_clk_values, prev_clk_time
         if with_xadc:
             xadc_points = int(XADC_WINDOW_SECONDS / refresh)
             temp_gen    = gen_xadc_data(get_xadc_temp, n=xadc_points)
@@ -226,19 +203,10 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.fit_axis_data(f"{name}_x")
 
             # Update Clock Frequencies.
-            if with_clks:
-                now = time.time()
-                if now - last_clk_update >= clock_update_interval:
-                    latch_all()
-                    current_values = read_all()
-                    elapsed = now - prev_clk_time
-                    for clk in CLOCKS:
-                        delta = current_values[clk] - prev_clk_values[clk]
-                        freq = delta / (elapsed * 1e6)  # Frequency in MHz.
-                        dpg.set_value(f"clock_{clk}", f"{CLOCKS[clk]}: {freq:.2f} MHz")
-                    prev_clk_values = current_values
-                    prev_clk_time = now
-                    last_clk_update = now
+            if with_clks and clk_drivers:
+                for clk, driver in clk_drivers.items():
+                    freq = driver.update()
+                    dpg.set_value(f"clock_{clk}", f"{driver.description}: {freq:.2f} MHz")
 
             # Update DMA Header & Timestamps.
             if with_header_reg:
