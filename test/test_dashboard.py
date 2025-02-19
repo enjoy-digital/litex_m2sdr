@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 #
 # This file is part of LiteX-M2SDR.
 #
@@ -16,6 +15,18 @@ from litex import RemoteClient
 
 XADC_WINDOW_SECONDS = 10
 
+# Define the clocks to measure.
+CLOCKS = {
+    "clk0": "Sys Clk",
+    "clk1": "PCIe Clk",
+    "clk2": "AD9361 Ref Clk",
+    "clk3": "AD9361 Dat Clk",
+    "clk4": "Time Ref Clk",
+}
+
+# Update interval (in seconds) for clock frequency measurement.
+clock_update_interval = 1.0
+
 # GUI ----------------------------------------------------------------------------------------------
 
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
@@ -30,6 +41,28 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Board capabilities.
     with_identifier = hasattr(bus.bases, "identifier_mem")
     with_xadc       = hasattr(bus.regs, "xadc_temperature")
+    with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
+
+    # Initialize clock measurement variables if available.
+    if with_clks:
+        def latch_all():
+            for clk in CLOCKS:
+                reg_name = f"clk_measurement_{clk}_latch"
+                getattr(bus.regs, reg_name).write(1)
+        def read_all():
+            ret = {}
+            for clk in CLOCKS:
+                reg_name = f"clk_measurement_{clk}_value"
+                ret[clk] = getattr(bus.regs, reg_name).read()
+            return ret
+        latch_all()
+        prev_clk_values = read_all()
+        prev_clk_time   = time.time()
+        last_clk_update = prev_clk_time
+    else:
+        prev_clk_values = None
+        prev_clk_time   = None
+        last_clk_update = None
 
     # Board functions.
     def reboot():
@@ -104,6 +137,13 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         if with_identifier:
             dpg.add_text(f"Identifier: {get_identifier()}")
 
+    # Clocks Window.
+    if with_clks:
+        with dpg.window(label="LiteX M2SDR Clocks", autosize=True, pos=(550, 300)):
+            # Create a text widget for each clock.
+            for clk, desc in CLOCKS.items():
+                dpg.add_text(f"{desc}: -- MHz", tag=f"clock_{clk}")
+
     # XADC Window.
     if with_xadc:
         with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(1000, 0)):
@@ -135,13 +175,13 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
+        nonlocal last_clk_update, prev_clk_values, prev_clk_time
         if with_xadc:
-            # Calculate number of points based on desired display window.
             xadc_points = int(XADC_WINDOW_SECONDS / refresh)
-            temp = gen_xadc_data(get_xadc_temp, n=xadc_points)
-            vccint = gen_xadc_data(get_xadc_vccint, n=xadc_points)
-            vccaux = gen_xadc_data(get_xadc_vccaux, n=xadc_points)
-            vccbram = gen_xadc_data(get_xadc_vccbram, n=xadc_points)
+            temp_gen    = gen_xadc_data(get_xadc_temp, n=xadc_points)
+            vccint_gen  = gen_xadc_data(get_xadc_vccint, n=xadc_points)
+            vccaux_gen  = gen_xadc_data(get_xadc_vccaux, n=xadc_points)
+            vccbram_gen = gen_xadc_data(get_xadc_vccbram, n=xadc_points)
 
         while dpg.is_dearpygui_running():
             # Update CSR Registers.
@@ -153,19 +193,33 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 now = time.time()
                 relative_now = now - start_time
                 for name, gen_data in [
-                    ("temp", temp),
-                    ("vccint", vccint),
-                    ("vccaux", vccaux),
-                    ("vccbram", vccbram)
+                    ("temp",    temp_gen),
+                    ("vccint",  vccint_gen),
+                    ("vccaux",  vccaux_gen),
+                    ("vccbram", vccbram_gen)
                 ]:
-                    datay = next(gen_data)
-                    n = len(datay)
-                    # Generate time stamps: the most recent sample at relative_now.
-                    datax = [relative_now - (n - 1 - i) * refresh for i in range(n)]
+                    datay    = next(gen_data)
+                    n_points = len(datay)
+                    datax    = [relative_now - (n_points - 1 - i) * refresh for i in range(n_points)]
                     dpg.set_value(name, [datax, datay])
                     dpg.set_item_label(name, name)
                     dpg.set_axis_limits_auto(f"{name}_x")
                     dpg.fit_axis_data(f"{name}_x")
+
+            # Update Clock Frequencies.
+            if with_clks:
+                now = time.time()
+                if now - last_clk_update >= clock_update_interval:
+                    latch_all()
+                    current_values = read_all()
+                    elapsed = now - prev_clk_time
+                    for clk in CLOCKS:
+                        delta = current_values[clk] - prev_clk_values[clk]
+                        freq = delta / (elapsed * 1e6)  # Frequency in MHz.
+                        dpg.set_value(f"clock_{clk}", f"{CLOCKS[clk]}: {freq:.2f} MHz")
+                    prev_clk_values = current_values
+                    prev_clk_time = now
+                    last_clk_update = now
 
             time.sleep(refresh)
 
