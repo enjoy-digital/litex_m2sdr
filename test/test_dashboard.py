@@ -119,9 +119,17 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Clocks Window.
     if with_clks:
         with dpg.window(label="LiteX M2SDR Clocks", autosize=True, pos=(550, 300)):
-            # Create a text widget for each clock.
-            for clk, desc in CLOCKS.items():
-                dpg.add_text(f"{desc}: -- MHz", tag=f"clock_{clk}")
+            with dpg.table(header_row=True, tag="clocks_table", resizable=True, policy=dpg.mvTable_SizingFixedFit):
+                dpg.add_table_column(label="Clock")
+                dpg.add_table_column(label="Description")
+                dpg.add_table_column(label="Frequency (MHz)")
+                # Create one table row per clock.
+                for clk, desc in CLOCKS.items():
+                    with dpg.table_row():
+                        dpg.add_text(clk)
+                        dpg.add_text(desc)
+                        # Create a text item with a unique tag for the frequency.
+                        dpg.add_text("--", tag=f"clock_{clk}_freq")
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
@@ -200,7 +208,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
             if with_clks and clk_drivers:
                 for clk, driver in clk_drivers.items():
                     freq = driver.update()
-                    dpg.set_value(f"clock_{clk}", f"{driver.description}: {freq:.2f} MHz")
+                    dpg.set_value(f"clock_{clk}_freq", f"{freq:.2f}")
 
             # Update DMA Header & Timestamps.
             if with_header_reg:
