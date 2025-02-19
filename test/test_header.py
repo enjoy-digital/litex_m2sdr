@@ -59,9 +59,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# ./m2sdr_rf -frame_size=1024
-# ./test_header.py --header=0 --loops=1000
-# ./tone_gen.py tone_tx.bin --frame-header --frame-size=1024 --nsamples=122880
-# ./m2sdr_play -c 0 tone_tx.bin 100000 -z
-# ./m2sdr_record -c 0 -z
