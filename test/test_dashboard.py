@@ -18,10 +18,7 @@ from test_time   import TimeDriver, unix_to_datetime
 
 # Constants ----------------------------------------------------------------------------------------
 
-XADC_WINDOW_SECONDS = 10
-
-# Update interval (in seconds) for clock frequency measurement.
-clock_update_interval = 1.0
+XADC_WINDOW_DURATION = 10
 
 # GUI ----------------------------------------------------------------------------------------------
 
@@ -112,21 +109,18 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # Clks and Time Window.
     with dpg.window(label="LiteX M2SDR Clks/Time", autosize=True, pos=(0, 0)):
-        dpg.add_text("Clks")
-        dpg.add_separator()
-        with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
-            dpg.add_table_column(label="Name")
-            dpg.add_table_column(label="Frequency (MHz)")
-            for clk, name in CLOCKS.items():
-                with dpg.table_row():
-                    dpg.add_text(name)
-                    dpg.add_text("--", tag=f"clock_{clk}_freq")
+        with dpg.collapsing_header(label="Clks", default_open=True):
+            with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
+                dpg.add_table_column(label="Name")
+                dpg.add_table_column(label="Frequency (MHz)")
+                for clk, name in CLOCKS.items():
+                    with dpg.table_row():
+                        dpg.add_text(name)
+                        dpg.add_text("--", tag=f"clock_{clk}_freq")
 
-        dpg.add_text("Time")
-        dpg.add_separator()
-        dpg.add_text("Time: -- ns", tag="time_ns")
-        dpg.add_text("Date/Time: --", tag="time_str")
-
+        with dpg.collapsing_header(label="Time", default_open=True):
+            dpg.add_text("Time: -- ns", tag="time_ns")
+            dpg.add_text("Date/Time: --", tag="time_str")
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
@@ -223,7 +217,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
         if with_xadc and xadc_driver:
-            xadc_points = int(XADC_WINDOW_SECONDS / refresh)
+            xadc_points = int(XADC_WINDOW_DURATION / refresh)
             temp_gen    = xadc_driver.gen_data("temp", n=xadc_points)
             vccint_gen  = xadc_driver.gen_data("vccint", n=xadc_points)
             vccaux_gen  = xadc_driver.gen_data("vccaux", n=xadc_points)
