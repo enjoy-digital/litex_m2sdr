@@ -11,8 +11,9 @@ import argparse
 
 from litex import RemoteClient
 
-from test_clks import ClkDriver, CLOCKS
-from test_xadc import XADCDriver
+from test_clks   import ClkDriver, CLOCKS
+from test_xadc   import XADCDriver
+from test_header import HeaderDriver
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -20,15 +21,6 @@ XADC_WINDOW_SECONDS = 10
 
 # Update interval (in seconds) for clock frequency measurement.
 clock_update_interval = 1.0
-
-# Header Driver ------------------------------------------------------------------------------------
-
-class HeaderDriver:
-    def __init__(self, bus, name):
-        self.last_tx_header    = getattr(bus.regs, f"{name}_last_tx_header")
-        self.last_rx_header    = getattr(bus.regs, f"{name}_last_rx_header")
-        self.last_tx_timestamp = getattr(bus.regs, f"{name}_last_tx_timestamp")
-        self.last_rx_timestamp = getattr(bus.regs, f"{name}_last_rx_timestamp")
 
 # GUI ----------------------------------------------------------------------------------------------
 
