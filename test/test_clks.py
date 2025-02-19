@@ -7,53 +7,70 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import time
+import argparse
+
 from litex import RemoteClient
 
-bus = RemoteClient()
-bus.open()
+# Constants ----------------------------------------------------------------------------------------
 
-def latch_all():
-    bus.regs.clk_measurement_clk0_latch.write(1)
-    bus.regs.clk_measurement_clk1_latch.write(1)
-    bus.regs.clk_measurement_clk2_latch.write(1)
-    bus.regs.clk_measurement_clk3_latch.write(1)
+CLOCKS = {
+    "clk0": "       Sys Clk",
+    "clk1": "      PCIe Clk",
+    "clk2": "AD9361 Ref Clk",
+    "clk3": "AD9361 Dat Clk",
+    "clk4": "  Time Ref Clk",
+}
 
-def read_all():
-    values = [
-        bus.regs.clk_measurement_clk0_value.read(),
-        bus.regs.clk_measurement_clk1_value.read(),
-        bus.regs.clk_measurement_clk2_value.read(),
-        bus.regs.clk_measurement_clk3_value.read()
-    ]
-    return values
+# Test Frequency -----------------------------------------------------------------------------------
 
-num_measurements    = 10
-delay_between_tests = 1
+def test_frequency(num_measurements=10, delay_between_tests=1.0):
+    bus = RemoteClient()
+    bus.open()
 
-# Latch and read initial values for each clock
-latch_all()
-previous_values = read_all()
-start_time = time.time()
+    max_name_len = max(len(name) for name in CLOCKS.values())
 
-for i in range(num_measurements):
-    time.sleep(delay_between_tests)
+    def latch_all():
+        for clk in CLOCKS:
+            reg_name = f"clk_measurement_{clk}_latch"
+            getattr(bus.regs, reg_name).write(1)
 
-    # Latch and read current values for each clock
+    def read_all():
+        readings = {}
+        for clk in CLOCKS:
+            reg_name = f"clk_measurement_{clk}_value"
+            readings[clk] = getattr(bus.regs, reg_name).read()
+        return readings
+
     latch_all()
-    current_values = read_all()
-    current_time = time.time()
+    previous_values = read_all()
+    prev_time = time.time()
 
-    # Calculate the actual elapsed time
-    elapsed_time = current_time - start_time
-    start_time = current_time  # Update the start_time for the next iteration
+    for meas in range(num_measurements):
+        time.sleep(delay_between_tests)
+        latch_all()
+        current_values = read_all()
+        cur_time = time.time()
 
-    for clk_index in range(5):
-        # Compute the difference between the current and previous values
-        delta_value = current_values[clk_index] - previous_values[clk_index]
-        frequency_mhz = delta_value / (elapsed_time * 1e6)
-        print(f"Measurement {i + 1}, Clock {clk_index}: Frequency: {frequency_mhz:.2f} MHz")
+        elapsed = cur_time - prev_time
+        prev_time = cur_time
 
-        # Update the previous value for the next iteration
-        previous_values[clk_index] = current_values[clk_index]
+        for clk in CLOCKS:
+            delta = current_values[clk] - previous_values[clk]
+            frequency = delta / (elapsed * 1e6)  # Frequency in MHz.
+            print(f"Measurement {meas + 1}, {CLOCKS[clk]:>{max_name_len}}: Frequency: {frequency:.2f} MHz")
+            previous_values[clk] = current_values[clk]
 
-bus.close()
+    bus.close()
+
+# Main ---------------------------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Frequency Measurement Script")
+    parser.add_argument("--num",   default=10,  type=int,   help="Number of measurements")
+    parser.add_argument("--delay", default=1.0, type=float, help="Delay between measurements (seconds)")
+    args = parser.parse_args()
+
+    test_frequency(num_measurements=args.num, delay_between_tests=args.delay)
+
+if __name__ == "__main__":
+    main()
