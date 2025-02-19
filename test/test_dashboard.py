@@ -14,6 +14,7 @@ from litex import RemoteClient
 from test_clks   import ClkDriver, CLOCKS
 from test_xadc   import XADCDriver
 from test_header import HeaderDriver
+from test_time   import TimeDriver, unix_to_datetime
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -38,6 +39,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     with_xadc       = hasattr(bus.regs, "xadc_temperature")
     with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
     with_header_reg = hasattr(bus.regs, "header_last_tx_header")
+    with_time       = hasattr(bus.regs, "time_gen_read_time")
 
     # Initialize ClkDriver if available.
     if with_clks:
@@ -54,6 +56,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Initialize DMA Header driver if available.
     if with_header_reg:
         header_driver = HeaderDriver(bus, "header")
+
+    # Initialize TimeDriver if available.
+    if with_time:
+        time_driver = TimeDriver(bus, "time_gen")
+    else:
+        time_driver = None
 
     # Board functions.
     def reboot():
@@ -150,6 +158,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         dpg.add_line_series([], [], label="vccbram", tag="vccbram")
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
+    # Time Window.
+    if with_time and time_driver:
+        with dpg.window(label="LiteX M2SDR Time", autosize=True, pos=(1000, 700)):
+            dpg.add_text("Time: -- ns",   tag="time_ns")
+            dpg.add_text("Date/Time: --", tag="time_str")
+
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
         if with_xadc and xadc_driver:
@@ -195,6 +209,13 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 tx_timestamp = header_driver.last_tx_timestamp.read()
                 rx_timestamp = header_driver.last_rx_timestamp.read()
                 dpg.set_value("dma_header_values", f"{tx_header:016x} {tx_timestamp:016x} {rx_header:016x} {rx_timestamp:016x}")
+
+            # Update Board Time.
+            if with_time and time_driver:
+                current_time_ns = time_driver.read_ns()
+                time_str        = unix_to_datetime(current_time_ns)
+                dpg.set_value("time_ns", f"Time: {current_time_ns} ns")
+                dpg.set_value("time_str", f"Date/Time: {time_str}")
 
             time.sleep(refresh)
 
