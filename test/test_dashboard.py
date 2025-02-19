@@ -85,7 +85,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     dpg.setup_dearpygui()
 
     # Registers Window.
-    with dpg.window(label="LiteX M2SDR Registers", autosize=True):
+    with dpg.window(label="LiteX M2SDR Registers", autosize=True, pos=(1230, 0)):
         dpg.add_text("Control/Status")
         def filter_callback(sender, filter_str):
             dpg.set_value("csr_filter", filter_str)
@@ -111,7 +111,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 )
 
     # Clks and Time Window.
-    with dpg.window(label="LiteX M2SDR Clks/Time", autosize=True, pos=(550, 0)):
+    with dpg.window(label="LiteX M2SDR Clks/Time", autosize=True, pos=(0, 0)):
         dpg.add_text("Clks")
         dpg.add_separator()
         with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
@@ -130,7 +130,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
-        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(550, 500)):
+        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(0, 300)):
             with dpg.collapsing_header(label="DMA Info", default_open=True):
                 with dpg.table(header_row=True, tag="dma_info_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=600):
                     dpg.add_table_column(label="Register", width=250)
@@ -193,7 +193,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # XADC Window.
     if with_xadc:
-        with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(1000, 0)):
+        with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(625, 0)):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
                 # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
