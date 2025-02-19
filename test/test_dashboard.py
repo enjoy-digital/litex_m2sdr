@@ -79,12 +79,13 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
             return identifier
 
     # Create Main Window.
+    main_title = f"LiteX M2SDR Dashboard on '{get_identifier()[:-1]}'"
     dpg.create_context()
-    dpg.create_viewport(title="LiteX M2SDR Dashboard", width=1920, height=1080, always_on_top=True)
+    dpg.create_viewport(title=main_title, width=1920, height=1080, always_on_top=True)
     dpg.setup_dearpygui()
 
-    # CSR Registers Window.
-    with dpg.window(label="LiteX M2SDR CSR Registers", autosize=True):
+    # Registers Window.
+    with dpg.window(label="LiteX M2SDR Registers", autosize=True):
         dpg.add_text("Control/Status")
         def filter_callback(sender, filter_str):
             dpg.set_value("csr_filter", filter_str)
@@ -109,25 +110,23 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     width=200
                 )
 
-    # Peripherals Window.
-    with dpg.window(label="LiteX M2SDR Peripherals", autosize=True, pos=(550, 0)):
-        dpg.add_text("SoC")
-        dpg.add_button(label="Reboot", callback=reboot)
-        if with_identifier:
-            dpg.add_text(f"Identifier: {get_identifier()}")
+    # Clks and Time Window.
+    with dpg.window(label="LiteX M2SDR Clks/Time", autosize=True, pos=(550, 0)):
+        dpg.add_text("Clks")
+        dpg.add_separator()
+        with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
+            dpg.add_table_column(label="Name")
+            dpg.add_table_column(label="Frequency (MHz)")
+            for clk, name in CLOCKS.items():
+                with dpg.table_row():
+                    dpg.add_text(name)
+                    dpg.add_text("--", tag=f"clock_{clk}_freq")
 
-    # Clocks Window.
-    if with_clks:
-        with dpg.window(label="LiteX M2SDR Clocks", autosize=True, pos=(550, 300)):
-            with dpg.table(header_row=True, tag="clocks_table", resizable=True, policy=dpg.mvTable_SizingFixedFit):
-                dpg.add_table_column(label="Clock")
-                dpg.add_table_column(label="Description")
-                dpg.add_table_column(label="Frequency (MHz)")
-                for clk, desc in CLOCKS.items():
-                    with dpg.table_row():
-                        dpg.add_text(clk)
-                        dpg.add_text(desc)
-                        dpg.add_text("--", tag=f"clock_{clk}_freq")
+        dpg.add_text("Time")
+        dpg.add_separator()
+        dpg.add_text("Time: -- ns", tag="time_ns")
+        dpg.add_text("Date/Time: --", tag="time_str")
+
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
@@ -189,12 +188,6 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         dpg.add_line_series([], [], label="vccbram", tag="vccbram")
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
-    # Time Window.
-    if with_time and time_driver:
-        with dpg.window(label="LiteX M2SDR Time", autosize=True, pos=(1000, 700)):
-            dpg.add_text("Time: -- ns", tag="time_ns")
-            dpg.add_text("Date/Time: --", tag="time_str")
-
     # GUI Timer Callback.
     def timer_callback(refresh=0.1):
         if with_xadc and xadc_driver:
@@ -222,7 +215,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     datay    = next(gen_data)
                     n_points = len(datay)
                     datax    = [relative_now - (n_points - 1 - i) * refresh for i in range(n_points)]
-                    dpg.set_value(name, [datax, datay])
+                    dpg.set_value(name, [datax, datay[::-1]])
                     dpg.set_item_label(name, name)
                     dpg.set_axis_limits_auto(f"{name}_x")
                     dpg.fit_axis_data(f"{name}_x")
