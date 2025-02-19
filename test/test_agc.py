@@ -42,29 +42,50 @@ class AGCDriver:
         self.name = name
         self.control = getattr(self.bus.regs, f"{name}_control")
         self.status  = getattr(self.bus.regs, f"{name}_status")
+        # Internal state for the control fields.
+        self._enable    = 0
+        self._threshold = 0
+        self._clear     = 0
+
+    def _update_control(self):
+        """Recompute and write the control register from internal state."""
+        reg = 0
+        reg = set_field(reg, CONTROL_ENABLE_OFFSET,    CONTROL_ENABLE_SIZE,    self._enable)
+        reg = set_field(reg, CONTROL_THRESHOLD_OFFSET, CONTROL_THRESHOLD_SIZE, self._threshold)
+        reg = set_field(reg, CONTROL_CLEAR_OFFSET,     CONTROL_CLEAR_SIZE,     self._clear)
+        self.control.write(reg)
 
     def enable(self):
-        reg = self.control.read()
-        reg = set_field(reg, CONTROL_ENABLE_OFFSET, CONTROL_ENABLE_SIZE, 1)
-        self.control.write(reg)
+        """Enable the AGC by setting the enable field to 1."""
+        self._enable = 1
+        self._update_control()
 
     def disable(self):
-        reg = self.control.read()
-        reg = set_field(reg, CONTROL_ENABLE_OFFSET, CONTROL_ENABLE_SIZE, 0)
-        self.control.write(reg)
-
-    def clear(self):
-        reg = self.control.read()
-        reg = set_field(reg, CONTROL_CLEAR_OFFSET, CONTROL_CLEAR_SIZE, 1)
-        self.control.write(reg)
+        """Disable the AGC by setting the enable field to 0."""
+        self._enable = 0
+        self._update_control()
 
     def set_threshold(self, threshold):
-        reg = self.control.read()
-        reg = set_field(reg, CONTROL_THRESHOLD_OFFSET, CONTROL_THRESHOLD_SIZE, threshold)
-        self.control.write(reg)
+        """Set the saturation threshold."""
+        self._threshold = threshold
+        self._update_control()
+
+    def clear(self):
+        """
+        Issue a clear command. This sets the clear bit as a pulse:
+        the bit is set, written, then cleared immediately.
+        """
+        self._clear = 1
+        self._update_control()
+        # Clear the clear bit (pulse)
+        self._clear = 0
+        self._update_control()
 
     def read_count(self):
-        # The entire status register is the count.
+        """
+        Read the saturation count from the status register.
+        (This is still a read operation as the status is provided by the hardware.)
+        """
         return self.status.read()
 
 # Test AGC ------------------------------------------------------------------------------------------
