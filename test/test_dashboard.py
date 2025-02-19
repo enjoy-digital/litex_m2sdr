@@ -139,6 +139,9 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         dpg.add_text("Writer Table Loop Status")
                         dpg.add_text("", tag="dma_writer_table_loop_status")
                     with dpg.table_row():
+                        dpg.add_text("Writer Loops/s")
+                        dpg.add_text("", tag="dma_writer_loops_speed")
+                    with dpg.table_row():
                         dpg.add_text("Reader Enable")
                         dpg.add_text("", tag="dma_reader_enable")
                     with dpg.table_row():
@@ -147,6 +150,9 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     with dpg.table_row():
                         dpg.add_text("Reader Table Loop Status")
                         dpg.add_text("", tag="dma_reader_table_loop_status")
+                    with dpg.table_row():
+                        dpg.add_text("Reader Loops/s")
+                        dpg.add_text("", tag="dma_reader_loops_speed")
                     with dpg.table_row():
                         dpg.add_text("Loopback Enable")
                         dpg.add_text("", tag="dma_loopback_enable")
@@ -215,6 +221,11 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
     # GUI Timer Callback.
+    writer_prev_loops = 0
+    writer_prev_time = time.time()
+    reader_prev_loops = 0
+    reader_prev_time = time.time()
+
     def timer_callback(refresh=0.1):
         if with_xadc and xadc_driver:
             xadc_points = int(XADC_WINDOW_DURATION / refresh)
@@ -222,6 +233,9 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
             vccint_gen  = xadc_driver.gen_data("vccint", n=xadc_points)
             vccaux_gen  = xadc_driver.gen_data("vccaux", n=xadc_points)
             vccbram_gen = xadc_driver.gen_data("vccbram", n=xadc_points)
+
+        nonlocal writer_prev_loops, writer_prev_time
+        nonlocal reader_prev_loops, reader_prev_time
 
         while dpg.is_dearpygui_running():
             # Update CSR Registers.
@@ -273,27 +287,48 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.set_value("dma_rx_datetime", f"{rx_datetime}")
             # Update DMA Info.
             if hasattr(bus.regs, "pcie_dma0_writer_enable"):
+                now = time.time()
                 writer_enable = bus.regs.pcie_dma0_writer_enable.read()
                 dpg.set_value("dma_writer_enable", str(writer_enable))
                 writer_table_level = bus.regs.pcie_dma0_writer_table_level.read()
-                loops = (writer_table_level >> 16) & 0xFFFF
-                count = writer_table_level & 0xFFFF
-                dpg.set_value("dma_writer_table_level", f"Loops: {loops}, Count: {count}")
+                loops_w = (writer_table_level >> 16) & 0xFFFF
+                count_w = writer_table_level & 0xFFFF
+                dpg.set_value("dma_writer_table_level", f"Loops: {loops_w}, Count: {count_w}")
                 writer_loop_status = bus.regs.pcie_dma0_writer_table_loop_status.read()
-                loops = (writer_loop_status >> 16) & 0xFFFF
-                count = writer_loop_status & 0xFFFF
-                dpg.set_value("dma_writer_table_loop_status", f"Loops: {loops}, Count: {count}")
+                loops_ws = (writer_loop_status >> 16) & 0xFFFF
+                count_ws = writer_loop_status & 0xFFFF
+                dpg.set_value("dma_writer_table_loop_status", f"Loops: {loops_ws}, Count: {count_ws}")
+
+                # Compute Writer Loops/s.
+                loops_diff = loops_ws - writer_prev_loops
+                time_diff = now - writer_prev_time
+                writer_speed = 0.0
+                if time_diff > 0 and loops_diff >= 0:
+                    writer_speed = loops_diff / time_diff
+                dpg.set_value("dma_writer_loops_speed", f"{writer_speed:.2f}")
+                writer_prev_loops = loops_ws
+                writer_prev_time = now
 
                 reader_enable = bus.regs.pcie_dma0_reader_enable.read()
                 dpg.set_value("dma_reader_enable", str(reader_enable))
                 reader_table_level = bus.regs.pcie_dma0_reader_table_level.read()
-                loops = (reader_table_level >> 16) & 0xFFFF
-                count = reader_table_level & 0xFFFF
-                dpg.set_value("dma_reader_table_level", f"Loops: {loops}, Count: {count}")
+                loops_r = (reader_table_level >> 16) & 0xFFFF
+                count_r = reader_table_level & 0xFFFF
+                dpg.set_value("dma_reader_table_level", f"Loops: {loops_r}, Count: {count_r}")
                 reader_loop_status = bus.regs.pcie_dma0_reader_table_loop_status.read()
-                loops = (reader_loop_status >> 16) & 0xFFFF
-                count = reader_loop_status & 0xFFFF
-                dpg.set_value("dma_reader_table_loop_status", f"Loops: {loops}, Count: {count}")
+                loops_rs = (reader_loop_status >> 16) & 0xFFFF
+                count_rs = reader_loop_status & 0xFFFF
+                dpg.set_value("dma_reader_table_loop_status", f"Loops: {loops_rs}, Count: {count_rs}")
+
+                # Compute Reader Loops/s.
+                loops_diff_r = loops_rs - reader_prev_loops
+                time_diff_r = now - reader_prev_time
+                reader_speed = 0.0
+                if time_diff_r > 0 and loops_diff_r >= 0:
+                    reader_speed = loops_diff_r / time_diff_r
+                dpg.set_value("dma_reader_loops_speed", f"{reader_speed:.2f}")
+                reader_prev_loops = loops_rs
+                reader_prev_time = now
 
                 loopback_enable = bus.regs.pcie_dma0_loopback_enable.read()
                 dpg.set_value("dma_loopback_enable", str(loopback_enable))
