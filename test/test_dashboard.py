@@ -130,34 +130,66 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
-        with dpg.window(label="LiteX M2SDR DMA Header", autosize=True, pos=(550, 500)):
-            dpg.add_text("TX DMA Header")
-            with dpg.table(header_row=True, tag="dma_tx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
-                dpg.add_table_column(label="Field")
-                dpg.add_table_column(label="Value")
-                with dpg.table_row():
-                    dpg.add_text("Header")
-                    dpg.add_text("", tag="dma_tx_header")
-                with dpg.table_row():
-                    dpg.add_text("Timestamp")
-                    dpg.add_text("", tag="dma_tx_timestamp")
-                with dpg.table_row():
-                    dpg.add_text("Date/Time")
-                    dpg.add_text("", tag="dma_tx_datetime")
-            dpg.add_spacer(height=10)
-            dpg.add_text("RX DMA Header")
-            with dpg.table(header_row=True, tag="dma_rx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
-                dpg.add_table_column(label="Field")
-                dpg.add_table_column(label="Value")
-                with dpg.table_row():
-                    dpg.add_text("Header")
-                    dpg.add_text("", tag="dma_rx_header")
-                with dpg.table_row():
-                    dpg.add_text("Timestamp")
-                    dpg.add_text("", tag="dma_rx_timestamp")
-                with dpg.table_row():
-                    dpg.add_text("Date/Time")
-                    dpg.add_text("", tag="dma_rx_datetime")
+        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(550, 500)):
+            with dpg.collapsing_header(label="DMA Info", default_open=True):
+                with dpg.table(header_row=True, tag="dma_info_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=600):
+                    dpg.add_table_column(label="Register", width=250)
+                    dpg.add_table_column(label="Value", width=350)
+                    with dpg.table_row():
+                        dpg.add_text("Writer Enable")
+                        dpg.add_text("", tag="dma_writer_enable")
+                    with dpg.table_row():
+                        dpg.add_text("Writer Table Level")
+                        dpg.add_text("", tag="dma_writer_table_level")
+                    with dpg.table_row():
+                        dpg.add_text("Writer Table Loop Status")
+                        dpg.add_text("", tag="dma_writer_table_loop_status")
+                    with dpg.table_row():
+                        dpg.add_text("Reader Enable")
+                        dpg.add_text("", tag="dma_reader_enable")
+                    with dpg.table_row():
+                        dpg.add_text("Reader Table Level")
+                        dpg.add_text("", tag="dma_reader_table_level")
+                    with dpg.table_row():
+                        dpg.add_text("Reader Table Loop Status")
+                        dpg.add_text("", tag="dma_reader_table_loop_status")
+                    with dpg.table_row():
+                        dpg.add_text("Loopback Enable")
+                        dpg.add_text("", tag="dma_loopback_enable")
+                    with dpg.table_row():
+                        dpg.add_text("Synchronizer Bypass")
+                        dpg.add_text("", tag="dma_sync_bypass")
+                    with dpg.table_row():
+                        dpg.add_text("Synchronizer Enable")
+                        dpg.add_text("", tag="dma_sync_enable")
+
+            with dpg.collapsing_header(label="TX DMA Header", default_open=True):
+                with dpg.table(header_row=True, tag="dma_tx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
+                    dpg.add_table_column(label="Field", width=150)
+                    dpg.add_table_column(label="Value", width=430)
+                    with dpg.table_row():
+                        dpg.add_text("Header")
+                        dpg.add_text("", tag="dma_tx_header")
+                    with dpg.table_row():
+                        dpg.add_text("Timestamp")
+                        dpg.add_text("", tag="dma_tx_timestamp")
+                    with dpg.table_row():
+                        dpg.add_text("Date/Time")
+                        dpg.add_text("", tag="dma_tx_datetime")
+
+            with dpg.collapsing_header(label="RX DMA Header", default_open=True):
+                with dpg.table(header_row=True, tag="dma_rx_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=400):
+                    dpg.add_table_column(label="Field", width=150)
+                    dpg.add_table_column(label="Value", width=430)
+                    with dpg.table_row():
+                        dpg.add_text("Header")
+                        dpg.add_text("", tag="dma_rx_header")
+                    with dpg.table_row():
+                        dpg.add_text("Timestamp")
+                        dpg.add_text("", tag="dma_rx_timestamp")
+                    with dpg.table_row():
+                        dpg.add_text("Date/Time")
+                        dpg.add_text("", tag="dma_rx_datetime")
 
     # XADC Window.
     if with_xadc:
@@ -225,7 +257,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 for clk, driver in clk_drivers.items():
                     freq = driver.update()
                     dpg.set_value(f"clock_{clk}_freq", f"{freq:.2f}")
-
+            # Update Time.
+            if with_time and time_driver:
+                current_time_ns = time_driver.read_ns()
+                time_str = unix_to_datetime(current_time_ns)
+                dpg.set_value("time_ns", f"Time: {current_time_ns} ns")
+                dpg.set_value("time_str", f"Date/Time: {time_str}")
             # Update DMA Header & Timestamps.
             if with_header_reg:
                 tx_header    = header_driver.last_tx_header.read()
@@ -234,22 +271,42 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 rx_timestamp = header_driver.last_rx_timestamp.read()
                 tx_datetime  = unix_to_datetime(tx_timestamp) if tx_timestamp else "N/A"
                 rx_datetime  = unix_to_datetime(rx_timestamp) if rx_timestamp else "N/A"
-
                 dpg.set_value("dma_tx_header", f"{tx_header:016x}")
                 dpg.set_value("dma_tx_timestamp", f"{tx_timestamp:016x}")
                 dpg.set_value("dma_tx_datetime", f"{tx_datetime}")
-
                 dpg.set_value("dma_rx_header", f"{rx_header:016x}")
                 dpg.set_value("dma_rx_timestamp", f"{rx_timestamp:016x}")
                 dpg.set_value("dma_rx_datetime", f"{rx_datetime}")
+            # Update DMA Info.
+            if hasattr(bus.regs, "pcie_dma0_writer_enable"):
+                writer_enable = bus.regs.pcie_dma0_writer_enable.read()
+                dpg.set_value("dma_writer_enable", str(writer_enable))
+                writer_table_level = bus.regs.pcie_dma0_writer_table_level.read()
+                loops = (writer_table_level >> 16) & 0xFFFF
+                count = writer_table_level & 0xFFFF
+                dpg.set_value("dma_writer_table_level", f"Loops: {loops}, Count: {count}")
+                writer_loop_status = bus.regs.pcie_dma0_writer_table_loop_status.read()
+                loops = (writer_loop_status >> 16) & 0xFFFF
+                count = writer_loop_status & 0xFFFF
+                dpg.set_value("dma_writer_table_loop_status", f"Loops: {loops}, Count: {count}")
 
-            # Update Board Time.
-            if with_time and time_driver:
-                current_time_ns = time_driver.read_ns()
-                time_str        = unix_to_datetime(current_time_ns)
-                dpg.set_value("time_ns", f"Time: {current_time_ns} ns")
-                dpg.set_value("time_str", f"Date/Time: {time_str}")
+                reader_enable = bus.regs.pcie_dma0_reader_enable.read()
+                dpg.set_value("dma_reader_enable", str(reader_enable))
+                reader_table_level = bus.regs.pcie_dma0_reader_table_level.read()
+                loops = (reader_table_level >> 16) & 0xFFFF
+                count = reader_table_level & 0xFFFF
+                dpg.set_value("dma_reader_table_level", f"Loops: {loops}, Count: {count}")
+                reader_loop_status = bus.regs.pcie_dma0_reader_table_loop_status.read()
+                loops = (reader_loop_status >> 16) & 0xFFFF
+                count = reader_loop_status & 0xFFFF
+                dpg.set_value("dma_reader_table_loop_status", f"Loops: {loops}, Count: {count}")
 
+                loopback_enable = bus.regs.pcie_dma0_loopback_enable.read()
+                dpg.set_value("dma_loopback_enable", str(loopback_enable))
+                sync_bypass = bus.regs.pcie_dma0_synchronizer_bypass.read()
+                dpg.set_value("dma_sync_bypass", str(sync_bypass))
+                sync_enable = bus.regs.pcie_dma0_synchronizer_enable.read()
+                dpg.set_value("dma_sync_enable", str(sync_enable))
             time.sleep(refresh)
 
     timer_thread = threading.Thread(target=timer_callback)
