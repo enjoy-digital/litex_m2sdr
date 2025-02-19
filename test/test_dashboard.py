@@ -12,6 +12,10 @@ import argparse
 
 from litex import RemoteClient
 
+# Constants ----------------------------------------------------------------------------------------
+
+XADC_WINDOW_SECONDS = 10
+
 # GUI ----------------------------------------------------------------------------------------------
 
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
@@ -19,6 +23,9 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     bus = RemoteClient(host=host, csr_csv=csr_csv, port=port)
     bus.open()
+
+    # Record the start time.
+    start_time = time.time()
 
     # Board capabilities.
     with_identifier = hasattr(bus.bases, "identifier_mem")
@@ -101,30 +108,36 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     if with_xadc:
         with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(1000, 0)):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
+                # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
-                    dpg.add_plot_axis(dpg.mvXAxis, tag="temp_x")
+                    dpg.add_plot_axis(dpg.mvXAxis, tag="temp_x", label="Time (s)")
                     with dpg.plot_axis(dpg.mvYAxis, tag="temp_y"):
                         dpg.add_line_series([], [], label="temp", tag="temp")
                     dpg.set_axis_limits("temp_y", 0, 100)
+                # VCCInt Plot.
                 with dpg.plot(label="VCCInt (V)"):
-                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccint_x")
+                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccint_x", label="Time (s)")
                     with dpg.plot_axis(dpg.mvYAxis, tag="vccint_y"):
                         dpg.add_line_series([], [], label="vccint", tag="vccint")
                     dpg.set_axis_limits("vccint_y", 0, 1.8)
+                # VCCAux Plot.
                 with dpg.plot(label="VCCAux (V)"):
-                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccaux_x")
+                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccaux_x", label="Time (s)")
                     with dpg.plot_axis(dpg.mvYAxis, tag="vccaux_y"):
                         dpg.add_line_series([], [], label="vccaux", tag="vccaux")
                     dpg.set_axis_limits("vccaux_y", 0, 2.5)
+                # VCCBRAM Plot.
                 with dpg.plot(label="VCCBRAM (V)"):
-                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccbram_x")
+                    dpg.add_plot_axis(dpg.mvXAxis, tag="vccbram_x", label="Time (s)")
                     with dpg.plot_axis(dpg.mvYAxis, tag="vccbram_y"):
                         dpg.add_line_series([], [], label="vccbram", tag="vccbram")
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
     # GUI Timer Callback.
-    def timer_callback(refresh=0.1, xadc_points=100):
+    def timer_callback(refresh=0.1):
         if with_xadc:
+            # Calculate number of points based on desired display window.
+            xadc_points = int(XADC_WINDOW_SECONDS / refresh)
             temp = gen_xadc_data(get_xadc_temp, n=xadc_points)
             vccint = gen_xadc_data(get_xadc_vccint, n=xadc_points)
             vccaux = gen_xadc_data(get_xadc_vccaux, n=xadc_points)
@@ -137,12 +150,18 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
             # Update XADC data.
             if with_xadc:
-                for name, gen_data in [("temp", temp),
-                                       ("vccint", vccint),
-                                       ("vccaux", vccaux),
-                                       ("vccbram", vccbram)]:
+                now = time.time()
+                relative_now = now - start_time
+                for name, gen_data in [
+                    ("temp", temp),
+                    ("vccint", vccint),
+                    ("vccaux", vccaux),
+                    ("vccbram", vccbram)
+                ]:
                     datay = next(gen_data)
-                    datax = list(range(len(datay)))
+                    n = len(datay)
+                    # Generate time stamps: the most recent sample at relative_now.
+                    datax = [relative_now - (n - 1 - i) * refresh for i in range(n)]
                     dpg.set_value(name, [datax, datay])
                     dpg.set_item_label(name, name)
                     dpg.set_axis_limits_auto(f"{name}_x")
@@ -168,9 +187,9 @@ def main():
         description     = "LiteX M2SDR Dashboard",
         formatter_class = argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--csr-csv", default="csr.csv", help="CSR configuration file")
-    parser.add_argument("--host", default="localhost", help="Host IP address")
-    parser.add_argument("--port", default="1234", help="Host bind port")
+    parser.add_argument("--csr-csv", default="csr.csv",   help="CSR configuration file")
+    parser.add_argument("--host",    default="localhost", help="Host IP address")
+    parser.add_argument("--port",    default="1234",      help="Host bind port")
     args = parser.parse_args()
 
     run_gui(host=args.host, csr_csv=args.csr_csv, port=int(args.port))
