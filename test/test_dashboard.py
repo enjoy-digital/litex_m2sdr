@@ -27,6 +27,14 @@ CLOCKS = {
 # Update interval (in seconds) for clock frequency measurement.
 clock_update_interval = 1.0
 
+# Header Driver --------------------------------------------------------------------------------------
+class HeaderDriver:
+    def __init__(self, bus, name):
+        self.last_tx_header    = getattr(bus.regs, f"{name}_last_tx_header")
+        self.last_rx_header    = getattr(bus.regs, f"{name}_last_rx_header")
+        self.last_tx_timestamp = getattr(bus.regs, f"{name}_last_tx_timestamp")
+        self.last_rx_timestamp = getattr(bus.regs, f"{name}_last_rx_timestamp")
+
 # GUI ----------------------------------------------------------------------------------------------
 
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
@@ -42,6 +50,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     with_identifier = hasattr(bus.bases, "identifier_mem")
     with_xadc       = hasattr(bus.regs, "xadc_temperature")
     with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
+    with_header_reg = hasattr(bus.regs, "header_last_tx_header")
 
     # Initialize clock measurement variables if available.
     if with_clks:
@@ -63,6 +72,10 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         prev_clk_values = None
         prev_clk_time   = None
         last_clk_update = None
+
+    # Initialize DMA Header driver if available.
+    if with_header_reg:
+        header_driver = HeaderDriver(bus, "header")
 
     # Board functions.
     def reboot():
@@ -144,6 +157,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
             for clk, desc in CLOCKS.items():
                 dpg.add_text(f"{desc}: -- MHz", tag=f"clock_{clk}")
 
+    # DMA Header & Timestamps Window.
+    if with_header_reg:
+        with dpg.window(label="LiteX M2SDR DMA Header", autosize=True, pos=(550, 500)):
+            dpg.add_text("TX_HEADER     TX_TIMESTAMP        RX_HEADER     RX_TIMESTAMP", tag="dma_header_labels")
+            dpg.add_text("Waiting...", tag="dma_header_values")
+
     # XADC Window.
     if with_xadc:
         with dpg.window(label="LiteX M2SDR XADC", width=600, height=600, pos=(1000, 0)):
@@ -220,6 +239,14 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     prev_clk_values = current_values
                     prev_clk_time = now
                     last_clk_update = now
+
+            # Update DMA Header & Timestamps.
+            if with_header_reg:
+                tx_header    = header_driver.last_tx_header.read()
+                rx_header    = header_driver.last_rx_header.read()
+                tx_timestamp = header_driver.last_tx_timestamp.read()
+                rx_timestamp = header_driver.last_rx_timestamp.read()
+                dpg.set_value("dma_header_values", f"{tx_header:016x} {tx_timestamp:016x} {rx_header:016x} {rx_timestamp:016x}")
 
             time.sleep(refresh)
 
