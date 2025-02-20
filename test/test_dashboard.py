@@ -131,7 +131,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
-        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(0, 300)):
+        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(0, 450)):
             with dpg.collapsing_header(label="DMA Info", default_open=True):
                 with dpg.table(header_row=True, tag="dma_info_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=600):
                     dpg.add_table_column(label="Register", width=250)
@@ -200,7 +200,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # XADC Window.
     if with_xadc:
-        with dpg.window(label="LiteX M2SDR XADC", width=600, height=500, pos=(625, 0)):
+        with dpg.window(label="LiteX M2SDR XADC", width=600, height=500, pos=(625, 510)):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
                 # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
@@ -228,7 +228,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
     # RF AGC Panel.
-    with dpg.window(label="RF AGC", autosize=True, pos=(935, 502)):
+    with dpg.window(label="LiteX M2SDR RF AGC", autosize=True, pos=(935, 0)):
         for inst in rf_agc_instances:
             with dpg.collapsing_header(label=f"AGC {inst.upper()}", default_open=True):
                 dpg.add_text("Saturation Count: --", tag=f"agc_{inst}_count")
@@ -269,6 +269,62 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     callback = make_autoclear_callback(inst)
                 )
                 dpg.add_separator()
+
+    # System Overview Window..
+    with dpg.window(label="LiteX M2SDR System Overview", width=600, height=400, pos=(260, 0)):
+        with dpg.node_editor():
+            # Host Node
+            host_node = dpg.add_node(label="Host", draggable=True)
+            with dpg.node_attribute(label="PCIe RX", attribute_type=dpg.mvNode_Attr_Output, parent=host_node) as host_tx_data:
+                dpg.add_text("PCIe RX")
+            with dpg.node_attribute(label="PCIe TX", attribute_type=dpg.mvNode_Attr_Output, parent=host_node) as host_rx_data:
+                dpg.add_text("PCIe TX")
+            dpg.set_item_pos(host_node, [10, 10])
+
+            # LitePCIe Node
+            litepcie_node = dpg.add_node(label="LitePCIe Core", draggable=True)
+            with dpg.node_attribute(label="PCIe RX", attribute_type=dpg.mvNode_Attr_Input, parent=litepcie_node) as dma_host_tx:
+                dpg.add_text("PCIe RX")
+            with dpg.node_attribute(label="PCIe TX", attribute_type=dpg.mvNode_Attr_Input, parent=litepcie_node) as dma_host_rx:
+                dpg.add_text("PCIe TX")
+            with dpg.node_attribute(label="DMA TX", attribute_type=dpg.mvNode_Attr_Output, parent=litepcie_node) as dma_fpga_tx:
+                dpg.add_text("                   DMA TX")
+            with dpg.node_attribute(label="DMA RX", attribute_type=dpg.mvNode_Attr_Output, parent=litepcie_node) as dma_fpga_rx:
+                dpg.add_text("                   DMA RX")
+            with dpg.node_attribute(attribute_type=dpg.mvNode_Attr_Static, parent=litepcie_node):
+                dpg.add_text("Writer Loops/s:       0.00", tag="node_dma_writer_loops")
+                dpg.add_text("Reader Loops/s:       0.00", tag="node_dma_reader_loops")
+                dpg.add_text("Writer Loops:         0",    tag="dma_writer_loops_count")
+                dpg.add_text("Writer Count:         0",    tag="dma_writer_count")
+                dpg.add_text("Reader Loops:         0",    tag="dma_reader_loops_count")
+                dpg.add_text("Reader Count:         0",    tag="dma_reader_count")
+                dpg.add_text("Loopback:             0",    tag="node_dma_loopback")
+                dpg.add_text("Sync Bypass:          0",    tag="node_dma_sync_bypass")
+                dpg.add_text("Sync Enable:          0",    tag="node_dma_sync_enable")
+                dpg.add_text("Writer Enable:        0",    tag="node_dma_writer_enable")
+                dpg.add_text("Reader Enable:        0",    tag="node_dma_reader_enable")
+            dpg.set_item_pos(litepcie_node, [100, 10])
+
+            # RFIC Node
+            rfic_node = dpg.add_node(label="AD9361 RFIC Core", draggable=True)
+            with dpg.node_attribute(label="RF TX", attribute_type=dpg.mvNode_Attr_Input, parent=rfic_node) as rfic_rf_tx:
+                dpg.add_text("RF TX")
+            with dpg.node_attribute(label="RF RX", attribute_type=dpg.mvNode_Attr_Input, parent=rfic_node) as rfic_rf_rx:
+                dpg.add_text("RF RX")
+            with dpg.node_attribute(attribute_type=dpg.mvNode_Attr_Static, parent=rfic_node):
+                dpg.add_text("Clock Freq:     0.00 MHz", tag="rfic_clock_freq")
+                dpg.add_text("Sample Rate:    0.00 MHz", tag="rfic_sample_rate")
+                dpg.add_text("RX1 Low AGC:         0",   tag="agc_rx1_low")
+                dpg.add_text("RX1 High AGC:        0",   tag="agc_rx1_high")
+                dpg.add_text("RX2 Low AGC:         0",   tag="agc_rx2_low")
+                dpg.add_text("RX2 High AGC:        0",   tag="agc_rx2_high")
+            dpg.set_item_pos(rfic_node, [350, 10])
+
+            # Create Static Links.
+            dpg.add_node_link(host_tx_data,  dma_host_tx)
+            dpg.add_node_link(dma_fpga_tx,   rfic_rf_tx)
+            dpg.add_node_link(rfic_rf_rx,    dma_fpga_rx)
+            dpg.add_node_link(dma_host_rx,   host_rx_data)
 
     # Prepare RF AGC instances.
     rf_agc_instances = ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]
@@ -315,11 +371,19 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_axis_limits_auto(f"{name}_x")
                     dpg.fit_axis_data(f"{name}_x")
 
-            # Update Clock Frequencies.
+            # Update Clock Frequencies and Sample Rate.
             if with_clks and clk_drivers:
                 for clk, driver in clk_drivers.items():
                     freq = driver.update()
                     dpg.set_value(f"clock_{clk}_freq", f"{freq:.2f}")
+                # Update RFIC clock frequency.
+                ref_clk_freq     = clk_drivers["clk2"].update()
+                ref_clk_freq_str = f"{ref_clk_freq:.2f}".rjust(8)
+                data_clk_freq    = clk_drivers["clk3"].update()
+                sample_rate      = data_clk_freq / 2
+                sample_rate_str  = f"{sample_rate:.2f}".rjust(8)
+                dpg.set_value("rfic_clock_freq", f"Clock Freq: {ref_clk_freq_str} MHz")
+                dpg.set_value("rfic_sample_rate", f"Sample Rate: {sample_rate_str} MHz")
 
             # Update Time.
             if with_time and time_driver:
@@ -343,11 +407,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.set_value("dma_rx_timestamp", f"{rx_timestamp:016x}")
                 dpg.set_value("dma_rx_datetime", f"{rx_datetime}")
 
-            # Update DMA Info.
+            # Update DMA Info and Nodes.
             if hasattr(bus.regs, "pcie_dma0_writer_enable"):
                 now = time.time()
                 writer_enable = bus.regs.pcie_dma0_writer_enable.read()
                 dpg.set_value("dma_writer_enable", str(writer_enable))
+                dpg.set_value("node_dma_writer_enable", f"Writer Enable: {str(writer_enable).rjust(1)}")
                 writer_table_level = bus.regs.pcie_dma0_writer_table_level.read()
                 loops_w = (writer_table_level >> 16) & 0xFFFF
                 count_w = writer_table_level & 0xFFFF
@@ -357,54 +422,69 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 count_ws = writer_loop_status & 0xFFFF
                 dpg.set_value("dma_writer_table_loop_status", f"Loops: {loops_ws}, Count: {count_ws}")
 
-                # Compute Writer Loops/s.
+                # Compute Writer Loops/s and update node.
                 loops_diff = loops_ws - writer_prev_loops
                 time_diff = now - writer_prev_time
                 writer_speed = 0.0
                 if time_diff > 0 and loops_diff >= 0:
                     writer_speed = loops_diff / time_diff
+                writer_speed_str = f"{writer_speed:.2f}".rjust(8)
                 dpg.set_value("dma_writer_loops_speed", f"{writer_speed:.2f}")
+                dpg.set_value("node_dma_writer_loops", f"Writer Loops/s: {writer_speed_str}")
+                dpg.set_value("dma_writer_loops_count", f"Writer Loops: {str(loops_w).rjust(8)}")
+                dpg.set_value("dma_writer_count", f"Writer Count: {str(count_w).rjust(8)}")
                 writer_prev_loops = loops_ws
                 writer_prev_time = now
 
                 reader_enable = bus.regs.pcie_dma0_reader_enable.read()
                 dpg.set_value("dma_reader_enable", str(reader_enable))
+                dpg.set_value("node_dma_reader_enable", f"Reader Enable: {str(reader_enable).rjust(1)}")
                 reader_table_level = bus.regs.pcie_dma0_reader_table_level.read()
                 loops_r = (reader_table_level >> 16) & 0xFFFF
                 count_r = reader_table_level & 0xFFFF
                 dpg.set_value("dma_reader_table_level", f"Loops: {loops_r}, Count: {count_r}")
                 reader_loop_status = bus.regs.pcie_dma0_reader_table_loop_status.read()
                 loops_rs = (reader_loop_status >> 16) & 0xFFFF
-                count_rs = reader_loop_status & 0xFFFF
+                count_rs = writer_loop_status & 0xFFFF
                 dpg.set_value("dma_reader_table_loop_status", f"Loops: {loops_rs}, Count: {count_rs}")
 
-                # Compute Reader Loops/s.
+                # Compute Reader Loops/s and update node.
                 loops_diff_r = loops_rs - reader_prev_loops
                 time_diff_r = now - reader_prev_time
                 reader_speed = 0.0
                 if time_diff_r > 0 and loops_diff_r >= 0:
                     reader_speed = loops_diff_r / time_diff_r
+                reader_speed_str = f"{reader_speed:.2f}".rjust(8)
                 dpg.set_value("dma_reader_loops_speed", f"{reader_speed:.2f}")
+                dpg.set_value("node_dma_reader_loops", f"Reader Loops/s: {reader_speed_str}")
+                dpg.set_value("dma_reader_loops_count", f"Reader Loops: {str(loops_r).rjust(8)}")
+                dpg.set_value("dma_reader_count", f"Reader Count: {str(count_r).rjust(8)}")
                 reader_prev_loops = loops_rs
                 reader_prev_time = now
 
+                # Update Loopback and Synchronizer status in node.
                 loopback_enable = bus.regs.pcie_dma0_loopback_enable.read()
                 dpg.set_value("dma_loopback_enable", str(loopback_enable))
+                dpg.set_value("node_dma_loopback", f"Loopback: {str(loopback_enable).rjust(1)}")
+
                 sync_bypass = bus.regs.pcie_dma0_synchronizer_bypass.read()
                 dpg.set_value("dma_sync_bypass", str(sync_bypass))
+                dpg.set_value("node_dma_sync_bypass", f"Sync Bypass: {str(sync_bypass).rjust(1)}")
+
                 sync_enable = bus.regs.pcie_dma0_synchronizer_enable.read()
                 dpg.set_value("dma_sync_enable", str(sync_enable))
-            time.sleep(refresh)
+                dpg.set_value("node_dma_sync_enable", f"Sync Enable: {str(sync_enable).rjust(1)}")
 
-            # Update RF AGC Panel.
+            # Update RF AGC Panel and RFIC Node.
             for inst in ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]:
                 count = agc_drivers[inst].read_count()
+                count_str = str(count).rjust(10)
                 dpg.set_value(f"agc_{inst}_count", f"Saturation Count: {count}")
+                dpg.set_value(f"agc_{inst}", f"{inst.upper()} AGC: {count_str}")
                 if agc_auto_clear.get(inst, False):
-                    # Instead of directly writing to the CSR,
-                    # use the driver's clear() method to issue a pulse.
                     agc_drivers[inst].clear()
 
+            time.sleep(refresh)
 
     timer_thread = threading.Thread(target=timer_callback)
     timer_thread.start()
