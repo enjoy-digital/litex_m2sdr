@@ -159,6 +159,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
 
 - [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
+- [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
 
 ### For Software Developers
 
