@@ -82,9 +82,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.opened = true;
         _rx_stream.format = format;
 
-        /* Set channels to 0 and 1 if none are provided. */
+        /* Default to channel 0 if none are provided. */
         if (channels.empty()) {
-            _rx_stream.channels = {0, 1};
+            _rx_stream.channels = {0};
         } else {
             _rx_stream.channels = channels;
         }
