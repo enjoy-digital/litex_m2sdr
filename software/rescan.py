@@ -14,7 +14,7 @@ from __init__ import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
 
 def remove_driver():
     print("Removing Driver...")
-    subprocess.run("sudo rmmod litepcie", shell=True)
+    subprocess.run("sudo rmmod m2sdr", shell=True)
 
 def remove_board_from_pcie_bus(device_ids):
     print("Removing Board from PCIe Bus...")
