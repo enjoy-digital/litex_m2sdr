@@ -28,7 +28,7 @@ def rescan_bus():
 
 def load_driver():
     print("Loading Driver...")
-    subprocess.run("sudo sh -c 'cd kernel && ./init.sh'", shell=True)
+    subprocess.run("sudo sh -c 'cd kernel && insmod m2sdr.ko'", shell=True)
 
 def get_device_ids():
     return [

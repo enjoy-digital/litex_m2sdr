@@ -14,33 +14,44 @@ Its lightweight design aims to be simple to maintain and straightforward to cust
 
 ---
 
-## Building & Installing
+## Building, Installing & Uninstalling
 
-1. **Build the driver**
-   ~~~~
-   make
-   ~~~~
-   This compiles the `litepcie.ko` module.
+### 1. Build the driver
+```
+make
+```
+This compiles the `m2sdr.ko` module.
 
-2. **Load the driver**
-   ~~~~
-   ./init.sh
-   ~~~~
-   This script:
-   - Installs the driver (via `insmod litepcie.ko` or `modprobe litepcie`).
-   - Creates `/dev/m2sdrN` device nodes, which user-space applications can open for DMA operations.
+### 2. Install the driver
+```
+sudo make install
+```
+This performs the following steps:
+- Installs the `m2sdr` module to the kernel directory.
+- Enables auto-load on boot (`/etc/modules-load.d/m2sdr.conf`).
+- Sets up a **udev rule** to allow non-root access (`/etc/udev/rules.d/99-m2sdr.rules`).
+- Triggers **udev** to apply changes.
 
-3. **Check dmesg output (optional)**
-   ~~~~
-   dmesg | grep litepcie
-   ~~~~
-   Look for messages indicating that the board is recognized and configured.
+### 3. Load the driver manually (optional)
+If you need to use the board without a reboot:
+```
+sudo insmod m2sdr.ko
+```
+### 4. Check driver status
+```
+dmesg | grep m2sdr
+```
+Look for messages indicating that the board is recognized and configured.
 
-4. **Remove the driver**
-   ~~~~
-   sudo rmmod litepcie
-   ~~~~
-   This removes the device nodes and stops any active DMA transfers.
+### 5. Uninstall the driver
+```
+sudo make uninstall
+```
+This removes:
+- The kernel module.
+- Auto-load configuration (`/etc/modules-load.d/m2sdr.conf`).
+- The **udev rule** (`/etc/udev/rules.d/99-m2sdr.rules`).
+- Updates the module dependencies.
 
 ---
 
@@ -52,9 +63,9 @@ Its lightweight design aims to be simple to maintain and straightforward to cust
   You can use `m2sdr_util`, `m2sdr_play`, or `m2sdr_record` to test DMA, or create custom applications interfacing with `/dev/m2sdrX`.
 - **Debug Logging**
   To enable detailed logs:
-  ~~~~
-  sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
-  ~~~~
+```
+sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
+```
   This helps diagnose data flow or interrupt issues. 🔎
 - **IOMMU**
   If your system has an IOMMU, ensure it’s set to passthrough mode. Otherwise, DMA may be blocked or fail to work properly.
@@ -63,18 +74,13 @@ Its lightweight design aims to be simple to maintain and straightforward to cust
 
 ## File Structure
 
-- **litepcie.c**
+- **main.c**
   The core driver logic, including:
   - PCI enumeration (probe/remove)
   - BAR0 memory mapping
   - DMA buffer allocation
   - Interrupt registration
   - `/dev/m2sdrX` char device operations
-
-- **init.sh**
-  A helper script that:
-  - Loads the `litepcie` module
-  - Automatically creates the device nodes
 
 ---
 

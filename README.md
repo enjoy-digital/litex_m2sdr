@@ -130,7 +130,9 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    - Load the kernel driver with the following commands:
    ```
    cd software/kernel
-   sudo ./init.sh
+   make clean all
+   sudo make install
+   sudo insmod m2sdr.ko (To avoid having to reboot the machine)
    ```
    - 🚀 Ready for launch!
 
@@ -173,7 +175,8 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ```
    cd software/kernel
    make clean all
-   sudo ./init.sh
+   sudo make install
+   sudo insmod m2sdr.ko (To avoid having to reboot the machine)
    ```
    - Test the user-space utilities:
    ```
