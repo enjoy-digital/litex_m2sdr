@@ -2,30 +2,30 @@
 # TODO: use udev instead
 
 # Check if litepcie module is already installed.
-FOUND=$(lsmod | grep litepcie)
+FOUND=$(lsmod | grep m2sdr)
 if [ "$FOUND" != "" ] ; then
-    echo "litepcie module already installed."
+    echo "m2sdr module already installed."
     exit 0
 fi
 
-# Install litepcie module.
-INS=$(insmod litepcie.ko 2>&1)
+# Install m2sdr module.
+INS=$(insmod m2sdr.ko 2>&1)
 if [ "$?" != "0" ] ; then
-    ERR=$(echo $INS | sed -s "s/.*litepcie.ko: //")
+    ERR=$(echo $INS | sed -s "s/.*m2sdr.ko: //")
     case $ERR in
     'Invalid module format')
         set -e
         echo "Kernel may have changed, try to rebuild module"
         make -s clean
         make -s
-        insmod litepcie.ko
+        insmod m2sdr.ko
         set +e
         ;;
     'No such file or directory')
         set -e
         echo "Module not compiled"
         make -s
-        insmod litepcie.ko
+        insmod m2sdr.ko
         set +e
         ;;
     'Required key not available')
@@ -39,7 +39,7 @@ if [ "$?" != "0" ] ; then
     esac
 fi
 
-# Change permissions on litepcie created devices.
+# Change permissions on m2sdr created devices.
 for i in `seq 0 16` ; do
     chmod 666 /dev/m2sdr$i > /dev/null 2>&1
 done

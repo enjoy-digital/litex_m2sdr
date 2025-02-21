@@ -50,7 +50,7 @@
 //#define DEBUG_READ
 //#define DEBUG_WRITE
 
-#define LITEPCIE_NAME "litepcie"
+#define LITEPCIE_NAME "m2sdr"
 #define LITEPCIE_MINOR_COUNT 32
 
 #ifndef CSR_BASE
