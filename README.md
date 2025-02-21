@@ -156,6 +156,11 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 > sudo reboot
 > ```
 
+> [!WARNING]
+> For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
+> add `intel_iommu=off` to `GRUB_CMDLINE_LINUX`. (This has been observed on
+> an *11th Gen Intel(R) Core(TM) i7-11700B @ 3.20GHz*)
+
 ### Tutorials for your platform
 
 > [!WARNING]
