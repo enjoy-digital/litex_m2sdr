@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR Utility.
+ * M2SDR Board Utility.
  *
  * This file is part of LiteX-M2SDR project.
  *
@@ -777,7 +777,7 @@ static void vcxo_test() {
 
 static void help(void)
 {
-    printf("M2SDR utilities\n"
+    printf("M2SDR Board Utility\n"
            "usage: m2sdr_util [options] cmd [args...]\n"
            "\n"
            "options:\n"
