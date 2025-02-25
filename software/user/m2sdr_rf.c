@@ -400,30 +400,29 @@ static void m2sdr_init(
 
 static void help(void)
 {
-    printf("M2SDR RF init/config utility\n"
-           "usage: m2sdr_rf [options] cmd [args...]\n"
+    printf("M2SDR RF Utility\n"
+           "usage: m2sdr_rf [options]\n"
            "\n"
            "Options:\n"
-           "-h                    Help.\n"
-           "-c device_num         Select the device (default=0).\n"
-           "-8bit                 Enable 8-bit mode (default=disabled).\n"
-           "-oversample           Enable oversample mode (default=disabled).\n"
-           "-chan mode            Set channel mode: '1t1r'(1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default='2t2r').\n"
-           "-sync mode            Set synchronization mode (internal or external, default=internal).\n"
+           "  -h                     Show this help message and exit.\n"
+           "  -c device_num          Select the device (default: 0).\n"
+           "  -8bit                  Enable 8-bit mode (default: disabled).\n"
+           "  -oversample            Enable oversample mode (default: disabled).\n"
+           "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
+           "  -sync mode             Set synchronization mode ('internal' or 'external', default: internal).\n"
            "\n"
-           "-refclk_freq freq     Set the RefClk frequency in Hz (default=%" PRId64 ").\n"
-           "-samplerate sps       Set RF Samplerate in SPS (default=%d).\n"
-           "-bandwidth bw         Set the RF bandwidth in Hz (default=%d).\n"
-           "-tx_freq freq         Set the TX (TX1/2) frequency in Hz (default=%" PRId64 ").\n"
-           "-rx_freq freq         Set the RX (RX1/2) frequency in Hz (default=%" PRId64 ").\n"
-           "-tx_gain gain         Set the TX gain in dB (default=%d).\n"
-           "-rx_gain gain         Set the RX gain in dB (default=%d).\n"
-           "-loopback enable      Set the internal loopback (JESD Deframer -> Framer) (default=%d).\n"
-           "-bist_tx_tone         Run TX tone test.\n"
-           "-bist_rx_tone         Run RX tone test.\n"
-           "-bist_prbs            Run PRBS test.\n"
-           "-bist_tone_freq freq  Set the BIST tone frequency in Hz (default=%d).\n"
-           "\n",
+           "  -refclk_freq freq      Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
+           "  -samplerate sps        Set RF samplerate in SPS (default: %d).\n"
+           "  -bandwidth bw          Set the RF bandwidth in Hz (default: %d).\n"
+           "  -tx_freq freq          Set the TX frequency in Hz (default: %" PRId64 ").\n"
+           "  -rx_freq freq          Set the RX frequency in Hz (default: %" PRId64 ").\n"
+           "  -tx_gain gain          Set the TX gain in dB (default: %d).\n"
+           "  -rx_gain gain          Set the RX gain in dB (default: %d).\n"
+           "  -loopback enable       Set the internal loopback (default: %d).\n"
+           "  -bist_tx_tone          Run TX tone test.\n"
+           "  -bist_rx_tone          Run RX tone test.\n"
+           "  -bist_prbs             Run PRBS test.\n"
+           "  -bist_tone_freq freq   Set the BIST tone frequency in Hz (default: %d).\n",
            DEFAULT_REFCLK_FREQ,
            DEFAULT_SAMPLERATE,
            DEFAULT_BANDWIDTH,
@@ -431,10 +430,11 @@ static void help(void)
            DEFAULT_RX_FREQ,
            DEFAULT_TX_GAIN,
            DEFAULT_RX_GAIN,
-           DEFAULT_BIST_TONE_FREQ,
-           DEFAULT_LOOPBACK);
+           DEFAULT_LOOPBACK,
+           DEFAULT_BIST_TONE_FREQ);
     exit(1);
 }
+
 
 static struct option options[] = {
     { "help",             no_argument, NULL, 'h' },   /*  0 */
