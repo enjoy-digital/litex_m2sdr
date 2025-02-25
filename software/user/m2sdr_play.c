@@ -85,7 +85,7 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
             if (feof(fo)) {
                 /* Rewind on end of file. */
                 current_loop += 1;
-                if (current_loop >= loops)
+                if (loops != 0 && current_loop >= loops)
                     keep_running = 0;
                 rewind(fo);
                 len += fread(buf_wr + len, 1, DMA_BUFFER_SIZE - len, fo);
@@ -139,8 +139,7 @@ static void help(void)
            "-c device_num                    Select the device (default = 0).\n"
            "-z                               Enable zero-copy DMA mode.\n"
            "\n"
-           "filename [loops]                 Play I/Q samples stream from file.\n"
-           );
+           "filename [loops]                 Play I/Q samples stream from file (0 for infinite loops).\n");
     exit(1);
 }
 
