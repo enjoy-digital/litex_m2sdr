@@ -60,6 +60,7 @@ from software import generate_litepcie_software
 
 class CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_eth=False, with_sata=False):
+        self.rst            = Signal()
         self.cd_sys         = ClockDomain()
         self.cd_clk10       = ClockDomain()
         self.cd_idelay      = ClockDomain()
@@ -74,6 +75,7 @@ class CRG(LiteXModule):
 
         # PLL.
         self.pll = pll = S7PLL(speedgrade=-3)
+        self.comb += self.pll.reset.eq(self.rst)
         pll.register_clkin(clk100, 100e6)
         pll.create_clkout(self.cd_sys,    sys_clk_freq)
         pll.create_clkout(self.cd_clk10,  10e6)
