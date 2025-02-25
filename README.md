@@ -7,10 +7,6 @@
 
 ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
 
-> [!WARNING]
->
-> **LiteX-M2SDR** is still in the lab, engineering new features. 🧪 Expect things to change or break, but feel free to contribute!
-
 [> Intro
 --------
 
@@ -49,15 +45,17 @@ For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly 
 
 Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
 
-[> Availability
------------------
-The boards are now available in our webshop: https://enjoy-digital-shop.myshopify.com
+[> Hardware Availability
+------------------------
+The LiteX-M2SDR board is now fully commercialized and available for purchase from our webshop: [Enjoy-Digital Shop](https://enjoy-digital-shop.myshopify.com).
 
-We have two variants:
-- **SI5351B Variant**: The SI5351 can be clocked from the local XO with VCXO control from the FPGA, ideal for software-regulated loop. More details here: https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b
-- **SI5351C Variant**: The SI5351 can be clocked from the local XO or from the FPGA/uFL connector (ex from an external 10MHz source on the uFL connector) More details here: https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c
+The hardware has been thoroughly tested with several SDR softwares compatible with SoapySDR as well as with our Bare metal C utilities.
 
-Both variants are perfectly fine for general use, with differences becoming relevant only when synchronization with another system or hardware is required. For common usage, **SI5351C** variant is recommended.
+*We offer two variants:*
+- **SI5351C Variant** – Uses the SI5351C clock generator with flexible clocking (local XO or external 10MHz via FPGA/uFL). **Recommended for general usage.** [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
+- **SI5351B Variant** – Uses the SI5351B clock generator, clocked from the local XO with FPGA-controlled VCXO for software-regulated loops. [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
+
+*Note: The differences between the variants are relevant only for specific use cases. The SI5351B variant is mostly intended for advanced users with specialized clock control requirements.*
 
 [> PCIe SoC Design
 ------------------
@@ -261,9 +259,11 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
 
 [> Contact
 ----------
+Got a unique idea or need a tweak? Whether it's custom FPGA/software development or hardware adjustments (like adapter boards) for your LiteX M2 SDR, we're here to help! Feel free to drop us a line or visit our website. We'd love to hear from you!
+
 E-mail: florent@enjoy-digital.fr
+Website: http://enjoy-digital.fr/
 
 <div align="center">
   <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="100%">
 </div>
-
