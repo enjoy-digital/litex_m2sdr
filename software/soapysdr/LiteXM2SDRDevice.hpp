@@ -152,6 +152,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const long long timeNs = 0,
         const long timeoutUs = 100000);
 
+    int readStreamStatus(
+        SoapySDR::Stream *stream,
+        size_t &chanMask,
+        int &flags,
+        long long &timeNs,
+        const long timeoutUs);
+
     /***********************************************************************************************
     *                                    Antenna API
     ***********************************************************************************************/

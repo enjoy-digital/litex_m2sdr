@@ -891,3 +891,35 @@ int SoapyLiteXM2SDR::writeStream(
 
     return returnedElems;
 }
+
+int SoapyLiteXM2SDR::readStreamStatus(
+    SoapySDR::Stream *stream,
+    size_t &chanMask,
+    int &flags,
+    long long &timeNs,
+    const long timeoutUs){
+    if(stream != TX_STREAM){
+        return SOAPY_SDR_NOT_SUPPORTED;
+    }
+
+    //calculate when the loop should exit
+    const auto timeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(std::chrono::microseconds(timeoutUs));
+    const auto exitTime = std::chrono::high_resolution_clock::now() + timeout;
+
+    //poll for status events until the timeout expires
+    while (true) {
+        if(_tx_stream.underflow){
+            _tx_stream.underflow=false;
+            SoapySDR::log(SOAPY_SDR_SSI, "U");
+            return SOAPY_SDR_UNDERFLOW;
+        }
+
+        //sleep for a fraction of the total timeout
+        const auto sleepTimeUs = std::min<long>(1000, timeoutUs/10);
+        std::this_thread::sleep_for(std::chrono::microseconds(sleepTimeUs));
+
+        //check for timeout expired
+        const auto timeNow = std::chrono::high_resolution_clock::now();
+        if (exitTime < timeNow) return SOAPY_SDR_TIMEOUT;
+    }
+}
