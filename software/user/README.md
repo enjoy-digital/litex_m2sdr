@@ -78,6 +78,27 @@ Example usage:
 
 ---
 
+### m2sdr_tone
+Generates and streams a pure-tone (sine wave) directly to the FPGA’s TX path in real-time (DMA TX).
+
+**Usage**:
+```
+m2sdr_tone [options]
+```
+
+**Relevant options**:
+
+    -s sample_rate (default=30720000)
+    -f frequency (default=1000)
+    -a amplitude (0.0 to 1.0, default=1.0)
+
+Example usage:
+~~~~
+./m2sdr_tone -s 30720000 -f 1e6 -a 0.5
+~~~~
+
+---
+
 ### m2sdr_play
 Streams an I/Q samples file to the FPGA’s TX path (DMA TX).
 
