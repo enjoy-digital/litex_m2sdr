@@ -109,21 +109,23 @@ static void m2sdr_record(const char *device_name, const char *filename, uint32_t
     if (filename != NULL)
         fclose(fo);
 }
+
 /* Help */
 /*------*/
 
 static void help(void)
 {
-    printf("LitePCIe testing utilities\n"
-           "usage: litepcie_test [options] cmd [args...]\n"
+    printf("M2SDR I/Q Record Utility\n"
+           "usage: m2sdr_record [options] [filename] [size]\n"
            "\n"
-           "options:\n"
-           "-h                               Help.\n"
-           "-c device_num                    Select the device (default = 0).\n"
-           "-z                               Enable zero-copy DMA mode.\n"
+           "Options:\n"
+           "-h                    Display this help message.\n"
+           "-c device_num         Select the device (default = 0).\n"
+           "-z                    Enable zero-copy DMA mode.\n"
            "\n"
-           "[filename] [size]                Record I/Q samples stream to file.\n"
-           );
+           "Arguments:\n"
+           "filename              File to record I/Q samples to (optional, omit to monitor stream).\n"
+           "size                  Number of samples to record (optional, 0 for infinite).\n");
     exit(1);
 }
 
