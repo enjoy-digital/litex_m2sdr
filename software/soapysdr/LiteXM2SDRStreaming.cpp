@@ -892,21 +892,24 @@ int SoapyLiteXM2SDR::writeStream(
     return returnedElems;
 }
 
+/* Check the status of the TX/RX streams. */
 int SoapyLiteXM2SDR::readStreamStatus(
     SoapySDR::Stream *stream,
     size_t &chanMask,
     int &flags,
     long long &timeNs,
     const long timeoutUs){
+
+    /* For now we only suport TX stream. */
     if(stream != TX_STREAM){
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
-    //calculate when the loop should exit
+    /* Calculate the timeout duration and exit time. */
     const auto timeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(std::chrono::microseconds(timeoutUs));
     const auto exitTime = std::chrono::high_resolution_clock::now() + timeout;
 
-    //poll for status events until the timeout expires
+    /* Poll for status events until the timeout expires. */
     while (true) {
         if(_tx_stream.underflow){
             _tx_stream.underflow=false;
@@ -914,11 +917,11 @@ int SoapyLiteXM2SDR::readStreamStatus(
             return SOAPY_SDR_UNDERFLOW;
         }
 
-        //sleep for a fraction of the total timeout
+        /* Sleep for a fraction of the total timeout. */
         const auto sleepTimeUs = std::min<long>(1000, timeoutUs/10);
         std::this_thread::sleep_for(std::chrono::microseconds(sleepTimeUs));
 
-        //check for timeout expired
+        /* Check if the timeout has expired. */
         const auto timeNow = std::chrono::high_resolution_clock::now();
         if (exitTime < timeNow) return SOAPY_SDR_TIMEOUT;
     }
