@@ -203,6 +203,7 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_udp_receiver->start();
 #endif
         _rx_stream.user_count = 0;
+        _rx_stream.burst_end = false;
 
     /* TX */
     } else if (stream == TX_STREAM) {
@@ -230,6 +231,10 @@ int SoapyLiteXM2SDR::deactivateStream(
 #elif USE_LITEETH
         _rx_udp_receiver->stop();
 #endif
+        /* set burst_end: if readStream is called after this point SOAPY_SDR_END_BURST
+         * will be set
+         */
+        _rx_stream.burst_end = true;
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
         /* Disable the DMA engine for TX. */
@@ -321,6 +326,9 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     if (stream != RX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
     }
+
+    if (_rx_stream.burst_end)
+        flags |= SOAPY_SDR_END_BURST;
 
 #if USE_LITEETH
 #ifdef USE_THREAD

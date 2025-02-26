@@ -370,6 +370,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         std::string antenna[2];
 
         bool overflow;
+        bool burst_end;
     };
 
     struct TXStream: Stream {
