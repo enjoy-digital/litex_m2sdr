@@ -811,6 +811,24 @@ void SoapyLiteXM2SDR::setSampleRate(
     if (_oversampling & (rate > 61.44e6))
         _rateMult = 2.0;
 
+    /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
+    double actual_rate = rate / _rateMult;
+    if (actual_rate < 2500000.0) {
+        SoapySDR::logf(SOAPY_SDR_INFO, "Setting FIR decimation/interpolation to 4 for rate %f < 2.5 Msps", actual_rate);
+        ad9361_phy->rx_fir_dec    = 4;
+        ad9361_phy->tx_fir_int    = 4;
+        ad9361_phy->bypass_rx_fir = 0;
+        ad9361_phy->bypass_tx_fir = 0;
+        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
+        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
+        rx_fir_cfg.rx_dec = 4;
+        tx_fir_cfg.tx_int = 4;
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
+        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
+        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+    }
+
     /* Set the sample rate for the TX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
