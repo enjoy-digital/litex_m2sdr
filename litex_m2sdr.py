@@ -524,7 +524,7 @@ def main():
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
-    parser.add_argument("--pcie-lanes",      default=4, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+    parser.add_argument("--pcie-lanes",      default=2, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
