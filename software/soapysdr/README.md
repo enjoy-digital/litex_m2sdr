@@ -75,8 +75,6 @@ This repository includes several Python utilities to help test and demonstrate t
 ```
 ./
 ├── CMakeLists.txt
-├── etherbone.c
-├── etherbone.h
 ├── LiteXM2SDRDevice.cpp
 ├── LiteXM2SDRDevice.hpp
 ├── LiteXM2SDRRegistration.cpp
@@ -90,9 +88,6 @@ This repository includes several Python utilities to help test and demonstrate t
 
 - **CMakeLists.txt**
   Defines the build steps and dependencies for the SoapySDR module.
-
-- **etherbone.c/h**
-  Optional Etherbone (UDP-based) code for remote streaming/control when PCIe is unavailable or not desired.
 
 - **LiteXM2SDRDevice.cpp/hpp**
   Main SoapySDR device class, providing sample rate/frequency/gain setups, device controls, etc.

@@ -32,6 +32,19 @@ find_library(LITEPCIE_LIBRARY litepcie
 include_directories(${LITEPCIE_INCLUDE_DIR})
 
 ########################################################################
+## LiteEth discovery (added)
+########################################################################
+
+find_path(LITEETH_INCLUDE_DIR etherbone.h
+          REQUIRED
+          HINTS
+            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+          PATH_SUFFIXES
+            software/user/libliteeth)
+
+include_directories(${LITEETH_INCLUDE_DIR})
+
+########################################################################
 ## USER discovery
 ########################################################################
 
@@ -88,6 +101,7 @@ set(LITEXM2SDR_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/etherbone.c
 )
 
 if(USE_LITEETH)
@@ -99,9 +113,9 @@ endif()
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
-    LiteXM2SDRRegistration.cpp etherbone.c
-	LiteXM2SDRUDPRx.cpp
-	${LITEXM2SDR_SOURCE}
+    LiteXM2SDRRegistration.cpp
+    LiteXM2SDRUDPRx.cpp
+    ${LITEXM2SDR_SOURCE}
     LIBRARIES ${LITEPCIE_LIBRARY} ${LIBM2SDR_LIBRARY} m
 )
 
