@@ -196,10 +196,26 @@ static void m2sdr_init(
 
     /* Configure AD9361 Samplerate */
     printf("Setting TX/RX Samplerate to %f MSPS.\n", samplerate/1e6);
+    uint32_t actual_samplerate = samplerate;
     if (enable_oversample)
-        samplerate /=2; /* Oversampling disable FIR decimation by 2 */
-    ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
-    ad9361_set_rx_sampling_freq(ad9361_phy, samplerate);
+        actual_samplerate /= 2; /* Oversampling disables FIR decimation by 2 */
+    if (actual_samplerate < 2500000) {
+        printf("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
+        ad9361_phy->rx_fir_dec    = 4;
+        ad9361_phy->tx_fir_int    = 4;
+        ad9361_phy->bypass_rx_fir = 0;
+        ad9361_phy->bypass_tx_fir = 0;
+        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
+        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
+        rx_fir_cfg.rx_dec = 4;
+        tx_fir_cfg.tx_int = 4;
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
+        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
+        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+    }
+    ad9361_set_tx_sampling_freq(ad9361_phy, actual_samplerate);
+    ad9361_set_rx_sampling_freq(ad9361_phy, actual_samplerate);
 
     /* Configure AD9361 TX/RX Bandwidth */
     printf("Setting TX/RX Bandwidth to %f MHz.\n", bandwidth/1e6);
