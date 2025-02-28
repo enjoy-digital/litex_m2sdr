@@ -789,6 +789,12 @@ void SoapyLiteXM2SDR::setSampleRate(
     const double rate) {
     std::lock_guard<std::mutex> lock(_mutex);
     std::string dirName ((direction == SOAPY_SDR_RX) ? "Rx" : "Tx");
+
+    /* Check if the requested sample rate is below 2.5 Msps and throw an exception if so */
+    if (rate < 2500000.0) {
+        throw std::runtime_error("Sample rates below 2.5 Msps are not supported (limitation to be removed soon)");
+    }
+
     SoapySDR::logf(SOAPY_SDR_DEBUG,
         "setSampleRate(%s, %ld, %g MHz)",
         dirName,
