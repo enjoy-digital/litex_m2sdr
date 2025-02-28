@@ -138,9 +138,11 @@ class HeaderInserterExtracter(LiteXModule):
 
         # # #
 
-        self.comb += self.enable.eq(self._control.fields.enable)
-        self.comb += self.header_enable.eq(self._control.fields.header_enable)
-        self.comb += self.frame_cycles.eq(self._frame_cycles.storage)
+        self.comb += [
+            self.enable.eq(self._control.fields.enable),
+            self.header_enable.eq(self._control.fields.header_enable),
+            self.frame_cycles.eq(self._frame_cycles.storage),
+        ]
 
 # TX Header Extracter ------------------------------------------------------------------------------
 
