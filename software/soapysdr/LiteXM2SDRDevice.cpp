@@ -851,16 +851,27 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     const int /*direction*/,
     const size_t /*channel*/) const {
     std::vector<double> sampleRates;
+
+    /* Standard SampleRates */
     sampleRates.push_back(25e6 / 96); /* 260.42 KSPS (Minimum sample rate). */
-    sampleRates.push_back(1.0e6);     /* 1 MSPS. */
-    sampleRates.push_back(2.5e6);     /* 2.5 MSPS. */
-    sampleRates.push_back(5.0e6);     /* 5 MSPS. */
-    sampleRates.push_back(10.0e6);    /* 10 MSPS. */
-    sampleRates.push_back(20.0e6);    /* 20 MSPS. */
-    sampleRates.push_back(30.72e6);   /* 30.72 MSPS. */
-    sampleRates.push_back(61.44e6);   /* 61.44 MSPS (Maximum sample rate without oversampling). */
+    sampleRates.push_back(1.0e6);     /*      1 MSPS. */
+    sampleRates.push_back(2.5e6);     /*    2.5 MSPS. */
+    sampleRates.push_back(5.0e6);     /*      5 MSPS. */
+    sampleRates.push_back(10.0e6);    /*     10 MSPS. */
+    sampleRates.push_back(20.0e6);    /*     20 MSPS. */
+
+    /* LTE / 5G NR SampleRates */
+    sampleRates.push_back(1.92e6);    /*  1.92 MSPS (LTE 1.4 MHz BW). */
+    sampleRates.push_back(3.84e6);    /*  3.84 MSPS (LTE 3 MHz BW).   */
+    sampleRates.push_back(7.68e6);    /*  7.68 MSPS (LTE 5 MHz BW).   */
+    sampleRates.push_back(15.36e6);   /* 15.36 MSPS (LTE 10 MHz BW).  */
+    sampleRates.push_back(23.04e6);   /* 23.04 MSPS (LTE 15 MHz BW).  */
+    sampleRates.push_back(30.72e6);   /* 30.72 MSPS (LTE 20 MHz BW).  */
+    sampleRates.push_back(61.44e6);   /* 61.44 MSPS (LTE 40 MHz BW via 2x 20 MHz CA, 5G NR 50 MHz BW). */
     if (_oversampling)
-        sampleRates.push_back(122.88e6);  /* 122.88 MSPS (Maximum sample rate with oversampling). */
+        sampleRates.push_back(122.88e6);  /* 122.88 MSPS (LTE 80 MHz BW via 4x 20 MHz CA, 5G NR 100 MHz BW). */
+
+    /* Return supported SampleRates */
     return sampleRates;
 }
 
