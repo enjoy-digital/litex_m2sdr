@@ -76,7 +76,7 @@ uint8_t m2sdr_ad9361_spi_read(int fd, uint16_t reg) {
     /* Process Data. */
     dat = miso[2];
 
-#ifdef AD9361_SPI_WRITE_DEBUG
+#ifdef AD9361_SPI_READ_DEBUG
     printf("ad9361_spi_read_reg; reg:0x%04x dat:%02x\n", reg, dat);
 #endif
 
