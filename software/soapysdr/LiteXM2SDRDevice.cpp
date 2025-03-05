@@ -42,6 +42,9 @@ static int spi_fd;
 static struct eb_connection *eb_fd;
 #endif
 
+//#define AD9361_SPI_WRITE_DEBUG
+//#define AD9361_SPI_READ_DEBUG
+
 void m2sdr_ad9361_spi_xfer(struct eb_connection *eb, uint8_t len, uint8_t *mosi, uint8_t *miso);
 void eb_m2sdr_ad9361_spi_write(struct eb_connection *eb, uint16_t reg, uint8_t dat);
 uint8_t eb_m2sdr_ad9361_spi_read(struct eb_connection *eb, uint16_t reg);
