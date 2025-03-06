@@ -461,6 +461,15 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
 #if USE_LITEPCIE
     close(_fd);
+#elif USE_LITEETH
+    if (_rx_udp_receiver) {
+        delete _rx_udp_receiver;
+        _rx_udp_receiver = NULL;
+    }
+    if (_fd) {
+        eb_disconnect(&_fd);
+        _fd = NULL;
+    }
 #endif
 }
 
