@@ -186,15 +186,6 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
             free(conn);
             return NULL;
         }
-        /* Enable address reuse on RX Socket, FIXME: Close socket properly */
-        int opt = 1;
-        if (setsockopt(rx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            fprintf(stderr, "setsockopt(SO_REUSEADDR) on rx_socket failed: %s\n", strerror(errno));
-            close(rx_socket);
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
-        }
         if (bind(rx_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
             fprintf(stderr, "Unable to bind Rx socket to port: %s\n", strerror(errno));
             close(rx_socket);
@@ -211,15 +202,6 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
             close(tx_socket);
             freeaddrinfo(res);
             fprintf(stderr, "unable to create socket: %s\n", strerror(errno));
-            free(conn);
-            return NULL;
-        }
-        /* Enable address reuse on TX Socket, FIXME: Close socket properly */
-        if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            fprintf(stderr, "setsockopt(SO_REUSEADDR) on tx_socket failed: %s\n", strerror(errno));
-            close(rx_socket);
-            close(tx_socket);
-            freeaddrinfo(res);
             free(conn);
             return NULL;
         }
