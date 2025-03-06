@@ -82,15 +82,10 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
 #define eb_writel(_eb, _addr, _val) eb_write32(_eb, _val, _addr)
 void eb_m2sdr_ad9361_spi_xfer(struct eb_connection *eb, uint8_t len, uint8_t *mosi, uint8_t *miso) {
-    bool is_write;
     eb_writel(eb, CSR_AD9361_SPI_MOSI_ADDR, mosi[0] << 16 | mosi[1] << 8 | mosi[2]);
     eb_writel(eb, CSR_AD9361_SPI_CONTROL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
-    /* Omit polling the SPI_STATUS_DONE flag to reduce Etherbone round-trip latency */
-    /* while ((eb_read32(eb, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE); */
-    is_write = (mosi[0] & 0x80) != 0;
-    if (!is_write) {
-        miso[2] = eb_read32(eb, CSR_AD9361_SPI_MISO_ADDR) & 0xff;
-    }
+    while ((eb_read32(eb, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
+    miso[2] = eb_read32(eb, CSR_AD9361_SPI_MISO_ADDR) & 0xff;
 }
 
 void eb_m2sdr_ad9361_spi_write(struct eb_connection *eb, uint16_t reg, uint8_t dat) {
