@@ -1,4 +1,4 @@
-CFLAGS  = -O2 -Wall -g -I../kernel -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
+CFLAGS  = -O2 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
@@ -11,7 +11,7 @@ liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_flash
 	ar rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o
+libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libliteeth/etherbone.o
 	ar rcs $@ $+
 	ranlib $@
 
@@ -39,6 +39,7 @@ clean:
 	rm -f $(PROGS) *.o *.a *.d *~
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
+	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f  ad9361/*.o ad9361/*.d ad9361/*~
 
 %.o: %.c
