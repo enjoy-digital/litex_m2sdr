@@ -16,6 +16,7 @@
 
 #include "etherbone.h"
 
+#define AD9361_SPI_WAIT_DONE
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
@@ -50,7 +51,9 @@ void m2sdr_ad9361_spi_xfer(int fd, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     litepcie_writel(fd, CSR_AD9361_SPI_CONTROL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
 
     /* Wait done. */
+#ifdef AD9361_SPI_WAIT_DONE
     while ((litepcie_readl(fd, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
+#endif
 
     /* Read MISO if read. */
     miso[2] = 0;
@@ -130,7 +133,9 @@ void m2sdr_ad9361_eb_spi_xfer(struct eb_connection *eb, uint8_t len, uint8_t *mo
     eb_writel(eb, CSR_AD9361_SPI_CONTROL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
 
     /* Wait done. */
+#ifdef AD9361_SPI_WAIT_DONE
     while ((eb_read32(eb, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
+#endif
 
     /* Read MISO if read. */
     miso[2] = 0;
