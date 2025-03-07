@@ -23,6 +23,9 @@
 
 /* Public Functions */
 
+/* PCIe */
+/*------*/
+
 void m2sdr_ad9361_spi_init(int fd, uint8_t reset) {
     if (reset) {
         /* Reset Through GPIO */
@@ -87,7 +90,22 @@ uint8_t m2sdr_ad9361_spi_read(int fd, uint16_t reg) {
 
 /* Etherbone */
 /*-----------*/
+
 #define eb_writel(_eb, _addr, _val) eb_write32(_eb, _val, _addr)
+
+void m2sdr_ad9361_eb_spi_init(struct eb_connection *fd, uint8_t reset) {
+    if (reset) {
+        /* Reset Through GPIO */
+        eb_write32(fd, 0b00, CSR_AD9361_CONFIG_ADDR);
+        usleep(1000);
+    }
+    eb_write32(fd, 0b11, CSR_AD9361_CONFIG_ADDR);
+    usleep(1000);
+
+    /* Small delay. */
+    usleep(1000);
+}
+
 void m2sdr_ad9361_eb_spi_xfer(struct eb_connection *eb, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     eb_writel(eb, CSR_AD9361_SPI_MOSI_ADDR, mosi[0] << 16 | mosi[1] << 8 | mosi[2]);
     eb_writel(eb, CSR_AD9361_SPI_CONTROL_ADDR, 24*SPI_CONTROL_LENGTH | SPI_CONTROL_START);
@@ -136,17 +154,3 @@ uint8_t m2sdr_ad9361_eb_spi_read(struct eb_connection *eb, uint16_t reg) {
 
     return dat;
 }
-
-void m2sdr_ad9361_eb_spi_init(struct eb_connection *fd, uint8_t reset) {
-    if (reset) {
-        /* Reset Through GPIO */
-        eb_write32(fd, 0b00, CSR_AD9361_CONFIG_ADDR);
-        usleep(1000);
-    }
-    eb_write32(fd, 0b11, CSR_AD9361_CONFIG_ADDR);
-    usleep(1000);
-
-    /* Small delay. */
-    usleep(1000);
-}
-
