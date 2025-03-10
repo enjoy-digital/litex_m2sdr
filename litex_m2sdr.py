@@ -255,7 +255,7 @@ class BaseSoC(SoCMini):
 
         if with_pcie:
             if variant == "baseboard":
-                pcie_lanes = 1
+                assert pcie_lanes == 1
             pcie_dmas = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
@@ -524,7 +524,7 @@ def main():
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
-    parser.add_argument("--pcie-lanes",      default=2, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+    parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -579,7 +579,7 @@ def main():
     def get_build_name():
         r = f"litex_m2sdr_{args.variant}"
         if args.with_pcie:
-            r += f"_pcie"
+            r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
         return r
