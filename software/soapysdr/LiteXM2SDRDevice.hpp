@@ -328,6 +328,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  *                                        PRIVATE
  **************************************************************************************************/
   private:
+    SoapySDR::Kwargs _deviceArgs;
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
 

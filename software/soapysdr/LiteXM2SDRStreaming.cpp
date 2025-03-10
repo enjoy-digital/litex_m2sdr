@@ -38,8 +38,15 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const int direction,
     const std::string &format,
     const std::vector<size_t> &channels,
-    const SoapySDR::Kwargs &/*args*/) {
+    const SoapySDR::Kwargs &args) {
     std::lock_guard<std::mutex> lock(_mutex);
+
+    SoapySDR::Kwargs searchArgs = args;
+    if (searchArgs.empty())
+        searchArgs = _deviceArgs;
+
+    /* Variable to hold the selected channels */
+    std::vector<size_t> selected_channels;
 
     if (direction == SOAPY_SDR_RX) {
         if (_rx_stream.opened) {
@@ -82,12 +89,51 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.opened = true;
         _rx_stream.format = format;
 
-        /* Default to channel 0 if none are provided. */
-        if (channels.empty()) {
-            _rx_stream.channels = {0};
+        /* Determine channels: prioritize searchArgs over the provided vector */
+        std::vector<size_t> selected_channels;
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            /* Extract channel string from searchArgs and override */
+            std::string chan_str = it->second;
+            if (chan_str == "0") {
+                selected_channels = {0};
+            } else if (chan_str == "1") {
+                selected_channels = {1};
+            } else if (chan_str == "0,1" || chan_str == "0, 1") {
+                selected_channels = {0, 1};
+            } else {
+                throw std::runtime_error("Invalid channels in searchArgs: " + chan_str + "; use '0', '1', or '0,1'");
+            }
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no device argument overrides it */
+            selected_channels = channels;
         } else {
-            _rx_stream.channels = channels;
+            /* Default to channel 0 if nothing provided */
+            selected_channels = {0};
         }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid RX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid RX channel index: must be 0 (RX1) or 1 (RX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual RX channels must be {0, 1} for RX1+RX2");
+        }
+
+        /* Log the selected RX channels for debugging */
+        if (selected_channels.size() == 1) {
+            SoapySDR_logf(SOAPY_SDR_INFO, "RX setupStream: Selected channel %zu", selected_channels[0]);
+        } else {
+            SoapySDR_logf(SOAPY_SDR_INFO, "RX setupStream: Selected channels %zu, %zu",
+                          selected_channels[0], selected_channels[1]);
+        }
+
+        _rx_stream.channels = selected_channels;
         _nChannels = _rx_stream.channels.size();
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
@@ -124,12 +170,43 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.opened = true;
         _tx_stream.format = format;
 
-        /* Default to channel 0 if none are provided. */
-        if (channels.empty()) {
-            _tx_stream.channels = {0};
+        /* Determine channels: override provided vector if searchArgs contains "channels" */
+        std::vector<size_t> selected_channels;
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            /* Extract channel string from searchArgs */
+            std::string chan_str = it->second;
+            if (chan_str == "0") {
+                selected_channels = {0};
+            } else if (chan_str == "1") {
+                selected_channels = {1};
+            } else if (chan_str == "0,1" || chan_str == "0, 1") {
+                selected_channels = {0, 1};
+            } else {
+                throw std::runtime_error("Invalid channels in searchArgs: " + chan_str + "; use '0', '1', or '0,1'");
+            }
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no override is present */
+            selected_channels = channels;
         } else {
-            _tx_stream.channels = channels;
+            /* Default to TX1 if nothing is specified */
+            selected_channels = {0};
         }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid TX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid TX channel index: must be 0 (TX1) or 1 (TX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual TX channels must be {0, 1} for TX1+TX2");
+        }
+
+        _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
     } else {
         throw std::runtime_error("Invalid direction.");
