@@ -45,16 +45,16 @@ from litesata.phy import LiteSATAPHY
 
 from litescope import LiteScopeAnalyzer
 
-from gateware.si5351      import SI5351
-from gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
-from gateware.ad9361.core import AD9361RFIC
-from gateware.qpll        import SharedQPLL
-from gateware.time        import TimeGenerator
-from gateware.pps         import PPSGenerator
-from gateware.header      import TXRXHeader
-from gateware.measurement import MultiClkMeasurement
+from litex_m2sdr.gateware.si5351      import SI5351
+from litex_m2sdr.gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
+from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
+from litex_m2sdr.gateware.qpll        import SharedQPLL
+from litex_m2sdr.gateware.time        import TimeGenerator
+from litex_m2sdr.gateware.pps         import PPSGenerator
+from litex_m2sdr.gateware.header      import TXRXHeader
+from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 
-from software import generate_litepcie_software
+from litex_m2sdr.software import generate_litepcie_software
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -588,7 +588,7 @@ def main():
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
-    generate_litepcie_software(soc, "software", use_litepcie_software=args.driver)
+    generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
 
     # Load Bistream.
     if args.load:
@@ -608,7 +608,7 @@ def main():
 
     # Rescan PCIe Bus.
     if args.rescan:
-        subprocess.run("sudo sh -c 'cd software && ./rescan.py'", shell=True)
+        subprocess.run("sudo sh -c 'cd litex_m2sdr/software && ./rescan.py'", shell=True)
 
 if __name__ == "__main__":
     main()
