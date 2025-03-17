@@ -13,12 +13,12 @@ from litex.soc.interconnect.csr import *
 
 from litepcie.common import *
 
-from gateware.ad9361.phy     import AD9361PHY
-from gateware.ad9361.spi     import AD9361SPIMaster
-from gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
-from gateware.ad9361.bitmode import _sign_extend
-from gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
-from gateware.ad9361.agc     import AGCSaturationCount
+from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
+from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
+from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
+from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
+from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
+from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 
 # Architecture -------------------------------------------------------------------------------------
 #

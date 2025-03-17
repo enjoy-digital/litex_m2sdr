@@ -33,7 +33,7 @@ Imagine a minimalist AD9361-based SDR with:
 
 OK, you probably also realized this project is a showcase for LiteX capabilities, haha. 😅 Rest assured, we'll do our best to gather and implement your requests to make this SDR as flexible and versatile as possible!
 
-This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/), managing the project and gateware/software development, and our partner [Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
+This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/), managing the project and litex_m2sdr/gateware/software development, and our partner [Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
 
 Ideal for SDR enthusiasts, this versatile board fits directly into an M2 slot or can team up with others in a PCIe M2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
 
@@ -119,7 +119,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
     Software build use make and cmake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top if it to simplify our developpment and installation:
    - Navigate to the software directory and run the build script:
    ```
-   cd software
+   cd litex_m2sdr/software
    ./build.py
    ```
    - This will build the necessary components including the kernel driver, user-space utilities, and the SoapySDR driver.
@@ -127,7 +127,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 5. **Load the Kernel Driver:**
    - Load the kernel driver with the following commands:
    ```
-   cd software/kernel
+   cd litex_m2sdr/software/kernel
    make clean all
    sudo make install
    sudo insmod m2sdr.ko (To avoid having to reboot the machine)
@@ -177,14 +177,14 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
 1. **Run Software Tests:**
    - Test the kernel:
    ```
-   cd software/kernel
+   cd litex_m2sdr/software/kernel
    make clean all
    sudo make install
    sudo insmod m2sdr.ko (To avoid having to reboot the machine)
    ```
    - Test the user-space utilities:
    ```
-   cd software/user
+   cd litex_m2sdr/software/user
    make clean all
    ./m2sdr_util info
    ./m2sdr_rf init -samplerate=30720000
@@ -246,8 +246,8 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
 5. **Flash the Board Over PCIe:**
     - Flash the board:
     ```
-    cd software
-    ./flash.py ../build/litex_m2sdr_platform/gateware/litex_m2sdr_platform.bin
+    cd litex_m2sdr/software
+    ./flash.py ../build/litex_m2sdr_platform/litex_m2sdr/gateware/litex_m2sdr_platform.bin
     ```
 
 6. **Reboot or Rescan PCIe Bus:**

@@ -18,7 +18,7 @@ from litex.soc.interconnect.csr import *
 from litex.soc.cores.pwm     import PWM
 from litex.soc.cores.bitbang import I2CMaster
 
-from gateware.si5351_i2c import SI5351I2C, i2c_program_si5351
+from litex_m2sdr.gateware.si5351_i2c import SI5351I2C, i2c_program_si5351
 
 # SI5351 -------------------------------------------------------------------------------------------
 
