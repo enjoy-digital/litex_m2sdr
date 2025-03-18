@@ -296,6 +296,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         /* Initialize SI531 Clocking. */
         m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
+        /* Power-up AD9361 */
+        litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
+
         /* Initialize AD9361 SPI. */
         m2sdr_ad9361_spi_init(_fd, 1);
 #else
@@ -363,6 +366,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     if (_rx_stream.opened) {
 #if USE_LITEPCIE
+         /* Release the DMA engine. */
         litepcie_release_dma(_fd, 0, 1);
 
         munmap(_rx_stream.buf,
@@ -386,6 +390,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
     /* Crossbar Demux: Select PCIe streaming */
     litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+
+    /* Power-Down AD9361 */
+    litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);
 
 #if USE_LITEPCIE
     close(_fd);
