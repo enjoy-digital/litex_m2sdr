@@ -63,7 +63,7 @@ std::string generateDeviceLabel(
     const SoapySDR::Kwargs &dev,
     const std::string &path) {
     std::string serialTrimmed = dev.at("serial").substr(dev.at("serial").find_first_not_of('0'));
-    return dev.at("device") + " " + path + " " + serialTrimmed + " " + dev.at("identification");
+    return dev.at("device") + " " + path + " " + serialTrimmed;
 }
 
 SoapySDR::Kwargs createDeviceKwargs(
