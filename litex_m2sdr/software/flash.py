@@ -24,6 +24,7 @@ def main():
     parser.add_argument("bitstream",                                                        help="Path to the bitstream file.")
     parser.add_argument("-o", "--offset",     type=lambda x: int(x, 0), default=0x00800000, help="Offset for flashing (default: 0x00800000).")
     parser.add_argument("-c", "--device_num", type=int,                 default=0,          help="Select the device number (default = 0).")
+    parser.add_argument("-r", "--rescan",     action="store_true",                          help="Enable PCIe rescan after flashing.")
     args = parser.parse_args()
 
     # Ask for confirmation before flashing.
@@ -43,7 +44,8 @@ def main():
     flash_bitstream(args.bitstream, args.offset, args.device_num)
 
     # PCIe Rescan and driver Remove/Reload.
-    subprocess.run("./rescan.py")
+    if args.rescan:
+        subprocess.run("./rescan.py")
 
 if __name__ == "__main__":
     main()
