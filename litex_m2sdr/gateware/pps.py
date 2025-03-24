@@ -21,8 +21,8 @@ class PPSGenerator(LiteXModule):
         # # #
 
         # PPS Signals.
-        start = Signal()
-        count = Signal(32)
+        self.start = start = Signal()
+        self.count = count = Signal(32)
 
         # PPS FSM.
         self.fsm = fsm = ResetInserter()(FSM(reset_state="IDLE"))
