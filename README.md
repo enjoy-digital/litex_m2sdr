@@ -80,14 +80,17 @@ The PCIe design has already been validated at the maximum AD9361 specified sampl
 
 > [!WARNING]
 >
-> **WiP** 🧪 Still in the lab, all the cores required are already developped and interfaces have been validated but the SoC still need to be assembled/tested and software developped.
+> **WiP** 🧪 Still in the lab, RX only for now!
 
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/bbcc0c79-4ae8-4e5b-94d8-aa7aff89bae2" width="100%">
+</div>
 
 The Ethernet design variant will gives flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe Hardened PHY in the case of a PCIe application but that can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
 
 In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
 
-TODO: Add diagram and more info.
+The Ethernet SoC design is RX capable only for now. TX support will come soon.
 
 [> Getting Started
 ------------------
