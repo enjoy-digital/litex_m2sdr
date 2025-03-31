@@ -95,10 +95,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     std::string path   = "/dev/m2sdr0";
 
 #if USE_LITEETH
-    if (args.count("eth_ip") == 0) {
-        std::cout << "When using ethernet mode eth_ip parameter is required\n";
-        //throw std::runtime_error("plop");
-    } else {
+    if (args.count("eth_ip") != 0) {
         eth_ip = args.at("eth_ip");
     }
 #endif
