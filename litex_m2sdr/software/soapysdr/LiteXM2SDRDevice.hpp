@@ -29,6 +29,10 @@
 //#define _RX_DMA_HEADER_TEST
 //#define _TX_DMA_HEADER_TEST
 
+/* Thresholds above which we switch to 8-bit mode: */
+#define LITEPCIE_8BIT_THRESHOLD  61.44e6
+#define LITEETH_8BIT_THRESHOLD   20.0e6
+
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
 #if USE_LITEPCIE
