@@ -51,8 +51,8 @@ static char port[16] = "1234";
 
 #define FLASH_SECTOR_SIZE (1 << 16)
 #define FLASH_RETRIES     4
-#define SPI_TIMEOUT       100000 /* in us */
 #define FLASH_PAGE_SIZE   256    /* Typical page size */
+#define SPI_TRANSACTION_TIME_US 25 /* Typical SPI transaction time in us */
 
 /* SPI Flash */
 /*-----------*/
@@ -74,22 +74,14 @@ static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t
     }
 
     eb_flash_spi_cs(conn, 0);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
-    usleep(100);
-    //for (i = 0; i < SPI_TIMEOUT; i++) {
-    //    if (litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE)
-    //        break;
-    //    usleep(1);
-    //}
-    if (i >= SPI_TIMEOUT) {
-        fprintf(stderr, "SPI transaction timed out\n");
-        eb_flash_spi_cs(conn, 1);
-        return 0;
-    }
+    usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
     if (tx_len != 8)
-        rx_data = ((uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) | litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+        rx_data = ((uint64_t)
+            litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 0) << 32) |
+            litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4) <<  0;
     else
         rx_data = 0;
     eb_flash_spi_cs(conn, 1);
@@ -179,11 +171,10 @@ static void eb_flash_write_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t 
 
         /* Send command and address */
         tx = ((uint64_t)FLASH_PP << 32) | ((uint64_t)addr << 8);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
-        //while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
-        //    usleep(1);
+        usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
 
         /* Send data in 32-bit chunks */
         for (i = 0; i < size; i += 4) {
@@ -191,11 +182,10 @@ static void eb_flash_write_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t 
                  ((uint64_t)(i + 1 < size ? buf[i + 1] : 0) << 24) |
                  ((uint64_t)(i + 2 < size ? buf[i + 2] : 0) << 16) |
                  ((uint64_t)(i + 3 < size ? buf[i + 3] : 0) << 8);
-            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
-            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
+            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
             litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
-            //while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
-            //    usleep(1);
+            usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
         }
 
         /* Set CS high */
@@ -213,15 +203,15 @@ static void eb_flash_read_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t a
 
     /* Send command and address (32 bits) */
     tx = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
     while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
         usleep(1);
 
     /* Read data in 32-bit chunks */
     for (i = 0; i < size; i += 4) {
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, 0);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, 0);
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
         while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
@@ -230,8 +220,8 @@ static void eb_flash_read_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t a
              litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
         if (i + 0 < size) buf[i + 0] = (rx >> 24) & 0xFF;
         if (i + 1 < size) buf[i + 1] = (rx >> 16) & 0xFF;
-        if (i + 2 < size) buf[i + 2] = (rx >> 8) & 0xFF;
-        if (i + 3 < size) buf[i + 3] = (rx >> 0) & 0xFF;
+        if (i + 2 < size) buf[i + 2] = (rx >>  8) & 0xFF;
+        if (i + 3 < size) buf[i + 3] = (rx >>  0) & 0xFF;
     }
 
     /* Set CS high */
