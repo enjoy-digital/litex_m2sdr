@@ -77,18 +77,21 @@ static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
-    for (i = 0; i < SPI_TIMEOUT; i++) {
-        if (litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE)
-            break;
-        usleep(1);
-    }
+    usleep(100);
+    //for (i = 0; i < SPI_TIMEOUT; i++) {
+    //    if (litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE)
+    //        break;
+    //    usleep(1);
+    //}
     if (i >= SPI_TIMEOUT) {
         fprintf(stderr, "SPI transaction timed out\n");
         eb_flash_spi_cs(conn, 1);
         return 0;
     }
-    rx_data = ((uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) |
-              litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+    if (tx_len != 8)
+        rx_data = ((uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) | litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+    else
+        rx_data = 0;
     eb_flash_spi_cs(conn, 1);
 
     return (uint32_t)(rx_data & 0xFFFFFFFF);
