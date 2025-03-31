@@ -162,6 +162,43 @@ static void eb_flash_program(litex_m2sdr_device_desc_t conn, uint32_t base, cons
     free(padded_buf);
 }
 
+static void eb_flash_write_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t addr, const uint8_t *buf, uint16_t size)
+{
+    if (size == 1) {
+        eb_flash_write(conn, addr, buf[0]);
+    } else {
+        int i;
+        uint64_t tx;
+
+        /* Set CS low */
+        eb_flash_spi_cs(conn, 0);
+
+        /* Send command and address */
+        tx = ((uint64_t)FLASH_PP << 32) | ((uint64_t)addr << 8);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+        litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));  // 32 bits for command + address
+        //while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
+        //    usleep(1);
+
+        /* Send data in 32-bit chunks */
+        for (i = 0; i < size; i += 4) {
+            tx = ((uint64_t)buf[i+0] << 32) |
+                 ((uint64_t)buf[i+1] << 24) |
+                 ((uint64_t)buf[i+2] << 16) |
+                 ((uint64_t)buf[i+3] << 8);
+            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR, (tx >> 32) & 0xFFFFFFFF);
+            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, tx & 0xFFFFFFFF);
+            litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));  // 32 bits per chunk
+            //while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
+            //    usleep(1);
+        }
+
+        /* Set CS high */
+        eb_flash_spi_cs(conn, 1);
+    }
+}
+
 static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, uint32_t size)
 {
     int i, retries = 0;
@@ -174,16 +211,15 @@ static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, 
             flash_progress(NULL, "Erasing @%08x\r", base + i);
             eb_flash_write_enable(conn);
             eb_flash_erase_sector(conn, base + i);
-            while (eb_flash_read_status(conn) & FLASH_WIP)
-                usleep(1000);
+            while (eb_flash_read_status(conn) & FLASH_WIP);
+                //usleep(1000);
         }
         flash_progress(NULL, "Writing @%08x\r", base + i);
         eb_flash_write_enable(conn);
-        for (int j = 0; j < chunk_size; j++)
-            eb_flash_write(conn, base + i + j, buf[i + j]);
+        eb_flash_write_buffer_bulk(conn, base + i, buf + i, chunk_size);
         eb_flash_write_disable(conn);
-        while (eb_flash_read_status(conn) & FLASH_WIP)
-            usleep(100);
+        while (eb_flash_read_status(conn) & FLASH_WIP);
+        //    usleep(100);
         for (int j = 0; j < chunk_size; j++)
             cmp_buf[j] = eb_flash_read(conn, base + i + j);
         if (memcmp(buf + i, cmp_buf, chunk_size) != 0) {
