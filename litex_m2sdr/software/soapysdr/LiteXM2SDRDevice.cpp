@@ -747,22 +747,35 @@ void SoapyLiteXM2SDR::setSampleRate(
         dirName,
         channel,
         rate / 1e6);
+
     uint32_t sample_rate = static_cast<uint32_t>(rate);
     _rateMult = 1.0;
 
-     /* If the requested rate is 122.88 MSPS, configure for 8-bit mode with oversampling enabled;
-        otherwise, use 16-bit mode and disable oversampling. */
-    if (rate == 122.88e6) {
-        _bitMode = 8; /* FIXME: We could keep 16-bit when PCIe > Gen2 X1. */
+#if USE_LITEPCIE
+    /* For PCIe, if the sample rate is above 61.44 MSPS, switch to 8-bit mode + oversampling. */
+    /* FIXME: We could keep 16-bit when PCIe > Gen2 X1. */
+    if (rate > 61.44e6) {
+        _bitMode      = 8;
         _oversampling = 1;
     } else {
-        _bitMode = 16;
+        _bitMode      = 16;
         _oversampling = 0;
     }
-    /* If oversampling is enabled and the rate exceeds 61.44 MSPS, double the rate multiplier to
-       account for oversampling. */
-    if (_oversampling & (rate > 61.44e6))
+#elif USE_LITEETH
+    /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
+    if (rate > 20.0e6) {
+        _bitMode      = 8;
+        _oversampling = 0;
+    } else {
+        _bitMode      = 16;
+        _oversampling = 0;
+    }
+#endif
+
+    /* If oversampling is enabled, double the rate multiplier. */
+    if (_oversampling) {
         _rateMult = 2.0;
+    }
 
     /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
     double actual_rate = rate / _rateMult;
@@ -788,21 +801,21 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
 
-    /* Set the sample rate for the TX and configure the hardware accordingly. */
+    /* Set the sample rate for the RX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_RX) {
         _rx_stream.samplerate = rate;
         ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
 
-    /* If oversampling is enabled and the rate multiplier indicates oversampling, enable
-       oversampling on the hardware. */
-    if (_oversampling & (_rateMult == 2.0)) {
+    /* If oversampling is enabled, enable oversampling on the hardware. */
+    if (_oversampling) {
         ad9361_enable_oversampling(ad9361_phy);
     }
 
-     /* Finally, update the sample mode (bit depth) based on the new configuration. */
+    /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
 }
+
 
 double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
