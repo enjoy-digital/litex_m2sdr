@@ -59,7 +59,6 @@ static void eb_flash_spi_cs(litex_m2sdr_device_desc_t conn, uint8_t cs_n)
 
 static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t cmd, uint32_t tx_data)
 {
-    int i;
     uint64_t tx = ((uint64_t)cmd << 32) | tx_data;
     uint64_t rx_data;
 
@@ -107,7 +106,7 @@ static void eb_flash_write(litex_m2sdr_device_desc_t conn, uint32_t addr, uint8_
     eb_flash_spi(conn, 40, FLASH_PP, (addr << 8) | byte);
 }
 
-static uint8_t eb_flash_read(litex_m2sdr_device_desc_t conn, uint32_t addr)
+__attribute__((unused)) static uint8_t eb_flash_read(litex_m2sdr_device_desc_t conn, uint32_t addr)
 {
     return eb_flash_spi(conn, 40, FLASH_READ, addr << 8) & 0xff;
 }
@@ -350,6 +349,9 @@ static void flash_reload(void)
 {
     litex_m2sdr_device_desc_t conn;
 
+    /* Indicate reload start */
+    printf("Reloading FPGA gateware...\n");
+
     /* Open Etherbone connection. */
     conn = eb_connect(ip_address, port, 1);
     if (!conn) {
@@ -362,13 +364,9 @@ static void flash_reload(void)
     litex_m2sdr_writel(conn, CSR_ICAP_DATA_ADDR, ICAP_CMD_IPROG);
     litex_m2sdr_writel(conn, CSR_ICAP_WRITE_ADDR, 1);
 
-    /* Notify user of update. */
-    printf("======================================================\n");
-    printf("= HARDWARE HAS IS NOW RUNNING RELOADED FPGA GATEWARE =\n");
-    printf("======================================================\n");
-
-    /* Close connection. */
+    /* Close connection and indicate success */
     eb_disconnect(&conn);
+    printf("Success.\n");
 }
 
 /* Probe */
