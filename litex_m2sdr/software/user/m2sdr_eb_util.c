@@ -322,8 +322,8 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     litex_m2sdr_device_desc_t conn;
     FILE *f;
     uint32_t i;
-    uint8_t byte;
-    uint32_t read_size = FLASH_PAGE_SIZE;
+    uint8_t read_buf[FLASH_PAGE_SIZE];
+    uint16_t read_size = FLASH_PAGE_SIZE;
 
     /* Open data destination file. */
     f = fopen(filename, "wb");
@@ -342,12 +342,11 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 
     /* Read flash and write to destination file. */
     printf("Reading (%d bytes from 0x%08x)...\n", size, offset);
-    for (i = 0; i < size; i++) {
-        if ((i % read_size) == 0) {
-            flash_progress(NULL, "Reading @%08x\r", offset + i);
-        }
-        byte = eb_flash_read(conn, offset + i);
-        fwrite(&byte, 1, 1, f);
+    for (i = 0; i < size; i += read_size) {
+        uint16_t chunk_size = (size - i < read_size) ? size - i : read_size;
+        flash_progress(NULL, "Reading @%08x\r", offset + i);
+        eb_flash_read_buffer_bulk(conn, offset + i, read_buf, chunk_size);
+        fwrite(read_buf, 1, chunk_size, f);
     }
     flash_progress(NULL, "\n");
 
