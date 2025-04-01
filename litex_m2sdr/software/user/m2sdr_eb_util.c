@@ -2,11 +2,10 @@
  *
  * M2SDR Etherbone Utility
  *
- * Remote flash update utility for M2SDR boards over Etherbone.
+ * This file is part of LiteX-M2SDR project.
  *
  * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
  *
- * Compilation: gcc -o m2sdr_eb_util m2sdr_eb_util.c libliteeth/etherbone.c -I../kernel -Ilibliteeth
  */
 
 #include <stdio.h>
