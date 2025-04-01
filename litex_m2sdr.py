@@ -515,6 +515,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",         default="m2",        help="Design variant.", choices=["m2", "baseboard"])
+    parser.add_argument("--reset",           action="store_true", help="Reset the device.")
     parser.add_argument("--build",           action="store_true", help="Build bitstream.")
     parser.add_argument("--load",            action="store_true", help="Load bitstream.")
     parser.add_argument("--flash",           action="store_true", help="Flash bitstream.")
@@ -590,6 +591,11 @@ def main():
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
 
+    # Reset Device.
+    if args.reset:
+        prog = soc.platform.create_programmer()
+        prog.reset()
+    
     # Load Bistream.
     if args.load:
         prog = soc.platform.create_programmer()
