@@ -323,6 +323,7 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     FILE *f;
     uint32_t i;
     uint8_t byte;
+    uint32_t read_size = FLASH_PAGE_SIZE;
 
     /* Open data destination file. */
     f = fopen(filename, "wb");
@@ -340,15 +341,15 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     }
 
     /* Read flash and write to destination file. */
+    printf("Reading (%d bytes from 0x%08x)...\n", size, offset);
     for (i = 0; i < size; i++) {
-        if ((i % FLASH_SECTOR_SIZE) == 0) {
-            printf("Reading 0x%08x\r", offset + i);
-            fflush(stdout);
+        if ((i % read_size) == 0) {
+            flash_progress(NULL, "Reading @%08x\r", offset + i);
         }
         byte = eb_flash_read(conn, offset + i);
         fwrite(&byte, 1, 1, f);
     }
-    printf("\n");
+    flash_progress(NULL, "\n");
 
     /* Close destination file and connection. */
     fclose(f);
