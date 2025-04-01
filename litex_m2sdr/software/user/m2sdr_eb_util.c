@@ -74,19 +74,17 @@ static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t
     }
 
     eb_flash_spi_cs(conn, 0);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
     usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
-    if (tx_len != 8)
-        rx_data = ((uint64_t)
-            litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 0) << 32) |
-            litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4) <<  0;
+    if (tx_len > 8)
+        rx_data = litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
     else
         rx_data = 0;
     eb_flash_spi_cs(conn, 1);
 
-    return (uint32_t)(rx_data & 0xFFFFFFFF);
+    return (uint32_t)(rx_data & 0xffffffff);
 }
 
 static void eb_flash_write_enable(litex_m2sdr_device_desc_t conn)
@@ -130,9 +128,9 @@ static void flash_progress(void *opaque, const char *fmt, ...)
     va_end(ap);
 }
 
-static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, uint32_t size);
+static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, uint32_t size, int verify);
 
-static void eb_flash_program(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, int size)
+static void eb_flash_program(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, int size, int verify)
 {
     uint32_t padded_size;
     uint8_t *padded_buf;
@@ -149,7 +147,7 @@ static void eb_flash_program(litex_m2sdr_device_desc_t conn, uint32_t base, cons
     memcpy(padded_buf, buf, size);
 
     printf("Programming (%d bytes at 0x%08x)...\n", size, base);
-    errors = eb_flash_write_buffer(conn, base, padded_buf, padded_size);
+    errors = eb_flash_write_buffer(conn, base, padded_buf, padded_size, verify);
     if (errors)
         printf("Failed with %d errors.\n", errors);
     else
@@ -201,23 +199,20 @@ static void eb_flash_read_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t a
     /* Set CS low */
     eb_flash_spi_cs(conn, 0);
 
-    /* Send command and address (32 bits) */
+    /* Send command and address */
     tx = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xFFFFFFFF);
     litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
-    while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
-        usleep(1);
+    usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
 
     /* Read data in 32-bit chunks */
     for (i = 0; i < size; i += 4) {
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, 0);
         litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
-        while (!(litex_m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE))
-            usleep(1);
-        rx = ((uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) |
-             litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+        usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
+        rx = (uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
         if (i + 0 < size) buf[i + 0] = (rx >> 24) & 0xFF;
         if (i + 1 < size) buf[i + 1] = (rx >> 16) & 0xFF;
         if (i + 2 < size) buf[i + 2] = (rx >>  8) & 0xFF;
@@ -228,7 +223,7 @@ static void eb_flash_read_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t a
     eb_flash_spi_cs(conn, 1);
 }
 
-static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, uint32_t size)
+static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, const uint8_t *buf, uint32_t size, int verify)
 {
     int i, retries = 0;
     uint8_t cmp_buf[FLASH_PAGE_SIZE];
@@ -237,37 +232,40 @@ static int eb_flash_write_buffer(litex_m2sdr_device_desc_t conn, uint32_t base, 
     for (i = 0; i < size; i += program_size) {
         uint16_t chunk_size = (size - i < program_size) ? size - i : program_size;
         if ((i % FLASH_SECTOR_SIZE) == 0) {
-            flash_progress(NULL, "Erasing @%08x\r", base + i);
+            flash_progress(NULL, "Erasing  @%08x\r", base + i);
             eb_flash_write_enable(conn);
             eb_flash_erase_sector(conn, base + i);
             usleep(5000); /* Typical sector erase time: ~5ms */
             while (eb_flash_read_status(conn) & FLASH_WIP)
                 usleep(1000); /* Final check */
         }
-        flash_progress(NULL, "Writing @%08x\r", base + i);
+        flash_progress(NULL, "Writing   @%08x\r", base + i);
         eb_flash_write_enable(conn);
         eb_flash_write_buffer_bulk(conn, base + i, buf + i, chunk_size);
         eb_flash_write_disable(conn);
         usleep(100); /* Typical page program time: ~100us */
-#if 0
-        eb_flash_read_buffer_bulk(conn, base + i, cmp_buf, chunk_size);
-        if (memcmp(buf + i, cmp_buf, chunk_size) != 0) {
-            retries++;
-            if (retries > FLASH_RETRIES) {
-                printf("Failed to write page at 0x%08x after %d retries\n", base + i, FLASH_RETRIES);
-                return 1;
+
+        if (verify) {
+            flash_progress(NULL, "Verifying @%08x\r", base + i);
+            eb_flash_read_buffer_bulk(conn, base + i, cmp_buf, chunk_size);
+            if (memcmp(buf + i, cmp_buf, chunk_size) != 0) {
+                retries++;
+                printf("r"); /* Indicate retry */
+                if (retries > FLASH_RETRIES) {
+                    printf("Failed to write page at 0x%08x after %d retries\n", base + i, FLASH_RETRIES);
+                    return 1;
+                }
+                i -= chunk_size; /* Retry the page */
+            } else {
+                retries = 0;
             }
-            i -= chunk_size;
-        } else {
-            retries = 0;
         }
-#endif
     }
     flash_progress(NULL, "\n");
     return 0;
 }
 
-static void flash_write(const char *filename, uint32_t offset)
+static void flash_write(const char *filename, uint32_t offset, int verify)
 {
     uint8_t *data;
     int size;
@@ -310,7 +308,7 @@ static void flash_write(const char *filename, uint32_t offset)
     fclose(f);
 
     /* Program file to flash. */
-    eb_flash_program(conn, offset, data, size);
+    eb_flash_program(conn, offset, data, size, verify);
 
     /* Free buffer and close connection. */
     free(data);
@@ -374,9 +372,9 @@ static void flash_reload(void)
     litex_m2sdr_writel(conn, CSR_ICAP_WRITE_ADDR, 1);
 
     /* Notify user of update. */
-    printf("===========================================================================\n");
-    printf("= HARDWARE HAS BEEN UPDATED AND IS NOW RUNNING UPDATED FPGA GATEWARE      =\n");
-    printf("===========================================================================\n");
+    printf("======================================================\n");
+    printf("= HARDWARE HAS IS NOW RUNNING RELOADED FPGA GATEWARE =\n");
+    printf("=====================================================\n");
 
     /* Close connection. */
     eb_disconnect(&conn);
@@ -425,6 +423,7 @@ static void help(void)
            "-h                                Help.\n"
            "-i ip_address                     Target IP address of the board.\n"
            "-p port                           Port number (default = 1234).\n"
+           "-v                                Verify writes (flash_write only).\n"
            "\n"
            "available commands:\n"
            "scratch_test                      Test Scratch register.\n"
@@ -443,11 +442,12 @@ int main(int argc, char **argv)
 {
     const char *cmd;
     int c;
+    int verify = 0; /* Default: no verification */
 
     /* Parameters. */
     ip_address[0] = '\0'; /* Initialize to empty string */
     for (;;) {
-        c = getopt(argc, argv, "hi:p:");
+        c = getopt(argc, argv, "hi:p:v");
         if (c == -1)
             break;
         switch (c) {
@@ -461,6 +461,9 @@ int main(int argc, char **argv)
         case 'p':
             strncpy(port, optarg, sizeof(port) - 1);
             port[sizeof(port) - 1] = '\0';
+            break;
+        case 'v':
+            verify = 1; /* Enable verification */
             break;
         default:
             exit(1);
@@ -487,7 +490,7 @@ int main(int argc, char **argv)
         filename = argv[optind++];
         if (optind < argc)
             offset = strtoul(argv[optind++], NULL, 0);
-        flash_write(filename, offset);
+        flash_write(filename, offset, verify);
     }
 #endif
     else if (!strcmp(cmd, "flash_read")) {
