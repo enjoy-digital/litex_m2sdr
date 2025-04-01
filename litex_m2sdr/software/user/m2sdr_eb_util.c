@@ -22,11 +22,6 @@
 #include "flags.h"
 #include "libliteeth/etherbone.h"
 
-/* Parameters */
-/*------------*/
-
-#define FLASH_WRITE /* Enable Flash Write when defined */
-
 /* Variables */
 /*-----------*/
 
@@ -116,8 +111,6 @@ static uint8_t eb_flash_read(litex_m2sdr_device_desc_t conn, uint32_t addr)
 {
     return eb_flash_spi(conn, 40, FLASH_READ, addr << 8) & 0xff;
 }
-
-#ifdef FLASH_WRITE
 
 static void flash_progress(void *opaque, const char *fmt, ...)
 {
@@ -315,8 +308,6 @@ static void flash_write(const char *filename, uint32_t offset, int verify)
     eb_disconnect(&conn);
 }
 
-#endif
-
 static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 {
     litex_m2sdr_device_desc_t conn;
@@ -436,9 +427,7 @@ static void help(void)
            "\n"
            "available commands:\n"
            "probe                             Probe board connectivity and MMAP access.\n"
-#ifdef FLASH_WRITE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
-#endif
            "flash_read filename size [offset] Read from SPI Flash and write contents to file.\n"
            "flash_reload                      Reload FPGA Image.\n");
     exit(1);
@@ -490,7 +479,6 @@ int main(int argc, char **argv)
         probe();
 
     /* SPI Flash cmds. */
-#ifdef FLASH_WRITE
     else if (!strcmp(cmd, "flash_write")) {
         const char *filename;
         uint32_t offset = 0x1000000; /* Default offset */
@@ -501,7 +489,6 @@ int main(int argc, char **argv)
             offset = strtoul(argv[optind++], NULL, 0);
         flash_write(filename, offset, verify);
     }
-#endif
     else if (!strcmp(cmd, "flash_read")) {
         const char *filename;
         uint32_t size = 0;
