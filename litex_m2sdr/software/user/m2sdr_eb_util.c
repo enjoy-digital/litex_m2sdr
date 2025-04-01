@@ -374,41 +374,50 @@ static void flash_reload(void)
     /* Notify user of update. */
     printf("======================================================\n");
     printf("= HARDWARE HAS IS NOW RUNNING RELOADED FPGA GATEWARE =\n");
-    printf("=====================================================\n");
+    printf("======================================================\n");
 
     /* Close connection. */
     eb_disconnect(&conn);
 }
 
-/* Scratch */
-/*---------*/
+/* Probe */
+/*-------*/
 
-static void scratch_test(void)
+static void probe(void)
 {
     litex_m2sdr_device_desc_t conn;
+    uint32_t read_value;
 
-    printf("\e[1m[> Scratch register test:\e[0m\n");
-    printf("-------------------------\n");
+    /* Indicate probing start */
+    printf("Probing %s:%s...\n", ip_address, port);
 
-    /* Open Etherbone connection. */
+    /* Attempt connection */
     conn = eb_connect(ip_address, port, 1);
     if (!conn) {
         fprintf(stderr, "Failed to connect to %s:%s\n", ip_address, port);
         exit(1);
     }
 
-    /* Write to scratch register. */
-    printf("Write 0x12345678 to Scratch register:\n");
+    /* Test MMAP: write and read back two values */
     litex_m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
-    printf("Read: 0x%08x\n", litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR));
+    read_value = litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
+    if (read_value != 0x12345678) {
+        eb_disconnect(&conn);
+        fprintf(stderr, "MMAP write/read mismatch\n");
+        exit(1);
+    }
 
-    /* Read from scratch register. */
-    printf("Write 0xdeadbeef to Scratch register:\n");
     litex_m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
-    printf("Read: 0x%08x\n", litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR));
+    read_value = litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
+    if (read_value != 0xdeadbeef) {
+        eb_disconnect(&conn);
+        fprintf(stderr, "MMAP write/read mismatch\n");
+        exit(1);
+    }
 
-    /* Close connection. */
+    /* Cleanup and success */
     eb_disconnect(&conn);
+    printf("Success.\n");
 }
 
 /* Help */
@@ -426,7 +435,7 @@ static void help(void)
            "-v                                Verify writes (flash_write only).\n"
            "\n"
            "available commands:\n"
-           "scratch_test                      Test Scratch register.\n"
+           "probe                             Probe board connectivity and MMAP access.\n"
 #ifdef FLASH_WRITE
            "flash_write filename [offset]     Write file contents to SPI Flash.\n"
 #endif
@@ -476,9 +485,9 @@ int main(int argc, char **argv)
 
     cmd = argv[optind++];
 
-    /* Scratch cmds. */
-    if (!strcmp(cmd, "scratch_test"))
-        scratch_test();
+    /* Probe cmd. */
+    if (!strcmp(cmd, "probe"))
+        probe();
 
     /* SPI Flash cmds. */
 #ifdef FLASH_WRITE
@@ -516,5 +525,5 @@ int main(int argc, char **argv)
 
 show_help:
     help();
-    return 0;
+    return 1;
 }
