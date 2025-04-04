@@ -10,12 +10,12 @@ from litex.gen import *
 
 from litepcie.common import *
 
-# RX GPIO Packer -----------------------------------------------------------------------------------
+# GPIO RX Packer -----------------------------------------------------------------------------------
 
-class RXGPIOPacker(LiteXModule):
+class GPIORXPacker(LiteXModule):
     """Packs 4 GPIO inputs into the 4 spare bits of a 16-bit RX I/Q stream."""
     def __init__(self):
-        self.gpio_i = Signal(4)                       # GPIO Inputs.
+        self.i      = Signal(4)                       # GPIO Inputs.
         self.sink   = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit data).
         self.source = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit + 4-bit GPIO).
 
@@ -23,15 +23,15 @@ class RXGPIOPacker(LiteXModule):
 
         # TODO.
 
-# TX GPIO Unpacker ---------------------------------------------------------------------------------
+# GPIO TX Unpacker ---------------------------------------------------------------------------------
 
-class TXGPIOUnpacker(LiteXModule):
+class GPIOTXUnpacker(LiteXModule):
     """Unpacks 4 GPIO outputs and tristate controls from a 16-bit TX I/Q stream."""
     def __init__(self):
-        self.gpio_oe = Signal(4)                       # GPIO Output Enable.
-        self.gpio_o  = Signal(4)                       # GPIO Output.
-        self.sink    = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit + 4-bit GPIO).
-        self.source  = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit data).
+        self.oe     = Signal(4)                       # GPIO Output Enable.
+        self.o      = Signal(4)                       # GPIO Output.
+        self.sink   = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit + 4-bit GPIO).
+        self.source = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit data).
 
         # # #
 
@@ -48,7 +48,7 @@ class GPIO(LiteXModule):
     - Switch between Packer/Unpacker or CSR control.
     - Tristate control via CSR.
     """
-    def __init__(self):
+    def __init__(self, rx_packer, tx_unpacker):
          # IO Signals
         self.o  = Signal(4)  # Output data.
         self.oe = Signal(4)  # Output enable (1=drive, 0=tristate).
@@ -103,8 +103,8 @@ class GPIO(LiteXModule):
             If(self._control.fields.enable,
                 # Packer/Unpacker mode.
                 If(self._control.fields.source == 0,
-                    self.o.eq(0),  # FIXME: From TXGPIOUnpacker.
-                    self.oe.eq(0), # FIXME: From TXGPIOUnpacker.
+                    self.o.eq(tx_unpacker.o),    # FIXME: SDR Output/Clk Domain?
+                    self.oe.eq(tx_unpacker.oe),  # FIXME: SDR Output/Clk Domain?
                 ),
                 # CSR mode.
                 If(self._control.fields.source == 1,
@@ -116,5 +116,5 @@ class GPIO(LiteXModule):
             # GPIO Inputs.
             # ------------
             self._i.fields.data.eq(self.i),
-            # FIXME: Connect self.rx_packer.gpio.eq(self.i) for RX sampling
+            rx_packer.i.eq(self.i),  # FIXME: SDR Input/Clk Domain?
         ]

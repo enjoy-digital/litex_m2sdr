@@ -53,7 +53,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
-from litex_m2sdr.gateware.gpio        import GPIO
+from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -422,7 +422,13 @@ class BaseSoC(SoCMini):
 
         # GPIO -------------------------------------------------------------------------------------
 
-        self.gpio = GPIO()
+        self.gpio_rx_packer   = GPIORXPacker()
+        self.gpio_tx_unpacker = GPIOTXUnpacker()
+
+        self.gpio = GPIO(
+            rx_packer   = self.gpio_rx_packer,
+            tx_unpacker = self.gpio_tx_unpacker,
+        )
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
