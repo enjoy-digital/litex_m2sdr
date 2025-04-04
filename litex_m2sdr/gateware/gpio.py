@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
+from migen.fhdl.specials import Tristate
 
 from litex.gen import *
 
@@ -118,3 +119,11 @@ class GPIO(LiteXModule):
             self._i.fields.data.eq(self.i),
             rx_packer.i.eq(self.i),  # FIXME: SDR Input/Clk Domain?
         ]
+
+    def connect_to_pads(self, pads):
+        for i in range(len(pads)):
+            self.specials += Tristate(pads[i],
+                o   = self.o[i],
+                oe  = self.oe[i],
+                i   = self.i[i],
+            )
