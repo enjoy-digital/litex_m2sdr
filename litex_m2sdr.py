@@ -53,6 +53,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
+from litex_m2sdr.gateware.gpio        import GPIO
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -418,6 +419,10 @@ class BaseSoC(SoCMini):
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             pass # TODO.
+
+        # GPIO -------------------------------------------------------------------------------------
+
+        self.gpio = GPIO()
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
