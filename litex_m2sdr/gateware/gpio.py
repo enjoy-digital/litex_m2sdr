@@ -198,26 +198,25 @@ class GPIO(LiteXModule):
             self.oe1.eq(0), # Default: All outputs tristated (first edge).
             self.oe2.eq(0), # Default: All outputs tristated (second edge).
 
-            If(self._control.fields.enable & ~self._control.fields.loopback,
-                # Packer/Unpacker mode.
-                If(self._control.fields.source == 0,
-                    self.o1.eq( tx_unpacker.o1),
-                    self.oe1.eq(tx_unpacker.oe1),
-                    self.o2.eq( tx_unpacker.o2),
-                    self.oe2.eq(tx_unpacker.oe2),
-                ),
-                # CSR mode (duplicate data across edges).
-                If(self._control.fields.source == 1,
-                    self.o1.eq( self._o.fields.data),
-                    self.o2.eq( self._o.fields.data),
-                    self.oe1.eq(self._oe.fields.enable),
-                    self.oe2.eq(self._oe.fields.enable),
-                ),
+            # Packer/Unpacker mode.
+            If(self._control.fields.source == 0,
+                self.o1.eq( tx_unpacker.o1),
+                self.oe1.eq(tx_unpacker.oe1),
+                self.o2.eq( tx_unpacker.o2),
+                self.oe2.eq(tx_unpacker.oe2),
+            ),
+            # CSR mode (duplicate data across edges).
+            If(self._control.fields.source == 1,
+                self.o1.eq( self._o.fields.data),
+                self.o2.eq( self._o.fields.data),
+                self.oe1.eq(self._oe.fields.enable),
+                self.oe2.eq(self._oe.fields.enable),
             ),
 
             # GPIO Inputs.
             # ------------
-            If(self._control.fields.enable & self._control.fields.loopback,
+            If(self._control.fields.loopback,
+                self._i.fields.data.eq(self.o1),
                 rx_packer.i1.eq(self.o1),  # Loop o1  (first edge) to i1.
                 rx_packer.i2.eq(self.o2),  # Loop o2 (second edge) to i2.
             ).Else(
