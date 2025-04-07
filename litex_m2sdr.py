@@ -449,12 +449,9 @@ class BaseSoC(SoCMini):
 
         # GPIO -------------------------------------------------------------------------------------
 
-        self.gpio_rx_packer   = GPIORXPacker()
-        self.gpio_tx_unpacker = GPIOTXUnpacker()
-
         self.gpio = GPIO(
-            rx_packer   = self.gpio_rx_packer,
-            tx_unpacker = self.gpio_tx_unpacker,
+            rx_packer   = self.ad9361.gpio_rx_packer,
+            tx_unpacker = self.ad9361.gpio_tx_unpacker,
         )
         self.gpio.connect_to_pads(pads=platform.request("gpios"))
 
