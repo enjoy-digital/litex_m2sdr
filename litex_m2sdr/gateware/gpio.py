@@ -126,8 +126,9 @@ class GPIO(LiteXModule):
 
     Features:
     - 4-bit GPIO with DDR synchronous RX sampling and TX driving.
-    - Switch between Packer/Unpacker or CSR control.
+    - Switch between Packer/Unpacker or CSR control with optional loopback mode.
     - Tristate control via CSR.
+    - Loopback mode connects o1 to i1 and o2 to i2 internally, bypassing DDRTristate.
     """
     def __init__(self, rx_packer, tx_unpacker):
         # IO Signals
@@ -151,6 +152,10 @@ class GPIO(LiteXModule):
                 ("``0b0``", "GPIO controlled by Packer/Unpacker."),
                 ("``0b1``", "GPIO controlled by CSR."),
             ], description="Select GPIO control source."),
+            CSRField("loopback", size=1, offset=2, values=[
+                ("``0b0``", "Normal operation (DDRTristate active)."),
+                ("``0b1``", "Loopback mode (o1 to i1, o2 to i2)."),
+            ], description="Enable/disable internal loopback mode."),
         ])
 
         self._o = CSRStorage(fields=[
@@ -193,7 +198,7 @@ class GPIO(LiteXModule):
             self.oe1.eq(0), # Default: All outputs tristated (first edge).
             self.oe2.eq(0), # Default: All outputs tristated (second edge).
 
-            If(self._control.fields.enable,
+            If(self._control.fields.enable & ~self._control.fields.loopback,
                 # Packer/Unpacker mode.
                 If(self._control.fields.source == 0,
                     self.o1.eq( tx_unpacker.o1),
@@ -212,9 +217,14 @@ class GPIO(LiteXModule):
 
             # GPIO Inputs.
             # ------------
-            self._i.fields.data.eq(self.i1),
-            rx_packer.i1.eq(self.i1),
-            rx_packer.i2.eq(self.i2),
+            If(self._control.fields.enable & self._control.fields.loopback,
+                rx_packer.i1.eq(self.o1),  # Loop o1  (first edge) to i1.
+                rx_packer.i2.eq(self.o2),  # Loop o2 (second edge) to i2.
+            ).Else(
+                self._i.fields.data.eq(self.i1),
+                rx_packer.i1.eq(self.i1),
+                rx_packer.i2.eq(self.i2),
+            ),
         ]
 
     def connect_to_pads(self, pads):
