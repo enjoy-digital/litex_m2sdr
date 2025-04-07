@@ -258,10 +258,10 @@ class BaseSoC(SoCMini):
 
         # Leds -------------------------------------------------------------------------------------
 
-        self.leds = LedChaser(
-            pads         = platform.request_all("user_led"),
-            sys_clk_freq = sys_clk_freq
-        )
+        #self.leds = LedChaser(
+        #    pads         = platform.request_all("user_led"),
+        #    sys_clk_freq = sys_clk_freq
+        #)
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -313,7 +313,8 @@ class BaseSoC(SoCMini):
                 with_msi              = True
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
+            #self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(1)
 
         # Ethernet ---------------------------------------------------------------------------------
 
@@ -459,6 +460,8 @@ class BaseSoC(SoCMini):
             tx_unpacker = self.ad9361.gpio_tx_unpacker,
         )
         self.gpio.connect_to_pads(pads=platform.request("gpios"))
+
+        self.comb += platform.request("user_led").eq(self.gpio.o1[0])
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
