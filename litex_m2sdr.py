@@ -117,6 +117,9 @@ class BaseSoC(SoCMini):
         # Capability.
         "capability"      : 13,
 
+        # Time.
+        "time_gen"        : 17,
+
         # PCIe.
         "pcie_phy"        : 10,
         "pcie_msi"        : 11,
@@ -133,10 +136,12 @@ class BaseSoC(SoCMini):
 
         # SDR.
         "si5351"          : 20,
-        "time"            : 21,
         "header"          : 23,
         "ad9361"          : 24,
         "crossbar"        : 25,
+
+        # GPIO.
+        "gpio"            : 21,
 
         # Measurements/Analyzer.
         "clk_measurement" : 30,
