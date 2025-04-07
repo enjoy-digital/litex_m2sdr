@@ -34,11 +34,11 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 #                               │            │  │ D │      │          ┌───────────┐   │
 #                               └────────────┘  │ E │      │          │  RX Data  │   │
 #                                               │ M ◄──────┼──────────┤    2:1    ◄───┼── RX Data
-#                         ┌──────┐    ┌──────┐  │ U │      │          │    DDR    │   │
-#                   Source│      │    │      │  │ X │      │          └───────────┘   │
-#    To DMA    ◄──────────┤ BUF  ◄────┤ CDC  ◄──┤   ◄─┐    │                    X6    │
-#                         │      │    │      │  │   │ │    │                          │  From AD9361
-#                         └──────┘    └──────┘  └───┘ │    │                          │
+#                ┌──────┐  ┌──────┐   ┌──────┐  │ U │      │          │    DDR    │   │
+#     Source     │      │  │12-bit│   │      │  │ X │      │          └───────────┘   │
+#    (To DMA) ◄──┤ BUF  ◄──┤ 8-bit◄───┤ CDC  ◄──┤   ◄─┐    │                    X6    │
+#                │      │  │ mode │   │      │  │   │ │    │                          │  From AD9361
+#                └──────┘  └──────┘   └──────┘  └───┘ │    │                          │
 #                                                     │    │          ┌───────────┐   │
 #                                                     │    │          │  RX Clk   │   │
 #                                                     │    │      ┌───┤    BUF    ◄───┼── RX Clk
@@ -62,11 +62,11 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 #                              │            │  │   │  │    │          ┌───────────┐   │
 #                              └────────────┘  │ M │  │    │          │  TX Data  │   │
 #                                              │ U ├──┴────┼──────────►    2:1    ├───┼─► TX Data
-#                        ┌──────┐    ┌──────┐  │ X │       │          │    DDR    │   │
-#                    Sink│      │    │      │  │   │       │          └───────────┘   │
-#   From DMA   ──────────►  BUF ├────► CDC  ├──►   │       │                    X6    │
-#                        │      │    │      │  │   │       │                          │
-#                        └──────┘    └──────┘  └───┘       │            PHY           │
+#                ┌──────┐  ┌──────┐  ┌──────┐  │ X │       │          │    DDR    │   │
+#    Sink        │      │  │12-bit│  │      │  │   │       │          └───────────┘   │
+#   (From DMA) ──►  BUF ├──► 8-bit├──► CDC  ├──►   │       │                    X6    │
+#                │      │  │ mode │  │      │  │   │       │                          │
+#                └──────┘  └──────┘  └──────┘  └───┘       │            PHY           │
 #                                                          └──────────────────────────┘
 # - The rfic_clk is recovered from the AD9361 RX Clk through a Clk buffer.
 # - The rfic_clk is used for both TX/RX.
