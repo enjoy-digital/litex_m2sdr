@@ -229,11 +229,16 @@ class GPIO(LiteXModule):
     def connect_to_pads(self, pads):
         for i in range(len(pads)):
             self.specials += DDRTristate(pads[i],
+                # Clk.
+                clk = ClockSignal("rfic"),
+
+                # Output.
                 o1  = self.o1[i],
                 o2  = self.o2[i],
                 oe1 = self.oe1[i],
                 oe2 = self.oe2[i],
+
+                # Input.
                 i1  = self.i1[i],
                 i2  = self.i2[i],
-                clk = ClockSignal("rfic")
             )
