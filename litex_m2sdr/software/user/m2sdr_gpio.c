@@ -27,8 +27,6 @@ static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable,
     control = litepcie_readl(fd, CSR_GPIO_CONTROL_ADDR);
 
     /* Modify control register */
-    printf("gpio_enable: %x\n", gpio_enable);
-    printf("control: %x\n", control);
     if (gpio_enable) {
         control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);  /* Enable GPIO */
         if (loopback_enable) {
@@ -44,7 +42,6 @@ static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable,
     } else {
         control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET); /* Disable GPIO */
     }
-    printf("control: %x\n", control);
     litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, control);
 
     /* Set output data and enable if CSR mode is requested */
