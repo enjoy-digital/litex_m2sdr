@@ -45,6 +45,7 @@ from litesata.phy import LiteSATAPHY
 
 from litescope import LiteScopeAnalyzer
 
+from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
 from litex_m2sdr.gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
@@ -113,6 +114,9 @@ class BaseSoC(SoCMini):
         "identifier_mem"  : 8,
         "timer0"          : 9,
 
+        # Capability.
+        "capability"      : 13,
+
         # PCIe.
         "pcie_phy"        : 10,
         "pcie_msi"        : 11,
@@ -175,6 +179,29 @@ class BaseSoC(SoCMini):
             with_eth  = with_eth,
             eth_phy   = eth_phy,
             with_sata = with_sata,
+        )
+
+        # Capability -------------------------------------------------------------------------------
+
+        self.capability = Capability(
+            # API Version.
+            api_version_str = "1.0",
+
+            # PCIe Capabilities.
+            pcie_enabled    = with_pcie,
+            pcie_speed      = "gen2",
+            pcie_lanes      = pcie_lanes,
+
+            # Ethernet Capabilities.
+            eth_enabled     = with_eth,
+            eth_speed       = eth_phy,
+
+            # SATA Capabilities.
+            sata_enabled    = with_sata,
+            sata_gen        = sata_gen,
+
+            # GPIO Capabilities.
+            gpio_enabled    = True,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
