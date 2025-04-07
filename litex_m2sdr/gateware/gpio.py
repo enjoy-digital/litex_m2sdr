@@ -6,7 +6,7 @@
 
 from migen import *
 
-from litex.build.io import SDRTristate
+from litex.build.io import DDRTristate
 
 from litex.gen import *
 
@@ -16,7 +16,7 @@ from litepcie.common import *
 
 class GPIORXPacker(LiteXModule):
     """
-    Packs 4 GPIO inputs into the 4 spare bits of a 16-bit RX I/Q stream.
+    Packs 4 GPIO inputs into the 4 spare bits of a 16-bit RX I/Q stream using DDR.
 
     Data Format (64-bit stream):
         Before Packing (sink.data from RFIC):
@@ -34,15 +34,17 @@ class GPIORXPacker(LiteXModule):
         | 63      48|47       32|31       16|15        0| <- Bit Positions |
         | QB        | IB        | QA        | IA        | <- 16-bit Fields |
         |[15..0]    |[15..0]    |[15..0]    |[15..0]    |                  |
-        |0000DDDDDDD|GGGGDDDDDDD|0000DDDDDDD|GGGGDDDDDDD| <- Layout        |
+        |0000DDDDDDD|iiiiDDDDDDD|0000DDDDDDD|IIIIDDDDDDD| <- Layout        |
         +------------------------------------------------------------------+
-        - GGGG = 4-bit GPIO data inserted into IA[15:12] and IB[15:12].
+        - IIII = 4-bit GPIO data (i1) inserted into IA[15:12] (first clock edge).
+        - iiii = 4-bit GPIO data (i2) inserted into IB[15:12] (second clock edge).
         - QA[15:12] and QB[15:12] are zeroed.
         - DDDDDDD (bits [11:0]) remain unchanged from the original I/Q data.
     """
     def __init__(self):
         self.enable  = Signal()                                 # GPIO Module Enable.
-        self.i       = Signal(4)                                # GPIO Inputs.
+        self.i1      = Signal(4)                                # GPIO Inputs (first edge).
+        self.i2      = Signal(4)                                # GPIO Inputs (second edge).
         self.sink    = sink   = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit data).
         self.source  = source = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit + 4-bit GPIO).
 
@@ -55,17 +57,17 @@ class GPIORXPacker(LiteXModule):
         enable = Signal()
         self.specials += MultiReg(self.enable, enable, "rfic")
         self.comb += If(enable,
-            source.data[0*16+12:1*16].eq(self.i),  # Pack GPIO into IA[15:12].
-            source.data[1*16+12:2*16].eq(0),       # QA[15:12] zeroed.
-            source.data[2*16+12:3*16].eq(self.i),  # Pack GPIO into IB[15:12].
-            source.data[3*16+12:4*16].eq(0),       # QB[15:12] zeroed.
+            source.data[0*16+12:1*16].eq(self.i1),  # Pack GPIO i1 into IA[15:12].
+            source.data[1*16+12:2*16].eq(0),        # QA[15:12] zeroed.
+            source.data[2*16+12:3*16].eq(self.i2),  # Pack GPIO i2 into IB[15:12].
+            source.data[3*16+12:4*16].eq(0),        # QB[15:12] zeroed.
         )
 
 # GPIO TX Unpacker ---------------------------------------------------------------------------------
 
 class GPIOTXUnpacker(LiteXModule):
     """
-    Unpacks 4 GPIO outputs and tristate controls from a 16-bit TX I/Q stream.
+    Unpacks 4 GPIO outputs and tristate controls from a 16-bit TX I/Q stream using DDR.
 
     Data Format (64-bit stream):
         Input (sink.data from Pipeline):
@@ -73,11 +75,12 @@ class GPIOTXUnpacker(LiteXModule):
         | 63      48|47       32|31       16|15        0| <- Bit Positions |
         | QB        | IB        | QA        | IA        | <- 16-bit Fields |
         |[15..0]    |[15..0]    |[15..0]    |[15..0]    |                  |
-        |xxxxDDDDDDD|xxxxDDDDDDD|TTTTDDDDDDD|OOOODDDDDDD| <- Layout        |
+        |TTTTDDDDDDD|OOOODDDDDDD|ttttDDDDDDD|ooooDDDDDDD| <- Layout        |
         +------------------------------------------------------------------+
-        - OOOO = 4-bit GPIO Outputs in IA[15:12].
-        - TTTT = 4-bit Tristate Controls in QA[15:12].
-        - xxxx = unused/don't care bits [15:12] in IB and QB.
+        - oooo = 4-bit GPIO Outputs (o1) in IA[15:12] (first edge).
+        - tttt = 4-bit Tristate Controls (oe1) in QA[15:12] (first edge).
+        - OOOO = 4-bit GPIO Outputs (o2) in IB[15:12] (second edge).
+        - TTTT = 4-bit Tristate Controls (oe2) in QB[15:12] (second edge).
         - DDDDDDD = 12-bit I/Q data in [11:0] of all fields.
 
         Output (source.data to RFIC):
@@ -85,16 +88,18 @@ class GPIOTXUnpacker(LiteXModule):
         | 63      48|47       32|31       16|15        0| <- Bit Positions |
         | QB        | IB        | QA        | IA        | <- 16-bit Fields |
         |[15..0]    |[15..0]    |[15..0]    |[15..0]    |                  |
-        |xxxxDDDDDDD|xxxxDDDDDDD|TTTTDDDDDDD|OOOODDDDDDD| <- Layout        |
+        |TTTTDDDDDDD|OOOODDDDDDD|ttttDDDDDDD|ooooDDDDDDD| <- Layout        |
         +------------------------------------------------------------------+
         - Identical to input; full 16-bit words passed to PHY unchanged.
-        - GPIO Outputs (o) extracted from IA[15:12].
-        - Tristate Controls (oe) extracted from QA[15:12].
+        - o1, oe1 extracted from IA[15:12], QA[15:12] (first edge).
+        - o2, oe2 extracted from IB[15:12], QB[15:12] (second edge).
     """
     def __init__(self):
         self.enable = Signal()                                # GPIO Module Enable.
-        self.oe     = Signal(4)                               # GPIO Output Enable.
-        self.o      = Signal(4)                               # GPIO Output.
+        self.o1     = Signal(4)                               # GPIO Outputs (first edge).
+        self.oe1    = Signal(4)                               # Tristate Controls (first edge).
+        self.o2     = Signal(4)                               # GPIO Outputs (second edge).
+        self.oe2    = Signal(4)                               # Tristate Controls (second edge).
         self.sink   = sink   = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit + 4-bit GPIO).
         self.source = source = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit data).
 
@@ -107,26 +112,31 @@ class GPIOTXUnpacker(LiteXModule):
         enable = Signal()
         self.specials += MultiReg(self.enable, enable, "rfic")
         self.comb += If(enable,
-            self.o.eq(source.data[0*16+12:1*16]),  # Unpack GPIO outputs from IA[15:12].
-            self.oe.eq(source.data[1*16+12:2*16]), # Unpack tristate controls from QA[15:12].
+            self.o1.eq( source.data[0*16+12:1*16]), # Unpack GPIO o1 from IA[15:12].
+            self.oe1.eq(source.data[1*16+12:2*16]), # Unpack tristate oe1 from QA[15:12].
+            self.o2.eq( source.data[2*16+12:3*16]), # Unpack GPIO o2 from IB[15:12].
+            self.oe2.eq(source.data[3*16+12:4*16]), # Unpack tristate oe2 from QB[15:12].
         )
 
 # GPIO ---------------------------------------------------------------------------------------------
 
 class GPIO(LiteXModule):
     """
-    GPIO Module for LiteX M2SDR with CSR control and Packer/Unpacker integration.
+    GPIO Module for LiteX M2SDR with CSR control and Packer/Unpacker integration using DDR.
 
     Features:
-    - 4-bit GPIO with synchronous RX sampling and TX control.
+    - 4-bit GPIO with DDR synchronous RX sampling and TX driving.
     - Switch between Packer/Unpacker or CSR control.
     - Tristate control via CSR.
     """
     def __init__(self, rx_packer, tx_unpacker):
-         # IO Signals
-        self.o  = Signal(4)  # Output data.
-        self.oe = Signal(4)  # Output enable (1=drive, 0=tristate).
-        self.i  = Signal(4)  # Input data.
+        # IO Signals
+        self.o1  = Signal(4)  # Output data (first edge).
+        self.o2  = Signal(4)  # Output data (second edge).
+        self.oe1 = Signal(4)  # Output enable (first edge,  1=drive, 0=tristate).
+        self.oe2 = Signal(4)  # Output enable (second edge, 1=drive, 0=tristate).
+        self.i1  = Signal(4)  # Input data (first edge).
+        self.i2  = Signal(4)  # Input data (second edge).
 
         # # #
 
@@ -178,33 +188,43 @@ class GPIO(LiteXModule):
             # -------------
 
             # Default to tristate, overridden by enable and mode
-            self.o.eq(0),  # Default: All outputs low.
-            self.oe.eq(0), # Default: All outputs tristated.
+            self.o1.eq(0),  # Default: All outputs low (first edge).
+            self.o2.eq(0),  # Default: All outputs low (second edge).
+            self.oe1.eq(0), # Default: All outputs tristated (first edge).
+            self.oe2.eq(0), # Default: All outputs tristated (second edge).
 
             If(self._control.fields.enable,
                 # Packer/Unpacker mode.
                 If(self._control.fields.source == 0,
-                    self.o.eq(tx_unpacker.o),
-                    self.oe.eq(tx_unpacker.oe),
+                    self.o1.eq( tx_unpacker.o1),
+                    self.oe1.eq(tx_unpacker.oe1),
+                    self.o2.eq( tx_unpacker.o2),
+                    self.oe2.eq(tx_unpacker.oe2),
                 ),
-                # CSR mode.
+                # CSR mode (duplicate data across edges).
                 If(self._control.fields.source == 1,
-                    self.o.eq(self._o.fields.data),
-                    self.oe.eq(self._oe.fields.enable),
+                    self.o1.eq( self._o.fields.data),
+                    self.o2.eq( self._o.fields.data),
+                    self.oe1.eq(self._oe.fields.enable),
+                    self.oe2.eq(self._oe.fields.enable),
                 ),
             ),
 
             # GPIO Inputs.
             # ------------
-            self._i.fields.data.eq(self.i),
-            rx_packer.i.eq(self.i),
+            self._i.fields.data.eq(self.i1),
+            rx_packer.i1.eq(self.i1),
+            rx_packer.i2.eq(self.i2),
         ]
 
     def connect_to_pads(self, pads):
         for i in range(len(pads)):
-            self.specials += SDRTristate(pads[i],
-                o   = self.o[i],
-                oe  = self.oe[i],
-                i   = self.i[i],
+            self.specials += DDRTristate(pads[i],
+                o1  = self.o1[i],
+                o2  = self.o2[i],
+                oe1 = self.oe1[i],
+                oe2 = self.oe2[i],
+                i1  = self.i1[i],
+                i2  = self.i2[i],
                 clk = ClockSignal("rfic")
             )
