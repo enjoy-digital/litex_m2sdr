@@ -16,7 +16,7 @@ from litex.gen import *
 from litex.gen.genlib.cdc import BusSynchronizer
 
 from litex.build.generic_platform import Subsignal, Pins
-from litex_m2sdr_platform import Platform
+from litex_m2sdr.litex_m2sdr_platform import Platform
 
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect     import stream
