@@ -138,10 +138,10 @@ class BaseSoC(SoCMini):
         "analyzer"        : 31,
     }
 
-    def __init__(self, variant="m2", sys_clk_freq=int(125e6),
+    def __init__(self, variant="m2", sys_clk_freq=int(150e6),
         with_pcie     = True,  pcie_lanes=1,
         with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        with_sata     = False, sata_gen="gen2",
+        with_sata     = False, sata_gen="gen3",
         with_jtagbone = True,
         with_rfic_oversampling = True,
     ):
