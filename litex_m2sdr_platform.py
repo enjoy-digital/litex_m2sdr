@@ -134,6 +134,9 @@ _io = [
         Subsignal("miso", Pins("M6")), # RF_SPI_DO.
         IOStandard("LVCMOS25")
     ),
+
+    # GPIOs.
+    ("gpios", 0, Pins("V13 K18 Y18 A19"), IOStandard("LVCMOS33")), # 0: SYNCDBG_CLK; 1-3: Synchro_GPIO1-3.
 ]
 
 _connectors = [

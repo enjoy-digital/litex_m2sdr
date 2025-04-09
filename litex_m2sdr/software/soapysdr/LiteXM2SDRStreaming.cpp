@@ -676,8 +676,12 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
         const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
 
         for (uint32_t i = 0; i < len; i++) {
-            samples_cf32[0] = static_cast<float>(src_int16[0]) / _samplesScaling; /* I. */
-            samples_cf32[1] = static_cast<float>(src_int16[1]) / _samplesScaling; /* Q. */
+            /* Mask 12 LSB and sign-extend */
+            int16_t i_sample = static_cast<int16_t>(src_int16[0] << 4) >> 4;  /* I. */
+            int16_t q_sample = static_cast<int16_t>(src_int16[1] << 4) >> 4;  /* Q. */
+            /* Scale to float (-1.0 to 1.0 range) */
+            samples_cf32[0] = static_cast<float>(i_sample) / _samplesScaling; /* I. */
+            samples_cf32[1] = static_cast<float>(q_sample) / _samplesScaling; /* Q. */
             samples_cf32 += 2;
             src_int16 += _nChannels * _samplesPerComplex;
         }
@@ -685,6 +689,7 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
         const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
 
         for (uint32_t i = 0; i < len; i++) {
+            /* Scale to float (-1.0 to 1.0 range) */
             samples_cf32[0] = static_cast<float>(src_int8[0]) / _samplesScaling; /* I. */
             samples_cf32[1] = static_cast<float>(src_int8[1]) / _samplesScaling; /* Q. */
             samples_cf32 += 2;
@@ -738,8 +743,9 @@ void SoapyLiteXM2SDR::deinterleaveCS16(
         const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
 
         for (uint32_t i = 0; i < len; i++) {
-            samples_cs16[0] = src_int16[0]; /* I. */
-            samples_cs16[1] = src_int16[1]; /* Q. */
+            /* Mask 12 LSB and sign-extend */
+            samples_cs16[0] = static_cast<int16_t>(src_int16[0] << 4) >> 4;  /* I. */
+            samples_cs16[1] = static_cast<int16_t>(src_int16[1] << 4) >> 4;  /* Q. */
             samples_cs16 += 2;
             src_int16 += _nChannels * _samplesPerComplex;
         }
