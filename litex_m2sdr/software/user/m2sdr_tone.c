@@ -55,7 +55,7 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
 
     /* Enable GPIO in Packer/Unpacker mode if PPS is requested */
     if (pps_freq > 0) {
-        uint32_t control = CSR_GPIO_CONTROL_ENABLE; /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=0 */
+        uint32_t control = CSR_GPIO_CONTROL_ENABLE | CSR_GPIO_CONTROL_LOOPBACK; /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=1 */
         litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, control);
         double pps_period_s = 1.0 / pps_freq;
         double pps_high_s = pps_period_s * 0.2;
@@ -169,6 +169,7 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
 
     /* Cleanup DMA and close device */
     litepcie_dma_cleanup(&dma);
+    litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, 0);
     close(fd);
 }
 

@@ -258,10 +258,9 @@ class BaseSoC(SoCMini):
 
         # Leds -------------------------------------------------------------------------------------
 
-        #self.leds = LedChaser(
-        #    pads         = platform.request_all("user_led"),
-        #    sys_clk_freq = sys_clk_freq
-        #)
+        led_pad = platform.request("user_led")
+        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
+        self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -461,7 +460,8 @@ class BaseSoC(SoCMini):
         )
         self.gpio.connect_to_pads(pads=platform.request("gpios"))
 
-        self.comb += platform.request("user_led").eq(self.gpio.o1[0])
+        # Drive led from GPIO when in loopback mode to ease test/verification.
+        self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.o1[0]))
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
@@ -489,6 +489,7 @@ class BaseSoC(SoCMini):
             "si5351_clk1",
             "sync_clk_in",
         )
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_s7pll0_clkout_buf1}}]")
 
         # Clk Measurements -------------------------------------------------------------------------
 
