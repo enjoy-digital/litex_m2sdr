@@ -228,6 +228,7 @@ class GPIO(LiteXModule):
         ]
 
     def connect_to_pads(self, pads):
+        self.i_async = Signal(len(pads))
         for i in range(len(pads)):
             self.specials += DDRTristate(pads[i],
                 # Clk.
@@ -242,4 +243,7 @@ class GPIO(LiteXModule):
                 # Input.
                 i1  = self.i1[i],
                 i2  = self.i2[i],
+
+                # Input (Async).
+                i_async = self.i_async[i],
             )

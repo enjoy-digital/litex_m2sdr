@@ -211,7 +211,8 @@ class BaseSoC(SoCMini):
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
-        self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=platform.request("sync_clk_in"))
+        si5351_clk_in = Signal()
+        self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
 
@@ -457,10 +458,15 @@ class BaseSoC(SoCMini):
             rx_packer   = self.ad9361.gpio_rx_packer,
             tx_unpacker = self.ad9361.gpio_tx_unpacker,
         )
+        # GPIO0   : Sync/ClkIn.
+        # GPIO1-3 : Synchro_GPIO1-3.
         self.gpio.connect_to_pads(pads=platform.request("gpios"))
 
-        # Drive led from GPIO when in loopback mode to ease test/verification.
-        self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.o1[0]))
+        # Drive led from GPIO0 when in loopback mode to ease test/verification.
+        self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
+
+        # Use GPIO0 as ClkIn.
+        self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 

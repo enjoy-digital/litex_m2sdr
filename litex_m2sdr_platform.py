@@ -136,7 +136,7 @@ _io = [
     ),
 
     # GPIOs.
-    ("gpios", 0, Pins("K18 Y18 A19 A18"), IOStandard("LVCMOS33")), # Synchro_GPIO1-4.
+    ("gpios", 0, Pins("V13 K18 Y18 A19"), IOStandard("LVCMOS33")), # 0: SYNCDBG_CLK; 1-3: Synchro_GPIO1-3.
 ]
 
 _connectors = [
