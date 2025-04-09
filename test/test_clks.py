@@ -19,6 +19,7 @@ CLOCKS = {
     "clk2": "AD9361 Ref Clk",
     "clk3": "AD9361 Dat Clk",
     "clk4": "  Time Ref Clk",
+    "clk5": "  SATA Ref Clk",
 }
 
 # Clk Driver ---------------------------------------------------------------------------------------

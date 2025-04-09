@@ -141,7 +141,7 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie     = True,  pcie_lanes=1,
         with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        with_sata     = False, sata_gen="gen2",
+        with_sata     = False, sata_gen="gen1",
         with_jtagbone = True,
         with_rfic_oversampling = True,
     ):
@@ -349,6 +349,14 @@ class BaseSoC(SoCMini):
                 data_width = 16,
                 qpll       = self.qpll.get_channel("sata"),
             )
+            sata_clk_freq = {"gen1": 75e6, "gen2": 150e6, "gen3": 300e6}[sata_gen]
+            platform.add_period_constraint(self.sata_phy.crg.cd_sata_tx.clk, 1e9/sata_clk_freq)
+            platform.add_period_constraint(self.sata_phy.crg.cd_sata_rx.clk, 1e9/sata_clk_freq)
+            self.platform.add_false_path_constraints(
+                self.crg.cd_sys.clk,
+                self.sata_phy.crg.cd_sata_tx.clk,
+                self.sata_phy.crg.cd_sata_rx.clk,
+            )
 
             # Core
             self.add_sata(phy=self.sata_phy, mode="read+write")
@@ -454,6 +462,7 @@ class BaseSoC(SoCMini):
             "clk2" : si5351_clk0,
             "clk3" : ClockSignal("rfic"),
             "clk4" : si5351_clk1,
+            "clk5" : ClockSignal("refclk_sata"),
         })
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
