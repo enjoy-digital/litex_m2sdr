@@ -170,73 +170,73 @@ if __name__ == "__main__":
     # # #
 
     identify  = LiteSATABISTIdentifyDriver(wb.regs,  wb.constants, "sata")
-    #generator = LiteSATABISTGeneratorDriver(wb.regs, wb.constants, "sata")
-    #checker   = LiteSATABISTCheckerDriver(wb.regs,   wb.constants, "sata")
+    generator = LiteSATABISTGeneratorDriver(wb.regs, wb.constants, "sata_bist")
+    checker   = LiteSATABISTCheckerDriver(wb.regs,   wb.constants, "sata_bist")
 
     identify.run()
     identify.hdd_info()
 
-#    if not int(args.identify):
-#        count             = int(args.transfer_size)*kb//logical_sector_size
-#        loops             = int(args.loops)
-#        length            = int(args.total_length)*mb
-#        random            = int(args.random)
-#        continuous        = int(args.continuous)
-#        sw_timer          = int(args.software_timer)
-#        random_addressing = int(args.random_addressing)
-#
-#        write_and_read_sequence = {"write": 1, "read": 1}
-#        write_sequence          = {"write": 1, "read": 0}
-#        read_sequence           = {"write": 0, "read": 1}
-#        if int(args.delayed_read):
-#            sequences = [write_sequence, read_sequence]
-#        else:
-#            sequences = [write_and_read_sequence]
-#
-#        for sequence in sequences:
-#            sector      = 0
-#            run_sectors = 0
-#            try:
-#                while ((run_sectors*logical_sector_size < length) or continuous) and (sector < identify.total_sectors):
-#                    retry = 0
-#                    if sequence["write"]:
-#                        # Generator (write data to HDD)
-#                        write_done = False
-#                        while not write_done:
-#                            write_aborted, write_errors, write_speed = generator.run(sector, count, loops, random, True, not sw_timer)
-#                            write_done = not write_aborted
-#                            if not write_done:
-#                                retry += 1
-#                    else:
-#                        write_error, write_speed = 0, 0
-#
-#                    if sequence["read"]:
-#                        # Checker (read and check data from HDD)
-#                        read_done = False
-#                        while not read_done:
-#                            read_aborted, read_errors, read_speed = checker.run(sector, count, loops, random, True, not sw_timer)
-#                            read_done = not read_aborted
-#                            if not read_done:
-#                                retry += 1
-#                    else:
-#                        read_errors, read_speed = 0, 0
-#
-#                    ratio = identify.data_width.read()//32
-#                    print("sector:{:8d} writes:{:7.2f}MiB/s reads:{:7.2f}MiB/s errors:{:d} retry:{:d} ({:d}MiB)".format(
-#                        sector,
-#                        write_speed/mb*ratio,
-#                        read_speed/mb*ratio,
-#                        write_errors + read_errors,
-#                        retry,
-#                        int(run_sectors*logical_sector_size/mb)*ratio))
-#                    if random_addressing:
-#                        sector = rand.randint(0, identify.total_sectors//(256*2))*256
-#                    else:
-#                        sector += count
-#                    run_sectors += count
-#
-#            except KeyboardInterrupt:
-#                pass
+    if not int(args.identify):
+        count             = int(args.transfer_size)*kb//logical_sector_size
+        loops             = int(args.loops)
+        length            = int(args.total_length)*mb
+        random            = int(args.random)
+        continuous        = int(args.continuous)
+        sw_timer          = int(args.software_timer)
+        random_addressing = int(args.random_addressing)
+
+        write_and_read_sequence = {"write": 1, "read": 1}
+        write_sequence          = {"write": 1, "read": 0}
+        read_sequence           = {"write": 0, "read": 1}
+        if int(args.delayed_read):
+            sequences = [write_sequence, read_sequence]
+        else:
+            sequences = [write_and_read_sequence]
+
+        for sequence in sequences:
+            sector      = 0
+            run_sectors = 0
+            try:
+                while ((run_sectors*logical_sector_size < length) or continuous) and (sector < identify.total_sectors):
+                    retry = 0
+                    if sequence["write"]:
+                        # Generator (write data to HDD)
+                        write_done = False
+                        while not write_done:
+                            write_aborted, write_errors, write_speed = generator.run(sector, count, loops, random, True, not sw_timer)
+                            write_done = not write_aborted
+                            if not write_done:
+                                retry += 1
+                    else:
+                        write_error, write_speed = 0, 0
+
+                    if sequence["read"]:
+                        # Checker (read and check data from HDD)
+                        read_done = False
+                        while not read_done:
+                            read_aborted, read_errors, read_speed = checker.run(sector, count, loops, random, True, not sw_timer)
+                            read_done = not read_aborted
+                            if not read_done:
+                                retry += 1
+                    else:
+                        read_errors, read_speed = 0, 0
+
+                    ratio = identify.data_width.read()//32
+                    print("sector:{:8d} writes:{:7.2f}MiB/s reads:{:7.2f}MiB/s errors:{:d} retry:{:d} ({:d}MiB)".format(
+                        sector,
+                        write_speed/mb*ratio,
+                        read_speed/mb*ratio,
+                        write_errors + read_errors,
+                        retry,
+                        int(run_sectors*logical_sector_size/mb)*ratio))
+                    if random_addressing:
+                        sector = rand.randint(0, identify.total_sectors//(256*2))*256
+                    else:
+                        sector += count
+                    run_sectors += count
+
+            except KeyboardInterrupt:
+                pass
     # # #
 
     wb.close()
