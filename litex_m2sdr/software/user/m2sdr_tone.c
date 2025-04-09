@@ -131,9 +131,9 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
                 }
 
                 ((int16_t *)buf_wr)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12); // TX1_I (IA[15:12] = GPIO1)
-                ((int16_t *)buf_wr)[4 * j + 1] = Q_int & 0xFFF;                   // TX1_Q (QA[15:12] = 0)
+                ((int16_t *)buf_wr)[4 * j + 1] = (Q_int & 0xFFF) | (gpio1 << 12); // TX1_Q (QA[15:12] = GPIO1 OE)
                 ((int16_t *)buf_wr)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12); // TX2_I (IB[15:12] = GPIO2)
-                ((int16_t *)buf_wr)[4 * j + 3] = Q_int & 0xFFF;                   // TX2_Q (QB[15:12] = 0)
+                ((int16_t *)buf_wr)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12); // TX2_Q (QB[15:12] = GPIO2_OE)
 
                 phi += omega;
                 if (phi >= 2 * M_PI) phi -= 2 * M_PI;
