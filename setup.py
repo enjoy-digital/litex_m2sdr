@@ -32,4 +32,5 @@ setup(
         "Programming Language :: Python",
     ],
     packages                      = find_packages(exclude=['test*']),
+    py_modules                    = ['litex_m2sdr_platform'],
 )
