@@ -58,22 +58,25 @@ You’ll need an M2x3mm screw to secure the SDR module in place.
 # Log in over SSH using your IP and password
 ssh ubuntu@10.254.1.21
 
+# Install missing dependencies
+sudo apt install -y cmake soapysdr-tools libsoapysdr0.8 libsoapysdr-dev
+
 # On OrangePI, clone the LiteX-M2SDR source tree
 mkdir Code
 cd Code
 git clone https://github.com/enjoy-digital/litex_m2sdr
 
-# Compile the LiteX-M2SDR Linux kernel driver for arm64 ...
-cd litex_m2sdr/software/kernel
-# This line compiles and activates the driver
-sudo ARCH=arm64 ./init.sh
+# Move to the software directory
+cd litex_m2sdr/litex_m2sdr/software
 
 # Compile the command-line tools and the SoapySDR driver for LiteX-M2SDR
+./build.py
+
+# Build and Install the LiteX-M2SDR Linux kernel driver for arm64
+cd kernel
+make ARCH=arm64 clean all
+sudo make ARCH=arm64 install
 cd ..
-# Install missing dependencies ...
-sudo apt install -y cmake soapysdr-tools libsoapysdr0.8 libsoapysdr-dev
-# Compile command-line tools and SoapySDR driver
-./build
 
 # Verify the list of compiled tools
 git status
@@ -89,12 +92,10 @@ user/m2sdr_util info
 user/m2sdr_rf
 ```
 
-On subsequent boots, you’ll need to manually insert the LitePCI driver and grant access to your user to avoid using `sudo`:
+On subsequent boots, the LiteX-M2SDR driver is automatically loaded:
 ```bash
-sudo modprobe ~/Code/litex_m2sdr/software/kernel/litepcie.ko
-sudo chmod 666 /dev/m2sdr0
-# Check if it works
-~/Code/litex_m2sdr/software/user/m2sdr_util info
+# Check whether it works
+~/Code/litex_m2sdr/litex_m2sdr/software/user/m2sdr_util info
 ```
 
 Example LiteX session:
