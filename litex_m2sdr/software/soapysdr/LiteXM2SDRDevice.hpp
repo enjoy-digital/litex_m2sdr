@@ -16,7 +16,7 @@
 
 #include "liblitepcie.h"
 #include "etherbone.h"
-#include "LiteXM2SDRUDPRx.hpp"
+#include "LiteXM2SDRUDP.hpp"
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
@@ -343,7 +343,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     size_t _tx_buf_size;
     size_t _rx_buf_count;
     size_t _tx_buf_count;
-    LiteXM2SDRUPDRx *_rx_udp_receiver;
+    LiteXM2SDRUDP *_udp_streamer;
 
     struct Stream {
         Stream() : opened(false), remainderHandle(-1), remainderSamps(0),
