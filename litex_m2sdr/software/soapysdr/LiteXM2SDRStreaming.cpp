@@ -79,8 +79,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 
 #elif USE_LITEETH
-        _rx_buf_size = _rx_udp_receiver->buffer_size();
-        _rx_buf_count = _rx_udp_receiver->buffer_count();
+        _rx_buf_size = _udp_streamer->buffer_size();
+        _rx_buf_count = _udp_streamer->buffer_count();
         _rx_stream.buf = malloc(_rx_buf_size * _rx_buf_count);
         if (!_rx_stream.buf)
             throw std::runtime_error("Malloc failed.");
@@ -277,7 +277,7 @@ int SoapyLiteXM2SDR::activateStream(
 #elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
-        _rx_udp_receiver->start();
+        _udp_streamer->start(SOAPY_SDR_RX);
 #endif
         _rx_stream.user_count = 0;
         _rx_stream.burst_end = false;
@@ -306,7 +306,7 @@ int SoapyLiteXM2SDR::deactivateStream(
 #if USE_LITEPCIE
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
-        _rx_udp_receiver->stop();
+        _udp_streamer->stop(SOAPY_SDR_RX);
 #endif
         /* set burst_end: if readStream is called after this point SOAPY_SDR_END_BURST
          * will be set
@@ -409,14 +409,14 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
 #if USE_LITEETH
 #ifdef USE_THREAD
-    int buffers_available = _rx_udp_receiver->buffers_available();
+    int buffers_available = _udp_streamer->buffers_available();
     /* No buffer: fails */
     if (buffers_available <= 0) {
         return SOAPY_SDR_TIMEOUT;
     }
 
     /* Detect overflows of the underlying circular buffer. */
-    if (_rx_udp_receiver->overflow()) {
+    if (_udp_streamer->overflow()) {
         flags |= SOAPY_SDR_END_ABRUPT;
         return SOAPY_SDR_OVERFLOW;
     }
@@ -424,7 +424,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     buffs[0] = (char *)_rx_stream.buf;
     int pos = 0;
     char *ptr = (char *)_rx_stream.buf;
-    std::vector<char> vc = _rx_udp_receiver->get_data();
+    std::vector<char> vc = _udp_streamer->get_data();
     memcpy(ptr, vc.data(), _rx_buf_size);
     pos += _rx_buf_size;
 
