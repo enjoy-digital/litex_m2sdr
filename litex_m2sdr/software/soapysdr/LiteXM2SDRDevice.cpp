@@ -866,10 +866,7 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
     const int /*direction*/,
     const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
-    if (_oversampling)
-        results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
-    else
-        results.push_back(SoapySDR::Range(25e6 / 96, 61.44e6));
+    results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
     return results;
 }
 
