@@ -46,6 +46,7 @@ from litescope import LiteScopeAnalyzer
 
 from litex_m2sdr import Platform
 
+from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
 from litex_m2sdr.gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
@@ -54,6 +55,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
+from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -113,6 +115,12 @@ class BaseSoC(SoCMini):
         "identifier_mem"  : 8,
         "timer0"          : 9,
 
+        # Capability.
+        "capability"      : 13,
+
+        # Time.
+        "time_gen"        : 17,
+
         # PCIe.
         "pcie_phy"        : 10,
         "pcie_msi"        : 11,
@@ -129,10 +137,12 @@ class BaseSoC(SoCMini):
 
         # SDR.
         "si5351"          : 20,
-        "time"            : 21,
         "header"          : 23,
         "ad9361"          : 24,
         "crossbar"        : 25,
+
+        # GPIO.
+        "gpio"            : 21,
 
         # Measurements/Analyzer.
         "clk_measurement" : 30,
@@ -177,9 +187,33 @@ class BaseSoC(SoCMini):
             with_sata = with_sata,
         )
 
+        # Capability -------------------------------------------------------------------------------
+
+        self.capability = Capability(
+            # API Version.
+            api_version_str = "1.0",
+
+            # PCIe Capabilities.
+            pcie_enabled    = with_pcie,
+            pcie_speed      = "gen2",
+            pcie_lanes      = pcie_lanes,
+
+            # Ethernet Capabilities.
+            eth_enabled     = with_eth,
+            eth_speed       = eth_phy,
+
+            # SATA Capabilities.
+            sata_enabled    = with_sata,
+            sata_gen        = sata_gen,
+
+            # GPIO Capabilities.
+            gpio_enabled    = True,
+        )
+
         # SI5351 Clock Generator -------------------------------------------------------------------
 
-        self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=platform.request("sync_clk_in"))
+        si5351_clk_in = Signal()
+        self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
 
@@ -226,10 +260,9 @@ class BaseSoC(SoCMini):
 
         # Leds -------------------------------------------------------------------------------------
 
-        self.leds = LedChaser(
-            pads         = platform.request_all("user_led"),
-            sys_clk_freq = sys_clk_freq
-        )
+        led_pad = platform.request("user_led")
+        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
+        self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -420,6 +453,22 @@ class BaseSoC(SoCMini):
         if with_sata:
             pass # TODO.
 
+        # GPIO -------------------------------------------------------------------------------------
+
+        self.gpio = GPIO(
+            rx_packer   = self.ad9361.gpio_rx_packer,
+            tx_unpacker = self.ad9361.gpio_tx_unpacker,
+        )
+        # GPIO0   : Sync/ClkIn.
+        # GPIO1-3 : Synchro_GPIO1-3.
+        self.gpio.connect_to_pads(pads=platform.request("gpios"))
+
+        # Drive led from GPIO0 when in loopback mode to ease test/verification.
+        self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
+
+        # Use GPIO0 as ClkIn.
+        self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
+
         # Timing Constraints/False Paths -----------------------------------------------------------
 
         platform.add_false_path_constraints(
@@ -446,6 +495,7 @@ class BaseSoC(SoCMini):
             "si5351_clk1",
             "sync_clk_in",
         )
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_s7pll0_clkout_buf1}}]")
 
         # Clk Measurements -------------------------------------------------------------------------
 

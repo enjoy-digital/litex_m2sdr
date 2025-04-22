@@ -722,13 +722,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
     if (_bitMode == 8) {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
-        _samplesScaling  = 128.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
+        _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
         litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
-        _samplesScaling  = 2048.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
+        _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
         litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0);
     }
 }

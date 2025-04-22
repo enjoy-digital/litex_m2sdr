@@ -13,6 +13,8 @@ from litex.soc.interconnect.csr import *
 
 from litepcie.common import *
 
+from litex_m2sdr.gateware.gpio import GPIORXPacker, GPIOTXUnpacker
+
 from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
 from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
@@ -34,11 +36,11 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 #                               │            │  │ D │      │          ┌───────────┐   │
 #                               └────────────┘  │ E │      │          │  RX Data  │   │
 #                                               │ M ◄──────┼──────────┤    2:1    ◄───┼── RX Data
-#                         ┌──────┐    ┌──────┐  │ U │      │          │    DDR    │   │
-#                   Source│      │    │      │  │ X │      │          └───────────┘   │
-#    To DMA    ◄──────────┤ BUF  ◄────┤ CDC  ◄──┤   ◄─┐    │                    X6    │
-#                         │      │    │      │  │   │ │    │                          │  From AD9361
-#                         └──────┘    └──────┘  └───┘ │    │                          │
+#                ┌──────┐  ┌──────┐   ┌──────┐  │ U │      │          │    DDR    │   │
+#     Source     │      │  │12-bit│   │      │  │ X │      │          └───────────┘   │
+#    (To DMA) ◄──┤ BUF  ◄──┤ 8-bit◄───┤ CDC  ◄──┤   ◄─┐    │                    X6    │
+#                │      │  │ mode │   │      │  │   │ │    │                          │  From AD9361
+#                └──────┘  └──────┘   └──────┘  └───┘ │    │                          │
 #                                                     │    │          ┌───────────┐   │
 #                                                     │    │          │  RX Clk   │   │
 #                                                     │    │      ┌───┤    BUF    ◄───┼── RX Clk
@@ -62,11 +64,11 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 #                              │            │  │   │  │    │          ┌───────────┐   │
 #                              └────────────┘  │ M │  │    │          │  TX Data  │   │
 #                                              │ U ├──┴────┼──────────►    2:1    ├───┼─► TX Data
-#                        ┌──────┐    ┌──────┐  │ X │       │          │    DDR    │   │
-#                    Sink│      │    │      │  │   │       │          └───────────┘   │
-#   From DMA   ──────────►  BUF ├────► CDC  ├──►   │       │                    X6    │
-#                        │      │    │      │  │   │       │                          │
-#                        └──────┘    └──────┘  └───┘       │            PHY           │
+#                ┌──────┐  ┌──────┐  ┌──────┐  │ X │       │          │    DDR    │   │
+#    Sink        │      │  │12-bit│  │      │  │   │       │          └───────────┘   │
+#   (From DMA) ──►  BUF ├──► 8-bit├──► CDC  ├──►   │       │                    X6    │
+#                │      │  │ mode │  │      │  │   │       │                          │
+#                └──────┘  └──────┘  └──────┘  └───┘       │            PHY           │
 #                                                          └──────────────────────────┘
 # - The rfic_clk is recovered from the AD9361 RX Clk through a Clk buffer.
 # - The rfic_clk is used for both TX/RX.
@@ -149,6 +151,11 @@ class AD9361RFIC(LiteXModule):
         # PHY --------------------------------------------------------------------------------------
         self.phy = AD9361PHY(rfic_pads)
 
+        # TX/RX UnPacker/Packer (GPIOs) ------------------------------------------------------------
+
+        self.gpio_tx_unpacker = gpio_tx_unpacker = GPIOTXUnpacker()
+        self.gpio_rx_packer   = gpio_rx_packer   = GPIORXPacker()
+
         # Cross domain crossing --------------------------------------------------------------------
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
             layout  = dma_layout(64),
@@ -177,32 +184,34 @@ class AD9361RFIC(LiteXModule):
 
         # TX.
         # ---
-        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> PHY.
+        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
             tx_bitmode,
             tx_cdc,
+            gpio_tx_unpacker,
         )
         self.comb += [
-            tx_cdc.source.connect(self.phy.sink, keep={"valid", "ready"}),
-            self.phy.sink.ia.eq(tx_cdc.source.data[0*16:1*16]),
-            self.phy.sink.qa.eq(tx_cdc.source.data[1*16:2*16]),
-            self.phy.sink.ib.eq(tx_cdc.source.data[2*16:3*16]),
-            self.phy.sink.qb.eq(tx_cdc.source.data[3*16:4*16]),
+            gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
+            self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),
+            self.phy.sink.qa.eq(gpio_tx_unpacker.source.data[1*16:2*16]),
+            self.phy.sink.ib.eq(gpio_tx_unpacker.source.data[2*16:3*16]),
+            self.phy.sink.qb.eq(gpio_tx_unpacker.source.data[3*16:4*16]),
         ]
 
         # RX.
         # ---
-        # PHY -> RX CDC -> RX BitMode -> RX Buffer -> Source.
+        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source.
         self.comb += [
-            self.phy.source.connect(rx_cdc.sink, keep={"valid", "ready"}),
-            rx_cdc.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
-            rx_cdc.sink.data[1*16:2*16].eq(_sign_extend(self.phy.source.qa, 16)),
-            rx_cdc.sink.data[2*16:3*16].eq(_sign_extend(self.phy.source.ib, 16)),
-            rx_cdc.sink.data[3*16:4*16].eq(_sign_extend(self.phy.source.qb, 16)),
+            self.phy.source.connect(gpio_rx_packer.sink, keep={"valid", "ready"}),
+            gpio_rx_packer.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
+            gpio_rx_packer.sink.data[1*16:2*16].eq(_sign_extend(self.phy.source.qa, 16)),
+            gpio_rx_packer.sink.data[2*16:3*16].eq(_sign_extend(self.phy.source.ib, 16)),
+            gpio_rx_packer.sink.data[3*16:4*16].eq(_sign_extend(self.phy.source.qb, 16)),
         ]
         self.rx_pipeline = stream.Pipeline(
+            gpio_rx_packer,
             rx_cdc,
             rx_bitmode,
             rx_buffer,

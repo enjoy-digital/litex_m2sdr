@@ -80,6 +80,7 @@ Example usage:
 
 ### m2sdr_tone
 Generates and streams a pure-tone (sine wave) directly to the FPGA’s TX path in real-time (DMA TX).
+Also supports GPIO/PPS (pulse-per-second) toggling on a selected GPIO pin.
 
 **Usage**:
 ```
@@ -87,15 +88,30 @@ m2sdr_tone [options]
 ```
 
 **Relevant options**:
+- `-c device_num`
+  Selects the device (default=0).
+- `-s sample_rate`
+  Set sample rate in Hz (default = 30720000).
+- `-f frequency`
+  Set tone frequency in Hz (default = 1000).
+- `-a amplitude`
+  Set amplitude (0.0 to 1.0, default = 1.0).
+- `-z`
+  Enable zero-copy DMA mode.
+- `-p [pps_freq]`
+  Enable PPS/toggle on GPIO. When specified, it toggles the configured GPIO at the given frequency (default = 1 Hz if no frequency is provided). The pulse is 20% high and 80% low.
+- `-g gpio_pin`
+  Select GPIO pin for PPS (range 0-3, default = 0).
 
-    -s sample_rate (default=30720000)
-    -f frequency (default=1000)
-    -a amplitude (0.0 to 1.0, default=1.0)
-
-Example usage:
-~~~~
+Example usage without PPS:
+```
 ./m2sdr_tone -s 30720000 -f 1e6 -a 0.5
-~~~~
+```
+
+Example usage with PPS on GPIO pin 0:
+```
+./m2sdr_tone -c 0 -s 30720000 -f 1e6 -a 0.5 -p 1.0 -g 0
+```
 
 ---
 
@@ -172,6 +188,36 @@ Example usage:
                 --samplerate=30720000 \
                 --plot
 ~~~~
+---
+
+### m2sdr_gpio
+Provides GPIO control for the M2SDR board, including configuration, loopback mode, and CSR/DMA mode selection. This tool allows for setting output data, output enable bits, and reading back the 4-bit GPIO input.
+
+**Usage**:
+```
+m2sdr_gpio [options]
+```
+
+**Options**:
+- `-h`
+  Display this help message.
+- `-c device_num`
+  Select the device (default = 0).
+- `-g`
+  Enable GPIO control.
+- `-l`
+  Enable GPIO loopback mode (requires `-g`).
+- `-s`
+  Use CSR mode (instead of the default DMA mode, requires `-g`).
+- `-o output_data`
+  Set GPIO output data (4-bit hexadecimal, e.g., `0xF`; requires `-s`).
+- `-e output_enable`
+  Set GPIO output enable (4-bit hexadecimal, e.g., `0xF`; requires `-s`).
+
+Example usage:
+```
+./m2sdr_gpio -c 0 -g -s -o 0xA -e 0xA
+```
 
 ---
 
