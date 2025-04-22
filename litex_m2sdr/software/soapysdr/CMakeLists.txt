@@ -114,7 +114,7 @@ SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    LiteXM2SDRUDPRx.cpp
+    LiteXM2SDRUDP.cpp
     ${LITEXM2SDR_SOURCE}
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )

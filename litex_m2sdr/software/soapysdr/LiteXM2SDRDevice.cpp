@@ -163,7 +163,7 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _deviceArgs(args), _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
-    _rx_udp_receiver(NULL),
+    _udp_streamer(NULL),
     _fd(FD_INIT), ad9361_phy(NULL) {
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -205,7 +205,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     /* Ethernet streamer */
     try {
-        _rx_udp_receiver = new LiteXM2SDRUPDRx(eth_ip, "2345", 0, 20, 1024/8, 8);
+        _udp_streamer = new LiteXM2SDRUDP(eth_ip, "2345", 0, 20, 1024/8, 8);
     } catch (std::exception &e) {
         throw std::runtime_error("can't prepare UDP RX Receiver");
     }
@@ -372,7 +372,8 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         munmap(_rx_stream.buf,
                _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
 #elif USE_LITEETH
-        _rx_udp_receiver->stop();
+        _udp_streamer->stop(SOAPY_SDR_RX);
+        _udp_streamer->stop(SOAPY_SDR_TX);
 #endif
         _rx_stream.opened = false;
     }
@@ -390,6 +391,8 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
     /* Crossbar Demux: Select PCIe streaming */
     litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    /* Crossbar Mux: Select PCIe streaming */
+    litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
 
     /* Power-Down AD9361 */
     litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);
@@ -397,9 +400,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 #if USE_LITEPCIE
     close(_fd);
 #elif USE_LITEETH
-    if (_rx_udp_receiver) {
-        delete _rx_udp_receiver;
-        _rx_udp_receiver = NULL;
+    if (_udp_streamer) {
+        delete _udp_streamer;
+        _udp_streamer = NULL;
     }
     if (_fd) {
         eb_disconnect(&_fd);
