@@ -83,6 +83,7 @@ class CRG(LiteXModule):
         pll.create_clkout(self.cd_sys,    sys_clk_freq)
         pll.create_clkout(self.cd_clk10,  10e6)
         pll.create_clkout(self.cd_idelay, 200e6)
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_clkout_buf1]") # FIXME: Simplify clk10.
 
         # IDelayCtrl.
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
