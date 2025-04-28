@@ -1,9 +1,11 @@
+PREFIX ?= /usr/local
 CFLAGS  = -O2 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-PROGS=m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+BINARIES = m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio
+PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
 all: $(PROGS)
 
@@ -56,5 +58,11 @@ liblitepcie/%.o: liblitepcie/%.c
 
 ad9361/%.o: ad9361/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
+
+install: $(BINARIES)
+	install -d $(PREFIX)/bin
+	$(foreach bin,$(BINARIES), \
+		install -D -m 755 $(bin) $(PREFIX)/bin; \
+	)
 
 -include $(wildcard *.d)
