@@ -65,4 +65,17 @@ install: $(BINARIES)
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
 
+install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+	install -d $(PREFIX)/lib
+	$(foreach lib,$^, \
+		install -D -m 755 $(lib) $(PREFIX)/lib; \
+	)
+	install -d $(PREFIX)/include/litex_m2sdr
+	install -d $(PREFIX)/include/litex_m2sdr/kernel
+	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel
+	$(foreach inc,ad9361 liblitepcie libm2sdr libliteeth, \
+		install -d $(PREFIX)/include/litex_m2sdr/$(inc); \
+		install -m 644 $(inc)/*.h $(PREFIX)/include/litex_m2sdr/$(inc); \
+	)
+
 -include $(wildcard *.d)
