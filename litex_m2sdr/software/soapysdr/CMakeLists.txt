@@ -69,13 +69,13 @@ include_directories(${USER_INCLUDE_DIR})
 ## AD9361 discovery
 ########################################################################
 
-find_path(AD9361_INCLUDE_DIR ad9361.h
+find_path(AD9361_INCLUDE_DIR ad9361/ad9361.h
           REQUIRED
           HINTS
             ${CMAKE_CURRENT_SOURCE_DIR}/../..
           PATH_SUFFIXES
-            litex_m2sdr/ad9361
-            software/user/ad9361
+            litex_m2sdr
+            software/user
 )
 
 include_directories(${AD9361_INCLUDE_DIR})
