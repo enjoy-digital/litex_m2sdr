@@ -80,7 +80,6 @@ SoapySDR::Kwargs createDeviceKwargs(
         {"identification", getLiteXM2SDRIdentification(fd)},
         {"version",        "1234"},
         {"label",          ""},
-        {"bitmode",        "16"},
         {"oversampling",   "0"},
     };
     dev["label"] = generateDeviceLabel(dev, path);
