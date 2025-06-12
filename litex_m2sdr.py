@@ -480,8 +480,8 @@ class BaseSoC(SoCMini):
             #"main_s7pciephy_clkout3", # FIXME.
 
             # CRG.
-            "main_crg_clkout0",
-            "main_crg_clkout1",
+            "{{*crg_clkout0}}",
+            "{{*crg_clkout1}}",
 
             # RFIC.
             "rfic_clk",
