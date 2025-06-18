@@ -3,13 +3,14 @@ import subprocess
 
 # Generic PCIe Utilities ---------------------------------------------------------------------------
 
-def get_pcie_device_id(vendor, device):
+def get_pcie_device_ids(vendor, device):
     try:
         lspci_output = subprocess.check_output(["lspci", "-d", f"{vendor}:{device}"]).decode()
-        device_id = lspci_output.split()[0]
-        return device_id
-    except:
-        return None
+        # Split output into lines and extract device IDs (first field of each line)
+        device_ids = [line.split()[0] for line in lspci_output.strip().split('\n') if line]
+        return device_ids
+    except subprocess.CalledProcessError:
+        return []
 
 def remove_pcie_device(device_id, driver="litepcie"):
     if not device_id:

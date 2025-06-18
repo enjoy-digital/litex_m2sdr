@@ -8,7 +8,7 @@
 import argparse
 import subprocess
 
-from __init__ import get_pcie_device_id, remove_pcie_device, rescan_pcie_bus
+from __init__ import get_pcie_device_ids, remove_pcie_device, rescan_pcie_bus
 
 # Rescan Utilities ---------------------------------------------------------------------------------
 
@@ -31,11 +31,11 @@ def load_driver():
     subprocess.run("sudo modprobe m2sdr", shell=True)
 
 def get_device_ids():
-    return [
-        get_pcie_device_id("0x10ee", "0x7021"),
-        get_pcie_device_id("0x10ee", "0x7022"),
-        get_pcie_device_id("0x10ee", "0x7024"),
-    ]
+    return (
+        get_pcie_device_ids("0x10ee", "0x7021") +
+        get_pcie_device_ids("0x10ee", "0x7022") +
+        get_pcie_device_ids("0x10ee", "0x7024")
+    )
 
 # Main ---------------------------------------------------------------------------------------------
 
