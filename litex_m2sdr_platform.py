@@ -235,4 +235,5 @@ class Platform(Xilinx7SeriesPlatform):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
         self.add_period_constraint(self.lookup_request("clk100",      loose=True), 1e9/100e6)
         self.add_period_constraint(self.lookup_request("si5351_clk0", loose=True), 1e9/38.4e6)
+        self.add_period_constraint(self.lookup_request("si5351_clk1", loose=True), 1e9/100e6)
         self.add_period_constraint(self.lookup_request("sync_clk_in", loose=True), 1e9/10e6)
