@@ -526,13 +526,25 @@ class BaseSoC(SoCMini):
 
         if with_white_rabbit:
 
-            from litex_wr_nic.gateware.soc import LiteXWRNICSoC
+            from litex.soc.cores.uart import UARTPHY, UART
+
+            from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
+
+            # UART.
+            # -----
+
+            class UARTPads:
+                def __init__(self):
+                    self.tx = Signal()
+                    self.rx = Signal()
+
+            self.uart_xover_pads = UARTPads()
+            self.uart_xover_phy  = UARTPHY(self.uart_xover_pads, clk_freq=sys_clk_freq, baudrate=115200)
+            self.uart_xover      = UART(self.uart_xover_phy, rx_fifo_depth=128, rx_fifo_rx_we=True)
 
             # Core Instance.
             # --------------
-            serial_pads  = Record([("tx", 1), ("rx", 1)])   # FIXME: Use proper pads.
             sfp_i2c_pads = Record([("scl", 1), ("sda", 1)]) # FIXME: Use proper pads.
-
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
                 cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Add firmware build to target and fix location.
@@ -551,7 +563,7 @@ class BaseSoC(SoCMini):
                 with_ext_clk    = False,
 
                 # Serial.
-                serial_pads     = serial_pads, # FIXME.
+                serial_pads     = self.uart_xover_pads,
             )
             LiteXWRNICSoC.add_sources(self)
 
