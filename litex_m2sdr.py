@@ -35,6 +35,8 @@ from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
 from litepcie.common        import *
 from litepcie.phy.s7pciephy import S7PCIEPHY
+from litepcie.frontend.ptm  import PCIePTMSniffer
+from litepcie.frontend.ptm  import PTMCapabilities, PTMRequester
 
 from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
@@ -151,7 +153,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie     = True,  pcie_lanes=1,
+        with_pcie     = True,  with_pcie_ptm=False, pcie_lanes=1,
         with_eth      = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata     = False, sata_gen="gen2",
         with_jtagbone = True,
@@ -295,6 +297,7 @@ class BaseSoC(SoCMini):
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size   = 0x20000,
+                with_ptm    = with_pcie_ptm,
                 cd          = "sys",
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
@@ -312,10 +315,15 @@ class BaseSoC(SoCMini):
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
-                with_msi              = True
+                with_msi              = True,
+                with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
+            if with_pcie_ptm:
+                if pcie_lanes != 1:
+                    raise NotImplementedError("PCIe PTM only supported in PCIe Gen2 X1 for now.")
+                self.add_pcie_ptm()
 
         # Ethernet ---------------------------------------------------------------------------------
 
@@ -509,6 +517,91 @@ class BaseSoC(SoCMini):
             "clk4" : si5351_clk1,
         })
 
+
+    # Add PCIe PTM ---------------------------------------------------------------------------------
+
+    # TODO:
+    # - Improve integration.
+    # - Connect Time.
+    # - Integrate Driver.
+    # - Test phc2sys Host <-> Board regulation.
+
+    def add_pcie_ptm(self):
+        # PCIe PTM Sniffer.
+        # -----------------
+
+        # Since Xilinx PHY does not allow redirecting PTM TLP Messages to the AXI inferface, we have
+        # to sniff the GTPE2 -> PCIE2 RX Data to re-generate PTM TLP Messages.
+
+        # Sniffer Signals.
+        # ----------------
+        sniffer_rst_n   = Signal()
+        sniffer_clk     = Signal()
+        sniffer_rx_data = Signal(16)
+        sniffer_rx_ctl  = Signal(2)
+
+        # Sniffer Tap.
+        # ------------
+        rx_data = Signal(16)
+        rx_ctl  = Signal(2)
+        self.sync.pclk += rx_data.eq(rx_data + 1)
+        self.sync.pclk += rx_ctl.eq(rx_ctl + 1)
+        self.specials += Instance("sniffer_tap",
+            i_rst_n_in    = 1,
+            i_clk_in     = ClockSignal("pclk"),
+            i_rx_data_in = rx_data, # /!\ Fake, will be re-connected post-synthesis /!\.
+            i_rx_ctl_in  = rx_ctl,  # /!\ Fake, will be re-connected post-synthesis /!\.
+            o_rst_n_out   = sniffer_rst_n,
+            o_clk_out     = sniffer_clk,
+            o_rx_data_out = sniffer_rx_data,
+            o_rx_ctl_out  = sniffer_rx_ctl,
+        )
+
+        # Sniffer.
+        # --------
+        self.pcie_ptm_sniffer = PCIePTMSniffer(
+            rx_rst_n = sniffer_rst_n,
+            rx_clk   = sniffer_clk,
+            rx_data  = sniffer_rx_data,
+            rx_ctrl  = sniffer_rx_ctl,
+        )
+        self.pcie_ptm_sniffer.add_sources(self.platform)
+
+
+        # PTM
+        # ---
+
+        # PTM Capabilities.
+        self.ptm_capabilities = PTMCapabilities(
+            pcie_endpoint     = self.pcie_endpoint,
+            requester_capable = True,
+        )
+
+        # PTM Requester.
+        self.ptm_requester = PTMRequester(
+            pcie_endpoint    = self.pcie_endpoint,
+            pcie_ptm_sniffer = self.pcie_ptm_sniffer,
+            sys_clk_freq     = self.sys_clk_freq,
+        )
+
+        # Sniffer Post-Synthesis connections.
+        # -----------------------------------
+        pcie_ptm_sniffer_connections = []
+        for n in range(2):
+            pcie_ptm_sniffer_connections.append((
+                f"pcie_s7/inst/inst/gt_top_i/gt_rx_data_k_wire_filter[{n}]", # Src.
+                f"sniffer_tap/rx_ctl_in[{n}]",                               # Dst.
+            ))
+        for n in range(16):
+            pcie_ptm_sniffer_connections.append((
+                f"pcie_s7/inst/inst/gt_top_i/gt_rx_data_wire_filter[{n}]", # Src.
+                f"sniffer_tap/rx_data_in[{n}]",                            # Dst.
+            ))
+        for _from, _to in pcie_ptm_sniffer_connections:
+            self.platform.toolchain.pre_optimize_commands.append(f"set pin_driver [get_nets -of [get_pins {_to}]]")
+            self.platform.toolchain.pre_optimize_commands.append(f"disconnect_net -net $pin_driver -objects {_to}")
+            self.platform.toolchain.pre_optimize_commands.append(f"connect_net -hier -net {_from} -objects {_to}")
+
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
     def add_ad9361_spi_probe(self):
@@ -578,6 +671,7 @@ def main():
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
+    parser.add_argument("--with-pcie-ptm",   action="store_true", help="Enable PCIe PTM.")
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
 
     # Ethernet parameters.
@@ -606,6 +700,7 @@ def main():
 
         # PCIe.
         with_pcie     = args.with_pcie,
+        with_pcie_ptm = args.with_pcie_ptm,
         pcie_lanes    = args.pcie_lanes,
 
         # Ethernet.
