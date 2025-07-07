@@ -2,14 +2,18 @@
 KERNEL_VERSION := $(shell uname -r)
 KERNEL_PATH ?= /lib/modules/$(KERNEL_VERSION)/build
 
-obj-m = m2sdr.o
+obj-m = m2sdr.o liteuart.o
 m2sdr-objs = main.o
+liteuart-objs = liteuart.o
 
 # Default target
-all: m2sdr.ko
+all: m2sdr.ko liteuart.ko
 
-# Build the module
+# Build the modules
 m2sdr.ko: main.c litepcie.h config.h flags.h csr.h soc.h
+	make -C $(KERNEL_PATH) M=$(shell pwd) modules
+
+liteuart.ko: liteuart.c litepcie.h config.h flags.h csr.h soc.h
 	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 # Install the module to the kernel directory, enable auto-load on boot, and install udev rule to set
