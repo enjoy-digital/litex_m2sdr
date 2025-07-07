@@ -547,7 +547,7 @@ class BaseSoC(SoCMini):
             sfp_i2c_pads = Record([("scl", 1), ("sda", 1)]) # FIXME: Use proper pads.
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
-                cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Add firmware build to target and fix location.
+                cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
 
                 # Board name.
                 board_name       = "SAWR",
@@ -740,6 +740,13 @@ def main():
     probeopts.add_argument("--with-eth-tx-probe",          action="store_true", help="Enable Ethernet Tx Probe.")
 
     args = parser.parse_args()
+
+    # Build White Rabbit Firmware.
+    if args.with_white_rabbit & args.build:
+        print("Building White Rabbit firmware...")
+        r = os.system("cd ../litex_wr_nic/litex_wr_nic/firmware && ./build.py --target acorn") # FIXME: Avoid harcoded path/platform.
+        if r != 0:
+            raise RuntimeError("White Rabbit Firmware build failed.")
 
     # Build SoC.
     soc = BaseSoC(
