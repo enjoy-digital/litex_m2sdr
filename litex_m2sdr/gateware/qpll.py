@@ -13,7 +13,7 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 # Shared QPLL --------------------------------------------------------------------------------------
 
 class SharedQPLL(LiteXModule):
-    def __init__(self, platform, with_pcie=False, with_eth=False, eth_phy="1000basex", with_sata=False):
+    def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6, eth_phy="1000basex", with_sata=False):
         assert not (with_pcie and with_eth and with_sata) # QPLL only has 2 PLLs :(
 
         # PCIe QPLL Settings.
@@ -28,7 +28,7 @@ class SharedQPLL(LiteXModule):
         qpll_eth_settings = QPLLSettings(
             refclksel  = 0b111,
             fbdiv      = {"1000basex": 4, "2500basex": 5}[eth_phy],
-            fbdiv_45   = 4,
+            fbdiv_45   = {125e6: 5, 156.25e6 : 4}[eth_refclk_freq],
             refclk_div = 1,
         )
 

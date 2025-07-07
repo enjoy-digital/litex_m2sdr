@@ -223,10 +223,11 @@ class BaseSoC(SoCMini):
 
         # Shared QPLL.
         self.qpll = SharedQPLL(platform,
-            with_pcie = with_pcie,
-            with_eth  = with_eth | with_white_rabbit,
-            eth_phy   = eth_phy,
-            with_sata = with_sata,
+            with_pcie       = with_pcie,
+            with_eth        = with_eth | with_white_rabbit,
+            eth_phy         = eth_phy,
+            eth_refclk_freq = {True: 125e6, False: 156.25e6}[with_white_rabbit],
+            with_sata       = with_sata,
         )
 
         # Capability -------------------------------------------------------------------------------
@@ -559,7 +560,7 @@ class BaseSoC(SoCMini):
                 sfp_rx_polarity = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
 
                 # QPLL.
-                qpll            = self.qpll, # FIXME: Check generated frequency.
+                qpll            = self.qpll,
                 with_ext_clk    = False,
 
                 # Serial.
