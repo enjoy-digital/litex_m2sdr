@@ -543,8 +543,8 @@ class BaseSoC(SoCMini):
                 # SFP.
                 sfp_pads        = platform.request("sfp", 1),
                 sfp_i2c_pads    = sfp_i2c_pads,
-                sfp_tx_polarity = 0, # Inverted on Acorn and on baseboard. # FIXME: Adapt for M2SDR?
-                sfp_rx_polarity = 1, # Inverted on Acorn.                  # FIXME: Adapt for M2SDR?
+                sfp_tx_polarity = 1, # Inverted on M2SDR.
+                sfp_rx_polarity = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
 
                 # QPLL.
                 qpll            = self.qpll, # FIXME: Check generated frequency.
