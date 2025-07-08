@@ -540,8 +540,14 @@ class BaseSoC(SoCMini):
                     self.rx = Signal()
 
             self.uart_xover_pads = UARTPads()
+            self.shared_pads     = UARTPads()
             self.uart_xover_phy  = UARTPHY(self.uart_xover_pads, clk_freq=sys_clk_freq, baudrate=115200)
             self.uart_xover      = UART(self.uart_xover_phy, rx_fifo_depth=128, rx_fifo_rx_we=True)
+
+            self.comb += [
+                self.uart_xover_pads.rx.eq(self.shared_pads.tx),
+                self.shared_pads.rx.eq(self.uart_xover_pads.tx),
+            ]
 
             # Core Instance.
             # --------------
@@ -564,7 +570,7 @@ class BaseSoC(SoCMini):
                 with_ext_clk    = False,
 
                 # Serial.
-                serial_pads     = self.uart_xover_pads,
+                serial_pads     = self.shared_pads,
             )
             LiteXWRNICSoC.add_sources(self)
 
