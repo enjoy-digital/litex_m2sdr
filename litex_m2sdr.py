@@ -808,6 +808,8 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+        if args.with_white_rabbit:
+            r += f"_white_rabbit"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="csr.csv")
