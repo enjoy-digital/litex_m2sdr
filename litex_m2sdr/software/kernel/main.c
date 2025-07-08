@@ -1252,7 +1252,9 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 		free_irq(irq, litepcie_dev);
 	}
 
+#ifdef CSR_UART_XOVER_RXTX_ADDR
 	platform_device_unregister(litepcie_dev->uart);
+#endif
 
 	litepcie_free_chdev(litepcie_dev);
 
