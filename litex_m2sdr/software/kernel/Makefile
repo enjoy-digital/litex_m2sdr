@@ -4,7 +4,6 @@ KERNEL_PATH ?= /lib/modules/$(KERNEL_VERSION)/build
 
 obj-m = m2sdr.o liteuart.o
 m2sdr-objs = main.o
-liteuart-objs = liteuart.o
 
 # Default target
 all: m2sdr.ko liteuart.ko
