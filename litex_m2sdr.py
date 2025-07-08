@@ -572,7 +572,7 @@ class BaseSoC(SoCMini):
                 board_name       = "SAWR",
 
                 # SFP.
-                sfp_pads        = platform.request("sfp", 1),
+                sfp_pads        = platform.request("sfp", 0),
                 sfp_i2c_pads    = sfp_i2c_pads,
                 sfp_tx_polarity = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
                 sfp_rx_polarity = 1, # Inverted on M2SDR.
@@ -785,7 +785,7 @@ def main():
     parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
 
     # White Rabbit parameters.
-    parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support (on SFP1).")
+    parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support (on SFP0).")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
