@@ -95,7 +95,8 @@ class CRG(LiteXModule):
         self.comb += self.pll.reset.eq(self.rst)
         pll.register_clkin(clk100, 100e6)
         pll.create_clkout(self.cd_sys,    sys_clk_freq)
-        pll.create_clkout(self.cd_clk10,  10e6)
+        if not with_white_rabbit:
+            pll.create_clkout(self.cd_clk10, 10e6)
         pll.create_clkout(self.cd_idelay, 200e6)
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_clkout_buf1]")       # FIXME: Simplify clk10.
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_s7pll_clkout_buf1]") # FIXME: Simplify clk10.
@@ -585,6 +586,14 @@ class BaseSoC(SoCMini):
                 serial_pads     = self.shared_pads,
             )
             LiteXWRNICSoC.add_sources(self)
+
+            # Clk10M Generator.
+            # -----------------
+
+            self.syncout_pll = syncout_pll = S7MMCM(speedgrade=-2)
+            self.comb += syncout_pll.reset.eq(ResetSignal("wr"))
+            syncout_pll.register_clkin(ClockSignal("wr"), 62.5e6)
+            syncout_pll.create_clkout(self.crg.cd_clk10, 10e6, margin=0, phase=0)
 
             # RefClk MMCM Phase Shift.
             # ------------------------
