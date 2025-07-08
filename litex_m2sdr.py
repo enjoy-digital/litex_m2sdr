@@ -629,31 +629,67 @@ class BaseSoC(SoCMini):
 
         # Timing Constraints/False Paths -----------------------------------------------------------
 
-        platform.add_false_path_constraints(
-            # PCIe.
-            #"main_s7pciephy_clkout0", # FIXME.
-            #"main_s7pciephy_clkout1", # FIXME.
-            #"main_s7pciephy_clkout2", # FIXME.
-            #"main_s7pciephy_clkout3", # FIXME.
 
-            # CRG.
-            "clk100",
-            "{{*crg_clkout0}}",
-            "{{*crg_clkout1}}",
+        if with_white_rabbit:
+            platform.add_false_path_constraints(
+                # PCIe.
+                #"main_s7pciephy_clkout0", # FIXME.
+                #"main_s7pciephy_clkout1", # FIXME.
+                #"main_s7pciephy_clkout2", # FIXME.
+                #"main_s7pciephy_clkout3", # FIXME.
 
-            # RFIC.
-            "rfic_clk",
+                # CRG.
+                "clk100",
+                "clk_sys",
+                "{{*crg_s7pll_clkout0}}",
+                "{{*crg_s7pll_clkout1}}",
 
-            # Internal Primitives.
-            "dna_clk",
-            "jtag_clk",
-            "icap_clk",
+                # RFIC.
+                "rfic_clk",
 
-            # Sync.
-            "si5351_clk0",
-            "si5351_clk1",
-            "sync_clk_in",
-        )
+                # Internal Primitives.
+                "dna_clk",
+                "jtag_clk",
+                "icap_clk",
+
+                # Sync.
+                "si5351_clk0",
+                "si5351_clk1",
+                "sync_clk_in",
+
+                # White Rabbit.
+                "wr_rxoutclk",
+                "wr_txoutclk",
+                "{{*crg_s7mmcm0_clkout}}",
+                "{{*crg_s7mmcm1_clkout}}",
+            )
+        else:
+            platform.add_false_path_constraints(
+                # PCIe.
+                #"main_s7pciephy_clkout0", # FIXME.
+                #"main_s7pciephy_clkout1", # FIXME.
+                #"main_s7pciephy_clkout2", # FIXME.
+                #"main_s7pciephy_clkout3", # FIXME.
+
+                # CRG.
+                "clk100",
+                "{{*crg_clkout0}}",
+                "{{*crg_clkout1}}",
+
+                # RFIC.
+                "rfic_clk",
+
+                # Internal Primitives.
+                "dna_clk",
+                "jtag_clk",
+                "icap_clk",
+
+                # Sync.
+                "si5351_clk0",
+                "si5351_clk1",
+                "sync_clk_in",
+            )
+
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_s7pll0_clkout_buf1}}]")
 
         # Clk Measurements -------------------------------------------------------------------------
