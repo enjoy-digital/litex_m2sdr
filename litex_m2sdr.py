@@ -195,7 +195,7 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen="gen2",
         with_white_rabbit      = False,
         with_jtagbone          = True,
-        with_rfic_oversampling = True,
+        with_rfic_oversampling = False,
     ):
         # Platform ---------------------------------------------------------------------------------
 
