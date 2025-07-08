@@ -536,8 +536,9 @@ class BaseSoC(SoCMini):
 
             _sfp_i2c_io = [
                 ("sfp_i2c", 0,
-                    Subsignal("sda",  Pins("A14")),
-                    Subsignal("scl",  Pins("A13")),
+                    Subsignal("sda",  Pins("M2:SMB_DAT")),
+                    Subsignal("scl",  Pins("M2:SMB_CLK")),
+                    IOStandard("LVCMOS33"),
                 ),
             ]
             platform.add_extension(_sfp_i2c_io)
