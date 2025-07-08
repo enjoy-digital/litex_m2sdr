@@ -531,6 +531,17 @@ class BaseSoC(SoCMini):
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
 
+            # IOs.
+            # ----
+
+            _sfp_i2c_io = [
+                ("sfp_i2c", 0,
+                    Subsignal("sda",  Pins("A14")),
+                    Subsignal("scl",  Pins("A13")),
+                ),
+            ]
+            platform.add_extension(_sfp_i2c_io)
+
             # UART.
             # -----
 
@@ -551,7 +562,7 @@ class BaseSoC(SoCMini):
 
             # Core Instance.
             # --------------
-            sfp_i2c_pads = Record([("scl", 1), ("sda", 1)]) # FIXME: Use proper pads.
+            sfp_i2c_pads = platform.request("sfp_i2c")
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
                 cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
