@@ -134,7 +134,7 @@ class CRG(LiteXModule):
             # DMTD MMCM (62.5MHz).
             self.dmtd_mmcm = S7MMCM(speedgrade=-3)
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
-            self.dmtd_mmcm.register_clkin(ClockSignal("clk100"), 200e6)
+            self.dmtd_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.dmtd_mmcm.create_clkout(self.cd_clk_62m5_dmtd, 62.5e6, margin=0)
             self.dmtd_mmcm.expose_dps("clk100", with_csr=False)
             self.dmtd_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
