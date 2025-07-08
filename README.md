@@ -57,6 +57,36 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 
 *Note: The differences between the variants are relevant only for specific use cases. The SI5351B variant is mostly intended for advanced users with specialized clock control requirements.*
 
+[> Capabilities Overview
+------------------------
+
+| Feature                          | Mounted in M.2 Slot         | Mounted in Baseboard         | Parameter(s) to Enable                        |
+|----------------------------------|------------------------------|-----------------------------|-----------------------------------------------|
+| **SDR Functionality**           |                              |                              |                                               |
+| SDR TX (AD9361)                 | ✅                           | ✅                           | (always included)                             |
+| SDR RX (AD9361)                 | ✅                           | ✅                           | (always included)                             |
+| Oversampling (122.88MSPS)       | ✅  (PCIe Gen2 x2/x4 only)   | ❌                           | `--with-pcie --pcie-lanes=2|4`                |
+| C API + Utilities               | ✅                           | ✅                           | (included in software build)                  |
+| SoapySDR Support                | ✅                           | ✅                           | (via optional SoapySDR driver)                |
+|                                 |                              |                              |                                               |
+| **Connectivity**                |                              |                              |                                               |
+| PCIe (up to Gen2 x4)            | ✅                           | ✅ (x1 only)                 | `--with-pcie --pcie-lanes=1|2|4`              |
+| Ethernet (1G/2.5G)              | ❌                           | ✅                           | `--with-eth`                                  |
+| ├─ Ethernet RX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
+| └─ Ethernet TX (LiteEth)        | ❌                           | ⚠️ (in development)          | (included with `--with-eth`)                  |
+|                                 |                              |                              |                                               |
+| **Timing & Sync**               |                              |                              |                                               |
+| PTM (Precision Time Measurement)| ✅ (PCIe Gen2 x1 only)       | ✅ (PCIe Gen2 x1 only)       | `--with-pcie --pcie-lanes=1 --with-pcie-ptm`  |
+| White Rabbit Support            | ❌                           | ✅                           | `--with-white-rabbit`                         |
+| External Clocking               | ✅ (SI5351C: ext. 10MHz)     | ✅ (SI5351C: ext. 10MHz)     | (SI5351B VCXO mode in dev for PTM regulation) |
+|                                 |                              |                              |                                               |
+| **Storage**                     |                              |                              |                                               |
+| SATA                            | ❌                           | ⚠️ (in development)          | `--with-sata`                                 |
+|                                 |                              |                              |                                               |
+| **System Features**             |                              |                              |                                               |
+| Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
+| GPIO                            | ✅                           | ✅                           | (always included)                             |
+
 [> PCIe SoC Design
 ------------------
 
