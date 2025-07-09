@@ -7,8 +7,21 @@
 
 ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
 
+
+[> Contents
+-----------
+
+1. [Intro](#intro)
+2. [Hardware Availability](#hardware-availability)
+3. [Capabilities Overview](#capabilities-overview)
+4. [PCIe SoC Design](#pcie-soc-design)
+5. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
+6. [Quick Start](#quick-start)
+7. [Contact](#contact)
+
 [> Intro
 --------
+<a id="intro"></a>
 
 We know what you'll first ask when discovering this new SDR project: what's the RFIC? 🤔 Let's answer straight away: Another **AD936X**-based SDR! 😄
 
@@ -47,6 +60,7 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 
 [> Hardware Availability
 ------------------------
+<a id="hardware-availability"></a>
 The LiteX-M2SDR board is now fully commercialized and available for purchase from our webshop: [Enjoy-Digital Shop](https://enjoy-digital-shop.myshopify.com).
 
 The hardware has been thoroughly tested with several SDR softwares compatible with SoapySDR as well as with our Bare metal C utilities.
@@ -59,6 +73,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 
 [> Capabilities Overview
 ------------------------
+<a id="capabilities-overview"></a>
 
 | Feature                          | Mounted in M.2 Slot         | Mounted in Baseboard         | Parameter(s) to Enable                        |
 |----------------------------------|------------------------------|-----------------------------|-----------------------------------------------|
@@ -89,6 +104,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 
 [> PCIe SoC Design
 ------------------
+<a id="pcie-soc-design"></a>
 
 The PCIe design is the first variant developed for the board and does not require an additional baseboard. Just pop the M2SDR into a PCIe M2 slot, connect your antennas, and you're ready to go! 🚀
 
@@ -107,6 +123,7 @@ The PCIe design has already been validated at the maximum AD9361 specified sampl
 
 [> Ethernet SoC Design (1/2.5Gbps x 1 or 2).
 --------------------------------------------
+<a id="ethernet-soc-design"></a>
 
 > [!WARNING]
 >
@@ -124,6 +141,7 @@ The Ethernet SoC design is RX capable only for now. TX support will come soon.
 
 [> Getting Started
 ------------------
+<a id="quick-start"></a>
 
 ### For SDR Enthusiasts
 
@@ -292,6 +310,8 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
 
 [> Contact
 ----------
+<a id="contact"></a>
+
 Got a unique idea or need a tweak? Whether it's custom FPGA/software development or hardware adjustments (like adapter boards) for your LiteX M2 SDR, we're here to help! Feel free to drop us a line or visit our website. We'd love to hear from you!
 
 E-mail: florent@enjoy-digital.fr
