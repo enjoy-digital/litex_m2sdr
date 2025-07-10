@@ -35,19 +35,23 @@ static void m2sdr_record(const char *device_name, const char *filename, uint32_t
 {
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
 
-    FILE * fo = NULL;
+    FILE *fo = NULL;
     int i = 0;
     size_t len;
     size_t total_len = 0;
     int64_t last_time;
     int64_t writer_sw_count_last = 0;
 
-    /* Open File to write to. */
+    /* Open File or use stdout */
     if (filename != NULL) {
-        fo = fopen(filename, "wb");
-        if (!fo) {
-            perror(filename);
-            exit(1);
+        if (strcmp(filename, "-") == 0) {
+            fo = stdout;
+        } else {
+            fo = fopen(filename, "wb");
+            if (!fo) {
+                perror(filename);
+                exit(1);
+            }
         }
     }
 
@@ -74,8 +78,8 @@ static void m2sdr_record(const char *device_name, const char *filename, uint32_t
             /* Break when no buffer available for Read. */
             if (!buf_rd)
                 break;
-            /* Copy Read data to File. */
-            if (filename != NULL) {
+            /* Copy Read data to File or stdout. */
+            if (fo != NULL) {
                 len = fwrite(buf_rd, 1, fmin(size - total_len, DMA_BUFFER_SIZE), fo);
                 total_len += len;
             }
@@ -105,8 +109,8 @@ static void m2sdr_record(const char *device_name, const char *filename, uint32_t
     /* Cleanup DMA. */
     litepcie_dma_cleanup(&dma);
 
-    /* Close File. */
-    if (filename != NULL)
+    /* Close File if not stdout */
+    if (fo != NULL && fo != stdout)
         fclose(fo);
 }
 
@@ -171,16 +175,13 @@ int main(int argc, char **argv)
     const char *filename = NULL;
     uint32_t size = 0;
     if (optind != argc) {
-        if (optind + 2 > argc)
-            goto show_help;
-        filename = argv[optind++];
-        size = strtoul(argv[optind++], NULL, 0);
+        filename = argv[optind++];  /* Allow filename to be provided or "-" */
+        if (optind < argc) {        /* Size is optional */
+            size = strtoul(argv[optind++], NULL, 0);
+        }
+    } else {
+        filename = "-";  /* Default to stdout if no filename provided */
     }
     m2sdr_record(litepcie_device, filename, size, litepcie_device_zero_copy);
-    return 0;
-
-show_help:
-        help();
-
     return 0;
 }
