@@ -7,17 +7,18 @@
 
 ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
 
+[> TL;DR
+---------
+- **What?** LiteX‑based M.2 2280 SDR board featuring a Xilinx **Artix‑7 XC7A200T** FPGA and an **ADI AD9361** RFIC.
+- **Why?** Open‑source gateware/software, up to 61.44 MSPS (122.88 MSPS†) over PCIe Gen2 ×4, hack‑friendly clocking & debug.
+- **Who?** SDR tinkerers, FPGA devs, time‑sync enthusiats or anyone hitting the limits of other SDRs.
+- **How fast?** `apt install …` → `./build.py` → **stream/record IQ in ≈5 min** with our C API/tools or any SoapySDR compatible software.
 
-[> Contents
------------
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">
+</div>
 
-1. [Intro](#intro)
-2. [Hardware Availability](#hardware-availability)
-3. [Capabilities Overview](#capabilities-overview)
-4. [PCIe SoC Design](#pcie-soc-design)
-5. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
-6. [Quick Start](#quick-start)
-7. [Contact](#contact)
+† Oversampling needs PCIe Gen2 ×2/×4 bandwidth.
 
 [> Intro
 --------
@@ -57,6 +58,16 @@ For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly 
 </div>
 
 Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
+
+[> Contents
+-----------
+
+1. [Hardware Availability](#hardware-availability)
+2. [Capabilities Overview](#capabilities-overview)
+3. [PCIe SoC Design](#pcie-soc-design)
+4. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
+5. [Quick Start](#quick-start)
+6. [Contact](#contact)
 
 [> Hardware Availability
 ------------------------
