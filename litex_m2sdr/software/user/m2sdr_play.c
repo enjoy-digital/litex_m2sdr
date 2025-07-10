@@ -35,7 +35,8 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
-    FILE * fo;
+    FILE *fo;
+    int close_fo = 0;
     int i = 0;
     size_t len;
     int64_t reader_sw_count_last = 0;
@@ -44,11 +45,16 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
     uint64_t sw_underflows = 0;
     int64_t hw_count_stop = 0;
 
-    /* Open File to read from. */
-    fo = fopen(filename, "rb");
-    if (!fo) {
-        perror(filename);
-        exit(1);
+    /* Open File or use stdin */
+    if (strcmp(filename, "-") == 0) {
+        fo = stdin;
+    } else {
+        fo = fopen(filename, "rb");
+        if (!fo) {
+            perror(filename);
+            exit(1);
+        }
+        close_fo = 1;
     }
 
     /* Initialize DMA. */
@@ -83,19 +89,21 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
             /* Read data from File and fill Write buffer */
             len = fread(buf_wr, 1, DMA_BUFFER_SIZE, fo);
             if (feof(fo)) {
-                /* Rewind on end of file. */
+                /* Rewind on end of file, but not for stdin */
                 current_loop += 1;
                 if (loops != 0 && current_loop >= loops)
                     keep_running = 0;
-                rewind(fo);
-                len += fread(buf_wr + len, 1, DMA_BUFFER_SIZE - len, fo);
+                if (strcmp(filename, "-") != 0) {
+                    rewind(fo);
+                    len += fread(buf_wr + len, 1, DMA_BUFFER_SIZE - len, fo);
+                }
             }
         }
 
         /* Statistics every 200ms. */
         int64_t duration = get_time_ms() - last_time;
         if (duration > 200) {
-             /* Print banner every 10 lines. */
+            /* Print banner every 10 lines. */
             if (i % 10 == 0)
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");
             i++;
@@ -106,7 +114,7 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
                    (dma.reader_sw_count * DMA_BUFFER_SIZE) / 1024 / 1024,
                    current_loop,
                    sw_underflows);
-           /* Update time/count/underflows. */
+            /* Update time/count/underflows. */
             last_time = get_time_ms();
             reader_sw_count_last = dma.reader_hw_count;
             sw_underflows = 0;
@@ -122,8 +130,9 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
     /* Cleanup DMA. */
     litepcie_dma_cleanup(&dma);
 
-    /* Close File. */
-    fclose(fo);
+    /* Close File if not stdin */
+    if (close_fo)
+        fclose(fo);
 }
 
 /* Help */
@@ -180,26 +189,25 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Show help when too much args. */
-    if (optind >= argc)
-        help();
-
     /* Select device. */
     snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
 
     /* Interpret cmd and play. */
     const char *filename;
     uint32_t loops = 1;
-    if (optind + 1 > argc)
-        goto show_help;
-    filename = argv[optind++];
-    if (optind < argc)
-        loops = strtoul(argv[optind++], NULL, 0);
-    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
-    return 0;
-
-show_help:
+    if (optind < argc) {
+        filename = argv[optind++];
+        if (strcmp(filename, "-") == 0) {
+            loops = 1;
+        } else if (optind < argc) {
+            loops = strtoul(argv[optind++], NULL, 0);
+        }
+    } else if (!isatty(STDIN_FILENO)) {
+        filename = "-";
+        loops = 1;
+    } else {
         help();
-
+    }
+    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
     return 0;
 }
