@@ -70,6 +70,7 @@ class CRG(LiteXModule):
         self.cd_clk10         = ClockDomain()
 
         self.cd_clk100        = ClockDomain()
+        self.cd_clk200        = ClockDomain()
         self.cd_idelay        = ClockDomain()
 
         self.cd_refclk_pcie   = ClockDomain()
@@ -98,6 +99,8 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             pll.create_clkout(self.cd_clk10, 10e6)
         pll.create_clkout(self.cd_idelay, 200e6)
+        self.comb += self.cd_clk200.clk.eq(self.cd_idelay.clk)
+        self.comb += self.cd_clk200.rst.eq(self.cd_idelay.rst)
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_clkout_buf1]")       # FIXME: Simplify clk10.
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_s7pll_clkout_buf1]") # FIXME: Simplify clk10.
         self.comb += self.cd_clk100.clk.eq(pll.clkin)
@@ -128,7 +131,7 @@ class CRG(LiteXModule):
             self.comb += self.refclk_mmcm.reset.eq(self.rst)
             self.refclk_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.refclk_mmcm.create_clkout(self.cd_clk_125m_gtp,  125e6, margin=0)
-            self.refclk_mmcm.expose_dps("clk100", with_csr=False)
+            self.refclk_mmcm.expose_dps("clk200", with_csr=False)
             self.refclk_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
             self.comb += self.cd_refclk_eth.clk.eq(self.cd_clk_125m_gtp.clk)
 
@@ -137,7 +140,7 @@ class CRG(LiteXModule):
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
             self.dmtd_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.dmtd_mmcm.create_clkout(self.cd_clk_62m5_dmtd, 62.5e6, margin=0)
-            self.dmtd_mmcm.expose_dps("clk100", with_csr=False)
+            self.dmtd_mmcm.expose_dps("clk200", with_csr=False)
             self.dmtd_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
 
 # BaseSoC ------------------------------------------------------------------------------------------
@@ -251,7 +254,7 @@ class BaseSoC(SoCMini):
             sata_gen        = sata_gen,
 
             # GPIO Capabilities.
-            gpio_enabled    = True,
+            gpio_enabled    = False,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -524,6 +527,12 @@ class BaseSoC(SoCMini):
         # Use GPIO0 as ClkIn.
         self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
 
+        #platform.add_extension([
+        #    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),
+        #])
+
+        #self.comb += platform.request('wr_clk_out').eq(ClockSignal('wr'))
+
         # White Rabbit -----------------------------------------------------------------------------
 
         if with_white_rabbit:
@@ -531,6 +540,7 @@ class BaseSoC(SoCMini):
             from litex.soc.cores.uart import UARTPHY, UART
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
+            from litex_wr_nic.gateware.ps_gen  import PSGen
 
             # IOs.
             # ----
@@ -567,7 +577,7 @@ class BaseSoC(SoCMini):
             sfp_i2c_pads = platform.request("sfp_i2c")
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
-                cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
+                cpu_firmware    = "../litex_wr_nic_ours/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
 
                 # Board name.
                 board_name       = "SAWR",
@@ -597,37 +607,27 @@ class BaseSoC(SoCMini):
 
             # RefClk MMCM Phase Shift.
             # ------------------------
-            self.refclk_mmcm_ps_gen = Instance("ps_gen",
-                p_WIDTH       = 16,
-                p_DIV         = 16,
-                p_MULT        = 7,
-
-                i_pswidth     = self.dac_refclk_data,
-                i_pswidth_set = self.dac_refclk_load,
-                i_pswidth_clk = ClockSignal("wr"),
-
-                i_psclk       = ClockSignal("clk100"),
-                i_psdone      = self.crg.refclk_mmcm.psdone,
-                o_psen        = self.crg.refclk_mmcm.psen,
-                o_psincdec    = self.crg.refclk_mmcm.psincdec,
-            )
+            self.refclk_mmcm_ps_gen = PSGen(
+                 cd_psclk    = "clk200",
+                 cd_sys      = "wr",
+                 ctrl_size   = 16,
+                 )
+            self.comb += self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data)
+            self.comb += self.refclk_mmcm_ps_gen.ctrl_load.eq(self.dac_refclk_load)
+            self.comb += self.crg.refclk_mmcm.psen.eq(self.refclk_mmcm_ps_gen.psen)
+            self.comb += self.crg.refclk_mmcm.psincdec.eq(self.refclk_mmcm_ps_gen.psincdec)
 
             # DMTD MMCM Phase Shift.
             # ----------------------
-            self.dac_mmcm_ps_gen = Instance("ps_gen",
-                p_WIDTH       = 16,
-                p_DIV         = 16,
-                p_MULT        = 7,
-
-                i_pswidth     = self.dac_dmtd_data,
-                i_pswidth_set = self.dac_dmtd_load,
-                i_pswidth_clk = ClockSignal("wr"),
-
-                i_psclk       = ClockSignal("clk100"),
-                i_psdone      = self.crg.dmtd_mmcm.psdone,
-                o_psen        = self.crg.dmtd_mmcm.psen,
-                o_psincdec    = self.crg.dmtd_mmcm.psincdec,
-            )
+            self.dmtd_mmcm_ps_gen = PSGen(
+                 cd_psclk    = "clk200",
+                 cd_sys      = "wr",
+                 ctrl_size   = 16,
+                 )
+            self.comb += self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data)
+            self.comb += self.dmtd_mmcm_ps_gen.ctrl_load.eq(self.dac_dmtd_load)
+            self.comb += self.crg.dmtd_mmcm.psen.eq(self.dmtd_mmcm_ps_gen.psen)
+            self.comb += self.crg.dmtd_mmcm.psincdec.eq(self.dmtd_mmcm_ps_gen.psincdec)
 
             # Timings Constraints.
             # --------------------
