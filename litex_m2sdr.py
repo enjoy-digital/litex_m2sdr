@@ -254,7 +254,7 @@ class BaseSoC(SoCMini):
             sata_gen        = sata_gen,
 
             # GPIO Capabilities.
-            gpio_enabled    = False,
+            gpio_enabled    = True,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -577,7 +577,7 @@ class BaseSoC(SoCMini):
             sfp_i2c_pads = platform.request("sfp_i2c")
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
-                cpu_firmware    = "../litex_wr_nic_ours/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
+                cpu_firmware    = "../litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
 
                 # Board name.
                 board_name       = "SAWR",
