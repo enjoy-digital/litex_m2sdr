@@ -49,7 +49,7 @@ static void generate_sine_table(int16_t *sine_table, int bits) {
     }
 }
 
-static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits) {
+static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, const char *preemphasis_type) {
     /* Modulate audio to interleaved 16-bit I/Q samples in streaming fashion */
     int N = SINE_TABLE_SIZE;
     int shift = 32;
@@ -62,6 +62,23 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
 
     /* Assume audio is normalized to [-1, 1] for streaming */
     const int64_t max_val = 32767LL;
+
+    /* Pre-emphasis configuration */
+    double tau = 0.0;
+    if (strcmp(preemphasis_type, "eu") == 0) {
+        tau = 50e-6;
+    } else if (strcmp(preemphasis_type, "us") == 0) {
+        tau = 75e-6;
+    } else if (strcmp(preemphasis_type, "none") == 0) {
+        tau = 0.0;
+    }
+    double b0 = 0.0, b1 = 0.0;
+    static double prev_x = 0.0;
+    static double prev_y = 0.0;
+    if (tau > 0.0) {
+        b0 = 1.0 + 2.0 * tau * samplerate;
+        b1 = 1.0 - 2.0 * tau * samplerate;
+    }
 
     /* Setup buffers */
     float *in_chunk = malloc(sizeof(float) * CHUNK_SIZE * sfinfo->channels);
@@ -159,7 +176,14 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
 
         /* Modulate and write directly */
         for (sf_count_t i = 0; i < process_frames; i++) {
-            int64_t sample = llround(process_buffer[i] * 32767.0);
+            double x = process_buffer[i];
+            double y = x;
+            if (tau > 0.0) {
+                y = b0 * x + b1 * prev_x - prev_y;
+                prev_x = x;
+                prev_y = y;
+            }
+            int64_t sample = llround(y * 32767.0);
             int64_t phase_increment = (sample * multiplier) / (max_val * (1LL << shift));
             phase_int += phase_increment;
             phase_int %= N;
@@ -194,7 +218,14 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
 
         /* Modulate and write remaining */
         for (sf_count_t i = 0; i < process_frames; i++) {
-            int64_t sample = llround(process_buffer[i] * 32767.0);
+            double x = process_buffer[i];
+            double y = x;
+            if (tau > 0.0) {
+                y = b0 * x + b1 * prev_x - prev_y;
+                prev_x = x;
+                prev_y = y;
+            }
+            int64_t sample = llround(y * 32767.0);
             int64_t phase_increment = (sample * multiplier) / (max_val * (1LL << shift));
             phase_int += phase_increment;
             phase_int %= N;
@@ -227,14 +258,15 @@ static void help(void) {
            "usage: m2sdr_fm_tx [options] input output\n"
            "\n"
            "Options:\n"
-           "-h, --help            Display this help message.\n"
-           "-s, --samplerate sps  Set sample rate in SPS (default: 500000).\n"
-           "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
-           "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "-h, --help                Display this help message.\n"
+           "-s, --samplerate sps      Set sample rate in SPS (default: 500000).\n"
+           "-d, --deviation dev       Set FM deviation in Hz (default: 75000).\n"
+           "-b, --bits bits           Set bits per I/Q sample (≤16, default: 12).\n"
+           "-p, --preemphasis type    Set pre-emphasis type: eu, us, none (default: eu).\n"
            "\n"
            "Arguments:\n"
-           "input                 Input WAV file (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
-           "output                Output file for I/Q samples ('-' for stdout).\n"
+           "input                     Input WAV file (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
+           "output                    Output file for I/Q samples ('-' for stdout).\n"
            "\n"
            "Example:\n"
            "m2sdr_fm_tx -s 500000 -d 75000 -b 12 input.wav output.bin\n"
@@ -247,11 +279,12 @@ static void help(void) {
 /*------*/
 
 static struct option options[] = {
-    { "help",       no_argument,       NULL, 'h' },
-    { "samplerate", required_argument, NULL, 's' },
-    { "deviation",  required_argument, NULL, 'd' },
-    { "bits",       required_argument, NULL, 'b' },
-    { NULL,         0,                 NULL, 0 }
+    { "help",         no_argument,       NULL, 'h' },
+    { "samplerate",   required_argument, NULL, 's' },
+    { "deviation",    required_argument, NULL, 'd' },
+    { "bits",         required_argument, NULL, 'b' },
+    { "preemphasis",  required_argument, NULL, 'p' },
+    { NULL,           0,                 NULL, 0 }
 };
 
 int main(int argc, char **argv) {
@@ -263,10 +296,11 @@ int main(int argc, char **argv) {
     double samplerate = 500000.0;
     double deviation = 75000.0;
     int bits = 12;
+    char *preemphasis_type = "eu";
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:p:", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -281,9 +315,20 @@ int main(int argc, char **argv) {
         case 'b':
             bits = atoi(optarg);
             break;
+        case 'p':
+            preemphasis_type = optarg;
+            break;
         default:
             exit(1);
         }
+    }
+
+    /* Validate pre-emphasis type */
+    if (strcmp(preemphasis_type, "eu") != 0 &&
+        strcmp(preemphasis_type, "us") != 0 &&
+        strcmp(preemphasis_type, "none") != 0) {
+        fprintf(stderr, "Error: Invalid pre-emphasis type. Must be 'eu', 'us', or 'none'.\n");
+        exit(1);
     }
 
     /* Validate positional arguments */
@@ -321,7 +366,7 @@ int main(int argc, char **argv) {
     }
 
     /* Perform FM modulation */
-    modulate_audio(infile, &sfinfo, outfile, samplerate, deviation, bits);
+    modulate_audio(infile, &sfinfo, outfile, samplerate, deviation, bits, preemphasis_type);
 
     /* Cleanup */
     sf_close(infile);
