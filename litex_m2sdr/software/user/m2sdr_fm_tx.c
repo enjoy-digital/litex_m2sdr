@@ -49,7 +49,7 @@ static void generate_sine_table(int16_t *sine_table, int bits) {
     }
 }
 
-static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, const char *preemphasis_type) {
+static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode) {
     /* Modulate audio to interleaved 16-bit I/Q samples in streaming fashion */
     int N = SINE_TABLE_SIZE;
     int shift = 32;
@@ -63,22 +63,21 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
     /* Assume audio is normalized to [-1, 1] for streaming */
     const int64_t max_val = 32767LL;
 
-    /* Pre-emphasis configuration */
-    double tau = 0.0;
-    if (strcmp(preemphasis_type, "eu") == 0) {
-        tau = 50e-6;
-    } else if (strcmp(preemphasis_type, "us") == 0) {
-        tau = 75e-6;
-    } else if (strcmp(preemphasis_type, "none") == 0) {
-        tau = 0.0;
-    }
+    /* Determine audio channels */
+    int audio_channels = (strcmp(mode, "stereo") == 0) ? 2 : 1;
+
+    /* Pre-emphasis */
     double b0 = 0.0, b1 = 0.0;
-    static double prev_x = 0.0;
-    static double prev_y = 0.0;
     if (tau > 0.0) {
         b0 = 1.0 + 2.0 * tau * samplerate;
         b1 = 1.0 - 2.0 * tau * samplerate;
     }
+    static double prev_x[2] = {0.0, 0.0};
+    static double prev_y[2] = {0.0, 0.0};
+
+    /* Stereo parameters */
+    static double pilot_phase = 0.0;
+    double pilot_inc = 2 * M_PI * 19000.0 / samplerate;
 
     /* Setup buffers */
     float *in_chunk = malloc(sizeof(float) * CHUNK_SIZE * sfinfo->channels);
@@ -86,9 +85,9 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
         fprintf(stderr, "Error: Memory allocation failed for input chunk\n");
         exit(1);
     }
-    float *mono_chunk = malloc(sizeof(float) * CHUNK_SIZE);
-    if (!mono_chunk) {
-        fprintf(stderr, "Error: Memory allocation failed for mono chunk\n");
+    float *audio_chunk = malloc(sizeof(float) * CHUNK_SIZE * audio_channels);
+    if (!audio_chunk) {
+        fprintf(stderr, "Error: Memory allocation failed for audio chunk\n");
         free(in_chunk);
         exit(1);
     }
@@ -103,21 +102,21 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
     if (resampling_needed) {
         src_ratio = samplerate / sfinfo->samplerate;
         max_out_frames = (int)(CHUNK_SIZE * src_ratio) + 1024; /* Generous margin for filter state */
-        out_chunk = malloc(sizeof(float) * max_out_frames);
+        out_chunk = malloc(sizeof(float) * max_out_frames * audio_channels);
         if (!out_chunk) {
             fprintf(stderr, "Error: Memory allocation failed for output chunk\n");
             free(in_chunk);
-            free(mono_chunk);
+            free(audio_chunk);
             exit(1);
         }
 
         /* Initialize resampler */
         int error;
-        src_state = src_new(SRC_SINC_BEST_QUALITY, 1, &error);
+        src_state = src_new(SRC_SINC_BEST_QUALITY, audio_channels, &error);
         if (!src_state) {
             fprintf(stderr, "Error: Failed to initialize resampler\n");
             free(in_chunk);
-            free(mono_chunk);
+            free(audio_chunk);
             free(out_chunk);
             exit(1);
         }
@@ -128,29 +127,36 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
         sf_count_t frames_read = sf_readf_float(infile, in_chunk, CHUNK_SIZE);
         if (frames_read == 0) break;
 
-        /* Convert to mono */
-        if (sfinfo->channels == 1) {
-            memcpy(mono_chunk, in_chunk, sizeof(float) * frames_read);
-        } else if (sfinfo->channels == 2) {
-            for (sf_count_t k = 0; k < frames_read; k++) {
-                mono_chunk[k] = (in_chunk[2 * k] + in_chunk[2 * k + 1]) * 0.5f;
+        /* Convert to audio_channels */
+        for (sf_count_t k = 0; k < frames_read; k++) {
+            if (sfinfo->channels == audio_channels) {
+                for (int ch = 0; ch < audio_channels; ch++) {
+                    audio_chunk[k * audio_channels + ch] = in_chunk[k * sfinfo->channels + ch];
+                }
+            } else if (sfinfo->channels == 1 && audio_channels == 2) {
+                float val = in_chunk[k];
+                audio_chunk[k * 2] = val;
+                audio_chunk[k * 2 + 1] = val;
+            } else if (sfinfo->channels == 2 && audio_channels == 1) {
+                float val = (in_chunk[k * 2] + in_chunk[k * 2 + 1]) * 0.5f;
+                audio_chunk[k] = val;
+            } else {
+                fprintf(stderr, "Error: Unsupported number of channels (%d). Only mono or stereo supported.\n", sfinfo->channels);
+                free(in_chunk);
+                free(audio_chunk);
+                if (resampling_needed) {
+                    free(out_chunk);
+                    src_delete(src_state);
+                }
+                exit(1);
             }
-        } else {
-            fprintf(stderr, "Error: Unsupported number of channels (%d). Only mono or stereo supported.\n", sfinfo->channels);
-            free(in_chunk);
-            free(mono_chunk);
-            if (resampling_needed) {
-                free(out_chunk);
-                src_delete(src_state);
-            }
-            exit(1);
         }
 
         float *process_buffer;
         sf_count_t process_frames;
 
         if (resampling_needed) {
-            src_data.data_in = mono_chunk;
+            src_data.data_in = audio_chunk;
             src_data.input_frames = frames_read;
             src_data.data_out = out_chunk;
             src_data.output_frames = max_out_frames;
@@ -161,7 +167,7 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
             if (err) {
                 fprintf(stderr, "Error: Resampling failed: %s\n", src_strerror(err));
                 free(in_chunk);
-                free(mono_chunk);
+                free(audio_chunk);
                 free(out_chunk);
                 src_delete(src_state);
                 exit(1);
@@ -170,20 +176,41 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
             process_frames = src_data.output_frames_gen;
             process_buffer = out_chunk;
         } else {
-            process_buffer = mono_chunk;
+            process_buffer = audio_chunk;
             process_frames = frames_read;
+        }
+
+        /* Apply pre-emphasis if enabled */
+        for (sf_count_t i = 0; i < process_frames; i++) {
+            for (int ch = 0; ch < audio_channels; ch++) {
+                double x = process_buffer[i * audio_channels + ch];
+                double y = x;
+                if (tau > 0.0) {
+                    y = b0 * x + b1 * prev_x[ch] - prev_y[ch];
+                    prev_x[ch] = x;
+                    prev_y[ch] = y;
+                }
+                process_buffer[i * audio_channels + ch] = y;
+            }
         }
 
         /* Modulate and write directly */
         for (sf_count_t i = 0; i < process_frames; i++) {
-            double x = process_buffer[i];
-            double y = x;
-            if (tau > 0.0) {
-                y = b0 * x + b1 * prev_x - prev_y;
-                prev_x = x;
-                prev_y = y;
+            double composite;
+            if (audio_channels == 1) {
+                composite = process_buffer[i];
+            } else {
+                double L = process_buffer[i * 2];
+                double R = process_buffer[i * 2 + 1];
+                double mono = (L + R) / 2.0;
+                double diff = (L - R) / 2.0;
+                double pilot = 0.1 * sin(pilot_phase);
+                double diff_mod = diff * sin(2.0 * pilot_phase);
+                composite = 0.9 * (mono + diff_mod) + pilot;
+                pilot_phase += pilot_inc;
+                pilot_phase = fmod(pilot_phase, 2.0 * M_PI);
             }
-            int64_t sample = llround(y * 32767.0);
+            int64_t sample = llround(composite * 32767.0);
             int64_t phase_increment = (sample * multiplier) / (max_val * (1LL << shift));
             phase_int += phase_increment;
             phase_int %= N;
@@ -207,7 +234,7 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
         if (err) {
             fprintf(stderr, "Error: Resampling flush failed: %s\n", src_strerror(err));
             free(in_chunk);
-            free(mono_chunk);
+            free(audio_chunk);
             free(out_chunk);
             src_delete(src_state);
             exit(1);
@@ -216,16 +243,37 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
         sf_count_t process_frames = src_data.output_frames_gen;
         float *process_buffer = out_chunk;
 
+        /* Apply pre-emphasis if enabled */
+        for (sf_count_t i = 0; i < process_frames; i++) {
+            for (int ch = 0; ch < audio_channels; ch++) {
+                double x = process_buffer[i * audio_channels + ch];
+                double y = x;
+                if (tau > 0.0) {
+                    y = b0 * x + b1 * prev_x[ch] - prev_y[ch];
+                    prev_x[ch] = x;
+                    prev_y[ch] = y;
+                }
+                process_buffer[i * audio_channels + ch] = y;
+            }
+        }
+
         /* Modulate and write remaining */
         for (sf_count_t i = 0; i < process_frames; i++) {
-            double x = process_buffer[i];
-            double y = x;
-            if (tau > 0.0) {
-                y = b0 * x + b1 * prev_x - prev_y;
-                prev_x = x;
-                prev_y = y;
+            double composite;
+            if (audio_channels == 1) {
+                composite = process_buffer[i];
+            } else {
+                double L = process_buffer[i * 2];
+                double R = process_buffer[i * 2 + 1];
+                double mono = (L + R) / 2.0;
+                double diff = (L - R) / 2.0;
+                double pilot = 0.1 * sin(pilot_phase);
+                double diff_mod = diff * sin(2.0 * pilot_phase);
+                composite = 0.9 * (mono + diff_mod) + pilot;
+                pilot_phase += pilot_inc;
+                pilot_phase = fmod(pilot_phase, 2.0 * M_PI);
             }
-            int64_t sample = llround(y * 32767.0);
+            int64_t sample = llround(composite * 32767.0);
             int64_t phase_increment = (sample * multiplier) / (max_val * (1LL << shift));
             phase_int += phase_increment;
             phase_int %= N;
@@ -242,7 +290,7 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
 
     /* Cleanup */
     free(in_chunk);
-    free(mono_chunk);
+    free(audio_chunk);
     if (resampling_needed) {
         free(out_chunk);
         src_delete(src_state);
@@ -258,15 +306,16 @@ static void help(void) {
            "usage: m2sdr_fm_tx [options] input output\n"
            "\n"
            "Options:\n"
-           "-h, --help                Display this help message.\n"
-           "-s, --samplerate sps      Set sample rate in SPS (default: 500000).\n"
-           "-d, --deviation dev       Set FM deviation in Hz (default: 75000).\n"
-           "-b, --bits bits           Set bits per I/Q sample (≤16, default: 12).\n"
-           "-p, --preemphasis type    Set pre-emphasis type: eu, us, none (default: eu).\n"
+           "-h, --help            Display this help message.\n"
+           "-s, --samplerate sps  Set sample rate in SPS (default: 500000).\n"
+           "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
+           "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "-e, --emphasis type   Set pre-emphasis to us, eu or none (default: eu).\n"
+           "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
            "\n"
            "Arguments:\n"
-           "input                     Input WAV file (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
-           "output                    Output file for I/Q samples ('-' for stdout).\n"
+           "input                 Input WAV file (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
+           "output                Output file for I/Q samples ('-' for stdout).\n"
            "\n"
            "Example:\n"
            "m2sdr_fm_tx -s 500000 -d 75000 -b 12 input.wav output.bin\n"
@@ -279,12 +328,13 @@ static void help(void) {
 /*------*/
 
 static struct option options[] = {
-    { "help",         no_argument,       NULL, 'h' },
-    { "samplerate",   required_argument, NULL, 's' },
-    { "deviation",    required_argument, NULL, 'd' },
-    { "bits",         required_argument, NULL, 'b' },
-    { "preemphasis",  required_argument, NULL, 'p' },
-    { NULL,           0,                 NULL, 0 }
+    { "help",       no_argument,       NULL, 'h' },
+    { "samplerate", required_argument, NULL, 's' },
+    { "deviation",  required_argument, NULL, 'd' },
+    { "bits",       required_argument, NULL, 'b' },
+    { "emphasis",   required_argument, NULL, 'e' },
+    { "mode",       required_argument, NULL, 'm' },
+    { NULL,         0,                 NULL, 0 }
 };
 
 int main(int argc, char **argv) {
@@ -296,11 +346,12 @@ int main(int argc, char **argv) {
     double samplerate = 500000.0;
     double deviation = 75000.0;
     int bits = 12;
-    char *preemphasis_type = "eu";
+    char *emphasis_type = "eu";
+    char *mode = "mono";
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:p:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:e:m:", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -315,19 +366,33 @@ int main(int argc, char **argv) {
         case 'b':
             bits = atoi(optarg);
             break;
-        case 'p':
-            preemphasis_type = optarg;
+        case 'e':
+            emphasis_type = optarg;
+            break;
+        case 'm':
+            mode = optarg;
             break;
         default:
             exit(1);
         }
     }
 
-    /* Validate pre-emphasis type */
-    if (strcmp(preemphasis_type, "eu") != 0 &&
-        strcmp(preemphasis_type, "us") != 0 &&
-        strcmp(preemphasis_type, "none") != 0) {
-        fprintf(stderr, "Error: Invalid pre-emphasis type. Must be 'eu', 'us', or 'none'.\n");
+    /* Set tau based on emphasis type */
+    double tau = 0.0;
+    if (strcmp(emphasis_type, "us") == 0) {
+        tau = 75e-6;
+    } else if (strcmp(emphasis_type, "eu") == 0) {
+        tau = 50e-6;
+    } else if (strcmp(emphasis_type, "none") == 0) {
+        tau = 0.0;
+    } else {
+        fprintf(stderr, "Error: Invalid emphasis type '%s'. Must be 'us', 'eu', or 'none'.\n", emphasis_type);
+        exit(1);
+    }
+
+    /* Validate mode */
+    if (strcmp(mode, "mono") != 0 && strcmp(mode, "stereo") != 0) {
+        fprintf(stderr, "Error: Invalid mode '%s'. Must be 'mono' or 'stereo'.\n", mode);
         exit(1);
     }
 
@@ -366,7 +431,7 @@ int main(int argc, char **argv) {
     }
 
     /* Perform FM modulation */
-    modulate_audio(infile, &sfinfo, outfile, samplerate, deviation, bits, preemphasis_type);
+    modulate_audio(infile, &sfinfo, outfile, samplerate, deviation, bits, tau, mode);
 
     /* Cleanup */
     sf_close(infile);
