@@ -4,7 +4,7 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-BINARIES = m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx
+BINARIES = m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
 all: $(PROGS)
@@ -44,6 +44,9 @@ m2sdr_record: liblitepcie/liblitepcie.a m2sdr_record.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
 
 m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
+
+m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
 
 clean:
