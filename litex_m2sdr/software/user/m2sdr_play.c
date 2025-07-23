@@ -31,7 +31,7 @@ void intHandler(int dummy) {
 /* Play (DMA TX) */
 /*---------------*/
 
-static void m2sdr_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy)
+static void m2sdr_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy, uint8_t quiet)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
@@ -102,7 +102,7 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
 
         /* Statistics every 200ms. */
         int64_t duration = get_time_ms() - last_time;
-        if (duration > 200) {
+        if (!quiet && duration > 200) {
             /* Print banner every 10 lines. */
             if (i % 10 == 0)
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");
@@ -147,6 +147,7 @@ static void help(void)
            "-h                    Display this help message.\n"
            "-c device_num         Select the device (default = 0).\n"
            "-z                    Enable zero-copy DMA mode.\n"
+           "-q                    Quiet mode (suppress statistics).\n"
            "\n"
            "Arguments:\n"
            "filename              I/Q samples stream file to play.\n"
@@ -163,6 +164,7 @@ int main(int argc, char **argv)
     static char litepcie_device[1024];
     static int litepcie_device_num;
     static uint8_t litepcie_device_zero_copy;
+    static uint8_t quiet = 0;
 
     litepcie_device_num = 0;
     litepcie_device_zero_copy = 0;
@@ -171,7 +173,7 @@ int main(int argc, char **argv)
 
     /* Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:z");
+        c = getopt(argc, argv, "hc:zq");
         if (c == -1)
             break;
         switch(c) {
@@ -183,6 +185,9 @@ int main(int argc, char **argv)
             break;
         case 'z':
             litepcie_device_zero_copy = 1;
+            break;
+        case 'q':
+            quiet = 1;
             break;
         default:
             exit(1);
@@ -208,6 +213,6 @@ int main(int argc, char **argv)
     } else {
         help();
     }
-    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy);
+    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy, quiet);
     return 0;
 }
