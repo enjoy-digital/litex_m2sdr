@@ -363,7 +363,7 @@ int main(int argc, char **argv) {
 
     char *input_file = NULL;
     char *output_file = NULL;
-    double samplerate = 500000.0;
+    double samplerate = 1000000.0;
     double deviation = 75000.0;
     int bits = 12;
     char *emphasis_type = "eu";

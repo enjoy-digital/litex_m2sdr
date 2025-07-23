@@ -13,7 +13,7 @@
  * Usage Example:
  *     ./m2sdr_rf -samplerate 1e6 -rx_freq 100e6 -rx_gain 20 -chan 1t1r
  *     ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -o music.wav
- *     ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -e eu -m stereo - - | ffmpeg -f s16le -ac 2 -ar 48000 -i - -f alsa default
+ *     ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -e eu -m stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
  *
  */
 
@@ -33,7 +33,7 @@
 /*-----------*/
 
 #define CHUNK_SIZE 512
-#define AUDIO_RATE 48000.0  /* Default output audio sample rate */
+#define AUDIO_RATE 44100.0  /* Default output audio sample rate */
 
 /* FM Demodulation Functions */
 /*---------------------------*/
@@ -246,7 +246,7 @@ int main(int argc, char **argv) {
 
     char *input_file = NULL;
     char *output_file = NULL;
-    double samplerate = 500000.0;
+    double samplerate = 1000000.0;
     double deviation = 75000.0;
     int bits = 12;
     char *emphasis_type = "eu";
