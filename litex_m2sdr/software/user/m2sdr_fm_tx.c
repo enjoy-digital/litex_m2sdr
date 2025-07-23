@@ -18,6 +18,7 @@
  * Usage Example:
  *     ./m2sdr_rf -samplerate 1e6 -tx_freq 100e6 -tx_gain -10 -chan 1t1r
  *     ./m2sdr_fm_tx -s 1000000 -b 12 music.wav - | ./m2sdr_play -
+ *     ffmpeg -i music.mp3 -f s16le -ac 1 -ar 44100 - | ./m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 1 -f 44100 - - | ./m2sdr_play -
  *
  */
 
@@ -49,7 +50,7 @@ static void generate_sine_table(int16_t *sine_table, int bits) {
     }
 }
 
-static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode) {
+static void modulate_audio(FILE *in_stream, SNDFILE *infile_wav, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode, int input_channels) {
     /* Modulate audio to interleaved 16-bit I/Q samples in streaming fashion */
     int N = SINE_TABLE_SIZE;
     int shift = 32;
@@ -79,8 +80,12 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
     static double pilot_phase = 0.0;
     double pilot_inc = 2 * M_PI * 19000.0 / samplerate;
 
+    /* Determine source channels and sample rate */
+    int source_channels = infile_wav ? sfinfo->channels : input_channels;
+    int source_samplerate = sfinfo->samplerate;
+
     /* Setup buffers */
-    float *in_chunk = malloc(sizeof(float) * CHUNK_SIZE * sfinfo->channels);
+    float *in_chunk = malloc(sizeof(float) * CHUNK_SIZE * source_channels);
     if (!in_chunk) {
         fprintf(stderr, "Error: Memory allocation failed for input chunk\n");
         exit(1);
@@ -93,14 +98,14 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
     }
 
     /* Setup resampling if input sample rate differs from desired sample rate */
-    int resampling_needed = (sfinfo->samplerate != (int)samplerate);
+    int resampling_needed = (source_samplerate != (int)samplerate);
     SRC_STATE *src_state = NULL;
     SRC_DATA src_data;
     float *out_chunk = NULL;
     int max_out_frames = 0;
     double src_ratio = 1.0;
     if (resampling_needed) {
-        src_ratio = samplerate / sfinfo->samplerate;
+        src_ratio = samplerate / source_samplerate;
         max_out_frames = (int)(CHUNK_SIZE * src_ratio) + 1024; /* Generous margin for filter state */
         out_chunk = malloc(sizeof(float) * max_out_frames * audio_channels);
         if (!out_chunk) {
@@ -124,24 +129,34 @@ static void modulate_audio(SNDFILE *infile, SF_INFO *sfinfo, FILE *outfile, doub
 
     /* Process in chunks */
     while (1) {
-        sf_count_t frames_read = sf_readf_float(infile, in_chunk, CHUNK_SIZE);
+        sf_count_t frames_read = 0;
+        if (infile_wav) {
+            frames_read = sf_readf_float(infile_wav, in_chunk, CHUNK_SIZE);
+        } else {
+            int16_t raw_chunk[CHUNK_SIZE * source_channels];
+            size_t bytes_read = fread(raw_chunk, 1, sizeof(int16_t) * CHUNK_SIZE * source_channels, in_stream);
+            frames_read = bytes_read / (sizeof(int16_t) * source_channels);
+            for (sf_count_t k = 0; k < frames_read * source_channels; k++) {
+                in_chunk[k] = raw_chunk[k] / (float)32768.0f;
+            }
+        }
         if (frames_read == 0) break;
 
         /* Convert to audio_channels */
         for (sf_count_t k = 0; k < frames_read; k++) {
-            if (sfinfo->channels == audio_channels) {
+            if (source_channels == audio_channels) {
                 for (int ch = 0; ch < audio_channels; ch++) {
-                    audio_chunk[k * audio_channels + ch] = in_chunk[k * sfinfo->channels + ch];
+                    audio_chunk[k * audio_channels + ch] = in_chunk[k * source_channels + ch];
                 }
-            } else if (sfinfo->channels == 1 && audio_channels == 2) {
+            } else if (source_channels == 1 && audio_channels == 2) {
                 float val = in_chunk[k];
                 audio_chunk[k * 2] = val;
                 audio_chunk[k * 2 + 1] = val;
-            } else if (sfinfo->channels == 2 && audio_channels == 1) {
+            } else if (source_channels == 2 && audio_channels == 1) {
                 float val = (in_chunk[k * 2] + in_chunk[k * 2 + 1]) * 0.5f;
                 audio_chunk[k] = val;
             } else {
-                fprintf(stderr, "Error: Unsupported number of channels (%d). Only mono or stereo supported.\n", sfinfo->channels);
+                fprintf(stderr, "Error: Unsupported number of channels (%d). Only mono or stereo supported.\n", source_channels);
                 free(in_chunk);
                 free(audio_chunk);
                 if (resampling_needed) {
@@ -312,13 +327,16 @@ static void help(void) {
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
            "-e, --emphasis type   Set pre-emphasis to us, eu or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
+           "-i, --input-channels channels  Set input channels for stdin (1 or 2).\n"
+           "-f, --input-samplerate sps  Set input sample rate for stdin (default to samplerate).\n"
            "\n"
            "Arguments:\n"
-           "input                 Input WAV file (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
+           "input                 Input WAV file or '-' for raw PCM from stdin (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
            "output                Output file for I/Q samples ('-' for stdout).\n"
            "\n"
            "Example:\n"
            "m2sdr_fm_tx -s 500000 -d 75000 -b 12 input.wav output.bin\n"
+           "ffmpeg -i input.mp3 -f s16le -ac 2 -ar 44100 - | m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 2 -f 44100 - - | m2sdr_play -\n"
            "Note: Convert MP3 to WAV using: ffmpeg -i input.mp3 input.wav\n"
            "Note: This version processes in streaming mode without global normalization, assuming audio is normalized to full scale.\n");
     exit(1);
@@ -334,6 +352,8 @@ static struct option options[] = {
     { "bits",       required_argument, NULL, 'b' },
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
+    { "input-channels", required_argument, NULL, 'i' },
+    { "input-samplerate", required_argument, NULL, 'f' },
     { NULL,         0,                 NULL, 0 }
 };
 
@@ -348,10 +368,12 @@ int main(int argc, char **argv) {
     int bits = 12;
     char *emphasis_type = "eu";
     char *mode = "mono";
+    int input_channels = 0;
+    double input_srate = 0.0;
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:e:m:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:e:m:i:f:", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -371,6 +393,12 @@ int main(int argc, char **argv) {
             break;
         case 'm':
             mode = optarg;
+            break;
+        case 'i':
+            input_channels = atoi(optarg);
+            break;
+        case 'f':
+            input_srate = atof(optarg);
             break;
         default:
             exit(1);
@@ -410,31 +438,45 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    /* Debug: Print input file path */
-    printf("Attempting to open input file: %s\n", input_file);
-
-    /* Open input audio file */
+    /* Handle input */
+    FILE *in_stream = NULL;
+    SNDFILE *infile_wav = NULL;
     SF_INFO sfinfo = {0};
-    SNDFILE *infile = sf_open(input_file, SFM_READ, &sfinfo);
-    if (!infile) {
-        fprintf(stderr, "Error: Could not open input file %s: %s\n", input_file, sf_strerror(NULL));
-        fprintf(stderr, "Note: Only WAV files are supported. Convert MP3 to WAV with: ffmpeg -i %s %s.wav\n", input_file, input_file);
-        exit(1);
+    if (strcmp(input_file, "-") == 0) {
+        in_stream = stdin;
+        if (input_channels == 0) {
+            fprintf(stderr, "Error: -i/--input-channels required for stdin input.\n");
+            help();
+        }
+        if (input_channels != 1 && input_channels != 2) {
+            fprintf(stderr, "Error: Invalid input channels '%d'. Must be 1 or 2.\n", input_channels);
+            exit(1);
+        }
+        sfinfo.channels = input_channels;
+        sfinfo.samplerate = input_srate > 0 ? (int)input_srate : (int)samplerate;
+    } else {
+        printf("Attempting to open input file: %s\n", input_file);
+        infile_wav = sf_open(input_file, SFM_READ, &sfinfo);
+        if (!infile_wav) {
+            fprintf(stderr, "Error: Could not open input file %s: %s\n", input_file, sf_strerror(NULL));
+            fprintf(stderr, "Note: Only WAV files are supported. Convert MP3 to WAV with: ffmpeg -i %s %s.wav\n", input_file, input_file);
+            exit(1);
+        }
     }
 
     /* Open output file or use stdout */
     FILE *outfile = (strcmp(output_file, "-") == 0) ? stdout : fopen(output_file, "wb");
     if (!outfile) {
         fprintf(stderr, "Error: Could not open output file %s\n", output_file);
-        sf_close(infile);
+        if (infile_wav) sf_close(infile_wav);
         exit(1);
     }
 
     /* Perform FM modulation */
-    modulate_audio(infile, &sfinfo, outfile, samplerate, deviation, bits, tau, mode);
+    modulate_audio(in_stream, infile_wav, &sfinfo, outfile, samplerate, deviation, bits, tau, mode, input_channels);
 
     /* Cleanup */
-    sf_close(infile);
+    if (infile_wav) sf_close(infile_wav);
     if (outfile != stdout) fclose(outfile);
 
     /* Report completion */
