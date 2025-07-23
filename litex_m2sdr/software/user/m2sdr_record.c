@@ -31,7 +31,7 @@ void intHandler(int dummy) {
 /* Record (DMA RX) */
 /*-----------------*/
 
-static void m2sdr_record(const char *device_name, const char *filename, uint32_t size, uint8_t zero_copy)
+static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet)
 {
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
 
@@ -80,26 +80,31 @@ static void m2sdr_record(const char *device_name, const char *filename, uint32_t
                 break;
             /* Copy Read data to File or stdout. */
             if (fo != NULL) {
-                len = fwrite(buf_rd, 1, fmin(size - total_len, DMA_BUFFER_SIZE), fo);
+                if (size > 0 && total_len >= size) {
+                    keep_running = 0;
+                    break;
+                }
+                size_t to_write = DMA_BUFFER_SIZE;
+                if (size > 0 && to_write > size - total_len) {
+                    to_write = size - total_len;
+                }
+                len = fwrite(buf_rd, 1, to_write, fo);
                 total_len += len;
             }
-            /* Stop when specified size is reached */
-            if (size > 0 && total_len >= size)
-                keep_running = 0;
         }
 
         /* Statistics every 200ms. */
         int64_t duration = get_time_ms() - last_time;
-        if (duration > 200) {
+        if (!quiet && duration > 200) {
             /* Print banner every 10 lines. */
             if (i % 10 == 0)
-                printf("\e[1mSPEED(Gbps)    BUFFERS SIZE(MB)\e[0m\n");
+                fprintf(stderr, "\e[1mSPEED(Gbps)    BUFFERS SIZE(MB)\e[0m\n");
             i++;
             /* Print statistics. */
-            printf("%10.2f %10" PRIu64 "  %8" PRIu64"\n",
+            fprintf(stderr, "%10.2f %10" PRIu64 "  %8" PRIu64"\n",
                     (double)(dma.writer_sw_count - writer_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6),
                     dma.writer_sw_count,
-                    (size > 0) ? ((dma.writer_sw_count) * DMA_BUFFER_SIZE) / 1024 / 1024 : 0);
+                    ((dma.writer_sw_count) * DMA_BUFFER_SIZE) / 1024 / 1024);
             /* Update time/count. */
             last_time = get_time_ms();
             writer_sw_count_last = dma.writer_sw_count;
@@ -126,6 +131,7 @@ static void help(void)
            "-h                    Display this help message.\n"
            "-c device_num         Select the device (default = 0).\n"
            "-z                    Enable zero-copy DMA mode.\n"
+           "-q                    Quiet mode (suppress statistics).\n"
            "\n"
            "Arguments:\n"
            "filename              File to record I/Q samples to (optional, omit to monitor stream).\n"
@@ -142,6 +148,7 @@ int main(int argc, char **argv)
     static char litepcie_device[1024];
     static int litepcie_device_num;
     static uint8_t litepcie_device_zero_copy;
+    static uint8_t quiet = 0;
 
     litepcie_device_num = 0;
     litepcie_device_zero_copy = 0;
@@ -150,7 +157,7 @@ int main(int argc, char **argv)
 
     /* Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:z");
+        c = getopt(argc, argv, "hc:zq");
         if (c == -1)
             break;
         switch(c) {
@@ -163,6 +170,9 @@ int main(int argc, char **argv)
         case 'z':
             litepcie_device_zero_copy = 1;
             break;
+        case 'q':
+            quiet = 1;
+            break;
         default:
             exit(1);
         }
@@ -173,15 +183,13 @@ int main(int argc, char **argv)
 
     /* Interpret cmd and record. */
     const char *filename = NULL;
-    uint32_t size = 0;
+    size_t size = 0;
     if (optind != argc) {
         filename = argv[optind++];  /* Allow filename to be provided or "-" */
         if (optind < argc) {        /* Size is optional */
             size = strtoul(argv[optind++], NULL, 0);
         }
-    } else {
-        filename = "-";  /* Default to stdout if no filename provided */
     }
-    m2sdr_record(litepcie_device, filename, size, litepcie_device_zero_copy);
+    m2sdr_record(litepcie_device, filename, size, litepcie_device_zero_copy, quiet);
     return 0;
 }
