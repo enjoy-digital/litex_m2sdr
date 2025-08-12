@@ -199,6 +199,7 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen="gen2",
         with_white_rabbit      = False,
         with_jtagbone          = True,
+        with_gpio             = False,
         with_rfic_oversampling = False,
     ):
         # Platform ---------------------------------------------------------------------------------
@@ -513,25 +514,27 @@ class BaseSoC(SoCMini):
 
         # GPIO -------------------------------------------------------------------------------------
 
-        self.gpio = GPIO(
-            rx_packer   = self.ad9361.gpio_rx_packer,
-            tx_unpacker = self.ad9361.gpio_tx_unpacker,
-        )
-        # GPIO0   : Sync/ClkIn.
-        # GPIO1-3 : Synchro_GPIO1-3.
-        self.gpio.connect_to_pads(pads=platform.request("gpios"))
+        if with_gpio:
 
-        # Drive led from GPIO0 when in loopback mode to ease test/verification.
-        self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
+            self.gpio = GPIO(
+                rx_packer   = self.ad9361.gpio_rx_packer,
+                tx_unpacker = self.ad9361.gpio_tx_unpacker,
+            )
+            # GPIO0   : Sync/ClkIn.
+            # GPIO1-3 : Synchro_GPIO1-3.
+            self.gpio.connect_to_pads(pads=platform.request("gpios"))
 
-        # Use GPIO0 as ClkIn.
-        self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
+            # Drive led from GPIO0 when in loopback mode to ease test/verification.
+            self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
 
-        #platform.add_extension([
-        #    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),
-        #])
+           # Use GPIO0 as ClkIn.
+            self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
 
-        #self.comb += platform.request('wr_clk_out').eq(ClockSignal('wr'))
+            #platform.add_extension([
+            #    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),
+            #])
+
+            #self.comb += platform.request('wr_clk_out').eq(ClockSignal('wr'))
 
         # White Rabbit -----------------------------------------------------------------------------
 
@@ -793,6 +796,9 @@ def main():
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
 
+    # GPIO parameters.
+    parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
+
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support (on SFP0).")
 
@@ -831,6 +837,9 @@ def main():
 
         # SATA.
         with_sata     = args.with_sata,
+
+        # GPIOs.
+        with_gpio     = args.with_gpio,
 
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
