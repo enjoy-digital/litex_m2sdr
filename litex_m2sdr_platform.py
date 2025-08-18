@@ -112,12 +112,12 @@ _io = [
         Subsignal("rx_data_p",  Pins("U6 W6  Y6 V7 W9 V9"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
         Subsignal("rx_data_n",  Pins("V5 W5 AA6 W7 Y9 V8"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RX_DATA_P0-5.
 
-        Subsignal("tx_clk_p",   Pins("T5"),                    IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_P.
-        Subsignal("tx_clk_n",   Pins("U5"),                    IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # RF_FB_CLK_N.
-        Subsignal("tx_frame_p", Pins("AA8"),                   IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_P.
-        Subsignal("tx_frame_n", Pins("AB8"),                   IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_FRAME_N.
-        Subsignal("tx_data_p",  Pins("U3  Y4 AB3 AA1 W1 AA5"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_DATA_P_0-5.
-        Subsignal("tx_data_n",  Pins("V3 AA4 AB2 AB1 Y1 AB5"), IOStandard("LVDS_25"), Misc("DIFF_TERM=TRUE")), # TX_DATA_N_0-5.
+        Subsignal("tx_clk_p",   Pins("T5"),                    IOStandard("LVDS_25")), # RF_FB_CLK_P.
+        Subsignal("tx_clk_n",   Pins("U5"),                    IOStandard("LVDS_25")), # RF_FB_CLK_N.
+        Subsignal("tx_frame_p", Pins("AA8"),                   IOStandard("LVDS_25")), # TX_FRAME_P.
+        Subsignal("tx_frame_n", Pins("AB8"),                   IOStandard("LVDS_25")), # TX_FRAME_N.
+        Subsignal("tx_data_p",  Pins("U3  Y4 AB3 AA1 W1 AA5"), IOStandard("LVDS_25")), # TX_DATA_P_0-5.
+        Subsignal("tx_data_n",  Pins("V3 AA4 AB2 AB1 Y1 AB5"), IOStandard("LVDS_25")), # TX_DATA_N_0-5.
 
         Subsignal("rst_n",  Pins("E1"), IOStandard("LVCMOS25")), # RF_RESET_N.
         Subsignal("enable", Pins("P4"), IOStandard("LVCMOS25")), # RF_ENABLE.
