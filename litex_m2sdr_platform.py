@@ -186,7 +186,6 @@ class Platform(Xilinx7SeriesPlatform):
     def __init__(self, build_multiboot=False):
         device = "xc7a200t"
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain="vivado")
-        self.device     = device
         self.image_size = {
             "xc7a200t" : 0x00800000,
         }[device]
