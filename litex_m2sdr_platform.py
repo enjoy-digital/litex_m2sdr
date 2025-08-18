@@ -54,37 +54,37 @@ _io = [
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERn3")), # PCIe_RX3_P
-        Subsignal("rx_n",  Pins("M2:PERp3")), # PCIe_RX3_N.
-        Subsignal("tx_p",  Pins("M2:PETn3")), # PCIe_TX3_P.
-        Subsignal("tx_n",  Pins("M2:PETp3")), # PCIe_TX3_N.
+        Subsignal("rx_p",  Pins("M2:PERp3")), # PCIe_RX3_P
+        Subsignal("rx_n",  Pins("M2:PERn3")), # PCIe_RX3_N.
+        Subsignal("tx_p",  Pins("M2:PETp3")), # PCIe_TX3_P.
+        Subsignal("tx_n",  Pins("M2:PETn3")), # PCIe_TX3_N.
     ),
     ("pcie_x1_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERn0")), # PCIe_RX0_P
-        Subsignal("rx_n",  Pins("M2:PERp0")), # PCIe_RX0_N.
-        Subsignal("tx_p",  Pins("M2:PETn0")), # PCIe_TX0_P.
-        Subsignal("tx_n",  Pins("M2:PETp0")), # PCIe_TX0_N.
+        Subsignal("rx_p",  Pins("M2:PERp0")), # PCIe_RX0_P
+        Subsignal("rx_n",  Pins("M2:PERn0")), # PCIe_RX0_N.
+        Subsignal("tx_p",  Pins("M2:PETp0")), # PCIe_TX0_P.
+        Subsignal("tx_n",  Pins("M2:PETn0")), # PCIe_TX0_N.
     ),
     ("pcie_x2_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERn0 M2:PERn1")), # PCIe_RX0-1_P
-        Subsignal("rx_n",  Pins("M2:PERp0 M2:PERp1")), # PCIe_RX0-1_N.
-        Subsignal("tx_p",  Pins("M2:PETn0 M2:PETn1")), # PCIe_TX0-1_P.
-        Subsignal("tx_n",  Pins("M2:PETp0 M2:PETp1")), # PCIe_TX0-1_N.
+        Subsignal("rx_p",  Pins("M2:PERp0 M2:PERp1")), # PCIe_RX0-1_P
+        Subsignal("rx_n",  Pins("M2:PERn0 M2:PERn1")), # PCIe_RX0-1_N.
+        Subsignal("tx_p",  Pins("M2:PETp0 M2:PETp1")), # PCIe_TX0-1_P.
+        Subsignal("tx_n",  Pins("M2:PETn0 M2:PETn1")), # PCIe_TX0-1_N.
     ),
     ("pcie_x4_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERn0 M2:PERn1 M2:PERn2 M2:PERn3")), # PCIe_RX0-3_P.
-        Subsignal("rx_n",  Pins("M2:PERp0 M2:PERp1 M2:PERp2 M2:PERp3")), # PCIe_RX0-3_N.
-        Subsignal("tx_p",  Pins("M2:PETn0 M2:PETn1 M2:PETn2 M2:PETn3")), # PCIe_TX0-3_P.
-        Subsignal("tx_n",  Pins("M2:PETp0 M2:PETp1 M2:PETp2 M2:PETp3")), # PCIe_TX0-3_N.
+        Subsignal("rx_p",  Pins("M2:PERp0 M2:PERp1 M2:PERp2 M2:PERp3")), # PCIe_RX0-3_P.
+        Subsignal("rx_n",  Pins("M2:PERn0 M2:PERn1 M2:PERn2 M2:PERn3")), # PCIe_RX0-3_N.
+        Subsignal("tx_p",  Pins("M2:PETp0 M2:PETp1 M2:PETp2 M2:PETp3")), # PCIe_TX0-3_P.
+        Subsignal("tx_n",  Pins("M2:PETn0 M2:PETn1 M2:PETn2 M2:PETn3")), # PCIe_TX0-3_N.
     ),
 
     # SFP 0 (When plugged in Acorn Baseboard Mini).
