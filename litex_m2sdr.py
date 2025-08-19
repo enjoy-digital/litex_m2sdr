@@ -199,7 +199,7 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen="gen2",
         with_white_rabbit      = False,
         with_jtagbone          = True,
-        with_gpio             = False,
+        with_gpio              = False,
         with_rfic_oversampling = False,
     ):
         # Platform ---------------------------------------------------------------------------------
@@ -264,6 +264,7 @@ class BaseSoC(SoCMini):
         self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
+        platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
         # Time Generator ---------------------------------------------------------------------------
 
@@ -305,6 +306,7 @@ class BaseSoC(SoCMini):
         if with_jtagbone:
             self.add_jtagbone()
             platform.add_period_constraint(self.jtagbone_phy.cd_jtag.clk, 1e9/20e6)
+            platform.add_false_path_constraints(self.jtagbone_phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
 
@@ -317,15 +319,18 @@ class BaseSoC(SoCMini):
         self.icap = ICAP()
         self.icap.add_reload()
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # XADC -------------------------------------------------------------------------------------
 
         self.xadc = XADC()
+        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # DNA --------------------------------------------------------------------------------------
 
         self.dna = DNA()
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        platform.add_false_path_constraints(self.dna.cd_dna.clk, self.crg.cd_sys.clk)
 
         # SPI Flash --------------------------------------------------------------------------------
 
@@ -336,6 +341,8 @@ class BaseSoC(SoCMini):
         # PCIe -------------------------------------------------------------------------------------
 
         if with_pcie:
+            # PHY.
+            # ----
             if variant == "baseboard":
                 assert pcie_lanes == 1
             pcie_dmas = 1
@@ -356,6 +363,9 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 }
             )
+
+            # Core.
+            # -----
             self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
@@ -365,6 +375,9 @@ class BaseSoC(SoCMini):
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
+
+            # PTM.
+            # ----
             if with_pcie_ptm:
                 # TODO:
                 # - Connect Time.
@@ -375,10 +388,23 @@ class BaseSoC(SoCMini):
                 from litex_wr_nic.gateware.soc import LiteXWRNICSoC
                 LiteXWRNICSoC.add_pcie_ptm(self)
 
+            # Timings False Paths.
+            # --------------------
+            false_paths = [
+                ("{{*s7pciephy_clkout0}}", "{{*crg_*clkout0}}"),
+                ("{{*s7pciephy_clkout1}}", "{{*crg_*clkout0}}"),
+                ("{{*s7pciephy_clkout3}}", "{{*crg_*clkout0}}"),
+                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
+            ]
+            for clk0, clk1 in false_paths:
+                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
+                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
+
         # Ethernet ---------------------------------------------------------------------------------
 
         if with_eth:
             # PHY.
+            # ----
             eth_phy_cls = {
                 "1000basex" : A7_1000BASEX,
                 "2500basex" : A7_2500BASEX,
@@ -392,14 +418,18 @@ class BaseSoC(SoCMini):
             )
             platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
             platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
 
             # Core + MMAP (Etherbone).
+            # ------------------------
             self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
 
             # UDP Streamer.
+            # -------------
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=64, cd="sys")
 
             # RFIC -> UDP TX.
+            # ---------------
             self.eth_rx_streamer = LiteEthStream2UDPTX(
                 udp_port   = eth_udp_port,
                 fifo_depth = 1024//8,
@@ -409,6 +439,7 @@ class BaseSoC(SoCMini):
             self.comb += self.eth_rx_streamer.source.connect(eth_streamer_port.sink)
 
             # UDP RX -> RFIC.
+            # ---------------
             self.eth_tx_streamer = LiteEthUDP2StreamRX(
                 udp_port   = eth_udp_port,
                 fifo_depth = 1024//8,
@@ -420,7 +451,8 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
-            # IOs
+            # IOs.
+            # ----
             _sata_io = [
                 ("sata", 0,
                     # Inverted on M2SDR.
@@ -433,7 +465,8 @@ class BaseSoC(SoCMini):
             ]
             platform.add_extension(_sata_io)
 
-            # PHY
+            # PHY.
+            # ----
             self.sata_phy = LiteSATAPHY(platform.device,
                 refclk     = ClockSignal("refclk_sata"),
                 pads       = platform.request("sata"),
@@ -443,7 +476,8 @@ class BaseSoC(SoCMini):
                 qpll       = self.qpll.get_channel("sata"),
             )
 
-            # Core
+            # Core.
+            # -----
             self.add_sata(phy=self.sata_phy, mode="read+write")
 
         # AD9361 RFIC ------------------------------------------------------------------------------
@@ -460,6 +494,7 @@ class BaseSoC(SoCMini):
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
+        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -638,36 +673,15 @@ class BaseSoC(SoCMini):
             platform.add_platform_command("create_clock -name wr_txoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/TXOUTCLK]")
             platform.add_platform_command("create_clock -name wr_rxoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/RXOUTCLK]")
 
-
         # Timing Constraints/False Paths -----------------------------------------------------------
-
 
         if with_white_rabbit:
             platform.add_false_path_constraints(
-                # PCIe.
-                #"main_s7pciephy_clkout0", # FIXME.
-                #"main_s7pciephy_clkout1", # FIXME.
-                #"main_s7pciephy_clkout2", # FIXME.
-                #"main_s7pciephy_clkout3", # FIXME.
-
                 # CRG.
                 "clk100",
                 "clk_sys",
-                "{{*crg_s7pll_clkout0}}",
-                "{{*crg_s7pll_clkout1}}",
-
-                # RFIC.
-                "rfic_clk",
-
-                # Internal Primitives.
-                "dna_clk",
-                "jtag_clk",
-                "icap_clk",
-
-                # Sync.
-                "si5351_clk0",
-                "si5351_clk1",
-                "sync_clk_in",
+                "{{*crg_*clkout0}}",
+                "{{*crg_*clkout1}}",
 
                 # White Rabbit.
                 "wr_rxoutclk",
@@ -677,32 +691,11 @@ class BaseSoC(SoCMini):
             )
         else:
             platform.add_false_path_constraints(
-                # PCIe.
-                #"main_s7pciephy_clkout0", # FIXME.
-                #"main_s7pciephy_clkout1", # FIXME.
-                #"main_s7pciephy_clkout2", # FIXME.
-                #"main_s7pciephy_clkout3", # FIXME.
-
                 # CRG.
                 "clk100",
-                "{{*crg_clkout0}}",
-                "{{*crg_clkout1}}",
-
-                # RFIC.
-                "rfic_clk",
-
-                # Internal Primitives.
-                "dna_clk",
-                "jtag_clk",
-                "icap_clk",
-
-                # Sync.
-                "si5351_clk0",
-                "si5351_clk1",
-                "sync_clk_in",
+                "{{*crg_*clkout0}}",
+                "{{*crg_*clkout1}}",
             )
-
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets {{*crg_s7pll0_clkout_buf1}}]")
 
         # Clk Measurements -------------------------------------------------------------------------
 
