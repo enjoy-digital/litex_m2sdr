@@ -228,7 +228,7 @@ class Platform(Xilinx7SeriesPlatform):
         ftdi_chip = self.detect_ftdi_chip()
         if ftdi_chip is None:
             raise RuntimeError("No compatible FTDI device found.")
-        return OpenFPGALoader(cable=ftdi_chip, fpga_part=f"{self.device}sbg484", freq=20e6)
+        return OpenFPGALoader(cable=ftdi_chip, fpga_part=f"xc7a200tsbg484", freq=20e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
