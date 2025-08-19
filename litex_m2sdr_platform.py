@@ -32,7 +32,7 @@ _io = [
         Misc("PULLUP=TRUE"),
         IOStandard("LVCMOS33")
     ),
-    ("si5351_en_clkin", 0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_EN (B) / SI5351_CLKIN (C).
+    ("si5351_ssen_clkin", 0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
     ("si5351_pwm",      0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ("si5351_clk0",     0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
     ("si5351_clk1",     0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
