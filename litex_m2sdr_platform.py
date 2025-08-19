@@ -194,6 +194,7 @@ class Platform(Xilinx7SeriesPlatform):
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
             "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4 [current_design]",
             "set_property BITSTREAM.CONFIG.CONFIGRATE 33 [current_design]",
+            "set_property BITSTREAM.CONFIG.OVERTEMPPOWERDOWN ENABLE [current_design]",
             "set_property BITSTREAM.GENERAL.COMPRESS TRUE [current_design]",
             "set_property CFGBVS VCCO [current_design]",
             "set_property CONFIG_VOLTAGE 3.3 [current_design]",
@@ -228,7 +229,7 @@ class Platform(Xilinx7SeriesPlatform):
         ftdi_chip = self.detect_ftdi_chip()
         if ftdi_chip is None:
             raise RuntimeError("No compatible FTDI device found.")
-        return OpenFPGALoader(cable=ftdi_chip, fpga_part=f"{self.device}sbg484", freq=20e6)
+        return OpenFPGALoader(cable=ftdi_chip, fpga_part=f"xc7a200tsbg484", freq=20e6)
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)

@@ -104,6 +104,7 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
+        platform.add_false_path_constraints(self.cd_sys.clk, self.cd_clk10.clk, pll.clkin)
 
         # IDelayCtrl.
         # -----------
@@ -650,10 +651,12 @@ class BaseSoC(SoCMini):
                  cd_sys      = "wr",
                  ctrl_size   = 16,
                  )
-            self.comb += self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data)
-            self.comb += self.refclk_mmcm_ps_gen.ctrl_load.eq(self.dac_refclk_load)
-            self.comb += self.crg.refclk_mmcm.psen.eq(self.refclk_mmcm_ps_gen.psen)
-            self.comb += self.crg.refclk_mmcm.psincdec.eq(self.refclk_mmcm_ps_gen.psincdec)
+            self.comb += [
+                self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data),
+                self.refclk_mmcm_ps_gen.ctrl_load.eq(self.dac_refclk_load),
+                self.crg.refclk_mmcm.psen.eq(self.refclk_mmcm_ps_gen.psen),
+                self.crg.refclk_mmcm.psincdec.eq(self.refclk_mmcm_ps_gen.psincdec),
+            ]
 
             # DMTD MMCM Phase Shift.
             # ----------------------
@@ -662,39 +665,23 @@ class BaseSoC(SoCMini):
                  cd_sys      = "wr",
                  ctrl_size   = 16,
                  )
-            self.comb += self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data)
-            self.comb += self.dmtd_mmcm_ps_gen.ctrl_load.eq(self.dac_dmtd_load)
-            self.comb += self.crg.dmtd_mmcm.psen.eq(self.dmtd_mmcm_ps_gen.psen)
-            self.comb += self.crg.dmtd_mmcm.psincdec.eq(self.dmtd_mmcm_ps_gen.psincdec)
+            self.comb += [
+                self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data),
+                self.dmtd_mmcm_ps_gen.ctrl_load.eq(self.dac_dmtd_load),
+                self.crg.dmtd_mmcm.psen.eq(self.dmtd_mmcm_ps_gen.psen),
+                self.crg.dmtd_mmcm.psincdec.eq(self.dmtd_mmcm_ps_gen.psincdec),
+            ]
 
             # Timings Constraints.
             # --------------------
             platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-123]") # FIXME: Add 10MHz Ext Clk.
             platform.add_platform_command("create_clock -name wr_txoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/TXOUTCLK]")
             platform.add_platform_command("create_clock -name wr_rxoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/RXOUTCLK]")
-
-        # Timing Constraints/False Paths -----------------------------------------------------------
-
-        if with_white_rabbit:
             platform.add_false_path_constraints(
-                # CRG.
-                "clk100",
-                "clk_sys",
-                "{{*crg_*clkout0}}",
-                "{{*crg_*clkout1}}",
-
-                # White Rabbit.
                 "wr_rxoutclk",
                 "wr_txoutclk",
                 "{{*crg_s7mmcm0_clkout}}",
                 "{{*crg_s7mmcm1_clkout}}",
-            )
-        else:
-            platform.add_false_path_constraints(
-                # CRG.
-                "clk100",
-                "{{*crg_*clkout0}}",
-                "{{*crg_*clkout1}}",
             )
 
         # Clk Measurements -------------------------------------------------------------------------
