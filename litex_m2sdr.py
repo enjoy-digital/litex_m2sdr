@@ -99,11 +99,11 @@ class CRG(LiteXModule):
         if not with_white_rabbit:
             pll.create_clkout(self.cd_clk10, 10e6)
         pll.create_clkout(self.cd_idelay, 200e6)
-        self.comb += self.cd_clk200.clk.eq(self.cd_idelay.clk)
-        self.comb += self.cd_clk200.rst.eq(self.cd_idelay.rst)
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_clkout_buf1]")       # FIXME: Simplify clk10.
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets basesoc_crg_s7pll_clkout_buf1]") # FIXME: Simplify clk10.
-        self.comb += self.cd_clk100.clk.eq(pll.clkin)
+        self.comb += [
+            self.cd_clk200.clk.eq(self.cd_idelay.clk),
+            self.cd_clk200.rst.eq(self.cd_idelay.rst),
+            self.cd_clk100.clk.eq(pll.clkin),
+        ]
 
         # IDelayCtrl.
         # -----------
