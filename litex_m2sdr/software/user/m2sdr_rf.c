@@ -510,7 +510,7 @@ int main(int argc, char **argv)
 
     /* Parse/Handle Parameters. */
     for (;;) {
-        c = getopt_long_only(argc, argv, "hc8", options, &option_index);
+        c = getopt_long_only(argc, argv, "hc:8", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
