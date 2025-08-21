@@ -319,6 +319,12 @@ void m2sdr_si5351_i2c_scan(int fd)
 void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length)
 {
     int i;
+
+    /* Reset I2C Line */
+    m2sdr_si5351_i2c_reset(fd);
+    usleep(100);
+
+    /* Configure SI5351 */
     for (i=0; i<i2c_length; i++) {
         uint8_t addr = i2c_config[i][0];
         uint8_t data = i2c_config[i][1];
