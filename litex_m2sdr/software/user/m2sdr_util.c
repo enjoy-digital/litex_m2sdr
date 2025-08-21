@@ -717,6 +717,20 @@ static void vcxo_test() {
     printf("\e[1m[> VCXO Test:\e[0m\n");
     printf("-------------\n");
 
+    /* Find clock index for AD9361 Ref Clk */
+    int clk_index = -1;
+    for (int i = 0; i < N_CLKS; i++) {
+        if (strcmp(clk_names[i], "AD9361 Ref Clk") == 0) {
+            clk_index = i;
+            break;
+        }
+    }
+    if (clk_index == -1) {
+        fprintf(stderr, "Error: Clock 'AD9361 Ref Clk' not found in clk_names\n");
+        close(fd);
+        exit(1);
+    }
+
     uint32_t nominal_pwm_width = (uint32_t)((50.0 / 100.0) * PWM_PERIOD);
     double nominal_frequency_hz = 0;
 
@@ -736,13 +750,13 @@ static void vcxo_test() {
         litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
 
         latch_all_clocks(fd);
-        previous_value = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+        previous_value = read_64bit_register(fd, value_addrs[clk_index]);
         clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         sleep(1);
 
         latch_all_clocks(fd);
-        current_value = read_64bit_register(fd, CSR_CLK_MEASUREMENT_CLK0_VALUE_ADDR);
+        current_value = read_64bit_register(fd, value_addrs[clk_index]);
         clock_gettime(CLOCK_MONOTONIC, &current_time);
 
         elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
