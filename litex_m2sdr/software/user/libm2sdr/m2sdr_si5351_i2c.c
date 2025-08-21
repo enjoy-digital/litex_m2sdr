@@ -319,18 +319,79 @@ void m2sdr_si5351_i2c_scan(int fd)
 void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length)
 {
     int i;
+    uint8_t data;
+    bool success;
 
     /* Reset I2C Line */
     m2sdr_si5351_i2c_reset(fd);
     usleep(100);
 
-    /* Configure SI5351 */
-    for (i=0; i<i2c_length; i++) {
+    /* Wait for System Initialization (SYS_INIT = 0) */
+    int timeout = 100;  /* 100 attempts */
+    while (timeout--) {
+        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 0, &data, 1, true);
+        if (success && (data & 0x80) == 0) {
+            break;
+        }
+        usleep(1000);  /* Wait 1 ms */
+    }
+    if (timeout <= 0) {
+        fprintf(stderr, "SI5351 system initialization timeout\n");
+        return;
+    }
+
+    /* Disable all outputs */
+    data = 0xFF;
+    if (!m2sdr_si5351_i2c_write(fd, i2c_addr, 3, &data, 1)) {
+        fprintf(stderr, "Failed to disable SI5351 outputs (reg 0x03)\n");
+    }
+
+    /* Power down all output drivers */
+    data = 0x80;
+    for (i = 16; i <= 23; i++) {
+        if (!m2sdr_si5351_i2c_write(fd, i2c_addr, i, &data, 1)) {
+            fprintf(stderr, "Failed to power down SI5351 output (reg 0x%02X)\n", i);
+        }
+    }
+
+    /* Set interrupt masks */
+    data = 0x00;
+    if (!m2sdr_si5351_i2c_write(fd, i2c_addr, 2, &data, 1)) {
+        fprintf(stderr, "Failed to set SI5351 interrupt masks (reg 0x02)\n");
+    }
+
+    /* Configure SI5351 from provided register map */
+    for (i = 0; i < i2c_length; i++) {
         uint8_t addr = i2c_config[i][0];
         uint8_t data = i2c_config[i][1];
         if (!m2sdr_si5351_i2c_write(fd, i2c_addr, addr, &data, 1)) {
             fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
         }
+    }
+
+    /* Apply PLLA and PLLB soft reset */
+    data = 0xAC;
+    if (!m2sdr_si5351_i2c_write(fd, i2c_addr, 177, &data, 1)) {
+        fprintf(stderr, "Failed to apply SI5351 PLL soft reset (reg 0xB1)\n");
+    }
+
+    /* Wait for PLL lock */
+    timeout = 100;  /* 100 attempts */
+    while (timeout--) {
+        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 1, &data, 1, true);
+        if (success && (data & 0x60) == 0) {  /* LOL_B (bit 7=0), LOL_A (bit 5=0) */
+            break;
+        }
+        usleep(1000);  /* Wait 1 ms */
+    }
+    if (timeout <= 0) {
+        fprintf(stderr, "SI5351 PLL lock timeout\n");
+    }
+
+    /* Enable all outputs */
+    data = 0x00;
+    if (!m2sdr_si5351_i2c_write(fd, i2c_addr, 3, &data, 1)) {
+        fprintf(stderr, "Failed to enable SI5351 outputs (reg 0x03)\n");
     }
 }
 
