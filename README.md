@@ -158,10 +158,17 @@ The Ethernet SoC design is RX capable only for now. TX support will come soon.
 
 If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
 
-1. **Connect the Board:**
+1. **Install Prerequisite Packages:**
+   - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software. Run the following command in your terminal:
+   ```bash
+   sudo apt install build-essential cmake libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
+   ```
+   - **Note**: For non-Ubuntu Linux distributions (e.g., Fedora, Arch), install the equivalent packages using your distribution's package manager (e.g., `dnf` for Fedora or `pacman` for Arch).
+
+2. **Connect the Board:**
    - Insert the LiteX-M2SDR board into an available M2 slot on your Linux computer and connect your antennas.
 
-2. **Install Required Software:**
+3. **Install Required Software:**
    - Ensure you have the necessary software installed on your Linux system. You can do this by running the following command in your terminal:
    ```
    sudo apt install git cmake gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.9t64 gqrx-sdr
@@ -171,13 +178,13 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 >
 > If an error related to DKMS appears during installation, run sudo apt remove --purge xtrx-dkms dkms and then re-execute the installation command.
 
-3. **Clone the Repository:**
+4. **Clone the Repository:**
    - Clone the LiteX-M2SDR repository using the following command:
    ```
    git clone https://github.com/enjoy-digital/litex_m2sdr
    ```
 
-4. **Build and Install Software:**
+5. **Build and Install Software:**
     Software build use make and cmake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top if it to simplify our developpment and installation:
    - Navigate to the software directory and run the build script:
    ```
@@ -186,7 +193,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    ```
    - This will build the necessary components including the kernel driver, user-space utilities, and the SoapySDR driver.
 
-5. **Load the Kernel Driver:**
+6. **Load the Kernel Driver:**
    - Load the kernel driver with the following commands:
    ```
    cd litex_m2sdr/software/kernel
@@ -196,7 +203,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    ```
    - 🚀 Ready for launch!
 
-6. **Run Your SDR Software:**
+7. **Run Your SDR Software:**
    - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
 
 > [!TIP]
