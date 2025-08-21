@@ -64,10 +64,12 @@ static void test_si5351_scan(void)
         exit(1);
     }
 
+#if 0
     printf("\e[1m[> SI53512 I2C Bus Scan:\e[0m\n");
     printf("-----------------------------\n");
     m2sdr_si5351_i2c_scan(fd);
     printf("\n");
+#endif
 
     close(fd);
 }
@@ -82,9 +84,11 @@ static void test_si5351_init(void)
         exit(1);
     }
 
+#if 0
     printf("\e[1m[> SI53512 Init...\e[0m\n");
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
+#endif
 
     close(fd);
 }
@@ -172,6 +176,7 @@ static void info(void)
 #endif
     printf("\n");
 
+#if 0
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
@@ -194,6 +199,7 @@ static void info(void)
         printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
     }
     printf("\n");
+#endif
 #endif
 
     printf("\e[1m[> AD9361 Info:\e[0m\n");

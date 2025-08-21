@@ -50,7 +50,6 @@ from litex_m2sdr import Platform
 
 from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
-from litex_m2sdr.gateware.si5351_i2c  import SI5351I2C, i2c_program_si5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator
@@ -263,6 +262,7 @@ class BaseSoC(SoCMini):
 
         si5351_clk_in = Signal()
         self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
+        self.bus.add_master(name="si5351_sequencer", master=self.si5351.sequencer.bus)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
