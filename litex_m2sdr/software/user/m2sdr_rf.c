@@ -136,7 +136,6 @@ static void m2sdr_init(
         exit(1);
     }
 
-#if 0
 #ifdef  CSR_SI5351_BASE
     /* Initialize SI531 Clocking */
     printf("Initializing SI5351 Clocking...\n");
@@ -164,7 +163,6 @@ static void m2sdr_init(
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
         exit(1);
     }
-#endif
 #endif
 
     /* Initialize AD9361 SPI */

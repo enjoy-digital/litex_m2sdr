@@ -8,300 +8,169 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 #include "liblitepcie.h"
-
 #include "m2sdr_si5351_i2c.h"
 
-#ifdef CSR_SI5351_I2C_W_ADDR
-
-#define I2C_RETRY_COUNT 4        /* Number of retry attempts for I2C operations */
-#define I2C_RETRY_DELAY_US 1000  /* Delay in microseconds between retries */
 #define I2C_DEBUG 0              /* Set to 1 for verbose debug logging in read/write/config */
 
-extern void nanosleep(int n);
-extern void usleep(int n);
+#define I2C_TIMEOUT_MS 100       /* Timeout in ms for wait operations */
 
-/* Private Functions */
+/* I2C Core Functions */
 
-static void si5351_i2c_delay(int n) {
-    nanosleep(n);
+static uint32_t i2c_read_reg(int fd, uint32_t addr) {
+    return litepcie_readl(fd, addr);
 }
 
-static inline void si5351_i2c_oe_scl_sda(int fd, bool oe, bool scl, bool sda)
-{
-    litepcie_writel(fd, CSR_SI5351_I2C_W_ADDR,
-        ((oe & 1)  << CSR_SI5351_I2C_W_OE_OFFSET)   |
-        ((scl & 1) << CSR_SI5351_I2C_W_SCL_OFFSET) |
-        ((sda & 1) << CSR_SI5351_I2C_W_SDA_OFFSET)
-    );
+static void i2c_write_reg(int fd, uint32_t addr, uint32_t value) {
+    litepcie_writel(fd, addr, value);
 }
 
-static void si5351_i2c_start(int fd)
-{
-    si5351_i2c_oe_scl_sda(fd, 1, 1, 1);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 1, 1, 0);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 1, 0, 0);
-    si5351_i2c_delay(1);
+static int i2c_get_status(int fd) {
+    return i2c_read_reg(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
 }
 
-static void si5351_i2c_stop(int fd)
-{
-    si5351_i2c_oe_scl_sda(fd, 1, 0, 0);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 1, 1, 0);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 1, 1, 1);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 0, 1, 1);
-}
-
-static void si5351_i2c_transmit_bit(int fd, int value)
-{
-    si5351_i2c_oe_scl_sda(fd, 1, 0, value);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 1, 1, value);
-    si5351_i2c_delay(2);
-    si5351_i2c_oe_scl_sda(fd, 1, 0, value);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 0, 0, 0);
-}
-
-static int si5351_i2c_receive_bit(int fd)
-{
-    int value;
-    si5351_i2c_oe_scl_sda(fd, 0, 0, 0);
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 0, 1, 0);
-    si5351_i2c_delay(1);
-    value = litepcie_readl(fd, CSR_SI5351_I2C_R_ADDR) & 1;
-    si5351_i2c_delay(1);
-    si5351_i2c_oe_scl_sda(fd, 0, 0, 0);
-    si5351_i2c_delay(1);
-    return value;
-}
-
-/* Transmit byte and return 1 if slave sends ACK */
-
-static bool si5351_i2c_transmit_byte(int fd, uint8_t data)
-{
-    int i;
-    int ack;
-
-    /* SCL should have already been low for 1/4 cycle */
-    si5351_i2c_oe_scl_sda(fd, 0, 0, 0);
-    for (i = 0; i < 8; ++i) {
-        /* MSB first */
-        si5351_i2c_transmit_bit(fd, (data & (1 << 7)) != 0);
-        data <<= 1;
+static int i2c_wait_for_flag(int fd, uint32_t flag_offset, int timeout_ms) {
+    int64_t start = get_time_ms();
+    while (get_time_ms() - start < timeout_ms) {
+        int status = i2c_get_status(fd);
+        if (status & (1 << flag_offset)) {
+            return status;
+        }
+        usleep(100);
     }
-    ack = si5351_i2c_receive_bit(fd);
-
-    /* 0 from Slave means ACK */
-    return ack == 0;
+    return -1;  /* Timeout */
 }
 
-/* Receive byte and send ACK if ack=1 */
-static uint8_t si5351_i2c_receive_byte(int fd, bool ack)
-{
-    int i;
-    uint8_t data = 0;
-
-    for (i = 0; i < 8; ++i) {
-        data <<= 1;
-        data |= si5351_i2c_receive_bit(fd);
+static void i2c_flush_rx(int fd) {
+    while (i2c_get_status(fd) & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)) {
+        i2c_read_reg(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
     }
-    si5351_i2c_transmit_bit(fd, !ack);
-
-    return data;
-}
-
-/* Reset line state */
-void m2sdr_si5351_i2c_reset(int fd)
-{
-    int i;
-    si5351_i2c_oe_scl_sda(fd, 1, 1, 1);
-    si5351_i2c_delay(8);
-    for (i = 0; i < 9; ++i) {
-        si5351_i2c_oe_scl_sda(fd, 1, 0, 1);
-        si5351_i2c_delay(2);
-        si5351_i2c_oe_scl_sda(fd, 1, 1, 1);
-        si5351_i2c_delay(2);
-    }
-    si5351_i2c_oe_scl_sda(fd, 0, 0, 1);
-    si5351_i2c_delay(1);
-    si5351_i2c_stop(fd);
-    si5351_i2c_oe_scl_sda(fd, 0, 1, 1);
-    si5351_i2c_delay(8);
 }
 
 /* Public Functions */
 
-/*
- * Read slave memory over I2C starting at given address
- *
- * First writes the memory starting address, then reads the data:
- *   START WR(slaveaddr) WR(addr) STOP START WR(slaveaddr) RD(data) RD(data) ... STOP
- * Some chips require that after transmiting the address, there will be no STOP in between:
- *   START WR(slaveaddr) WR(addr) START WR(slaveaddr) RD(data) RD(data) ... STOP
- */
-bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop)
-{
-    int retry;
-    bool success = false;
-
-    for (retry = 0; retry < I2C_RETRY_COUNT; retry++) {
-        si5351_i2c_start(fd);
-
-        if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
-            si5351_i2c_stop(fd);
-#if I2C_DEBUG
-            fprintf(stderr, "Retry %d: NACK on address write\n", retry);
-#endif
-            usleep(I2C_RETRY_DELAY_US);
-            continue;
-        }
-        if(!si5351_i2c_transmit_byte(fd, addr)) {
-            si5351_i2c_stop(fd);
-#if I2C_DEBUG
-            fprintf(stderr, "Retry %d: NACK on register addr\n", retry);
-#endif
-            usleep(I2C_RETRY_DELAY_US);
-            continue;
-        }
-
-        if (send_stop) {
-            si5351_i2c_stop(fd);
-        }
-        si5351_i2c_start(fd);
-
-        if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_RD(slave_addr))) {
-            si5351_i2c_stop(fd);
-#if I2C_DEBUG
-            fprintf(stderr, "Retry %d: NACK on address read\n", retry);
-#endif
-            usleep(I2C_RETRY_DELAY_US);
-            continue;
-        }
-        for (int i = 0; i < len; ++i) {
-            data[i] = si5351_i2c_receive_byte(fd, i != (len - 1));
-        }
-
-        si5351_i2c_stop(fd);
-
-        success = true;
-        break;
-    }
-
-    if (!success) {
-        fprintf(stderr, "I2C read failed after %d retries\n", I2C_RETRY_COUNT);
-    }
-#if I2C_DEBUG
-    else {
-        fprintf(stderr, "I2C read succeeded after %d retries\n", retry);
-    }
-#endif
-
-    return success;
+void m2sdr_si5351_i2c_reset(int fd) {
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 0);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, 0);
+    i2c_flush_rx(fd);
 }
 
-/*
- * Write slave memory over I2C starting at given address
- *
- * First writes the memory starting address, then writes the data:
- *   START WR(slaveaddr) WR(addr) WR(data) WR(data) ... STOP
- */
-bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len)
-{
-    int retry;
-    bool success = false;
-
-    for (retry = 0; retry < I2C_RETRY_COUNT; retry++) {
-        si5351_i2c_start(fd);
-
-        if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
-            si5351_i2c_stop(fd);
-#if I2C_DEBUG
-            fprintf(stderr, "Retry %d: NACK on address write\n", retry);
-#endif
-            usleep(I2C_RETRY_DELAY_US);
-            continue;
-        }
-        if(!si5351_i2c_transmit_byte(fd, addr)) {
-            si5351_i2c_stop(fd);
-#if I2C_DEBUG
-            fprintf(stderr, "Retry %d: NACK on register addr\n", retry);
-#endif
-            usleep(I2C_RETRY_DELAY_US);
-            continue;
-        }
-        bool all_acked = true;
-        for (int i = 0; i < len; ++i) {
-            if(!si5351_i2c_transmit_byte(fd, data[i])) {
-                all_acked = false;
-#if I2C_DEBUG
-                fprintf(stderr, "Retry %d: NACK on data byte %d\n", retry, i);
-#endif
-                break;
-            }
-        }
-        si5351_i2c_stop(fd);
-
-        if (all_acked) {
-            success = true;
-            break;
-        }
-        usleep(I2C_RETRY_DELAY_US);
+bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
+    if (len != 1) {
+        fprintf(stderr, "Multi-byte write not supported\n");
+        return false;
     }
 
-    if (!success) {
-        fprintf(stderr, "I2C write failed after %d retries\n", I2C_RETRY_COUNT);
-    }
-#if I2C_DEBUG
-    else {
-        fprintf(stderr, "I2C write succeeded after %d retries\n", retry);
-    }
-#endif
+    m2sdr_si5351_i2c_reset(fd);
 
-    return success;
+    // Configure transaction: TX=2 bytes, RX=0
+    uint32_t settings = (2 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_TX_OFFSET) | (0 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_RX_OFFSET);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, settings);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+
+    // Send register address
+    int status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+#if I2C_DEBUG
+        fprintf(stderr, "NACK on slave addr\n");
+#endif
+        return false;
+    }
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR, addr);
+
+    // Send value
+    status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+#if I2C_DEBUG
+        fprintf(stderr, "NACK on register addr\n");
+#endif
+        return false;
+    }
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR, data[0]);
+
+    // Final check for completion
+    status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+#if I2C_DEBUG
+        fprintf(stderr, "NACK on data\n");
+#endif
+        return false;
+    }
+
+#if I2C_DEBUG
+    fprintf(stderr, "I2C write succeeded\n");
+#endif
+    return true;
 }
 
-/*
- * Poll I2C slave at given address, return true if it sends an ACK back
- */
-bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr)
-{
-    int retry;
-    bool result = false;
-
-    for (retry = 0; retry < I2C_RETRY_COUNT; retry++) {
-        si5351_i2c_start(fd);
-        result = si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr));
-        result |= si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_RD(slave_addr));
-        si5351_i2c_stop(fd);
-
-        if (result) {
-            break;
-        }
-        usleep(I2C_RETRY_DELAY_US);
+bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop) {
+    if (len != 1) {
+        fprintf(stderr, "Multi-byte read not supported\n");
+        return false;
     }
 
-    return result;
+    m2sdr_si5351_i2c_reset(fd);
+
+    // Configure transaction: 1 byte TX (register address), 1 byte RX
+    uint32_t settings = (1 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_TX_OFFSET) | (1 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_RX_OFFSET);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, settings);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+
+    // Send register address
+    int status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+#if I2C_DEBUG
+        fprintf(stderr, "NACK on slave addr\n");
+#endif
+        return false;
+    }
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR, addr);
+
+    // Read data byte
+    status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+#if I2C_DEBUG
+        fprintf(stderr, "NACK on read\n");
+#endif
+        return false;
+    }
+    data[0] = i2c_read_reg(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR) & 0xFF;
+
+#if I2C_DEBUG
+    fprintf(stderr, "I2C read succeeded\n");
+#endif
+    return true;
 }
 
-/*
- * Scan I2C
- */
-void m2sdr_si5351_i2c_scan(int fd)
-{
-    int slave_addr;
+bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr) {
+    m2sdr_si5351_i2c_reset(fd);
 
+    uint32_t settings = (0 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_TX_OFFSET) | (0 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_RX_OFFSET);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, settings);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+
+    int status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
+    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
+        return false;
+    }
+
+    return true;
+}
+
+void m2sdr_si5351_i2c_scan(int fd) {
     printf("       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
-    for (slave_addr = 0; slave_addr < 0x80; slave_addr++) {
+    for (int slave_addr = 0; slave_addr < 0x80; slave_addr++) {
         if (slave_addr % 0x10 == 0) {
-            printf("\n0x%02x:", slave_addr & 0x70);
+            printf("\n%02x: ", slave_addr & 0xf0);
         }
         if (m2sdr_si5351_i2c_poll(fd, slave_addr)) {
             printf(" %02x", slave_addr);
@@ -312,12 +181,7 @@ void m2sdr_si5351_i2c_scan(int fd)
     printf("\n");
 }
 
-/*
- * I2C Config
- */
-
-void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length)
-{
+void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;
     uint8_t data;
     bool success;
@@ -329,7 +193,7 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
     /* Wait for System Initialization (SYS_INIT = 0) */
     int timeout = 100;  /* 100 attempts */
     while (timeout--) {
-        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 0, &data, 1, true);
+        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 0, &data, 1, false);  // Use repeated start
         if (success && (data & 0x80) == 0) {
             break;
         }
@@ -362,10 +226,10 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
 
     /* Configure SI5351 from provided register map */
     for (i = 0; i < i2c_length; i++) {
-        uint8_t addr = i2c_config[i][0];
-        uint8_t data = i2c_config[i][1];
-        if (!m2sdr_si5351_i2c_write(fd, i2c_addr, addr, &data, 1)) {
-            fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", addr);
+        uint8_t reg = i2c_config[i][0];
+        uint8_t val = i2c_config[i][1];
+        if (!m2sdr_si5351_i2c_write(fd, i2c_addr, reg, &val, 1)) {
+            fprintf(stderr, "Failed to write to SI5351 at register 0x%02X\n", reg);
         }
     }
 
@@ -378,7 +242,7 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
     /* Wait for PLL lock */
     timeout = 100;  /* 100 attempts */
     while (timeout--) {
-        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 1, &data, 1, true);
+        success = m2sdr_si5351_i2c_read(fd, i2c_addr, 1, &data, 1, false);  // Use repeated start
         if (success && (data & 0x60) == 0) {  /* LOL_B (bit 7=0), LOL_A (bit 5=0) */
             break;
         }
@@ -394,6 +258,3 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
         fprintf(stderr, "Failed to enable SI5351 outputs (reg 0x03)\n");
     }
 }
-
-
-#endif /* CSR_SI5351_I2C_W_ADDR */
