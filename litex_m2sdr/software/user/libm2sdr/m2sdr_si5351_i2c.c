@@ -15,7 +15,11 @@
 
 #ifdef CSR_SI5351_I2C_W_ADDR
 
+#define I2C_RETRY_COUNT 4        /* Number of retry attempts for I2C operations */
+#define I2C_RETRY_DELAY_US 1000  /* Delay in microseconds between retries */
+
 extern void nanosleep(int n);
+extern void usleep(int n);
 
 /* Private Functions */
 
@@ -144,35 +148,48 @@ void m2sdr_si5351_i2c_reset(int fd)
  */
 bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop)
 {
-	int i;
+	int retry;
+	bool success = false;
 
-	si5351_i2c_start(fd);
+	for (retry = 0; retry < I2C_RETRY_COUNT; retry++) {
+		si5351_i2c_start(fd);
 
-	if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
+		if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
+			si5351_i2c_stop(fd);
+			usleep(I2C_RETRY_DELAY_US);
+			continue;
+		}
+		if(!si5351_i2c_transmit_byte(fd, addr)) {
+			si5351_i2c_stop(fd);
+			usleep(I2C_RETRY_DELAY_US);
+			continue;
+		}
+
+		if (send_stop) {
+			si5351_i2c_stop(fd);
+		}
+		si5351_i2c_start(fd);
+
+		if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_RD(slave_addr))) {
+			si5351_i2c_stop(fd);
+			usleep(I2C_RETRY_DELAY_US);
+			continue;
+		}
+		for (int i = 0; i < len; ++i) {
+			data[i] = si5351_i2c_receive_byte(fd, i != (len - 1));
+		}
+
 		si5351_i2c_stop(fd);
-		return false;
-	}
-	if(!si5351_i2c_transmit_byte(fd, addr)) {
-		si5351_i2c_stop(fd);
-		return false;
+
+		success = true;
+		break;
 	}
 
-	if (send_stop) {
-		si5351_i2c_stop(fd);
-	}
-	si5351_i2c_start(fd);
-
-	if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_RD(slave_addr))) {
-		si5351_i2c_stop(fd);
-		return false;
-	}
-	for (i = 0; i < len; ++i) {
-		data[i] = si5351_i2c_receive_byte(fd, i != (len - 1));
+	if (!success) {
+		fprintf(stderr, "I2C read failed after %d retries\n", I2C_RETRY_COUNT);
 	}
 
-	si5351_i2c_stop(fd);
-
-	return true;
+	return success;
 }
 
 /*
@@ -183,28 +200,43 @@ bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *da
  */
 bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len)
 {
-	int i;
+	int retry;
+	bool success = false;
 
-	si5351_i2c_start(fd);
+	for (retry = 0; retry < I2C_RETRY_COUNT; retry++) {
+		si5351_i2c_start(fd);
 
-	if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
-		si5351_i2c_stop(fd);
-		return false;
-	}
-	if(!si5351_i2c_transmit_byte(fd, addr)) {
-		si5351_i2c_stop(fd);
-		return false;
-	}
-	for (i = 0; i < len; ++i) {
-		if(!si5351_i2c_transmit_byte(fd, data[i])) {
+		if(!si5351_i2c_transmit_byte(fd, SI5351_I2C_ADDR_WR(slave_addr))) {
 			si5351_i2c_stop(fd);
-			return false;
+			usleep(I2C_RETRY_DELAY_US);
+			continue;
 		}
+		if(!si5351_i2c_transmit_byte(fd, addr)) {
+			si5351_i2c_stop(fd);
+			usleep(I2C_RETRY_DELAY_US);
+			continue;
+		}
+		bool all_acked = true;
+		for (int i = 0; i < len; ++i) {
+			if(!si5351_i2c_transmit_byte(fd, data[i])) {
+				all_acked = false;
+				break;
+			}
+		}
+		si5351_i2c_stop(fd);
+
+		if (all_acked) {
+			success = true;
+			break;
+		}
+		usleep(I2C_RETRY_DELAY_US);
 	}
 
-	si5351_i2c_stop(fd);
+	if (!success) {
+		fprintf(stderr, "I2C write failed after %d retries\n", I2C_RETRY_COUNT);
+	}
 
-	return true;
+	return success;
 }
 
 /*
