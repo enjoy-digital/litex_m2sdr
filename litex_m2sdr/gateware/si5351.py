@@ -87,7 +87,7 @@ class SI5351(LiteXModule):
             i_S  = self.version,
             i_I0 = self.ss_en,
             i_I1 = ClockSignal("clk10"),
-            o_O   = platform.request("si5351_ssen_clkin"),
+            o_O  = platform.request("si5351_ssen_clkin"),
         )
 
         # CSRs.
