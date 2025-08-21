@@ -19,10 +19,14 @@
 
 #include "liblitepcie.h"
 
+#ifdef CSR_GPIO_BASE
+
 /* CSR Definitions from csr.h */
 #define CSR_GPIO_CONTROL_ENABLE   (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET)
 #define CSR_GPIO_CONTROL_SOURCE   (1 << CSR_GPIO_CONTROL_SOURCE_OFFSET)
 #define CSR_GPIO_CONTROL_LOOPBACK (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET)
+
+#endif
 
 /* Variables */
 /*-----------*/
@@ -53,6 +57,8 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
         exit(1);
     }
 
+#ifdef CSR_GPIO_BASE
+
     /* Enable GPIO in Packer/Unpacker mode if PPS is requested */
     if (pps_freq > 0) {
         uint32_t control = CSR_GPIO_CONTROL_ENABLE | CSR_GPIO_CONTROL_LOOPBACK; /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=1 */
@@ -62,6 +68,8 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
         printf("GPIO Enabled for PPS/Toggle at %.2f Hz (20%% high: %.3fs, 80%% low: %.3fs) on bit %d\n",
                pps_freq, pps_high_s, pps_period_s - pps_high_s, gpio_pin);
     }
+
+#endif
 
     /* Print parameters */
     printf("Starting tone generation with parameters:\n");
@@ -169,7 +177,9 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
 
     /* Cleanup DMA and close device */
     litepcie_dma_cleanup(&dma);
+#ifdef CSR_GPIO_BASE
     litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, 0);
+#endif
     close(fd);
 }
 

@@ -21,6 +21,7 @@
 /*-----------------------*/
 
 static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
+#ifdef CSR_GPIO_BASE
     uint32_t control = 0;
 
     /* Read current control register value */
@@ -62,6 +63,9 @@ static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable,
            gpio_enable && source_csr ? (output_data & 0xF) : 0,
            gpio_enable && source_csr ? (output_enable & 0xF) : 0,
            input_data);
+
+#endif
+
 }
 
 /* Help */
