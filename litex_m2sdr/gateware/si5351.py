@@ -25,6 +25,7 @@ from litex_m2sdr.gateware.si5351_i2c import SI5351I2C, i2c_program_si5351
 class SI5351(LiteXModule):
     def __init__(self, platform, sys_clk_freq, clk_in=0, with_csr=True):
         self.version    = Signal() # SI5351 Version (0=B, 1=C).
+        self.ss_en      = Signal()   # SI5351 Spread spectrum enable (versions A and B).
         self.clk_in_src = Signal() # SI5351 ClkIn Source.
 
         # # #
@@ -81,19 +82,12 @@ class SI5351(LiteXModule):
         )
 
         # Enable / Clkin.
-        si5351_clk_in = Signal()
-        self.specials += Instance("BUFGMUX",
-            i_S  = self.clk_in_src,
-            i_I0 = ClockSignal("clk10"),
-            i_I1 = clk_in,
-            o_O  = si5351_clk_in,
-        )
         platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk10_clk]")
-        self.specials += DDROutput(
-            i1  = 1,
-            i2  = ~self.version, # B = Enable, always 1. C = Generate 10MHz.
-            o   = platform.request("si5351_en_clkin"),
-            clk = si5351_clk_in
+        self.specials += Instance("BUFGMUX",
+            i_S  = self.version,
+            i_I0 = self.ss_en,
+            i_I1 = ClockSignal("clk10"),
+            o_O   = platform.request("si5351_ssen_clkin"),
         )
 
         # CSRs.
@@ -106,10 +100,14 @@ class SI5351(LiteXModule):
                 ("``0b0``", "SI5351B Version."),
                 ("``0b1``", "SI5351C Version."),
             ], reset=default_version),
-            CSRField("clk_in_src",  size=1, offset=1, values=[
-                ("``0b0``", "10MHz ClkIn from PLL."),
-                ("``0b1``", "10MHz ClkIn from uFL."),
-            ], reset=default_clk_in)
+            CSRField("clk_in_src",  size=1, offset=1, values=[ # FIXME use this instead of version
+                ("``0b0``", "10MHz ClkIn from XO."),
+                ("``0b1``", "10MHz ClkIn from FPGA."),
+            ], reset=default_clk_in),
+            CSRField("ss_en",  size=1, offset=2, values=[
+                ("``0b0``", "SI5351B Spread spectrum disabled."),
+                ("``0b1``", "SI5351B Spread spectrum enabled."),
+            ], reset=default_version),
         ])
 
         # # #
