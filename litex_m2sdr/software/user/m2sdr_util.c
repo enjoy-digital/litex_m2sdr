@@ -661,6 +661,17 @@ static void clk_test(int num_measurements, int delay_between_tests)
     struct timespec start_time, current_time;
     double elapsed_time;
 
+    printf("\e[1m%-8s", "Meas.");
+    for (int i = 0; i < N_CLKS; i++) {
+        printf("  %-15s", clk_names[i]);
+    }
+    printf(" (MHz)\e[0m\n");
+    printf("--------");
+    for (int i = 0; i < N_CLKS; i++) {
+        printf("  ---------------");
+    }
+    printf("\n");
+
     latch_all_clocks(fd);
     read_all_clocks(fd, previous_values);
     clock_gettime(CLOCK_MONOTONIC, &start_time);
@@ -676,12 +687,14 @@ static void clk_test(int num_measurements, int delay_between_tests)
                        (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
         start_time = current_time;
 
+        printf("%-8d", i + 1);
         for (int clk_index = 0; clk_index < N_CLKS; clk_index++) {
             uint64_t delta_value = current_values[clk_index] - previous_values[clk_index];
             double frequency_mhz = delta_value / (elapsed_time * 1e6);
-            printf("Measurement %d, %s: Frequency: %3.2f MHz\n", i + 1, clk_names[clk_index], frequency_mhz);
+            printf("  %15.2f", frequency_mhz);
             previous_values[clk_index] = current_values[clk_index];
         }
+        printf("\n");
     }
 
     close(fd);
