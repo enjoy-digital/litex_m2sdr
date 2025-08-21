@@ -705,10 +705,48 @@ static void clk_test(int num_measurements, int delay_between_tests)
 
 #ifdef CSR_SI5351_BASE
 
-#define PWM_PERIOD 4096  // Define the PWM period
+#define VCXO_TEST_PWM_PERIOD             4096   /* PWM period */
+#define VCXO_TEST_MEASUREMENT_SAMPLES    10     /* Number of samples for averaging frequency measurements */
+#define VCXO_TEST_STABILIZATION_DELAY_MS 100    /* Milliseconds to wait for stabilization */
+#define VCXO_TEST_MEASUREMENT_DELAY_MS   100    /* Milliseconds for measurement period */
+#define VCXO_TEST_DETECTION_THRESHOLD_HZ 1000.0 /* Threshold for detecting VCXO presence (SI5351B) */
 
-static void vcxo_test() {
-    int fd = open(litepcie_device, O_RDWR);
+static double measure_frequency(int fd, int clk_index)
+{
+    uint64_t previous_value, current_value;
+    struct timespec start_time, current_time;
+    double elapsed_time;
+    double freq_sum = 0.0;
+
+    for (int sample = 0; sample < VCXO_TEST_MEASUREMENT_SAMPLES; sample++) {
+        latch_all_clocks(fd);
+        previous_value = read_64bit_register(fd, value_addrs[clk_index]);
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+        struct timespec ts;
+        ts.tv_sec = VCXO_TEST_MEASUREMENT_DELAY_MS / 1000;
+        ts.tv_nsec = (VCXO_TEST_MEASUREMENT_DELAY_MS % 1000) * 1000000L;
+        nanosleep(&ts, NULL);
+
+        latch_all_clocks(fd);
+        current_value = read_64bit_register(fd, value_addrs[clk_index]);
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+
+        elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
+                       (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+        uint64_t delta_value = current_value - previous_value;
+        freq_sum += delta_value / elapsed_time;
+    }
+
+    return freq_sum / VCXO_TEST_MEASUREMENT_SAMPLES;
+}
+
+static void vcxo_test(void)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -717,7 +755,7 @@ static void vcxo_test() {
     printf("\e[1m[> VCXO Test:\e[0m\n");
     printf("-------------\n");
 
-    /* Find clock index for AD9361 Ref Clk */
+    /* Find clock index for AD9361 Ref Clk. */
     int clk_index = -1;
     for (int i = 0; i < N_CLKS; i++) {
         if (strcmp(clk_names[i], "AD9361 Ref Clk") == 0) {
@@ -731,48 +769,71 @@ static void vcxo_test() {
         exit(1);
     }
 
-    uint32_t nominal_pwm_width = (uint32_t)((50.0 / 100.0) * PWM_PERIOD);
-    double nominal_frequency_hz = 0;
-
-    uint64_t previous_value, current_value;
-    struct timespec start_time, current_time;
-    double elapsed_time, min_frequency = 1e12, max_frequency = 0, previous_frequency_hz = 0;
-
     /* Set PWM period. */
-    litepcie_writel(fd, CSR_SI5351_PWM_PERIOD_ADDR, PWM_PERIOD);
+    litepcie_writel(fd, CSR_SI5351_PWM_PERIOD_ADDR, VCXO_TEST_PWM_PERIOD);
     /* Enable PWM. */
     litepcie_writel(fd, CSR_SI5351_PWM_ENABLE_ADDR, 1);
 
+    /* Set PWM to 0% and wait for stabilization. */
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    struct timespec ts_stab;
+    ts_stab.tv_sec = VCXO_TEST_STABILIZATION_DELAY_MS / 1000;
+    ts_stab.tv_nsec = (VCXO_TEST_STABILIZATION_DELAY_MS % 1000) * 1000000L;
+    nanosleep(&ts_stab, NULL);
+
+    /* Detection phase for SI5351B (VCXO) vs SI5351C. */
+    double freq_0 = measure_frequency(fd, clk_index);
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);  /* 50% */
+    nanosleep(&ts_stab, NULL);
+    double freq_50 = measure_frequency(fd, clk_index);
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD);  /* 100% */
+    nanosleep(&ts_stab, NULL);
+    double freq_100 = measure_frequency(fd, clk_index);
+
+    double max_diff = fabs(freq_0 - freq_50) + fabs(freq_100 - freq_50);
+    int is_vcxo = (max_diff >= VCXO_TEST_DETECTION_THRESHOLD_HZ);
+
+    if (!is_vcxo) {
+        printf("Detected SI5351C (no VCXO), exiting.\n");
+        /* Set back PWM to nominal width. */
+        litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
+        close(fd);
+        return;
+    }
+
+    printf("Detected SI5351B (with VCXO): Max frequency variation %.2f Hz >= threshold %.2f Hz.\n\n", max_diff, VCXO_TEST_DETECTION_THRESHOLD_HZ);
+
+    /* Full test: Reset to 0% and stabilize again. */
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    nanosleep(&ts_stab, NULL);
+
+    double nominal_frequency_hz = 0.0;
+    double min_frequency = 1e12;
+    double max_frequency = 0.0;
+    double previous_frequency_hz = 0.0;
+
+    /* Print table header. */
+    printf("\e[1m%-12s  %-15s  %-15s\e[0m\n", "PWM Width (%)", "Frequency (MHz)", "Variation (Hz)");
+    printf("------------  ---------------  ---------------\n");
+
     for (double pwm_width_percent = 0.0; pwm_width_percent <= 100.0; pwm_width_percent += 10.0) {
-        uint32_t pwm_width = (uint32_t)((pwm_width_percent / 100.0) * PWM_PERIOD);
+        uint32_t pwm_width = (uint32_t)((pwm_width_percent / 100.0) * VCXO_TEST_PWM_PERIOD);
 
         /* Set PWM width. */
         litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
+        nanosleep(&ts_stab, NULL);
 
-        latch_all_clocks(fd);
-        previous_value = read_64bit_register(fd, value_addrs[clk_index]);
-        clock_gettime(CLOCK_MONOTONIC, &start_time);
+        double frequency_hz = measure_frequency(fd, clk_index);
 
-        sleep(1);
-
-        latch_all_clocks(fd);
-        current_value = read_64bit_register(fd, value_addrs[clk_index]);
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-
-        elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
-                       (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
-
-        uint64_t delta_value = current_value - previous_value;
-        double frequency_hz = delta_value / elapsed_time;
-
-        if (pwm_width == nominal_pwm_width) {
+        if (pwm_width == VCXO_TEST_PWM_PERIOD / 2) {
             nominal_frequency_hz = frequency_hz;
         }
 
-        double variation_hz = (pwm_width_percent != 0.0) ? frequency_hz - previous_frequency_hz : 0;
+        double variation_hz = (pwm_width_percent != 0.0) ? frequency_hz - previous_frequency_hz : 0.0;
 
-        printf("PWM Width: %6.2f%%, Frequency: %10.6f MHz, Variation: %c%7.2f Hz\n",
-               pwm_width_percent, frequency_hz / 1e6, (variation_hz >= 0 ? '+' : '-'), fabs(variation_hz));
+        printf("%-12.2f  %15.6f  %c%14.2f\n",
+               pwm_width_percent, frequency_hz / 1e6,
+               (variation_hz >= 0 ? '+' : '-'), fabs(variation_hz));
 
         if (frequency_hz < min_frequency) min_frequency = frequency_hz;
         if (frequency_hz > max_frequency) max_frequency = frequency_hz;
@@ -781,7 +842,7 @@ static void vcxo_test() {
     }
 
     /* Set back PWM to nominal width. */
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, nominal_pwm_width);
+    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
 
     close(fd);
 
@@ -791,10 +852,12 @@ static void vcxo_test() {
     double ppm_variation_from_nominal_max = (hz_variation_from_nominal_max / nominal_frequency_hz) * 1e6;
     double ppm_variation_from_nominal_min = (hz_variation_from_nominal_min / nominal_frequency_hz) * 1e6;
 
-    printf("\e[1m[>Report:\e[0m\n");
-    printf("-------------------------\n");
-    printf(" Hz Variation from Nominal (50%% PWM): -%10.2f  Hz / +%10.2f  Hz\n", hz_variation_from_nominal_min, hz_variation_from_nominal_max);
-    printf("PPM Variation from Nominal (50%% PWM): -%10.2f PPM / +%10.2f PPM\n", ppm_variation_from_nominal_min, ppm_variation_from_nominal_max);
+    printf("\n\e[1m[> Report:\e[0m\n");
+    printf("----------\n");
+    printf(" Hz Variation from Nominal (50%% PWM): -%10.2f Hz / +%10.2f Hz\n",
+           hz_variation_from_nominal_min, hz_variation_from_nominal_max);
+    printf("PPM Variation from Nominal (50%% PWM): -%10.2f PPM / +%10.2f PPM\n",
+           ppm_variation_from_nominal_min, ppm_variation_from_nominal_max);
 }
 
 #endif
