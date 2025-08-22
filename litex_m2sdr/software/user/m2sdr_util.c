@@ -262,23 +262,27 @@ static void info(void)
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
-    bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
-    printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
-    if (si5351_present) {
-        uint8_t status;
-        m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
-        printf("Device Status    : 0x%02x\n", status);
-        printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
-        printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
-        printf("  LOL_A          : %s\n", (status & 0x20) ? "Unlocked"       : "Locked");
-        printf("  LOS            : %s\n", (status & 0x10) ? "Loss of Signal" : "Valid Signal");
-        printf("  REVID          : 0x%01x\n", status & 0x03);
+    if (m2sdr_si5351_i2c_check_litei2c(fd)) {
+        bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
+        printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
+        if (si5351_present) {
+            uint8_t status;
+            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
+            printf("Device Status    : 0x%02x\n", status);
+            printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
+            printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
+            printf("  LOL_A          : %s\n", (status & 0x20) ? "Unlocked"       : "Locked");
+            printf("  LOS            : %s\n", (status & 0x10) ? "Loss of Signal" : "Valid Signal");
+            printf("  REVID          : 0x%01x\n", status & 0x03);
 
-        uint8_t rev;
-        m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
-        printf("PLL Input Source : 0x%02x\n", rev);
-        printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
-        printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
+            uint8_t rev;
+            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
+            printf("PLL Input Source : 0x%02x\n", rev);
+            printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
+            printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
+        }
+    } else {
+        printf("Old gateware detected: SI5351 Software I2C access is not supported. Please update gateware.\n");
     }
     printf("\n");
 #endif

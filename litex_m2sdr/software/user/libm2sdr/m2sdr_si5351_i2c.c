@@ -147,9 +147,19 @@ bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr) {
     return m2sdr_si5351_i2c_read(fd, slave_addr, 0x00, &dummy, 1, true);
 }
 
+bool m2sdr_si5351_i2c_check_litei2c(int fd) {
+    return litepcie_readl(fd, CSR_SI5351_BASE) != 0x5;
+}
+
 void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;
     uint8_t data;
+
+    /* Check for LiteI2C. */
+    if (m2sdr_si5351_i2c_check_litei2c(fd) == false) {
+        printf("Old gateware detected: SI5351 Software I2C access is not supported. Please update gateware.\n");
+        return;
+    }
 
     /* Reset I2C Line */
     m2sdr_si5351_i2c_reset(fd);
