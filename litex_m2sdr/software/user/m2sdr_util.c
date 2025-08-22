@@ -54,24 +54,6 @@ void intHandler(int dummy) {
 /* SI5351 */
 /*--------*/
 
-static void test_si5351_scan(void)
-{
-    int fd;
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    printf("\e[1m[> SI53512 I2C Bus Scan:\e[0m\n");
-    printf("-----------------------------\n");
-    m2sdr_si5351_i2c_scan(fd);
-    printf("\n");
-
-    close(fd);
-}
-
 static void test_si5351_init(void)
 {
     int fd;
@@ -82,9 +64,75 @@ static void test_si5351_init(void)
         exit(1);
     }
 
-    printf("\e[1m[> SI53512 Init...\e[0m\n");
+    printf("\e[1m[> SI5351 Init...\e[0m\n");
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
+
+    close(fd);
+}
+
+static void test_si5351_dump(void)
+{
+    int fd;
+    uint8_t value;
+    int i;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("\e[1m[> SI5351 Registers Dump:\e[0m\n");
+    printf("--------------------------\n");
+
+    for (i = 0; i < 256; i++) {
+        if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, i, &value, 1, true)) {
+            printf("Reg 0x%02x: 0x%02x\n", i, value);
+        } else {
+            fprintf(stderr, "Failed to read reg 0x%02x\n", i);
+        }
+    }
+
+    printf("\n");
+    close(fd);
+}
+
+static void test_si5351_write(uint8_t reg, uint8_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (m2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, reg, &value, 1)) {
+        printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
+    } else {
+        fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
+    }
+
+    close(fd);
+}
+
+static void test_si5351_read(uint8_t reg)
+{
+    int fd;
+    uint8_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, reg, &value, 1, true)) {
+        printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
+    } else {
+        fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
+    }
 
     close(fd);
 }
@@ -113,6 +161,45 @@ static void test_ad9361_dump(void)
         printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
 
     printf("\n");
+
+    close(fd);
+}
+
+static void test_ad9361_write(uint16_t reg, uint16_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(fd, 0);
+
+    m2sdr_ad9361_spi_write(fd, reg, value);
+    printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
+
+    close(fd);
+}
+
+static void test_ad9361_read(uint16_t reg)
+{
+    int fd;
+    uint16_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(fd, 0);
+
+    value = m2sdr_ad9361_spi_read(fd, reg);
+    printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
     close(fd);
 }
@@ -175,23 +262,27 @@ static void info(void)
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
-    bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
-    printf("SI5351 Presence : %s\n", si5351_present ? "Yes" : "No");
-    if (si5351_present) {
-        uint8_t status;
-        m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
-        printf("Device Status    : 0x%02x\n", status);
-        printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
-        printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
-        printf("  LOL_A          : %s\n", (status & 0x20) ? "Unlocked"       : "Locked");
-        printf("  LOS            : %s\n", (status & 0x10) ? "Loss of Signal" : "Valid Signal");
-        printf("  REVID          : 0x%01x\n", status & 0x03);
+    if (m2sdr_si5351_i2c_check_litei2c(fd)) {
+        bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
+        printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
+        if (si5351_present) {
+            uint8_t status;
+            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
+            printf("Device Status    : 0x%02x\n", status);
+            printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
+            printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
+            printf("  LOL_A          : %s\n", (status & 0x20) ? "Unlocked"       : "Locked");
+            printf("  LOS            : %s\n", (status & 0x10) ? "Loss of Signal" : "Valid Signal");
+            printf("  REVID          : 0x%01x\n", status & 0x03);
 
-        uint8_t rev;
-        m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
-        printf("PLL Input Source : 0x%02x\n", rev);
-        printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
-        printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
+            uint8_t rev;
+            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
+            printf("PLL Input Source : 0x%02x\n", rev);
+            printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
+            printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
+        }
+    } else {
+        printf("Old gateware detected: SI5351 Software I2C access is not supported. Please update gateware.\n");
     }
     printf("\n");
 #endif
@@ -199,9 +290,50 @@ static void info(void)
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
     m2sdr_ad9361_spi_init(fd, 0);
-    printf("AD9361 Product ID  : %04x \n", m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID));
-    printf("AD9361 Temperature : %0.1f °C\n",
-        (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
+    uint16_t product_id = m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID);
+    bool ad9361_present = (product_id == 0xa);
+    printf("AD9361 Presence    : %s\n", ad9361_present ? "Yes" : "No");
+    if (ad9361_present) {
+        printf("AD9361 Product ID  : %04x \n", product_id);
+        printf("AD9361 Temperature : %0.1f °C\n",
+            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
+    }
+    close(fd);
+}
+
+
+/* FPGA Reg Access */
+/*-----------------*/
+
+static void test_reg_write(uint32_t offset, uint32_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    litepcie_writel(fd, offset, value);
+    printf("Wrote 0x%08x to reg 0x%08x\n", value, offset);
+
+    close(fd);
+}
+
+static void test_reg_read(uint32_t offset)
+{
+    int fd;
+    uint32_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    value = litepcie_readl(fd, offset);
+    printf("Reg 0x%08x: 0x%08x\n", offset, value);
 
     close(fd);
 }
@@ -905,6 +1037,8 @@ static void help(void)
            "\n"
            "available commands:\n"
            "info                              Get Board information.\n"
+           "reg_write offset value            Write to FPGA register.\n"
+           "reg_read offset                   Read from FPGA register.\n"
            "\n"
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
@@ -914,17 +1048,21 @@ static void help(void)
 #endif
            "\n"
 #ifdef  CSR_SI5351_BASE
-           "si5351_scan                       Scan SI5351 I2C Bus.\n"
            "si5351_init                       Init SI5351.\n"
+           "si5351_dump                       Dump SI5351 Registers.\n"
+           "si5351_write reg value            Write to SI5351 register.\n"
+           "si5351_read reg                   Read from SI5351 register.\n"
            "\n"
 #endif
            "ad9361_dump                       Dump AD9361 Registers.\n"
+           "ad9361_write reg value            Write to AD9361 register.\n"
+           "ad9361_read reg                   Read from AD9361 register.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
 #ifdef FLASH_WRITE
-           "flash_write filename [offset]     Write file contents to SPI Flash.\n"
+           "flash_write filename [offset]     Write file to SPI Flash.\n"
 #endif
-           "flash_read filename size [offset] Read from SPI Flash and write contents to file.\n"
+           "flash_read filename size [offset] Read from SPI Flash to file.\n"
            "flash_reload                      Reload FPGA Image.\n"
 #endif
            );
@@ -995,6 +1133,19 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "info"))
         info();
 
+    /* Reg cmds. */
+    else if (!strcmp(cmd, "reg_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint32_t offset = strtoul(argv[optind++], NULL, 0);
+        uint32_t value = strtoul(argv[optind++], NULL, 0);
+        test_reg_write(offset, value);
+    }
+    else if (!strcmp(cmd, "reg_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint32_t offset = strtoul(argv[optind++], NULL, 0);
+        test_reg_read(offset);
+    }
+
     /* Scratch cmds. */
     else if (!strcmp(cmd, "scratch_test"))
         scratch_test();
@@ -1021,15 +1172,37 @@ int main(int argc, char **argv)
 
     /* SI5351 cmds. */
 #ifdef CSR_SI5351_BASE
-    else if (!strcmp(cmd, "si5351_scan"))
-        test_si5351_scan();
     else if (!strcmp(cmd, "si5351_init"))
         test_si5351_init();
+    else if (!strcmp(cmd, "si5351_dump"))
+        test_si5351_dump();
+    else if (!strcmp(cmd, "si5351_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint8_t reg = strtoul(argv[optind++], NULL, 0);
+        uint8_t value = strtoul(argv[optind++], NULL, 0);
+        test_si5351_write(reg, value);
+    }
+    else if (!strcmp(cmd, "si5351_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint8_t reg = strtoul(argv[optind++], NULL, 0);
+        test_si5351_read(reg);
+    }
 #endif
 
     /* AD9361 cmds. */
     else if (!strcmp(cmd, "ad9361_dump"))
         test_ad9361_dump();
+    else if (!strcmp(cmd, "ad9361_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint16_t reg = strtoul(argv[optind++], NULL, 0);
+        uint16_t value = strtoul(argv[optind++], NULL, 0);
+        test_ad9361_write(reg, value);
+    }
+    else if (!strcmp(cmd, "ad9361_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint16_t reg = strtoul(argv[optind++], NULL, 0);
+        test_ad9361_read(reg);
+    }
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
