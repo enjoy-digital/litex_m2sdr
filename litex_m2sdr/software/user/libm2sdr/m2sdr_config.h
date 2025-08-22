@@ -48,8 +48,8 @@
 #define SI5351C_10MHZ_CLK_IN_FROM_PLL 0b0
 #define SI5351C_10MHZ_CLK_IN_FROM_UFL 0b1
 
-/* SI5351B-C Default Config from XO (38.4MHz on all outputs) */
-/*-----------------------------------------------------------*/
+/* SI5351B-C Default Config from XO (38.4MHz on MS0/2/3/4/5/6/7 and 100MHz on MS1) */
+/*---------------------------------------------------------------------------------*/
 
 const uint8_t si5351_xo_config[][2] = {
     /* Interrupt Mask Configuration */
@@ -179,8 +179,8 @@ const uint8_t si5351_xo_config[][2] = {
     { 0xB7, 0x12 },  // XTAL_CL=0 (6pF loading)
 };
 
-/* SI5351C Default Config from 10MHz ClkIn (38.4MHz on all outputs) */
-/*------------------------------------------------------------------*/
+/* SI5351C Default Config from 10MHz ClkIn (38.4MHz on MS0/2/3/4/5/6/7 and 100MHz on MS1) */
+/*----------------------------------------------------------------------------------------*/
 
 const uint8_t si5351_clkin_10m_config[][2] = {
     /* Interrupt Mask Configuration */
