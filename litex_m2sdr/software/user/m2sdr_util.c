@@ -89,6 +89,33 @@ static void test_si5351_init(void)
     close(fd);
 }
 
+static void test_si5351_dump(void)
+{
+    int fd;
+    uint8_t value;
+    int i;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    printf("\e[1m[> SI5351 Registers Dump:\e[0m\n");
+    printf("--------------------------\n");
+
+    for (i = 0; i < 256; i++) {
+        if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, i, &value, 1, true)) {
+            printf("Reg 0x%02x: 0x%02x\n", i, value);
+        } else {
+            fprintf(stderr, "Failed to read reg 0x%02x\n", i);
+        }
+    }
+
+    printf("\n");
+    close(fd);
+}
+
 #endif
 
 /* AD9361 Dump */
@@ -916,15 +943,16 @@ static void help(void)
 #ifdef  CSR_SI5351_BASE
            "si5351_scan                       Scan SI5351 I2C Bus.\n"
            "si5351_init                       Init SI5351.\n"
+           "si5351_dump                       Dump SI5351 Registers.\n"
            "\n"
 #endif
            "ad9361_dump                       Dump AD9361 Registers.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
 #ifdef FLASH_WRITE
-           "flash_write filename [offset]     Write file contents to SPI Flash.\n"
+           "flash_write filename [offset]     Write file to SPI Flash.\n"
 #endif
-           "flash_read filename size [offset] Read from SPI Flash and write contents to file.\n"
+           "flash_read filename size [offset] Read from SPI Flash to file.\n"
            "flash_reload                      Reload FPGA Image.\n"
 #endif
            );
@@ -1025,6 +1053,8 @@ int main(int argc, char **argv)
         test_si5351_scan();
     else if (!strcmp(cmd, "si5351_init"))
         test_si5351_init();
+    else if (!strcmp(cmd, "si5351_dump"))
+        test_si5351_dump();
 #endif
 
     /* AD9361 cmds. */
