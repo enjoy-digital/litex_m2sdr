@@ -54,24 +54,6 @@ void intHandler(int dummy) {
 /* SI5351 */
 /*--------*/
 
-static void test_si5351_scan(void)
-{
-    int fd;
-
-    fd = open(litepcie_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    printf("\e[1m[> SI53512 I2C Bus Scan:\e[0m\n");
-    printf("-----------------------------\n");
-    m2sdr_si5351_i2c_scan(fd);
-    printf("\n");
-
-    close(fd);
-}
-
 static void test_si5351_init(void)
 {
     int fd;
@@ -82,7 +64,7 @@ static void test_si5351_init(void)
         exit(1);
     }
 
-    printf("\e[1m[> SI53512 Init...\e[0m\n");
+    printf("\e[1m[> SI5351 Init...\e[0m\n");
     m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
 
@@ -945,7 +927,6 @@ static void help(void)
 #endif
            "\n"
 #ifdef  CSR_SI5351_BASE
-           "si5351_scan                       Scan SI5351 I2C Bus.\n"
            "si5351_init                       Init SI5351.\n"
            "si5351_dump                       Dump SI5351 Registers.\n"
            "\n"
@@ -1053,8 +1034,6 @@ int main(int argc, char **argv)
 
     /* SI5351 cmds. */
 #ifdef CSR_SI5351_BASE
-    else if (!strcmp(cmd, "si5351_scan"))
-        test_si5351_scan();
     else if (!strcmp(cmd, "si5351_init"))
         test_si5351_init();
     else if (!strcmp(cmd, "si5351_dump"))

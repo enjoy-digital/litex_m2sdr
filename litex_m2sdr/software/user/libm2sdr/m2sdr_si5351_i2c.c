@@ -151,34 +151,8 @@ bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *da
 }
 
 bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr) {
-    m2sdr_si5351_i2c_reset(fd);
-
-    uint32_t settings = (0 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_TX_OFFSET) | (0 << CSR_SI5351_I2C_MASTER_SETTINGS_LEN_RX_OFFSET);
-    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, settings);
-    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
-    i2c_write_reg(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
-
-    int status = i2c_wait_for_flag(fd, CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET, I2C_TIMEOUT_MS);
-    if (status < 0 || (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET))) {
-        return false;
-    }
-
-    return true;
-}
-
-void m2sdr_si5351_i2c_scan(int fd) {
-    printf("       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f");
-    for (int slave_addr = 0; slave_addr < 0x80; slave_addr++) {
-        if (slave_addr % 0x10 == 0) {
-            printf("\n%02x: ", slave_addr & 0xf0);
-        }
-        if (m2sdr_si5351_i2c_poll(fd, slave_addr)) {
-            printf(" %02x", slave_addr);
-        } else {
-            printf(" --");
-        }
-    }
-    printf("\n");
+    uint8_t dummy;
+    return m2sdr_si5351_i2c_read(fd, slave_addr, 0x00, &dummy, 1, true);
 }
 
 void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
