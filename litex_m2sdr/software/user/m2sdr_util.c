@@ -297,6 +297,43 @@ static void info(void)
     close(fd);
 }
 
+
+/* FPGA Reg Access */
+/*-----------------*/
+
+static void test_reg_write(uint32_t offset, uint32_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    litepcie_writel(fd, offset, value);
+    printf("Wrote 0x%08x to reg 0x%08x\n", value, offset);
+
+    close(fd);
+}
+
+static void test_reg_read(uint32_t offset)
+{
+    int fd;
+    uint32_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    value = litepcie_readl(fd, offset);
+    printf("Reg 0x%08x: 0x%08x\n", offset, value);
+
+    close(fd);
+}
+
 /* Scratch */
 /*---------*/
 
@@ -996,6 +1033,8 @@ static void help(void)
            "\n"
            "available commands:\n"
            "info                              Get Board information.\n"
+           "reg_write offset value            Write to FPGA register.\n"
+           "reg_read offset                   Read from FPGA register.\n"
            "\n"
            "dma_test                          Test DMA.\n"
            "scratch_test                      Test Scratch register.\n"
@@ -1089,6 +1128,19 @@ int main(int argc, char **argv)
     /* Info cmds. */
     if (!strcmp(cmd, "info"))
         info();
+
+    /* Reg cmds. */
+    else if (!strcmp(cmd, "reg_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint32_t offset = strtoul(argv[optind++], NULL, 0);
+        uint32_t value = strtoul(argv[optind++], NULL, 0);
+        test_reg_write(offset, value);
+    }
+    else if (!strcmp(cmd, "reg_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint32_t offset = strtoul(argv[optind++], NULL, 0);
+        test_reg_read(offset);
+    }
 
     /* Scratch cmds. */
     else if (!strcmp(cmd, "scratch_test"))
