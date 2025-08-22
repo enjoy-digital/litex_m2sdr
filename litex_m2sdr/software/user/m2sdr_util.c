@@ -203,7 +203,7 @@ static void info(void)
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
     bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
-    printf("SI5351 Presence : %s\n", si5351_present ? "Yes" : "No");
+    printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
     if (si5351_present) {
         uint8_t status;
         m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
@@ -226,10 +226,14 @@ static void info(void)
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
     m2sdr_ad9361_spi_init(fd, 0);
-    printf("AD9361 Product ID  : %04x \n", m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID));
-    printf("AD9361 Temperature : %0.1f °C\n",
-        (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
-
+    uint16_t product_id = m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID);
+    bool ad9361_present = (product_id == 0xa);
+    printf("AD9361 Presence    : %s\n", ad9361_present ? "Yes" : "No");
+    if (ad9361_present) {
+        printf("AD9361 Product ID  : %04x \n", product_id);
+        printf("AD9361 Temperature : %0.1f °C\n",
+            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
+    }
     close(fd);
 }
 
