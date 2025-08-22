@@ -193,7 +193,7 @@ class LiteI2CSequencer(LiteXModule):
                 If(bus.dat_r & 0b10,
                     NextState("FLUSH-RX")
                 ).Else(
-                    NextState("CONF-0")
+                    NextState("CHECK-TX-READY")
                 )
             )
         )
@@ -205,6 +205,20 @@ class LiteI2CSequencer(LiteXModule):
             bus.sel.eq(0xf),
             If(bus.ack,
                 NextState("CHECK-RX-READY")
+            )
+        )
+        self.fsm.act("CHECK-TX-READY",
+            bus.stb.eq(1),
+            bus.cyc.eq(1),
+            bus.we.eq(0),
+            bus.adr.eq(I2C_MASTER_STATUS_ADDR),
+            bus.sel.eq(0xf),
+            If(bus.ack,
+                If(bus.dat_r & 0b01,
+                    NextState("CONF-0")
+                ).Else(
+                    NextState("CHECK-TX-READY")
+                )
             )
         )
         self.fsm.act("CONF-0",
@@ -224,7 +238,7 @@ class LiteI2CSequencer(LiteXModule):
             bus.we.eq(1),
             bus.adr.eq(I2C_MASTER_SETTINGS_ADDR),
             bus.sel.eq(0xf),
-            bus.dat_w.eq(2 | (0 << 8)),  # TX=2, RX=0
+            bus.dat_w.eq(2 | (0 << 8)), # TX=2, RX=0
             If(bus.ack,
                 NextState("CONF-2")
             )
@@ -251,6 +265,8 @@ class LiteI2CSequencer(LiteXModule):
                 NextValue(mem_port.adr, mem_port.adr + 1),
                 If(mem_port.adr == (len(seq_data) - 1),
                     NextState("DONE")
+                ).Else(
+                    NextState("FLUSH-RX")
                 )
             )
         )
@@ -274,17 +290,17 @@ class SI5351(LiteXModule):
         # LiteI2C Master.
         self.i2c = LiteI2C(sys_clk_freq,
             pads                     = i2c_pads,
-            i2c_master_tx_fifo_depth = 32,
-            i2c_master_rx_fifo_depth = 32,
+            i2c_master_tx_fifo_depth = 8,
+            i2c_master_rx_fifo_depth = 8,
         )
 
         # I2C Sequencer for Gateware Init.
-        self.sequencer = LiteI2CSequencer(
+        self.sequencer = ResetInserter()(LiteI2CSequencer(
             sys_clk_freq = sys_clk_freq,
             i2c_base     = 0xa000, # FIXME: Avoid hardcoded value.
             i2c_adr      = 0x60,
             i2c_sequence = si5351_i2c_sequence,
-        )
+        ))
 
         # VCXO PWM.
         self.pwm = PWM(platform.request("si5351_pwm"),
@@ -320,11 +336,27 @@ class SI5351(LiteXModule):
                 ("``0b0``", "SI5351B Spread spectrum disabled."),
                 ("``0b1``", "SI5351B Spread spectrum enabled."),
             ], reset=default_version),
+            CSRField("seq_reset",  size=1, offset=8, pulse=True, values=[
+                ("``0b1``", "Gateware Sequencer Reset."),
+            ], reset=default_version),
+        ])
+        self.status = CSRStatus(fields=[
+            CSRField("seq_done",  size=1, offset=8, values=[
+                ("``0b0``", "Gateware Sequencer Ongoing."),
+                ("``0b1``", "Gateware Sequencer Done."),
+            ]),
         ])
 
         # # #
 
+        # Controls.
         self.comb += [
             self.version.eq(self.control.fields.version),
             self.clk_in_src.eq(self.control.fields.clk_in_src),
+            self.sequencer.reset.eq(self.control.fields.seq_reset),
+        ]
+
+        # Status.
+        self.comb += [
+            self.status.fields.seq_done.eq(self.sequencer.done),
         ]

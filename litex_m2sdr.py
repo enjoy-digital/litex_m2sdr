@@ -255,14 +255,14 @@ class BaseSoC(SoCMini):
             sata_gen        = sata_gen,
 
             # GPIO Capabilities.
-            gpio_enabled    = True,
+            gpio_enabled    = with_gpio,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
         si5351_clk_in = Signal()
         self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
-        self.bus.add_master(name="si5351_sequencer", master=self.si5351.sequencer.bus)
+        self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
@@ -700,15 +700,23 @@ class BaseSoC(SoCMini):
 
     def add_si5351_i2c_probe(self):
         analyzer_signals = [
+            # I2C SCL.
             self.si5351.i2c.phy.clkgen.scl_o,
             self.si5351.i2c.phy.clkgen.scl_oe,
 
+            # I2C SDA.
             self.si5351.i2c.phy.sda_o,
             self.si5351.i2c.phy.sda_oe,
             self.si5351.i2c.phy.sda_i,
 
+            # I2C Master.
             self.si5351.i2c.master.source,
             self.si5351.i2c.master.sink,
+
+            # I2C Sequencer.
+            self.si5351.sequencer.fsm,
+            self.si5351.sequencer.done,
+            self.si5351.sequencer.bus,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = 4096,
