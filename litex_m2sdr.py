@@ -267,6 +267,8 @@ class BaseSoC(SoCMini):
         si5351_clk1 = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
+        self.add_si5351_i2c_probe()
+
         # Time Generator ---------------------------------------------------------------------------
 
         self.time_gen = TimeGenerator(
@@ -695,6 +697,25 @@ class BaseSoC(SoCMini):
         })
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
+
+    def add_si5351_i2c_probe(self):
+        analyzer_signals = [
+            self.si5351.i2c.phy.clkgen.scl_o,
+            self.si5351.i2c.phy.clkgen.scl_oe,
+
+            self.si5351.i2c.phy.sda_o,
+            self.si5351.i2c.phy.sda_oe,
+            self.si5351.i2c.phy.sda_i,
+
+            self.si5351.i2c.master.source,
+            self.si5351.i2c.master.sink,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 4096,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
 
     def add_ad9361_spi_probe(self):
         analyzer_signals = [self.platform.lookup_request("ad9361_spi")]

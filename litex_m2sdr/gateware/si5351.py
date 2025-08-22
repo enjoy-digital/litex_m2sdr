@@ -269,7 +269,7 @@ class SI5351(LiteXModule):
         # # #
 
         # I2C Pads.
-        i2c_pads = platform.request("si5351_i2c")
+        self.i2c_pads = i2c_pads = platform.request("si5351_i2c")
 
         # LiteI2C Master.
         self.i2c = LiteI2C(sys_clk_freq,
