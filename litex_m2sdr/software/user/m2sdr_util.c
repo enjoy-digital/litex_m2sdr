@@ -98,6 +98,45 @@ static void test_si5351_dump(void)
     close(fd);
 }
 
+static void test_si5351_write(uint8_t reg, uint8_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (m2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, reg, &value, 1)) {
+        printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
+    } else {
+        fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
+    }
+
+    close(fd);
+}
+
+static void test_si5351_read(uint8_t reg)
+{
+    int fd;
+    uint8_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, reg, &value, 1, true)) {
+        printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
+    } else {
+        fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
+    }
+
+    close(fd);
+}
+
 #endif
 
 /* AD9361 Dump */
@@ -122,6 +161,45 @@ static void test_ad9361_dump(void)
         printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
 
     printf("\n");
+
+    close(fd);
+}
+
+static void test_ad9361_write(uint16_t reg, uint16_t value)
+{
+    int fd;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(fd, 0);
+
+    m2sdr_ad9361_spi_write(fd, reg, value);
+    printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
+
+    close(fd);
+}
+
+static void test_ad9361_read(uint16_t reg)
+{
+    int fd;
+    uint16_t value;
+
+    fd = open(litepcie_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(fd, 0);
+
+    value = m2sdr_ad9361_spi_read(fd, reg);
+    printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
     close(fd);
 }
@@ -929,9 +1007,13 @@ static void help(void)
 #ifdef  CSR_SI5351_BASE
            "si5351_init                       Init SI5351.\n"
            "si5351_dump                       Dump SI5351 Registers.\n"
+           "si5351_write reg value            Write to SI5351 register.\n"
+           "si5351_read reg                   Read from SI5351 register.\n"
            "\n"
 #endif
            "ad9361_dump                       Dump AD9361 Registers.\n"
+           "ad9361_write reg value            Write to AD9361 register.\n"
+           "ad9361_read reg                   Read from AD9361 register.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
 #ifdef FLASH_WRITE
@@ -1038,11 +1120,33 @@ int main(int argc, char **argv)
         test_si5351_init();
     else if (!strcmp(cmd, "si5351_dump"))
         test_si5351_dump();
+    else if (!strcmp(cmd, "si5351_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint8_t reg = strtoul(argv[optind++], NULL, 0);
+        uint8_t value = strtoul(argv[optind++], NULL, 0);
+        test_si5351_write(reg, value);
+    }
+    else if (!strcmp(cmd, "si5351_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint8_t reg = strtoul(argv[optind++], NULL, 0);
+        test_si5351_read(reg);
+    }
 #endif
 
     /* AD9361 cmds. */
     else if (!strcmp(cmd, "ad9361_dump"))
         test_ad9361_dump();
+    else if (!strcmp(cmd, "ad9361_write")) {
+        if (optind + 2 > argc) goto show_help;
+        uint16_t reg = strtoul(argv[optind++], NULL, 0);
+        uint16_t value = strtoul(argv[optind++], NULL, 0);
+        test_ad9361_write(reg, value);
+    }
+    else if (!strcmp(cmd, "ad9361_read")) {
+        if (optind + 1 > argc) goto show_help;
+        uint16_t reg = strtoul(argv[optind++], NULL, 0);
+        test_ad9361_read(reg);
+    }
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
