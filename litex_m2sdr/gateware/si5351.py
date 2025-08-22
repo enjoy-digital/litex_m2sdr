@@ -170,10 +170,6 @@ class LiteI2CSequencer(LiteXModule):
         mem_port = mem.get_port(async_read=True)
         self.specials += mem, mem_port
 
-        # Sequence Addr/Length.
-        seq_adr = 0
-        seq_len = len(i2c_sequence)
-
         # LiteI2C Registers.
         I2C_MASTER_ACTIVE_ADDR   = i2c_base + 0x04
         I2C_MASTER_SETTINGS_ADDR = i2c_base + 0x08
@@ -184,7 +180,7 @@ class LiteI2CSequencer(LiteXModule):
         # FSM
         self.fsm = fsm = FSM(reset_state="IDLE")
         self.fsm.act("IDLE",
-            NextValue(mem_port.adr, seq_adr),
+            NextValue(mem_port.adr, 0),
             NextState("CHECK-RX-READY")
         )
         self.fsm.act("CHECK-RX-READY",
@@ -253,16 +249,9 @@ class LiteI2CSequencer(LiteXModule):
             bus.dat_w.eq(mem_port.dat_r),
             If(bus.ack,
                 NextValue(mem_port.adr, mem_port.adr + 1),
-                If(mem_port.adr == (seq_adr + seq_len - 1),
-                    NextState("WAIT")
+                If(mem_port.adr == (len(seq_data) - 1),
+                    NextState("DONE")
                 )
-            )
-        )
-        self.wait_timer = WaitTimer(sys_clk_freq*100e-3) # 100ms.
-        self.fsm.act("WAIT",
-            self.wait_timer.wait.eq(1),
-            If(self.wait_timer.done,
-                NextState("DONE")
             )
         )
         self.fsm.act("DONE",
