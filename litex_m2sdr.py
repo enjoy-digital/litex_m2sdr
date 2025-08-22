@@ -267,8 +267,6 @@ class BaseSoC(SoCMini):
         si5351_clk1 = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
-        self.add_si5351_i2c_probe()
-
         # Time Generator ---------------------------------------------------------------------------
 
         self.time_gen = TimeGenerator(
