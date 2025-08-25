@@ -4,6 +4,27 @@
 
 The LiteX M2 SDR project is actively under development and does not yet have formal releases. However, we maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. The updates below are summarized by quarter, highlighting major advancements to provide a clear overview of the project's evolution.
 
+[> 2025 Q3 (Jul - Sep)
+----------------------
+**White Rabbit Integration, FM Utilities, and LiteI2C Migration**
+- Added initial White Rabbit support with PCIe PTM, WR firmware, WR console.
+- Introduced FM utilities (m2sdr_fm_tx/rx) with stereo, pre-emphasis, piping modes; replaced Python with C.
+- Migrated SI5351 to LiteI2C with sequencer, adaptations, presence checks, and register utilities.
+- Enhanced README with diagram, contents table, capabilities overview, and prerequisites.
+- Made GPIO optional/default-disabled.
+- Fixes: Overtemp power down, AD9361 signals, SI5351 for WR 10MHz, optimized PPS, timing cleanups.
+
+[> 2025 Q2 (Apr - Jun)
+----------------------
+**GPIO Integration, Streaming Enhancements, and Stability Improvements**
+- Added GPIO gateware with packing/unpacking and utilities incl. PPS output.
+- Enhanced SoapySDR with LiteEth TX, dynamic oversampling, scaling/deinterleaving fixes, and build configs.
+- Improved installation with Makefile rules for binaries/libs/headers and external platform reuse.
+- Updated OrangePi/RPi docs with restructured kernel instructions.
+- Integrated Capability module for API/hardware info and device reset support.
+- Optimized Etherbone with bulk transfers, verification, and remote probing.
+- Fixed timing constraints, CRG paths, PCIe rescan, and GPIO mapping.
+
 [> 2025 Q1 (Jan - Mar)
 ----------------------
 **Enhanced Hardware and Software Integration with New Diagnostic Tools**
