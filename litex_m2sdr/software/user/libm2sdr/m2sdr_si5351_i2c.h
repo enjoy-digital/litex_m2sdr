@@ -15,8 +15,14 @@
 #include "csr.h"
 #include "soc.h"
 
+/* I2C Constants */
+/*---------------*/
+
 #define SI5351_I2C_ADDR_WR(addr)  ((addr) << 1)
 #define SI5351_I2C_ADDR_RD(addr) (((addr) << 1) | 1u)
+
+/* I2C functions */
+/*---------------*/
 
 void m2sdr_si5351_i2c_reset(int fd);
 bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len);
