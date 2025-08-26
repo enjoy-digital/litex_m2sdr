@@ -11,6 +11,7 @@
 #include <memory>
 #include <sys/mman.h>
 #include <arpa/inet.h>
+#include <stdint.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -36,11 +37,7 @@
 
 /* AD9361 SPI */
 
-#if USE_LITEPCIE
-static int spi_fd;
-#elif USE_LITEETH
-static struct eb_connection *eb_fd;
-#endif
+static void *spi_conn;
 
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
@@ -52,19 +49,11 @@ int spi_write_then_read(struct spi_device * /*spi*/,
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-#if USE_LITEPCIE
-        rxbuf[0] = m2sdr_ad9361_spi_read(spi_fd, txbuf[0] << 8 | txbuf[1]);
-#elif USE_LITEETH
-        rxbuf[0] = m2sdr_ad9361_eb_spi_read(eb_fd, txbuf[0] << 8 | txbuf[1]);
-#endif
+        rxbuf[0] = m2sdr_ad9361_spi_read(spi_conn, txbuf[0] << 8 | txbuf[1]);
 
     /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-#if USE_LITEPCIE
-        m2sdr_ad9361_spi_write(spi_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-#else
-        m2sdr_ad9361_eb_spi_write(eb_fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-#endif
+        m2sdr_ad9361_spi_write(spi_conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
 
     /* Unsupported. */
     } else {
@@ -186,7 +175,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (_fd < 0)
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
     /* Global file descriptor for AD9361 lib. */
-    spi_fd = _fd;
+    spi_conn = (void *)(intptr_t)_fd;
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 #elif USE_LITEETH
@@ -201,7 +190,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _fd = eb_connect(eth_ip.c_str(), "1234", 1);
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
-    eb_fd = _fd;
+    spi_conn = _fd;
 
     /* Ethernet streamer */
     try {
@@ -296,16 +285,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (do_init) {
 #if USE_LITEPCIE
         /* Initialize SI531 Clocking. */
-        m2sdr_si5351_i2c_config(_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+        m2sdr_si5351_i2c_config((intptr_t)_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
         /* Power-up AD9361 */
         litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
+#endif
 
         /* Initialize AD9361 SPI. */
-        m2sdr_ad9361_spi_init(_fd, 1);
-#else
-        m2sdr_ad9361_eb_spi_init(_fd, 1);
-#endif
+        m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
     /* Initialize AD9361 RFIC. */

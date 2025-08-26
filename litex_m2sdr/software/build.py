@@ -39,16 +39,18 @@ def main():
 
     # Control/Data path flags.
     if args.interface == "litepcie":
-        flags = "-DUSE_LITEETH=OFF"
+        flags     = "-DUSE_LITEETH=OFF"
+        interface = "USE_LITEPCIE"
     else:
-        flags = "-DUSE_LITEETH=ON"
+        flags     = "-DUSE_LITEETH=ON"
+        interface = "USE_LITEETH"
 
     # Kernel compilation.
     if (args.interface == "litepcie"):
         run_command("cd kernel && make clean all")
 
     # Utilities compilation.
-    run_command("cd user   && make clean all")
+    run_command(f"cd user   && make clean INTERFACE={interface} all")
 
     # SoapySDR Driver compilation.
     build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {flags}")

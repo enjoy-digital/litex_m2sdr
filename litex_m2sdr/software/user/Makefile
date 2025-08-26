@@ -4,6 +4,8 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
+INTERFACE ?= USE_LITEPCIE
+
 BINARIES = m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
@@ -63,7 +65,7 @@ liblitepcie/%.o: liblitepcie/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 libm2sdr/%.o: libm2sdr/%.c
-	$(CC) -c $(CFLAGS) -DUSE_LITEPCIE -o $@ $<
+	$(CC) -c $(CFLAGS) -D$(INTERFACE) -o $@ $<
 
 ad9361/%.o: ad9361/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<

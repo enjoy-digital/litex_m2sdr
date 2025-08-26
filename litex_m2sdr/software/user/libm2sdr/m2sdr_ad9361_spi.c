@@ -31,7 +31,7 @@
 #define m2sdr_writel(conn, addr, val) litepcie_writel(m2sdr_conn_cast(conn), addr, val)
 #define m2sdr_readl(conn, addr)       litepcie_readl(m2sdr_conn_cast(conn), addr)
 
-#elif defined(USE_LITEETH)
+#elif USE_LITEETH
 
 #define m2sdr_conn_type struct eb_connection *
 #define m2sdr_conn_cast(conn) ((m2sdr_conn_type)(conn))
