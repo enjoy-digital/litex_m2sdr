@@ -66,7 +66,7 @@ static void test_si5351_init(void)
     }
 
     printf("\e[1m[> SI5351 Init...\e[0m\n");
-    m2sdr_si5351_i2c_config(fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+    m2sdr_si5351_i2c_config((void *)(intptr_t)fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
 
     close(fd);
@@ -88,7 +88,7 @@ static void test_si5351_dump(void)
     printf("--------------------------\n");
 
     for (i = 0; i < 256; i++) {
-        if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, i, &value, 1, true)) {
+        if (m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, i, &value, 1, true)) {
             printf("Reg 0x%02x: 0x%02x\n", i, value);
         } else {
             fprintf(stderr, "Failed to read reg 0x%02x\n", i);
@@ -109,7 +109,7 @@ static void test_si5351_write(uint8_t reg, uint8_t value)
         exit(1);
     }
 
-    if (m2sdr_si5351_i2c_write(fd, SI5351_I2C_ADDR, reg, &value, 1)) {
+    if (m2sdr_si5351_i2c_write((void *)(intptr_t)fd, SI5351_I2C_ADDR, reg, &value, 1)) {
         printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
     } else {
         fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
@@ -129,7 +129,7 @@ static void test_si5351_read(uint8_t reg)
         exit(1);
     }
 
-    if (m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, reg, &value, 1, true)) {
+    if (m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, reg, &value, 1, true)) {
         printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
     } else {
         fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
@@ -263,12 +263,12 @@ static void info(void)
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
-    if (m2sdr_si5351_i2c_check_litei2c(fd)) {
-        bool si5351_present = m2sdr_si5351_i2c_poll(fd, SI5351_I2C_ADDR);
+    if (m2sdr_si5351_i2c_check_litei2c((void *)(intptr_t)fd)) {
+        bool si5351_present = m2sdr_si5351_i2c_poll((void *)(intptr_t)fd, SI5351_I2C_ADDR);
         printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
         if (si5351_present) {
             uint8_t status;
-            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
+            m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
             printf("Device Status    : 0x%02x\n", status);
             printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
             printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
@@ -277,7 +277,7 @@ static void info(void)
             printf("  REVID          : 0x%01x\n", status & 0x03);
 
             uint8_t rev;
-            m2sdr_si5351_i2c_read(fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
+            m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
             printf("PLL Input Source : 0x%02x\n", rev);
             printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
             printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
