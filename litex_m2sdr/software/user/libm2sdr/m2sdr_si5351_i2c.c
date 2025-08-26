@@ -9,25 +9,51 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "liblitepcie.h"
 
 #include "m2sdr_si5351_i2c.h"
 
-void m2sdr_si5351_i2c_reset(int fd) {
+#include "etherbone.h"
+
+/* Abstraction Macros */
+/*--------------------*/
+
+#ifdef USE_LITEPCIE
+
+#define m2sdr_conn_type int
+#define m2sdr_conn_cast(conn) ((m2sdr_conn_type)(intptr_t)(conn))
+#define m2sdr_writel(conn, addr, val) litepcie_writel(m2sdr_conn_cast(conn), addr, val)
+#define m2sdr_readl(conn, addr)       litepcie_readl(m2sdr_conn_cast(conn), addr)
+
+#elif defined(USE_LITEETH)
+
+#define m2sdr_conn_type struct eb_connection *
+#define m2sdr_conn_cast(conn) ((m2sdr_conn_type)(conn))
+#define m2sdr_writel(conn, addr, val) eb_write32(m2sdr_conn_cast(conn), val, addr)
+#define m2sdr_readl(conn, addr)       eb_read32(m2sdr_conn_cast(conn), addr)
+
+#else
+
+#error "Define USE_LITEPCIE or USE_LITEETH for build configuration"
+
+#endif
+
+void m2sdr_si5351_i2c_reset(void *conn) {
     /* Reset Active. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 0);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 0);
 
     /* Reset Settings. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, 0);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, 0);
 
     /* Flush RX FIFO. */
-    while (litepcie_readl(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR) & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)) {
-        litepcie_readl(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
+    while (m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR) & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)) {
+        m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
     }
 }
 
-bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
+bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
     if (len != 1) {
         return false;
     }
@@ -36,21 +62,21 @@ bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint
     int timeout;
 
     /* Reset I2C. */
-    m2sdr_si5351_i2c_reset(fd);
+    m2sdr_si5351_i2c_reset(conn);
 
     /* Configure Transaction: TX=2 bytes, RX=0. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | 2);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | 2);
 
     /* Set Slave Address. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
 
     /* Start Transaction. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
 
     /* Wait TX Ready. */
     timeout = 100000;
     do {
-        status = litepcie_readl(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
         if (timeout-- <= 0) {
             return false;
         }
@@ -63,12 +89,12 @@ bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint
     }
 
     /* Send Register Address and Data. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR, (addr << 8) | data[0]);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR, (addr << 8) | data[0]);
 
     /* Wait TX Ready. */
     timeout = 100000;
     do {
-        status = litepcie_readl(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
         if (timeout-- <= 0) {
             return false;
         }
@@ -83,7 +109,7 @@ bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint
     return true;
 }
 
-bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop) {
+bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop) {
     if (len != 1) {
         return false;
     }
@@ -92,21 +118,21 @@ bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *da
     int timeout;
 
     /* Reset I2C. */
-    m2sdr_si5351_i2c_reset(fd);
+    m2sdr_si5351_i2c_reset(conn);
 
     /* Configure Transaction: TX=1 byte, RX=1 byte. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (1 << 8) | 1);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (1 << 8) | 1);
 
     /* Set Slave Address. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
 
     /* Start Transaction. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
 
     /* Wait TX Ready. */
     timeout = 100000;
     do {
-        status = litepcie_readl(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
         if (timeout-- <= 0) {
             return false;
         }
@@ -119,12 +145,12 @@ bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *da
     }
 
     /* Send Register Address. */
-    litepcie_writel(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR, addr);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR, addr);
 
     /* Wait RX Ready. */
     timeout = 100000;
     do {
-        status = litepcie_readl(fd, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
         if (timeout-- <= 0) {
             return false;
         }
@@ -137,38 +163,38 @@ bool m2sdr_si5351_i2c_read(int fd, uint8_t slave_addr, uint8_t addr, uint8_t *da
     }
 
     /* Read Data. */
-    *data = litepcie_readl(fd, CSR_SI5351_I2C_MASTER_RXTX_ADDR) & 0xFF;
+    *data = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR) & 0xFF;
 
     return true;
 }
 
-bool m2sdr_si5351_i2c_poll(int fd, uint8_t slave_addr) {
+bool m2sdr_si5351_i2c_poll(void *conn, uint8_t slave_addr) {
     uint8_t dummy;
-    return m2sdr_si5351_i2c_read(fd, slave_addr, 0x00, &dummy, 1, true);
+    return m2sdr_si5351_i2c_read(conn, slave_addr, 0x00, &dummy, 1, true);
 }
 
-bool m2sdr_si5351_i2c_check_litei2c(int fd) {
-    return litepcie_readl(fd, CSR_SI5351_BASE) != 0x5;
+bool m2sdr_si5351_i2c_check_litei2c(void *conn) {
+    return m2sdr_readl(conn, CSR_SI5351_BASE) != 0x5;
 }
 
-void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
+void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;
     uint8_t data;
 
     /* Check for LiteI2C. */
-    if (m2sdr_si5351_i2c_check_litei2c(fd) == false) {
+    if (m2sdr_si5351_i2c_check_litei2c(conn) == false) {
         printf("Old gateware detected: SI5351 Software I2C access is not supported. Please update gateware.\n");
         return;
     }
 
     /* Reset I2C Line */
-    m2sdr_si5351_i2c_reset(fd);
+    m2sdr_si5351_i2c_reset(conn);
     usleep(100);
 
     /* Wait for System Initialization (SYS_INIT = 0) */
     int timeout = 100;
     while (timeout--) {
-        if (m2sdr_si5351_i2c_read(fd, i2c_addr, 0, &data, 1, false) && (data & 0x80) == 0) {
+        if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &data, 1, false) && (data & 0x80) == 0) {
             break;
         }
         usleep(1000);
@@ -179,33 +205,33 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
 
     /* Disable all outputs */
     data = 0xFF;
-    m2sdr_si5351_i2c_write(fd, i2c_addr, 3, &data, 1);
+    m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1);
 
     /* Power down all output drivers */
     data = 0x80;
     for (i = 16; i <= 23; i++) {
-        m2sdr_si5351_i2c_write(fd, i2c_addr, i, &data, 1);
+        m2sdr_si5351_i2c_write(conn, i2c_addr, i, &data, 1);
     }
 
     /* Set interrupt masks */
     data = 0x00;
-    m2sdr_si5351_i2c_write(fd, i2c_addr, 2, &data, 1);
+    m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1);
 
     /* Configure SI5351 from provided register map */
     for (i = 0; i < i2c_length; i++) {
         uint8_t reg = i2c_config[i][0];
         uint8_t val = i2c_config[i][1];
-        m2sdr_si5351_i2c_write(fd, i2c_addr, reg, &val, 1);
+        m2sdr_si5351_i2c_write(conn, i2c_addr, reg, &val, 1);
     }
 
     /* Apply PLLA and PLLB soft reset */
     data = 0xAC;
-    m2sdr_si5351_i2c_write(fd, i2c_addr, 177, &data, 1);
+    m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1);
 
     /* Wait for PLL lock */
     timeout = 100;
     while (timeout--) {
-        if (m2sdr_si5351_i2c_read(fd, i2c_addr, 1, &data, 1, false) && (data & 0x60) == 0) {
+        if (m2sdr_si5351_i2c_read(conn, i2c_addr, 1, &data, 1, false) && (data & 0x60) == 0) {
             break;
         }
         usleep(1000);
@@ -216,5 +242,5 @@ void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[
 
     /* Enable all outputs */
     data = 0x00;
-    m2sdr_si5351_i2c_write(fd, i2c_addr, 3, &data, 1);
+    m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1);
 }

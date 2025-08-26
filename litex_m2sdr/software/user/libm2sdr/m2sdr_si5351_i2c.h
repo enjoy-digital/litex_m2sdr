@@ -21,14 +21,14 @@
 #define SI5351_I2C_ADDR_WR(addr)  ((addr) << 1)
 #define SI5351_I2C_ADDR_RD(addr) (((addr) << 1) | 1u)
 
-/* I2C functions */
-/*---------------*/
+/* Unified I2C functions (PCIe or Etherbone) */
+/*--------------------------------------------*/
 
-void m2sdr_si5351_i2c_reset(int fd);
-bool m2sdr_si5351_i2c_write(int fd, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len);
-bool m2sdr_si5351_i2c_read(int fd,  uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop);
-bool m2sdr_si5351_i2c_poll(int fd,  uint8_t slave_addr);
-bool m2sdr_si5351_i2c_check_litei2c(int fd);
-void m2sdr_si5351_i2c_config(int fd, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
+void m2sdr_si5351_i2c_reset(void *conn);
+bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len);
+bool m2sdr_si5351_i2c_read(void *conn,  uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop);
+bool m2sdr_si5351_i2c_poll(void *conn,  uint8_t slave_addr);
+bool m2sdr_si5351_i2c_check_litei2c(void *conn);
+void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
 
 #endif /* M2SDR_LIB_SI5351_I2C_H */
