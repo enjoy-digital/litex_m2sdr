@@ -62,6 +62,9 @@ clean:
 liblitepcie/%.o: liblitepcie/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
+libm2sdr/%.o: libm2sdr/%.c
+	$(CC) -c $(CFLAGS) -DUSE_LITEPCIE -o $@ $<
+
 ad9361/%.o: ad9361/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
