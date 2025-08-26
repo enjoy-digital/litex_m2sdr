@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <time.h>
 #include <math.h>
+#include <stdint.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -154,11 +155,11 @@ static void test_ad9361_dump(void)
     }
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(fd, 0);
+    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
 
     /* AD9361 SPI Dump of all the Registers */
     for (i=0; i<1024; i++)
-        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(fd, i));
+        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read((void *)(intptr_t)fd, i));
 
     printf("\n");
 
@@ -176,9 +177,9 @@ static void test_ad9361_write(uint16_t reg, uint16_t value)
     }
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(fd, 0);
+    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
 
-    m2sdr_ad9361_spi_write(fd, reg, value);
+    m2sdr_ad9361_spi_write((void *)(intptr_t)fd, reg, value);
     printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
 
     close(fd);
@@ -196,9 +197,9 @@ static void test_ad9361_read(uint16_t reg)
     }
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(fd, 0);
+    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
 
-    value = m2sdr_ad9361_spi_read(fd, reg);
+    value = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, reg);
     printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
     close(fd);
@@ -289,14 +290,14 @@ static void info(void)
 
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
-    m2sdr_ad9361_spi_init(fd, 0);
-    uint16_t product_id = m2sdr_ad9361_spi_read(fd, REG_PRODUCT_ID);
+    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
+    uint16_t product_id = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, REG_PRODUCT_ID);
     bool ad9361_present = (product_id == 0xa);
     printf("AD9361 Presence    : %s\n", ad9361_present ? "Yes" : "No");
     if (ad9361_present) {
         printf("AD9361 Product ID  : %04x \n", product_id);
         printf("AD9361 Temperature : %0.1f °C\n",
-            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
+            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read((void *)(intptr_t)fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
     }
     close(fd);
 }

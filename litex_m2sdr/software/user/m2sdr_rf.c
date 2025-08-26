@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <stdbool.h>
 #include <getopt.h>
+#include <stdint.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -61,10 +62,10 @@ int spi_write_then_read(struct spi_device *spi,
 
     if (n_tx == 2 && n_rx == 1) {
         /* read */
-        rxbuf[0] = m2sdr_ad9361_spi_read(fd, txbuf[0] << 8 | txbuf[1]);
+        rxbuf[0] = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, txbuf[0] << 8 | txbuf[1]);
     } else if (n_tx == 3 && n_rx == 0) {
         /* write */
-        m2sdr_ad9361_spi_write(fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+        m2sdr_ad9361_spi_write((void *)(intptr_t)fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
                 n_tx, n_rx);
@@ -167,7 +168,7 @@ static void m2sdr_init(
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init(fd, 1);
+    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 1);
 
     /* Initialize AD9361 RFIC */
     printf("Initializing AD9361 RFIC...\n");
@@ -290,7 +291,7 @@ static void m2sdr_init(
             printf(" %2d     |", rx_clk_delay);
             for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
                 /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
+                m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
 
                 /* Small sleep to let PRBS synchronize */
                 mdelay(10);
@@ -334,7 +335,7 @@ static void m2sdr_init(
 
         /* Configure optimal RX Clk/Dat delays */
         if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write(fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
+            m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
         }
 
         /* Enable RX->TX AD9361 loopback */
@@ -355,7 +356,7 @@ static void m2sdr_init(
             printf(" %2d     |", tx_clk_delay);
             for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
                 /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
+                m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
 
                 /* Small sleep to let PRBS synchronize */
                 mdelay(10);
@@ -399,7 +400,7 @@ static void m2sdr_init(
 
         /* Configure optimal TX Clk/Dat delays */
         if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write(fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
+            m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
         }
     }
 
