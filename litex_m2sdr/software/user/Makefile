@@ -10,7 +10,7 @@ INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_eb_util m2sdr_rf m2sdr_gpio
+  BINARIES := m2sdr_eb_util m2sdr_util m2sdr_rf m2sdr_gpio
 else ifeq ($(INTERFACE),USE_LITEPCIE)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
 else
@@ -41,6 +41,9 @@ ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361
 ifeq ($(INTERFACE),USE_LITEETH)
 m2sdr_eb_util: m2sdr_eb_util.o libm2sdr/libm2sdr.a
 	$(CC) $(LDFLAGS) -o $@ $^ -Llibm2sdr -lm2sdr
+
+m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr -lm
 
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o

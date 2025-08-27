@@ -41,8 +41,13 @@
 /* Variables */
 /*-----------*/
 
+#ifdef USE_LITEPCIE
 static char m2sdr_device[1024];
-static int m2sdr_device_num;
+static int m2sdr_device_num = 0;
+#elif defined(USE_LITEETH)
+static char m2sdr_ip_address[1024] = "192.168.1.50";
+static char m2sdr_port[16] = "1234";
+#endif
 
 sig_atomic_t keep_running = 1;
 
@@ -50,45 +55,63 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-#ifdef CSR_SI5351_BASE
+/* Connection Functions */
+/*----------------------*/
+
+static void * m2sdr_open(void) {
+#ifdef USE_LITEPCIE
+    int fd = open(m2sdr_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+    return (void *)(intptr_t)fd;
+#elif USE_LITEETH
+    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
+    if (!eb) {
+        fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
+        exit(1);
+    }
+    return eb;
+#endif
+}
+
+static void m2sdr_close(void *conn) {
+#ifdef USE_LITEPCIE
+    close((int)(intptr_t)conn);
+#elif USE_LITEETH
+    eb_disconnect((struct eb_connection **)&conn);
+#endif
+}
 
 /* SI5351 */
 /*--------*/
 
+#ifdef CSR_SI5351_BASE
+
 static void test_si5351_init(void)
 {
-    int fd;
-
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     printf("\e[1m[> SI5351 Init...\e[0m\n");
-    m2sdr_si5351_i2c_config((void *)(intptr_t)fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
     printf("Done.\n");
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_si5351_dump(void)
 {
-    int fd;
     uint8_t value;
     int i;
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     printf("\e[1m[> SI5351 Registers Dump:\e[0m\n");
     printf("--------------------------\n");
 
     for (i = 0; i < 256; i++) {
-        if (m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, i, &value, 1, true)) {
+        if (m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, i, &value, 1, true)) {
             printf("Reg 0x%02x: 0x%02x\n", i, value);
         } else {
             fprintf(stderr, "Failed to read reg 0x%02x\n", i);
@@ -96,46 +119,35 @@ static void test_si5351_dump(void)
     }
 
     printf("\n");
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_si5351_write(uint8_t reg, uint8_t value)
 {
-    int fd;
+    void *conn = m2sdr_open();
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    if (m2sdr_si5351_i2c_write((void *)(intptr_t)fd, SI5351_I2C_ADDR, reg, &value, 1)) {
+    if (m2sdr_si5351_i2c_write(conn, SI5351_I2C_ADDR, reg, &value, 1)) {
         printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
     } else {
         fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
     }
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_si5351_read(uint8_t reg)
 {
-    int fd;
     uint8_t value;
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
-    if (m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, reg, &value, 1, true)) {
+    if (m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, reg, &value, 1, true)) {
         printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
     } else {
         fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
     }
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 #endif
@@ -146,116 +158,94 @@ static void test_si5351_read(uint8_t reg)
 static void test_ad9361_dump(void)
 {
     int i;
-    int fd;
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
+    m2sdr_ad9361_spi_init(conn, 0);
 
     /* AD9361 SPI Dump of all the Registers */
     for (i=0; i<1024; i++)
-        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read((void *)(intptr_t)fd, i));
+        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(conn, i));
 
     printf("\n");
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_ad9361_write(uint16_t reg, uint16_t value)
 {
-    int fd;
-
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
+    m2sdr_ad9361_spi_init(conn, 0);
 
-    m2sdr_ad9361_spi_write((void *)(intptr_t)fd, reg, value);
+    m2sdr_ad9361_spi_write(conn, reg, value);
     printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_ad9361_read(uint16_t reg)
 {
-    int fd;
     uint16_t value;
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
+    m2sdr_ad9361_spi_init(conn, 0);
 
-    value = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, reg);
+    value = m2sdr_ad9361_spi_read(conn, reg);
     printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 /* Info */
 /*------*/
 
-static uint32_t icap_read(int fd, uint32_t reg)
+static uint32_t icap_read(void *conn, uint32_t reg)
 {
-    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_ADDR_ADDR, reg);
-    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_READ_ADDR, 1);
-    while (m2sdr_readl((void *)(intptr_t)fd, CSR_ICAP_DONE_ADDR) == 0)
+    m2sdr_writel(conn, CSR_ICAP_ADDR_ADDR, reg);
+    m2sdr_writel(conn, CSR_ICAP_READ_ADDR, 1);
+    while (m2sdr_readl(conn, CSR_ICAP_DONE_ADDR) == 0)
         usleep(1000);
-    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_READ_ADDR, 0);
-    return m2sdr_readl((void *)(intptr_t)fd, CSR_ICAP_DATA_ADDR);
+    m2sdr_writel(conn, CSR_ICAP_READ_ADDR, 0);
+    return m2sdr_readl(conn, CSR_ICAP_DATA_ADDR);
 }
 
 static void info(void)
 {
-    int fd;
     int i;
     unsigned char fpga_identifier[256];
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
+    void *conn = m2sdr_open();
 
     printf("\e[1m[> FPGA/SoC Info:\e[0m\n");
     printf("-----------------\n");
 
     for (i = 0; i < 256; i ++)
-        fpga_identifier[i] = m2sdr_readl((void *)(intptr_t)fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+        fpga_identifier[i] = m2sdr_readl(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
     printf("SoC Identifier   : %s.\n", fpga_identifier);
 #ifdef CSR_DNA_BASE
     printf("FPGA DNA         : 0x%08x%08x\n",
-        m2sdr_readl((void *)(intptr_t)fd, CSR_DNA_ID_ADDR + 4 * 0),
-        m2sdr_readl((void *)(intptr_t)fd, CSR_DNA_ID_ADDR + 4 * 1)
+        m2sdr_readl(conn, CSR_DNA_ID_ADDR + 4 * 0),
+        m2sdr_readl(conn, CSR_DNA_ID_ADDR + 4 * 1)
     );
 #endif
 #ifdef CSR_XADC_BASE
     printf("FPGA Temperature : %0.1f °C\n",
-           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
+           (double)m2sdr_readl(conn, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
     printf("FPGA VCC-INT     : %0.2f V\n",
-           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
+           (double)m2sdr_readl(conn, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
     printf("FPGA VCC-AUX     : %0.2f V\n",
-           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
+           (double)m2sdr_readl(conn, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
     printf("FPGA VCC-BRAM    : %0.2f V\n",
-           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
+           (double)m2sdr_readl(conn, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
 #endif
 #ifdef CSR_ICAP_BASE
     uint32_t status;
-    status = icap_read(fd, ICAP_BOOTSTS_REG);
+    status = icap_read(conn, ICAP_BOOTSTS_REG);
     printf("FPGA Status      : %s\n", (status & ICAP_BOOTSTS_FALLBACK)? "Fallback" : "Operational");
 #endif
     printf("\n");
@@ -263,12 +253,12 @@ static void info(void)
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
-    if (m2sdr_si5351_i2c_check_litei2c((void *)(intptr_t)fd)) {
-        bool si5351_present = m2sdr_si5351_i2c_poll((void *)(intptr_t)fd, SI5351_I2C_ADDR);
+    if (m2sdr_si5351_i2c_check_litei2c(conn)) {
+        bool si5351_present = m2sdr_si5351_i2c_poll(conn, SI5351_I2C_ADDR);
         printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
         if (si5351_present) {
             uint8_t status;
-            m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, 0x00, &status, 1, true);
+            m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, 0x00, &status, 1, true);
             printf("Device Status    : 0x%02x\n", status);
             printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
             printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
@@ -277,7 +267,7 @@ static void info(void)
             printf("  REVID          : 0x%01x\n", status & 0x03);
 
             uint8_t rev;
-            m2sdr_si5351_i2c_read((void *)(intptr_t)fd, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
+            m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
             printf("PLL Input Source : 0x%02x\n", rev);
             printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
             printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
@@ -290,16 +280,16 @@ static void info(void)
 
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
-    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 0);
-    uint16_t product_id = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, REG_PRODUCT_ID);
+    m2sdr_ad9361_spi_init(conn, 0);
+    uint16_t product_id = m2sdr_ad9361_spi_read(conn, REG_PRODUCT_ID);
     bool ad9361_present = (product_id == 0xa);
     printf("AD9361 Presence    : %s\n", ad9361_present ? "Yes" : "No");
     if (ad9361_present) {
         printf("AD9361 Product ID  : %04x \n", product_id);
         printf("AD9361 Temperature : %0.1f °C\n",
-            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read((void *)(intptr_t)fd, REG_TEMPERATURE) * 1000000, 1140)/1000);
+            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(conn, REG_TEMPERATURE) * 1000000, 1140)/1000);
     }
-    close(fd);
+    m2sdr_close(conn);
 }
 
 
@@ -308,35 +298,24 @@ static void info(void)
 
 static void test_reg_write(uint32_t offset, uint32_t value)
 {
-    int fd;
+    void *conn = m2sdr_open();
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-    m2sdr_writel((void *)(intptr_t)fd, offset, value);
+    m2sdr_writel(conn, offset, value);
     printf("Wrote 0x%08x to reg 0x%08x\n", value, offset);
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void test_reg_read(uint32_t offset)
 {
-    int fd;
     uint32_t value;
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
-    value = m2sdr_readl((void *)(intptr_t)fd, offset);
+    value = m2sdr_readl(conn, offset);
     printf("Reg 0x%08x: 0x%08x\n", offset, value);
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 /* Scratch */
@@ -344,30 +323,22 @@ static void test_reg_read(uint32_t offset)
 
 void scratch_test(void)
 {
-    int fd;
-
     printf("\e[1m[> Scratch register test:\e[0m\n");
     printf("-------------------------\n");
 
-    /* Open LitePCIe device. */
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     /* Write to scratch register. */
     printf("Write 0x12345678 to Scratch register:\n");
-    m2sdr_writel((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
-    printf("Read: 0x%08x\n", m2sdr_readl((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR));
+    m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
+    printf("Read: 0x%08x\n", m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR));
 
     /* Read from scratch register. */
     printf("Write 0xdeadbeef to Scratch register:\n");
-    m2sdr_writel((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
-    printf("Read: 0x%08x\n", m2sdr_readl((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR));
+    m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
+    printf("Read: 0x%08x\n", m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR));
 
-    /* Close LitePCIe device. */
-    close(fd);
+    m2sdr_close(conn);
 }
 
 /* SPI Flash */
@@ -388,20 +359,11 @@ static void flash_progress(void *opaque, const char *fmt, ...)
 
 static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 {
-    int fd;
-    void *conn;
+    void *conn = m2sdr_open();
     uint32_t size;
     uint8_t *buf;
     int sector_size;
     int errors;
-
-    /* Open LitePCIe device. */
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-    conn = (void *)(intptr_t)fd;
 
     /* Get flash sector size and pad size to it. */
     sector_size = m2sdr_flash_get_erase_block_size(conn);
@@ -425,9 +387,9 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
         printf("Success.\n");
     }
 
-    /* Free buffer and close LitePCIe device. */
+    /* Free buffer and close connection. */
     free(buf);
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void flash_write(const char *filename, uint32_t offset)
@@ -469,8 +431,7 @@ static void flash_write(const char *filename, uint32_t offset)
 
 static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 {
-    int fd;
-    void *conn;
+    void *conn = m2sdr_open();
     FILE * f;
     uint32_t base;
     uint32_t sector_size;
@@ -483,14 +444,6 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
         perror(filename);
         exit(1);
     }
-
-    /* Open LitePCIe device. */
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-    conn = (void *)(intptr_t)fd;
 
     /* Get flash sector size. */
     sector_size = m2sdr_flash_get_erase_block_size(conn);
@@ -506,38 +459,34 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
         fwrite(&byte, 1, 1, f);
     }
 
-    /* Close destination file and LitePCIe device. */
+    /* Close destination file and connection. */
     fclose(f);
-    close(fd);
+    m2sdr_close(conn);
 }
 
 static void flash_reload(void)
 {
-    int fd;
-
-    /* Open LitePCIe device. */
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     /* Reload FPGA through ICAP.*/
-    litepcie_reload(fd);
+    m2sdr_writel(conn, CSR_ICAP_ADDR_ADDR, ICAP_CMD_REG);
+    m2sdr_writel(conn, CSR_ICAP_DATA_ADDR, ICAP_CMD_IPROG);
+    m2sdr_writel(conn, CSR_ICAP_WRITE_ADDR, 1);
 
     /* Notice user to reboot/rescan the hardware.*/
     printf("===========================================================================\n");
     printf("= PLEASE REBOOT YOUR HARDWARE OR RESCAN PCIe BUS TO USE NEW FPGA GATEWARE =\n");
     printf("===========================================================================\n");
 
-    /* Close LitePCIe device. */
-    close(fd);
+    m2sdr_close(conn);
 }
 
 #endif /* CSR_FLASH_BASE */
 
 /* DMA */
 /*-----*/
+
+#ifdef USE_LITEPCIE
 
 #if (DMA_BUFFER_SIZE & (DMA_BUFFER_SIZE - 1)) == 0
 static inline int64_t add_mod_int(int64_t a, int64_t b, int64_t m)
@@ -755,6 +704,8 @@ end:
     litepcie_dma_cleanup(&dma);
 }
 
+#endif
+
 /* Clk Measurement */
 /*-----------------*/
 
@@ -786,34 +737,30 @@ static const char* clk_names[N_CLKS] = {
     "  Time Ref Clk",
 };
 
-static uint64_t read_64bit_register(int fd, uint32_t addr)
+static uint64_t read_64bit_register(void *conn, uint32_t addr)
 {
-    uint32_t lower = m2sdr_readl((void *)(intptr_t)fd, addr + 4);
-    uint32_t upper = m2sdr_readl((void *)(intptr_t)fd, addr + 0);
+    uint32_t lower = m2sdr_readl(conn, addr + 4);
+    uint32_t upper = m2sdr_readl(conn, addr + 0);
     return ((uint64_t)upper << 32) | lower;
 }
 
-static void latch_all_clocks(int fd)
+static void latch_all_clocks(void *conn)
 {
     for (int i = 0; i < N_CLKS; i++) {
-        m2sdr_writel((void *)(intptr_t)fd, latch_addrs[i], 1);
+        m2sdr_writel(conn, latch_addrs[i], 1);
     }
 }
 
-static void read_all_clocks(int fd, uint64_t *values)
+static void read_all_clocks(void *conn, uint64_t *values)
 {
     for (int i = 0; i < N_CLKS; i++) {
-        values[i] = read_64bit_register(fd, value_addrs[i]);
+        values[i] = read_64bit_register(conn, value_addrs[i]);
     }
 }
 
 static void clk_test(int num_measurements, int delay_between_tests)
 {
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     printf("\e[1m[> Clk Measurement Test:\e[0m\n");
     printf("-------------------------\n");
@@ -833,15 +780,15 @@ static void clk_test(int num_measurements, int delay_between_tests)
     }
     printf("\n");
 
-    latch_all_clocks(fd);
-    read_all_clocks(fd, previous_values);
+    latch_all_clocks(conn);
+    read_all_clocks(conn, previous_values);
     clock_gettime(CLOCK_MONOTONIC, &start_time);
 
     for (int i = 0; i < num_measurements; i++) {
         sleep(delay_between_tests);
 
-        latch_all_clocks(fd);
-        read_all_clocks(fd, current_values);
+        latch_all_clocks(conn);
+        read_all_clocks(conn, current_values);
         clock_gettime(CLOCK_MONOTONIC, &current_time);
 
         elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
@@ -858,7 +805,7 @@ static void clk_test(int num_measurements, int delay_between_tests)
         printf("\n");
     }
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 /* VCXO Test  */
@@ -872,7 +819,7 @@ static void clk_test(int num_measurements, int delay_between_tests)
 #define VCXO_TEST_MEASUREMENT_DELAY_MS   100    /* Milliseconds for measurement period */
 #define VCXO_TEST_DETECTION_THRESHOLD_HZ 1000.0 /* Threshold for detecting VCXO presence (SI5351B) */
 
-static double measure_frequency(int fd, int clk_index)
+static double measure_frequency(void *conn, int clk_index)
 {
     uint64_t previous_value, current_value;
     struct timespec start_time, current_time;
@@ -880,8 +827,8 @@ static double measure_frequency(int fd, int clk_index)
     double freq_sum = 0.0;
 
     for (int sample = 0; sample < VCXO_TEST_MEASUREMENT_SAMPLES; sample++) {
-        latch_all_clocks(fd);
-        previous_value = read_64bit_register(fd, value_addrs[clk_index]);
+        latch_all_clocks(conn);
+        previous_value = read_64bit_register(conn, value_addrs[clk_index]);
         clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         struct timespec ts;
@@ -889,8 +836,8 @@ static double measure_frequency(int fd, int clk_index)
         ts.tv_nsec = (VCXO_TEST_MEASUREMENT_DELAY_MS % 1000) * 1000000L;
         nanosleep(&ts, NULL);
 
-        latch_all_clocks(fd);
-        current_value = read_64bit_register(fd, value_addrs[clk_index]);
+        latch_all_clocks(conn);
+        current_value = read_64bit_register(conn, value_addrs[clk_index]);
         clock_gettime(CLOCK_MONOTONIC, &current_time);
 
         elapsed_time = (current_time.tv_sec - start_time.tv_sec) +
@@ -905,13 +852,7 @@ static double measure_frequency(int fd, int clk_index)
 
 static void vcxo_test(void)
 {
-    int fd;
-
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     printf("\e[1m[> VCXO Test:\e[0m\n");
     printf("-------------\n");
@@ -926,30 +867,30 @@ static void vcxo_test(void)
     }
     if (clk_index == -1) {
         fprintf(stderr, "Error: Clock 'AD9361 Ref Clk' not found in clk_names\n");
-        close(fd);
+        m2sdr_close(conn);
         exit(1);
     }
 
     /* Set PWM period. */
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_PERIOD_ADDR, VCXO_TEST_PWM_PERIOD);
+    m2sdr_writel(conn, CSR_SI5351_PWM_PERIOD_ADDR, VCXO_TEST_PWM_PERIOD);
     /* Enable PWM. */
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_ENABLE_ADDR, 1);
+    m2sdr_writel(conn, CSR_SI5351_PWM_ENABLE_ADDR, 1);
 
     /* Set PWM to 0% and wait for stabilization. */
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, 0);
     struct timespec ts_stab;
     ts_stab.tv_sec = VCXO_TEST_STABILIZATION_DELAY_MS / 1000;
     ts_stab.tv_nsec = (VCXO_TEST_STABILIZATION_DELAY_MS % 1000) * 1000000L;
     nanosleep(&ts_stab, NULL);
 
     /* Detection phase for SI5351B (VCXO) vs SI5351C. */
-    double freq_0 = measure_frequency(fd, clk_index);
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);  /* 50% */
+    double freq_0 = measure_frequency(conn, clk_index);
+    m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);  /* 50% */
     nanosleep(&ts_stab, NULL);
-    double freq_50 = measure_frequency(fd, clk_index);
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD);  /* 100% */
+    double freq_50 = measure_frequency(conn, clk_index);
+    m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD);  /* 100% */
     nanosleep(&ts_stab, NULL);
-    double freq_100 = measure_frequency(fd, clk_index);
+    double freq_100 = measure_frequency(conn, clk_index);
 
     double max_diff = fabs(freq_0 - freq_50) + fabs(freq_100 - freq_50);
     int is_vcxo = (max_diff >= VCXO_TEST_DETECTION_THRESHOLD_HZ);
@@ -957,15 +898,15 @@ static void vcxo_test(void)
     if (!is_vcxo) {
         printf("Detected SI5351C (no VCXO), exiting.\n");
         /* Set back PWM to nominal width. */
-        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
-        close(fd);
+        m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
+        m2sdr_close(conn);
         return;
     }
 
     printf("Detected SI5351B (with VCXO): Max frequency variation %.2f Hz >= threshold %.2f Hz.\n\n", max_diff, VCXO_TEST_DETECTION_THRESHOLD_HZ);
 
     /* Full test: Reset to 0% and stabilize again. */
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, 0);
     nanosleep(&ts_stab, NULL);
 
     double nominal_frequency_hz = 0.0;
@@ -981,10 +922,10 @@ static void vcxo_test(void)
         uint32_t pwm_width = (uint32_t)((pwm_width_percent / 100.0) * VCXO_TEST_PWM_PERIOD);
 
         /* Set PWM width. */
-        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
+        m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
         nanosleep(&ts_stab, NULL);
 
-        double frequency_hz = measure_frequency(fd, clk_index);
+        double frequency_hz = measure_frequency(conn, clk_index);
 
         if (pwm_width == VCXO_TEST_PWM_PERIOD / 2) {
             nominal_frequency_hz = frequency_hz;
@@ -1003,9 +944,9 @@ static void vcxo_test(void)
     }
 
     /* Set back PWM to nominal width. */
-    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
+    m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
 
-    close(fd);
+    m2sdr_close(conn);
 
     /* Calculate PPM and Hz variation from nominal at 50% PWM. */
     double hz_variation_from_nominal_max = max_frequency - nominal_frequency_hz;
@@ -1033,19 +974,26 @@ static void help(void)
            "\n"
            "options:\n"
            "-h                                Help.\n"
+#ifdef USE_LITEPCIE
            "-c device_num                     Select the device (default = 0).\n"
            "-z                                Enable zero-copy DMA mode.\n"
            "-e                                Use external loopback (default = internal).\n"
            "-w data_width                     Width of data bus (default = 32).\n"
            "-a                                Automatic DMA RX-Delay calibration.\n"
            "-t duration                       Duration of the test in seconds (default = 0, infinite).\n"
+#elif USE_LITEETH
+           "-i ip_address                     Target IP address for Etherbone (required).\n"
+           "-p port                           Port number (default = 1234).\n"
+#endif
            "\n"
            "available commands:\n"
            "info                              Get Board information.\n"
            "reg_write offset value            Write to FPGA register.\n"
            "reg_read offset                   Read from FPGA register.\n"
            "\n"
+#ifdef USE_LITEPCIE
            "dma_test                          Test DMA.\n"
+#endif
            "scratch_test                      Test Scratch register.\n"
            "clk_test                          Test Clks frequencies.\n"
 #ifdef  CSR_SI5351_BASE
@@ -1081,27 +1029,38 @@ int main(int argc, char **argv)
 {
     const char *cmd;
     int c;
-    static uint8_t m2sdr_device_zero_copy;
-    static uint8_t m2sdr_device_external_loopback;
-    static int litepcie_data_width;
-    static int litepcie_auto_rx_delay;
+#ifdef USE_LITEPCIE
+    static uint8_t m2sdr_device_zero_copy = 0;
+    static uint8_t m2sdr_device_external_loopback = 0;
+    static int litepcie_data_width = 32;
+    static int litepcie_auto_rx_delay = 0;
     static int test_duration = 0; /* Default to 0 for infinite duration.*/
-
-    m2sdr_device_num = 0;
-    litepcie_data_width = 32;
-    litepcie_auto_rx_delay = 0;
-    m2sdr_device_zero_copy = 0;
-    m2sdr_device_external_loopback = 0;
+#endif
 
     /* Parameters. */
     for (;;) {
+        #ifdef USE_LITEPCIE
         c = getopt(argc, argv, "hc:w:zeat:");
+        #elif USE_LITEETH
+        c = getopt(argc, argv, "hi:p:");
+        #endif
         if (c == -1)
             break;
         switch(c) {
         case 'h':
             help();
             break;
+        #ifdef USE_LITEETH
+        case 'i':
+            strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
+            m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
+            break;
+        case 'p':
+            strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
+            m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
+            break;
+        #endif
+        #ifdef USE_LITEPCIE
         case 'c':
             m2sdr_device_num = atoi(optarg);
             break;
@@ -1120,6 +1079,7 @@ int main(int argc, char **argv)
         case 't':
             test_duration = atoi(optarg);
             break;
+        #endif
         default:
             exit(1);
         }
@@ -1130,7 +1090,9 @@ int main(int argc, char **argv)
         help();
 
     /* Select device. */
+    #ifdef USE_LITEPCIE
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
+    #endif
 
     cmd = argv[optind++];
 
@@ -1239,6 +1201,7 @@ int main(int argc, char **argv)
         flash_reload();
 #endif
 
+#ifdef USE_LITEPCIE
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
         dma_test(
@@ -1247,6 +1210,7 @@ int main(int argc, char **argv)
             litepcie_data_width,
             litepcie_auto_rx_delay,
             test_duration);
+#endif
 
     /* Show help otherwise. */
     else
@@ -1255,7 +1219,7 @@ int main(int argc, char **argv)
     return 0;
 
 show_help:
-        help();
+    help();
 
     return 0;
 }
