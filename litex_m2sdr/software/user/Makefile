@@ -1,5 +1,6 @@
 PREFIX ?= /usr/local
 CFLAGS  = -O2 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
+CFLAGS += -D$(INTERFACE)
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
@@ -65,7 +66,7 @@ liblitepcie/%.o: liblitepcie/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 libm2sdr/%.o: libm2sdr/%.c
-	$(CC) -c $(CFLAGS) -D$(INTERFACE) -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 ad9361/%.o: ad9361/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
