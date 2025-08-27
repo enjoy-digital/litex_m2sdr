@@ -217,16 +217,64 @@ static uint32_t icap_read(void *conn, uint32_t reg)
 static void info(void)
 {
     int i;
-    unsigned char fpga_identifier[256];
+    unsigned char soc_identifier[256];
 
     void *conn = m2sdr_open();
 
-    printf("\e[1m[> FPGA/SoC Info:\e[0m\n");
-    printf("-----------------\n");
+    printf("\e[1m[> SoC Info:\e[0m\n");
+    printf("------------\n");
 
     for (i = 0; i < 256; i ++)
-        fpga_identifier[i] = m2sdr_readl(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
-    printf("SoC Identifier   : %s.\n", fpga_identifier);
+        soc_identifier[i] = m2sdr_readl(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+    printf("SoC Identifier   : %s.\n", soc_identifier);
+
+#ifdef CSR_CAPABILITY_BASE
+    uint32_t api_version = m2sdr_readl(conn, CSR_CAPABILITY_API_VERSION_ADDR);
+    int major = api_version >> 16;
+    int minor = api_version & 0xffff;
+    printf("API Version      : %d.%d\n", major, minor);
+
+    uint32_t features = m2sdr_readl(conn, CSR_CAPABILITY_FEATURES_ADDR);
+    bool pcie_enabled = (features >> CSR_CAPABILITY_FEATURES_PCIE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_PCIE_SIZE) - 1);
+    bool eth_enabled  = (features >> CSR_CAPABILITY_FEATURES_ETH_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_ETH_SIZE) - 1);
+    bool sata_enabled = (features >> CSR_CAPABILITY_FEATURES_SATA_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_SATA_SIZE) - 1);
+    bool gpio_enabled = (features >> CSR_CAPABILITY_FEATURES_GPIO_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_GPIO_SIZE) - 1);
+
+    printf("Features:\n");
+    printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
+    printf("  Ethernet       : %s\n", eth_enabled ? "Yes" : "No");
+    printf("  SATA           : %s\n", sata_enabled ? "Yes" : "No");
+    printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
+
+    if (pcie_enabled) {
+        uint32_t pcie_config = m2sdr_readl(conn, CSR_CAPABILITY_PCIE_CONFIG_ADDR);
+        int pcie_speed = (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
+        int pcie_lanes = (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE) - 1);
+        const char *pcie_speed_str[] = {"Gen1", "Gen2"};
+        const char *pcie_lanes_str[] = {"x1", "x2", "x4"};
+        printf("  PCIe Speed     : %s\n", pcie_speed_str[pcie_speed]);
+        printf("  PCIe Lanes     : %s\n", pcie_lanes_str[pcie_lanes]);
+    }
+
+    if (eth_enabled) {
+        uint32_t eth_config = m2sdr_readl(conn, CSR_CAPABILITY_ETH_CONFIG_ADDR);
+        int eth_speed = (eth_config >> CSR_CAPABILITY_ETH_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_ETH_CONFIG_SPEED_SIZE) - 1);
+        const char *eth_speed_str[] = {"1Gbps", "2.5Gbps"};
+        printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed]);
+    }
+
+    if (sata_enabled) {
+        uint32_t sata_config = m2sdr_readl(conn, CSR_CAPABILITY_SATA_CONFIG_ADDR);
+        int sata_gen = (sata_config >> CSR_CAPABILITY_SATA_CONFIG_GEN_OFFSET) & ((1 << CSR_CAPABILITY_SATA_CONFIG_GEN_SIZE) - 1);
+        const char *sata_gen_str[] = {"Gen1", "Gen2", "Gen3"};
+        printf("  SATA Gen       : %s\n", sata_gen_str[sata_gen]);
+    }
+#endif
+    printf("\n");
+
+    printf("\e[1m[> FPGA Info:\e[0m\n");
+    printf("-------------\n");
+
 #ifdef CSR_DNA_BASE
     printf("FPGA DNA         : 0x%08x%08x\n",
         m2sdr_readl(conn, CSR_DNA_ID_ADDR + 4 * 0),
