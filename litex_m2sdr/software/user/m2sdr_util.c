@@ -210,12 +210,12 @@ static void test_ad9361_read(uint16_t reg)
 
 static uint32_t icap_read(int fd, uint32_t reg)
 {
-    litepcie_writel(fd, CSR_ICAP_ADDR_ADDR, reg);
-    litepcie_writel(fd, CSR_ICAP_READ_ADDR, 1);
-    while (litepcie_readl(fd, CSR_ICAP_DONE_ADDR) == 0)
+    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_ADDR_ADDR, reg);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_READ_ADDR, 1);
+    while (m2sdr_readl((void *)(intptr_t)fd, CSR_ICAP_DONE_ADDR) == 0)
         usleep(1000);
-    litepcie_writel(fd, CSR_ICAP_READ_ADDR, 0);
-    return litepcie_readl(fd, CSR_ICAP_DATA_ADDR);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_ICAP_READ_ADDR, 0);
+    return m2sdr_readl((void *)(intptr_t)fd, CSR_ICAP_DATA_ADDR);
 }
 
 static void info(void)
@@ -235,23 +235,23 @@ static void info(void)
     printf("-----------------\n");
 
     for (i = 0; i < 256; i ++)
-        fpga_identifier[i] = litepcie_readl(fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+        fpga_identifier[i] = m2sdr_readl((void *)(intptr_t)fd, CSR_IDENTIFIER_MEM_BASE + 4 * i);
     printf("SoC Identifier   : %s.\n", fpga_identifier);
 #ifdef CSR_DNA_BASE
     printf("FPGA DNA         : 0x%08x%08x\n",
-        litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 0),
-        litepcie_readl(fd, CSR_DNA_ID_ADDR + 4 * 1)
+        m2sdr_readl((void *)(intptr_t)fd, CSR_DNA_ID_ADDR + 4 * 0),
+        m2sdr_readl((void *)(intptr_t)fd, CSR_DNA_ID_ADDR + 4 * 1)
     );
 #endif
 #ifdef CSR_XADC_BASE
     printf("FPGA Temperature : %0.1f °C\n",
-           (double)litepcie_readl(fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
+           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975/4096 - 273.15);
     printf("FPGA VCC-INT     : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
+           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3);
     printf("FPGA VCC-AUX     : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
+           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3);
     printf("FPGA VCC-BRAM    : %0.2f V\n",
-           (double)litepcie_readl(fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
+           (double)m2sdr_readl((void *)(intptr_t)fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3);
 #endif
 #ifdef CSR_ICAP_BASE
     uint32_t status;
@@ -316,7 +316,7 @@ static void test_reg_write(uint32_t offset, uint32_t value)
         exit(1);
     }
 
-    litepcie_writel(fd, offset, value);
+    m2sdr_writel((void *)(intptr_t)fd, offset, value);
     printf("Wrote 0x%08x to reg 0x%08x\n", value, offset);
 
     close(fd);
@@ -333,7 +333,7 @@ static void test_reg_read(uint32_t offset)
         exit(1);
     }
 
-    value = litepcie_readl(fd, offset);
+    value = m2sdr_readl((void *)(intptr_t)fd, offset);
     printf("Reg 0x%08x: 0x%08x\n", offset, value);
 
     close(fd);
@@ -358,13 +358,13 @@ void scratch_test(void)
 
     /* Write to scratch register. */
     printf("Write 0x12345678 to Scratch register:\n");
-    litepcie_writel(fd, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
-    printf("Read: 0x%08x\n", litepcie_readl(fd, CSR_CTRL_SCRATCH_ADDR));
+    m2sdr_writel((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
+    printf("Read: 0x%08x\n", m2sdr_readl((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR));
 
     /* Read from scratch register. */
     printf("Write 0xdeadbeef to Scratch register:\n");
-    litepcie_writel(fd, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
-    printf("Read: 0x%08x\n", litepcie_readl(fd, CSR_CTRL_SCRATCH_ADDR));
+    m2sdr_writel((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
+    printf("Read: 0x%08x\n", m2sdr_readl((void *)(intptr_t)fd, CSR_CTRL_SCRATCH_ADDR));
 
     /* Close LitePCIe device. */
     close(fd);
@@ -788,15 +788,15 @@ static const char* clk_names[N_CLKS] = {
 
 static uint64_t read_64bit_register(int fd, uint32_t addr)
 {
-    uint32_t lower = litepcie_readl(fd, addr + 4);
-    uint32_t upper = litepcie_readl(fd, addr + 0);
+    uint32_t lower = m2sdr_readl((void *)(intptr_t)fd, addr + 4);
+    uint32_t upper = m2sdr_readl((void *)(intptr_t)fd, addr + 0);
     return ((uint64_t)upper << 32) | lower;
 }
 
 static void latch_all_clocks(int fd)
 {
     for (int i = 0; i < N_CLKS; i++) {
-        litepcie_writel(fd, latch_addrs[i], 1);
+        m2sdr_writel((void *)(intptr_t)fd, latch_addrs[i], 1);
     }
 }
 
@@ -931,12 +931,12 @@ static void vcxo_test(void)
     }
 
     /* Set PWM period. */
-    litepcie_writel(fd, CSR_SI5351_PWM_PERIOD_ADDR, VCXO_TEST_PWM_PERIOD);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_PERIOD_ADDR, VCXO_TEST_PWM_PERIOD);
     /* Enable PWM. */
-    litepcie_writel(fd, CSR_SI5351_PWM_ENABLE_ADDR, 1);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_ENABLE_ADDR, 1);
 
     /* Set PWM to 0% and wait for stabilization. */
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
     struct timespec ts_stab;
     ts_stab.tv_sec = VCXO_TEST_STABILIZATION_DELAY_MS / 1000;
     ts_stab.tv_nsec = (VCXO_TEST_STABILIZATION_DELAY_MS % 1000) * 1000000L;
@@ -944,10 +944,10 @@ static void vcxo_test(void)
 
     /* Detection phase for SI5351B (VCXO) vs SI5351C. */
     double freq_0 = measure_frequency(fd, clk_index);
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);  /* 50% */
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);  /* 50% */
     nanosleep(&ts_stab, NULL);
     double freq_50 = measure_frequency(fd, clk_index);
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD);  /* 100% */
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD);  /* 100% */
     nanosleep(&ts_stab, NULL);
     double freq_100 = measure_frequency(fd, clk_index);
 
@@ -957,7 +957,7 @@ static void vcxo_test(void)
     if (!is_vcxo) {
         printf("Detected SI5351C (no VCXO), exiting.\n");
         /* Set back PWM to nominal width. */
-        litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
         close(fd);
         return;
     }
@@ -965,7 +965,7 @@ static void vcxo_test(void)
     printf("Detected SI5351B (with VCXO): Max frequency variation %.2f Hz >= threshold %.2f Hz.\n\n", max_diff, VCXO_TEST_DETECTION_THRESHOLD_HZ);
 
     /* Full test: Reset to 0% and stabilize again. */
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, 0);
     nanosleep(&ts_stab, NULL);
 
     double nominal_frequency_hz = 0.0;
@@ -981,7 +981,7 @@ static void vcxo_test(void)
         uint32_t pwm_width = (uint32_t)((pwm_width_percent / 100.0) * VCXO_TEST_PWM_PERIOD);
 
         /* Set PWM width. */
-        litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, pwm_width);
         nanosleep(&ts_stab, NULL);
 
         double frequency_hz = measure_frequency(fd, clk_index);
@@ -1003,7 +1003,7 @@ static void vcxo_test(void)
     }
 
     /* Set back PWM to nominal width. */
-    litepcie_writel(fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
 
     close(fd);
 
