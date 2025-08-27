@@ -37,7 +37,7 @@
 static char m2sdr_device[1024];
 static int m2sdr_device_num = 0;
 #elif defined(USE_LITEETH)
-static char m2sdr_ip_address[1024] = "";
+static char m2sdr_ip_address[1024] = "192.168.1.50";
 static char m2sdr_port[16] = "1234";
 #endif
 
