@@ -26,7 +26,6 @@
 
 #include "m2sdr_config.h"
 
-#include "liblitepcie.h"
 #include "libm2sdr.h"
 
 /* Variables */
@@ -69,6 +68,7 @@ int spi_write_then_read(struct spi_device *spi,
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
                 n_tx, n_rx);
+        close(fd);
         exit(1);
     }
 
@@ -145,7 +145,7 @@ static void m2sdr_init(
     if (strcmp(sync_mode, "internal") == 0) {
         /* Supported by SI5351B & C Versions */
         printf("Using internal XO for as SI5351 RefClk...\n");
-        litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
         );
         m2sdr_si5351_i2c_config((void *)(intptr_t)fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
@@ -154,7 +154,7 @@ static void m2sdr_init(
     } else if (strcmp(sync_mode, "external") == 0) {
         /* Only Supported by SI5351C Version */
         printf("Using 10MHz input as SI5351 RefClk...\n");
-        litepcie_writel(fd, CSR_SI5351_CONTROL_ADDR,
+        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLK_IN_SRC_OFFSET)   /* ClkIn from uFL. */
         );
@@ -162,6 +162,7 @@ static void m2sdr_init(
     /* Invalid Sync */
     } else {
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
+        close(fd);
         exit(1);
     }
 #endif
@@ -183,7 +184,7 @@ static void m2sdr_init(
         default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
         default_init_param.two_t_two_r_timing_enable     = 0;
-        litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
     }
     if (strcmp(chan_mode, "2t2r") == 0) {
         printf("Setting Channel Mode to 2T2R.\n");
@@ -191,7 +192,7 @@ static void m2sdr_init(
         default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
         default_init_param.two_t_two_r_timing_enable     = 1;
-        litepcie_writel(fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
     }
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
@@ -249,10 +250,10 @@ static void m2sdr_init(
     /* Configure 8-bit mode */
     if (enable_8bit_mode) {
         printf("Enabling 8-bit mode.\n");
-        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_BITMODE_ADDR, 1);
     } else {
         printf("Enabling 16-bit mode.\n");
-        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 0);
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_BITMODE_ADDR, 0);
     }
 
     /* Enable BIST TX Tone (Optional: For RF TX Tests) */
@@ -276,7 +277,7 @@ static void m2sdr_init(
         printf("BIST_PRBS TEST...\n");
 
         /* Enable AD9361 RX-PRBS */
-        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
         ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
 
         /* RX Clk/Dat delays scan */
@@ -297,7 +298,7 @@ static void m2sdr_init(
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                int prbs_sync = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                int prbs_sync = m2sdr_readl((void *)(intptr_t)fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
                 printf(" %2d", prbs_sync);
 
                 /* Record valid delay settings */
@@ -342,7 +343,7 @@ static void m2sdr_init(
         ad9361_bist_loopback(ad9361_phy, 1);
 
         /* Enable FPGA TX-PRBS */
-        litepcie_writel(fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
         /* TX Clk/Dat delays scan */
         printf("\n");
@@ -362,7 +363,7 @@ static void m2sdr_init(
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                int prbs_sync = litepcie_readl(fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                int prbs_sync = m2sdr_readl((void *)(intptr_t)fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
                 printf(" %2d", prbs_sync);
 
                 /* Record valid delay settings */
