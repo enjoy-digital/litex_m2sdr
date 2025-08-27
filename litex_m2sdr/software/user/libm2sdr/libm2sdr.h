@@ -10,6 +10,9 @@
 #ifndef M2SDR_LIB_H
 #define M2SDR_LIB_H
 
+#include "liblitepcie.h"
+#include "etherbone.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

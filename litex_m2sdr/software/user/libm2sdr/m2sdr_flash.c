@@ -1,224 +1,270 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LitePCIe library
+ * LiteX-M2SDR library
  *
- * This file is part of LitePCIe.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (C) 2018-2023 / EnjoyDigital  / florent@enjoy-digital.fr
+ * Copyright (C) 2024-2025 Enjoy-Digital
  *
  */
 
-#include <sys/ioctl.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+
+#include "csr.h"
+#include "soc.h"
+#include "flags.h"
+#include "libm2sdr.h"
 #include "m2sdr_flash.h"
-#include "litepcie_helpers.h"
-#include "litepcie.h"
 
 #ifdef CSR_FLASH_BASE
 
-//#define FLASH_FULL_ERASE
-#define FLASH_RETRIES 16
+#define FLASH_RETRIES            16
+#define FLASH_PAGE_SIZE          256
+#define FLASH_SECTOR_SIZE        (1 << 16)
 
-static void flash_spi_cs(int fd, uint8_t cs_n)
+#define SPI_TIMEOUT 100000 /* in us */
+#define SPI_TRANSACTION_TIME_US  25
+
+/* CS */
+static void flash_spi_cs(void *conn, uint8_t cs_n)
 {
-    litepcie_writel(fd, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
+    m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
 }
 
-static uint64_t flash_spi(int fd, int tx_len, uint8_t cmd,
-                          uint32_t tx_data)
+/* SPI transaction */
+
+static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
 {
-    struct litepcie_ioctl_flash m;
-    flash_spi_cs(fd, 0);
-    m.tx_len = tx_len;
-    m.tx_data = tx_data | ((uint64_t)cmd << 32);
-    checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
-    flash_spi_cs(fd, 1);
-    return m.rx_data;
+    uint64_t tx = ((uint64_t)cmd << 32) | tx_data;
+    uint64_t rx = 0;
+
+    if (tx_len < 8 || tx_len > 40) {
+        fprintf(stderr, "Invalid SPI transaction length: %d\n", tx_len);
+        return 0;
+    }
+
+    flash_spi_cs(conn, 0);
+
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
+                 SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
+
+#ifdef USE_LITEPCIE
+    /* Poll SPI_STATUS_DONE for PCIe */
+    for (int i = 0; i < SPI_TIMEOUT; i++) {
+        if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
+            break;
+        }
+        usleep(1);
+    }
+    rx = ((uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) |
+          m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+#endif
+
+#ifdef USE_LITEETH
+    /* Etherbone: roundtrip latency, just wait */
+    usleep(SPI_TRANSACTION_TIME_US);
+    if (tx_len > 8) {
+        rx = m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+    }
+#endif
+
+    flash_spi_cs(conn, 1);
+
+    return rx;
 }
 
-uint32_t flash_read_id(int fd, int reg)
+uint32_t flash_read_id(void *conn, int reg)
 {
-    return flash_spi(fd, 32, reg, 0) & 0xffffff;
+    return flash_spi(conn, 32, reg, 0) & 0xffffff;
 }
 
-static void flash_write_enable(int fd)
+static void flash_write_enable(void *conn)
 {
-    flash_spi(fd, 8, FLASH_WREN, 0);
+    flash_spi(conn, 8, FLASH_WREN, 0);
 }
 
-static void flash_write_disable(int fd)
+static void flash_write_disable(void *conn)
 {
-    flash_spi(fd, 8, FLASH_WRDI, 0);
+    flash_spi(conn, 8, FLASH_WRDI, 0);
 }
 
-static uint8_t flash_read_status(int fd)
+static uint8_t flash_read_status(void *conn)
 {
-    return flash_spi(fd, 16, FLASH_RDSR, 0) & 0xff;
+    return flash_spi(conn, 16, FLASH_RDSR, 0) & 0xff;
 }
 
-static __attribute__((unused)) void flash_write_status(int fd, uint8_t value)
+static void flash_erase_sector(void *conn, uint32_t addr)
 {
-    flash_spi(fd, 16, FLASH_WRSR, value << 24);
+    flash_spi(conn, 32, FLASH_SE, addr << 8);
 }
 
-static __attribute__((unused)) void flash_erase_sector(int fd, uint32_t addr)
-{
-    flash_spi(fd, 32, FLASH_SE, addr << 8);
-}
-
-static __attribute__((unused)) uint8_t flash_read_sector_lock(int fd, uint32_t addr)
-{
-    return flash_spi(fd, 40, FLASH_WRSR, addr << 8) & 0xff;
-}
-
-static __attribute__((unused)) void flash_write_sector_lock(int fd, uint32_t addr, uint8_t byte)
-{
-    flash_spi(fd, 40, FLASH_WRSR, (addr << 8) | byte);
-}
-
-static void flash_write(int fd, uint32_t addr, uint8_t byte)
-{
-    flash_spi(fd, 40, FLASH_PP, (addr << 8) | byte);
-}
-
-static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
+static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     if (size == 1) {
-        flash_write(fd, addr, buf[0]);
+        flash_spi(conn, 40, FLASH_PP, (addr << 8) | buf[0]);
     } else {
         int i;
-        struct litepcie_ioctl_flash m;
+        uint64_t tx;
 
-        /* set cs_n */
-        flash_spi_cs(fd, 0);
+        flash_spi_cs(conn, 0);
 
-        /* send cmd */
-        m.tx_len = 32;
-        m.tx_data = ((uint64_t)FLASH_PP << 32) | ((uint64_t)addr << 8);
-        checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
+        /* send command+addr */
+        tx = ((uint64_t)FLASH_PP << 32) | ((uint64_t)addr << 8);
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+        m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
+                     SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
-        /* send bytes */
-        for (i=0; i<size; i+=4) {
-            m.tx_len = 32;
-            m.tx_data = (
-                ((uint64_t)buf[i+0] << 32) |
-                ((uint64_t)buf[i+1] << 24) |
-                ((uint64_t)buf[i+2] << 16) |
-                ((uint64_t)buf[i+3] << 8));
-            checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
+#ifdef USE_LITEPCIE
+        for (int j = 0; j < SPI_TIMEOUT; j++) {
+            if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
+                break;
+            }
+            usleep(1);
+        }
+#endif
+#ifdef USE_LITEETH
+        usleep(SPI_TRANSACTION_TIME_US);
+#endif
+
+        /* send data words */
+        for (i = 0; i < size; i += 4) {
+            tx = ((uint64_t)buf[i + 0] << 32) |
+                 ((uint64_t)buf[i + 1] << 24) |
+                 ((uint64_t)buf[i + 2] << 16) |
+                 ((uint64_t)buf[i + 3] <<  8);
+            m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+            m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+            m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
+                         SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+
+#ifdef USE_LITEPCIE
+            for (int j = 0; j < SPI_TIMEOUT; j++) {
+                if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
+                    break;
+                }
+                usleep(1);
+            }
+#endif
+#ifdef USE_LITEETH
+            usleep(SPI_TRANSACTION_TIME_US);
+#endif
         }
 
-        /* release cs_n */
-        flash_spi_cs(fd, 1);
+        flash_spi_cs(conn, 1);
     }
 }
 
-uint8_t m2sdr_flash_read(int fd, uint32_t addr)
+uint8_t m2sdr_flash_read(void *conn, uint32_t addr)
 {
-    return flash_spi(fd, 40, FLASH_READ, addr << 8) & 0xff;
+    return flash_spi(conn, 40, FLASH_READ, addr << 8) & 0xff;
 }
 
-static void m2sdr_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
+static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     int i;
-
-    struct litepcie_ioctl_flash m;
+    uint64_t tx, rx;
 
     if (size == 1) {
-        buf[0] = m2sdr_flash_read(fd, addr);
-
-    } else {
-        /* set cs_n */
-        flash_spi_cs(fd, 0);
-
-        /* send cmd */
-        m.tx_len = 32;
-        m.tx_data = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
-        checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
-
-        /* read bytes */
-        for (i=0; i<size; i+=4) {
-            m.tx_len = 32;
-            checked_ioctl(fd, LITEPCIE_IOCTL_FLASH, &m);
-            buf[i+0] = (m.rx_data >> 24 & 0xff);
-            buf[i+1] = (m.rx_data >> 16 & 0xff);
-            buf[i+2] = (m.rx_data >>  8 & 0xff);
-            buf[i+3] = (m.rx_data >>  0 & 0xff);
-        }
-
-        /* release cs_n */
-        flash_spi_cs(fd, 1);
+        buf[0] = m2sdr_flash_read(conn, addr);
+        return;
     }
+
+    flash_spi_cs(conn, 0);
+
+    tx = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
+                 SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+
+#ifdef USE_LITEPCIE
+    for (int j = 0; j < SPI_TIMEOUT; j++) {
+        if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
+            break;
+        }
+        usleep(1);
+    }
+#endif
+#ifdef USE_LITEETH
+    usleep(SPI_TRANSACTION_TIME_US);
+#endif
+
+    for (i = 0; i < size; i += 4) {
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, 0);
+        m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
+                     SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+
+#ifdef USE_LITEPCIE
+        for (int j = 0; j < SPI_TIMEOUT; j++) {
+            if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
+                break;
+            }
+            usleep(1);
+        }
+#endif
+#ifdef USE_LITEETH
+        usleep(SPI_TRANSACTION_TIME_US);
+#endif
+
+        rx = (uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+        buf[i + 0] = (rx >> 24) & 0xff;
+        buf[i + 1] = (rx >> 16) & 0xff;
+        buf[i + 2] = (rx >>  8) & 0xff;
+        buf[i + 3] = (rx >>  0) & 0xff;
+    }
+
+    flash_spi_cs(conn, 1);
 }
 
-int m2sdr_flash_get_erase_block_size(int fd)
+int m2sdr_flash_get_erase_block_size(void *conn)
 {
+    (void)conn;
     return FLASH_SECTOR_SIZE;
 }
 
-static int m2sdr_flash_get_flash_program_size(int fd)
+static int m2sdr_flash_get_flash_program_size(void *conn)
 {
-    int software_cs = 1;
-    /* if software cs control, program in blocks to speed up update */
-    litepcie_writel(fd, CSR_FLASH_CS_N_OUT_ADDR, 0);
-    software_cs &= ((litepcie_readl(fd, CSR_FLASH_CS_N_OUT_ADDR) & 0x1) == 0);
-    litepcie_writel(fd, CSR_FLASH_CS_N_OUT_ADDR, 1);
-    software_cs &= ((litepcie_readl(fd, CSR_FLASH_CS_N_OUT_ADDR) & 0x1) == 1);
-    if (software_cs)
-        return 256;
-    else
-        return 1;
+    (void)conn;
+    return FLASH_PAGE_SIZE;
 }
 
-int m2sdr_flash_write(int fd,
-                     uint8_t *buf, uint32_t base, uint32_t size,
-                     void (*progress_cb)(void *opaque, const char *fmt, ...),
-                     void *opaque)
+int m2sdr_flash_write(void *conn,
+                      uint8_t *buf, uint32_t base, uint32_t size,
+                      void (*progress_cb)(void *opaque, const char *fmt, ...),
+                      void *opaque)
 {
-    int i;
-    int retries;
-    uint16_t flash_program_size;
+    uint16_t prog_size = m2sdr_flash_get_flash_program_size(conn);
+    uint8_t cmp_buf[FLASH_PAGE_SIZE];
+    int i = 0;
+    int retries = 0;
 
-    flash_program_size = m2sdr_flash_get_flash_program_size(fd);
-    printf("flash_program_size: %d\n", flash_program_size);
+    flash_read_id(conn, 0);
+    flash_write_enable(conn);
 
-    uint8_t cmp_buf[256];
-
-    /* dummy command because in some case the first erase does not
-       work. */
-    flash_read_id(fd, 0);
-
-    /* disable write protection */
-     flash_write_enable(fd);
-
-#ifndef FLASH_FULL_ERASE
-    /* erase */
-    for(i = 0; i < size; i += FLASH_SECTOR_SIZE) {
+    /* Erase */
+    for (i = 0; i < size; i += FLASH_SECTOR_SIZE) {
         if (progress_cb) {
             progress_cb(opaque, "Erasing @%08x\r", base + i);
         }
-        flash_write_enable(fd);
-        flash_erase_sector(fd, base + i);
-        while (flash_read_status(fd) & FLASH_WIP) {
+        flash_write_enable(conn);
+        flash_erase_sector(conn, base + i);
+        while (flash_read_status(conn) & FLASH_WIP) {
             usleep(1000);
         }
     }
     if (progress_cb) {
         progress_cb(opaque, "\n");
     }
-#else
-    /* erase full flash */
-    printf("Erasing...\n");
-    flash_write_enable(fd);
-    flash_spi(fd, 8, 0xC7, 0);
-    while (flash_read_status(fd) & FLASH_WIP) {
-        usleep(1000);
-    }
-#endif
-    flash_write_disable(fd);
 
+    flash_write_disable(conn);
+
+    /* Program */
     i = 0;
     retries = 0;
     while (i < size) {
@@ -226,31 +272,28 @@ int m2sdr_flash_write(int fd,
             progress_cb(opaque, "Writing @%08x\r", base + i);
         }
 
-        /* wait flash to be ready */
-        while (flash_read_status(fd) & FLASH_WIP)
+        while (flash_read_status(conn) & FLASH_WIP) {
             usleep(100);
-
-        /* write flash page */
-        flash_write_enable(fd);
-        flash_write_buffer(fd, base + i, buf + i, flash_program_size);
-        flash_write_disable(fd);
-
-        /* wait flash to be ready*/
-        while (flash_read_status(fd) & FLASH_WIP)
-            usleep(100);
-
-        /* verify flash page */
-        m2sdr_flash_read_buffer(fd, base + i, cmp_buf, flash_program_size);
-        if (memcmp(buf + i, cmp_buf, flash_program_size) != 0) {
-            retries += 1;
-        } else {
-            i += flash_program_size;
-            retries = 0;
         }
 
-        if (retries > FLASH_RETRIES) {
-            printf("Not able to write page\n");
-            return 1;
+        flash_write_enable(conn);
+        flash_write_buffer(conn, base + i, buf + i, prog_size);
+        flash_write_disable(conn);
+
+        while (flash_read_status(conn) & FLASH_WIP) {
+            usleep(100);
+        }
+
+        m2sdr_flash_read_buffer(conn, base + i, cmp_buf, prog_size);
+        if (memcmp(buf + i, cmp_buf, prog_size) != 0) {
+            retries++;
+            if (retries > FLASH_RETRIES) {
+                printf("Not able to write page\n");
+                return 1;
+            }
+        } else {
+            i += prog_size;
+            retries = 0;
         }
     }
 
@@ -261,4 +304,4 @@ int m2sdr_flash_write(int fd,
     return 0;
 }
 
-#endif
+#endif /* CSR_FLASH_BASE */

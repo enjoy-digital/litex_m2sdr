@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LitePCIe library
+ * LiteX-M2SDR library
  *
- * This file is part of LitePCIe.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (C) 2018-2023 / EnjoyDigital  / florent@enjoy-digital.fr
+ * Copyright (C) 2024-2025 Enjoy-Digital
  *
  */
 
-#ifndef LITEPCIE_LIB_FLASH_H
-#define LITEPCIE_LIB_FLASH_H
+#ifndef M2SDR_LIB_FLASH_H
+#define M2SDR_LIB_FLASH_H
 
 #include <stdint.h>
 
@@ -28,11 +28,11 @@
 
 #define FLASH_SECTOR_SIZE (1 << 16)
 
-uint8_t m2sdr_flash_read(int fd, uint32_t addr);
-int m2sdr_flash_get_erase_block_size(int fd);
-int m2sdr_flash_write(int fd,
-                         uint8_t *buf, uint32_t base, uint32_t size,
-                         void (*progress_cb)(void *opaque, const char *fmt, ...),
-                         void *opaque);
+uint8_t m2sdr_flash_read(void *conn, uint32_t addr);
+int m2sdr_flash_get_erase_block_size(void *conn);
+int m2sdr_flash_write(void *conn,
+                      uint8_t *buf, uint32_t base, uint32_t size,
+                      void (*progress_cb)(void *opaque, const char *fmt, ...),
+                      void *opaque);
 
-#endif //LITEPCIE_LIB_FLASH_H
+#endif // M2SDR_LIB_FLASH_H
