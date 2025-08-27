@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include "litepcie_flash.h"
+#include "m2sdr_flash.h"
 #include "litepcie_helpers.h"
 #include "litepcie.h"
 

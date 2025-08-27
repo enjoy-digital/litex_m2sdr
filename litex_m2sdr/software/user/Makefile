@@ -12,11 +12,11 @@ PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
 all: $(PROGS)
 
-liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_flash.o liblitepcie/litepcie_helpers.o
+liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
 	ar rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libliteeth/etherbone.o
+libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o libliteeth/etherbone.o
 	ar rcs $@ $+
 	ranlib $@
 

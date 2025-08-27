@@ -42,6 +42,7 @@ extern "C" {
 
 #include "m2sdr_si5351_i2c.h"
 #include "m2sdr_ad9361_spi.h"
+#include "m2sdr_flash.h"
 
 #ifdef __cplusplus
 }
