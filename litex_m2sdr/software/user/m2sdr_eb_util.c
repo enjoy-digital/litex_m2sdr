@@ -20,28 +20,15 @@
 #include "soc.h"
 #include "flags.h"
 #include "libliteeth/etherbone.h"
+#include "libm2sdr.h"
 
 /* Variables */
 /*-----------*/
 
-#define litex_m2sdr_writel(_fd, _addr, _val) eb_write32(_fd, _val, _addr)
-#define litex_m2sdr_readl(_fd, _addr) eb_read32(_fd, _addr)
-typedef struct eb_connection *litex_m2sdr_device_desc_t;
+typedef m2sdr_conn_type litex_m2sdr_device_desc_t;
 
 static char ip_address[1024];
 static char port[16] = "1234";
-
-#define FLASH_READ_ID_REG 0x9f
-
-#define FLASH_READ    0x03
-#define FLASH_WREN    0x06
-#define FLASH_WRDI    0x04
-#define FLASH_PP      0x02
-#define FLASH_SE      0xd8
-#define FLASH_BE      0xc7
-#define FLASH_RDSR    0x05
-#define FLASH_WRSR    0x01
-#define FLASH_WIP     0x01
 
 #define FLASH_SECTOR_SIZE (1 << 16)
 #define FLASH_RETRIES     4
@@ -53,7 +40,7 @@ static char port[16] = "1234";
 
 static void eb_flash_spi_cs(litex_m2sdr_device_desc_t conn, uint8_t cs_n)
 {
-    litex_m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
+    m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
 }
 
 static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t cmd, uint32_t tx_data)
@@ -67,12 +54,12 @@ static uint32_t eb_flash_spi(litex_m2sdr_device_desc_t conn, int tx_len, uint8_t
     }
 
     eb_flash_spi_cs(conn, 0);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
     usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
     if (tx_len > 8)
-        rx_data = litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+        rx_data = m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
     else
         rx_data = 0;
     eb_flash_spi_cs(conn, 1);
@@ -160,9 +147,9 @@ static void eb_flash_write_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t 
 
         /* Send command and address */
         tx = ((uint64_t)FLASH_PP << 32) | ((uint64_t)addr << 8);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+        m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
         usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
 
         /* Send data in 32-bit chunks */
@@ -171,9 +158,9 @@ static void eb_flash_write_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t 
                  ((uint64_t)buf[i + 1] << 24) |
                  ((uint64_t)buf[i + 2] << 16) |
                  ((uint64_t)buf[i + 3] << 8);
-            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
-            litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
-            litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+            m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+            m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+            m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
             usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
         }
 
@@ -192,18 +179,18 @@ static void eb_flash_read_buffer_bulk(litex_m2sdr_device_desc_t conn, uint32_t a
 
     /* Send command and address */
     tx = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
-    litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, (tx >>  0) & 0xffffffff);
+    m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
     usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
 
     /* Read data in 32-bit chunks */
     for (i = 0; i < size; i += 4) {
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, 0);
-        litex_m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
+        m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 4, 0);
+        m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR, SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
         usleep(SPI_TRANSACTION_TIME_US); /* Wait for SPI transaction to complete */
-        rx = (uint64_t)litex_m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+        rx = (uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
         buf[i + 0] = (rx >> 24) & 0xff;
         buf[i + 1] = (rx >> 16) & 0xff;
         buf[i + 2] = (rx >>  8) & 0xff;
@@ -359,9 +346,9 @@ static void flash_reload(void)
     }
 
     /* Reload FPGA through ICAP. */
-    litex_m2sdr_writel(conn, CSR_ICAP_ADDR_ADDR, ICAP_CMD_REG);
-    litex_m2sdr_writel(conn, CSR_ICAP_DATA_ADDR, ICAP_CMD_IPROG);
-    litex_m2sdr_writel(conn, CSR_ICAP_WRITE_ADDR, 1);
+    m2sdr_writel(conn, CSR_ICAP_ADDR_ADDR, ICAP_CMD_REG);
+    m2sdr_writel(conn, CSR_ICAP_DATA_ADDR, ICAP_CMD_IPROG);
+    m2sdr_writel(conn, CSR_ICAP_WRITE_ADDR, 1);
 
     /* Close connection and indicate success */
     eb_disconnect(&conn);
@@ -387,16 +374,16 @@ static void probe(void)
     }
 
     /* Test MMAP: write and read back two values */
-    litex_m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
-    read_value = litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
+    m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0x12345678);
+    read_value = m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
     if (read_value != 0x12345678) {
         eb_disconnect(&conn);
         fprintf(stderr, "MMAP write/read mismatch\n");
         exit(1);
     }
 
-    litex_m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
-    read_value = litex_m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
+    m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
+    read_value = m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR);
     if (read_value != 0xdeadbeef) {
         eb_disconnect(&conn);
         fprintf(stderr, "MMAP write/read mismatch\n");
