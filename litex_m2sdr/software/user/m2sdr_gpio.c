@@ -15,7 +15,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "liblitepcie.h"
+#include "libm2sdr.h"
 
 /* GPIO Control Functions */
 /*-----------------------*/
@@ -23,9 +23,10 @@
 static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
 #ifdef CSR_GPIO_BASE
     uint32_t control = 0;
+    void *conn = (void *)(intptr_t)fd;
 
     /* Read current control register value */
-    control = litepcie_readl(fd, CSR_GPIO_CONTROL_ADDR);
+    control = m2sdr_readl(conn, CSR_GPIO_CONTROL_ADDR);
 
     /* Modify control register */
     if (gpio_enable) {
@@ -43,16 +44,16 @@ static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable,
     } else {
         control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET); /* Disable GPIO */
     }
-    litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, control);
+    m2sdr_writel(conn, CSR_GPIO_CONTROL_ADDR, control);
 
     /* Set output data and enable if CSR mode is requested */
     if (gpio_enable && source_csr) {
-        litepcie_writel(fd, CSR_GPIO__O_ADDR, output_data & 0xF);   /* 4-bit output data */
-        litepcie_writel(fd, CSR_GPIO_OE_ADDR, output_enable & 0xF); /* 4-bit output enable */
+        m2sdr_writel(conn, CSR_GPIO__O_ADDR,  output_data  & 0xF); /* 4-bit output data */
+        m2sdr_writel(conn, CSR_GPIO_OE_ADDR,  output_enable & 0xF); /* 4-bit output enable */
     }
 
     /* Read and display current GPIO input */
-    uint32_t input_data = litepcie_readl(fd, CSR_GPIO__I_ADDR) & 0xF; /* 4-bit input data */
+    uint32_t input_data = m2sdr_readl(conn, CSR_GPIO__I_ADDR) & 0xF; /* 4-bit input data */
 
     /* Display configuration */
     printf("GPIO Control: %s, Source: %s, Loopback: %s\n",
@@ -65,7 +66,6 @@ static void configure_gpio(int fd, uint8_t gpio_enable, uint8_t loopback_enable,
            input_data);
 
 #endif
-
 }
 
 /* Help */
