@@ -286,10 +286,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         /* Initialize SI531 Clocking. */
         m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
-#if USE_LITEPCIE
         /* Power-up AD9361 */
         litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
-#endif
 
         /* Initialize AD9361 SPI. */
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
