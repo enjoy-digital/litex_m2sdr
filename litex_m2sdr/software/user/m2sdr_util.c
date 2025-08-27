@@ -389,7 +389,7 @@ static void flash_progress(void *opaque, const char *fmt, ...)
 static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 {
     int fd;
-
+    void *conn;
     uint32_t size;
     uint8_t *buf;
     int sector_size;
@@ -401,9 +401,10 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
+    conn = (void *)(intptr_t)fd;
 
     /* Get flash sector size and pad size to it. */
-    sector_size = m2sdr_flash_get_erase_block_size(fd);
+    sector_size = m2sdr_flash_get_erase_block_size(conn);
     size = ((size1 + sector_size - 1) / sector_size) * sector_size;
 
     /* Alloc buffer and copy data to it. */
@@ -416,7 +417,7 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 
     /* Program flash. */
     printf("Programming (%d bytes at 0x%08x)...\n", size, base);
-    errors = m2sdr_flash_write(fd, buf, base, size, flash_progress, NULL);
+    errors = m2sdr_flash_write(conn, buf, base, size, flash_progress, NULL);
     if (errors) {
         printf("Failed %d errors.\n", errors);
         exit(1);
@@ -464,11 +465,12 @@ static void flash_write(const char *filename, uint32_t offset)
     free(data);
 }
 
-#endif
+#endif /* FLASH_WRITE */
 
 static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 {
     int fd;
+    void *conn;
     FILE * f;
     uint32_t base;
     uint32_t sector_size;
@@ -488,9 +490,10 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
+    conn = (void *)(intptr_t)fd;
 
     /* Get flash sector size. */
-    sector_size = m2sdr_flash_get_erase_block_size(fd);
+    sector_size = m2sdr_flash_get_erase_block_size(conn);
 
     /* Read flash and write to destination file. */
     base = offset;
@@ -499,7 +502,7 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
             printf("Reading 0x%08x\r", base + i);
             fflush(stdout);
         }
-        byte = m2sdr_flash_read(fd, base + i);
+        byte = m2sdr_flash_read(conn, base + i);
         fwrite(&byte, 1, 1, f);
     }
 
@@ -530,7 +533,8 @@ static void flash_reload(void)
     /* Close LitePCIe device. */
     close(fd);
 }
-#endif
+
+#endif /* CSR_FLASH_BASE */
 
 /* DMA */
 /*-----*/
