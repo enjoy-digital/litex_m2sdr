@@ -26,18 +26,54 @@
 
 #include "m2sdr_config.h"
 
+#include "liblitepcie.h"
 #include "libm2sdr.h"
+#include "etherbone.h"
 
 /* Variables */
 /*-----------*/
 
+#ifdef USE_LITEPCIE
 static char m2sdr_device[1024];
-static int m2sdr_device_num;
+static int m2sdr_device_num = 0;
+#elif defined(USE_LITEETH)
+static char m2sdr_ip_address[1024] = "";
+static char m2sdr_port[16] = "1234";
+#endif
 
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     keep_running = 0;
+}
+
+/* Connection Functions */
+/*----------------------*/
+
+static void * m2sdr_open(void) {
+#ifdef USE_LITEPCIE
+    int fd = open(m2sdr_device, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not init driver\n");
+        exit(1);
+    }
+    return (void *)(intptr_t)fd;
+#elif defined(USE_LITEETH)
+    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
+    if (!eb) {
+        fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
+        exit(1);
+    }
+    return eb;
+#endif
+}
+
+static void m2sdr_close(void *conn) {
+#ifdef USE_LITEPCIE
+    close((int)(intptr_t)conn);
+#elif defined(USE_LITEETH)
+    eb_disconnect((struct eb_connection **)&conn);
+#endif
 }
 
 /* AD9361 */
@@ -51,28 +87,22 @@ int spi_write_then_read(struct spi_device *spi,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
-    int fd;
-
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
+    void *conn = m2sdr_open();
 
     if (n_tx == 2 && n_rx == 1) {
         /* read */
-        rxbuf[0] = m2sdr_ad9361_spi_read((void *)(intptr_t)fd, txbuf[0] << 8 | txbuf[1]);
+        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
     } else if (n_tx == 3 && n_rx == 0) {
         /* write */
-        m2sdr_ad9361_spi_write((void *)(intptr_t)fd, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
     } else {
         fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
                 n_tx, n_rx);
-        close(fd);
+        m2sdr_close(conn);
         exit(1);
     }
 
-    close(fd);
+    m2sdr_close(conn);
 
     return 0;
 }
@@ -129,47 +159,41 @@ static void m2sdr_init(
     const char *chan_mode,
     const char *sync_mode
 ) {
-    int fd;
+    void *conn = m2sdr_open();
 
-    fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-
-#ifdef  CSR_SI5351_BASE
-    /* Initialize SI531 Clocking */
+#ifdef CSR_SI5351_BASE
+    /* Initialize SI5351 Clocking */
     printf("Initializing SI5351 Clocking...\n");
 
     /* Internal Sync */
     if (strcmp(sync_mode, "internal") == 0) {
         /* Supported by SI5351B & C Versions */
-        printf("Using internal XO for as SI5351 RefClk...\n");
-        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_CONTROL_ADDR,
+        printf("Using internal XO as SI5351 RefClk...\n");
+        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
         );
-        m2sdr_si5351_i2c_config((void *)(intptr_t)fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
 
     /* External Sync */
     } else if (strcmp(sync_mode, "external") == 0) {
         /* Only Supported by SI5351C Version */
         printf("Using 10MHz input as SI5351 RefClk...\n");
-        m2sdr_writel((void *)(intptr_t)fd, CSR_SI5351_CONTROL_ADDR,
+        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLK_IN_SRC_OFFSET)   /* ClkIn from uFL. */
         );
-        m2sdr_si5351_i2c_config((void *)(intptr_t)fd, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
     /* Invalid Sync */
     } else {
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
-        close(fd);
+        m2sdr_close(conn);
         exit(1);
     }
 #endif
 
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init((void *)(intptr_t)fd, 1);
+    m2sdr_ad9361_spi_init(conn, 1);
 
     /* Initialize AD9361 RFIC */
     printf("Initializing AD9361 RFIC...\n");
@@ -184,7 +208,7 @@ static void m2sdr_init(
         default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
         default_init_param.two_t_two_r_timing_enable     = 0;
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 1);
     }
     if (strcmp(chan_mode, "2t2r") == 0) {
         printf("Setting Channel Mode to 2T2R.\n");
@@ -192,7 +216,7 @@ static void m2sdr_init(
         default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
         default_init_param.two_t_two_r_timing_enable     = 1;
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 0);
     }
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
@@ -250,10 +274,10 @@ static void m2sdr_init(
     /* Configure 8-bit mode */
     if (enable_8bit_mode) {
         printf("Enabling 8-bit mode.\n");
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_BITMODE_ADDR, 1);
+        m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 1);
     } else {
         printf("Enabling 16-bit mode.\n");
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_BITMODE_ADDR, 0);
+        m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
     }
 
     /* Enable BIST TX Tone (Optional: For RF TX Tests) */
@@ -277,7 +301,7 @@ static void m2sdr_init(
         printf("BIST_PRBS TEST...\n");
 
         /* Enable AD9361 RX-PRBS */
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        m2sdr_writel(conn, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
         ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
 
         /* RX Clk/Dat delays scan */
@@ -292,13 +316,13 @@ static void m2sdr_init(
             printf(" %2d     |", rx_clk_delay);
             for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
                 /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
+                m2sdr_ad9361_spi_write(conn, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
 
                 /* Small sleep to let PRBS synchronize */
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                int prbs_sync = m2sdr_readl((void *)(intptr_t)fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                int prbs_sync = m2sdr_readl(conn, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
                 printf(" %2d", prbs_sync);
 
                 /* Record valid delay settings */
@@ -336,14 +360,14 @@ static void m2sdr_init(
 
         /* Configure optimal RX Clk/Dat delays */
         if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
+            m2sdr_ad9361_spi_write(conn, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
         }
 
         /* Enable RX->TX AD9361 loopback */
         ad9361_bist_loopback(ad9361_phy, 1);
 
         /* Enable FPGA TX-PRBS */
-        m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        m2sdr_writel(conn, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
 
         /* TX Clk/Dat delays scan */
         printf("\n");
@@ -357,13 +381,13 @@ static void m2sdr_init(
             printf(" %2d     |", tx_clk_delay);
             for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
                 /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
+                m2sdr_ad9361_spi_write(conn, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
 
                 /* Small sleep to let PRBS synchronize */
                 mdelay(10);
 
                 /* Check PRBS checker synchronization */
-                int prbs_sync = m2sdr_readl((void *)(intptr_t)fd, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
+                int prbs_sync = m2sdr_readl(conn, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
                 printf(" %2d", prbs_sync);
 
                 /* Record valid delay settings */
@@ -401,7 +425,7 @@ static void m2sdr_init(
 
         /* Configure optimal TX Clk/Dat delays */
         if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write((void *)(intptr_t)fd, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
+            m2sdr_ad9361_spi_write(conn, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
         }
     }
 
@@ -410,7 +434,7 @@ static void m2sdr_init(
         ad9361_enable_oversampling(ad9361_phy);
     }
 
-    close(fd);
+    m2sdr_close(conn);
 }
 
 /* Help */
@@ -423,7 +447,12 @@ static void help(void)
            "\n"
            "Options:\n"
            "  -h                     Show this help message and exit.\n"
+#ifdef USE_LITEPCIE
            "  -c device_num          Select the device (default: 0).\n"
+#elif defined(USE_LITEETH)
+           "  -i ip_address          Target IP address for Etherbone (required).\n"
+           "  -p port                Port number (default = 1234).\n"
+#endif
            "  -8bit                  Enable 8-bit mode (default: disabled).\n"
            "  -oversample            Enable oversample mode (default: disabled).\n"
            "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
@@ -453,6 +482,8 @@ static void help(void)
     exit(1);
 }
 
+/* Options */
+/*---------*/
 
 static struct option options[] = {
     { "help",             no_argument, NULL, 'h' },   /*  0 */
@@ -483,8 +514,6 @@ int main(int argc, char **argv)
     int c;
     int option_index;
 
-    m2sdr_device_num = 0;
-
     int64_t  refclk_freq;
     uint32_t samplerate;
     int32_t  bandwidth;
@@ -512,11 +541,37 @@ int main(int argc, char **argv)
 
     /* Parse/Handle Parameters. */
     for (;;) {
+        #ifdef USE_LITEPCIE
         c = getopt_long_only(argc, argv, "hc:8", options, &option_index);
+        #elif defined(USE_LITEETH)
+        c = getopt_long_only(argc, argv, "hi:p:8", options, &option_index);
+        #endif
         if (c == -1)
             break;
         switch(c) {
-        case 0 :
+        case 'h':
+            help();
+            exit(1);
+            break;
+        #ifdef USE_LITEETH
+        case 'i':
+            strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
+            m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
+            break;
+        case 'p':
+            strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
+            m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
+            break;
+        #endif
+        #ifdef USE_LITEPCIE
+        case 'c':
+            m2sdr_device_num = atoi(optarg);
+            break;
+        #endif
+        case '8':
+            enable_8bit_mode = true;
+            break;
+        case 0:
             switch(option_index) {
                 case 1: /* refclk_freq */
                     refclk_freq = (int64_t)strtod(optarg, NULL);
@@ -562,7 +617,7 @@ int main(int argc, char **argv)
                     break;
                 case 15: /* chan */
                     strncpy(chan_mode, optarg, sizeof(chan_mode));
-                    chan_mode[sizeof(sync_mode) - 1] = '\0';
+                    chan_mode[sizeof(chan_mode) - 1] = '\0';
                     break;
                 case 16: /* sync */
                     strncpy(sync_mode, optarg, sizeof(sync_mode));
@@ -573,23 +628,15 @@ int main(int argc, char **argv)
                     exit(1);
             }
             break;
-        case 'h':
-            help();
-            exit(1);
-            break;
-        case 'c':
-            m2sdr_device_num = atoi(optarg);
-            break;
-        case '8': /* 8-bit mode */
-            enable_8bit_mode = true;
-            break;
         default:
             exit(1);
         }
     }
 
     /* Select device. */
+    #ifdef USE_LITEPCIE
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
+    #endif
 
     /* Initialize RF. */
     m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
