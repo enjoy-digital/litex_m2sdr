@@ -5,30 +5,48 @@ LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 AR      = ar
 
-INTERFACE ?= USE_LITEPCIE
+# Backend selection: USE_LITEPCIE (default) or USE_LITEETH
+INTERFACE ?= USE_LITEETH
 
-BINARIES = m2sdr_util m2sdr_eb_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
+# Which binaries to build per interface
+ifeq ($(INTERFACE),USE_LITEETH)
+  BINARIES := m2sdr_eb_util
+else ifeq ($(INTERFACE),USE_LITEPCIE)
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_tone m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
+else
+  $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
+endif
+
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
 
 all: $(PROGS)
 
+# --- Libraries ---
+
 liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
-	ar rcs $@ $+
+	$(AR) rcs $@ $+
 	ranlib $@
 
 libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o libliteeth/etherbone.o
-	ar rcs $@ $+
+	$(AR) rcs $@ $+
 	ranlib $@
 
 ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
-	ar rcs $@ $+
+	$(AR) rcs $@ $+
 	ranlib $@
 
+# --- Binaries ---
+
+# Etherbone-only build
+ifeq ($(INTERFACE),USE_LITEETH)
+m2sdr_eb_util: m2sdr_eb_util.o libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $^ -Llibm2sdr -lm2sdr
+endif
+
+# PCIe-only build
+ifeq ($(INTERFACE),USE_LITEPCIE)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr -lm
-
-m2sdr_eb_util: m2sdr_eb_util.o libliteeth/etherbone.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
@@ -51,13 +69,16 @@ m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 
 m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
+endif
 
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
-	rm -f  ad9361/*.o ad9361/*.d ad9361/*~
+	rm -f ad9361/*.o ad9361/*.d ad9361/*~
+
+# --- Compile rules ---
 
 %.o: %.c
 	$(CC) -c $(CFLAGS) -o $@ $<
