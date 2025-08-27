@@ -115,19 +115,19 @@ static void flash_write_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t siz
     }
 }
 
-uint8_t litepcie_flash_read(int fd, uint32_t addr)
+uint8_t m2sdr_flash_read(int fd, uint32_t addr)
 {
     return flash_spi(fd, 40, FLASH_READ, addr << 8) & 0xff;
 }
 
-static void litepcie_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
+static void m2sdr_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint16_t size)
 {
     int i;
 
     struct litepcie_ioctl_flash m;
 
     if (size == 1) {
-        buf[0] = litepcie_flash_read(fd, addr);
+        buf[0] = m2sdr_flash_read(fd, addr);
 
     } else {
         /* set cs_n */
@@ -153,12 +153,12 @@ static void litepcie_flash_read_buffer(int fd, uint32_t addr, uint8_t *buf, uint
     }
 }
 
-int litepcie_flash_get_erase_block_size(int fd)
+int m2sdr_flash_get_erase_block_size(int fd)
 {
     return FLASH_SECTOR_SIZE;
 }
 
-static int litepcie_flash_get_flash_program_size(int fd)
+static int m2sdr_flash_get_flash_program_size(int fd)
 {
     int software_cs = 1;
     /* if software cs control, program in blocks to speed up update */
@@ -172,7 +172,7 @@ static int litepcie_flash_get_flash_program_size(int fd)
         return 1;
 }
 
-int litepcie_flash_write(int fd,
+int m2sdr_flash_write(int fd,
                      uint8_t *buf, uint32_t base, uint32_t size,
                      void (*progress_cb)(void *opaque, const char *fmt, ...),
                      void *opaque)
@@ -181,7 +181,7 @@ int litepcie_flash_write(int fd,
     int retries;
     uint16_t flash_program_size;
 
-    flash_program_size = litepcie_flash_get_flash_program_size(fd);
+    flash_program_size = m2sdr_flash_get_flash_program_size(fd);
     printf("flash_program_size: %d\n", flash_program_size);
 
     uint8_t cmp_buf[256];
@@ -240,7 +240,7 @@ int litepcie_flash_write(int fd,
             usleep(100);
 
         /* verify flash page */
-        litepcie_flash_read_buffer(fd, base + i, cmp_buf, flash_program_size);
+        m2sdr_flash_read_buffer(fd, base + i, cmp_buf, flash_program_size);
         if (memcmp(buf + i, cmp_buf, flash_program_size) != 0) {
             retries += 1;
         } else {

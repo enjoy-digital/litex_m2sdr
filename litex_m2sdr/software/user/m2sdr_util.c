@@ -403,7 +403,7 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
     }
 
     /* Get flash sector size and pad size to it. */
-    sector_size = litepcie_flash_get_erase_block_size(fd);
+    sector_size = m2sdr_flash_get_erase_block_size(fd);
     size = ((size1 + sector_size - 1) / sector_size) * sector_size;
 
     /* Alloc buffer and copy data to it. */
@@ -416,7 +416,7 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 
     /* Program flash. */
     printf("Programming (%d bytes at 0x%08x)...\n", size, base);
-    errors = litepcie_flash_write(fd, buf, base, size, flash_progress, NULL);
+    errors = m2sdr_flash_write(fd, buf, base, size, flash_progress, NULL);
     if (errors) {
         printf("Failed %d errors.\n", errors);
         exit(1);
@@ -490,7 +490,7 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     }
 
     /* Get flash sector size. */
-    sector_size = litepcie_flash_get_erase_block_size(fd);
+    sector_size = m2sdr_flash_get_erase_block_size(fd);
 
     /* Read flash and write to destination file. */
     base = offset;
@@ -499,7 +499,7 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
             printf("Reading 0x%08x\r", base + i);
             fflush(stdout);
         }
-        byte = litepcie_flash_read(fd, base + i);
+        byte = m2sdr_flash_read(fd, base + i);
         fwrite(&byte, 1, 1, f);
     }
 

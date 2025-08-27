@@ -28,9 +28,9 @@
 
 #define FLASH_SECTOR_SIZE (1 << 16)
 
-uint8_t litepcie_flash_read(int fd, uint32_t addr);
-int litepcie_flash_get_erase_block_size(int fd);
-int litepcie_flash_write(int fd,
+uint8_t m2sdr_flash_read(int fd, uint32_t addr);
+int m2sdr_flash_get_erase_block_size(int fd);
+int m2sdr_flash_write(int fd,
                          uint8_t *buf, uint32_t base, uint32_t size,
                          void (*progress_cb)(void *opaque, const char *fmt, ...),
                          void *opaque);
