@@ -91,8 +91,8 @@ static void help(void) {
 
 int main(int argc, char **argv) {
     int c;
-    static char litepcie_device[1024];
-    static int litepcie_device_num = 0;
+    static char m2sdr_device[1024];
+    static int m2sdr_device_num = 0;
     static uint8_t gpio_enable = 0;
     static uint8_t loopback_enable = 0;
     static uint8_t source_csr = 0;
@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
             help();
             break;
         case 'c':
-            litepcie_device_num = atoi(optarg);
+            m2sdr_device_num = atoi(optarg);
             break;
         case 'g':
             gpio_enable = 1;
@@ -146,10 +146,10 @@ int main(int argc, char **argv) {
     }
 
     /* Select device */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     /* Open device */
-    int fd = open(litepcie_device, O_RDWR);
+    int fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         perror("Failed to open device");
         exit(1);

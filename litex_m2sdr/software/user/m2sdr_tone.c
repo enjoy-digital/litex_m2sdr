@@ -208,9 +208,9 @@ static void help(void) {
 
 int main(int argc, char **argv) {
     int c;
-    static char litepcie_device[1024];
-    static int litepcie_device_num = 0;
-    static uint8_t litepcie_device_zero_copy = 0;
+    static char m2sdr_device[1024];
+    static int m2sdr_device_num = 0;
+    static uint8_t m2sdr_device_zero_copy = 0;
     double sample_rate = 30720000.0;
     double frequency = 1000.0;
     double amplitude = 1.0;
@@ -229,7 +229,7 @@ int main(int argc, char **argv) {
             help();
             break;
         case 'c':
-            litepcie_device_num = atoi(optarg);
+            m2sdr_device_num = atoi(optarg);
             break;
         case 's':
             sample_rate = atof(optarg);
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
             }
             break;
         case 'z':
-            litepcie_device_zero_copy = 1;
+            m2sdr_device_zero_copy = 1;
             break;
         case 'p':
             if (optarg) {
@@ -286,10 +286,10 @@ int main(int argc, char **argv) {
     }
 
     /* Select device */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     /* Generate and play tone with optional PPS */
-    m2sdr_tone(litepcie_device, sample_rate, frequency, amplitude, litepcie_device_zero_copy, pps_freq, gpio_pin);
+    m2sdr_tone(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin);
 
     return 0;
 }

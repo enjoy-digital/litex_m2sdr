@@ -161,13 +161,13 @@ static void help(void)
 int main(int argc, char **argv)
 {
     int c;
-    static char litepcie_device[1024];
-    static int litepcie_device_num;
-    static uint8_t litepcie_device_zero_copy;
+    static char m2sdr_device[1024];
+    static int m2sdr_device_num;
+    static uint8_t m2sdr_device_zero_copy;
     static uint8_t quiet = 0;
 
-    litepcie_device_num = 0;
-    litepcie_device_zero_copy = 0;
+    m2sdr_device_num = 0;
+    m2sdr_device_zero_copy = 0;
 
     signal(SIGINT, intHandler);
 
@@ -181,10 +181,10 @@ int main(int argc, char **argv)
             help();
             break;
         case 'c':
-            litepcie_device_num = atoi(optarg);
+            m2sdr_device_num = atoi(optarg);
             break;
         case 'z':
-            litepcie_device_zero_copy = 1;
+            m2sdr_device_zero_copy = 1;
             break;
         case 'q':
             quiet = 1;
@@ -195,7 +195,7 @@ int main(int argc, char **argv)
     }
 
     /* Select device. */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     /* Interpret cmd and play. */
     const char *filename;
@@ -213,6 +213,6 @@ int main(int argc, char **argv)
     } else {
         help();
     }
-    m2sdr_play(litepcie_device, filename, loops, litepcie_device_zero_copy, quiet);
+    m2sdr_play(m2sdr_device, filename, loops, m2sdr_device_zero_copy, quiet);
     return 0;
 }

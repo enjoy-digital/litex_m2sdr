@@ -41,8 +41,8 @@
 /* Variables */
 /*-----------*/
 
-static char litepcie_device[1024];
-static int litepcie_device_num;
+static char m2sdr_device[1024];
+static int m2sdr_device_num;
 
 sig_atomic_t keep_running = 1;
 
@@ -59,7 +59,7 @@ static void test_si5351_init(void)
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -78,7 +78,7 @@ static void test_si5351_dump(void)
     uint8_t value;
     int i;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -103,7 +103,7 @@ static void test_si5351_write(uint8_t reg, uint8_t value)
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -123,7 +123,7 @@ static void test_si5351_read(uint8_t reg)
     int fd;
     uint8_t value;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -148,7 +148,7 @@ static void test_ad9361_dump(void)
     int i;
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -170,7 +170,7 @@ static void test_ad9361_write(uint16_t reg, uint16_t value)
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -190,7 +190,7 @@ static void test_ad9361_read(uint16_t reg)
     int fd;
     uint16_t value;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -224,7 +224,7 @@ static void info(void)
     int i;
     unsigned char fpga_identifier[256];
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -310,7 +310,7 @@ static void test_reg_write(uint32_t offset, uint32_t value)
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -327,7 +327,7 @@ static void test_reg_read(uint32_t offset)
     int fd;
     uint32_t value;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -350,7 +350,7 @@ void scratch_test(void)
     printf("-------------------------\n");
 
     /* Open LitePCIe device. */
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -396,7 +396,7 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
     int errors;
 
     /* Open LitePCIe device. */
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -485,7 +485,7 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     }
 
     /* Open LitePCIe device. */
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -516,7 +516,7 @@ static void flash_reload(void)
     int fd;
 
     /* Open LitePCIe device. */
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -654,7 +654,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (litepcie_dma_init(&dma, litepcie_device, zero_copy))
+    if (litepcie_dma_init(&dma, m2sdr_device, zero_copy))
         exit(1);
 
     dma.reader_enable = 1;
@@ -809,7 +809,7 @@ static void read_all_clocks(int fd, uint64_t *values)
 
 static void clk_test(int num_measurements, int delay_between_tests)
 {
-    int fd = open(litepcie_device, O_RDWR);
+    int fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -907,7 +907,7 @@ static void vcxo_test(void)
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -1081,17 +1081,17 @@ int main(int argc, char **argv)
 {
     const char *cmd;
     int c;
-    static uint8_t litepcie_device_zero_copy;
-    static uint8_t litepcie_device_external_loopback;
+    static uint8_t m2sdr_device_zero_copy;
+    static uint8_t m2sdr_device_external_loopback;
     static int litepcie_data_width;
     static int litepcie_auto_rx_delay;
     static int test_duration = 0; /* Default to 0 for infinite duration.*/
 
-    litepcie_device_num = 0;
+    m2sdr_device_num = 0;
     litepcie_data_width = 32;
     litepcie_auto_rx_delay = 0;
-    litepcie_device_zero_copy = 0;
-    litepcie_device_external_loopback = 0;
+    m2sdr_device_zero_copy = 0;
+    m2sdr_device_external_loopback = 0;
 
     /* Parameters. */
     for (;;) {
@@ -1103,16 +1103,16 @@ int main(int argc, char **argv)
             help();
             break;
         case 'c':
-            litepcie_device_num = atoi(optarg);
+            m2sdr_device_num = atoi(optarg);
             break;
         case 'w':
             litepcie_data_width = atoi(optarg);
             break;
         case 'z':
-            litepcie_device_zero_copy = 1;
+            m2sdr_device_zero_copy = 1;
             break;
         case 'e':
-            litepcie_device_external_loopback = 1;
+            m2sdr_device_external_loopback = 1;
             break;
         case 'a':
             litepcie_auto_rx_delay = 1;
@@ -1130,7 +1130,7 @@ int main(int argc, char **argv)
         help();
 
     /* Select device. */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     cmd = argv[optind++];
 
@@ -1242,8 +1242,8 @@ int main(int argc, char **argv)
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
         dma_test(
-            litepcie_device_zero_copy,
-            litepcie_device_external_loopback,
+            m2sdr_device_zero_copy,
+            m2sdr_device_external_loopback,
             litepcie_data_width,
             litepcie_auto_rx_delay,
             test_duration);

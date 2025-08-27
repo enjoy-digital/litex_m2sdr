@@ -32,8 +32,8 @@
 /* Variables */
 /*-----------*/
 
-static char litepcie_device[1024];
-static int litepcie_device_num;
+static char m2sdr_device[1024];
+static int m2sdr_device_num;
 
 sig_atomic_t keep_running = 1;
 
@@ -54,7 +54,7 @@ int spi_write_then_read(struct spi_device *spi,
 {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -131,7 +131,7 @@ static void m2sdr_init(
 ) {
     int fd;
 
-    fd = open(litepcie_device, O_RDWR);
+    fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
@@ -482,7 +482,7 @@ int main(int argc, char **argv)
     int c;
     int option_index;
 
-    litepcie_device_num = 0;
+    m2sdr_device_num = 0;
 
     int64_t  refclk_freq;
     uint32_t samplerate;
@@ -577,7 +577,7 @@ int main(int argc, char **argv)
             exit(1);
             break;
         case 'c':
-            litepcie_device_num = atoi(optarg);
+            m2sdr_device_num = atoi(optarg);
             break;
         case '8': /* 8-bit mode */
             enable_8bit_mode = true;
@@ -588,7 +588,7 @@ int main(int argc, char **argv)
     }
 
     /* Select device. */
-    snprintf(litepcie_device, sizeof(litepcie_device), "/dev/m2sdr%d", litepcie_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     /* Initialize RF. */
     m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
