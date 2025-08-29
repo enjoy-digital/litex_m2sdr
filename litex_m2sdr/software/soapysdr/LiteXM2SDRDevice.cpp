@@ -495,20 +495,36 @@ bool SoapyLiteXM2SDR::hasDCOffsetMode(
  **************************************************************************************************/
 
 std::vector<std::string> SoapyLiteXM2SDR::listGains(
-    const int /*direction*/,
+    const int direction,
     const size_t) const {
     std::vector<std::string> gains;
-    gains.push_back("PGA");
+
+    /* TX */
+    if (direction == SOAPY_SDR_TX) {
+        gains.push_back("ATT");
+        gains.push_back("GAIN");
+    }
+
+    /* RX */
+    if (direction == SOAPY_SDR_RX) {
+        gains.push_back("PGA");
+    }
     return gains;
 }
 
 bool SoapyLiteXM2SDR::hasGainMode(
     const int direction,
     const size_t /*channel*/) const {
+
+    /* TX */
     if (direction == SOAPY_SDR_TX)
         return false;
+
+    /* RX */
     if (direction == SOAPY_SDR_RX)
         return true;
+
+    /* Fallback */
     return false;
 }
 
@@ -528,13 +544,19 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
 
 bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) const
 {
+
+    /* TX */
     if (direction == SOAPY_SDR_TX)
         return false;
+
+    /* RX */
     if (direction == SOAPY_SDR_RX) {
         uint8_t gc_mode;
         ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
         return (gc_mode != RF_GAIN_MGC);
     }
+
+    /* Fallback */
     return false;
 }
 
@@ -543,19 +565,27 @@ void SoapyLiteXM2SDR::setGain(
     size_t channel,
     const double value) {
     std::lock_guard<std::mutex> lock(_mutex);
-    SoapySDR::logf(SOAPY_SDR_DEBUG,
-        "SoapyLiteXM2SDR::setGain(%s, ch%d, %f dB)",
-        dir2Str(direction),
-        channel,
-        value);
 
-    if (SOAPY_SDR_TX == direction) {
+    /* TX */
+    if (direction == SOAPY_SDR_TX) {
         _tx_stream.gain[channel] = value;
-        uint32_t atten = static_cast<uint32_t>(-value * 1000);
-        ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+        double   att_db  = (value >= 0.0) ? value : -value;
+        uint32_t att_mdb = static_cast<uint32_t>(att_db * 1000.0);
+
+        /* Clarify interpretation */
+        if (value >= 0.0) {
+            SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, att_db);
+        } else {
+            SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Gain", channel, value);
+        }
+
+        ad9361_set_tx_attenuation(ad9361_phy, channel, att_mdb);
     }
+
+    /* RX */
     if (SOAPY_SDR_RX == direction) {
         _rx_stream.gain[channel] = value;
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
         ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
     }
 }
@@ -564,13 +594,37 @@ void SoapyLiteXM2SDR::setGain(
     const int direction,
     const size_t channel,
     const std::string &name,
-    const double value) {
-    SoapySDR::logf(SOAPY_SDR_DEBUG,
-        "SoapyLiteXM2SDR::setGain(%s, ch%d, %s, %f dB)",
-        dir2Str(direction),
-        channel,
-        name.c_str(),
-        value);
+    const double value)
+{
+    /* TX */
+    if (direction == SOAPY_SDR_TX) {
+        if (name == "ATT") {
+            /* Positive attenuation in dB. */
+            _tx_stream.gain[channel] = -value;
+            SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
+            uint32_t atten = static_cast<uint32_t>(value * 1000.0);
+            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            return;
+        }
+        if (name == "GAIN") {
+            /* Negative gain in dB. */
+            _tx_stream.gain[channel] = value;
+            SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: GAIN %.3f dB Gain", channel, value);
+            uint32_t atten = static_cast<uint32_t>(-value * 1000.0);
+            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            return;
+        }
+    }
+
+    /* RX */
+    if (name == "PGA") {
+        _rx_stream.gain[channel] = value;
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: PGA %.3f dB Gain", channel, value);
+        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+        return;
+    }
+
+    /* Fallback */
     setGain(direction, channel, value);
 }
 
@@ -579,10 +633,14 @@ double SoapyLiteXM2SDR::getGain(
     const size_t channel) const
 {
     int32_t gain = 0;
+
+    /* TX */
     if (direction == SOAPY_SDR_TX) {
         ad9361_get_tx_attenuation(ad9361_phy, channel, (uint32_t *) &gain);
         gain = -gain/1000;
     }
+
+    /* RX */
     if (direction == SOAPY_SDR_RX) {
         ad9361_get_rx_rf_gain(ad9361_phy, channel, &gain);
     }
@@ -593,31 +651,69 @@ double SoapyLiteXM2SDR::getGain(
 double SoapyLiteXM2SDR::getGain(
     const int direction,
     const size_t channel,
-    const std::string &/*name*/) const
+    const std::string &name) const
 {
-    return getGain(direction, channel);
+    /* TX */
+    if (direction == SOAPY_SDR_TX) {
+        uint32_t atten_mdb = 0;
+        ad9361_get_tx_attenuation(ad9361_phy, channel, &atten_mdb);
+        double atten_db = atten_mdb / 1000.0;
+        if (name == "ATT")
+            return atten_db;     /* Positive attenuation. */
+        if (name == "GAIN")
+            return -atten_db;        /* Negative gain. */
+    }
+
+    /* RX */
+    if (direction == SOAPY_SDR_RX) {
+        return getGain(direction, channel);
+    }
+
+    /* Fallback */
+    return 0;
 }
 
 SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const int direction,
-    const size_t /*channel*/) const {
+    const size_t /*channel*/) const
+{
 
+    /* TX */
     if (direction == SOAPY_SDR_TX)
         return(SoapySDR::Range(-89, 0));
 
+    /* RX */
     if (direction == SOAPY_SDR_RX)
         return(SoapySDR::Range(0, 73));
 
+    /* Fallback */
     return(SoapySDR::Range(0,0));
 }
 
 SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const int direction,
-    const size_t channel,
-    const std::string &/*name*/) const {
+    const size_t /*channel*/,
+    const std::string &name) const
+{
 
-    return getGainRange(direction, channel);
+    /* TX */
+    if (direction == SOAPY_SDR_TX) {
+        if (name == "ATT")
+            return(SoapySDR::Range(0, 89));
+        if (name == "GAIN")
+            return(SoapySDR::Range(-89, 0));
+    }
+
+    /* RX */
+    if (direction == SOAPY_SDR_RX) {
+        return(SoapySDR::Range(0, 73));
+    }
+
+    /* Fallback */
+    return(SoapySDR::Range(0,0));
 }
+
+
 /***************************************************************************************************
  *                                     Frequency API
  **************************************************************************************************/
