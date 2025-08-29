@@ -762,7 +762,7 @@ void SoapyLiteXM2SDR::setSampleRate(
     /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
     double actual_rate = rate / _rateMult;
     if (actual_rate < 1250000.0) {
-        SoapySDR::logf(SOAPY_SDR_INFO, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", actual_rate);
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", actual_rate);
         ad9361_phy->rx_fir_dec    = 4;
         ad9361_phy->tx_fir_int    = 4;
         ad9361_phy->bypass_rx_fir = 0;
@@ -777,7 +777,7 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
     else if (actual_rate < 2500000.0) {
-        SoapySDR::logf(SOAPY_SDR_INFO, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", actual_rate);
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", actual_rate);
         ad9361_phy->rx_fir_dec    = 2;
         ad9361_phy->tx_fir_int    = 2;
         ad9361_phy->bypass_rx_fir = 0;
