@@ -376,10 +376,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
 #endif
 
-    /* Crossbar Demux: Select PCIe streaming */
+    /* Crossbar Mux/Demux : Select PCIe streaming */
+    litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
     litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
-    /* Crossbar Mux: Select PCIe streaming */
-    litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
 
     /* Power-Down AD9361 */
     litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);

@@ -295,13 +295,13 @@ int SoapyLiteXM2SDR::activateStream(
         for (size_t i = 0; i < _tx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
 #if USE_LITEPCIE
-        /* Crossbar Demux: Select PCIe streaming */
+        /* Crossbar Mux: Select PCIe streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
         /* Configure the DMA engine for TX, but don't enable it yet. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
 #elif USE_LITEETH
-        /* Crossbar Demux: Select Ethernet streaming */
+        /* Crossbar Mux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
         _udp_streamer->set_samplerate(_tx_stream.samplerate);
         _udp_streamer->start(SOAPY_SDR_TX);
