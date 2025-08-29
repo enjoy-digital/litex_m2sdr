@@ -1,10 +1,22 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR Tone Generator Utility.
+ * M2SDR Signal Generator Utility.
  *
  * This file is part of LiteX-M2SDR project.
  *
  * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ *
+ * Description:
+ * This utility generates tone, white noise, or PRBS signals into interleaved 16-bit I/Q samples for
+ * use with the M2SDR software-defined radio. It runs in real-time using DMA to transmit the generated signal.
+ *
+ * Note: Configure the RF settings first using m2sdr_rf before running this utility.
+ *
+ * Usage Example:
+ *     ./m2sdr_rf -samplerate 30.72e6 -tx_freq 100e6 -tx_gain -10
+ *     ./m2sdr_gen -s 30.72e6 -t tone -f 1e6 -a 1.0
+ *     ./m2sdr_gen -s 30.72e6 -t white -a 1.0
+ *     ./m2sdr_gen -s 30.72e6 -t prbs -a 1.0
  *
  */
 
@@ -16,6 +28,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
+#include <time.h>
 
 #include "liblitepcie.h"
 
@@ -37,10 +50,19 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
-/* Tone (DMA TX) with GPIO PPS */
+/* PRBS bit generator (PRBS31: x^31 + x^28 + 1) */
+static uint32_t prbs_lfsr = 0xFFFFFFFFu; /* Initial seed, all 1s */
+
+static int get_prbs_bit(void) {
+    int bit = ((prbs_lfsr >> 30) ^ (prbs_lfsr >> 27)) & 1;
+    prbs_lfsr = (prbs_lfsr << 1) | bit;
+    return bit;
+}
+
+/* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
-static void m2sdr_tone(const char *device_name, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin) {
+static void m2sdr_gen(const char *device_name, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type) {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
@@ -72,10 +94,13 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
 #endif
 
     /* Print parameters */
-    printf("Starting tone generation with parameters:\n");
+    printf("Starting signal generation with parameters:\n");
     printf("  Device: %s\n", device_name);
     printf("  Sample Rate: %.0f Hz\n", sample_rate);
-    printf("  Frequency: %.0f Hz\n", frequency);
+    printf("  Signal Type: %s\n", signal_type);
+    if (strcmp(signal_type, "tone") == 0) {
+        printf("  Frequency: %.0f Hz\n", frequency);
+    }
     printf("  Amplitude: %.2f\n", amplitude);
     printf("  Zero-Copy Mode: %d\n", zero_copy);
 
@@ -95,6 +120,9 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
     double pps_period_samples = pps_freq > 0 ? sample_rate / pps_freq : 0;
     double pps_high_samples = pps_period_samples * 0.2; /* 20% high */
     uint64_t sample_count = 0;
+
+    /* Seed random number generator for white noise */
+    srand(time(NULL));
 
     /* Test Loop */
     last_time = get_time_ms();
@@ -123,8 +151,30 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
             /* Generate tone and fill Write buffer */
             int num_samples = DMA_BUFFER_SIZE / 8; // 8 bytes per sample: TX1_I, TX1_Q, TX2_I, TX2_Q
             for (int j = 0; j < num_samples; j++) {
-                float I = cos(phi) * amplitude;
-                float Q = sin(phi) * amplitude;
+                float I = 0.0;
+                float Q = 0.0;
+
+                if (strcmp(signal_type, "tone") == 0) {
+                    I = cos(phi) * amplitude;
+                    Q = sin(phi) * amplitude;
+                    phi += omega;
+                    if (phi >= 2 * M_PI) phi -= 2 * M_PI;
+                } else if (strcmp(signal_type, "white") == 0) {
+                    I = ((float)rand() / RAND_MAX * 2.0 - 1.0) * amplitude;
+                    Q = ((float)rand() / RAND_MAX * 2.0 - 1.0) * amplitude;
+                } else if (strcmp(signal_type, "prbs") == 0) {
+                    int32_t value_I = 0;
+                    int32_t value_Q = 0;
+                    for (int b = 0; b < 12; b++) {
+                        value_I = (value_I << 1) | get_prbs_bit();
+                    }
+                    for (int b = 0; b < 12; b++) {
+                        value_Q = (value_Q << 1) | get_prbs_bit();
+                    }
+                    I = ((float)(value_I - 2048) / 2048.0f) * amplitude;
+                    Q = ((float)(value_Q - 2048) / 2048.0f) * amplitude;
+                }
+
                 int16_t I_int = (int16_t)(I * 2047); // Scale to 12-bit range
                 int16_t Q_int = (int16_t)(Q * 2047); // Scale to 12-bit range
 
@@ -143,8 +193,6 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
                 ((int16_t *)buf_wr)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12); // TX2_I (IB[15:12] = GPIO2)
                 ((int16_t *)buf_wr)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12); // TX2_Q (QB[15:12] = GPIO2_OE)
 
-                phi += omega;
-                if (phi >= 2 * M_PI) phi -= 2 * M_PI;
                 sample_count++;
             }
         }
@@ -187,13 +235,14 @@ static void m2sdr_tone(const char *device_name, double sample_rate, double frequ
 /*------*/
 
 static void help(void) {
-    printf("M2SDR Tone Generator Utility\n"
-           "usage: m2sdr_tone [options]\n"
+    printf("M2SDR Signal Generator Utility\n"
+           "usage: m2sdr_gen [options]\n"
            "\n"
            "Options:\n"
            "-h                               Help.\n"
            "-c device_num                    Select the device (default = 0).\n"
            "-s sample_rate                   Set sample rate in Hz (default = 30720000).\n"
+           "-t signal_type                   Set signal type: 'tone' (default), 'white', or 'prbs'.\n"
            "-f frequency                     Set tone frequency in Hz (default = 1000).\n"
            "-a amplitude                     Set amplitude (0.0 to 1.0, default = 1.0).\n"
            "-z                               Enable zero-copy DMA mode.\n"
@@ -216,12 +265,13 @@ int main(int argc, char **argv) {
     double amplitude = 1.0;
     double pps_freq = 0.0; /* Disabled by default */
     uint8_t gpio_pin = 0;  /* Default to GPIO bit 0 */
+    char signal_type[16] = "tone"; /* Default to tone */
 
     signal(SIGINT, intHandler);
 
     /* Parameters */
     for (;;) {
-        c = getopt(argc, argv, "hc:s:f:a:zp:g:");
+        c = getopt(argc, argv, "hc:s:t:f:a:zp:g:");
         if (c == -1)
             break;
         switch (c) {
@@ -235,6 +285,14 @@ int main(int argc, char **argv) {
             sample_rate = atof(optarg);
             if (sample_rate <= 0) {
                 fprintf(stderr, "Sample rate must be positive\n");
+                exit(1);
+            }
+            break;
+        case 't':
+            strncpy(signal_type, optarg, sizeof(signal_type) - 1);
+            signal_type[sizeof(signal_type) - 1] = '\0';
+            if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0) {
+                fprintf(stderr, "Invalid signal type: must be 'tone', 'white', or 'prbs'\n");
                 exit(1);
             }
             break;
@@ -289,7 +347,7 @@ int main(int argc, char **argv) {
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     /* Generate and play tone with optional PPS */
-    m2sdr_tone(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin);
+    m2sdr_gen(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type);
 
     return 0;
 }

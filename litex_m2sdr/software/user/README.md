@@ -78,13 +78,13 @@ Example usage:
 
 ---
 
-### m2sdr_tone
-Generates and streams a pure-tone (sine wave) directly to the FPGA’s TX path in real-time (DMA TX).
+### m2sdr_gen
+Generates and streams a tone, white noise, or PRBS signal directly to the FPGA’s TX path in real-time (DMA TX).
 Also supports GPIO/PPS (pulse-per-second) toggling on a selected GPIO pin.
 
 **Usage**:
 ~~~~
-m2sdr_tone [options]
+m2sdr_gen [options]
 ~~~~
 
 **Relevant options**:
@@ -92,6 +92,8 @@ m2sdr_tone [options]
   Selects the device (default=0).
 - `-s sample_rate`
   Set sample rate in Hz (default = 30720000).
+- `-t signal_type`
+  Set signal type: 'tone' (default), 'white', or 'prbs'.
 - `-f frequency`
   Set tone frequency in Hz (default = 1000).
 - `-a amplitude`
@@ -105,12 +107,14 @@ m2sdr_tone [options]
 
 Example usage without PPS:
 ~~~~
-./m2sdr_tone -s 30720000 -f 1e6 -a 0.5
+./m2sdr_gen -s 30720000 -t tone -f 1e6 -a 0.5
+./m2sdr_gen -s 30720000 -t white -a 0.5
+./m2sdr_gen -s 30720000 -t prbs -a 0.5
 ~~~~
 
 Example usage with PPS on GPIO pin 0:
 ~~~~
-./m2sdr_tone -c 0 -s 30720000 -f 1e6 -a 0.5 -p 1.0 -g 0
+./m2sdr_gen -c 0 -s 30720000 -t tone -f 1e6 -a 0.5 -p 1.0 -g 0
 ~~~~
 
 ---
@@ -300,7 +304,7 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **play** t
 
 3. **Play the tone (in Terminal #1)**
    ~~~~
-   ./m2sdr_play tx_file.bin 1000
+   ./m2sdr_gen tx_file.bin 1000
    ~~~~
    *(Will send the file 1000 times.)*
 
