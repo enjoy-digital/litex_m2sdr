@@ -32,15 +32,6 @@
 
 #include "liblitepcie.h"
 
-#ifdef CSR_GPIO_BASE
-
-/* CSR Definitions from csr.h */
-#define CSR_GPIO_CONTROL_ENABLE   (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET)
-#define CSR_GPIO_CONTROL_SOURCE   (1 << CSR_GPIO_CONTROL_SOURCE_OFFSET)
-#define CSR_GPIO_CONTROL_LOOPBACK (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET)
-
-#endif
-
 /* Variables */
 /*-----------*/
 
@@ -83,7 +74,7 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
 
     /* Enable GPIO in Packer/Unpacker mode if PPS is requested */
     if (pps_freq > 0) {
-        uint32_t control = CSR_GPIO_CONTROL_ENABLE | CSR_GPIO_CONTROL_LOOPBACK; /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=1 */
+        uint32_t control = (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET) | (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET); /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=1 */
         litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, control);
         double pps_period_s = 1.0 / pps_freq;
         double pps_high_s = pps_period_s * 0.2;
