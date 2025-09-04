@@ -36,7 +36,7 @@
 #define DMA_CHECK_DATA   /* Enable Data Check when defined */
 #define DMA_RANDOM_DATA  /* Enable Random Data when defined */
 
-#define FLASH_WRITE /* Enable Flash Write when defined */
+#define FLASH_WRITE      /* Enable Flash Write when defined */
 
 /* Variables */
 /*-----------*/
@@ -856,8 +856,8 @@ static void clk_test(int num_measurements, int delay_between_tests)
     m2sdr_close(conn);
 }
 
-/* VCXO Test  */
-/*------------*/
+/* VCXO Test */
+/*-----------*/
 
 #ifdef CSR_SI5351_BASE
 
