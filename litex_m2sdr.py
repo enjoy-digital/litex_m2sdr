@@ -325,7 +325,6 @@ class BaseSoC(SoCMini):
         # XADC -------------------------------------------------------------------------------------
 
         self.xadc = XADC()
-        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # DNA --------------------------------------------------------------------------------------
 
