@@ -13,6 +13,10 @@
 
 #include <stdint.h>
 
+#define SPI_CTRL_START  (1 << 0)
+#define SPI_CTRL_LENGTH (1 << 8)
+#define SPI_STATUS_DONE (1 << 0)
+
 #define FLASH_READ_ID_REG 0x9F
 
 #define FLASH_READ    0x03

@@ -666,34 +666,6 @@ static unsigned int litepcie_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 
-#ifdef CSR_FLASH_BASE
-/* SPI */
-
-#define SPI_TIMEOUT 100000 /* in us */
-
-static int litepcie_flash_spi(struct litepcie_device *s, struct litepcie_ioctl_flash *m)
-{
-	int i;
-
-	if (m->tx_len < 8 || m->tx_len > 40)
-		return -EINVAL;
-
-	litepcie_writel(s, CSR_FLASH_SPI_MOSI_ADDR, m->tx_data >> 32);
-	litepcie_writel(s, CSR_FLASH_SPI_MOSI_ADDR + 4, m->tx_data);
-	litepcie_writel(s, CSR_FLASH_SPI_CONTROL_ADDR,
-		SPI_CTRL_START | (m->tx_len * SPI_CTRL_LENGTH));
-	udelay(16);
-	for (i = 0; i < SPI_TIMEOUT; i++) {
-		if (litepcie_readl(s, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE)
-			break;
-		udelay(1);
-	}
-	m->rx_data = ((uint64_t)litepcie_readl(s, CSR_FLASH_SPI_MISO_ADDR) << 32) |
-		litepcie_readl(s, CSR_FLASH_SPI_MISO_ADDR + 4);
-	return 0;
-}
-#endif
-
 static long litepcie_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
@@ -723,25 +695,6 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 	}
 	break;
-#ifdef CSR_FLASH_BASE
-	case LITEPCIE_IOCTL_FLASH:
-	{
-		struct litepcie_ioctl_flash m;
-
-		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
-			ret = -EFAULT;
-			break;
-		}
-		ret = litepcie_flash_spi(dev, &m);
-		if (ret == 0) {
-			if (copy_to_user((void *)arg, &m, sizeof(m))) {
-				ret = -EFAULT;
-				break;
-			}
-		}
-	}
-	break;
-#endif
 #ifdef CSR_ICAP_BASE
 	case LITEPCIE_IOCTL_ICAP:
 	{

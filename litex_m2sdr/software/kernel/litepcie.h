@@ -22,12 +22,6 @@ struct litepcie_ioctl_reg {
 	uint8_t is_write;
 };
 
-struct litepcie_ioctl_flash {
-	int tx_len; /* 8 to 40 */
-	__u64 tx_data; /* 8 to 40 bits */
-	__u64 rx_data; /* 40 bits */
-};
-
 struct litepcie_ioctl_icap {
 	uint8_t addr;
 	uint32_t data;
@@ -75,7 +69,6 @@ struct litepcie_ioctl_mmap_dma_update {
 #define LITEPCIE_IOCTL 'S'
 
 #define LITEPCIE_IOCTL_REG               _IOWR(LITEPCIE_IOCTL,  0, struct litepcie_ioctl_reg)
-#define LITEPCIE_IOCTL_FLASH             _IOWR(LITEPCIE_IOCTL,  1, struct litepcie_ioctl_flash)
 #define LITEPCIE_IOCTL_ICAP              _IOWR(LITEPCIE_IOCTL,  2, struct litepcie_ioctl_icap)
 
 #define LITEPCIE_IOCTL_DMA                       _IOW(LITEPCIE_IOCTL,  20, struct litepcie_ioctl_dma)
