@@ -348,7 +348,7 @@ class BaseSoC(SoCMini):
             pcie_dmas = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
-                bar0_size   = 0x20000,
+                bar0_size   = 0x10_0000,
                 with_ptm    = with_pcie_ptm,
                 cd          = "sys",
             )
@@ -361,6 +361,8 @@ class BaseSoC(SoCMini):
                 "Sub_Class_Interface_Menu" : "RF_controller",
                 "Class_Code_Base"          : "0D",
                 "Class_Code_Sub"           : "10",
+                "Bar0_Scale"               : "Megabytes",
+                "Bar0_Size"                : 1,
                 }
             )
 
@@ -632,7 +634,12 @@ class BaseSoC(SoCMini):
 
                 # Serial.
                 serial_pads     = self.shared_pads,
+
+                # Wishbone Slave.
+                wb_slave_origin = 0x0004_0000,
+                wb_slave_size   = 0x0004_0000
             )
+
             LiteXWRNICSoC.add_sources(self)
 
             # Clk10M Generator.
