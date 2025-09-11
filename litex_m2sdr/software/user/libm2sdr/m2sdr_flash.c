@@ -8,6 +8,9 @@
  *
  */
 
+/* Includes */
+/*----------*/
+
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -20,6 +23,9 @@
 
 #ifdef CSR_FLASH_BASE
 
+/* Defines */
+/*---------*/
+
 #define FLASH_RETRIES            16
 #define FLASH_PAGE_SIZE          256
 #define FLASH_SECTOR_SIZE        (1 << 16)
@@ -27,13 +33,16 @@
 #define SPI_TIMEOUT 100000 /* in us */
 #define SPI_TRANSACTION_TIME_US  25
 
-/* CS */
+/* flash_spi_cs */
+/*--------------*/
+
 static void flash_spi_cs(void *conn, uint8_t cs_n)
 {
     m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
 }
 
-/* SPI transaction */
+/* flash_spi */
+/*-----------*/
 
 static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
 {
@@ -77,30 +86,48 @@ static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
     return rx;
 }
 
+/* flash_read_id */
+/*---------------*/
+
 uint32_t flash_read_id(void *conn, int reg)
 {
     return flash_spi(conn, 32, reg, 0) & 0xffffff;
 }
+
+/* flash_write_enable */
+/*--------------------*/
 
 static void flash_write_enable(void *conn)
 {
     flash_spi(conn, 8, FLASH_WREN, 0);
 }
 
+/* flash_write_disable */
+/*---------------------*/
+
 static void flash_write_disable(void *conn)
 {
     flash_spi(conn, 8, FLASH_WRDI, 0);
 }
+
+/* flash_read_status */
+/*-------------------*/
 
 static uint8_t flash_read_status(void *conn)
 {
     return flash_spi(conn, 16, FLASH_RDSR, 0) & 0xff;
 }
 
+/* flash_erase_sector */
+/*--------------------*/
+
 static void flash_erase_sector(void *conn, uint32_t addr)
 {
     flash_spi(conn, 32, FLASH_SE, addr << 8);
 }
+
+/* flash_write_buffer */
+/*--------------------*/
 
 static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
@@ -159,10 +186,16 @@ static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t
     }
 }
 
+/* m2sdr_flash_read */
+/*------------------*/
+
 uint8_t m2sdr_flash_read(void *conn, uint32_t addr)
 {
     return flash_spi(conn, 40, FLASH_READ, addr << 8) & 0xff;
 }
+
+/* m2sdr_flash_read_buffer */
+/*-------------------------*/
 
 static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
@@ -222,17 +255,26 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
     flash_spi_cs(conn, 1);
 }
 
+/* m2sdr_flash_get_erase_block_size */
+/*----------------------------------*/
+
 int m2sdr_flash_get_erase_block_size(void *conn)
 {
     (void)conn;
     return FLASH_SECTOR_SIZE;
 }
 
+/* m2sdr_flash_get_flash_program_size */
+/*-----------------------------------*/
+
 static int m2sdr_flash_get_flash_program_size(void *conn)
 {
     (void)conn;
     return FLASH_PAGE_SIZE;
 }
+
+/* m2sdr_flash_write */
+/*-------------------*/
 
 int m2sdr_flash_write(void *conn,
                       uint8_t *buf, uint32_t base, uint32_t size,

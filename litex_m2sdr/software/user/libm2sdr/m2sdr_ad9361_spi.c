@@ -7,6 +7,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+/* Includes */
+/*----------*/
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -18,12 +21,15 @@
 
 #include "etherbone.h"
 
+/* Defines */
+/*---------*/
+
 #define AD9361_SPI_WAIT_DONE
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
-/* Public Functions */
-/*------------------*/
+/* m2sdr_ad9361_spi_init */
+/*-----------------------*/
 
 void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
     if (reset) {
@@ -37,6 +43,9 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
     /* Small delay. */
     usleep(1000);
 }
+
+/* m2sdr_ad9361_spi_xfer */
+/*-----------------------*/
 
 void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     /* Check write. */
@@ -60,6 +69,9 @@ void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso
     }
 }
 
+/* m2sdr_ad9361_spi_write */
+/*------------------------*/
+
 void m2sdr_ad9361_spi_write(void *conn, uint16_t reg, uint8_t dat) {
     uint8_t mosi[3];
     uint8_t miso[3];
@@ -77,6 +89,9 @@ void m2sdr_ad9361_spi_write(void *conn, uint16_t reg, uint8_t dat) {
     /* Do SPI Xfer. */
     m2sdr_ad9361_spi_xfer(conn, 3, mosi, miso);
 }
+
+/* m2sdr_ad9361_spi_read */
+/*-----------------------*/
 
 uint8_t m2sdr_ad9361_spi_read(void *conn, uint16_t reg) {
     uint8_t dat;

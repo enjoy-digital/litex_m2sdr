@@ -7,6 +7,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+/* Includes */
+/*----------*/
+
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -17,6 +20,12 @@
 #include "m2sdr_si5351_i2c.h"
 
 #include "etherbone.h"
+
+/* Functions */
+/*-----------*/
+
+/* m2sdr_si5351_i2c_reset */
+/*------------------------*/
 
 void m2sdr_si5351_i2c_reset(void *conn) {
     /* Reset Active. */
@@ -30,6 +39,9 @@ void m2sdr_si5351_i2c_reset(void *conn) {
         m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
     }
 }
+
+/* m2sdr_si5351_i2c_write */
+/*------------------------*/
 
 bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
     if (len != 1) {
@@ -86,6 +98,9 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
 
     return true;
 }
+
+/* m2sdr_si5351_i2c_read */
+/*-----------------------*/
 
 bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop) {
     if (len != 1) {
@@ -146,14 +161,23 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
     return true;
 }
 
+/* m2sdr_si5351_i2c_poll */
+/*-----------------------*/
+
 bool m2sdr_si5351_i2c_poll(void *conn, uint8_t slave_addr) {
     uint8_t dummy;
     return m2sdr_si5351_i2c_read(conn, slave_addr, 0x00, &dummy, 1, true);
 }
 
+/* m2sdr_si5351_i2c_check_litei2c */
+/*--------------------------------*/
+
 bool m2sdr_si5351_i2c_check_litei2c(void *conn) {
     return m2sdr_readl(conn, CSR_SI5351_BASE) != 0x5;
 }
+
+/* m2sdr_si5351_i2c_config */
+/*-------------------------*/
 
 void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;
