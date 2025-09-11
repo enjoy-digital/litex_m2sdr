@@ -21,6 +21,7 @@
 #include <linux/xarray.h>
 
 #include "litex.h"
+#include "liteuart.h"
 
 // FIXME: Too early to use  platform_get_mem_or_io directly from kernel, use a local version for now.
 
@@ -508,7 +509,7 @@ static int __init early_liteuart_setup(struct earlycon_device *device,
 OF_EARLYCON_DECLARE(liteuart, "litex,liteuart", early_liteuart_setup);
 #endif /* CONFIG_SERIAL_LITEUART_CONSOLE */
 
-static int __init liteuart_init(void)
+int __init liteuart_init(void)
 {
 	int res;
 
@@ -525,14 +526,14 @@ static int __init liteuart_init(void)
 	return 0;
 }
 
-static void __exit liteuart_exit(void)
+void __exit liteuart_exit(void)
 {
 	platform_driver_unregister(&liteuart_platform_driver);
 	uart_unregister_driver(&liteuart_driver);
 }
 
-module_init(liteuart_init);
-module_exit(liteuart_exit);
+//module_init(liteuart_init);
+//module_exit(liteuart_exit);
 
 MODULE_AUTHOR("Antmicro <www.antmicro.com>");
 MODULE_DESCRIPTION("LiteUART serial driver");

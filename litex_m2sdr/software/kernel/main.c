@@ -50,6 +50,9 @@
 //#define DEBUG_READ
 //#define DEBUG_WRITE
 
+extern int liteuart_init(void);
+extern void liteuart_exit(void);
+
 #define LITEPCIE_NAME "m2sdr"
 #define LITEPCIE_MINOR_COUNT 32
 
@@ -1318,6 +1321,11 @@ static struct pci_driver litepcie_pci_driver = {
 static int __init litepcie_module_init(void)
 {
 	int ret;
+	int res;
+
+	res = liteuart_init();
+	if (res)
+		return res;
 
 	#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 		litepcie_class = class_create(THIS_MODULE, LITEPCIE_NAME);
@@ -1360,6 +1368,8 @@ static void __exit litepcie_module_exit(void)
 	pci_unregister_driver(&litepcie_pci_driver);
 	unregister_chrdev_region(litepcie_dev_t, LITEPCIE_MINOR_COUNT);
 	class_destroy(litepcie_class);
+
+	liteuart_exit();
 }
 
 module_init(litepcie_module_init);

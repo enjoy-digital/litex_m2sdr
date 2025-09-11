@@ -2,17 +2,14 @@
 KERNEL_VERSION := $(shell uname -r)
 KERNEL_PATH ?= /lib/modules/$(KERNEL_VERSION)/build
 
-obj-m = m2sdr.o liteuart.o
-m2sdr-objs = main.o
+obj-m = m2sdr.o
+m2sdr-objs = main.o liteuart.o
 
 # Default target
-all: m2sdr.ko liteuart.ko
+all: m2sdr.ko
 
-# Build the modules
-m2sdr.ko: main.c litepcie.h config.h flags.h csr.h soc.h
-	make -C $(KERNEL_PATH) M=$(shell pwd) modules
-
-liteuart.ko: liteuart.c litepcie.h config.h flags.h csr.h soc.h
+# Build the module
+m2sdr.ko: main.c liteuart.c litepcie.h config.h flags.h csr.h soc.h litex.h
 	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 # Install the module to the kernel directory, enable auto-load on boot, and install udev rule to set
@@ -26,7 +23,7 @@ install:
 
 # Uninstall the module and remove configuration files
 uninstall:
-	-sudo rmmod m2sdr || true
+	sudo rmmod m2sdr || true
 	sudo rm -f /lib/modules/$(KERNEL_VERSION)/updates/m2sdr.ko
 	sudo rm -f /etc/modules-load.d/m2sdr.conf
 	sudo rm -f /etc/udev/rules.d/99-m2sdr.rules
