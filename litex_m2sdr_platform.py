@@ -214,8 +214,9 @@ class Platform(Xilinx7SeriesPlatform):
 
                 # Build Fallback-Multiboot Bitstream.
                 f"set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x{self.image_size:08x} [current_design]",
+                "set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 1 [current_design]",
                 "write_bitstream -force {build_name}_fallback.bit ",
-                "write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit \"up 0x0 \
+                "write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit \"up 0x0 \
                 {build_name}_fallback.bit\" -file {build_name}_fallback.bin"]
 
     def detect_ftdi_chip(self):
