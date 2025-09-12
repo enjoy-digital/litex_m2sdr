@@ -13,10 +13,9 @@ from litex.soc.interconnect.csr import *
 class Capability(LiteXModule):
     """
     Capability Module for LiteX M2SDR.
-
     Provides read-only CSRs to indicate the API version and hardware capabilities such as PCIe
     presence and configuration, Ethernet presence and speed, SATA presence and configuration,
-    and GPIO presence.
+    GPIO presence, and White Rabbit presence.
 
     Parameters:
     - api_version_str (str) : API version as a string (e.g., "1.0" for v1.0).
@@ -28,6 +27,7 @@ class Capability(LiteXModule):
     - sata_enabled (bool)   : Indicates if SATA is present.
     - sata_gen (str)        : SATA generation (e.g., "gen2").
     - gpio_enabled (bool)   : Indicates if GPIO is present.
+    - wr_enabled (bool)     : Indicates if White Rabbit is present.
     """
     def __init__(self, api_version_str,
         # PCIe.
@@ -37,7 +37,9 @@ class Capability(LiteXModule):
         # SATA.
         sata_enabled, sata_gen,
         # GPIO.
-        gpio_enabled):
+        gpio_enabled,
+        # White Rabbit.
+        wr_enabled):
 
         # API Version.
         # ------------
@@ -47,7 +49,6 @@ class Capability(LiteXModule):
             description = "API Version of the gateware (e.g., 0x0100 for v1.0).",
             reset       = api_version
         )
-
         # Features.
         # ---------
         self._features = CSRStatus(32, fields=[
@@ -55,6 +56,7 @@ class Capability(LiteXModule):
             CSRField("eth",  size=1, offset=1, reset=int(eth_enabled),  description="Ethernet is present."),
             CSRField("sata", size=1, offset=2, reset=int(sata_enabled), description="SATA     is present."),
             CSRField("gpio", size=1, offset=3, reset=int(gpio_enabled), description="GPIO     is present."),
+            CSRField("wr",   size=1, offset=4, reset=int(wr_enabled),   description="White Rabbit is present."),
             # Reserved bits for future features
         ], description="Hardware feature presence bitfield.")
 

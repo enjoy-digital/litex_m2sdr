@@ -256,6 +256,9 @@ class BaseSoC(SoCMini):
 
             # GPIO Capabilities.
             gpio_enabled    = with_gpio,
+
+            # White Rabbit Capabilities.
+            wr_enabled      = with_white_rabbit,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------

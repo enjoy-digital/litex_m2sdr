@@ -236,15 +236,17 @@ static void info(void)
 
     uint32_t features = m2sdr_readl(conn, CSR_CAPABILITY_FEATURES_ADDR);
     bool pcie_enabled = (features >> CSR_CAPABILITY_FEATURES_PCIE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_PCIE_SIZE) - 1);
-    bool eth_enabled  = (features >> CSR_CAPABILITY_FEATURES_ETH_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_ETH_SIZE) - 1);
+    bool eth_enabled  = (features >> CSR_CAPABILITY_FEATURES_ETH_OFFSET)  & ((1 << CSR_CAPABILITY_FEATURES_ETH_SIZE)  - 1);
     bool sata_enabled = (features >> CSR_CAPABILITY_FEATURES_SATA_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_SATA_SIZE) - 1);
     bool gpio_enabled = (features >> CSR_CAPABILITY_FEATURES_GPIO_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_GPIO_SIZE) - 1);
+    bool wr_enabled   = (features >> CSR_CAPABILITY_FEATURES_WR_OFFSET)   & ((1 << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1);
 
     printf("Features:\n");
     printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
-    printf("  Ethernet       : %s\n", eth_enabled ? "Yes" : "No");
+    printf("  Ethernet       : %s\n", eth_enabled  ? "Yes" : "No");
     printf("  SATA           : %s\n", sata_enabled ? "Yes" : "No");
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
+    printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
 
     if (pcie_enabled) {
         uint32_t pcie_config = m2sdr_readl(conn, CSR_CAPABILITY_PCIE_CONFIG_ADDR);
