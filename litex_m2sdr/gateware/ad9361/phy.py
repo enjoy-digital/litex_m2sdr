@@ -95,10 +95,10 @@ class AD9361PHY(LiteXModule):
         rx_frame_rising   = Signal()
         rx_frame_rising_d = Signal()
         self.specials += [
-            Instance("IBUFDS",
-                i_I  = pads.rx_frame_p,
+            Instance("IBUFDS", # IBUFDS for differential to single-ended conversion (for robustness) 
+                i_I  = pads.rx_frame_p, # signal from AD9361 indicating whether the RX frame is valid
                 i_IB = pads.rx_frame_n,
-                o_O  = rx_frame_ibufds
+                o_O  = rx_frame_ibufds # RX frame is valid
             ),
             Instance("IDDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
@@ -107,7 +107,7 @@ class AD9361PHY(LiteXModule):
                 i_S  = 0,
                 i_R  = 0,
                 i_D  = rx_frame_ibufds,
-                o_Q1 = rx_frame,
+                o_Q1 = rx_frame, # rx_frame is used for sample selection (2R2T) or channel selection (1R1T). it comes from 
                 o_Q2 = Open(),
             )
         ]
@@ -136,8 +136,8 @@ class AD9361PHY(LiteXModule):
                     i_S  = 0,
                     i_R  = 0,
                     i_D  = rx_data_ibufds[i],
-                    o_Q1 = rx_data_half_i[i],
-                    o_Q2 = rx_data_half_q[i],
+                    o_Q1 = rx_data_half_i[i], # I on rising edge
+                    o_Q2 = rx_data_half_q[i], # Q on falling edge
                 )
             ]
 
@@ -149,16 +149,18 @@ class AD9361PHY(LiteXModule):
         rx_data_qa     = Signal(12)
         rx_data_ib     = Signal(12)
         rx_data_qb     = Signal(12)
+        # data_valid shift register.
         self.sync.rfic += [
             If(mode == modes["1R1T"],
                 rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
-                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
+                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first)) # toggle at each rising edge of rx_frame (every 12 samples)
             ).Elif(mode == modes["2R2T"],
                 rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
             )
         ]
+        # sampling the data on both channels (A and B) + assembling 12-bit samples.
         self.sync.rfic += [
-            If(mode == modes["1R1T"],
+            If(mode == modes["1R1T"], # 1R1T mode: first sample on A, second sample on B (then repeat)
                 If(rx_frame_first,
                     rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
                     rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),

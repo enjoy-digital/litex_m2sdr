@@ -145,7 +145,7 @@ class CRG(LiteXModule):
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
-class BaseSoC(SoCMini):
+class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIXME
     SoCCore.csr_map = {
         # SoC.
         "ctrl"            : 0,
@@ -278,7 +278,7 @@ class BaseSoC(SoCMini):
             with_csr   = True,
         )
 
-        # FIXME: Try to avoid CDC, change sys_clk?
+        # FIXME: Try to avoid CDC, change sys_clk? is somehow si5351_clk1 (investigate)
         time_sys = Signal(64)
         self.time_sync = BusSynchronizer(
             width   = 64,
@@ -511,22 +511,25 @@ class BaseSoC(SoCMini):
 
         # TX/RX Datapath ---------------------------------------------------------------------------
 
+        # TX Datapath: PCIe/Eth/Sata (DMA) -> Crossbar -> Header -> AD9361 (check AD9361 core.py to follow the rest of the dataflow) -------------------------
+        # RX Datapath: AD9361 -> Header -> Crossbar -> PCIe/Eth/Sata (DMA) -------------------------
+
         # AD9361 <-> Header.
         # ------------------
         self.comb += [
-            self.header.tx.source.connect(self.ad9361.sink),
-            self.ad9361.source.connect(self.header.rx.sink),
+            self.header.tx.source.connect(self.ad9361.sink), # TX: Header -> AD9361.
+            self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
 
         # Crossbar.
         # ---------
-        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True) # Crossbar is a MUX/DEMUX that can connect multiple sources (PCI, Eth, Sata) DMAs to a single sink (header) and vice versa.
 
-        # TX: Comms -> Crossbar -> Header.
+        # TX: Comms (DMA) -> Crossbar -> Header. 
         # --------------------------------
         if with_pcie:
             self.comb += [
-                self.pcie_dma0.source.connect(self.crossbar.mux.sink0),
+                self.pcie_dma0.source.connect(self.crossbar.mux.sink0), # TX: PCIe DMA -> Crossbar.
                 If(self.crossbar.mux.sel == 0,
                     self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
@@ -535,14 +538,14 @@ class BaseSoC(SoCMini):
             self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
             pass # TODO.
-        self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
+        self.comb += self.crossbar.mux.source.connect(self.header.tx.sink) # TX: Crossbar -> Header.
 
-        # RX: Header -> Crossbar -> Comms.
+        # RX: Header -> Crossbar -> Comms (DMA)
         # --------------------------------
-        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink) # RX: Header -> Crossbar.
         if with_pcie:
             self.comb += [
-                self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
+                self.crossbar.demux.source0.connect(self.pcie_dma0.sink), # RX: Crossbar -> PCIe DMA.
                 If(self.crossbar.demux.sel == 0,
                     self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )

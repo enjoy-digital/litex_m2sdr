@@ -1,0 +1,88 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
+| Date         : Tue Sep 23 10:37:37 2025
+| Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
+| Command      : report_drc -file litex_m2sdr_m2_pcie_x1_drc.rpt
+| Design       : litex_m2sdr_m2_pcie_x1
+| Device       : xc7a200tsbg484-3
+| Speed File   : -3
+| Design State : Fully Routed
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Report DRC
+
+Table of Contents
+-----------------
+1. REPORT SUMMARY
+2. REPORT DETAILS
+
+1. REPORT SUMMARY
+-----------------
+            Netlist: litex_m2sdr_m2_pcie_x1
+          Floorplan: design_1
+      Design limits: <entire design considered>
+           Ruledeck: default
+             Max checks: <unlimited>
+             Checks found: 6
++-------------+----------+-------------------------------------------------------------+--------+
+| Rule        | Severity | Description                                                 | Checks |
++-------------+----------+-------------------------------------------------------------+--------+
+| CFGBVS-1    | Warning  | Missing CFGBVS and CONFIG_VOLTAGE Design Properties         | 1      |
+| PDRC-138    | Warning  | SLICE_PairEqSame_D6D5_WARN                                  | 1      |
+| PDRC-153    | Warning  | Gated clock check                                           | 1      |
+| PLHOLDVIO-2 | Warning  | Non-Optimal connections which could lead to hold violations | 1      |
+| REQP-1839   | Warning  | RAMB36 async control check                                  | 1      |
+| RTSTAT-10   | Warning  | No routable loads                                           | 1      |
++-------------+----------+-------------------------------------------------------------+--------+
+
+2. REPORT DETAILS
+-----------------
+CFGBVS-1#1 Warning
+Missing CFGBVS and CONFIG_VOLTAGE Design Properties  
+Neither the CFGBVS nor CONFIG_VOLTAGE voltage property is set in the current_design.  Configuration bank voltage select (CFGBVS) must be set to VCCO or GND, and CONFIG_VOLTAGE must be set to the correct configuration voltage, in order to determine the I/O voltage support for the pins in bank 0.  It is suggested to specify these either using the 'Edit Device Properties' function in the GUI or directly in the XDC file using the following syntax:
+
+ set_property CFGBVS value1 [current_design]
+ #where value1 is either VCCO or GND
+
+ set_property CONFIG_VOLTAGE value2 [current_design]
+ #where value2 is the voltage provided to configuration bank 0
+
+Refer to the device configuration user guide for more information.
+Related violations: <none>
+
+PDRC-138#1 Warning
+SLICE_PairEqSame_D6D5_WARN  
+Luts D6LUT and D5LUT in use in site SLICE_X95Y125 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-153#1 Warning
+Gated clock check  
+Net basesoc_crg_clkin is a gated clock net sourced by a combinational pin clk100_inst/O, cell clk100_inst. This is not good design practice and will likely impact performance. For SLICE registers, for example, use the CE pin to control the loading of data.
+Related violations: <none>
+
+PLHOLDVIO-2#1 Warning
+Non-Optimal connections which could lead to hold violations  
+A LUT clk100_inst is driving clock pin of 8 cells. This could lead to large hold time violations. Involved cells are:
+FDCE, FDCE_1, FDCE_2, FDCE_3, FDCE_4, FDCE_5, FDCE_6, FDCE_7
+Related violations: <none>
+
+REQP-1839#1 Warning
+RAMB36 async control check  
+The RAMB36E1 storage_5_reg_0 has an input control pin storage_5_reg_0/RSTREGARSTREG (net: basesoc_ad9361_rx_cdc_cd_rst) which is driven by a register (FDPE_1) that has an active asychronous set or reset. This may cause corruption of the memory contents and/or read values when the set/reset is asserted and is not analyzed by the default static timing analysis. It is suggested to eliminate the use of a set/reset to registers driving this RAMB pin or else use a synchronous reset in which the assertion of the reset is timed by default.
+Related violations: <none>
+
+RTSTAT-10#1 Warning
+No routable loads  
+27 net(s) have no routable loads. The problem bus(es) and/or net(s) are impl_xilinxmultiregimpl25_regs1[0], impl_xilinxmultiregimpl25_regs1[10],
+impl_xilinxmultiregimpl25_regs1[11], impl_xilinxmultiregimpl25_regs1[12],
+impl_xilinxmultiregimpl25_regs1[13], impl_xilinxmultiregimpl25_regs1[14],
+impl_xilinxmultiregimpl25_regs1[15], impl_xilinxmultiregimpl25_regs1[1],
+impl_xilinxmultiregimpl25_regs1[3], impl_xilinxmultiregimpl25_regs1[4],
+impl_xilinxmultiregimpl25_regs1[5], impl_xilinxmultiregimpl25_regs1[6],
+impl_xilinxmultiregimpl25_regs1[7], impl_xilinxmultiregimpl25_regs1[8],
+impl_xilinxmultiregimpl25_regs1[9]
+ (the first 15 of 27 listed nets/buses).
+Related violations: <none>
+
+

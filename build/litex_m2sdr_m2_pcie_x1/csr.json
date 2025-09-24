@@ -1,0 +1,648 @@
+{
+    "csr_bases": {
+        "ctrl": 0,
+        "icap": 4096,
+        "flash_cs_n": 6144,
+        "xadc": 8192,
+        "dna": 10240,
+        "flash": 12288,
+        "leds": 14336,
+        "identifier_mem": 16384,
+        "pcie_phy": 20480,
+        "pcie_msi": 22528,
+        "pcie_dma0": 24576,
+        "capability": 26624,
+        "time_gen": 34816,
+        "si5351": 40960,
+        "pcie_endpoint": 45056,
+        "header": 47104,
+        "ad9361": 49152,
+        "crossbar": 51200,
+        "clk_measurement": 61440
+    },
+    "csr_registers": {
+        "ctrl_reset": {
+            "addr": 0,
+            "size": 1,
+            "type": "rw"
+        },
+        "ctrl_scratch": {
+            "addr": 4,
+            "size": 1,
+            "type": "rw"
+        },
+        "ctrl_bus_errors": {
+            "addr": 8,
+            "size": 1,
+            "type": "ro"
+        },
+        "icap_addr": {
+            "addr": 4096,
+            "size": 1,
+            "type": "rw"
+        },
+        "icap_data": {
+            "addr": 4100,
+            "size": 1,
+            "type": "rw"
+        },
+        "icap_write": {
+            "addr": 4104,
+            "size": 1,
+            "type": "rw"
+        },
+        "icap_done": {
+            "addr": 4108,
+            "size": 1,
+            "type": "ro"
+        },
+        "icap_read": {
+            "addr": 4112,
+            "size": 1,
+            "type": "rw"
+        },
+        "flash_cs_n_out": {
+            "addr": 6144,
+            "size": 1,
+            "type": "rw"
+        },
+        "xadc_temperature": {
+            "addr": 8192,
+            "size": 1,
+            "type": "ro"
+        },
+        "xadc_vccint": {
+            "addr": 8196,
+            "size": 1,
+            "type": "ro"
+        },
+        "xadc_vccaux": {
+            "addr": 8200,
+            "size": 1,
+            "type": "ro"
+        },
+        "xadc_vccbram": {
+            "addr": 8204,
+            "size": 1,
+            "type": "ro"
+        },
+        "xadc_eoc": {
+            "addr": 8208,
+            "size": 1,
+            "type": "ro"
+        },
+        "xadc_eos": {
+            "addr": 8212,
+            "size": 1,
+            "type": "ro"
+        },
+        "dna_id": {
+            "addr": 10240,
+            "size": 2,
+            "type": "ro"
+        },
+        "flash_spi_control": {
+            "addr": 12288,
+            "size": 1,
+            "type": "rw"
+        },
+        "flash_spi_status": {
+            "addr": 12292,
+            "size": 1,
+            "type": "ro"
+        },
+        "flash_spi_mosi": {
+            "addr": 12296,
+            "size": 2,
+            "type": "rw"
+        },
+        "flash_spi_miso": {
+            "addr": 12304,
+            "size": 2,
+            "type": "ro"
+        },
+        "flash_spi_cs": {
+            "addr": 12312,
+            "size": 1,
+            "type": "rw"
+        },
+        "flash_spi_loopback": {
+            "addr": 12316,
+            "size": 1,
+            "type": "rw"
+        },
+        "leds_out": {
+            "addr": 14336,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_phy_phy_link_status": {
+            "addr": 20480,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_phy_phy_msi_enable": {
+            "addr": 20484,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_phy_phy_msix_enable": {
+            "addr": 20488,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_phy_phy_bus_master_enable": {
+            "addr": 20492,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_phy_phy_max_request_size": {
+            "addr": 20496,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_phy_phy_max_payload_size": {
+            "addr": 20500,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_msi_enable": {
+            "addr": 22528,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_msi_clear": {
+            "addr": 22532,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_msi_vector": {
+            "addr": 22536,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_writer_enable": {
+            "addr": 24576,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_writer_table_value": {
+            "addr": 24580,
+            "size": 2,
+            "type": "rw"
+        },
+        "pcie_dma0_writer_table_we": {
+            "addr": 24588,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_writer_table_loop_prog_n": {
+            "addr": 24592,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_writer_table_loop_status": {
+            "addr": 24596,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_writer_table_level": {
+            "addr": 24600,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_writer_table_reset": {
+            "addr": 24604,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_reader_enable": {
+            "addr": 24608,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_reader_table_value": {
+            "addr": 24612,
+            "size": 2,
+            "type": "rw"
+        },
+        "pcie_dma0_reader_table_we": {
+            "addr": 24620,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_reader_table_loop_prog_n": {
+            "addr": 24624,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_reader_table_loop_status": {
+            "addr": 24628,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_reader_table_level": {
+            "addr": 24632,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_reader_table_reset": {
+            "addr": 24636,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_loopback_enable": {
+            "addr": 24640,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_synchronizer_bypass": {
+            "addr": 24644,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_synchronizer_enable": {
+            "addr": 24648,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_buffering_reader_fifo_control": {
+            "addr": 24652,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_buffering_reader_fifo_status": {
+            "addr": 24656,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_dma0_buffering_writer_fifo_control": {
+            "addr": 24660,
+            "size": 1,
+            "type": "rw"
+        },
+        "pcie_dma0_buffering_writer_fifo_status": {
+            "addr": 24664,
+            "size": 1,
+            "type": "ro"
+        },
+        "capability_api_version": {
+            "addr": 26624,
+            "size": 1,
+            "type": "ro"
+        },
+        "capability_features": {
+            "addr": 26628,
+            "size": 1,
+            "type": "ro"
+        },
+        "capability_pcie_config": {
+            "addr": 26632,
+            "size": 1,
+            "type": "ro"
+        },
+        "capability_eth_config": {
+            "addr": 26636,
+            "size": 1,
+            "type": "ro"
+        },
+        "capability_sata_config": {
+            "addr": 26640,
+            "size": 1,
+            "type": "ro"
+        },
+        "time_gen_control": {
+            "addr": 34816,
+            "size": 1,
+            "type": "rw"
+        },
+        "time_gen_read_time": {
+            "addr": 34820,
+            "size": 2,
+            "type": "ro"
+        },
+        "time_gen_write_time": {
+            "addr": 34828,
+            "size": 2,
+            "type": "rw"
+        },
+        "time_gen_time_adjustment": {
+            "addr": 34836,
+            "size": 2,
+            "type": "rw"
+        },
+        "si5351_i2c_phy_speed_mode": {
+            "addr": 40960,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_i2c_master_active": {
+            "addr": 40964,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_i2c_master_settings": {
+            "addr": 40968,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_i2c_master_addr": {
+            "addr": 40972,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_i2c_master_rxtx": {
+            "addr": 40976,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_i2c_master_status": {
+            "addr": 40980,
+            "size": 1,
+            "type": "ro"
+        },
+        "si5351_pwm_enable": {
+            "addr": 40984,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_pwm_width": {
+            "addr": 40988,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_pwm_period": {
+            "addr": 40992,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_control": {
+            "addr": 40996,
+            "size": 1,
+            "type": "rw"
+        },
+        "si5351_status": {
+            "addr": 41000,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_link_status": {
+            "addr": 45056,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_msi_enable": {
+            "addr": 45060,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_msix_enable": {
+            "addr": 45064,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_bus_master_enable": {
+            "addr": 45068,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_max_request_size": {
+            "addr": 45072,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_max_payload_size": {
+            "addr": 45076,
+            "size": 1,
+            "type": "ro"
+        },
+        "header_tx_control": {
+            "addr": 47104,
+            "size": 1,
+            "type": "rw"
+        },
+        "header_tx_frame_cycles": {
+            "addr": 47108,
+            "size": 1,
+            "type": "rw"
+        },
+        "header_rx_control": {
+            "addr": 47112,
+            "size": 1,
+            "type": "rw"
+        },
+        "header_rx_frame_cycles": {
+            "addr": 47116,
+            "size": 1,
+            "type": "rw"
+        },
+        "header_last_tx_header": {
+            "addr": 47120,
+            "size": 2,
+            "type": "ro"
+        },
+        "header_last_tx_timestamp": {
+            "addr": 47128,
+            "size": 2,
+            "type": "ro"
+        },
+        "header_last_rx_header": {
+            "addr": 47136,
+            "size": 2,
+            "type": "ro"
+        },
+        "header_last_rx_timestamp": {
+            "addr": 47144,
+            "size": 2,
+            "type": "ro"
+        },
+        "ad9361_config": {
+            "addr": 49152,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_ctrl": {
+            "addr": 49156,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_stat": {
+            "addr": 49160,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_bitmode": {
+            "addr": 49164,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_spi_control": {
+            "addr": 49168,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_spi_status": {
+            "addr": 49172,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_spi_mosi": {
+            "addr": 49176,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_spi_miso": {
+            "addr": 49180,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_phy_control": {
+            "addr": 49184,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_prbs_tx": {
+            "addr": 49188,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_prbs_rx": {
+            "addr": 49192,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_agc_count_rx1_low_control": {
+            "addr": 49196,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_agc_count_rx1_low_status": {
+            "addr": 49200,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_agc_count_rx1_high_control": {
+            "addr": 49204,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_agc_count_rx1_high_status": {
+            "addr": 49208,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_agc_count_rx2_low_control": {
+            "addr": 49212,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_agc_count_rx2_low_status": {
+            "addr": 49216,
+            "size": 1,
+            "type": "ro"
+        },
+        "ad9361_agc_count_rx2_high_control": {
+            "addr": 49220,
+            "size": 1,
+            "type": "rw"
+        },
+        "ad9361_agc_count_rx2_high_status": {
+            "addr": 49224,
+            "size": 1,
+            "type": "ro"
+        },
+        "crossbar_mux_sel": {
+            "addr": 51200,
+            "size": 1,
+            "type": "rw"
+        },
+        "crossbar_demux_sel": {
+            "addr": 51204,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk0_latch": {
+            "addr": 61440,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk0_value": {
+            "addr": 61444,
+            "size": 2,
+            "type": "ro"
+        },
+        "clk_measurement_clk1_latch": {
+            "addr": 61452,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk1_value": {
+            "addr": 61456,
+            "size": 2,
+            "type": "ro"
+        },
+        "clk_measurement_clk2_latch": {
+            "addr": 61464,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk2_value": {
+            "addr": 61468,
+            "size": 2,
+            "type": "ro"
+        },
+        "clk_measurement_clk3_latch": {
+            "addr": 61476,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk3_value": {
+            "addr": 61480,
+            "size": 2,
+            "type": "ro"
+        },
+        "clk_measurement_clk4_latch": {
+            "addr": 61488,
+            "size": 1,
+            "type": "rw"
+        },
+        "clk_measurement_clk4_value": {
+            "addr": 61492,
+            "size": 2,
+            "type": "ro"
+        },
+        "clk_measurement_latch_all": {
+            "addr": 61500,
+            "size": 1,
+            "type": "rw"
+        }
+    },
+    "constants": {
+        "config_platform_name": "litex_m2sdr_platform",
+        "config_clock_frequency": 125000000,
+        "config_cpu_type_none": null,
+        "config_cpu_variant_standard": null,
+        "config_cpu_family": null,
+        "config_cpu_name": null,
+        "config_cpu_human_name": "unknown",
+        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-09-23 10:34:47",
+        "config_flash_image_size": 8388608,
+        "dma_channels": 1,
+        "dma_addr_width": 64,
+        "pcie_dma0_reader_interrupt": 0,
+        "pcie_dma0_writer_interrupt": 1,
+        "config_csr_data_width": 32,
+        "config_csr_alignment": 32,
+        "config_bus_standard": "wishbone",
+        "config_bus_data_width": 32,
+        "config_bus_address_width": 32,
+        "config_bus_bursting": 0
+    },
+    "memories": {
+        "csr": {
+            "base": 0,
+            "size": 65536,
+            "type": "io"
+        }
+    }
+}
