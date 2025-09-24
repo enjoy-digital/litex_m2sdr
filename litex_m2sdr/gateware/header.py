@@ -19,8 +19,8 @@ class HeaderInserterExtracter(LiteXModule):
     def __init__(self, mode="inserter", data_width=64, with_csr=True):
         assert data_width == 64
         assert mode in ["inserter", "extracter"]
-        self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i
-        self.source = source = stream.Endpoint(dma_layout(data_width)) # o
+        self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i   
+        self.source = source = stream.Endpoint(dma_layout(data_width)) # o   may be output to RFIC ?? 
 
         self.reset         = Signal() # i
 
