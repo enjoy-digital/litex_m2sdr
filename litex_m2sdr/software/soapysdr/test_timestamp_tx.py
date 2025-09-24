@@ -35,7 +35,7 @@ def main():
     
     # Initialize SDR
     try:
-        sdr = SoapySDR.Device(dict(driver="litexm2sdr"))
+        sdr = SoapySDR.Device({"driver": "LiteXM2SDR"})
         print(f"Found device: {sdr.getHardwareKey()}")
     except Exception as e:
         print(f"Failed to open device: {e}")
@@ -88,15 +88,14 @@ def main():
     while time.time() - start_time < args.time:
         # Calculate target timestamp for this buffer
         target_time = hw_time + (buffer_count * buffer_time_ns)
-        
+        print(f"Buffer {buffer_count}: target_time={target_time}")
         # Prepare buffer
         buffs = [tone]
         
         # Write with timestamp
-        ret = sdr.writeStream(tx_stream, buffs, buffer_size, 
-                             flags=0, timeNs=target_time, timeoutUs=1000000)
-        
-        if ret < 0:
+        ret = sdr.writeStream(tx_stream, buffs, buffer_size, flags=0, timeNs=target_time, timeoutUs=1000000)
+
+        if ret.ret < 0:
             if ret == SoapySDR.SOAPY_SDR_TIMEOUT:
                 if args.verbose:
                     print(f"Buffer {buffer_count}: timeout waiting for timestamp {target_time}")
@@ -105,13 +104,13 @@ def main():
                 print(f"Write error: {ret}")
                 break
         
-        if ret > 0:
-            total_samples += ret
+        if ret.ret > 0:
+            total_samples += ret.ret
             buffer_count += 1
             
             if args.verbose and buffer_count % 100 == 0:
                 current_hw_time = sdr.getHardwareTime() if hw_time > 0 else 0
-                print(f"Buffer {buffer_count}: transmitted {ret} samples at timestamp {target_time}, "
+                print(f"Buffer {buffer_count}: transmitted {ret.ret} samples at timestamp {target_time}, "
                       f"hw_time={current_hw_time}, total_samples={total_samples}")
     
     # Deactivate and close stream

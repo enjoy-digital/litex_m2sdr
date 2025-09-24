@@ -719,7 +719,6 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     int &/*flags*/,
     const long long /*timeNs*/) {
     /* XXX: Inspect user-provided numElems and flags, and act upon them? */
-
 #if USE_LITEPCIE
     /* Update the DMA counters so that the engine can submit this buffer. */
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
@@ -1004,7 +1003,6 @@ int SoapyLiteXM2SDR::writeStream(
 
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
-
     size_t samp_avail = 0;
 
     /* If there's a remainder buffer from a previous write, process that first. */
