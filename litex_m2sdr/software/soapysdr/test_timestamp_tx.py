@@ -93,24 +93,24 @@ def main():
         buffs = [tone]
         
         # Write with timestamp
-        ret = sdr.writeStream(tx_stream, buffs, buffer_size, flags=0, timeNs=target_time, timeoutUs=1000000)
+        SoapyStreamResult = sdr.writeStream(tx_stream, buffs, buffer_size, flags=0, timeNs=target_time, timeoutUs=1000000)
 
-        if ret.ret < 0:
-            if ret == SoapySDR.SOAPY_SDR_TIMEOUT:
+        if SoapyStreamResult.ret < 0:
+            if SoapyStreamResult.ret == SoapySDR.SOAPY_SDR_TIMEOUT:
                 if args.verbose:
                     print(f"Buffer {buffer_count}: timeout waiting for timestamp {target_time}")
                 continue
             else:
-                print(f"Write error: {ret}")
+                print(f"Write error: {SoapyStreamResult}")
                 break
         
-        if ret.ret > 0:
-            total_samples += ret.ret
+        if SoapyStreamResult.ret > 0:
+            total_samples += SoapyStreamResult.ret
             buffer_count += 1
             
             if args.verbose and buffer_count % 100 == 0:
                 current_hw_time = sdr.getHardwareTime() if hw_time > 0 else 0
-                print(f"Buffer {buffer_count}: transmitted {ret.ret} samples at timestamp {target_time}, "
+                print(f"Buffer {buffer_count}: transmitted {SoapyStreamResult.ret} samples at timestamp {target_time}, "
                       f"hw_time={current_hw_time}, total_samples={total_samples}")
     
     # Deactivate and close stream
