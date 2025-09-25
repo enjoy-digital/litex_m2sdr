@@ -37,7 +37,7 @@ extern "C" {
 #define DEBUG
 
 //#define _RX_DMA_HEADER_TEST
-//#define _TX_DMA_HEADER_TEST
+#define _TX_DMA_HEADER_TEST
 
 /* Thresholds above which we switch to 8-bit mode: */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6

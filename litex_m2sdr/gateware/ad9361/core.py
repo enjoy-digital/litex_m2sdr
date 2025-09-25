@@ -184,7 +184,7 @@ class AD9361RFIC(LiteXModule):
 
         # TX.
         # ---
-        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
+        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
@@ -202,7 +202,7 @@ class AD9361RFIC(LiteXModule):
 
         # RX.
         # ---
-        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source.
+        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source (AD9361) -> sink (header)
         self.comb += [
             self.phy.source.connect(gpio_rx_packer.sink, keep={"valid", "ready"}),
             gpio_rx_packer.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),

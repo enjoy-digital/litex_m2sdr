@@ -670,6 +670,9 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     /* Write Sync Word and Timestamp to DMA header */
 #if defined(_TX_DMA_HEADER_TEST)
     {
+        printf("Inserting TX DMA Header...\n");
+        uint32_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
+        printf("Last TX Timestamp (from CSR): %u\n", last_timestamp);
         /* Header is at the beginning of the DMA buffer */
         uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
 
