@@ -218,17 +218,11 @@ class AD9361PHY(LiteXModule):
         self.sync.rfic += tx_cnt.eq(tx_cnt + 1)
         self.comb += tx_ce.eq(tx_cnt == 3)
 
-        tx_data_valid = Signal()
         tx_data_ia    = Signal(12)
         tx_data_qa    = Signal(12)
         tx_data_ib    = Signal(12)
         tx_data_qb    = Signal(12)
         self.sync.rfic += [
-            If(tx_ce,
-                tx_data_valid.eq(1)
-            ).Elif(tx_ce,
-                tx_data_valid.eq(0)
-            ),
             If(tx_ce,
                 tx_data_ia.eq(0),
                 tx_data_qa.eq(0),
@@ -281,9 +275,19 @@ class AD9361PHY(LiteXModule):
                 ]
             }),
             If(mode == AD9361PHY1R1T_MODE,
-                tx_frame.eq(tx_data_valid & ~tx_cnt[0])
+                Case(tx_cnt, {
+                    0b00 : tx_frame.eq(1),
+                    0b01 : tx_frame.eq(0),
+                    0b10 : tx_frame.eq(1),
+                    0b01 : tx_frame.eq(0),
+                })
             ).Elif(mode == AD9361PHY2R2T_MODE,
-                tx_frame.eq(tx_data_valid & (tx_cnt < 2))
+                Case(tx_cnt, {
+                    0b00 : tx_frame.eq(1),
+                    0b01 : tx_frame.eq(1),
+                    0b10 : tx_frame.eq(0),
+                    0b01 : tx_frame.eq(0),
+                })
             )
         ]
 
