@@ -262,19 +262,24 @@ class AD9361PHY(LiteXModule):
         tx_data_half_i = Signal(6)
         tx_data_half_q = Signal(6)
         self.comb += [
-            If(tx_cnt == 0,
-                tx_data_half_i.eq(tx_data_ia[6:12]),
-                tx_data_half_q.eq(tx_data_qa[6:12])
-            ).Elif(tx_cnt == 1,
-                tx_data_half_i.eq(tx_data_ia[0:6]),
-                tx_data_half_q.eq(tx_data_qa[0:6])
-            ).Elif(tx_cnt == 2,
-                tx_data_half_i.eq(tx_data_ib[6:12]),
-                tx_data_half_q.eq(tx_data_qb[6:12])
-            ).Elif(tx_cnt == 3,
-                tx_data_half_i.eq(tx_data_ib[0:6]),
-                tx_data_half_q.eq(tx_data_qb[0:6])
-            ),
+            Case(tx_cnt, {
+                0b00 : [
+                    tx_data_half_i.eq(tx_data_ia[6:]),
+                    tx_data_half_q.eq(tx_data_qa[6:]),
+                ],
+                0b01 : [
+                    tx_data_half_i.eq(tx_data_ia[0:]),
+                    tx_data_half_q.eq(tx_data_qa[0:]),
+                ],
+                0b10 : [
+                    tx_data_half_i.eq(tx_data_ib[6:]),
+                    tx_data_half_q.eq(tx_data_qb[6:]),
+                ],
+                0b11 : [
+                    tx_data_half_i.eq(tx_data_ib[0:]),
+                    tx_data_half_q.eq(tx_data_qb[0:]),
+                ]
+            }),
             If(mode == AD9361PHY1R1T_MODE,
                 tx_frame.eq(tx_data_valid & ~tx_cnt[0])
             ).Elif(mode == AD9361PHY2R2T_MODE,
