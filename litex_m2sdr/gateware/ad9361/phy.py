@@ -15,10 +15,8 @@ from litex.soc.interconnect     import stream
 
 # Constants ----------------------------------------------------------------------------------------
 
-modes = {
-    "2R2T": 0,
-    "1R1T": 1,
-}
+AD9361PHY2R2T_MODE = 0
+AD9361PHY1R1T_MODE = 1
 
 def phy_layout():
     layout = [
@@ -150,15 +148,15 @@ class AD9361PHY(LiteXModule):
         rx_data_ib     = Signal(12)
         rx_data_qb     = Signal(12)
         self.sync.rfic += [
-            If(mode == modes["1R1T"],
+            If(mode == AD9361PHY1R1T_MODE,
                 rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
                 If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
-            ).Elif(mode == modes["2R2T"],
+            ).Elif(mode == AD9361PHY2R2T_MODE,
                 rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
             )
         ]
         self.sync.rfic += [
-            If(mode == modes["1R1T"],
+            If(mode == AD9361PHY1R1T_MODE,
                 If(rx_frame_first,
                     rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
                     rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
@@ -166,7 +164,7 @@ class AD9361PHY(LiteXModule):
                     rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
                     rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
                 )
-            ).Elif(mode == modes["2R2T"],
+            ).Elif(mode == AD9361PHY2R2T_MODE,
                 If(rx_frame,
                     rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
                     rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
@@ -251,9 +249,9 @@ class AD9361PHY(LiteXModule):
                 tx_data_half_i.eq(tx_data_ib[0:6]),
                 tx_data_half_q.eq(tx_data_qb[0:6])
             ),
-            If(mode == modes["1R1T"],
+            If(mode == AD9361PHY1R1T_MODE,
                 tx_frame.eq(tx_data_valid & ~tx_cnt[0])
-            ).Elif(mode == modes["2R2T"],
+            ).Elif(mode == AD9361PHY2R2T_MODE,
                 tx_frame.eq(tx_data_valid & (tx_cnt < 2))
             )
         ]
