@@ -65,8 +65,8 @@ class AD9361PHY(LiteXModule):
         mode     = Signal()
         loopback = Signal()
         self.specials += [
-            MultiReg(self.control.fields.mode, mode),
-            MultiReg(self.control.fields.loopback, loopback),
+            MultiReg(self.control.fields.mode,     mode,     odomain="rfic"),
+            MultiReg(self.control.fields.loopback, loopback, odomain="rfic"),
         ]
 
         # RX ---------------------------------------------------------------------------------------
