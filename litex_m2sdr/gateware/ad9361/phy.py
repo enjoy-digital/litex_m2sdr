@@ -149,28 +149,28 @@ class AD9361PHY(LiteXModule):
         rx_data_qb     = Signal(12)
         self.sync.rfic += [
             If(mode == AD9361PHY1R1T_MODE,
-                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
+                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid)),
                 If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
             ).Elif(mode == AD9361PHY2R2T_MODE,
-                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
+                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid))
             )
         ]
         self.sync.rfic += [
             If(mode == AD9361PHY1R1T_MODE,
                 If(rx_frame_first,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
+                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia)),
+                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa)),
                 ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
+                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib)),
+                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb)),
                 )
             ).Elif(mode == AD9361PHY2R2T_MODE,
                 If(rx_frame,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
+                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia)),
+                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa)),
                 ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
+                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib)),
+                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb)),
                 )
             )
         ]
