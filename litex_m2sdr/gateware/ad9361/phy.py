@@ -67,10 +67,10 @@ class AD9361PHY(LiteXModule):
             MultiReg(self.control.fields.loopback, loopback, odomain="rfic"),
         ]
 
-        # RX ---------------------------------------------------------------------------------------
+        # RX PHY -----------------------------------------------------------------------------------
 
-        # Clocking.
-        # ---------
+        # RX Clocking.
+        # ------------
         rx_clk_ibufds = Signal()
         self.specials += [
             Instance("IBUFDS",
@@ -85,8 +85,8 @@ class AD9361PHY(LiteXModule):
             AsyncResetSynchronizer(ClockDomain("rfic"), ResetSignal("sys")),
         ]
 
-        # Framing.
-        # --------
+        # RX Framing.
+        # -----------
         rx_frame_ibufds   = Signal()
         rx_frame          = Signal()
         rx_frame_d        = Signal()
@@ -113,8 +113,8 @@ class AD9361PHY(LiteXModule):
         self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
         self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
 
-        # Data.
-        # -----
+        # RX Data.
+        # --------
         # I sampled on rfic clk  rising edge.
         # Q sampled on rfic clk falling edge.
         rx_data_ibufds = Signal(6)
@@ -187,9 +187,32 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
-        # TX ---------------------------------------------------------------------------------------
+        # TX PHY -----------------------------------------------------------------------------------
 
-        # Generate signals from sink (always supposed valid).
+        # TX Clocking.
+        # ------------
+        tx_clk_obufds = Signal()
+        self.specials += [
+            Instance("ODDR",
+                p_DDR_CLK_EDGE = "SAME_EDGE",
+                i_C  = ClockSignal("rfic"),
+                i_CE = 1,
+                i_S  = 0,
+                i_R  = 0,
+                i_D1 = 1,
+                i_D2 = 0,
+                o_Q  = tx_clk_obufds,
+            ),
+            Instance("OBUFDS",
+                i_I  = tx_clk_obufds,
+                o_O  = pads.tx_clk_p,
+                o_OB = pads.tx_clk_n
+            )
+        ]
+
+        # TX Gen from Sink.
+        # -----------------
+        # TX always supposed valid.
         tx_ce  = Signal()
         tx_cnt = Signal(2)
         self.sync.rfic += tx_cnt.eq(tx_cnt + 1)
@@ -221,7 +244,8 @@ class AD9361PHY(LiteXModule):
         ]
         self.comb += sink.ready.eq(tx_ce)
 
-        # Dynamic Loopback Logic.
+        # TX -> RX Dynamic Loopback.
+        # --------------------------
         self.sync.rfic += [
             If(loopback,
                 source.valid.eq(sink.valid & sink.ready),
@@ -232,6 +256,8 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
+        # TX Framing.
+        # -----------
         tx_frame       = Signal()
         tx_data_half_i = Signal(6)
         tx_data_half_q = Signal(6)
@@ -256,29 +282,6 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
-        # Clocking.
-        # ---------
-        tx_clk_obufds = Signal()
-        self.specials += [
-            Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("rfic"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = 1,
-                i_D2 = 0,
-                o_Q  = tx_clk_obufds,
-            ),
-            Instance("OBUFDS",
-                i_I  = tx_clk_obufds,
-                o_O  = pads.tx_clk_p,
-                o_OB = pads.tx_clk_n
-            ),
-        ]
-
-        # Framing.
-        # --------
         tx_frame_obufds = Signal()
         self.specials += [
             Instance("ODDR",
@@ -295,11 +298,11 @@ class AD9361PHY(LiteXModule):
                 i_I  = tx_frame_obufds,
                 o_O  = pads.tx_frame_p,
                 o_OB = pads.tx_frame_n
-            ),
+            )
         ]
 
-        # Data.
-        # -----
+        # TX Data.
+        # --------
         tx_data_obufds = Signal(6)
         for i in range(6):
             self.specials += [
@@ -317,5 +320,5 @@ class AD9361PHY(LiteXModule):
                     i_I  = tx_data_obufds[i],
                     o_O  = pads.tx_data_p[i],
                     o_OB = pads.tx_data_n[i]
-                ),
+                )
             ]
