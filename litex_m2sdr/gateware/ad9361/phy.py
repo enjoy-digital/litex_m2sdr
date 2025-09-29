@@ -15,10 +15,8 @@ from litex.soc.interconnect     import stream
 
 # Constants ----------------------------------------------------------------------------------------
 
-modes = {
-    "2R2T": 0,
-    "1R1T": 1,
-}
+AD9361PHY2R2T_MODE = 0
+AD9361PHY1R1T_MODE = 1
 
 def phy_layout():
     layout = [
@@ -32,16 +30,23 @@ def phy_layout():
 # AD9361PHY ----------------------------------------------------------------------------------------
 
 class AD9361PHY(LiteXModule):
-    """7-Series AD9361 RFIC PHY
+    """7-Series AD9361 RFIC PHY (Dual Port Full Duplex LVDS Mode)
 
-    This module implements a PHY for the AD9361 RFIC in LVDS mode on 7-series FPGAs. It supports
-    both 1R1T and 2R2T configurations.
+    This module implements a PHY for the AD9361 RFIC in Dual Port Full Duplex LVDS mode on 7-series
+    FPGAs, with separate Rx_D[5:0]/Tx_D[5:0] sub-buses for simultaneous operation. It supports 1R1T
+    (4-way interleaving) and 2R2T (8-way interleaving) configurations; for 2R1T/1R2T, use 2R2T mode
+    with unused slots ignored.
 
-    - In 1R1T mode, the 'a' suffix is used for the first sample, and 'b' for the second sample.
-    - In 2R2T mode, the 'a' suffix is used for channel 1 samples, and 'b' for channel 2 samples.
+    Samples are two's complement, MSBs first then LSBs, I/Q interleaved. D[5] is MSB, D[0] LSB per
+    word.
 
-    The operating mode can be selected through the `mode` register. Additionally, a dynamic loopback
-    feature is supported, which can be enabled or disabled through the `loopback` register.
+    - In 1R1T mode: 'a' for first sample, 'b' for second; Interleave: I_MSB, Q_MSB, I_LSB,
+      Q_LSB,...
+    - In 2R2T mode: 'a' for channel 1, 'b' for channel 2; Interleave: I1_MSB, Q1_MSB, I1_LSB,
+      Q1_LSB, I2_MSB,...
+
+    Select mode via `mode` register; enable loopback via `loopback` register. No phase requirement
+    between DATA_CLK (rx_clk) and FB_CLK (tx_clk).
     """
 
     def __init__(self, pads):
@@ -65,14 +70,15 @@ class AD9361PHY(LiteXModule):
         mode     = Signal()
         loopback = Signal()
         self.specials += [
-            MultiReg(self.control.fields.mode, mode),
-            MultiReg(self.control.fields.loopback, loopback),
+            MultiReg(self.control.fields.mode,     mode,     odomain="rfic"),
+            MultiReg(self.control.fields.loopback, loopback, odomain="rfic"),
         ]
 
-        # RX ---------------------------------------------------------------------------------------
+        # RX PHY -----------------------------------------------------------------------------------
 
-        # Clocking.
-        # ---------
+        # RX Clocking.
+        # ------------
+        # Input: DATA_CLK from AD9361, used to clock RX data and frame.
         rx_clk_ibufds = Signal()
         self.specials += [
             Instance("IBUFDS",
@@ -87,13 +93,12 @@ class AD9361PHY(LiteXModule):
             AsyncResetSynchronizer(ClockDomain("rfic"), ResetSignal("sys")),
         ]
 
-        # Framing.
-        # --------
-        rx_frame_ibufds   = Signal()
-        rx_frame          = Signal()
-        rx_frame_d        = Signal()
-        rx_frame_rising   = Signal()
-        rx_frame_rising_d = Signal()
+        # RX Framing.
+        # -----------
+        # Input: Rx_FRAME from AD9361, high for MSBs (and channel 1 in 2R2T), low for LSBs
+        # (and channel 2 in 2R2T). 50% duty cycle; SDR (same value on both clock edges).
+        rx_frame_ibufds = Signal()
+        rx_frame        = Signal()
         self.specials += [
             Instance("IBUFDS",
                 i_I  = pads.rx_frame_p,
@@ -111,14 +116,25 @@ class AD9361PHY(LiteXModule):
                 o_Q2 = Open(),
             )
         ]
-        self.sync.rfic += rx_frame_d.eq(rx_frame)
-        self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
-        self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
 
-        # Data.
-        # -----
-        # I sampled on rfic clk  rising edge.
-        # Q sampled on rfic clk falling edge.
+        # RX Count: Free-run counter; resync to 1 on Rx_FRAME rising edge.
+        rx_count   = Signal(2)
+        rx_frame_d = Signal()
+        self.sync.rfic += [
+            rx_frame_d.eq(rx_frame),
+            rx_count.eq(rx_count + 1),
+            If(rx_frame & ~rx_frame_d,
+                Case(mode, {
+                    AD9361PHY1R1T_MODE : rx_count[0].eq(1),
+                    AD9361PHY2R2T_MODE : rx_count   .eq(1),
+                })
+            )
+        ]
+
+        # RX Data.
+        # --------
+        # Input: Rx_D[5:0] from AD9361, DDR: half_i captured on rising edge, half_q on falling edge.
+        # Sequence: MSBs first, then LSBs; I and Q interleaved.
         rx_data_ibufds = Signal(6)
         rx_data_half_i = Signal(6)
         rx_data_half_q = Signal(6)
@@ -140,90 +156,43 @@ class AD9361PHY(LiteXModule):
                     o_Q2 = rx_data_half_q[i],
                 )
             ]
-
-        # rx_frame = 1 / IA/QA.
-        # rx_frame = 0 / IB/QB.
-        rx_frame_first = Signal()
-        rx_data_valid  = Signal(4)
-        rx_data_ia     = Signal(12)
-        rx_data_qa     = Signal(12)
-        rx_data_ib     = Signal(12)
-        rx_data_qb     = Signal(12)
+        rx_data_ia  = Signal(12)
+        rx_data_qa  = Signal(12)
+        rx_data_ib  = Signal(12)
+        rx_data_qb  = Signal(12)
         self.sync.rfic += [
-            If(mode == modes["1R1T"],
-                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid[0:3])),
-                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
-            ).Elif(mode == modes["2R2T"],
-                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid[0:3]))
-            )
-        ]
-        self.sync.rfic += [
-            If(mode == modes["1R1T"],
-                If(rx_frame_first,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
-                ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
-                )
-            ).Elif(mode == modes["2R2T"],
-                If(rx_frame,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia[:6])),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa[:6])),
-                ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib[:6])),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb[:6])),
-                )
-            )
+            Case(rx_count[1], {
+                0b0 : [ # IA/QA Shifting (assemble MSB in high bits, LSB in low).
+                    rx_data_ia[0: 6].eq(rx_data_half_i),
+                    rx_data_ia[6:12].eq(rx_data_ia[0:6]),
+                    rx_data_qa[0: 6].eq(rx_data_half_q),
+                    rx_data_qa[6:12].eq(rx_data_qa[0:6]),
+                ],
+                0b1 : [ # IB/QB Shifting (assemble MSB in high bits, LSB in low).
+                    rx_data_ib[0: 6].eq(rx_data_half_i),
+                    rx_data_ib[6:12].eq(rx_data_ib[0:6]),
+                    rx_data_qb[0: 6].eq(rx_data_half_q),
+                    rx_data_qb[6:12].eq(rx_data_qb[0:6]),
+                ]
+            })
         ]
 
-        # Drive Source.
+        # RX Source Interface.
+        # --------------------
+        # Pulse source.valid with assembled samples.
         self.sync.rfic += [
             source.valid.eq(0),
-            If(rx_data_valid[3],
+            If(rx_count == 0,
                 source.valid.eq(1),
                 source.ia.eq(rx_data_ia),
                 source.qa.eq(rx_data_qa),
                 source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb)
+                source.qb.eq(rx_data_qb),
             )
         ]
 
-        # TX ---------------------------------------------------------------------------------------
+        # TX -> RX Loopback ------------------------------------------------------------------------
 
-        # Generate signals from sink (always supposed valid).
-        tx_ce  = Signal()
-        tx_cnt = Signal(2)
-        self.sync.rfic += tx_cnt.eq(tx_cnt + 1)
-        self.comb += tx_ce.eq(tx_cnt == 3)
-
-        tx_data_valid = Signal()
-        tx_data_ia    = Signal(12)
-        tx_data_qa    = Signal(12)
-        tx_data_ib    = Signal(12)
-        tx_data_qb    = Signal(12)
-        self.sync.rfic += [
-            If(tx_ce,
-                tx_data_valid.eq(1)
-            ).Elif(tx_ce,
-                tx_data_valid.eq(0)
-            ),
-            If(tx_ce,
-                tx_data_ia.eq(0),
-                tx_data_qa.eq(0),
-                tx_data_ib.eq(0),
-                tx_data_qb.eq(0),
-                If(sink.valid,
-                    tx_data_ia.eq(sink.ia),
-                    tx_data_qa.eq(sink.qa),
-                    tx_data_ib.eq(sink.ib),
-                    tx_data_qb.eq(sink.qb),
-                )
-            )
-        ]
-        self.comb += sink.ready.eq(tx_ce)
-
-        # Dynamic Loopback Logic.
         self.sync.rfic += [
             If(loopback,
                 source.valid.eq(sink.valid & sink.ready),
@@ -234,32 +203,42 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
-        tx_frame       = Signal()
-        tx_data_half_i = Signal(6)
-        tx_data_half_q = Signal(6)
-        self.comb += [
-            If(tx_cnt == 0,
-                tx_data_half_i.eq(tx_data_ia[6:12]),
-                tx_data_half_q.eq(tx_data_qa[6:12])
-            ).Elif(tx_cnt == 1,
-                tx_data_half_i.eq(tx_data_ia[0:6]),
-                tx_data_half_q.eq(tx_data_qa[0:6])
-            ).Elif(tx_cnt == 2,
-                tx_data_half_i.eq(tx_data_ib[6:12]),
-                tx_data_half_q.eq(tx_data_qb[6:12])
-            ).Elif(tx_cnt == 3,
-                tx_data_half_i.eq(tx_data_ib[0:6]),
-                tx_data_half_q.eq(tx_data_qb[0:6])
-            ),
-            If(mode == modes["1R1T"],
-                tx_frame.eq(tx_data_valid & ~tx_cnt[0])
-            ).Elif(mode == modes["2R2T"],
-                tx_frame.eq(tx_data_valid & (tx_cnt < 2))
+        # TX PHY -----------------------------------------------------------------------------------
+
+        # TX Sink Interface.
+        # ------------------
+        # Accepts new samples every 4 RFIC clocks (when tx_count == 0).
+
+        # Control: Free-running 4-cycle counter.
+        tx_count = Signal(2)
+        self.sync.rfic += tx_count.eq(tx_count + 1)
+        self.comb += sink.ready.eq(tx_count == 0) # Ready at 0 for sink handshake.
+
+        # Data: Latch samples on ready; default to 0 if not valid (avoid spurs on underrun/disable).
+        tx_data_ia = Signal(12)
+        tx_data_qa = Signal(12)
+        tx_data_ib = Signal(12)
+        tx_data_qb = Signal(12)
+        self.sync.rfic += [
+            If(sink.ready,
+                # Default to zero.
+                tx_data_ia.eq(0),
+                tx_data_qa.eq(0),
+                tx_data_ib.eq(0),
+                tx_data_qb.eq(0),
+                If(sink.valid,
+                    # Latch valid samples.
+                    tx_data_ia.eq(sink.ia),
+                    tx_data_qa.eq(sink.qa),
+                    tx_data_ib.eq(sink.ib),
+                    tx_data_qb.eq(sink.qb),
+                )
             )
         ]
 
-        # Clocking.
-        # ---------
+        # TX Clocking.
+        # ------------
+        # Output: FB_CLK to AD9361, derived from RFIC clock (same frequency as DATA_CLK).
         tx_clk_obufds = Signal()
         self.specials += [
             Instance("ODDR",
@@ -276,12 +255,33 @@ class AD9361PHY(LiteXModule):
                 i_I  = tx_clk_obufds,
                 o_O  = pads.tx_clk_p,
                 o_OB = pads.tx_clk_n
-            ),
+            )
         ]
 
-        # Framing.
-        # --------
+
+        # TX Framing.
+        # -----------
+        # Output: Tx_FRAME to AD9361, high for MSBs (and channel 1 in 2R2T), low for LSBs
+        # (and channel 2 in 2R2T). 50% duty cycle; SDR (same value on both clock edges).
+        tx_frame        = Signal()
         tx_frame_obufds = Signal()
+        self.comb += [
+            If(mode == AD9361PHY1R1T_MODE,
+                Case(tx_count, { # I/Q transmitted over 2 RFIC Clk cycles (4-way interleave).
+                    0b00 : tx_frame.eq(1),
+                    0b01 : tx_frame.eq(0),
+                    0b10 : tx_frame.eq(1),
+                    0b11 : tx_frame.eq(0),
+                })
+            ).Elif(mode == AD9361PHY2R2T_MODE,
+                Case(tx_count, { # I/Q transmitted over 4 RFIC Clk cycles (8-way interleave).
+                    0b00 : tx_frame.eq(1),
+                    0b01 : tx_frame.eq(1),
+                    0b10 : tx_frame.eq(0),
+                    0b11 : tx_frame.eq(0),
+                })
+            )
+        ]
         self.specials += [
             Instance("ODDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE",
@@ -297,12 +297,36 @@ class AD9361PHY(LiteXModule):
                 i_I  = tx_frame_obufds,
                 o_O  = pads.tx_frame_p,
                 o_OB = pads.tx_frame_n
-            ),
+            )
         ]
 
-        # Data.
-        # -----
+        # TX Data.
+        # --------
+        # Output: Tx_D[5:0] to AD9361, DDR: half_i on rising edge, half_q on falling edge. Sequence:
+        # MSBs first, then LSBs; I and Q interleaved.
+        tx_data_half_i = Signal(6)
+        tx_data_half_q = Signal(6)
         tx_data_obufds = Signal(6)
+        self.comb += [
+            Case(tx_count, {
+                0b00 : [ # IA/QA MSBs.
+                    tx_data_half_i.eq(tx_data_ia[6:]),
+                    tx_data_half_q.eq(tx_data_qa[6:]),
+                ],
+                0b01 : [ # IA/QA LSBs.
+                    tx_data_half_i.eq(tx_data_ia[0:]),
+                    tx_data_half_q.eq(tx_data_qa[0:]),
+                ],
+                0b10 : [ # IB/QB MSBs.
+                    tx_data_half_i.eq(tx_data_ib[6:]),
+                    tx_data_half_q.eq(tx_data_qb[6:]),
+                ],
+                0b11 : [ # IB/QB LSBs.
+                    tx_data_half_i.eq(tx_data_ib[0:]),
+                    tx_data_half_q.eq(tx_data_qb[0:]),
+                ]
+            })
+        ]
         for i in range(6):
             self.specials += [
                 Instance("ODDR",
@@ -319,5 +343,5 @@ class AD9361PHY(LiteXModule):
                     i_I  = tx_data_obufds[i],
                     o_O  = pads.tx_data_p[i],
                     o_OB = pads.tx_data_n[i]
-                ),
+                )
             ]
