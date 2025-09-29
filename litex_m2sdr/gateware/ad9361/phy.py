@@ -87,11 +87,10 @@ class AD9361PHY(LiteXModule):
 
         # RX Framing.
         # -----------
-        rx_frame_ibufds   = Signal()
-        rx_frame          = Signal()
-        rx_frame_d        = Signal()
-        rx_frame_rising   = Signal()
-        rx_frame_rising_d = Signal()
+        rx_frame_ibufds = Signal()
+        rx_frame        = Signal()
+        rx_frame_d      = Signal()
+        rx_count        = Signal(2)
         self.specials += [
             Instance("IBUFDS",
                 i_I  = pads.rx_frame_p,
@@ -109,14 +108,16 @@ class AD9361PHY(LiteXModule):
                 o_Q2 = Open(),
             )
         ]
-        self.sync.rfic += rx_frame_d.eq(rx_frame)
-        self.comb += rx_frame_rising.eq(rx_frame & ~rx_frame_d)
-        self.sync.rfic += rx_frame_rising_d.eq(rx_frame_rising)
+        self.sync.rfic += [
+            rx_frame_d.eq(rx_frame),
+            rx_count.eq(rx_count + 1),
+            If(rx_frame & ~rx_frame_d,
+                rx_count.eq(1)
+            )
+        ]
 
         # RX Data.
         # --------
-        # I sampled on rfic clk  rising edge.
-        # Q sampled on rfic clk falling edge.
         rx_data_ibufds = Signal(6)
         rx_data_half_i = Signal(6)
         rx_data_half_q = Signal(6)
@@ -138,52 +139,45 @@ class AD9361PHY(LiteXModule):
                     o_Q2 = rx_data_half_q[i],
                 )
             ]
-
-        # rx_frame = 1 / IA/QA.
-        # rx_frame = 0 / IB/QB.
-        rx_frame_first = Signal()
-        rx_data_valid  = Signal(4)
+        rx_data_sel    = Signal()
         rx_data_ia     = Signal(12)
         rx_data_qa     = Signal(12)
         rx_data_ib     = Signal(12)
         rx_data_qb     = Signal(12)
-        self.sync.rfic += [
-            If(mode == AD9361PHY1R1T_MODE,
-                rx_data_valid.eq(Cat(rx_frame_rising & rx_frame_first, rx_data_valid)),
-                If(rx_frame_rising_d, rx_frame_first.eq(~rx_frame_first))
-            ).Elif(mode == AD9361PHY2R2T_MODE,
-                rx_data_valid.eq(Cat(rx_frame_rising, rx_data_valid))
-            )
+        self.comb += [
+            Case(mode, {
+                AD9361PHY1R1T_MODE : rx_data_sel.eq(rx_count[0]),
+                AD9361PHY2R2T_MODE : rx_data_sel.eq(rx_count[1]),
+            })
         ]
         self.sync.rfic += [
-            If(mode == AD9361PHY1R1T_MODE,
-                If(rx_frame_first,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia)),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa)),
-                ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib)),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb)),
-                )
-            ).Elif(mode == AD9361PHY2R2T_MODE,
-                If(rx_frame,
-                    rx_data_ia.eq(Cat(rx_data_half_i, rx_data_ia)),
-                    rx_data_qa.eq(Cat(rx_data_half_q, rx_data_qa)),
-                ).Else(
-                    rx_data_ib.eq(Cat(rx_data_half_i, rx_data_ib)),
-                    rx_data_qb.eq(Cat(rx_data_half_q, rx_data_qb)),
-                )
-            )
+            Case(rx_data_sel, {
+                0b0 : [ # IA/QA Shifting.
+                    rx_data_ia[0: 6].eq(rx_data_half_i),
+                    rx_data_ia[6:12].eq(rx_data_ia),
+                    rx_data_qa[0: 6].eq(rx_data_half_q),
+                    rx_data_qa[6:12].eq(rx_data_qa),
+                ],
+                0b1 : [ # IB/QB Shifting.
+                    rx_data_ib[0: 6].eq(rx_data_half_i),
+                    rx_data_ib[6:12].eq(rx_data_ib),
+                    rx_data_qb[0: 6].eq(rx_data_half_q),
+                    rx_data_qb[6:12].eq(rx_data_qb),
+                ]
+            })
         ]
 
-        # Drive Source.
+        # RX Source Interface.
+        # --------------------
+        # Pulse source.valid with assembled samples.
         self.sync.rfic += [
             source.valid.eq(0),
-            If(rx_data_valid[3],
+            If(rx_count == 1,
                 source.valid.eq(1),
                 source.ia.eq(rx_data_ia),
                 source.qa.eq(rx_data_qa),
                 source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb)
+                source.qb.eq(rx_data_qb),
             )
         ]
 
@@ -208,7 +202,6 @@ class AD9361PHY(LiteXModule):
         tx_count = Signal(2)
         self.sync.rfic += tx_count.eq(tx_count + 1)
         self.comb += sink.ready.eq(tx_count == 0) # Ready at 0 for sink handshake.
-
 
         # Data: Latch samples on ready; default to 0 if not valid (avoid spurs on underrun/disable).
         tx_data_ia = Signal(12)
