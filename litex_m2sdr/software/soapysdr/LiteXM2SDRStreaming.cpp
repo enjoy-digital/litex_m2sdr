@@ -672,7 +672,7 @@ void SoapyLiteXM2SDR::interleaveCF32(
 
     if (_bytesPerSample == 2) {
         int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * _samplesPerComplex);
-        for (uint32_t i = 0; i < len; i++) {
+        for (uint32_t i = 0; i < len; i++) { // For each complex sample
             dst_int16[0] = static_cast<int16_t>(samples_cf32[0] * _samplesScaling); /* I. */
             dst_int16[1] = static_cast<int16_t>(samples_cf32[1] * _samplesScaling); /* Q. */
             samples_cf32 += 2;
@@ -930,6 +930,7 @@ int SoapyLiteXM2SDR::writeStream(
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
+    //printf("SoapyLiteXM2SDR::writeStream: _bytesPerComplex=%zu, _nChannels=%zu\n", _bytesPerComplex, _nChannels);
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
     size_t samp_avail = 0;
