@@ -21,6 +21,9 @@ from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
+from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
+from litex_m2sdr.gateware.layouts import dma_layout
+
 
 # Architecture -------------------------------------------------------------------------------------
 #
@@ -77,6 +80,7 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 # - TX sampling (on the AD931) is adjusted through AD9361 registers.
 # - An optional TX-RX loopback is implemented.
 # - Sink/Source stream operate in sys_clk domain @ 64-bit and are converted to/from rfic_clk.
+
 
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
@@ -179,19 +183,27 @@ class AD9361RFIC(LiteXModule):
         self.rx_bitmode = rx_bitmode = AD9361RXBitMode()
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
+       
+        # TX Scheduler ---------------------------------------------------------------------------
+        self.scheduler_tx = scheduler_tx = Scheduler()
 
         # Data Flow --------------------------------------------------------------------------------
 
-        # TX.
+        # TX.  # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         # ---
-        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
+        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode ->
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
             tx_bitmode,
-            tx_cdc,
-            gpio_tx_unpacker,
+            tx_cdc
         )
+        # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
+        self.comb += [
+            scheduler_tx.sink.connect(tx_cdc.source) , # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source, keep={"valid", "ready"}), # connect gpio unpacker to scheduler except valid and ready that will be managed by the scheduler
+        ]
+
         self.comb += [
             gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
             self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),

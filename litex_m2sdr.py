@@ -60,7 +60,6 @@ from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
-from litex_m2sdr.gateware.scheduler   import Scheduler
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -550,10 +549,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
-        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)
-
-        # Scheduler TX (for now) ----------------------------------------------------------
-        self.scheduler_tx = Scheduler()
+        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)        
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -571,10 +567,23 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         # AD9361 <-> Header.
         # ------------------
         self.comb += [
-            self.header.tx.source.connect(self.scheduler_tx.sink), # TX: Header -> Scheduler.
-            self.scheduler_tx.source.connect(self.ad9361.tx.sink), # TX: Scheduler -> AD9361.
+            self.header.tx.source.connect(self.ad9361.tx.sink), # TX: Header -> AD9361.
             self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
+
+        # !! THIS IS DANGEROUS AS IT IS NOT THE SAME TIME DOMAIN AS THE AD9361 !!
+        # Push TX Timestamp to AD9361 TX scheduler. 
+        # ----------------------------------------------
+        # pkt_count = Signal(3) # max pkt count in scheduler is 8 #FIXME: make it configurable
+        
+        # # update metadata in ad9361 scheduler when we get a new frame from the header
+        # If(self.header.update, # we got a new timestamp ==> push it to the AD9361 TX scheduler metadata
+        #     self.ad9361.scheduler_tx.metadata.valid.eq(1), # trying to push the metadata
+        #     self.ad9361.scheduler_tx.metadata.timestamp[0:64].eq(self.header.timestamp),
+        #     NextValue(pkt_count, pkt_count + 1),
+        #     self.ad9361.scheduler_tx.metadata.ptr.eq(pkt_count)
+        # )
+
 
         # Crossbar.
         # ---------
