@@ -99,8 +99,6 @@ class AD9361PHY(LiteXModule):
         # (and channel 2 in 2R2T). 50% duty cycle; SDR (same value on both clock edges).
         rx_frame_ibufds = Signal()
         rx_frame        = Signal()
-        rx_frame_d      = Signal()
-        rx_count        = Signal(2)
         self.specials += [
             Instance("IBUFDS",
                 i_I  = pads.rx_frame_p,
@@ -118,7 +116,10 @@ class AD9361PHY(LiteXModule):
                 o_Q2 = Open(),
             )
         ]
+
         # RX Count: Free-run counter; resync to 1 on Rx_FRAME rising edge.
+        rx_count   = Signal(2)
+        rx_frame_d = Signal()
         self.sync.rfic += [
             rx_frame_d.eq(rx_frame),
             rx_count.eq(rx_count + 1),
