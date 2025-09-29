@@ -123,7 +123,10 @@ class AD9361PHY(LiteXModule):
             rx_frame_d.eq(rx_frame),
             rx_count.eq(rx_count + 1),
             If(rx_frame & ~rx_frame_d,
-                rx_count.eq(1)
+                Case(mode, {
+                    AD9361PHY1R1T_MODE : rx_count[0].eq(1),
+                    AD9361PHY2R2T_MODE : rx_count   .eq(1),
+                })
             )
         ]
 
@@ -152,19 +155,12 @@ class AD9361PHY(LiteXModule):
                     o_Q2 = rx_data_half_q[i],
                 )
             ]
-        rx_data_sel    = Signal()
-        rx_data_ia     = Signal(12)
-        rx_data_qa     = Signal(12)
-        rx_data_ib     = Signal(12)
-        rx_data_qb     = Signal(12)
-        self.comb += [
-            Case(mode, {
-                AD9361PHY1R1T_MODE : rx_data_sel.eq(rx_count[0]),
-                AD9361PHY2R2T_MODE : rx_data_sel.eq(rx_count[1]),
-            })
-        ]
+        rx_data_ia  = Signal(12)
+        rx_data_qa  = Signal(12)
+        rx_data_ib  = Signal(12)
+        rx_data_qb  = Signal(12)
         self.sync.rfic += [
-            Case(rx_data_sel, {
+            Case(rx_count[1], {
                 0b0 : [ # IA/QA Shifting (assemble MSB in high bits, LSB in low).
                     rx_data_ia[0: 6].eq(rx_data_half_i),
                     rx_data_ia[6:12].eq(rx_data_ia[0:6]),
@@ -185,7 +181,7 @@ class AD9361PHY(LiteXModule):
         # Pulse source.valid with assembled samples.
         self.sync.rfic += [
             source.valid.eq(0),
-            If(rx_count == 1,
+            If(rx_count == 0,
                 source.valid.eq(1),
                 source.ia.eq(rx_data_ia),
                 source.qa.eq(rx_data_qa),
