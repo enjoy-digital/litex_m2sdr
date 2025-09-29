@@ -201,25 +201,29 @@ class AD9361PHY(LiteXModule):
 
         # TX PHY -----------------------------------------------------------------------------------
 
-        # TX Gen from Sink.
-        # -----------------
-        # TX always supposed valid.
-        tx_ce  = Signal()
-        tx_cnt = Signal(2)
-        self.sync.rfic += tx_cnt.eq(tx_cnt + 1)
-        self.comb += tx_ce.eq(tx_cnt == 3)
+        # TX Sink Interface.
+        # ------------------
 
+        # Control: Free-running 4-cycle counter.
+        tx_count = Signal(2)
+        self.sync.rfic += tx_count.eq(tx_count + 1)
+        self.comb += sink.ready.eq(tx_count == 0) # Ready at 0 for sink handshake.
+
+
+        # Data: Latch samples on ready; default to 0 if not valid (avoid spurs on underrun/disable).
         tx_data_ia = Signal(12)
         tx_data_qa = Signal(12)
         tx_data_ib = Signal(12)
         tx_data_qb = Signal(12)
         self.sync.rfic += [
-            If(tx_ce,
+            If(sink.ready,
+                # Default to zero.
                 tx_data_ia.eq(0),
                 tx_data_qa.eq(0),
                 tx_data_ib.eq(0),
                 tx_data_qb.eq(0),
                 If(sink.valid,
+                    # Latch valid samples.
                     tx_data_ia.eq(sink.ia),
                     tx_data_qa.eq(sink.qa),
                     tx_data_ib.eq(sink.ib),
@@ -227,7 +231,6 @@ class AD9361PHY(LiteXModule):
                 )
             )
         ]
-        self.comb += sink.ready.eq(tx_ce)
 
         # TX Clocking.
         # ------------
@@ -257,14 +260,14 @@ class AD9361PHY(LiteXModule):
         tx_frame_obufds = Signal()
         self.comb += [
             If(mode == AD9361PHY1R1T_MODE,
-                Case(tx_cnt, { # I/Q transmitted in 1 RFIC Clk cycle.
+                Case(tx_count, { # I/Q transmitted in 1 RFIC Clk cycle.
                     0b00 : tx_frame.eq(1),
                     0b01 : tx_frame.eq(0),
                     0b10 : tx_frame.eq(1),
                     0b01 : tx_frame.eq(0),
                 })
             ).Elif(mode == AD9361PHY2R2T_MODE,
-                Case(tx_cnt, { # I/Q transmitted in 2 RFIC Clk cycles.
+                Case(tx_count, { # I/Q transmitted in 2 RFIC Clk cycles.
                     0b00 : tx_frame.eq(1),
                     0b01 : tx_frame.eq(1),
                     0b10 : tx_frame.eq(0),
@@ -296,7 +299,7 @@ class AD9361PHY(LiteXModule):
         tx_data_half_q = Signal(6)
         tx_data_obufds = Signal(6)
         self.comb += [
-            Case(tx_cnt, {
+            Case(tx_count, {
                 0b00 : [ # IA/QA MSBs.
                     tx_data_half_i.eq(tx_data_ia[6:]),
                     tx_data_half_q.eq(tx_data_qa[6:]),
