@@ -252,28 +252,9 @@ class AD9361PHY(LiteXModule):
 
         # TX Framing.
         # -----------
-        tx_frame       = Signal()
-        tx_data_half_i = Signal(6)
-        tx_data_half_q = Signal(6)
+        tx_frame        = Signal()
+        tx_frame_obufds = Signal()
         self.comb += [
-            Case(tx_cnt, {
-                0b00 : [ # IA/QA MSBs.
-                    tx_data_half_i.eq(tx_data_ia[6:]),
-                    tx_data_half_q.eq(tx_data_qa[6:]),
-                ],
-                0b01 : [ # IA/QA LSBs.
-                    tx_data_half_i.eq(tx_data_ia[0:]),
-                    tx_data_half_q.eq(tx_data_qa[0:]),
-                ],
-                0b10 : [ # IB/QB MSBs.
-                    tx_data_half_i.eq(tx_data_ib[6:]),
-                    tx_data_half_q.eq(tx_data_qb[6:]),
-                ],
-                0b11 : [ # IB/QB LSBs.
-                    tx_data_half_i.eq(tx_data_ib[0:]),
-                    tx_data_half_q.eq(tx_data_qb[0:]),
-                ]
-            }),
             If(mode == AD9361PHY1R1T_MODE,
                 Case(tx_cnt, { # I/Q transmitted in 1 RFIC Clk cycle.
                     0b00 : tx_frame.eq(1),
@@ -290,8 +271,6 @@ class AD9361PHY(LiteXModule):
                 })
             )
         ]
-
-        tx_frame_obufds = Signal()
         self.specials += [
             Instance("ODDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE",
@@ -312,7 +291,29 @@ class AD9361PHY(LiteXModule):
 
         # TX Data.
         # --------
+        tx_data_half_i = Signal(6)
+        tx_data_half_q = Signal(6)
         tx_data_obufds = Signal(6)
+        self.comb += [
+            Case(tx_cnt, {
+                0b00 : [ # IA/QA MSBs.
+                    tx_data_half_i.eq(tx_data_ia[6:]),
+                    tx_data_half_q.eq(tx_data_qa[6:]),
+                ],
+                0b01 : [ # IA/QA LSBs.
+                    tx_data_half_i.eq(tx_data_ia[0:]),
+                    tx_data_half_q.eq(tx_data_qa[0:]),
+                ],
+                0b10 : [ # IB/QB MSBs.
+                    tx_data_half_i.eq(tx_data_ib[6:]),
+                    tx_data_half_q.eq(tx_data_qb[6:]),
+                ],
+                0b11 : [ # IB/QB LSBs.
+                    tx_data_half_i.eq(tx_data_ib[0:]),
+                    tx_data_half_q.eq(tx_data_qb[0:]),
+                ]
+            })
+        ]
         for i in range(6):
             self.specials += [
                 Instance("ODDR",
