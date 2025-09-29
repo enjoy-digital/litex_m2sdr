@@ -187,28 +187,19 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
-        # TX PHY -----------------------------------------------------------------------------------
+        # TX -> RX Loopback ------------------------------------------------------------------------
 
-        # TX Clocking.
-        # ------------
-        tx_clk_obufds = Signal()
-        self.specials += [
-            Instance("ODDR",
-                p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("rfic"),
-                i_CE = 1,
-                i_S  = 0,
-                i_R  = 0,
-                i_D1 = 1,
-                i_D2 = 0,
-                o_Q  = tx_clk_obufds,
-            ),
-            Instance("OBUFDS",
-                i_I  = tx_clk_obufds,
-                o_O  = pads.tx_clk_p,
-                o_OB = pads.tx_clk_n
+        self.sync.rfic += [
+            If(loopback,
+                source.valid.eq(sink.valid & sink.ready),
+                source.ia.eq(sink.ia),
+                source.qa.eq(sink.qa),
+                source.ib.eq(sink.ib),
+                source.qb.eq(sink.qb),
             )
         ]
+
+        # TX PHY -----------------------------------------------------------------------------------
 
         # TX Gen from Sink.
         # -----------------
@@ -238,17 +229,27 @@ class AD9361PHY(LiteXModule):
         ]
         self.comb += sink.ready.eq(tx_ce)
 
-        # TX -> RX Dynamic Loopback.
-        # --------------------------
-        self.sync.rfic += [
-            If(loopback,
-                source.valid.eq(sink.valid & sink.ready),
-                source.ia.eq(sink.ia),
-                source.qa.eq(sink.qa),
-                source.ib.eq(sink.ib),
-                source.qb.eq(sink.qb),
+        # TX Clocking.
+        # ------------
+        tx_clk_obufds = Signal()
+        self.specials += [
+            Instance("ODDR",
+                p_DDR_CLK_EDGE = "SAME_EDGE",
+                i_C  = ClockSignal("rfic"),
+                i_CE = 1,
+                i_S  = 0,
+                i_R  = 0,
+                i_D1 = 1,
+                i_D2 = 0,
+                o_Q  = tx_clk_obufds,
+            ),
+            Instance("OBUFDS",
+                i_I  = tx_clk_obufds,
+                o_O  = pads.tx_clk_p,
+                o_OB = pads.tx_clk_n
             )
         ]
+
 
         # TX Framing.
         # -----------
