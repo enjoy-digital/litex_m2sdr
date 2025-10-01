@@ -111,7 +111,7 @@ class HeaderInserterExtracter(LiteXModule):
         # Frame.
         fsm.act("FRAME",
             sink.connect(source, omit={"first", "timestamp"}),
-            source.timestamp.eq(self.timestamp), # propagate timestamp
+            source.timestamp.eq(self.timestamp), # propagate timestamp # TODO check if it is propagated correctly
             NextValue(self.update, 0),
             If(self.header_enable,
                 source.first.eq(("cycles" == 0) & (mode == "extracter")),
