@@ -1,0 +1,7 @@
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/SoapyLiteXM2SDR.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/edit_cache.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/rebuild_cache.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/list_install_components.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/install.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/install/local.dir
+/home/sens/litex_m2sdr/litex_m2sdr/software/soapysdr/build_debug/CMakeFiles/install/strip.dir
