@@ -201,6 +201,109 @@ static void test_ad9361_read(uint16_t reg)
     m2sdr_close(conn);
 }
 
+/* AD9361 Dump Utilities */
+/*-----------------------*/
+
+static void print_table_row(const char *c1, const char *c2, const char *c3, const char *c4, const char *c5, const char *c6)
+{
+    printf("|%-9s|%-6s|%-5s|%-35s|%-8s|%-35s|\n",
+           c1 ? c1 : "", c2 ? c2 : "", c3 ? c3 : "", c4 ? c4 : "", c5 ? c5 : "", c6 ? c6 : "");
+}
+
+static void print_separator(void)
+{
+    printf("+---------+------+-----+-----------------------------------+--------+-----------------------------------+\n");
+}
+
+/* AD9361 Port Dump */
+/*------------------*/
+static void test_ad9361_port_dump(void)
+{
+    void *conn = m2sdr_open();
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(conn, 0);
+    uint8_t reg010 = m2sdr_ad9361_spi_read(conn, 0x010);
+    uint8_t reg011 = m2sdr_ad9361_spi_read(conn, 0x011);
+    uint8_t reg012 = m2sdr_ad9361_spi_read(conn, 0x012);
+    printf("\e[1m[> AD9361 Parallel Port Configuration Dump:\e[0m\n");
+    printf("-------------------------------------------\n");
+
+    /* Separator */
+    print_separator();
+
+    /* Table Header */
+    print_table_row("Register", "Hex", "Bits", "Field Name", "Value", "Decoding");
+
+    /* Separator */
+    print_separator();
+
+    /* Register 0x010 */
+    {
+        char hex010[7];
+        snprintf(hex010, sizeof(hex010), "0x%02X", reg010);
+        print_table_row("0x010", hex010, "", "", "", "");
+        print_table_row("", "", "D7", "PP Tx Swap IQ",       ((reg010 >> 7) & 0x01) ? "1" : "0", ((reg010 >> 7) & 0x01) ? "No Swap"          : "Swap Enabled (Spectral Inversion)");
+        print_table_row("", "", "D6", "PP Rx Swap IQ",       ((reg010 >> 6) & 0x01) ? "1" : "0", ((reg010 >> 6) & 0x01) ? "No Swap"          : "Swap Enabled (Spectral Inversion)");
+        print_table_row("", "", "D5", "Tx Channel Swap",     ((reg010 >> 5) & 0x01) ? "1" : "0", ((reg010 >> 5) & 0x01) ? "Swap Enabled"     : "No Swap");
+        print_table_row("", "", "D4", "Rx Channel Swap",     ((reg010 >> 4) & 0x01) ? "1" : "0", ((reg010 >> 4) & 0x01) ? "Swap Enabled"     : "No Swap");
+        print_table_row("", "", "D3", "Rx Frame Pulse Mode", ((reg010 >> 3) & 0x01) ? "1" : "0", ((reg010 >> 3) & 0x01) ? "Pulse (50% duty)" : "Level (stays high)");
+        print_table_row("", "", "D2", "2R2T Timing",         ((reg010 >> 2) & 0x01) ? "1" : "0", ((reg010 >> 2) & 0x01) ? "Always 2R2T"      : "Auto (based on paths)");
+        print_table_row("", "", "D1", "Invert Data Bus",     ((reg010 >> 1) & 0x01) ? "1" : "0", ((reg010 >> 1) & 0x01) ? "Enabled ([0:11])" : "Disabled ([11:0])");
+        print_table_row("", "", "D0", "Invert DATA CLK",     (reg010 & 0x01)        ? "1" : "0", (reg010 & 0x01)        ? "Enabled"          : "Disabled");
+    }
+
+    /* Separator */
+    print_separator();
+
+    /* Register 0x011 */
+    {
+        char hex011[7];
+        snprintf(hex011, sizeof(hex011), "0x%02X", reg011);
+        print_table_row("0x011", hex011, "", "", "", "");
+        print_table_row("", "", "D7", "FDD Alt Word Order", ((reg011 >> 7) & 0x01) ? "1" : "0", ((reg011 >> 7) & 0x01) ? "Enabled (6-bit split)" : "Disabled");
+        {
+            char mustbe_val[6];
+            snprintf(mustbe_val, sizeof(mustbe_val), "0x%X", (reg011 >> 5) & 0x03);
+            char mustbe_desc[50];
+            snprintf(mustbe_desc, sizeof(mustbe_desc), "%s", ((reg011 >> 5) & 0x03) ? "Warning: Should be 0x0" : "Clear");
+            print_table_row("", "", "D6:5", "Must be 0", mustbe_val, mustbe_desc);
+        }
+        print_table_row("", "", "D4", "Invert Tx1",      ((reg011 >> 4) & 0x01) ? "1" : "0", ((reg011 >> 4) & 0x01) ? "Enabled (Multiply by -1)" : "Normal");
+        print_table_row("", "", "D3", "Invert Tx2",      ((reg011 >> 3) & 0x01) ? "1" : "0", ((reg011 >> 3) & 0x01) ? "Enabled (Multiply by -1)" : "Normal");
+        print_table_row("", "", "D2", "Invert Rx Frame", ((reg011 >> 2) & 0x01) ? "1" : "0", ((reg011 >> 2) & 0x01) ? "Enabled"                  : "Disabled");
+        {
+            char delay_val[6];
+            snprintf(delay_val, sizeof(delay_val), "0x%X", reg011 & 0x03);
+            char delay_desc[64];
+            snprintf(delay_desc, sizeof(delay_desc), "%u (1/4 clk cycles for DDR)", reg011 & 0x03);
+            print_table_row("", "", "D1:0", "Delay Rx Data", delay_val, delay_desc);
+        }
+    }
+
+    /* Separator */
+    print_separator();
+
+    /* Register 0x012 */
+    {
+        char hex012[7];
+        snprintf(hex012, sizeof(hex012), "0x%02X", reg012);
+        print_table_row("0x012", hex012, "", "", "", "");
+        print_table_row("", "", "D7", "FDD Rx Rate = 2*Tx Rate", ((reg012 >> 7) & 0x01) ? "1" : "0", ((reg012 >> 7) & 0x01) ? "Enabled (Rx 2x Tx)"           : "Disabled (Rx = Tx)");
+        print_table_row("", "", "D6", "Swap Ports",              ((reg012 >> 6) & 0x01) ? "1" : "0", ((reg012 >> 6) & 0x01) ? "Enabled (P0 <-> P1)"          : "Disabled");
+        print_table_row("", "", "D5", "Single Data Rate",        ((reg012 >> 5) & 0x01) ? "1" : "0", ((reg012 >> 5) & 0x01) ? "SDR (one edge)"               : "DDR (both edges)");
+        print_table_row("", "", "D4", "LVDS Mode",               ((reg012 >> 4) & 0x01) ? "1" : "0", ((reg012 >> 4) & 0x01) ? "Enabled (LVDS)"               : "Disabled (CMOS)");
+        print_table_row("", "", "D3", "Half-Duplex Mode",        ((reg012 >> 3) & 0x01) ? "1" : "0", ((reg012 >> 3) & 0x01) ? "Enabled (TDD)"                : "Disabled (FDD)");
+        print_table_row("", "", "D2", "Single Port Mode",        ((reg012 >> 2) & 0x01) ? "1" : "0", ((reg012 >> 2) & 0x01) ? "Enabled (1 port)"             : "Disabled (2 ports)");
+        print_table_row("", "", "D1", "Full Port",               ((reg012 >> 1) & 0x01) ? "1" : "0", ((reg012 >> 1) & 0x01) ? "Enabled (Rx/Tx separated)"    : "Disabled (Mixed)");
+        print_table_row("", "", "D0", "Full Duplex Swap Bit",    (reg012 & 0x01)        ? "1" : "0", (reg012 & 0x01)        ? "Enabled (Toggle Rx/Tx bits)"  : "Disabled");
+    }
+
+    /* Final Separator */
+    print_separator();
+    printf("\n");
+
+    m2sdr_close(conn);
+}
 /* Info */
 /*------*/
 
@@ -1060,6 +1163,7 @@ static void help(void)
            "ad9361_dump                       Dump AD9361 Registers.\n"
            "ad9361_write reg value            Write to AD9361 register.\n"
            "ad9361_read reg                   Read from AD9361 register.\n"
+           "ad9361_port_dump                  Dump AD9361 Port Configuration.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
 #ifdef FLASH_WRITE
@@ -1220,6 +1324,8 @@ int main(int argc, char **argv)
         uint16_t reg = strtoul(argv[optind++], NULL, 0);
         test_ad9361_read(reg);
     }
+    else if (!strcmp(cmd, "ad9361_port_dump"))
+        test_ad9361_port_dump();
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
