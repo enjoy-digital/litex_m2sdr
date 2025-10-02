@@ -304,6 +304,154 @@ static void test_ad9361_port_dump(void)
 
     m2sdr_close(conn);
 }
+
+/* AD9361 ENSM Dump */
+/*-----------------*/
+
+static const char* decode_cal_state(uint8_t state)
+{
+    switch (state) {
+        case 0x0: return "Calibrations Done";
+        case 0x1: return "Baseband DC Offset Cal";
+        case 0x2: return "RF DC Offset Cal";
+        case 0x3: return "Tx1 Quadrature Cal";
+        case 0x4: return "Tx2 Quadrature Cal";
+        case 0x5: return "Receiver Gain Step Cal";
+        case 0x9: return "Baseband Cal Flush";
+        case 0xA: return "RF Cal Flush";
+        case 0xB: return "Tx Quad Cal Flush";
+        case 0xC: return "Tx Power Detector Cal Flush";
+        case 0xE: return "Rx Gain Step Cal Flush";
+        case 0xF: return "Unknown";
+        default: return "Reserved";
+    }
+}
+
+static const char* decode_ensm_state(uint8_t state)
+{
+    switch (state) {
+        case 0x0: return "Sleep (Clocks/BB PLL disabled)";
+        case 0x1: return "Wait";
+        case 0x5: return "Alert (Synthesizers enabled)";
+        case 0x6: return "Tx (Tx signal chain enabled)";
+        case 0x7: return "Tx Flush";
+        case 0x8: return "Rx (Rx signal chain enabled)";
+        case 0x9: return "Rx Flush";
+        case 0xA: return "FDD (Tx and Rx enabled)";
+        case 0xB: return "FDD Flush";
+        default: return "Unknown";
+    }
+}
+
+
+
+static void test_ad9361_ensm_dump(void)
+{
+    void *conn = m2sdr_open();
+    /* AD9361 SPI Init */
+    m2sdr_ad9361_spi_init(conn, 0);
+    uint8_t reg013 = m2sdr_ad9361_spi_read(conn, 0x013);
+    uint8_t reg014 = m2sdr_ad9361_spi_read(conn, 0x014);
+    uint8_t reg015 = m2sdr_ad9361_spi_read(conn, 0x015);
+    uint8_t reg016 = m2sdr_ad9361_spi_read(conn, 0x016);
+    uint8_t reg017 = m2sdr_ad9361_spi_read(conn, 0x017);
+    printf("\e[1m[> AD9361 ENSM Dump:\e[0m\n");
+    printf("--------------------\n");
+    /* Separator */
+    print_separator();
+    /* Table Header */
+    print_table_row("Register", "Hex", "Bits", "Field Name", "Value", "Decoding");
+    /* Separator */
+    print_separator();
+
+    /* Register 0x013 */
+    {
+        char hex013[7];
+        snprintf(hex013, sizeof(hex013), "0x%02X", reg013);
+        print_table_row("0x013", hex013, "", "", "", "");
+        print_table_row("", "", "D7", "Open",     ((reg013 >> 7) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D6", "Reserved", ((reg013 >> 6) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D5", "Reserved", ((reg013 >> 5) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D4", "Reserved", ((reg013 >> 4) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D3", "Reserved", ((reg013 >> 3) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D2", "Reserved", ((reg013 >> 2) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D1", "Reserved", ((reg013 >> 1) & 0x01) ? "1" : "0", "Reserved");
+        print_table_row("", "", "D0", "FDD Mode", ((reg013 >> 0) & 0x01) ? "1" : "0", ((reg013 >> 0) & 0x01) ? "FDD" : "TDD");
+    }
+    /* Separator */
+    print_separator();
+
+    /* Register 0x014 */
+    {
+        char hex014[7];
+        snprintf(hex014, sizeof(hex014), "0x%02X", reg014);
+        print_table_row("0x014", hex014, "", "", "", "");
+        print_table_row("", "", "D7", "Enable Rx Data Port for Cal", ((reg014 >> 7) & 0x01) ? "1" : "0", ((reg014 >> 7) & 0x01) ? "Enabled"             : "Disabled");
+        print_table_row("", "", "D6", "Force Rx On",                 ((reg014 >> 6) & 0x01) ? "1" : "0", ((reg014 >> 6) & 0x01) ? "Force Rx State"      : "Normal");
+        print_table_row("", "", "D5", "Force Tx On",                 ((reg014 >> 5) & 0x01) ? "1" : "0", ((reg014 >> 5) & 0x01) ? "Force Tx/FDD State"  : "Normal");
+        print_table_row("", "", "D4", "ENSM Pin Control",            ((reg014 >> 4) & 0x01) ? "1" : "0", ((reg014 >> 4) & 0x01) ? "Pin Controlled"      : "SPI Controlled");
+        print_table_row("", "", "D3", "Level Mode",                  ((reg014 >> 3) & 0x01) ? "1" : "0", ((reg014 >> 3) & 0x01) ? "Level"               : "Pulse");
+        print_table_row("", "", "D2", "Force Alert State",           ((reg014 >> 2) & 0x01) ? "1" : "0", ((reg014 >> 2) & 0x01) ? "Force to Alert/Wait" : "Normal");
+        print_table_row("", "", "D1", "Auto Gain Lock",              ((reg014 >> 1) & 0x01) ? "1" : "0", ((reg014 >> 1) & 0x01) ? "Enabled"             : "Disabled");
+        print_table_row("", "", "D0", "To Alert",                    ((reg014 >> 0) & 0x01) ? "1" : "0", ((reg014 >> 0) & 0x01) ? "To Alert"            : "To Wait");
+    }
+    /* Separator */
+    print_separator();
+
+    /* Register 0x015 */
+    {
+        char hex015[7];
+        snprintf(hex015, sizeof(hex015), "0x%02X", reg015);
+        print_table_row("0x015", hex015, "", "", "", "");
+        print_table_row("", "", "D7", "FDD External Control Enable", ((reg015 >> 7) & 0x01) ? "1" : "0", ((reg015 >> 7) & 0x01) ? "Enabled (Independent)" : "Disabled");
+        print_table_row("", "", "D6", "Power Down Rx Synth",         ((reg015 >> 6) & 0x01) ? "1" : "0", ((reg015 >> 6) & 0x01) ? "Powered Down"          : "Normal");
+        print_table_row("", "", "D5", "Power Down Tx Synth",         ((reg015 >> 5) & 0x01) ? "1" : "0", ((reg015 >> 5) & 0x01) ? "Powered Down"          : "Normal");
+        print_table_row("", "", "D4", "TXNRX SPI Control",           ((reg015 >> 4) & 0x01) ? "1" : "0", ((reg015 >> 4) & 0x01) ? "TXNRX/ENRX Control"    : "ENRX/ENTX Control");
+        print_table_row("", "", "D3", "Synth Pin Control Mode",      ((reg015 >> 3) & 0x01) ? "1" : "0", ((reg015 >> 3) & 0x01) ? "TXNRX Controls Synth"  : "Bit D4 Controls");
+        print_table_row("", "", "D2", "Dual Synth Mode",             ((reg015 >> 2) & 0x01) ? "1" : "0", ((reg015 >> 2) & 0x01) ? "Both Synths Always On" : "Single Synth");
+        print_table_row("", "", "D1", "Rx Synth Ready Mask",         ((reg015 >> 1) & 0x01) ? "1" : "0", ((reg015 >> 1) & 0x01) ? "Ignore VCO Cal"        : "Wait for Lock");
+        print_table_row("", "", "D0", "Tx Synth Ready Mask",         ((reg015 >> 0) & 0x01) ? "1" : "0", ((reg015 >> 0) & 0x01) ? "Ignore VCO Cal"        : "Wait for Lock");
+    }
+    /* Separator */
+    print_separator();
+
+    /* Register 0x016 */
+    {
+        char hex016[7];
+        snprintf(hex016, sizeof(hex016), "0x%02X", reg016);
+        print_table_row("0x016", hex016, "", "", "", "");
+        print_table_row("", "", "D7", "Rx BB Tune",       ((reg016 >> 7) & 0x01) ? "1" : "0", ((reg016 >> 7) & 0x01) ? "Start Rx BB Filter Cal" : "Idle");
+        print_table_row("", "", "D6", "Tx BB Tune",       ((reg016 >> 6) & 0x01) ? "1" : "0", ((reg016 >> 6) & 0x01) ? "Start Tx BB Filter Cal" : "Idle");
+        print_table_row("", "", "D5", "Must be 0",        ((reg016 >> 5) & 0x01) ? "1" : "0", ((reg016 >> 5) & 0x01) ? "Warning: Should be 0"   : "Clear");
+        print_table_row("", "", "D4", "Tx Quad Cal",      ((reg016 >> 4) & 0x01) ? "1" : "0", ((reg016 >> 4) & 0x01) ? "Start Tx Quad Cal"      : "Idle");
+        print_table_row("", "", "D3", "Rx Gain Step Cal", ((reg016 >> 3) & 0x01) ? "1" : "0", ((reg016 >> 3) & 0x01) ? "Start Rx Gain Step Cal" : "Idle");
+        print_table_row("", "", "D2", "Must be 0",        ((reg016 >> 2) & 0x01) ? "1" : "0", ((reg016 >> 2) & 0x01) ? "Warning: Should be 0"   : "Clear");
+        print_table_row("", "", "D1", "DC Cal RF Start",  ((reg016 >> 1) & 0x01) ? "1" : "0", ((reg016 >> 1) & 0x01) ? "Start RF DC Cal"        : "Idle");
+        print_table_row("", "", "D0", "DC Cal BB Start",  ((reg016 >> 0) & 0x01) ? "1" : "0", ((reg016 >> 0) & 0x01) ? "Start BB DC Cal"        : "Idle");
+    }
+    /* Separator */
+    print_separator();
+
+    /* Register 0x017 */
+    {
+        char hex017[7];
+        snprintf(hex017, sizeof(hex017), "0x%02X", reg017);
+        print_table_row("0x017", hex017, "", "", "", "");
+        char cal_val[6];
+        snprintf(cal_val, sizeof(cal_val), "0x%X", (reg017 >> 4) & 0x0F);
+        print_table_row("", "", "D7:4", "Cal Sequence State", cal_val, decode_cal_state((reg017 >> 4) & 0x0F));
+        char ensm_val[6];
+        snprintf(ensm_val, sizeof(ensm_val), "0x%X", reg017 & 0x0F);
+        print_table_row("", "", "D3:0", "ENSM State", ensm_val, decode_ensm_state(reg017 & 0x0F));
+    }
+
+    /* Final Separator */
+    print_separator();
+    printf("\n");
+
+    m2sdr_close(conn);
+}
+
 /* Info */
 /*------*/
 
@@ -1164,6 +1312,7 @@ static void help(void)
            "ad9361_write reg value            Write to AD9361 register.\n"
            "ad9361_read reg                   Read from AD9361 register.\n"
            "ad9361_port_dump                  Dump AD9361 Port Configuration.\n"
+           "ad9361_ensm_dump                  Dump AD9361 ENSM Configuration.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
 #ifdef FLASH_WRITE
@@ -1326,6 +1475,8 @@ int main(int argc, char **argv)
     }
     else if (!strcmp(cmd, "ad9361_port_dump"))
         test_ad9361_port_dump();
+    else if (!strcmp(cmd, "ad9361_ensm_dump"))
+        test_ad9361_ensm_dump();
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
