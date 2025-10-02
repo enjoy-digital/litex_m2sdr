@@ -121,7 +121,7 @@ _io = [
 
         Subsignal("rst_n",  Pins("E1"), IOStandard("LVCMOS25")), # RF_RESET_N.
         Subsignal("enable", Pins("P4"), IOStandard("LVCMOS25")), # RF_ENABLE.
-        Subsignal("txnrx",  Pins("B2"), IOStandard("LVCMOS25")), # RF_RXTX.
+        Subsignal("txnrx",  Pins("M5"), IOStandard("LVCMOS25")), # RF_RXTX.
         Subsignal("en_agc", Pins("N5"), IOStandard("LVCMOS25")), # RF_EN_AGC.
 
         Subsignal("ctrl", Pins("T1 U1 M3 M1"),             IOStandard("LVCMOS25")), # RF_CTRL_IN_ 0-3.
