@@ -71,6 +71,7 @@ class Scheduler(LiteXModule): # TODO implement the valid and ready signals prope
         
         # FSM for scheduling ------------
         self.fsm = fsm = FSM(reset_state="RESET")
+        self.submodules.fsm = fsm   # need this to enable litescope debugging
         
         fsm.act("RESET",
             # NextValue(frame_count, 0),
