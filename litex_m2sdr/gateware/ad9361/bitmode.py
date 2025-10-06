@@ -39,7 +39,7 @@ class AD9361TXBitMode(LiteXModule):
         # -----------
         self.conv = conv = stream.Converter(64, 32)
         self.comb += If(mode == _8_BIT_MODE,
-            sink.connect(conv.sink),
+            sink.connect(conv.sink, omit={"timestamp"}),
             conv.source.connect(source, omit={"data"}),
             source.data[0*16+4:1*16].eq(_sign_extend(conv.source.data[0*8:1*8], 12)),
             source.data[1*16+4:2*16].eq(_sign_extend(conv.source.data[1*8:2*8], 12)),

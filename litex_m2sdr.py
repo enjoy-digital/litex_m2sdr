@@ -567,7 +567,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         # AD9361 <-> Header.
         # ------------------
         self.comb += [
-            self.header.tx.source.connect(self.ad9361.tx.sink), # TX: Header -> AD9361.
+            self.header.tx.source.connect(self.ad9361.sink), # TX: Header -> AD9361.
             self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
 
@@ -606,7 +606,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
 
         # RX: Header -> Crossbar -> Comms (DMA)
         # --------------------------------
-        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink) # RX: Header -> Crossbar.
+        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink, omit={"timestamp"}) # RX: Header -> Crossbar.
         if with_pcie:
             self.comb += [
                 self.crossbar.demux.source0.connect(self.pcie_dma0.sink), # RX: Crossbar -> PCIe DMA.
