@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Tue Sep 23 10:36:15 2025
+| Date         : Mon Oct  6 15:04:28 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_utilization -hierarchical -file litex_m2sdr_m2_pcie_x1_utilization_hierarchical_synth.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -22,8 +22,8 @@ Table of Contents
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
 |                          Instance                          |                    Module                   | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs | RAMB36 | RAMB18 | DSP Blocks |
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
-| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       8047 |       6876 |    1164 |    7 | 8577 |     35 |      2 |          0 |
-|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       7552 |       6387 |    1164 |    1 | 7604 |     27 |      2 |          0 |
+| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       7809 |       6678 |    1124 |    7 | 8426 |     35 |      2 |          0 |
+|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       7314 |       6189 |    1124 |    1 | 7453 |     27 |      2 |          0 |
 |   pcie_s7                                                  |                                     pcie_s7 |        495 |        489 |       0 |    6 |  973 |      8 |      0 |          0 |
 |     (pcie_s7)                                              |                                     pcie_s7 |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
 |     inst                                                   |                           pcie_s7_pcie2_top |        495 |        489 |       0 |    6 |  973 |      8 |      0 |          0 |

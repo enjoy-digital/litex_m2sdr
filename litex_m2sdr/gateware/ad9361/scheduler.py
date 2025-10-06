@@ -39,20 +39,19 @@ class Scheduler(LiteXModule): # TODO implement the valid and ready signals prope
             self.almost_full.eq(data_fifo.level >= data_fifo.depth - frames_per_packet), # almost full when it can no longer accept a full packet
             self.empty.eq(data_fifo.level == 0),
             self.almost_empty.eq(data_fifo.level <= frames_per_packet), # almost empty when it can no longer output a full packet
-            data_fifo.reset.eq(self.reset)
         ]
 
         # Counters for debugging
-        frame_count = Signal(13) # max 1022 frames per packet * 8 bytes = 8176 bytes
-        pkt_count = Signal(4) # max 8 packets
+        # frame_count = Signal(13) # max 1022 frames per packet * 8 bytes = 8176 bytes
+        # pkt_count = Signal(4) # max 8 packets
         
-        self.sync += frame_count.eq(frame_count + ready_to_read)
-        ready_to_read = Signal()
-        self.comb += [
-            ready_to_read.eq(sink.valid & sink.ready),
-            pkt_count.eq(frame_count // frames_per_packet)
-        ]
-        
+        # ready_to_read = Signal()
+        # self.comb += [
+        #     ready_to_read.eq(sink.valid & sink.ready),
+        #     pkt_count.eq(frame_count // frames_per_packet)
+        # ]
+        # self.sync += frame_count.eq(frame_count + ready_to_read)
+
         # Always Read from upstream if I can
         self.comb += [
             data_fifo.sink.connect(sink)   # data_fifo.sink.valid  <- sink.valid
@@ -74,7 +73,7 @@ class Scheduler(LiteXModule): # TODO implement the valid and ready signals prope
         self.fsm = fsm = FSM(reset_state="RESET")
         
         fsm.act("RESET",
-            NextValue(frame_count, 0),
+            # NextValue(frame_count, 0),
             NextState("WAIT")
         )
 

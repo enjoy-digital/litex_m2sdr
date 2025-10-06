@@ -102,8 +102,8 @@ class GPIOTXUnpacker(LiteXModule):
         self.oe1    = Signal(4)                               # Tristate Controls (first edge).
         self.o2     = Signal(4)                               # GPIO Outputs (second edge).
         self.oe2    = Signal(4)                               # Tristate Controls (second edge).
-        self.sink   = sink   = stream.Endpoint(dma_layout_with_ts(64)) # Input  I/Q stream (12-bit + 4-bit GPIO).
-        self.source = source = stream.Endpoint(dma_layout_with_ts(64)) # Output I/Q stream (12-bit data).
+        self.sink   = sink   = stream.Endpoint(dma_layout(64)) # Input  I/Q stream (12-bit + 4-bit GPIO).
+        self.source = source = stream.Endpoint(dma_layout(64)) # Output I/Q stream (12-bit data).
 
         # # #
 

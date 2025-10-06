@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Tue Sep 23 10:36:15 2025
+| Date         : Mon Oct  6 15:04:28 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_timing_summary -file litex_m2sdr_m2_pcie_x1_timing_synth.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -138,7 +138,7 @@ Table of Contents
 
     WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
     -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
-     -0.151       -0.151                      1                29624       -2.238     -530.384                   1250                29624       -0.272       -0.272                       1                 10048  
+     -0.151       -0.151                      1                28940       -2.238     -530.384                   1250                28940       -0.272       -0.272                       1                  9817  
 
 
 Timing constraints are not met.
@@ -179,15 +179,15 @@ txoutclk_x0y0                {0.000 5.000}        10.000          100.000
 Clock                            WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
 -----                            -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
 clk100                             9.113        0.000                      0                    7        0.136        0.000                      0                    7        3.000        0.000                       0                    10  
-  basesoc_crg_clkout0              1.265        0.000                      0                22942        0.036        0.000                      0                22942        2.950        0.000                       0                  7065  
+  basesoc_crg_clkout0              1.265        0.000                      0                22441        0.036        0.000                      0                22441        2.950        0.000                       0                  6921  
   basesoc_crg_clkout1                                                                                                                                                         60.000        0.000                       0                     3  
   basesoc_crg_clkout2              1.269        0.000                      0                   14        0.036        0.000                      0                   14        0.264        0.000                       0                    10  
   crg_pll_fb                                                                                                                                                                   8.751        0.000                       0                     2  
 dna_clk                           10.161        0.000                      0                  127        0.118        0.000                      0                  127        6.000        0.000                       0                    64  
-icap_clk                         121.519        0.000                      0                  109        0.163        0.000                      0                  109       63.500        0.000                       0                    40  
+icap_clk                         121.524        0.000                      0                  109        0.143        0.000                      0                  109       63.500        0.000                       0                    40  
 jtag_clk                           1.301        0.000                      0                  118        0.036        0.000                      0                  118       23.950        0.000                       0                    65  
 pcie_x1_m2_clk_p                                                                                                                                                               8.408        0.000                       0                     3  
-rfic_clk                           0.504        0.000                      0                 1277        0.029        0.000                      0                 1277        0.984        0.000                       0                   539  
+rfic_clk                           0.504        0.000                      0                 1094        0.029        0.000                      0                 1094        0.984        0.000                       0                   452  
 si5351_clk0                        1.293        0.000                      0                  322        0.032        0.000                      0                  322       12.521        0.000                       0                   133  
 si5351_clk1                        1.293        0.000                      0                  976        0.032        0.000                      0                  976        4.500        0.000                       0                   748  
 txoutclk_x0y0                                                                                                                                                                  3.000        0.000                       0                     3  
@@ -422,7 +422,7 @@ Slack (MET) :             1.265ns  (required time - arrival time)
                                                       0.069     3.301 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.571     3.872    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.076     3.948 r  BUFG/O
-                         net (fo=7063, unplaced)      0.571     4.519    sys_clk
+                         net (fo=6919, unplaced)      0.571     4.519    sys_clk
                          FDPE                                         r  FDPE/C
   -------------------------------------------------------------------    -------------------
                          FDPE (Prop_fdpe_C_Q)         0.357     4.876 r  FDPE/Q
@@ -443,7 +443,7 @@ Slack (MET) :             1.265ns  (required time - arrival time)
                                                       0.065     4.888 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.543     5.431    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.072     5.503 r  BUFG/O
-                         net (fo=7063, unplaced)      0.426     5.929    sys_clk
+                         net (fo=6919, unplaced)      0.426     5.929    sys_clk
                          FDPE                                         r  FDPE_1/C
                          clock pessimism              0.445     6.374    
                          clock uncertainty           -0.071     6.303    
@@ -463,7 +463,7 @@ Min Delay Paths
 Slack (MET) :             0.036ns  (arrival time - required time)
   Source:                 basesoc_basesoc_reader_splitter_source_payload_user_id_reg[7]/C
                             (rising edge-triggered cell FDRE clocked by basesoc_crg_clkout0  {rise@0.000ns fall@4.000ns period=8.000ns})
-  Destination:            storage_16_reg_0_7_18_20/RAMA/I
+  Destination:            storage_17_reg_0_7_18_20/RAMA/I
                             (rising edge-triggered cell RAMD32 clocked by basesoc_crg_clkout0  {rise@0.000ns fall@4.000ns period=8.000ns})
   Path Group:             basesoc_crg_clkout0
   Path Type:              Hold (Min at Fast Process Corner)
@@ -491,12 +491,12 @@ Slack (MET) :             0.036ns  (arrival time - required time)
                                                       0.050     0.921 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.333     1.255    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.026     1.281 r  BUFG/O
-                         net (fo=7063, unplaced)      0.206     1.486    sys_clk
+                         net (fo=6919, unplaced)      0.206     1.486    sys_clk
                          FDRE                                         r  basesoc_basesoc_reader_splitter_source_payload_user_id_reg[7]/C
   -------------------------------------------------------------------    -------------------
                          FDRE (Prop_fdre_C_Q)         0.141     1.627 r  basesoc_basesoc_reader_splitter_source_payload_user_id_reg[7]/Q
-                         net (fo=2, unplaced)         0.134     1.761    storage_16_reg_0_7_18_20/DIA0
-                         RAMD32                                       r  storage_16_reg_0_7_18_20/RAMA/I
+                         net (fo=2, unplaced)         0.134     1.761    storage_17_reg_0_7_18_20/DIA0
+                         RAMD32                                       r  storage_17_reg_0_7_18_20/RAMA/I
   -------------------------------------------------------------------    -------------------
 
                          (clock basesoc_crg_clkout0 rise edge)
@@ -513,11 +513,11 @@ Slack (MET) :             0.036ns  (arrival time - required time)
                                                       0.053     1.434 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.351     1.785    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.029     1.814 r  BUFG/O
-                         net (fo=7063, unplaced)      0.351     2.164    storage_16_reg_0_7_18_20/WCLK
-                         RAMD32                                       r  storage_16_reg_0_7_18_20/RAMA/CLK
+                         net (fo=6919, unplaced)      0.351     2.164    storage_17_reg_0_7_18_20/WCLK
+                         RAMD32                                       r  storage_17_reg_0_7_18_20/RAMA/CLK
                          clock pessimism             -0.533     1.631    
                          RAMD32 (Hold_ramd32_CLK_I)
-                                                      0.094     1.725    storage_16_reg_0_7_18_20/RAMA
+                                                      0.094     1.725    storage_17_reg_0_7_18_20/RAMA
   -------------------------------------------------------------------
                          required time                         -1.725    
                          arrival time                           1.761    
@@ -538,8 +538,8 @@ Sources:            { PLLE2_ADV/CLKOUT0 }
 Check Type        Corner  Lib Pin            Reference Pin  Required(ns)  Actual(ns)  Slack(ns)  Location  Pin
 Min Period        n/a     XADC/DCLK          n/a            4.000         8.000       4.000                XADC/DCLK
 Max Period        n/a     PLLE2_ADV/CLKOUT0  n/a            160.000       8.000       152.000              PLLE2_ADV/CLKOUT0
-Low Pulse Width   Slow    RAMD32/CLK         n/a            1.050         4.000       2.950                storage_13_reg_0_3_0_5/RAMA/CLK
-High Pulse Width  Slow    RAMD32/CLK         n/a            1.050         4.000       2.950                storage_13_reg_0_3_0_5/RAMA/CLK
+Low Pulse Width   Slow    RAMD32/CLK         n/a            1.050         4.000       2.950                storage_16_reg_0_7_0_4/RAMA/CLK
+High Pulse Width  Slow    RAMD32/CLK         n/a            1.050         4.000       2.950                storage_16_reg_0_7_0_4/RAMA/CLK
 
 
 
@@ -885,23 +885,23 @@ High Pulse Width  Slow    FDRE/C        n/a            0.500         8.000      
 From Clock:  icap_clk
   To Clock:  icap_clk
 
-Setup :            0  Failing Endpoints,  Worst Slack      121.519ns,  Total Violation        0.000ns
-Hold  :            0  Failing Endpoints,  Worst Slack        0.163ns,  Total Violation        0.000ns
+Setup :            0  Failing Endpoints,  Worst Slack      121.524ns,  Total Violation        0.000ns
+Hold  :            0  Failing Endpoints,  Worst Slack        0.143ns,  Total Violation        0.000ns
 PW    :            0  Failing Endpoints,  Worst Slack       63.500ns,  Total Violation        0.000ns
 ---------------------------------------------------------------------------------------------------
 
 
 Max Delay Paths
 --------------------------------------------------------------------------------------
-Slack (MET) :             121.519ns  (required time - arrival time)
-  Source:                 FSM_sequential_icap_resetinserter_state_reg[0]/C
+Slack (MET) :             121.524ns  (required time - arrival time)
+  Source:                 FSM_sequential_icap_resetinserter_state_reg[1]/C
                             (rising edge-triggered cell FDRE clocked by icap_clk  {rise@0.000ns fall@64.000ns period=128.000ns})
   Destination:            ICAPE2/RDWRB
                             (rising edge-triggered cell ICAPE2 clocked by icap_clk  {rise@0.000ns fall@64.000ns period=128.000ns})
   Path Group:             icap_clk
   Path Type:              Setup (Max at Slow Process Corner)
   Requirement:            128.000ns  (icap_clk rise@128.000ns - icap_clk rise@0.000ns)
-  Data Path Delay:        2.074ns  (logic 0.790ns (38.087%)  route 1.284ns (61.913%))
+  Data Path Delay:        2.069ns  (logic 0.790ns (38.179%)  route 1.279ns (61.821%))
   Logic Levels:           2  (LUT2=1 LUT6=1)
   Clock Path Skew:        -0.145ns (DCD - SCD + CPR)
     Destination Clock Delay (DCD):    0.439ns = ( 128.439 - 128.000 ) 
@@ -918,14 +918,14 @@ Slack (MET) :             121.519ns  (required time - arrival time)
                                                       0.000     0.000 r  
                          FDRE                         0.000     0.000 r  icap_clk_reg/Q
                          net (fo=40, unplaced)        0.584     0.584    icap_clk
-                         FDRE                                         r  FSM_sequential_icap_resetinserter_state_reg[0]/C
+                         FDRE                                         r  FSM_sequential_icap_resetinserter_state_reg[1]/C
   -------------------------------------------------------------------    -------------------
-                         FDRE (Prop_fdre_C_Q)         0.479     1.063 r  FSM_sequential_icap_resetinserter_state_reg[0]/Q
-                         net (fo=80, unplaced)        0.401     1.464    icap_resetinserter_state[0]
-                         LUT2 (Prop_lut2_I0_O)        0.214     1.678 r  ICAPE2_i_36/O
-                         net (fo=2, unplaced)         0.312     1.990    ICAPE2_i_36_n_0
-                         LUT6 (Prop_lut6_I1_O)        0.097     2.087 r  ICAPE2_i_2/O
-                         net (fo=1, unplaced)         0.571     2.658    basesoc_icap_rdwrb
+                         FDRE (Prop_fdre_C_Q)         0.479     1.063 r  FSM_sequential_icap_resetinserter_state_reg[1]/Q
+                         net (fo=50, unplaced)        0.389     1.452    icap_resetinserter_state[1]
+                         LUT2 (Prop_lut2_I0_O)        0.214     1.666 r  ICAPE2_i_36/O
+                         net (fo=3, unplaced)         0.319     1.985    ICAPE2_i_36_n_0
+                         LUT6 (Prop_lut6_I0_O)        0.097     2.082 r  ICAPE2_i_2/O
+                         net (fo=1, unplaced)         0.571     2.653    basesoc_icap_rdwrb
                          ICAPE2                                       r  ICAPE2/RDWRB
   -------------------------------------------------------------------    -------------------
 
@@ -940,9 +940,9 @@ Slack (MET) :             121.519ns  (required time - arrival time)
                                                      -4.191   124.177    ICAPE2
   -------------------------------------------------------------------
                          required time                        124.177    
-                         arrival time                          -2.658    
+                         arrival time                          -2.653    
   -------------------------------------------------------------------
-                         slack                                121.519    
+                         slack                                121.524    
 
 
 
@@ -950,16 +950,16 @@ Slack (MET) :             121.519ns  (required time - arrival time)
 
 Min Delay Paths
 --------------------------------------------------------------------------------------
-Slack (MET) :             0.163ns  (arrival time - required time)
-  Source:                 FSM_sequential_icap_resetinserter_state_reg[2]/C
+Slack (MET) :             0.143ns  (arrival time - required time)
+  Source:                 basesoc_icap_count_reg[0]/C
                             (rising edge-triggered cell FDRE clocked by icap_clk  {rise@0.000ns fall@64.000ns period=128.000ns})
-  Destination:            basesoc_icap_count_reg[0]/D
+  Destination:            basesoc_icap_count_reg[1]/D
                             (rising edge-triggered cell FDRE clocked by icap_clk  {rise@0.000ns fall@64.000ns period=128.000ns})
   Path Group:             icap_clk
   Path Type:              Hold (Min at Fast Process Corner)
   Requirement:            0.000ns  (icap_clk rise@0.000ns - icap_clk rise@0.000ns)
-  Data Path Delay:        0.486ns  (logic 0.309ns (63.610%)  route 0.177ns (36.390%))
-  Logic Levels:           1  (LUT4=1)
+  Data Path Delay:        0.466ns  (logic 0.312ns (66.950%)  route 0.154ns (33.050%))
+  Logic Levels:           1  (LUT5=1)
   Clock Path Skew:        0.145ns (DCD - SCD - CPR)
     Destination Clock Delay (DCD):    0.259ns
     Source Clock Delay      (SCD):    0.114ns
@@ -971,27 +971,27 @@ Slack (MET) :             0.163ns  (arrival time - required time)
                                                       0.000     0.000 r  
                          FDRE                         0.000     0.000 r  icap_clk_reg/Q
                          net (fo=40, unplaced)        0.114     0.114    icap_clk
-                         FDRE                                         r  FSM_sequential_icap_resetinserter_state_reg[2]/C
+                         FDRE                                         r  basesoc_icap_count_reg[0]/C
   -------------------------------------------------------------------    -------------------
-                         FDRE (Prop_fdre_C_Q)         0.211     0.325 r  FSM_sequential_icap_resetinserter_state_reg[2]/Q
-                         net (fo=83, unplaced)        0.177     0.502    icap_resetinserter_state[2]
-                         LUT4 (Prop_lut4_I3_O)        0.098     0.600 r  basesoc_icap_count[0]_i_1/O
-                         net (fo=1, unplaced)         0.000     0.600    basesoc_icap_count[0]_i_1_n_0
-                         FDRE                                         r  basesoc_icap_count_reg[0]/D
+                         FDRE (Prop_fdre_C_Q)         0.211     0.325 r  basesoc_icap_count_reg[0]/Q
+                         net (fo=17, unplaced)        0.154     0.479    basesoc_icap_count[0]
+                         LUT5 (Prop_lut5_I4_O)        0.101     0.580 r  basesoc_icap_count[1]_i_1/O
+                         net (fo=1, unplaced)         0.000     0.580    basesoc_icap_count_icap_next_value0[1]
+                         FDRE                                         r  basesoc_icap_count_reg[1]/D
   -------------------------------------------------------------------    -------------------
 
                          (clock icap_clk rise edge)
                                                       0.000     0.000 r  
                          FDRE                         0.000     0.000 r  icap_clk_reg/Q
                          net (fo=40, unplaced)        0.259     0.259    icap_clk
-                         FDRE                                         r  basesoc_icap_count_reg[0]/C
+                         FDRE                                         r  basesoc_icap_count_reg[1]/C
                          clock pessimism              0.000     0.259    
-                         FDRE (Hold_fdre_C_D)         0.178     0.437    basesoc_icap_count_reg[0]
+                         FDRE (Hold_fdre_C_D)         0.178     0.437    basesoc_icap_count_reg[1]
   -------------------------------------------------------------------
                          required time                         -0.437    
-                         arrival time                           0.600    
+                         arrival time                           0.580    
   -------------------------------------------------------------------
-                         slack                                  0.163    
+                         slack                                  0.143    
 
 
 
@@ -1170,7 +1170,7 @@ PW    :            0  Failing Endpoints,  Worst Slack        0.984ns,  Total Vio
 Max Delay Paths
 --------------------------------------------------------------------------------------
 Slack (MET) :             0.504ns  (required time - arrival time)
-  Source:                 basesoc_ad9361_ad9361phy_source_payload_ia_reg[4]/C
+  Source:                 basesoc_ad9361rfic_ad9361prbschecker0_data_reg[3]/C
                             (rising edge-triggered cell FDRE clocked by rfic_clk  {rise@0.000ns fall@2.034ns period=4.069ns})
   Destination:            basesoc_ad9361rfic_ad9361prbschecker0_count_reg[0]/R
                             (rising edge-triggered cell FDRE clocked by rfic_clk  {rise@0.000ns fall@2.034ns period=4.069ns})
@@ -1194,17 +1194,17 @@ Slack (MET) :             0.504ns  (required time - arrival time)
                          (clock rfic_clk rise edge)
                                                       0.000     0.000 r  
                          BUFG                         0.000     0.000 r  BUFG_8/O
-                         net (fo=539, unplaced)       0.571     0.571    rfic_clk
-                         FDRE                                         r  basesoc_ad9361_ad9361phy_source_payload_ia_reg[4]/C
+                         net (fo=452, unplaced)       0.571     0.571    rfic_clk
+                         FDRE                                         r  basesoc_ad9361rfic_ad9361prbschecker0_data_reg[3]/C
   -------------------------------------------------------------------    -------------------
-                         FDRE (Prop_fdre_C_Q)         0.341     0.912 r  basesoc_ad9361_ad9361phy_source_payload_ia_reg[4]/Q
-                         net (fo=2, unplaced)         0.706     1.618    basesoc_ad9361_ad9361phy_source_payload_ia_reg_n_0_[4]
+                         FDRE (Prop_fdre_C_Q)         0.341     0.912 r  basesoc_ad9361rfic_ad9361prbschecker0_data_reg[3]/Q
+                         net (fo=2, unplaced)         0.706     1.618    basesoc_ad9361rfic_ad9361prbschecker0_data_reg_n_0_[3]
                          LUT6 (Prop_lut6_I0_O)        0.199     1.817 r  basesoc_ad9361rfic_ad9361prbschecker0_data[15]_i_5/O
                          net (fo=1, unplaced)         0.000     1.817    basesoc_ad9361rfic_ad9361prbschecker0_data[15]_i_5_n_0
                          CARRY4 (Prop_carry4_S[1]_CO[3])
                                                       0.402     2.219 r  basesoc_ad9361rfic_ad9361prbschecker0_data_reg[15]_i_2/CO[3]
                          net (fo=1, unplaced)         0.684     2.903    basesoc_ad9361rfic_ad9361prbschecker0_error0
-                         LUT2 (Prop_lut2_I1_O)        0.097     3.000 r  basesoc_ad9361rfic_ad9361prbschecker0_data[15]_i_1/O
+                         LUT2 (Prop_lut2_I0_O)        0.097     3.000 r  basesoc_ad9361rfic_ad9361prbschecker0_data[15]_i_1/O
                          net (fo=27, unplaced)        0.639     3.639    basesoc_ad9361rfic_ad9361prbschecker0_error
                          FDRE                                         r  basesoc_ad9361rfic_ad9361prbschecker0_count_reg[0]/R
   -------------------------------------------------------------------    -------------------
@@ -1212,7 +1212,7 @@ Slack (MET) :             0.504ns  (required time - arrival time)
                          (clock rfic_clk rise edge)
                                                       4.069     4.069 r  
                          BUFG                         0.000     4.069 r  BUFG_8/O
-                         net (fo=539, unplaced)       0.426     4.495    rfic_clk
+                         net (fo=452, unplaced)       0.426     4.495    rfic_clk
                          FDRE                                         r  basesoc_ad9361rfic_ad9361prbschecker0_count_reg[0]/C
                          clock pessimism              0.000     4.495    
                          clock uncertainty           -0.035     4.460    
@@ -1249,7 +1249,7 @@ Slack (MET) :             0.029ns  (arrival time - required time)
                          (clock rfic_clk rise edge)
                                                       0.000     0.000 r  
                          BUFG                         0.000     0.000 r  BUFG_8/O
-                         net (fo=539, unplaced)       0.206     0.206    rfic_clk
+                         net (fo=452, unplaced)       0.206     0.206    rfic_clk
                          FDRE                                         r  basesoc_ad9361_ad9361phy_source_payload_qa_reg[2]/C
   -------------------------------------------------------------------    -------------------
                          FDRE (Prop_fdre_C_Q)         0.141     0.347 r  basesoc_ad9361_ad9361phy_source_payload_qa_reg[2]/Q
@@ -1260,7 +1260,7 @@ Slack (MET) :             0.029ns  (arrival time - required time)
                          (clock rfic_clk rise edge)
                                                       0.000     0.000 r  
                          BUFG                         0.000     0.000 r  BUFG_8/O
-                         net (fo=539, unplaced)       0.351     0.351    storage_14_reg_0_3_18_23/WCLK
+                         net (fo=452, unplaced)       0.351     0.351    storage_14_reg_0_3_18_23/WCLK
                          RAMD32                                       r  storage_14_reg_0_3_18_23/RAMA/CLK
                          clock pessimism              0.000     0.351    
                          RAMD32 (Hold_ramd32_CLK_I)
@@ -2304,7 +2304,7 @@ Slack (MET) :             6.543ns  (required time - arrival time)
                                                       0.050     8.921 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.333     9.255    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.026     9.281 r  BUFG/O
-                         net (fo=7063, unplaced)      0.206     9.486    sys_clk
+                         net (fo=6919, unplaced)      0.206     9.486    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl31_regs0_reg[0]/C
                          clock pessimism              0.000     9.486    
                          clock uncertainty           -0.268     9.218    
@@ -2379,7 +2379,7 @@ Slack (VIOLATED) :        -1.431ns  (arrival time - required time)
                                                       0.069     3.301 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.571     3.872    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.076     3.948 r  BUFG/O
-                         net (fo=7063, unplaced)      0.571     4.519    sys_clk
+                         net (fo=6919, unplaced)      0.571     4.519    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl32_regs0_reg[0]/C
                          clock pessimism              0.000     4.519    
                          clock uncertainty            0.268     4.787    
@@ -2463,7 +2463,7 @@ Slack (MET) :             2.643ns  (required time - arrival time)
                                                       0.050     8.921 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.333     9.255    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.026     9.281 r  BUFG/O
-                         net (fo=7063, unplaced)      0.206     9.486    sys_clk
+                         net (fo=6919, unplaced)      0.206     9.486    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl31_regs0_reg[0]/C
                          clock pessimism              0.000     9.486    
                          clock uncertainty           -0.261     9.226    
@@ -2538,7 +2538,7 @@ Slack (VIOLATED) :        -1.411ns  (arrival time - required time)
                                                       0.069     3.301 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.571     3.872    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.076     3.948 r  BUFG/O
-                         net (fo=7063, unplaced)      0.571     4.519    sys_clk
+                         net (fo=6919, unplaced)      0.571     4.519    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl32_regs0_reg[0]/C
                          clock pessimism              0.000     4.519    
                          clock uncertainty            0.261     4.780    
@@ -2619,7 +2619,7 @@ Slack (MET) :             6.786ns  (required time - arrival time)
                                                       0.050     8.921 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.333     9.255    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.026     9.281 r  BUFG/O
-                         net (fo=7063, unplaced)      0.206     9.486    sys_clk
+                         net (fo=6919, unplaced)      0.206     9.486    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl26_regs0_reg[8]/C
                          clock pessimism              0.000     9.486    
                          clock uncertainty           -0.268     9.218    
@@ -2690,7 +2690,7 @@ Slack (VIOLATED) :        -2.238ns  (arrival time - required time)
                                                       0.069     3.301 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.571     3.872    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.076     3.948 r  BUFG/O
-                         net (fo=7063, unplaced)      0.571     4.519    sys_clk
+                         net (fo=6919, unplaced)      0.571     4.519    sys_clk
                          FDRE                                         r  impl_xilinxmultiregimpl22_regs0_reg/C
                          clock pessimism              0.000     4.519    
                          clock uncertainty            0.268     4.787    
@@ -3060,7 +3060,7 @@ Slack (MET) :             4.667ns  (required time - arrival time)
                                                       0.069     3.301 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.571     3.872    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.076     3.948 r  BUFG/O
-                         net (fo=7063, unplaced)      0.571     4.519    sys_clk
+                         net (fo=6919, unplaced)      0.571     4.519    sys_clk
                          FDRE                                         r  basesoc_s7pciephy_tx_datapath_cdc_cdc_graycounter0_q_reg[3]/C
   -------------------------------------------------------------------    -------------------
                          FDRE (Prop_fdre_C_Q)         0.341     4.860 r  basesoc_s7pciephy_tx_datapath_cdc_cdc_graycounter0_q_reg[3]/Q
@@ -3131,7 +3131,7 @@ Slack (MET) :             0.080ns  (arrival time - required time)
                                                       0.050     0.921 r  PLLE2_ADV/CLKOUT0
                          net (fo=1, unplaced)         0.333     1.255    basesoc_crg_clkout0
                          BUFG (Prop_bufg_I_O)         0.026     1.281 r  BUFG/O
-                         net (fo=7063, unplaced)      0.206     1.486    sys_clk
+                         net (fo=6919, unplaced)      0.206     1.486    sys_clk
                          FDRE                                         r  basesoc_s7pciephy_tx_datapath_cdc_cdc_graycounter0_q_reg[0]/C
   -------------------------------------------------------------------    -------------------
                          FDRE (Prop_fdre_C_Q)         0.141     1.627 r  basesoc_s7pciephy_tx_datapath_cdc_cdc_graycounter0_q_reg[0]/Q

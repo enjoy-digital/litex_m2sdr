@@ -9,7 +9,7 @@
 // Filename   : litex_m2sdr_m2_pcie_x1.v
 // Device     : xc7a200tsbg484-3
 // LiteX sha1 : d89f19e55
-// Date       : 2025-09-23 10:34:47
+// Date       : 2025-10-06 15:03:05
 //------------------------------------------------------------------------------
 
 `timescale 1ns / 1ps
@@ -438,6 +438,10 @@ BaseSoC
 │    │    └─── conv (Converter)
 │    │    │    └─── _upconverter_0* (_UpConverter)
 │    └─── tx_pipeline (Pipeline)
+│    └─── scheduler_tx (Scheduler)
+│    │    └─── data_fifo (SyncFIFO)
+│    │    │    └─── fifo (SyncFIFO)
+│    │    └─── fsm (FSM)
 │    └─── rx_pipeline (Pipeline)
 │    └─── ad9361prbsgenerator_0* (AD9361PRBSGenerator)
 │    └─── ad9361prbschecker_0* (AD9361PRBSChecker)
@@ -606,66 +610,66 @@ BaseSoC
 └─── csr_interconnect (InterconnectShared)
 └─── [FDPE]
 └─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
 └─── [IOBUF]
 └─── [IOBUF]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
+└─── [ODDR]
+└─── [ODDR]
 └─── [ODDR]
 └─── [IDDR]
-└─── [ODDR]
-└─── [ODDR]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
 └─── [IDDR]
 └─── [ODDR]
 * : Generated name.
@@ -676,8 +680,8 @@ BaseSoC
 // Signals
 //------------------------------------------------------------------------------
 
-reg     [1:0] ad9361rfic_next_state = 2'd0;
-reg     [1:0] ad9361rfic_state = 2'd0;
+reg     [1:0] ad9361spimaster_next_state = 2'd0;
+reg     [1:0] ad9361spimaster_state = 2'd0;
 wire          basesoc;
 wire          basesoc_ad9361_ad9361phy;
 wire          basesoc_ad9361_ad9361phy_loopback0;
@@ -785,16 +789,17 @@ reg     [3:0] basesoc_ad9361_gpio_tx_unpacker_o1 = 4'd0;
 reg     [3:0] basesoc_ad9361_gpio_tx_unpacker_o2 = 4'd0;
 reg     [3:0] basesoc_ad9361_gpio_tx_unpacker_oe1 = 4'd0;
 reg     [3:0] basesoc_ad9361_gpio_tx_unpacker_oe2 = 4'd0;
-wire          basesoc_ad9361_gpio_tx_unpacker_sink_first;
-wire          basesoc_ad9361_gpio_tx_unpacker_sink_last;
-wire   [63:0] basesoc_ad9361_gpio_tx_unpacker_sink_payload_data;
-wire          basesoc_ad9361_gpio_tx_unpacker_sink_ready;
-wire          basesoc_ad9361_gpio_tx_unpacker_sink_valid;
+reg           basesoc_ad9361_gpio_tx_unpacker_sink_first = 1'd0;
+reg           basesoc_ad9361_gpio_tx_unpacker_sink_last = 1'd0;
+reg    [63:0] basesoc_ad9361_gpio_tx_unpacker_sink_payload_data = 64'd0;
+reg           basesoc_ad9361_gpio_tx_unpacker_sink_ready = 1'd0;
+reg           basesoc_ad9361_gpio_tx_unpacker_sink_valid = 1'd0;
 wire          basesoc_ad9361_gpio_tx_unpacker_source_first;
 wire          basesoc_ad9361_gpio_tx_unpacker_source_last;
 wire   [63:0] basesoc_ad9361_gpio_tx_unpacker_source_payload_data;
 wire          basesoc_ad9361_gpio_tx_unpacker_source_ready;
 wire          basesoc_ad9361_gpio_tx_unpacker_source_valid;
+reg    [63:0] basesoc_ad9361_rfic_time = 64'd0;
 reg           basesoc_ad9361_rx_bitmode_converter_demux = 1'd0;
 wire          basesoc_ad9361_rx_bitmode_converter_load_part;
 reg           basesoc_ad9361_rx_bitmode_converter_sink_first = 1'd0;
@@ -898,9 +903,63 @@ wire          basesoc_ad9361_rx_cdc_source_source_last;
 wire   [63:0] basesoc_ad9361_rx_cdc_source_source_payload_data;
 wire          basesoc_ad9361_rx_cdc_source_source_ready;
 wire          basesoc_ad9361_rx_cdc_source_source_valid;
+wire          basesoc_ad9361_scheduler_tx_almost_empty;
+wire          basesoc_ad9361_scheduler_tx_almost_full;
+reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_consume = 13'd0;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_do_read;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp;
+reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_level = 13'd0;
+reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_produce = 13'd0;
+wire   [12:0] basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr;
+wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_replace = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_first = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_last = 1'd0;
+reg    [63:0] basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data = 64'd0;
+reg    [63:0] basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp = 64'd0;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_ready = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_valid = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_source_first;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_source_last;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_source_ready = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_source_valid;
+wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din;
+wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable;
+reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr = 13'd0;
+wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_r;
+wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_wrport_we;
+wire          basesoc_ad9361_scheduler_tx_empty;
+wire          basesoc_ad9361_scheduler_tx_full;
+wire   [63:0] basesoc_ad9361_scheduler_tx_now;
+wire          basesoc_ad9361_scheduler_tx_sink_sink_first;
+wire          basesoc_ad9361_scheduler_tx_sink_sink_last;
+wire   [63:0] basesoc_ad9361_scheduler_tx_sink_sink_payload_data;
+wire   [63:0] basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp;
+reg           basesoc_ad9361_scheduler_tx_sink_sink_ready = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_sink_sink_valid;
+reg           basesoc_ad9361_scheduler_tx_source_source_first = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_source_source_last = 1'd0;
+reg    [63:0] basesoc_ad9361_scheduler_tx_source_source_payload_data = 64'd0;
+reg           basesoc_ad9361_scheduler_tx_source_source_ready = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_source_source_valid = 1'd0;
 wire          basesoc_ad9361_sink_sink_first;
 wire          basesoc_ad9361_sink_sink_last;
 wire   [63:0] basesoc_ad9361_sink_sink_payload_data;
+wire   [63:0] basesoc_ad9361_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_sink_sink_ready;
 wire          basesoc_ad9361_sink_sink_valid;
 wire          basesoc_ad9361_source_source_first;
@@ -929,11 +988,13 @@ wire          basesoc_ad9361_tx_bitmode_mode;
 wire          basesoc_ad9361_tx_bitmode_sink_first;
 wire          basesoc_ad9361_tx_bitmode_sink_last;
 wire   [63:0] basesoc_ad9361_tx_bitmode_sink_payload_data;
+wire   [63:0] basesoc_ad9361_tx_bitmode_sink_payload_timestamp;
 reg           basesoc_ad9361_tx_bitmode_sink_ready = 1'd0;
 wire          basesoc_ad9361_tx_bitmode_sink_valid;
 reg           basesoc_ad9361_tx_bitmode_source_first = 1'd0;
 reg           basesoc_ad9361_tx_bitmode_source_last = 1'd0;
 reg    [63:0] basesoc_ad9361_tx_bitmode_source_payload_data = 64'd0;
+reg    [63:0] basesoc_ad9361_tx_bitmode_source_payload_timestamp = 64'd0;
 wire          basesoc_ad9361_tx_bitmode_source_ready;
 wire          basesoc_ad9361_tx_bitmode_source_source_first;
 wire          basesoc_ad9361_tx_bitmode_source_source_last;
@@ -944,26 +1005,30 @@ reg           basesoc_ad9361_tx_bitmode_source_valid = 1'd0;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_first;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data;
+wire   [63:0] basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_ready;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_valid;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_first = 1'd0;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_last = 1'd0;
 reg    [63:0] basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data = 64'd0;
+reg    [63:0] basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp = 64'd0;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_source_ready;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_valid = 1'd0;
 wire          basesoc_ad9361_tx_buffer_sink_sink_first;
 wire          basesoc_ad9361_tx_buffer_sink_sink_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_sink_sink_payload_data;
+wire   [63:0] basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_sink_sink_ready;
 wire          basesoc_ad9361_tx_buffer_sink_sink_valid;
 wire          basesoc_ad9361_tx_buffer_source_source_first;
 wire          basesoc_ad9361_tx_buffer_source_source_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_source_source_payload_data;
+wire   [63:0] basesoc_ad9361_tx_buffer_source_source_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_source_source_ready;
 wire          basesoc_ad9361_tx_buffer_source_source_valid;
 wire          basesoc_ad9361_tx_cdc_cd_rst;
-wire   [65:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_din;
-wire   [65:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
+wire  [129:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_din;
+wire  [129:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_re;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_we;
@@ -972,9 +1037,11 @@ wire    [2:0] basesoc_ad9361_tx_cdc_cdc_consume_wdomain;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_in_first;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_in_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data;
+wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_out_first;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_out_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data;
+wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_graycounter0_ce;
 (* dont_touch = "true" *)
 reg     [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter0_q = 3'd0;
@@ -989,31 +1056,35 @@ wire    [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next;
 reg     [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary = 3'd0;
 wire    [2:0] basesoc_ad9361_tx_cdc_cdc_produce_rdomain;
 wire    [1:0] basesoc_ad9361_tx_cdc_cdc_rdport_adr;
-wire   [65:0] basesoc_ad9361_tx_cdc_cdc_rdport_dat_r;
+wire  [129:0] basesoc_ad9361_tx_cdc_cdc_rdport_dat_r;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_first;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_sink_payload_data;
+wire   [63:0] basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_ready;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_valid;
 wire          basesoc_ad9361_tx_cdc_cdc_source_first;
 wire          basesoc_ad9361_tx_cdc_cdc_source_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_source_payload_data;
+wire   [63:0] basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_source_ready;
 wire          basesoc_ad9361_tx_cdc_cdc_source_valid;
 wire    [1:0] basesoc_ad9361_tx_cdc_cdc_wrport_adr;
-wire   [65:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_r;
-wire   [65:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
+wire  [129:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_r;
+wire  [129:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
 wire          basesoc_ad9361_tx_cdc_cdc_wrport_we;
 wire          basesoc_ad9361_tx_cdc_sink_sink_first;
 wire          basesoc_ad9361_tx_cdc_sink_sink_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_sink_sink_payload_data;
+wire   [63:0] basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_sink_sink_ready;
 wire          basesoc_ad9361_tx_cdc_sink_sink_valid;
-wire          basesoc_ad9361_tx_cdc_source_source_first;
-wire          basesoc_ad9361_tx_cdc_source_source_last;
-wire   [63:0] basesoc_ad9361_tx_cdc_source_source_payload_data;
-wire          basesoc_ad9361_tx_cdc_source_source_ready;
-wire          basesoc_ad9361_tx_cdc_source_source_valid;
+reg           basesoc_ad9361_tx_cdc_source_source_first = 1'd0;
+reg           basesoc_ad9361_tx_cdc_source_source_last = 1'd0;
+reg    [63:0] basesoc_ad9361_tx_cdc_source_source_payload_data = 64'd0;
+reg    [63:0] basesoc_ad9361_tx_cdc_source_source_payload_timestamp = 64'd0;
+reg           basesoc_ad9361_tx_cdc_source_source_ready = 1'd0;
+reg           basesoc_ad9361_tx_cdc_source_source_valid = 1'd0;
 wire          basesoc_ad9361rfic_ad9361prbschecker0_ce0;
 wire          basesoc_ad9361rfic_ad9361prbschecker0_ce1;
 reg    [10:0] basesoc_ad9361rfic_ad9361prbschecker0_count = 11'd1024;
@@ -2652,6 +2723,7 @@ wire          basesoc_rx_sink_valid;
 reg           basesoc_rx_source_first = 1'd0;
 reg           basesoc_rx_source_last = 1'd0;
 reg    [63:0] basesoc_rx_source_payload_data = 64'd0;
+reg    [63:0] basesoc_rx_source_payload_timestamp = 64'd0;
 wire          basesoc_rx_source_ready;
 reg           basesoc_rx_source_valid = 1'd0;
 wire   [63:0] basesoc_rx_timestamp;
@@ -3507,6 +3579,7 @@ wire          basesoc_tx_sink_valid;
 reg           basesoc_tx_source_first = 1'd0;
 reg           basesoc_tx_source_last = 1'd0;
 reg    [63:0] basesoc_tx_source_payload_data = 64'd0;
+reg    [63:0] basesoc_tx_source_payload_timestamp = 64'd0;
 wire          basesoc_tx_source_ready;
 reg           basesoc_tx_source_valid = 1'd0;
 reg    [63:0] basesoc_tx_timestamp = 64'd0;
@@ -4185,10 +4258,10 @@ wire          from3033_clk;
 wire          from3033_rst;
 wire          from3224_clk;
 wire          from3224_rst;
-wire          from7250_clk;
-wire          from7250_rst;
-wire          from7401_clk;
-wire          from7401_rst;
+wire          from7252_clk;
+wire          from7252_rst;
+wire          from7415_clk;
+wire          from7415_rst;
 reg     [1:0] grant = 2'd0;
 (* dont_touch = "true" *)
 reg           icap_clk = 1'd0;
@@ -5312,6 +5385,8 @@ wire          s7pciephy_reset6;
 wire          s7pciephy_reset7;
 reg     [1:0] s7spiflash_next_state = 2'd0;
 reg     [1:0] s7spiflash_state = 2'd0;
+reg     [1:0] scheduler_next_state = 2'd0;
+reg     [1:0] scheduler_state = 2'd0;
 reg           shared_ack = 1'd0;
 wire   [29:0] shared_adr;
 wire    [1:0] shared_bte;
@@ -5383,10 +5458,10 @@ wire          to3033_clk;
 wire          to3033_rst;
 wire          to3224_clk;
 wire          to3224_rst;
-wire          to7250_clk;
-wire          to7250_rst;
-wire          to7401_clk;
-wire          to7401_rst;
+wire          to7252_clk;
+wire          to7252_rst;
+wire          to7415_clk;
+wire          to7415_rst;
 reg     [2:0] txheaderextracter_next_state = 3'd0;
 reg     [2:0] txheaderextracter_state = 3'd0;
 reg     [2:0] uartbone_next_state = 3'd0;
@@ -5425,6 +5500,7 @@ assign basesoc_tx_source_ready = basesoc_ad9361_sink_sink_ready;
 assign basesoc_ad9361_sink_sink_first = basesoc_tx_source_first;
 assign basesoc_ad9361_sink_sink_last = basesoc_tx_source_last;
 assign basesoc_ad9361_sink_sink_payload_data = basesoc_tx_source_payload_data;
+assign basesoc_ad9361_sink_sink_payload_timestamp = basesoc_tx_source_payload_timestamp;
 assign basesoc_rx_sink_valid = basesoc_ad9361_source_source_valid;
 assign basesoc_ad9361_source_source_ready = basesoc_rx_sink_ready;
 assign basesoc_rx_sink_first = basesoc_ad9361_source_source_first;
@@ -10045,6 +10121,7 @@ assign basesoc_basesoc_buffering_syncfifo1_syncfifo1_writable = (basesoc_basesoc
 assign basesoc_basesoc_buffering_syncfifo1_syncfifo1_readable = (basesoc_basesoc_buffering_syncfifo1_level0 != 1'd0);
 assign basesoc_ad9361_tx_bitmode_mode = basesoc_ad9361_csrfield_mode;
 assign basesoc_ad9361_rx_bitmode_mode = basesoc_ad9361_csrfield_mode;
+assign basesoc_ad9361_scheduler_tx_now = basesoc_ad9361_rfic_time;
 assign basesoc_ad9361_gpio_tx_unpacker_source_ready = basesoc_ad9361_ad9361phy_sink_ready;
 assign basesoc_ad9361_ad9361phy_sink_payload_qa = basesoc_ad9361_gpio_tx_unpacker_source_payload_data[31:16];
 assign basesoc_ad9361_ad9361phy_sink_payload_qb = basesoc_ad9361_gpio_tx_unpacker_source_payload_data[63:48];
@@ -10092,22 +10169,22 @@ assign ad9361_spi_cs_n = (~basesoc_ad9361_ad9361spimaster_chip_select);
 assign basesoc_ad9361_ad9361spimaster_mosi = basesoc_ad9361_ad9361spimaster_mosi_shift_reg[23];
 assign basesoc_ad9361_ad9361spimaster_miso_status = basesoc_ad9361_ad9361spimaster_miso_shift_reg;
 always @(*) begin
-    ad9361rfic_next_state <= 2'd0;
+    ad9361spimaster_next_state <= 2'd0;
     basesoc_ad9361_ad9361spimaster_chip_select <= 1'd0;
     basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= 8'd0;
     basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce <= 1'd0;
     basesoc_ad9361_ad9361spimaster_done <= 1'd0;
     basesoc_ad9361_ad9361spimaster_shift <= 1'd0;
-    ad9361rfic_next_state <= ad9361rfic_state;
-    case (ad9361rfic_state)
+    ad9361spimaster_next_state <= ad9361spimaster_state;
+    case (ad9361spimaster_state)
         1'd1: begin
             if (basesoc_ad9361_ad9361spimaster_clk_clr) begin
-                ad9361rfic_next_state <= 2'd2;
+                ad9361spimaster_next_state <= 2'd2;
             end
         end
         2'd2: begin
             if ((basesoc_ad9361_ad9361spimaster_length == basesoc_ad9361_ad9361spimaster_cnt)) begin
-                ad9361rfic_next_state <= 2'd3;
+                ad9361spimaster_next_state <= 2'd3;
             end else begin
                 basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= (basesoc_ad9361_ad9361spimaster_cnt + basesoc_ad9361_ad9361spimaster_clk_clr);
                 basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce <= 1'd1;
@@ -10117,13 +10194,13 @@ always @(*) begin
         end
         2'd3: begin
             if (basesoc_ad9361_ad9361spimaster_clk_set) begin
-                ad9361rfic_next_state <= 1'd0;
+                ad9361spimaster_next_state <= 1'd0;
             end
             basesoc_ad9361_ad9361spimaster_shift <= 1'd1;
         end
         default: begin
             if (basesoc_ad9361_ad9361spimaster_start) begin
-                ad9361rfic_next_state <= 1'd1;
+                ad9361spimaster_next_state <= 1'd1;
             end
             basesoc_ad9361_ad9361spimaster_done <= 1'd1;
             basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= 1'd0;
@@ -10168,7 +10245,11 @@ always @(*) begin
     end
 end
 assign basesoc_ad9361_gpio_tx_unpacker_source_valid = basesoc_ad9361_gpio_tx_unpacker_sink_valid;
-assign basesoc_ad9361_gpio_tx_unpacker_sink_ready = basesoc_ad9361_gpio_tx_unpacker_source_ready;
+always @(*) begin
+    basesoc_ad9361_gpio_tx_unpacker_sink_ready <= 1'd0;
+    basesoc_ad9361_gpio_tx_unpacker_sink_ready <= basesoc_ad9361_scheduler_tx_source_source_ready;
+    basesoc_ad9361_gpio_tx_unpacker_sink_ready <= basesoc_ad9361_gpio_tx_unpacker_source_ready;
+end
 assign basesoc_ad9361_gpio_tx_unpacker_source_first = basesoc_ad9361_gpio_tx_unpacker_sink_first;
 assign basesoc_ad9361_gpio_tx_unpacker_source_last = basesoc_ad9361_gpio_tx_unpacker_sink_last;
 assign basesoc_ad9361_gpio_tx_unpacker_source_payload_data = basesoc_ad9361_gpio_tx_unpacker_sink_payload_data;
@@ -10198,30 +10279,54 @@ always @(*) begin
         basesoc_ad9361_gpio_rx_packer_source_payload_data[63:60] <= 1'd0;
     end
 end
-assign from7250_clk = sys_clk;
-assign to7250_clk = rfic_clk;
+assign from7252_clk = sys_clk;
+assign to7252_clk = rfic_clk;
 assign basesoc_ad9361_tx_cdc_cd_rst = (sys_rst | rfic_rst);
 assign basesoc_ad9361_tx_cdc_cdc_sink_valid = basesoc_ad9361_tx_cdc_sink_sink_valid;
 assign basesoc_ad9361_tx_cdc_sink_sink_ready = basesoc_ad9361_tx_cdc_cdc_sink_ready;
 assign basesoc_ad9361_tx_cdc_cdc_sink_first = basesoc_ad9361_tx_cdc_sink_sink_first;
 assign basesoc_ad9361_tx_cdc_cdc_sink_last = basesoc_ad9361_tx_cdc_sink_sink_last;
 assign basesoc_ad9361_tx_cdc_cdc_sink_payload_data = basesoc_ad9361_tx_cdc_sink_sink_payload_data;
-assign basesoc_ad9361_tx_cdc_source_source_valid = basesoc_ad9361_tx_cdc_cdc_source_valid;
+assign basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp = basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp;
+always @(*) begin
+    basesoc_ad9361_tx_cdc_source_source_valid <= 1'd0;
+    basesoc_ad9361_tx_cdc_source_source_valid <= basesoc_ad9361_scheduler_tx_sink_sink_valid;
+    basesoc_ad9361_tx_cdc_source_source_valid <= basesoc_ad9361_tx_cdc_cdc_source_valid;
+end
 assign basesoc_ad9361_tx_cdc_cdc_source_ready = basesoc_ad9361_tx_cdc_source_source_ready;
-assign basesoc_ad9361_tx_cdc_source_source_first = basesoc_ad9361_tx_cdc_cdc_source_first;
-assign basesoc_ad9361_tx_cdc_source_source_last = basesoc_ad9361_tx_cdc_cdc_source_last;
-assign basesoc_ad9361_tx_cdc_source_source_payload_data = basesoc_ad9361_tx_cdc_cdc_source_payload_data;
-assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_din = {basesoc_ad9361_tx_cdc_cdc_fifo_in_last, basesoc_ad9361_tx_cdc_cdc_fifo_in_first, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data};
-assign {basesoc_ad9361_tx_cdc_cdc_fifo_out_last, basesoc_ad9361_tx_cdc_cdc_fifo_out_first, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data} = basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
+always @(*) begin
+    basesoc_ad9361_tx_cdc_source_source_first <= 1'd0;
+    basesoc_ad9361_tx_cdc_source_source_first <= basesoc_ad9361_scheduler_tx_sink_sink_first;
+    basesoc_ad9361_tx_cdc_source_source_first <= basesoc_ad9361_tx_cdc_cdc_source_first;
+end
+always @(*) begin
+    basesoc_ad9361_tx_cdc_source_source_last <= 1'd0;
+    basesoc_ad9361_tx_cdc_source_source_last <= basesoc_ad9361_scheduler_tx_sink_sink_last;
+    basesoc_ad9361_tx_cdc_source_source_last <= basesoc_ad9361_tx_cdc_cdc_source_last;
+end
+always @(*) begin
+    basesoc_ad9361_tx_cdc_source_source_payload_data <= 64'd0;
+    basesoc_ad9361_tx_cdc_source_source_payload_data <= basesoc_ad9361_scheduler_tx_sink_sink_payload_data;
+    basesoc_ad9361_tx_cdc_source_source_payload_data <= basesoc_ad9361_tx_cdc_cdc_source_payload_data;
+end
+always @(*) begin
+    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= 64'd0;
+    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp;
+    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp;
+end
+assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_din = {basesoc_ad9361_tx_cdc_cdc_fifo_in_last, basesoc_ad9361_tx_cdc_cdc_fifo_in_first, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data};
+assign {basesoc_ad9361_tx_cdc_cdc_fifo_out_last, basesoc_ad9361_tx_cdc_cdc_fifo_out_first, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data} = basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
 assign basesoc_ad9361_tx_cdc_cdc_sink_ready = basesoc_ad9361_tx_cdc_cdc_asyncfifo_writable;
 assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_we = basesoc_ad9361_tx_cdc_cdc_sink_valid;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_first = basesoc_ad9361_tx_cdc_cdc_sink_first;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_last = basesoc_ad9361_tx_cdc_cdc_sink_last;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data = basesoc_ad9361_tx_cdc_cdc_sink_payload_data;
+assign basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp = basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_cdc_source_valid = basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable;
 assign basesoc_ad9361_tx_cdc_cdc_source_first = basesoc_ad9361_tx_cdc_cdc_fifo_out_first;
 assign basesoc_ad9361_tx_cdc_cdc_source_last = basesoc_ad9361_tx_cdc_cdc_fifo_out_last;
 assign basesoc_ad9361_tx_cdc_cdc_source_payload_data = basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data;
+assign basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp = basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_re = basesoc_ad9361_tx_cdc_cdc_source_ready;
 assign basesoc_ad9361_tx_cdc_cdc_graycounter0_ce = (basesoc_ad9361_tx_cdc_cdc_asyncfifo_writable & basesoc_ad9361_tx_cdc_cdc_asyncfifo_we);
 assign basesoc_ad9361_tx_cdc_cdc_graycounter1_ce = (basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable & basesoc_ad9361_tx_cdc_cdc_asyncfifo_re);
@@ -10250,8 +10355,8 @@ always @(*) begin
     end
 end
 assign basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next = (basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary ^ basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary[2:1]);
-assign from7401_clk = rfic_clk;
-assign to7401_clk = sys_clk;
+assign from7415_clk = rfic_clk;
+assign to7415_clk = sys_clk;
 assign basesoc_ad9361_rx_cdc_cd_rst = (rfic_rst | sys_rst);
 assign basesoc_ad9361_rx_cdc_cdc_sink_valid = basesoc_ad9361_rx_cdc_sink_sink_valid;
 assign basesoc_ad9361_rx_cdc_sink_sink_ready = basesoc_ad9361_rx_cdc_cdc_sink_ready;
@@ -10308,11 +10413,13 @@ assign basesoc_ad9361_tx_buffer_sink_sink_ready = basesoc_ad9361_tx_buffer_pipe_
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_first = basesoc_ad9361_tx_buffer_sink_sink_first;
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_last = basesoc_ad9361_tx_buffer_sink_sink_last;
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data = basesoc_ad9361_tx_buffer_sink_sink_payload_data;
+assign basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp = basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp;
 assign basesoc_ad9361_tx_buffer_source_source_valid = basesoc_ad9361_tx_buffer_pipe_valid_source_valid;
 assign basesoc_ad9361_tx_buffer_pipe_valid_source_ready = basesoc_ad9361_tx_buffer_source_source_ready;
 assign basesoc_ad9361_tx_buffer_source_source_first = basesoc_ad9361_tx_buffer_pipe_valid_source_first;
 assign basesoc_ad9361_tx_buffer_source_source_last = basesoc_ad9361_tx_buffer_pipe_valid_source_last;
 assign basesoc_ad9361_tx_buffer_source_source_payload_data = basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data;
+assign basesoc_ad9361_tx_buffer_source_source_payload_timestamp = basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp;
 assign basesoc_ad9361_rx_buffer_pipe_valid_sink_ready = ((~basesoc_ad9361_rx_buffer_pipe_valid_source_valid) | basesoc_ad9361_rx_buffer_pipe_valid_source_ready);
 assign basesoc_ad9361_rx_buffer_pipe_valid_sink_valid = basesoc_ad9361_rx_buffer_sink_sink_valid;
 assign basesoc_ad9361_rx_buffer_sink_sink_ready = basesoc_ad9361_rx_buffer_pipe_valid_sink_ready;
@@ -10333,6 +10440,7 @@ always @(*) begin
     basesoc_ad9361_tx_bitmode_source_first <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_last <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_payload_data <= 64'd0;
+    basesoc_ad9361_tx_bitmode_source_payload_timestamp <= 64'd0;
     basesoc_ad9361_tx_bitmode_source_source_ready <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_valid <= 1'd0;
     if ((basesoc_ad9361_tx_bitmode_mode == 1'd0)) begin
@@ -10341,6 +10449,7 @@ always @(*) begin
         basesoc_ad9361_tx_bitmode_source_first <= basesoc_ad9361_tx_bitmode_sink_first;
         basesoc_ad9361_tx_bitmode_source_last <= basesoc_ad9361_tx_bitmode_sink_last;
         basesoc_ad9361_tx_bitmode_source_payload_data <= basesoc_ad9361_tx_bitmode_sink_payload_data;
+        basesoc_ad9361_tx_bitmode_source_payload_timestamp <= basesoc_ad9361_tx_bitmode_sink_payload_timestamp;
     end
     if ((basesoc_ad9361_tx_bitmode_mode == 1'd1)) begin
         basesoc_ad9361_tx_bitmode_converter_sink_valid <= basesoc_ad9361_tx_bitmode_sink_valid;
@@ -10428,21 +10537,101 @@ assign basesoc_ad9361_sink_sink_ready = basesoc_ad9361_tx_buffer_sink_sink_ready
 assign basesoc_ad9361_tx_buffer_sink_sink_first = basesoc_ad9361_sink_sink_first;
 assign basesoc_ad9361_tx_buffer_sink_sink_last = basesoc_ad9361_sink_sink_last;
 assign basesoc_ad9361_tx_buffer_sink_sink_payload_data = basesoc_ad9361_sink_sink_payload_data;
+assign basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp = basesoc_ad9361_sink_sink_payload_timestamp;
 assign basesoc_ad9361_tx_bitmode_sink_valid = basesoc_ad9361_tx_buffer_source_source_valid;
 assign basesoc_ad9361_tx_buffer_source_source_ready = basesoc_ad9361_tx_bitmode_sink_ready;
 assign basesoc_ad9361_tx_bitmode_sink_first = basesoc_ad9361_tx_buffer_source_source_first;
 assign basesoc_ad9361_tx_bitmode_sink_last = basesoc_ad9361_tx_buffer_source_source_last;
 assign basesoc_ad9361_tx_bitmode_sink_payload_data = basesoc_ad9361_tx_buffer_source_source_payload_data;
+assign basesoc_ad9361_tx_bitmode_sink_payload_timestamp = basesoc_ad9361_tx_buffer_source_source_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_sink_sink_valid = basesoc_ad9361_tx_bitmode_source_valid;
 assign basesoc_ad9361_tx_bitmode_source_ready = basesoc_ad9361_tx_cdc_sink_sink_ready;
 assign basesoc_ad9361_tx_cdc_sink_sink_first = basesoc_ad9361_tx_bitmode_source_first;
 assign basesoc_ad9361_tx_cdc_sink_sink_last = basesoc_ad9361_tx_bitmode_source_last;
 assign basesoc_ad9361_tx_cdc_sink_sink_payload_data = basesoc_ad9361_tx_bitmode_source_payload_data;
-assign basesoc_ad9361_gpio_tx_unpacker_sink_valid = basesoc_ad9361_tx_cdc_source_source_valid;
-assign basesoc_ad9361_tx_cdc_source_source_ready = basesoc_ad9361_gpio_tx_unpacker_sink_ready;
-assign basesoc_ad9361_gpio_tx_unpacker_sink_first = basesoc_ad9361_tx_cdc_source_source_first;
-assign basesoc_ad9361_gpio_tx_unpacker_sink_last = basesoc_ad9361_tx_cdc_source_source_last;
-assign basesoc_ad9361_gpio_tx_unpacker_sink_payload_data = basesoc_ad9361_tx_cdc_source_source_payload_data;
+assign basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp = basesoc_ad9361_tx_bitmode_source_payload_timestamp;
+assign basesoc_ad9361_scheduler_tx_full = (basesoc_ad9361_scheduler_tx_data_fifo_level == 13'd8176);
+assign basesoc_ad9361_scheduler_tx_almost_full = (basesoc_ad9361_scheduler_tx_data_fifo_level >= 13'd7154);
+assign basesoc_ad9361_scheduler_tx_empty = (basesoc_ad9361_scheduler_tx_data_fifo_level == 1'd0);
+assign basesoc_ad9361_scheduler_tx_almost_empty = (basesoc_ad9361_scheduler_tx_data_fifo_level <= 10'd1022);
+assign basesoc_ad9361_scheduler_tx_sink_sink_valid = basesoc_ad9361_scheduler_tx_data_fifo_sink_valid;
+assign basesoc_ad9361_scheduler_tx_sink_sink_first = basesoc_ad9361_scheduler_tx_data_fifo_sink_first;
+assign basesoc_ad9361_scheduler_tx_sink_sink_last = basesoc_ad9361_scheduler_tx_data_fifo_sink_last;
+assign basesoc_ad9361_scheduler_tx_sink_sink_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data;
+assign basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp;
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_source_source_payload_data <= 64'd0;
+    basesoc_ad9361_scheduler_tx_source_source_payload_data <= basesoc_ad9361_gpio_tx_unpacker_sink_payload_data;
+    basesoc_ad9361_scheduler_tx_source_source_payload_data <= basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
+end
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_source_source_first <= 1'd0;
+    basesoc_ad9361_scheduler_tx_source_source_first <= basesoc_ad9361_gpio_tx_unpacker_sink_first;
+    basesoc_ad9361_scheduler_tx_source_source_first <= basesoc_ad9361_scheduler_tx_data_fifo_source_first;
+end
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_source_source_last <= 1'd0;
+    basesoc_ad9361_scheduler_tx_source_source_last <= basesoc_ad9361_gpio_tx_unpacker_sink_last;
+    basesoc_ad9361_scheduler_tx_source_source_last <= basesoc_ad9361_scheduler_tx_data_fifo_source_last;
+end
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din = {basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data};
+assign {basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data} = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= 1'd0;
+    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= basesoc_ad9361_scheduler_tx_sink_sink_ready;
+    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable;
+end
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we = basesoc_ad9361_scheduler_tx_data_fifo_sink_valid;
+assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first = basesoc_ad9361_scheduler_tx_data_fifo_sink_first;
+assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last = basesoc_ad9361_scheduler_tx_data_fifo_sink_last;
+assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data;
+assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_valid = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_first = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_last = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re = basesoc_ad9361_scheduler_tx_data_fifo_source_ready;
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr <= 13'd0;
+    if (basesoc_ad9361_scheduler_tx_data_fifo_replace) begin
+        basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr <= (basesoc_ad9361_scheduler_tx_data_fifo_produce - 1'd1);
+    end else begin
+        basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr <= basesoc_ad9361_scheduler_tx_data_fifo_produce;
+    end
+end
+assign basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din;
+assign basesoc_ad9361_scheduler_tx_data_fifo_wrport_we = (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable | basesoc_ad9361_scheduler_tx_data_fifo_replace));
+assign basesoc_ad9361_scheduler_tx_data_fifo_do_read = (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re);
+assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr = basesoc_ad9361_scheduler_tx_data_fifo_consume;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout = basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable = (basesoc_ad9361_scheduler_tx_data_fifo_level != 13'd8176);
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable = (basesoc_ad9361_scheduler_tx_data_fifo_level != 1'd0);
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= 1'd0;
+    basesoc_ad9361_scheduler_tx_source_source_valid <= 1'd0;
+    scheduler_next_state <= 2'd0;
+    basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= 1'd0;
+    scheduler_next_state <= scheduler_state;
+    case (scheduler_state)
+        1'd1: begin
+            basesoc_ad9361_scheduler_tx_source_source_valid <= 1'd0;
+            if (((basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now) & basesoc_ad9361_scheduler_tx_data_fifo_source_valid)) begin
+                scheduler_next_state <= 2'd2;
+            end
+        end
+        2'd2: begin
+            basesoc_ad9361_scheduler_tx_source_source_valid <= (basesoc_ad9361_scheduler_tx_data_fifo_source_valid & (basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now));
+            basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= (basesoc_ad9361_scheduler_tx_source_source_ready & (basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now));
+            if (((basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp > basesoc_ad9361_scheduler_tx_now) | (~basesoc_ad9361_scheduler_tx_data_fifo_source_valid))) begin
+                scheduler_next_state <= 1'd1;
+            end
+        end
+        default: begin
+            scheduler_next_state <= 1'd1;
+        end
+    endcase
+end
 assign basesoc_ad9361_rx_cdc_sink_sink_valid = basesoc_ad9361_gpio_rx_packer_source_valid;
 assign basesoc_ad9361_gpio_rx_packer_source_ready = basesoc_ad9361_rx_cdc_sink_sink_ready;
 assign basesoc_ad9361_rx_cdc_sink_sink_first = basesoc_ad9361_gpio_rx_packer_source_first;
@@ -10557,6 +10746,7 @@ always @(*) begin
     basesoc_tx_source_first <= 1'd0;
     basesoc_tx_source_last <= 1'd0;
     basesoc_tx_source_payload_data <= 64'd0;
+    basesoc_tx_source_payload_timestamp <= 64'd0;
     basesoc_tx_source_valid <= 1'd0;
     basesoc_tx_timestamp_txheaderextracter_next_value2 <= 64'd0;
     basesoc_tx_timestamp_txheaderextracter_next_value_ce2 <= 1'd0;
@@ -10597,10 +10787,11 @@ always @(*) begin
             basesoc_tx_sink_ready <= basesoc_tx_source_ready;
             basesoc_tx_source_last <= basesoc_tx_sink_last;
             basesoc_tx_source_payload_data <= basesoc_tx_sink_payload_data;
+            basesoc_tx_source_payload_timestamp <= basesoc_tx_timestamp;
             basesoc_tx_update_txheaderextracter_next_value3 <= 1'd0;
             basesoc_tx_update_txheaderextracter_next_value_ce3 <= 1'd1;
             if (basesoc_tx_header_enable0) begin
-                basesoc_tx_source_first <= ((basesoc_tx_cycles == 1'd0) & 1'd1);
+                basesoc_tx_source_first <= 1'd0;
                 basesoc_tx_source_last <= (basesoc_tx_cycles == (basesoc_tx_frame_cycles - 1'd1));
                 if ((basesoc_tx_source_valid & basesoc_tx_source_ready)) begin
                     basesoc_tx_cycles_txheaderextracter_next_value0 <= (basesoc_tx_cycles + 1'd1);
@@ -10634,6 +10825,7 @@ always @(*) begin
     basesoc_rx_source_first <= 1'd0;
     basesoc_rx_source_last <= 1'd0;
     basesoc_rx_source_payload_data <= 64'd0;
+    basesoc_rx_source_payload_timestamp <= 64'd0;
     basesoc_rx_source_valid <= 1'd0;
     basesoc_rx_update_rxheaderinserter_next_value1 <= 1'd0;
     basesoc_rx_update_rxheaderinserter_next_value_ce1 <= 1'd0;
@@ -10671,10 +10863,11 @@ always @(*) begin
             basesoc_rx_sink_ready <= basesoc_rx_source_ready;
             basesoc_rx_source_last <= basesoc_rx_sink_last;
             basesoc_rx_source_payload_data <= basesoc_rx_sink_payload_data;
+            basesoc_rx_source_payload_timestamp <= basesoc_rx_timestamp;
             basesoc_rx_update_rxheaderinserter_next_value1 <= 1'd0;
             basesoc_rx_update_rxheaderinserter_next_value_ce1 <= 1'd1;
             if (basesoc_rx_header_enable0) begin
-                basesoc_rx_source_first <= ((basesoc_rx_cycles == 1'd0) & 1'd0);
+                basesoc_rx_source_first <= 1'd0;
                 basesoc_rx_source_last <= (basesoc_rx_cycles == (basesoc_rx_frame_cycles - 1'd1));
                 if ((basesoc_rx_source_valid & basesoc_rx_source_ready)) begin
                     basesoc_rx_cycles_rxheaderinserter_next_value0 <= (basesoc_rx_cycles + 1'd1);
@@ -12967,10 +13160,10 @@ always @(posedge from3224_clk) begin
     impl_xilinxmultiregimpl20_regs1 <= impl_xilinxmultiregimpl20_regs0;
 end
 
-always @(posedge from7250_clk) begin
+always @(posedge from7252_clk) begin
     basesoc_ad9361_tx_cdc_cdc_graycounter0_q_binary <= basesoc_ad9361_tx_cdc_cdc_graycounter0_q_next_binary;
     basesoc_ad9361_tx_cdc_cdc_graycounter0_q <= basesoc_ad9361_tx_cdc_cdc_graycounter0_q_next;
-    if (from7250_rst) begin
+    if (from7252_rst) begin
         basesoc_ad9361_tx_cdc_cdc_graycounter0_q <= 3'd0;
         basesoc_ad9361_tx_cdc_cdc_graycounter0_q_binary <= 3'd0;
     end
@@ -12978,10 +13171,10 @@ always @(posedge from7250_clk) begin
     impl_xilinxmultiregimpl38_regs1 <= impl_xilinxmultiregimpl38_regs0;
 end
 
-always @(posedge from7401_clk) begin
+always @(posedge from7415_clk) begin
     basesoc_ad9361_rx_cdc_cdc_graycounter0_q_binary <= basesoc_ad9361_rx_cdc_cdc_graycounter0_q_next_binary;
     basesoc_ad9361_rx_cdc_cdc_graycounter0_q <= basesoc_ad9361_rx_cdc_cdc_graycounter0_q_next;
-    if (from7401_rst) begin
+    if (from7415_rst) begin
         basesoc_ad9361_rx_cdc_cdc_graycounter0_q <= 3'd0;
         basesoc_ad9361_rx_cdc_cdc_graycounter0_q_binary <= 3'd0;
     end
@@ -13111,6 +13304,7 @@ always @(posedge pclk_clk) begin
 end
 
 always @(posedge rfic_clk) begin
+    basesoc_ad9361_rfic_time <= (basesoc_ad9361_rfic_time + 1'd1);
     basesoc_ad9361_ad9361phy_rx_frame_d <= basesoc_ad9361_ad9361phy_rx_frame;
     basesoc_ad9361_ad9361phy_rx_frame_rising_d <= basesoc_ad9361_ad9361phy_rx_frame_rising;
     if ((basesoc_ad9361_ad9361phy_mode1 == 1'd1)) begin
@@ -13229,6 +13423,7 @@ always @(posedge rfic_clk) begin
         basesoc_ad9361_ad9361phy_tx_data_qa <= 12'd0;
         basesoc_ad9361_ad9361phy_tx_data_ib <= 12'd0;
         basesoc_ad9361_ad9361phy_tx_data_qb <= 12'd0;
+        basesoc_ad9361_rfic_time <= 64'd0;
         basesoc_ad9361rfic_data <= 16'd2644;
         basesoc_ad9361rfic_ad9361prbschecker0_data <= 16'd2644;
         basesoc_ad9361rfic_ad9361prbschecker0_count <= 11'd1024;
@@ -14281,7 +14476,7 @@ always @(posedge sys_clk) begin
     if ((basesoc_ad9361_ad9361spimaster_clk_set & basesoc_ad9361_ad9361spimaster_shift)) begin
         basesoc_ad9361_ad9361spimaster_miso_shift_reg <= {basesoc_ad9361_ad9361spimaster_miso_shift_reg[22:0], basesoc_ad9361_ad9361spimaster_miso};
     end
-    ad9361rfic_state <= ad9361rfic_next_state;
+    ad9361spimaster_state <= ad9361spimaster_next_state;
     if (basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce) begin
         basesoc_ad9361_ad9361spimaster_cnt <= basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value;
     end
@@ -14290,6 +14485,7 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_tx_buffer_pipe_valid_source_first <= basesoc_ad9361_tx_buffer_pipe_valid_sink_first;
         basesoc_ad9361_tx_buffer_pipe_valid_source_last <= basesoc_ad9361_tx_buffer_pipe_valid_sink_last;
         basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data <= basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data;
+        basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp <= basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp;
     end
     if (((~basesoc_ad9361_rx_buffer_pipe_valid_source_valid) | basesoc_ad9361_rx_buffer_pipe_valid_source_ready)) begin
         basesoc_ad9361_rx_buffer_pipe_valid_source_valid <= basesoc_ad9361_rx_buffer_pipe_valid_sink_valid;
@@ -14342,6 +14538,30 @@ always @(posedge sys_clk) begin
     if (basesoc_ad9361_rx_bitmode_converter_load_part) begin
         basesoc_ad9361_rx_bitmode_converter_source_payload_valid_token_count <= (basesoc_ad9361_rx_bitmode_converter_demux + 1'd1);
     end
+    if (((basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable) & (~basesoc_ad9361_scheduler_tx_data_fifo_replace))) begin
+        if ((basesoc_ad9361_scheduler_tx_data_fifo_produce == 13'd8175)) begin
+            basesoc_ad9361_scheduler_tx_data_fifo_produce <= 1'd0;
+        end else begin
+            basesoc_ad9361_scheduler_tx_data_fifo_produce <= (basesoc_ad9361_scheduler_tx_data_fifo_produce + 1'd1);
+        end
+    end
+    if (basesoc_ad9361_scheduler_tx_data_fifo_do_read) begin
+        if ((basesoc_ad9361_scheduler_tx_data_fifo_consume == 13'd8175)) begin
+            basesoc_ad9361_scheduler_tx_data_fifo_consume <= 1'd0;
+        end else begin
+            basesoc_ad9361_scheduler_tx_data_fifo_consume <= (basesoc_ad9361_scheduler_tx_data_fifo_consume + 1'd1);
+        end
+    end
+    if (((basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable) & (~basesoc_ad9361_scheduler_tx_data_fifo_replace))) begin
+        if ((~basesoc_ad9361_scheduler_tx_data_fifo_do_read)) begin
+            basesoc_ad9361_scheduler_tx_data_fifo_level <= (basesoc_ad9361_scheduler_tx_data_fifo_level + 1'd1);
+        end
+    end else begin
+        if (basesoc_ad9361_scheduler_tx_data_fifo_do_read) begin
+            basesoc_ad9361_scheduler_tx_data_fifo_level <= (basesoc_ad9361_scheduler_tx_data_fifo_level - 1'd1);
+        end
+    end
+    scheduler_state <= scheduler_next_state;
     if (((~basesoc_ad9361rfic_agc_count_rx1_low_enable) | basesoc_ad9361rfic_agc_count_rx1_low_clear)) begin
         basesoc_ad9361rfic_agc_count_rx1_low_count <= 1'd0;
     end else begin
@@ -15518,6 +15738,7 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_ad9361phy_re <= 1'd0;
         basesoc_ad9361_tx_buffer_pipe_valid_source_valid <= 1'd0;
         basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data <= 64'd0;
+        basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp <= 64'd0;
         basesoc_ad9361_rx_buffer_pipe_valid_source_valid <= 1'd0;
         basesoc_ad9361_rx_buffer_pipe_valid_source_payload_data <= 64'd0;
         basesoc_ad9361_tx_bitmode_converter_mux <= 1'd0;
@@ -15525,6 +15746,9 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_rx_bitmode_converter_source_payload_valid_token_count <= 2'd0;
         basesoc_ad9361_rx_bitmode_converter_demux <= 1'd0;
         basesoc_ad9361_rx_bitmode_converter_strobe_all <= 1'd0;
+        basesoc_ad9361_scheduler_tx_data_fifo_level <= 13'd0;
+        basesoc_ad9361_scheduler_tx_data_fifo_produce <= 13'd0;
+        basesoc_ad9361_scheduler_tx_data_fifo_consume <= 13'd0;
         basesoc_ad9361rfic_prbs_tx_storage <= 1'd0;
         basesoc_ad9361rfic_prbs_tx_re <= 1'd0;
         basesoc_ad9361rfic_prbs_rx_re <= 1'd0;
@@ -15649,7 +15873,8 @@ always @(posedge sys_clk) begin
         litepciedmawriter_fsm_state <= 1'd0;
         litepciedmareader_resetinserter_state <= 1'd0;
         litepciedmareader_fsm_state <= 1'd0;
-        ad9361rfic_state <= 2'd0;
+        ad9361spimaster_state <= 2'd0;
+        scheduler_state <= 2'd0;
         txheaderextracter_state <= 3'd0;
         rxheaderinserter_state <= 3'd0;
         wishbone2csr_state <= 1'd0;
@@ -15828,10 +16053,10 @@ always @(posedge to3224_clk) begin
     impl_xilinxmultiregimpl19_regs1 <= impl_xilinxmultiregimpl19_regs0;
 end
 
-always @(posedge to7250_clk) begin
+always @(posedge to7252_clk) begin
     basesoc_ad9361_tx_cdc_cdc_graycounter1_q_binary <= basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary;
     basesoc_ad9361_tx_cdc_cdc_graycounter1_q <= basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next;
-    if (to7250_rst) begin
+    if (to7252_rst) begin
         basesoc_ad9361_tx_cdc_cdc_graycounter1_q <= 3'd0;
         basesoc_ad9361_tx_cdc_cdc_graycounter1_q_binary <= 3'd0;
     end
@@ -15839,10 +16064,10 @@ always @(posedge to7250_clk) begin
     impl_xilinxmultiregimpl37_regs1 <= impl_xilinxmultiregimpl37_regs0;
 end
 
-always @(posedge to7401_clk) begin
+always @(posedge to7415_clk) begin
     basesoc_ad9361_rx_cdc_cdc_graycounter1_q_binary <= basesoc_ad9361_rx_cdc_cdc_graycounter1_q_next_binary;
     basesoc_ad9361_rx_cdc_cdc_graycounter1_q <= basesoc_ad9361_rx_cdc_cdc_graycounter1_q_next;
-    if (to7401_rst) begin
+    if (to7415_rst) begin
         basesoc_ad9361_rx_cdc_cdc_graycounter1_q <= 3'd0;
         basesoc_ad9361_rx_cdc_cdc_graycounter1_q_binary <= 3'd0;
     end
@@ -16917,19 +17142,19 @@ OBUFDS OBUFDS_7(
 );
 
 //------------------------------------------------------------------------------
-// Memory storage_13: 4-words x 66-bit
+// Memory storage_13: 4-words x 130-bit
 //------------------------------------------------------------------------------
-// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 66 
+// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 130 
 // Port 1 | Read: Sync  | Write: ---- | 
-reg [65:0] storage_13[0:3];
-reg [65:0] storage_13_dat0;
-reg [65:0] storage_13_dat1;
-always @(posedge from7250_clk) begin
+reg [129:0] storage_13[0:3];
+reg [129:0] storage_13_dat0;
+reg [129:0] storage_13_dat1;
+always @(posedge from7252_clk) begin
 	if (basesoc_ad9361_tx_cdc_cdc_wrport_we)
 		storage_13[basesoc_ad9361_tx_cdc_cdc_wrport_adr] <= basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
 	storage_13_dat0 <= storage_13[basesoc_ad9361_tx_cdc_cdc_wrport_adr];
 end
-always @(posedge to7250_clk) begin
+always @(posedge to7252_clk) begin
 	storage_13_dat1 <= storage_13[basesoc_ad9361_tx_cdc_cdc_rdport_adr];
 end
 assign basesoc_ad9361_tx_cdc_cdc_wrport_dat_r = storage_13_dat0;
@@ -16944,16 +17169,34 @@ assign basesoc_ad9361_tx_cdc_cdc_rdport_dat_r = storage_13_dat1;
 reg [65:0] storage_14[0:3];
 reg [65:0] storage_14_dat0;
 reg [65:0] storage_14_dat1;
-always @(posedge from7401_clk) begin
+always @(posedge from7415_clk) begin
 	if (basesoc_ad9361_rx_cdc_cdc_wrport_we)
 		storage_14[basesoc_ad9361_rx_cdc_cdc_wrport_adr] <= basesoc_ad9361_rx_cdc_cdc_wrport_dat_w;
 	storage_14_dat0 <= storage_14[basesoc_ad9361_rx_cdc_cdc_wrport_adr];
 end
-always @(posedge to7401_clk) begin
+always @(posedge to7415_clk) begin
 	storage_14_dat1 <= storage_14[basesoc_ad9361_rx_cdc_cdc_rdport_adr];
 end
 assign basesoc_ad9361_rx_cdc_cdc_wrport_dat_r = storage_14_dat0;
 assign basesoc_ad9361_rx_cdc_cdc_rdport_dat_r = storage_14_dat1;
+
+
+//------------------------------------------------------------------------------
+// Memory storage_15: 8176-words x 130-bit
+//------------------------------------------------------------------------------
+// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 130 
+// Port 1 | Read: Async | Write: ---- | 
+reg [129:0] storage_15[0:8175];
+reg [129:0] storage_15_dat0;
+always @(posedge sys_clk) begin
+	if (basesoc_ad9361_scheduler_tx_data_fifo_wrport_we)
+		storage_15[basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr] <= basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w;
+	storage_15_dat0 <= storage_15[basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr];
+end
+always @(posedge sys_clk) begin
+end
+assign basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_r = storage_15_dat0;
+assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r = storage_15[basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr];
 
 
 //------------------------------------------------------------------------------
@@ -17445,66 +17688,45 @@ pcie_s7 pcie_s7(
 );
 
 //------------------------------------------------------------------------------
-// Memory storage_15: 8-words x 5-bit
+// Memory storage_16: 8-words x 5-bit
 //------------------------------------------------------------------------------
 // Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 5 
 // Port 1 | Read: Sync  | Write: ---- | 
-reg [4:0] storage_15[0:7];
-reg [4:0] storage_15_dat0;
-reg [4:0] storage_15_dat1;
+reg [4:0] storage_16[0:7];
+reg [4:0] storage_16_dat0;
+reg [4:0] storage_16_dat1;
 always @(posedge sys_clk) begin
 	if (litepcieendpoint_tag_queue_wrport_we)
-		storage_15[litepcieendpoint_tag_queue_wrport_adr] <= litepcieendpoint_tag_queue_wrport_dat_w;
-	storage_15_dat0 <= storage_15[litepcieendpoint_tag_queue_wrport_adr];
+		storage_16[litepcieendpoint_tag_queue_wrport_adr] <= litepcieendpoint_tag_queue_wrport_dat_w;
+	storage_16_dat0 <= storage_16[litepcieendpoint_tag_queue_wrport_adr];
 end
 always @(posedge sys_clk) begin
 	if (litepcieendpoint_tag_queue_rdport_re)
-		storage_15_dat1 <= storage_15[litepcieendpoint_tag_queue_rdport_adr];
+		storage_16_dat1 <= storage_16[litepcieendpoint_tag_queue_rdport_adr];
 end
-assign litepcieendpoint_tag_queue_wrport_dat_r = storage_15_dat0;
-assign litepcieendpoint_tag_queue_rdport_dat_r = storage_15_dat1;
+assign litepcieendpoint_tag_queue_wrport_dat_r = storage_16_dat0;
+assign litepcieendpoint_tag_queue_rdport_dat_r = storage_16_dat1;
 
 
 //------------------------------------------------------------------------------
-// Memory storage_16: 8-words x 21-bit
+// Memory storage_17: 8-words x 21-bit
 //------------------------------------------------------------------------------
 // Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 21 
 // Port 1 | Read: Sync  | Write: ---- | 
-reg [20:0] storage_16[0:7];
-reg [20:0] storage_16_dat0;
-reg [20:0] storage_16_dat1;
+reg [20:0] storage_17[0:7];
+reg [20:0] storage_17_dat0;
+reg [20:0] storage_17_dat1;
 always @(posedge sys_clk) begin
 	if (litepcieendpoint_req_queue_wrport_we)
-		storage_16[litepcieendpoint_req_queue_wrport_adr] <= litepcieendpoint_req_queue_wrport_dat_w;
-	storage_16_dat0 <= storage_16[litepcieendpoint_req_queue_wrport_adr];
+		storage_17[litepcieendpoint_req_queue_wrport_adr] <= litepcieendpoint_req_queue_wrport_dat_w;
+	storage_17_dat0 <= storage_17[litepcieendpoint_req_queue_wrport_adr];
 end
 always @(posedge sys_clk) begin
 	if (litepcieendpoint_req_queue_rdport_re)
-		storage_16_dat1 <= storage_16[litepcieendpoint_req_queue_rdport_adr];
+		storage_17_dat1 <= storage_17[litepcieendpoint_req_queue_rdport_adr];
 end
-assign litepcieendpoint_req_queue_wrport_dat_r = storage_16_dat0;
-assign litepcieendpoint_req_queue_rdport_dat_r = storage_16_dat1;
-
-
-//------------------------------------------------------------------------------
-// Memory storage_17: 256-words x 166-bit
-//------------------------------------------------------------------------------
-// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 166 
-// Port 1 | Read: Sync  | Write: ---- | 
-reg [165:0] storage_17[0:255];
-reg [165:0] storage_17_dat0;
-reg [165:0] storage_17_dat1;
-always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo0_wrport_we)
-		storage_17[litepcieendpoint_syncfifo0_wrport_adr] <= litepcieendpoint_syncfifo0_wrport_dat_w;
-	storage_17_dat0 <= storage_17[litepcieendpoint_syncfifo0_wrport_adr];
-end
-always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo0_rdport_re)
-		storage_17_dat1 <= storage_17[litepcieendpoint_syncfifo0_rdport_adr];
-end
-assign litepcieendpoint_syncfifo0_wrport_dat_r = storage_17_dat0;
-assign litepcieendpoint_syncfifo0_rdport_dat_r = storage_17_dat1;
+assign litepcieendpoint_req_queue_wrport_dat_r = storage_17_dat0;
+assign litepcieendpoint_req_queue_rdport_dat_r = storage_17_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17516,16 +17738,16 @@ reg [165:0] storage_18[0:255];
 reg [165:0] storage_18_dat0;
 reg [165:0] storage_18_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo1_wrport_we)
-		storage_18[litepcieendpoint_syncfifo1_wrport_adr] <= litepcieendpoint_syncfifo1_wrport_dat_w;
-	storage_18_dat0 <= storage_18[litepcieendpoint_syncfifo1_wrport_adr];
+	if (litepcieendpoint_syncfifo0_wrport_we)
+		storage_18[litepcieendpoint_syncfifo0_wrport_adr] <= litepcieendpoint_syncfifo0_wrport_dat_w;
+	storage_18_dat0 <= storage_18[litepcieendpoint_syncfifo0_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo1_rdport_re)
-		storage_18_dat1 <= storage_18[litepcieendpoint_syncfifo1_rdport_adr];
+	if (litepcieendpoint_syncfifo0_rdport_re)
+		storage_18_dat1 <= storage_18[litepcieendpoint_syncfifo0_rdport_adr];
 end
-assign litepcieendpoint_syncfifo1_wrport_dat_r = storage_18_dat0;
-assign litepcieendpoint_syncfifo1_rdport_dat_r = storage_18_dat1;
+assign litepcieendpoint_syncfifo0_wrport_dat_r = storage_18_dat0;
+assign litepcieendpoint_syncfifo0_rdport_dat_r = storage_18_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17537,16 +17759,16 @@ reg [165:0] storage_19[0:255];
 reg [165:0] storage_19_dat0;
 reg [165:0] storage_19_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo2_wrport_we)
-		storage_19[litepcieendpoint_syncfifo2_wrport_adr] <= litepcieendpoint_syncfifo2_wrport_dat_w;
-	storage_19_dat0 <= storage_19[litepcieendpoint_syncfifo2_wrport_adr];
+	if (litepcieendpoint_syncfifo1_wrport_we)
+		storage_19[litepcieendpoint_syncfifo1_wrport_adr] <= litepcieendpoint_syncfifo1_wrport_dat_w;
+	storage_19_dat0 <= storage_19[litepcieendpoint_syncfifo1_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo2_rdport_re)
-		storage_19_dat1 <= storage_19[litepcieendpoint_syncfifo2_rdport_adr];
+	if (litepcieendpoint_syncfifo1_rdport_re)
+		storage_19_dat1 <= storage_19[litepcieendpoint_syncfifo1_rdport_adr];
 end
-assign litepcieendpoint_syncfifo2_wrport_dat_r = storage_19_dat0;
-assign litepcieendpoint_syncfifo2_rdport_dat_r = storage_19_dat1;
+assign litepcieendpoint_syncfifo1_wrport_dat_r = storage_19_dat0;
+assign litepcieendpoint_syncfifo1_rdport_dat_r = storage_19_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17558,16 +17780,16 @@ reg [165:0] storage_20[0:255];
 reg [165:0] storage_20_dat0;
 reg [165:0] storage_20_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo3_wrport_we)
-		storage_20[litepcieendpoint_syncfifo3_wrport_adr] <= litepcieendpoint_syncfifo3_wrport_dat_w;
-	storage_20_dat0 <= storage_20[litepcieendpoint_syncfifo3_wrport_adr];
+	if (litepcieendpoint_syncfifo2_wrport_we)
+		storage_20[litepcieendpoint_syncfifo2_wrport_adr] <= litepcieendpoint_syncfifo2_wrport_dat_w;
+	storage_20_dat0 <= storage_20[litepcieendpoint_syncfifo2_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo3_rdport_re)
-		storage_20_dat1 <= storage_20[litepcieendpoint_syncfifo3_rdport_adr];
+	if (litepcieendpoint_syncfifo2_rdport_re)
+		storage_20_dat1 <= storage_20[litepcieendpoint_syncfifo2_rdport_adr];
 end
-assign litepcieendpoint_syncfifo3_wrport_dat_r = storage_20_dat0;
-assign litepcieendpoint_syncfifo3_rdport_dat_r = storage_20_dat1;
+assign litepcieendpoint_syncfifo2_wrport_dat_r = storage_20_dat0;
+assign litepcieendpoint_syncfifo2_rdport_dat_r = storage_20_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17579,16 +17801,16 @@ reg [165:0] storage_21[0:255];
 reg [165:0] storage_21_dat0;
 reg [165:0] storage_21_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo4_wrport_we)
-		storage_21[litepcieendpoint_syncfifo4_wrport_adr] <= litepcieendpoint_syncfifo4_wrport_dat_w;
-	storage_21_dat0 <= storage_21[litepcieendpoint_syncfifo4_wrport_adr];
+	if (litepcieendpoint_syncfifo3_wrport_we)
+		storage_21[litepcieendpoint_syncfifo3_wrport_adr] <= litepcieendpoint_syncfifo3_wrport_dat_w;
+	storage_21_dat0 <= storage_21[litepcieendpoint_syncfifo3_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo4_rdport_re)
-		storage_21_dat1 <= storage_21[litepcieendpoint_syncfifo4_rdport_adr];
+	if (litepcieendpoint_syncfifo3_rdport_re)
+		storage_21_dat1 <= storage_21[litepcieendpoint_syncfifo3_rdport_adr];
 end
-assign litepcieendpoint_syncfifo4_wrport_dat_r = storage_21_dat0;
-assign litepcieendpoint_syncfifo4_rdport_dat_r = storage_21_dat1;
+assign litepcieendpoint_syncfifo3_wrport_dat_r = storage_21_dat0;
+assign litepcieendpoint_syncfifo3_rdport_dat_r = storage_21_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17600,16 +17822,16 @@ reg [165:0] storage_22[0:255];
 reg [165:0] storage_22_dat0;
 reg [165:0] storage_22_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo5_wrport_we)
-		storage_22[litepcieendpoint_syncfifo5_wrport_adr] <= litepcieendpoint_syncfifo5_wrport_dat_w;
-	storage_22_dat0 <= storage_22[litepcieendpoint_syncfifo5_wrport_adr];
+	if (litepcieendpoint_syncfifo4_wrport_we)
+		storage_22[litepcieendpoint_syncfifo4_wrport_adr] <= litepcieendpoint_syncfifo4_wrport_dat_w;
+	storage_22_dat0 <= storage_22[litepcieendpoint_syncfifo4_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo5_rdport_re)
-		storage_22_dat1 <= storage_22[litepcieendpoint_syncfifo5_rdport_adr];
+	if (litepcieendpoint_syncfifo4_rdport_re)
+		storage_22_dat1 <= storage_22[litepcieendpoint_syncfifo4_rdport_adr];
 end
-assign litepcieendpoint_syncfifo5_wrport_dat_r = storage_22_dat0;
-assign litepcieendpoint_syncfifo5_rdport_dat_r = storage_22_dat1;
+assign litepcieendpoint_syncfifo4_wrport_dat_r = storage_22_dat0;
+assign litepcieendpoint_syncfifo4_rdport_dat_r = storage_22_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17621,16 +17843,16 @@ reg [165:0] storage_23[0:255];
 reg [165:0] storage_23_dat0;
 reg [165:0] storage_23_dat1;
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo6_wrport_we)
-		storage_23[litepcieendpoint_syncfifo6_wrport_adr] <= litepcieendpoint_syncfifo6_wrport_dat_w;
-	storage_23_dat0 <= storage_23[litepcieendpoint_syncfifo6_wrport_adr];
+	if (litepcieendpoint_syncfifo5_wrport_we)
+		storage_23[litepcieendpoint_syncfifo5_wrport_adr] <= litepcieendpoint_syncfifo5_wrport_dat_w;
+	storage_23_dat0 <= storage_23[litepcieendpoint_syncfifo5_wrport_adr];
 end
 always @(posedge sys_clk) begin
-	if (litepcieendpoint_syncfifo6_rdport_re)
-		storage_23_dat1 <= storage_23[litepcieendpoint_syncfifo6_rdport_adr];
+	if (litepcieendpoint_syncfifo5_rdport_re)
+		storage_23_dat1 <= storage_23[litepcieendpoint_syncfifo5_rdport_adr];
 end
-assign litepcieendpoint_syncfifo6_wrport_dat_r = storage_23_dat0;
-assign litepcieendpoint_syncfifo6_rdport_dat_r = storage_23_dat1;
+assign litepcieendpoint_syncfifo5_wrport_dat_r = storage_23_dat0;
+assign litepcieendpoint_syncfifo5_rdport_dat_r = storage_23_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -17642,16 +17864,37 @@ reg [165:0] storage_24[0:255];
 reg [165:0] storage_24_dat0;
 reg [165:0] storage_24_dat1;
 always @(posedge sys_clk) begin
+	if (litepcieendpoint_syncfifo6_wrport_we)
+		storage_24[litepcieendpoint_syncfifo6_wrport_adr] <= litepcieendpoint_syncfifo6_wrport_dat_w;
+	storage_24_dat0 <= storage_24[litepcieendpoint_syncfifo6_wrport_adr];
+end
+always @(posedge sys_clk) begin
+	if (litepcieendpoint_syncfifo6_rdport_re)
+		storage_24_dat1 <= storage_24[litepcieendpoint_syncfifo6_rdport_adr];
+end
+assign litepcieendpoint_syncfifo6_wrport_dat_r = storage_24_dat0;
+assign litepcieendpoint_syncfifo6_rdport_dat_r = storage_24_dat1;
+
+
+//------------------------------------------------------------------------------
+// Memory storage_25: 256-words x 166-bit
+//------------------------------------------------------------------------------
+// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 166 
+// Port 1 | Read: Sync  | Write: ---- | 
+reg [165:0] storage_25[0:255];
+reg [165:0] storage_25_dat0;
+reg [165:0] storage_25_dat1;
+always @(posedge sys_clk) begin
 	if (litepcieendpoint_syncfifo7_wrport_we)
-		storage_24[litepcieendpoint_syncfifo7_wrport_adr] <= litepcieendpoint_syncfifo7_wrport_dat_w;
-	storage_24_dat0 <= storage_24[litepcieendpoint_syncfifo7_wrport_adr];
+		storage_25[litepcieendpoint_syncfifo7_wrport_adr] <= litepcieendpoint_syncfifo7_wrport_dat_w;
+	storage_25_dat0 <= storage_25[litepcieendpoint_syncfifo7_wrport_adr];
 end
 always @(posedge sys_clk) begin
 	if (litepcieendpoint_syncfifo7_rdport_re)
-		storage_24_dat1 <= storage_24[litepcieendpoint_syncfifo7_rdport_adr];
+		storage_25_dat1 <= storage_25[litepcieendpoint_syncfifo7_rdport_adr];
 end
-assign litepcieendpoint_syncfifo7_wrport_dat_r = storage_24_dat0;
-assign litepcieendpoint_syncfifo7_rdport_dat_r = storage_24_dat1;
+assign litepcieendpoint_syncfifo7_wrport_dat_r = storage_25_dat0;
+assign litepcieendpoint_syncfifo7_rdport_dat_r = storage_25_dat1;
 
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -18377,7 +18620,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_38 (
 	// Inputs.
-	.C   (from7250_clk),
+	.C   (from7252_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
@@ -18395,13 +18638,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_39 (
 	// Inputs.
-	.C   (from7250_clk),
+	.C   (from7252_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl19_rst_meta),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (from7250_rst)
+	.Q   (from7252_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -18413,7 +18656,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_40 (
 	// Inputs.
-	.C   (to7250_clk),
+	.C   (to7252_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
@@ -18431,13 +18674,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_41 (
 	// Inputs.
-	.C   (to7250_clk),
+	.C   (to7252_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl20_rst_meta),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (to7250_rst)
+	.Q   (to7252_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -18449,7 +18692,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_42 (
 	// Inputs.
-	.C   (from7401_clk),
+	.C   (from7415_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
@@ -18467,13 +18710,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_43 (
 	// Inputs.
-	.C   (from7401_clk),
+	.C   (from7415_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl21_rst_meta),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (from7401_rst)
+	.Q   (from7415_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -18485,7 +18728,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_44 (
 	// Inputs.
-	.C   (to7401_clk),
+	.C   (to7415_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
@@ -18503,13 +18746,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_45 (
 	// Inputs.
-	.C   (to7401_clk),
+	.C   (to7415_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl22_rst_meta),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (to7401_rst)
+	.Q   (to7415_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -18809,5 +19052,5 @@ IDDR #(
 endmodule
 
 // -----------------------------------------------------------------------------
-//  Auto-Generated by LiteX on 2025-09-23 10:34:47.
+//  Auto-Generated by LiteX on 2025-10-06 15:03:05.
 //------------------------------------------------------------------------------

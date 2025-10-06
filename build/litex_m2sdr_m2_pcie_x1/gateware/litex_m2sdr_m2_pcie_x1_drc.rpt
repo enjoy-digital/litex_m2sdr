@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Tue Sep 23 10:37:37 2025
+| Date         : Mon Oct  6 15:05:47 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_drc -file litex_m2sdr_m2_pcie_x1_drc.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -24,12 +24,16 @@ Table of Contents
       Design limits: <entire design considered>
            Ruledeck: default
              Max checks: <unlimited>
-             Checks found: 6
+             Checks found: 13
 +-------------+----------+-------------------------------------------------------------+--------+
 | Rule        | Severity | Description                                                 | Checks |
 +-------------+----------+-------------------------------------------------------------+--------+
 | CFGBVS-1    | Warning  | Missing CFGBVS and CONFIG_VOLTAGE Design Properties         | 1      |
-| PDRC-138    | Warning  | SLICE_PairEqSame_D6D5_WARN                                  | 1      |
+| PDRC-132    | Warning  | SLICE_PairEqSame_A6A5_WARN                                  | 1      |
+| PDRC-136    | Warning  | SLICE_PairEqSame_C6C5_WARN                                  | 2      |
+| PDRC-138    | Warning  | SLICE_PairEqSame_D6D5_WARN                                  | 3      |
+| PDRC-144    | Warning  | SLICE_PairEqSame_C6C5_WARN                                  | 1      |
+| PDRC-146    | Warning  | SLICE_PairEqSame_D6D5_WARN                                  | 1      |
 | PDRC-153    | Warning  | Gated clock check                                           | 1      |
 | PLHOLDVIO-2 | Warning  | Non-Optimal connections which could lead to hold violations | 1      |
 | REQP-1839   | Warning  | RAMB36 async control check                                  | 1      |
@@ -51,9 +55,44 @@ Neither the CFGBVS nor CONFIG_VOLTAGE voltage property is set in the current_des
 Refer to the device configuration user guide for more information.
 Related violations: <none>
 
+PDRC-132#1 Warning
+SLICE_PairEqSame_A6A5_WARN  
+Luts A6LUT and A5LUT in use in site SLICE_X39Y156 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-136#1 Warning
+SLICE_PairEqSame_C6C5_WARN  
+Luts C6LUT and C5LUT in use in site SLICE_X77Y144 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-136#2 Warning
+SLICE_PairEqSame_C6C5_WARN  
+Luts C6LUT and C5LUT in use in site SLICE_X99Y142 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
 PDRC-138#1 Warning
 SLICE_PairEqSame_D6D5_WARN  
-Luts D6LUT and D5LUT in use in site SLICE_X95Y125 with different equations without A6 pin connected to Global Logic High.
+Luts D6LUT and D5LUT in use in site SLICE_X67Y137 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-138#2 Warning
+SLICE_PairEqSame_D6D5_WARN  
+Luts D6LUT and D5LUT in use in site SLICE_X75Y146 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-138#3 Warning
+SLICE_PairEqSame_D6D5_WARN  
+Luts D6LUT and D5LUT in use in site SLICE_X99Y142 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-144#1 Warning
+SLICE_PairEqSame_C6C5_WARN  
+Luts C6LUT and C5LUT in use in site SLICE_X84Y155 with different equations without A6 pin connected to Global Logic High.
+Related violations: <none>
+
+PDRC-146#1 Warning
+SLICE_PairEqSame_D6D5_WARN  
+Luts D6LUT and D5LUT in use in site SLICE_X66Y135 with different equations without A6 pin connected to Global Logic High.
 Related violations: <none>
 
 PDRC-153#1 Warning
@@ -74,7 +113,7 @@ Related violations: <none>
 
 RTSTAT-10#1 Warning
 No routable loads  
-27 net(s) have no routable loads. The problem bus(es) and/or net(s) are impl_xilinxmultiregimpl25_regs1[0], impl_xilinxmultiregimpl25_regs1[10],
+30 net(s) have no routable loads. The problem bus(es) and/or net(s) are impl_xilinxmultiregimpl25_regs1[0], impl_xilinxmultiregimpl25_regs1[10],
 impl_xilinxmultiregimpl25_regs1[11], impl_xilinxmultiregimpl25_regs1[12],
 impl_xilinxmultiregimpl25_regs1[13], impl_xilinxmultiregimpl25_regs1[14],
 impl_xilinxmultiregimpl25_regs1[15], impl_xilinxmultiregimpl25_regs1[1],
@@ -82,7 +121,7 @@ impl_xilinxmultiregimpl25_regs1[3], impl_xilinxmultiregimpl25_regs1[4],
 impl_xilinxmultiregimpl25_regs1[5], impl_xilinxmultiregimpl25_regs1[6],
 impl_xilinxmultiregimpl25_regs1[7], impl_xilinxmultiregimpl25_regs1[8],
 impl_xilinxmultiregimpl25_regs1[9]
- (the first 15 of 27 listed nets/buses).
+ (the first 15 of 28 listed nets/buses).
 Related violations: <none>
 
 

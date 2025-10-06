@@ -625,7 +625,7 @@
         "config_cpu_family": null,
         "config_cpu_name": null,
         "config_cpu_human_name": "unknown",
-        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-09-23 10:34:47",
+        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-06 15:03:05",
         "config_flash_image_size": 8388608,
         "dma_channels": 1,
         "dma_addr_width": 64,

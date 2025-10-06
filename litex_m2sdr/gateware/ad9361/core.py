@@ -22,7 +22,7 @@ from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
-from litex_m2sdr.gateware.layouts import dma_layout
+from litex_m2sdr.gateware.layouts import dma_layout_with_ts
 
 
 # Architecture -------------------------------------------------------------------------------------
@@ -80,7 +80,6 @@ from litex_m2sdr.gateware.layouts import dma_layout
 # - TX sampling (on the AD931) is adjusted through AD9361 registers.
 # - An optional TX-RX loopback is implemented.
 # - Sink/Source stream operate in sys_clk domain @ 64-bit and are converted to/from rfic_clk.
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts 
 
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
@@ -91,7 +90,7 @@ class AD9361RFIC(LiteXModule):
 
          # Stream Endpoints ------------------------------------------------------------------------
         self.sink   = stream.Endpoint(dma_layout_with_ts(64))
-        self.source = stream.Endpoint(dma_layout_with_ts(64))
+        self.source = stream.Endpoint(dma_layout(64))
 
         # Config/Control/Status registers ----------------------------------------------------------
         self._config = CSRStorage(fields=[
