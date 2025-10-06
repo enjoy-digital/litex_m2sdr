@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ----------------------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version              : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date                      : Mon Oct  6 15:04:56 2025
+| Date                      : Mon Oct  6 17:08:44 2025
 | Host                      : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command                   : report_io -file litex_m2sdr_m2_pcie_x1_io.rpt
 | Design                    : litex_m2sdr_m2_pcie_x1

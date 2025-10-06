@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 -------------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version     : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date             : Mon Oct  6 15:05:50 2025
+| Date             : Mon Oct  6 17:09:38 2025
 | Host             : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command          : report_power -file litex_m2sdr_m2_pcie_x1_power.rpt
 | Design           : litex_m2sdr_m2_pcie_x1
@@ -30,14 +30,14 @@ Table of Contents
 ----------
 
 +--------------------------+--------------+
-| Total On-Chip Power (W)  | 1.161        |
+| Total On-Chip Power (W)  | 1.172        |
 | Design Power Budget (W)  | Unspecified* |
 | Power Budget Margin (W)  | NA           |
-| Dynamic (W)              | 0.999        |
+| Dynamic (W)              | 1.010        |
 | Device Static (W)        | 0.162        |
 | Effective TJA (C/W)      | 3.3          |
-| Max Ambient (C)          | 96.2         |
-| Junction Temperature (C) | 28.8         |
+| Max Ambient (C)          | 96.1         |
+| Junction Temperature (C) | 28.9         |
 | Confidence Level         | Low          |
 | Setting File             | ---          |
 | Simulation Activity File | ---          |
@@ -52,17 +52,17 @@ Table of Contents
 +--------------------------+-----------+----------+-----------+-----------------+
 | On-Chip                  | Power (W) | Used     | Available | Utilization (%) |
 +--------------------------+-----------+----------+-----------+-----------------+
-| Clocks                   |     0.069 |       19 |       --- |             --- |
-| Slice Logic              |     0.020 |    17497 |       --- |             --- |
-|   LUT as Logic           |     0.017 |     5796 |    133800 |            4.33 |
-|   Register               |     0.001 |     8102 |    267600 |            3.03 |
-|   CARRY4                 |     0.001 |      457 |     33450 |            1.37 |
-|   LUT as Distributed RAM |    <0.001 |     1120 |     46200 |            2.42 |
+| Clocks                   |     0.074 |       19 |       --- |             --- |
+| Slice Logic              |     0.024 |    18180 |       --- |             --- |
+|   LUT as Logic           |     0.021 |     6051 |    133800 |            4.52 |
+|   Register               |     0.001 |     8447 |    267600 |            3.16 |
+|   CARRY4                 |     0.001 |      471 |     33450 |            1.41 |
+|   LUT as Distributed RAM |    <0.001 |     1152 |     46200 |            2.49 |
 |   LUT as Shift Register  |    <0.001 |        5 |     46200 |            0.01 |
 |   F7/F8 Muxes            |    <0.001 |       14 |    133800 |            0.01 |
 |   Others                 |     0.000 |       93 |       --- |             --- |
-| Signals                  |     0.036 |    15512 |       --- |             --- |
-| Block RAM                |     0.084 |       36 |       365 |            9.86 |
+| Signals                  |     0.044 |    16087 |       --- |             --- |
+| Block RAM                |     0.078 |     36.5 |       365 |           10.00 |
 | MMCM                     |     0.108 |        1 |        10 |           10.00 |
 | PLL                      |     0.104 |        1 |        10 |           10.00 |
 | I/O                      |     0.368 |       64 |       285 |           22.46 |
@@ -71,7 +71,7 @@ Table of Contents
 | Hard IPs                 |     0.042 |        1 |       --- |             --- |
 |   PCIE                   |     0.042 |        1 |         1 |          100.00 |
 | Static Power             |     0.162 |          |           |                 |
-| Total                    |     1.161 |          |           |                 |
+| Total                    |     1.172 |          |           |                 |
 +--------------------------+-----------+----------+-----------+-----------------+
 
 
@@ -81,7 +81,7 @@ Table of Contents
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
 | Source    | Voltage (V) | Total (A) | Dynamic (A) | Static (A) | Powerup (A) | Budget (A)  | Margin (A) |
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
-| Vccint    |       1.000 |     0.320 |       0.285 |      0.035 |       NA    | Unspecified | NA         |
+| Vccint    |       1.000 |     0.331 |       0.296 |      0.035 |       NA    | Unspecified | NA         |
 | Vccaux    |       1.800 |     0.156 |       0.125 |      0.031 |       NA    | Unspecified | NA         |
 | Vcco33    |       3.300 |     0.005 |       0.000 |      0.005 |       NA    | Unspecified | NA         |
 | Vcco25    |       2.500 |     0.139 |       0.134 |      0.005 |       NA    | Unspecified | NA         |
@@ -90,7 +90,7 @@ Table of Contents
 | Vcco135   |       1.350 |     0.000 |       0.000 |      0.000 |       NA    | Unspecified | NA         |
 | Vcco12    |       1.200 |     0.000 |       0.000 |      0.000 |       NA    | Unspecified | NA         |
 | Vccaux_io |       1.800 |     0.000 |       0.000 |      0.000 |       NA    | Unspecified | NA         |
-| Vccbram   |       1.000 |     0.006 |       0.004 |      0.001 |       NA    | Unspecified | NA         |
+| Vccbram   |       1.000 |     0.005 |       0.004 |      0.001 |       NA    | Unspecified | NA         |
 | MGTAVcc   |       1.000 |     0.073 |       0.072 |      0.002 |       NA    | Unspecified | NA         |
 | MGTAVtt   |       1.200 |     0.064 |       0.061 |      0.003 |       NA    | Unspecified | NA         |
 | Vccadc    |       1.800 |     0.021 |       0.001 |      0.020 |       NA    | Unspecified | NA         |
@@ -166,10 +166,10 @@ Table of Contents
 +------------------------+-----------+
 | Name                   | Power (W) |
 +------------------------+-----------+
-| litex_m2sdr_m2_pcie_x1 |     0.999 |
-|   pcie_s7              |     0.248 |
-|     inst               |     0.248 |
-|       inst             |     0.248 |
+| litex_m2sdr_m2_pcie_x1 |     1.010 |
+|   pcie_s7              |     0.249 |
+|     inst               |     0.249 |
+|       inst             |     0.249 |
 +------------------------+-----------+
 
 

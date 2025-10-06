@@ -344,11 +344,11 @@ set_max_delay 2 -quiet -from [get_pins -filter {REF_PIN_NAME == C} -of_objects [
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets rfic_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
-set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets icap_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
-
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets dna_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets jtag_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
+
+set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets icap_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets pcie_clk]] -asynchronous
 

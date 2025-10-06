@@ -59,6 +59,7 @@ from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.software import generate_litepcie_software
+# from litescope import LitePCIeWishboneBridge 
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -564,6 +565,9 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
                     self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
             ]
+            # self.submodules.pcie_bridge = LitePCIeWishboneBridge(self.pcie_endpoint,
+            # base_address = self.mem_map["csr"])
+            # self.add_wb_master(self.pcie_bridge.wishbone)
         if with_eth:
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
@@ -758,7 +762,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             csr_csv      = "analyzer.csv"
         )
 
-    def add_ad96361_data_probe(self):
+    def add_ad9361_data_probe(self):
         analyzer_signals = [
             self.ad9361.phy.sink,   # TX.
             self.ad9361.phy.source, # RX.
@@ -769,6 +773,27 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             clock_domain = "rfic",
             register     = True,
             csr_csv      = "analyzer.csv"
+        )
+        
+    def add_ad9361_scheduler_tx_probe(self):
+        analyzer_signals = [
+            self.ad9361.scheduler_tx.data_fifo.level,
+            # self.ad9361.scheduler_tx.fsm,
+            # self.ad9361.scheduler_tx.now,
+            # self.ad9361.scheduler_tx.source.valid,
+            # self.ad9361.scheduler_tx.source.ready,
+            # self.ad9361.scheduler_tx.source.data,
+            # self.ad9361.scheduler_tx.sink.valid,
+            # self.ad9361.scheduler_tx.sink.ready,
+            # self.ad9361.scheduler_tx.sink.data,
+            self.ad9361.tx_cdc.source.valid,
+            self.ad9361.gpio_tx_unpacker.sink.ready
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth = 256,
+            clock_domain = "rfic",
+            register = True,
+            csr_csv = "analyzer.csv"
         )
 
     def add_pcie_dma_probe(self):
@@ -839,6 +864,7 @@ def main():
     probeopts = parser.add_mutually_exclusive_group()
     probeopts.add_argument("--with-ad9361-spi-probe",      action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe",     action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-ad9361-scheduler-tx-probe",action="store_true", help="Enable AD9361 scheduler TX.")
     probeopts.add_argument("--with-pcie-dma-probe",        action="store_true", help="Enable PCIe DMA Probe.")
     probeopts.add_argument("--with-eth-tx-probe",          action="store_true", help="Enable Ethernet Tx Probe.")
 
@@ -882,11 +908,14 @@ def main():
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
-        soc.add_ad96361_data_probe()
+        soc.add_ad9361_data_probe()
+    if args.with_ad9361_scheduler_tx_probe:
+        soc.add_ad9361_scheduler_tx_probe()
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
     if args.with_eth_tx_probe:
         soc.add_eth_tx_probe()
+    
 
     # Builder.
     def get_build_name():
