@@ -6,7 +6,7 @@
 
 
 # modified dma layout to include timestamp
-def dma_layout(data_width):
+def dma_layout_with_ts(data_width):
     return [
         ("data", data_width),
         ("first", 1),

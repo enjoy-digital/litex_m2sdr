@@ -80,7 +80,7 @@ from litex_m2sdr.gateware.layouts import dma_layout
 # - TX sampling (on the AD931) is adjusted through AD9361 registers.
 # - An optional TX-RX loopback is implemented.
 # - Sink/Source stream operate in sys_clk domain @ 64-bit and are converted to/from rfic_clk.
-
+from litex_m2sdr.gateware.layouts import dma_layout_with_ts 
 
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
@@ -90,8 +90,8 @@ class AD9361RFIC(LiteXModule):
         self.enable_datapath = Signal(reset=1)
 
          # Stream Endpoints ------------------------------------------------------------------------
-        self.sink   = stream.Endpoint(dma_layout(64))
-        self.source = stream.Endpoint(dma_layout(64))
+        self.sink   = stream.Endpoint(dma_layout_with_ts(64))
+        self.source = stream.Endpoint(dma_layout_with_ts(64))
 
         # Config/Control/Status registers ----------------------------------------------------------
         self._config = CSRStorage(fields=[
@@ -162,7 +162,7 @@ class AD9361RFIC(LiteXModule):
 
         # Cross domain crossing --------------------------------------------------------------------
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
-            layout  = dma_layout(64),
+            layout  = dma_layout_with_ts(64),
             cd_from = "sys",
             cd_to   = "rfic",
             with_common_rst = True
@@ -175,7 +175,7 @@ class AD9361RFIC(LiteXModule):
         )
 
         # Buffers (For Timings) --------------------------------------------------------------------
-        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
+        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout_with_ts(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
 
         # BitMode ----------------------------------------------------------------------------------
@@ -184,9 +184,6 @@ class AD9361RFIC(LiteXModule):
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
        
-        # TX Scheduler ---------------------------------------------------------------------------
-        self.scheduler_tx = scheduler_tx = Scheduler()
-
         # Data Flow --------------------------------------------------------------------------------
 
         # TX.  # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
@@ -198,10 +195,18 @@ class AD9361RFIC(LiteXModule):
             tx_bitmode,
             tx_cdc
         )
+        # --- RFIC clock-domain timestamp counter ---
+        self.rfic_time = Signal(64)
+        self.sync.rfic += self.rfic_time.eq(self.rfic_time + 1)
+        
+        # TX Scheduler ---------------------------------------------------------------------------
+        self.scheduler_tx = scheduler_tx = Scheduler()
+        self.comb += scheduler_tx.now.eq(self.rfic_time)
+
         # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            scheduler_tx.sink.connect(tx_cdc.source, keep={"ready"}) , # connect scheduler to tx_cdc 
-            gpio_tx_unpacker.sink.connect(scheduler_tx.source, keep={"valid"}), # connect gpio unpacker to scheduler except valid and ready that will be managed by the scheduler
+            scheduler_tx.sink.connect(tx_cdc.source, omit={"ready"}) , # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source, omit={"valid"}), # connect gpio unpacker to scheduler except valid and ready that will be managed by the scheduler
         ]
 
         self.comb += [
