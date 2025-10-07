@@ -707,6 +707,24 @@ class BaseSoC(SoCMini):
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
+    def add_pcie_probe(self):
+        self.pcie_phy.add_ltssm_tracer()
+        analyzer_signals = [
+            # Rst.
+            self.pcie_phy.pcie_rst_n,
+
+            # Link Status.
+            self.pcie_phy._link_status.fields.rate,
+            self.pcie_phy._link_status.fields.width,
+            self.pcie_phy._link_status.fields.ltssm
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 4096,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
     def add_si5351_i2c_probe(self):
         analyzer_signals = [
             # I2C SCL.
