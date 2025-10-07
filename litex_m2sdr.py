@@ -709,9 +709,15 @@ class BaseSoC(SoCMini):
 
     def add_pcie_probe(self):
         self.pcie_phy.add_ltssm_tracer()
+        self.pcie_clk_count = Signal(16)
+        self.sync.pclk += self.pcie_clk_count.eq(self.pcie_clk_count + 1)
         analyzer_signals = [
             # Rst.
             self.pcie_phy.pcie_rst_n,
+
+            # Clk.
+            self.pcie_phy.pcie_refclk,
+            self.pcie_clk_count,
 
             # Link Status.
             self.pcie_phy._link_status.fields.rate,
