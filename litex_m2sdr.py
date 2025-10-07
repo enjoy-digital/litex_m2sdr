@@ -194,7 +194,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie              = True,  with_pcie_ptm=False, pcie_lanes=1,
+        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen="gen2",
         with_white_rabbit      = False,
@@ -243,7 +243,7 @@ class BaseSoC(SoCMini):
 
             # PCIe Capabilities.
             pcie_enabled    = with_pcie,
-            pcie_speed      = "gen2",
+            pcie_speed      = {1: "gen1", 2: "gen2"}[pcie_gen],
             pcie_lanes      = pcie_lanes,
 
             # Ethernet Capabilities.
@@ -366,6 +366,8 @@ class BaseSoC(SoCMini):
                 "Class_Code_Sub"           : "10",
                 "Bar0_Scale"               : "Megabytes",
                 "Bar0_Size"                : 1,
+                "Link_Speed"               : {1: "2.5_GT/s", 2: "5.0_GT/s"}[pcie_gen],
+                "Trgt_Link_Speed"          : {1: "4'h1",     2: "4'h2"}[pcie_gen],
                 }
             )
 
@@ -800,6 +802,7 @@ def main():
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
     parser.add_argument("--with-pcie-ptm",   action="store_true", help="Enable PCIe PTM.")
+    parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
 
     # Ethernet parameters.
@@ -842,6 +845,7 @@ def main():
         # PCIe.
         with_pcie     = args.with_pcie,
         with_pcie_ptm = args.with_pcie_ptm,
+        pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
 
         # Ethernet.
