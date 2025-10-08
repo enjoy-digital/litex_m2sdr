@@ -285,18 +285,7 @@ class BaseSoC(SoCMini):
             clk_freq   = 100e6,
             with_csr   = True,
         )
-
-        # FIXME: Try to avoid CDC, change sys_clk?
-        time_sys = Signal(64)
-        self.time_sync = BusSynchronizer(
-            width   = 64,
-            idomain = "time",
-            odomain = "sys",
-        )
-        self.comb += [
-            self.time_sync.i.eq(self.time_gen.time),
-            time_sys.eq(self.time_sync.o),
-        ]
+        self.time_gen.add_cdc()
 
         # PPS Generator ----------------------------------------------------------------------------
 
@@ -516,7 +505,7 @@ class BaseSoC(SoCMini):
         self.header = TXRXHeader(data_width=64)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
-            self.header.rx.timestamp.eq(time_sys),
+            self.header.rx.timestamp.eq(self.time_gen.time),
         ]
 
         # TX/RX Datapath ---------------------------------------------------------------------------
