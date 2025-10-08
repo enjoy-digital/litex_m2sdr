@@ -263,15 +263,15 @@ class BaseSoC(SoCMini):
 
         # SI5351 Clock Generator -------------------------------------------------------------------
 
-        si5351_clk_in = Signal()
-        self.si5351 = SI5351(platform,
-            i2c_base     = self.csr.address_map("si5351", origin=True),
-            sys_clk_freq = sys_clk_freq,
-            clk_in       = si5351_clk_in,
-        )
+        # SI5351 Control.
+        si5351_pads   = platform.request("si5351")
+        self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
-        si5351_clk0 = platform.request("si5351_clk0")
-        si5351_clk1 = platform.request("si5351_clk1")
+
+        # SI5351 ClkIn/Out.s
+        si5351_clk_in = Signal()
+        si5351_clk0   = platform.request("si5351_clk0")
+        si5351_clk1   = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
         # Time Generator ---------------------------------------------------------------------------

@@ -26,14 +26,12 @@ _io = [
     ("sync_clk_in", 0, Pins("V13"),  IOStandard("LVCMOS33")), # SYNCDBG_CLK.
 
     # SI5351 Clocking.
-    ("si5351_i2c", 0,
-        Subsignal("scl", Pins("AA20")), # SI5351_SCL.
-        Subsignal("sda", Pins("AB21")), # SI5351_SDA.
-        Misc("PULLUP=TRUE"),
-        IOStandard("LVCMOS33")
+    ("si5351", 0,
+        Subsignal("scl",        Pins("AA20"), Misc("PULLUP=TRUE"), IOStandard("LVCMOS33")), # SI5351_SCL.
+        Subsignal("sda",        Pins("AB21"), Misc("PULLUP=TRUE"), IOStandard("LVCMOS33")), # SI5351_SDA.
+        Subsignal("ssen_clkin", Pins("W22"),                       IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
+        Subsignal("pwm",        Pins("W19"),                       IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ),
-    ("si5351_ssen_clkin", 0, Pins("W22"), IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
-    ("si5351_pwm",        0, Pins("W19"), IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ("si5351_clk0",       0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
     ("si5351_clk1",       0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
     ("si5351_clk2",       0, Pins("H4"),  IOStandard("LVCMOS25")), # FPGA_AUXCLK_3.

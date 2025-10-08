@@ -8,6 +8,7 @@ from migen import *
 from migen.fhdl.specials import Tristate
 
 from litex.gen import *
+from litex.gen import LiteXContext
 from litex.gen.genlib.misc import WaitTimer
 
 from litex.build.io import DDROutput
@@ -286,33 +287,35 @@ class LiteI2CSequencer(LiteXModule):
 # SI5351 -------------------------------------------------------------------------------------------
 
 class SI5351(LiteXModule):
-    def __init__(self, platform, i2c_base, sys_clk_freq, clk_in=0, with_csr=True):
+    def __init__(self, pads, i2c_base, with_csr=True):
         self.version    = Signal() # SI5351 Version (0=B, 1=C).
         self.ss_en      = Signal() # SI5351 Spread spectrum enable (versions A and B).
         self.clk_in_src = Signal() # SI5351 ClkIn Source.
 
         # # #
 
-        # I2C Pads.
-        self.i2c_pads = i2c_pads = platform.request("si5351_i2c")
+        # Context.
+        soc      = LiteXContext.top
+        platform = LiteXContext.platform
 
         # LiteI2C Master.
-        self.i2c = LiteI2C(sys_clk_freq,
-            pads                     = i2c_pads,
+        self.i2c = LiteI2C(soc.sys_clk_freq,
+            pads                     = pads,
             i2c_master_tx_fifo_depth = 8,
             i2c_master_rx_fifo_depth = 8,
         )
 
         # I2C Sequencer for Gateware Init.
         self.sequencer = ResetInserter()(LiteI2CSequencer(
-            sys_clk_freq = sys_clk_freq,
+            sys_clk_freq = soc.sys_clk_freq,
             i2c_base     = i2c_base,
             i2c_adr      = si5351_i2c_addr,
             i2c_sequence = si5351_i2c_sequence,
         ))
 
         # VCXO PWM.
-        self.pwm = PWM(platform.request("si5351_pwm"),
+        self.pwm = PWM(
+            pwm            = pads.pwm,
             default_enable = 1,
             default_width  = 1024,
             default_period = 2048,
@@ -324,7 +327,7 @@ class SI5351(LiteXModule):
             i_S  = self.version,
             i_I0 = self.ss_en,
             i_I1 = ClockSignal("clk10"),
-            o_O  = platform.request("si5351_ssen_clkin"),
+            o_O  = pads.ssen_clkin,
         )
 
         # CSRs.
