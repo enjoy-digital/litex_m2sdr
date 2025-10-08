@@ -383,11 +383,12 @@ class BaseSoC(SoCMini):
             # PTM.
             # ----
             if with_pcie_ptm:
-                # TODO:
-                # - Integrate Driver.
-                # - Test phc2sys Host <-> Board regulation.
+                # TODO: Test phc2sys Host <-> Board regulation.
+                # Checks.
                 if pcie_lanes != 1:
                     raise NotImplementedError("PCIe PTM only supported in PCIe Gen2 X1 for now.")
+
+                # Add PCIe PTM support.
                 from litex_wr_nic.gateware.soc import LiteXWRNICSoC
                 LiteXWRNICSoC.add_pcie_ptm(self)
 
