@@ -384,13 +384,19 @@ class BaseSoC(SoCMini):
             # ----
             if with_pcie_ptm:
                 # TODO:
-                # - Connect Time.
                 # - Integrate Driver.
                 # - Test phc2sys Host <-> Board regulation.
                 if pcie_lanes != 1:
                     raise NotImplementedError("PCIe PTM only supported in PCIe Gen2 X1 for now.")
                 from litex_wr_nic.gateware.soc import LiteXWRNICSoC
                 LiteXWRNICSoC.add_pcie_ptm(self)
+
+                # Connect Time Gen's Time to PCIe PTM.
+                self.comb += [
+                    self.ptm_requester.time_clk.eq(ClockSignal("sys")),
+                    self.ptm_requester.time_rst.eq(ResetSignal("sys")),
+                    self.ptm_requester.time.eq(self.time_gen.time)
+                ]
 
             # Timings False Paths.
             # --------------------
