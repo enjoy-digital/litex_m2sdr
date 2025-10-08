@@ -729,7 +729,7 @@ class BaseSoC(SoCMini):
             depth        = 4096,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
     def add_pcie_dma_probe(self):
@@ -746,7 +746,7 @@ class BaseSoC(SoCMini):
             depth        = 1024,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
     # Clocking.
@@ -774,7 +774,7 @@ class BaseSoC(SoCMini):
             depth        = 4096,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
     # Ethernet.
@@ -787,7 +787,7 @@ class BaseSoC(SoCMini):
             depth        = 1024,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
     # RFIC.
@@ -797,7 +797,7 @@ class BaseSoC(SoCMini):
             depth        = 4096,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
     def add_ad96361_data_probe(self):
@@ -810,7 +810,7 @@ class BaseSoC(SoCMini):
             depth        = 4096,
             clock_domain = "rfic",
             register     = True,
-            csr_csv      = "analyzer.csv"
+            csr_csv      = "test/analyzer.csv"
         )
 
 # Build --------------------------------------------------------------------------------------------
@@ -920,7 +920,7 @@ def main():
             r += f"_white_rabbit"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="csr.csv")
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
