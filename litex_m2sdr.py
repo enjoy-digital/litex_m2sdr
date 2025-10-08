@@ -268,7 +268,11 @@ class BaseSoC(SoCMini):
         self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
-        # SI5351 ClkIn/Out.s
+        # SI5351 ClkIn Ext/uFL.
+        if not with_gpio:
+            self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
+
+        # SI5351 ClkIn/Out.
         si5351_clk_in = Signal()
         si5351_clk0   = platform.request("si5351_clk0")
         si5351_clk1   = platform.request("si5351_clk1")
@@ -574,7 +578,7 @@ class BaseSoC(SoCMini):
             self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
 
            # Use GPIO0 as ClkIn.
-            self.comb += si5351_clk_in.eq(self.gpio.i_async[0])
+            self.comb += self.si5351.clkin_ufl.eq(self.gpio.i_async[0])
 
             #platform.add_extension([
             #    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),

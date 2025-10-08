@@ -27,13 +27,19 @@ from litei2c import LiteI2C
 # Constants.
 # ----------
 
-si5351_i2c_addr = 0x60
+SI5351_I2C_ADDR = 0x60
+
+SI5351_B_VERSION = 0b0
+SI5351_C_VERSION = 0b1
+
+SI5351_CLKIN_FROM_FPGA = 0b0
+SI5351_CLKIN_FROM_UFL  = 0b1
 
 # Configs.
 # --------
 
 # SI5351B-C Default Config from XO (38.4MHz on MS0/2/3/4/5/6/7 and 100MHz on MS1).
-si5351_i2c_sequence = [
+SI5351_I2C_SEQUENCE = [
     # Interrupt Mask Configuration.
     ( 0x02, 0x33 ),  # Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled.
 
@@ -288,32 +294,37 @@ class LiteI2CSequencer(LiteXModule):
 
 class SI5351(LiteXModule):
     def __init__(self, pads, i2c_base, with_csr=True):
-        self.version    = Signal() # SI5351 Version (0=B, 1=C).
-        self.ss_en      = Signal() # SI5351 Spread spectrum enable (versions A and B).
-        self.clk_in_src = Signal() # SI5351 ClkIn Source.
+        self.version   = Signal() # SI5351 Version (0=B, 1=C).
+        self.ss_en     = Signal() # SI5351 Spread spectrum enable (versions A and B).
+        self.clkin_src = Signal() # SI5351 ClkIn Source.
+        self.clkin_ufl = Signal() # SI5351 ClkIn from uFL.
 
         # # #
 
         # Context.
+        # --------
         soc      = LiteXContext.top
         platform = LiteXContext.platform
 
         # LiteI2C Master.
+        # ---------------
         self.i2c = LiteI2C(soc.sys_clk_freq,
             pads                     = pads,
             i2c_master_tx_fifo_depth = 8,
             i2c_master_rx_fifo_depth = 8,
         )
 
-        # I2C Sequencer for Gateware Init.
+        # LiteI2C Sequencer for I2C Gateware Init.
+        # ----------------------------------------
         self.sequencer = ResetInserter()(LiteI2CSequencer(
             sys_clk_freq = soc.sys_clk_freq,
             i2c_base     = i2c_base,
-            i2c_adr      = si5351_i2c_addr,
-            i2c_sequence = si5351_i2c_sequence,
+            i2c_adr      = SI5351_I2C_ADDR,
+            i2c_sequence = SI5351_I2C_SEQUENCE,
         ))
 
         # VCXO PWM.
+        # ---------
         self.pwm = PWM(
             pwm            = pads.pwm,
             default_enable = 1,
@@ -322,28 +333,55 @@ class SI5351(LiteXModule):
         )
 
         # Enable / Clkin.
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets clk10_clk]")
+        # ---------------
+
+        # ClkIn Source Mux.
+        si5351_clkin = Signal()
         self.specials += Instance("BUFGMUX",
-            i_S  = self.version,
-            i_I0 = self.ss_en,
-            i_I1 = ClockSignal("clk10"),
-            o_O  = pads.ssen_clkin,
+            i_S  = self.clkin_src,
+            i_I0 = ClockSignal("clk10"),
+            i_I1 = self.clkin_ufl,
+            o_O  = si5351_clkin,
+        )
+
+        # ClkIn/Enable Ouptut.
+        si5351_ddr_i1 = Signal()
+        si5351_ddr_i2 = Signal()
+        self.comb += [
+            Case(self.version, {
+                # SI5351B: Spread Spectrum Enable.
+                SI5351_B_VERSION : [
+                   si5351_ddr_i1.eq(self.ss_en),
+                   si5351_ddr_i2.eq(self.ss_en),
+                ],
+                # SI5351C: 10MHz ClkIn.
+                SI5351_C_VERSION : [
+                    si5351_ddr_i1.eq(1),
+                    si5351_ddr_i2.eq(0),
+                ]
+            })
+        ]
+        self.specials += DDROutput(
+            clk = si5351_clkin,
+            i1  = si5351_ddr_i1,
+            i2  = si5351_ddr_i2,
+            o   = pads.ssen_clkin,
         )
 
         # CSRs.
         if with_csr:
             self.add_csr()
 
-    def add_csr(self, default_version=0, default_clk_in=0):
+    def add_csr(self, default_version=SI5351_B_VERSION, default_clkin=SI5351_CLKIN_FROM_FPGA):
         self.control = CSRStorage(fields=[
             CSRField("version",  size=1, offset=0, values=[
                 ("``0b0``", "SI5351B Version."),
                 ("``0b1``", "SI5351C Version."),
             ], reset=default_version),
-            CSRField("clk_in_src",  size=1, offset=1, values=[ # FIXME use this instead of version
-                ("``0b0``", "10MHz ClkIn from XO."),
-                ("``0b1``", "10MHz ClkIn from FPGA."),
-            ], reset=default_clk_in),
+            CSRField("clkin_src",  size=1, offset=1, values=[
+                ("``0b0``", "10MHz ClkIn from FPGA (clk10)."),
+                ("``0b1``", "10MHz ClkIn from uFL."),
+            ], reset=default_clkin),
             CSRField("ss_en",  size=1, offset=2, values=[
                 ("``0b0``", "SI5351B Spread spectrum disabled."),
                 ("``0b1``", "SI5351B Spread spectrum enabled."),
@@ -361,10 +399,11 @@ class SI5351(LiteXModule):
 
         # # #
 
-        # Controls.
+        # Control.
         self.comb += [
-            self.version.eq(self.control.fields.version),
-            self.clk_in_src.eq(self.control.fields.clk_in_src),
+            self.version.eq(        self.control.fields.version),
+            self.ss_en.eq(          self.control.fields.ss_en),
+            self.clkin_src.eq(      self.control.fields.clkin_src),
             self.sequencer.reset.eq(self.control.fields.seq_reset),
         ]
 
