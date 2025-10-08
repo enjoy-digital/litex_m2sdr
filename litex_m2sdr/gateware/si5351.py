@@ -21,37 +21,46 @@ from litex.soc.cores.pwm import PWM
 
 from litei2c import LiteI2C
 
-# SI5351B-C Default Config from XO (38.4MHz on MS0/2/3/4/5/6/7 and 100MHz on MS1) ------------------
+# Constants / Configs ------------------------------------------------------------------------------
 
+# Constants.
+# ----------
+
+si5351_i2c_addr = 0x60
+
+# Configs.
+# --------
+
+# SI5351B-C Default Config from XO (38.4MHz on MS0/2/3/4/5/6/7 and 100MHz on MS1).
 si5351_i2c_sequence = [
-    # Interrupt Mask Configuration
-    ( 0x02, 0x33 ),  # Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
+    # Interrupt Mask Configuration.
+    ( 0x02, 0x33 ),  # Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled.
 
-    # Output Enable Control
-    ( 0x03, 0x00 ),  # All CLK outputs enabled via register (OEB pin disabled)
+    # Output Enable Control.
+    ( 0x03, 0x00 ),  # All CLK outputs enabled via register (OEB pin disabled).
 
-    # PLL Reset Control
-    ( 0x04, 0x10 ),  # Disable reset on PLLA LOS (bit4=1), PLLB reset normal (bit5=0)
+    # PLL Reset Control.
+    ( 0x04, 0x10 ),  # Disable reset on PLLA LOS (bit4=1), PLLB reset normal (bit5=0).
 
-    # I2C Configuration
-    ( 0x07, 0x01 ),  # I2C address: 0x60 (default)
+    # I2C Configuration.
+    ( 0x07, 0x01 ),  # I2C address: 0x60 (default).
 
-    # Clock Input Configuration
-    ( 0x0F, 0x00 ),  # PLL src=XTAL (25MHz), CLKIN_DIV=1
+    # Clock Input Configuration.
+    ( 0x0F, 0x00 ),  # PLL src=XTAL (25MHz), CLKIN_DIV=1.
 
-    # Output Channel Configuration (CLK0-CLK7)
-    ( 0x10, 0x2F ),  # CLK0: LVCMOS 8mA, MS0 src=PLLB
-    ( 0x11, 0x2F ),  # CLK1: LVCMOS 8mA, MS1 src=PLLB
-    ( 0x12, 0x2F ),  # CLK2: LVCMOS 8mA, MS2 src=PLLB
-    ( 0x13, 0x2F ),  # CLK3: LVCMOS 8mA, MS3 src=PLLB
-    ( 0x14, 0x2F ),  # CLK4: LVCMOS 8mA, MS4 src=PLLB
-    ( 0x15, 0x2F ),  # CLK5: LVCMOS 8mA, MS5 src=PLLB
-    ( 0x16, 0x2F ),  # CLK6: LVCMOS 8mA, MS6 src=PLLB
-    ( 0x17, 0x2F ),  # CLK7: LVCMOS 8mA, MS7 src=PLLB
+    # Output Channel Configuration (CLK0-CLK7).
+    ( 0x10, 0x2F ),  # CLK0: LVCMOS 8mA, MS0 src=PLLB.
+    ( 0x11, 0x2F ),  # CLK1: LVCMOS 8mA, MS1 src=PLLB.
+    ( 0x12, 0x2F ),  # CLK2: LVCMOS 8mA, MS2 src=PLLB.
+    ( 0x13, 0x2F ),  # CLK3: LVCMOS 8mA, MS3 src=PLLB.
+    ( 0x14, 0x2F ),  # CLK4: LVCMOS 8mA, MS4 src=PLLB.
+    ( 0x15, 0x2F ),  # CLK5: LVCMOS 8mA, MS5 src=PLLB.
+    ( 0x16, 0x2F ),  # CLK6: LVCMOS 8mA, MS6 src=PLLB.
+    ( 0x17, 0x2F ),  # CLK7: LVCMOS 8mA, MS7 src=PLLB.
 
-    # PLLB Configuration (VCO = 844.8MHz from 25MHz XTAL)
-    ( 0x22, 0x42 ),  # PLLB feedback: Multisynth NA (integer mode)
-    ( 0x23, 0x40 ),  # PLLB reset=normal
+    # PLLB Configuration (VCO = 844.8MHz from 25MHz XTAL).
+    ( 0x22, 0x42 ),  # PLLB feedback: Multisynth NA (integer mode).
+    ( 0x23, 0x40 ),  # PLLB reset=normal.
     ( 0x24, 0x00 ),
     ( 0x25, 0x0E ),
     ( 0x26, 0xE5 ),
@@ -59,7 +68,7 @@ si5351_i2c_sequence = [
     ( 0x28, 0xBC ),
     ( 0x29, 0xC0 ),
 
-    # MS0 Configuration (Output Divider 22 for 38.4MHz)
+    # MS0 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x2A, 0x00 ),
     ( 0x2B, 0x01 ),
     ( 0x2C, 0x00 ),
@@ -69,7 +78,7 @@ si5351_i2c_sequence = [
     ( 0x30, 0x00 ),
     ( 0x31, 0x00 ),
 
-    # MS1 Configuration (Output Divider 8.448 for 100MHz)
+    # MS1 Configuration (Output Divider 8.448 for 100MHz).
     ( 0x32, 0x00 ),
     ( 0x33, 0x7D ),
     ( 0x34, 0x00 ),
@@ -79,7 +88,7 @@ si5351_i2c_sequence = [
     ( 0x38, 0x00 ),
     ( 0x39, 0x2B ),
 
-    # MS2 Configuration (Output Divider 22 for 38.4MHz)
+    # MS2 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x3A, 0x00 ),
     ( 0x3B, 0x01 ),
     ( 0x3C, 0x00 ),
@@ -89,7 +98,7 @@ si5351_i2c_sequence = [
     ( 0x40, 0x00 ),
     ( 0x41, 0x00 ),
 
-    # MS3 Configuration (Output Divider 22 for 38.4MHz)
+    # MS3 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x42, 0x00 ),
     ( 0x43, 0x01 ),
     ( 0x44, 0x00 ),
@@ -99,7 +108,7 @@ si5351_i2c_sequence = [
     ( 0x48, 0x00 ),
     ( 0x49, 0x00 ),
 
-    # MS4 Configuration (Output Divider 22 for 38.4MHz)
+    # MS4 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x4A, 0x00 ),
     ( 0x4B, 0x01 ),
     ( 0x4C, 0x00 ),
@@ -109,7 +118,7 @@ si5351_i2c_sequence = [
     ( 0x50, 0x00 ),
     ( 0x51, 0x00 ),
 
-    # MS5 Configuration (Output Divider 22 for 38.4MHz)
+    # MS5 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x52, 0x00 ),
     ( 0x53, 0x01 ),
     ( 0x54, 0x00 ),
@@ -119,36 +128,36 @@ si5351_i2c_sequence = [
     ( 0x58, 0x00 ),
     ( 0x59, 0x00 ),
 
-    # MS6 Configuration (Output Divider 22 for 38.4MHz)
+    # MS6 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x5A, 0x16 ),
 
-    # MS7 Configuration (Output Divider 22 for 38.4MHz)
+    # MS7 Configuration (Output Divider 22 for 38.4MHz).
     ( 0x5B, 0x16 ),
 
-    # Spread-Spectrum, Fractional Stepping Disabled
-    ( 0x95, 0x00 ),  # SSDN_P2=0, SSC_EN=0 => no SS
-    ( 0x96, 0x00 ),  # Reserved = 0
-    ( 0x97, 0x00 ),  # SSDN_P3=0, SSC_MODE=0 => off
-    ( 0x98, 0x00 ),  # Reserved = 0
-    ( 0x99, 0x00 ),  # SSDN_P1=0
-    ( 0x9A, 0x00 ),  # SSUDP=0 => no up/down spread
-    ( 0x9B, 0x00 ),  # Reserved = 0
+    # Spread-Spectrum, Fractional Stepping Disabled.
+    ( 0x95, 0x00 ),  # SSDN_P2=0, SSC_EN=0 => no SS.
+    ( 0x96, 0x00 ),  # Reserved = 0.
+    ( 0x97, 0x00 ),  # SSDN_P3=0, SSC_MODE=0 => off.
+    ( 0x98, 0x00 ),  # Reserved = 0.
+    ( 0x99, 0x00 ),  # SSDN_P1=0.
+    ( 0x9A, 0x00 ),  # SSUDP=0 => no up/down spread.
+    ( 0x9B, 0x00 ),  # Reserved = 0.
 
-    # VCXO Configuration
+    # VCXO Configuration.
     ( 0xA2, 0xF2 ),
     ( 0xA3, 0xFD ),
     ( 0xA4, 0x01 ),
 
-    # Phase Offset Configuration
-    ( 0xA5, 0x00 ),  # CLK0 phase offset=0
-    ( 0xA6, 0x00 ),  # CLK1 phase offset=0
-    ( 0xA7, 0x00 ),  # CLK2 phase offset=0
-    ( 0xA8, 0x00 ),  # CLK3 phase offset=0
-    ( 0xA9, 0x00 ),  # CLK4 phase offset=0
-    ( 0xAA, 0x00 ),  # CLK5 phase offset=0
+    # Phase Offset Configuration.
+    ( 0xA5, 0x00 ),  # CLK0 phase offset=0.
+    ( 0xA6, 0x00 ),  # CLK1 phase offset=0.
+    ( 0xA7, 0x00 ),  # CLK2 phase offset=0.
+    ( 0xA8, 0x00 ),  # CLK3 phase offset=0.
+    ( 0xA9, 0x00 ),  # CLK4 phase offset=0.
+    ( 0xAA, 0x00 ),  # CLK5 phase offset=0.
 
-    # Crystal Load Capacitance
-    (0xB7, 0x12 ),  # XTAL_CL=0 (6pF loading)
+    # Crystal Load Capacitance.
+    (0xB7, 0x12 ),  # XTAL_CL=0 (6pF loading).
 ]
 
 # LiteI2C Sequencer -----------------------------------------------------------------------------
@@ -165,7 +174,7 @@ class LiteI2CSequencer(LiteXModule):
         for i, (addr, data) in enumerate(i2c_sequence):
             seq_data.append(addr << 8 | data)
 
-        # Memory and Port
+        # Memory and Port.
         mem      = Memory(16, len(seq_data), init=seq_data)
         mem_port = mem.get_port(async_read=True)
         self.specials += mem, mem_port
@@ -177,7 +186,7 @@ class LiteI2CSequencer(LiteXModule):
         I2C_MASTER_RXTX_ADDR     = i2c_base + 0x10
         I2C_MASTER_STATUS_ADDR   = i2c_base + 0x14
 
-        # FSM
+        # FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         self.fsm.act("IDLE",
             NextValue(mem_port.adr, 0),
@@ -298,7 +307,7 @@ class SI5351(LiteXModule):
         self.sequencer = ResetInserter()(LiteI2CSequencer(
             sys_clk_freq = sys_clk_freq,
             i2c_base     = 0xa000, # FIXME: Avoid hardcoded value.
-            i2c_adr      = 0x60,
+            i2c_adr      = si5351_i2c_addr,
             i2c_sequence = si5351_i2c_sequence,
         ))
 
