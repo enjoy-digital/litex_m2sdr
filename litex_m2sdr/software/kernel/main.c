@@ -1517,6 +1517,9 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		return PTR_ERR(litepcie_dev->litepcie_ptp_clock);
 	}
 
+	/* Display created PTP device */
+	dev_info(&dev->dev, "PTP clock registered as /dev/ptp%d\n", ptp_clock_index(litepcie_dev->litepcie_ptp_clock));
+
 	/* Enable timer (time) counter */
 	litepcie_writel(litepcie_dev, CSR_TIME_GEN_CONTROL_ADDR, TIME_CONTROL_ENABLE | TIME_CONTROL_SYNC_ENABLE);
 
