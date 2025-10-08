@@ -707,6 +707,7 @@ class BaseSoC(SoCMini):
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
+    # PCIe.
     def add_pcie_probe(self):
         self.pcie_phy.add_ltssm_tracer()
         self.pcie_clk_count = Signal(16)
@@ -731,6 +732,24 @@ class BaseSoC(SoCMini):
             csr_csv      = "analyzer.csv"
         )
 
+    def add_pcie_dma_probe(self):
+        assert hasattr(self, "pcie_dma0")
+        analyzer_signals = [
+            self.pps_gen.pps,      # PPS.
+            self.pcie_dma0.sink,   # RX.
+            self.pcie_dma0.source, # TX.
+            self.pcie_dma0.synchronizer.synced,
+            self.header.rx.reset,
+            self.header.tx.reset,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
+    # Clocking.
     def add_si5351_i2c_probe(self):
         analyzer_signals = [
             # I2C SCL.
@@ -758,6 +777,20 @@ class BaseSoC(SoCMini):
             csr_csv      = "analyzer.csv"
         )
 
+    # Ethernet.
+    def add_eth_tx_probe(self):
+        assert hasattr(self, "eth_streamer")
+        analyzer_signals = [
+            self.eth_streamer.sink,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
+    # RFIC.
     def add_ad9361_spi_probe(self):
         analyzer_signals = [self.platform.lookup_request("ad9361_spi")]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
@@ -776,35 +809,6 @@ class BaseSoC(SoCMini):
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = 4096,
             clock_domain = "rfic",
-            register     = True,
-            csr_csv      = "analyzer.csv"
-        )
-
-    def add_pcie_dma_probe(self):
-        assert hasattr(self, "pcie_dma0")
-        analyzer_signals = [
-            self.pps_gen.pps,      # PPS.
-            self.pcie_dma0.sink,   # RX.
-            self.pcie_dma0.source, # TX.
-            self.pcie_dma0.synchronizer.synced,
-            self.header.rx.reset,
-            self.header.tx.reset,
-        ]
-        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 1024,
-            clock_domain = "sys",
-            register     = True,
-            csr_csv      = "analyzer.csv"
-        )
-
-    def add_eth_tx_probe(self):
-        assert hasattr(self, "eth_streamer")
-        analyzer_signals = [
-            self.eth_streamer.sink,
-        ]
-        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 1024,
-            clock_domain = "sys",
             register     = True,
             csr_csv      = "analyzer.csv"
         )
@@ -847,10 +851,12 @@ def main():
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
-    probeopts.add_argument("--with-ad9361-spi-probe",      action="store_true", help="Enable AD9361 SPI Probe.")
-    probeopts.add_argument("--with-ad9361-data-probe",     action="store_true", help="Enable AD9361 Data Probe.")
-    probeopts.add_argument("--with-pcie-dma-probe",        action="store_true", help="Enable PCIe DMA Probe.")
-    probeopts.add_argument("--with-eth-tx-probe",          action="store_true", help="Enable Ethernet Tx Probe.")
+    probeopts.add_argument("--with-pcie-probe",        action="store_true", help="Enable PCIe Probe.")
+    probeopts.add_argument("--with-pcie-dma-probe",    action="store_true", help="Enable PCIe DMA Probe.")
+    probeopts.add_argument("--with-si5351-i2c-probe",  action="store_true", help="Enable SI5351 I2C Probe.")
+    probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
+    probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
+    probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
 
     args = parser.parse_args()
 
@@ -890,14 +896,18 @@ def main():
     )
 
     # LiteScope Analyzer Probes.
+    if args.with_pcie_probe:
+        soc.add_pcie_probe()
+    if args.with_pcie_dma_probe:
+        soc.add_pcie_dma_probe()
+    if args.with_si5351_i2c_probe:
+        soc.add_si5351_i2c_probe()
+    if args.with_eth_tx_probe:
+        soc.add_eth_tx_probe()
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
         soc.add_ad96361_data_probe()
-    if args.with_pcie_dma_probe:
-        soc.add_pcie_dma_probe()
-    if args.with_eth_tx_probe:
-        soc.add_eth_tx_probe()
 
     # Builder.
     def get_build_name():
