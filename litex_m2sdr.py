@@ -264,7 +264,11 @@ class BaseSoC(SoCMini):
         # SI5351 Clock Generator -------------------------------------------------------------------
 
         si5351_clk_in = Signal()
-        self.si5351 = SI5351(platform, sys_clk_freq=sys_clk_freq, clk_in=si5351_clk_in)
+        self.si5351 = SI5351(platform,
+            i2c_base     = self.csr.address_map("si5351", origin=True),
+            sys_clk_freq = sys_clk_freq,
+            clk_in       = si5351_clk_in,
+        )
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
         si5351_clk0 = platform.request("si5351_clk0")
         si5351_clk1 = platform.request("si5351_clk1")
@@ -649,7 +653,6 @@ class BaseSoC(SoCMini):
 
             # Clk10M Generator.
             # -----------------
-
             self.syncout_pll = syncout_pll = S7MMCM(speedgrade=-2)
             self.comb += syncout_pll.reset.eq(ResetSignal("wr"))
             syncout_pll.register_clkin(ClockSignal("wr"), 62.5e6)

@@ -286,7 +286,7 @@ class LiteI2CSequencer(LiteXModule):
 # SI5351 -------------------------------------------------------------------------------------------
 
 class SI5351(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, clk_in=0, with_csr=True):
+    def __init__(self, platform, i2c_base, sys_clk_freq, clk_in=0, with_csr=True):
         self.version    = Signal() # SI5351 Version (0=B, 1=C).
         self.ss_en      = Signal() # SI5351 Spread spectrum enable (versions A and B).
         self.clk_in_src = Signal() # SI5351 ClkIn Source.
@@ -306,7 +306,7 @@ class SI5351(LiteXModule):
         # I2C Sequencer for Gateware Init.
         self.sequencer = ResetInserter()(LiteI2CSequencer(
             sys_clk_freq = sys_clk_freq,
-            i2c_base     = 0xa000, # FIXME: Avoid hardcoded value.
+            i2c_base     = i2c_base,
             i2c_adr      = si5351_i2c_addr,
             i2c_sequence = si5351_i2c_sequence,
         ))
