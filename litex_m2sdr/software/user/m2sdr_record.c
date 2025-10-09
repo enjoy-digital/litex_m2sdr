@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
+#include <time.h>
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
@@ -34,6 +35,7 @@ void intHandler(int dummy) {
 
 static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header)
 {
+    static const uint64_t DMA_HEADER_SYNC_WORD = 0x5aa55aa55aa55aa5ULL;
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
 
     FILE *fo = NULL;
@@ -42,6 +44,7 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
     size_t total_len = 0;
     int64_t last_time;
     int64_t writer_sw_count_last = 0;
+    uint64_t last_timestamp = 0;
 
     /* Open File or use stdout */
     if (filename != NULL) {
@@ -81,9 +84,20 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
         while (1) {
             /* Get Read buffer. */
             char *buf_rd = litepcie_dma_next_read_buffer(&dma);
+
             /* Break when no buffer available for Read. */
             if (!buf_rd)
                 break;
+
+            /* Extract timestamp if header enabled */
+            if (header) {
+                uint64_t sync = *(uint64_t*)buf_rd;
+                if (sync == DMA_HEADER_SYNC_WORD) {
+                    uint64_t timestamp = *(uint64_t*)(buf_rd + 8);
+                    last_timestamp = timestamp;
+                }
+            }
+
             /* Copy Read data to File or stdout. */
             if (fo != NULL) {
                 if (size > 0 && total_len >= size) {
@@ -102,15 +116,35 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
         /* Statistics every 200ms. */
         int64_t duration = get_time_ms() - last_time;
         if (!quiet && duration > 200) {
+            double speed     = (double)(dma.writer_sw_count - writer_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
+            uint64_t buffers = dma.writer_sw_count;
+            uint64_t size_mb = ((dma.writer_sw_count) * DMA_BUFFER_SIZE) / 1024 / 1024;
+
             /* Print banner every 10 lines. */
-            if (i % 10 == 0)
-                fprintf(stderr, "\e[1mSPEED(Gbps)    BUFFERS SIZE(MB)\e[0m\n");
+            if (i % 10 == 0) {
+                if (header) {
+                    fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
+                } else {
+                    fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
+                }
+            }
             i++;
+
             /* Print statistics. */
-            fprintf(stderr, "%10.2f %10" PRIu64 "  %8" PRIu64"\n",
-                    (double)(dma.writer_sw_count - writer_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6),
-                    dma.writer_sw_count,
-                    ((dma.writer_sw_count) * DMA_BUFFER_SIZE) / 1024 / 1024);
+            if (header) {
+                uint64_t seconds = last_timestamp / 1000000000ULL;
+                uint64_t nanos   = last_timestamp % 1000000000ULL;
+                uint32_t ms      = nanos / 1000000;
+                struct tm tm;
+                gmtime_r((const time_t*)&seconds, &tm);
+                char time_str[64];
+                strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+                fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u\n",
+                    speed, buffers, size_mb, time_str, ms);
+            } else {
+                fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64"\n",
+                    speed, buffers, size_mb);
+            }
             /* Update time/count. */
             last_time = get_time_ms();
             writer_sw_count_last = dma.writer_sw_count;
