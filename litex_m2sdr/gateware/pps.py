@@ -23,7 +23,8 @@ class PPSGenerator(LiteXModule):
     """
     def __init__(self, clk_freq, time, offset=int(500e6), reset=0):
         # IOs.
-        self.pps = pps = Signal()  # PPS output signal.
+        self.pps       = pps       = Signal() # PPS output.
+        self.pps_pulse = pps_pulse = Signal() # PPS pulse output.
 
         # # #
 
@@ -63,5 +64,6 @@ class PPSGenerator(LiteXModule):
         self.timer = WaitTimer(int(clk_freq * 100e-3))  # 10% high pulse width.
         self.comb += [
             self.timer.wait.eq(~start),
-            pps.eq(~self.timer.done)
+            pps.eq(~self.timer.done),
+            pps_pulse.eq(start),
         ]
