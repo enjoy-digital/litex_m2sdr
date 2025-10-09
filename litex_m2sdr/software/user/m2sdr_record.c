@@ -18,6 +18,7 @@
 #include <signal.h>
 
 #include "liblitepcie.h"
+#include "libm2sdr.h"
 
 /* Variables */
 /*-----------*/
@@ -31,7 +32,7 @@ void intHandler(int dummy) {
 /* Record (DMA RX) */
 /*-----------------*/
 
-static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet)
+static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header)
 {
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
 
@@ -58,8 +59,13 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
     /* Initialize DMA. */
     if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
-
     dma.writer_enable = 1;
+
+    /* Configure RX Header */
+    m2sdr_writel(dma.fds.fd, CSR_HEADER_RX_CONTROL_ADDR,
+       (1      << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+       (header << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
+    );
 
     /* Test Loop. */
     last_time = get_time_ms();
@@ -132,6 +138,7 @@ static void help(void)
            "-c device_num         Select the device (default = 0).\n"
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
+           "-t                    Enable RX Header with timestamp.\n"
            "\n"
            "Arguments:\n"
            "filename              File to record I/Q samples to (optional, omit to monitor stream).\n"
@@ -148,16 +155,16 @@ int main(int argc, char **argv)
     static char m2sdr_device[1024];
     static int m2sdr_device_num;
     static uint8_t m2sdr_device_zero_copy;
-    static uint8_t quiet = 0;
-
-    m2sdr_device_num = 0;
+    static uint8_t quiet   = 0;
+    static uint8_t header  = 0;
+    m2sdr_device_num       = 0;
     m2sdr_device_zero_copy = 0;
 
     signal(SIGINT, intHandler);
 
     /* Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:zq");
+        c = getopt(argc, argv, "hc:zqt");
         if (c == -1)
             break;
         switch(c) {
@@ -172,6 +179,9 @@ int main(int argc, char **argv)
             break;
         case 'q':
             quiet = 1;
+            break;
+        case 't':
+            header = 1;
             break;
         default:
             exit(1);
@@ -190,6 +200,6 @@ int main(int argc, char **argv)
             size = strtoul(argv[optind++], NULL, 0);
         }
     }
-    m2sdr_record(m2sdr_device, filename, size, m2sdr_device_zero_copy, quiet);
+    m2sdr_record(m2sdr_device, filename, size, m2sdr_device_zero_copy, quiet, header);
     return 0;
 }
