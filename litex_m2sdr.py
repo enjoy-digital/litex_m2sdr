@@ -289,18 +289,11 @@ class BaseSoC(SoCMini):
 
         # PPS Generator ----------------------------------------------------------------------------
 
-        self.pps_gen = ClockDomainsRenamer("time")(PPSGenerator(
-            clk_freq = 100e6,
+        self.pps_gen = PPSGenerator(
+            clk_freq = sys_clk_freq,
             time     = self.time_gen.time,
             reset    = self.time_gen.time_change,
-        ))
-        # FIXME: Improve.
-        pps_sys   = Signal()
-        pps_sys_d = Signal()
-        pps_rise  = Signal()
-        self.specials += MultiReg(self.pps_gen.pps, pps_sys)
-        self.sync += pps_sys_d.eq(pps_sys)
-        self.comb += pps_rise.eq(pps_sys & ~pps_sys_d)
+        )
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -378,7 +371,7 @@ class BaseSoC(SoCMini):
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(pps_rise)
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # PTM.
             # ----
