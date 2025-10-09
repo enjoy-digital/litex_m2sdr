@@ -590,6 +590,24 @@ static void info(void)
         printf("AD9361 Temperature : %0.1f °C\n",
             (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(conn, REG_TEMPERATURE) * 1000000, 1140)/1000);
     }
+
+    printf("\n\e[1m[> Board Time:\e[0m\n");
+    printf("--------------\n");
+    uint32_t ctrl = m2sdr_readl(conn, CSR_TIME_GEN_CONTROL_ADDR);
+    m2sdr_writel(conn, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
+    m2sdr_writel(conn, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
+    uint64_t ts    = (
+        ((uint64_t) m2sdr_readl(conn, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32 |
+        ((uint64_t) m2sdr_readl(conn, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0
+    );
+    time_t seconds = ts / 1000000000ULL;
+    uint32_t ms    = (ts % 1000000000ULL) / 1000000;
+    struct tm tm;
+    localtime_r(&seconds, &tm);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+    printf("Board Time : %s.%03u\n", time_str, ms);
+
     m2sdr_close(conn);
 }
 
