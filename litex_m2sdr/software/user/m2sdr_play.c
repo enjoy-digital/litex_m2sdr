@@ -16,8 +16,10 @@
 #include <fcntl.h>
 #include <math.h>
 #include <signal.h>
+#include <time.h>
 
 #include "liblitepcie.h"
+#include "libm2sdr.h"
 
 /* Variables */
 /*-----------*/
@@ -27,11 +29,10 @@ sig_atomic_t keep_running = 1;
 void intHandler(int dummy) {
     keep_running = 0;
 }
-
 /* Play (DMA TX) */
 /*---------------*/
 
-static void m2sdr_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy, uint8_t quiet)
+static void m2sdr_play(const char *device_name, const char *filename, uint32_t loops, uint8_t zero_copy, uint8_t quiet, uint8_t timed_start)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
@@ -60,6 +61,51 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
     /* Initialize DMA. */
     if (litepcie_dma_init(&dma, device_name, zero_copy))
         exit(1);
+
+    if (timed_start) {
+        /* Read initial timestamp */
+        uint32_t ctrl = m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR);
+        m2sdr_writel(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
+        m2sdr_writel(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
+        uint64_t current_ts = (
+            ((uint64_t) m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32 |
+            ((uint64_t) m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0
+        );
+        time_t seconds = current_ts / 1000000000ULL;
+        uint32_t ms = (current_ts % 1000000000ULL) / 1000000;
+        struct tm tm;
+        localtime_r(&seconds, &tm);
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+        printf("Initial Time : %s.%03u\n", time_str, ms);
+
+        /* Calculate next full second */
+        uint64_t ns_in_sec = current_ts % 1000000000ULL;
+        uint64_t wait_ns   = (ns_in_sec == 0) ? 1000000000ULL : (1000000000ULL - ns_in_sec);
+        uint64_t target_ts = current_ts + wait_ns;
+
+        /* Poll until target time reached */
+        uint64_t poll_ts;
+        do {
+            ctrl = m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR);
+            m2sdr_writel(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
+            m2sdr_writel(dma.fds.fd, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
+            poll_ts = (
+                ((uint64_t) m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32 |
+                ((uint64_t) m2sdr_readl(dma.fds.fd, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0
+            );
+            usleep(1000); /* 1ms poll */
+        } while (poll_ts < target_ts);
+        usleep(100000); /* 100ms delay */
+
+        /* Display DMA start time */
+        target_ts += 1000000000ULL;
+        seconds = target_ts / 1000000000ULL;
+        ms      = (target_ts % 1000000000ULL) / 1000000;
+        localtime_r(&seconds, &tm);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+        printf("Start Time   : %s.%03u\n", time_str, ms);
+    }
 
     dma.reader_enable = 1;
 
@@ -148,6 +194,7 @@ static void help(void)
            "-c device_num         Select the device (default = 0).\n"
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
+           "-t                    Timed start mode.\n"
            "\n"
            "Arguments:\n"
            "filename              I/Q samples stream file to play.\n"
@@ -165,7 +212,7 @@ int main(int argc, char **argv)
     static int m2sdr_device_num;
     static uint8_t m2sdr_device_zero_copy;
     static uint8_t quiet = 0;
-
+    static uint8_t timed_start = 0;
     m2sdr_device_num = 0;
     m2sdr_device_zero_copy = 0;
 
@@ -173,7 +220,7 @@ int main(int argc, char **argv)
 
     /* Parameters. */
     for (;;) {
-        c = getopt(argc, argv, "hc:zq");
+        c = getopt(argc, argv, "hc:zqt");
         if (c == -1)
             break;
         switch(c) {
@@ -188,6 +235,9 @@ int main(int argc, char **argv)
             break;
         case 'q':
             quiet = 1;
+            break;
+        case 't':
+            timed_start = 1;
             break;
         default:
             exit(1);
@@ -213,6 +263,6 @@ int main(int argc, char **argv)
     } else {
         help();
     }
-    m2sdr_play(m2sdr_device, filename, loops, m2sdr_device_zero_copy, quiet);
+    m2sdr_play(m2sdr_device, filename, loops, m2sdr_device_zero_copy, quiet, timed_start);
     return 0;
 }
