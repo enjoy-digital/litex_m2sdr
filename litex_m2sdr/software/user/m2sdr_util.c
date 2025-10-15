@@ -503,10 +503,12 @@ static void info(void)
         uint32_t pcie_config = m2sdr_readl(conn, CSR_CAPABILITY_PCIE_CONFIG_ADDR);
         int pcie_speed = (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
         int pcie_lanes = (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE) - 1);
+        bool pcie_ptm  = (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_PTM_OFFSET)   & ((1 << CSR_CAPABILITY_PCIE_CONFIG_PTM_SIZE) - 1);
         const char *pcie_speed_str[] = {"Gen1", "Gen2"};
         const char *pcie_lanes_str[] = {"x1", "x2", "x4"};
         printf("  PCIe Speed     : %s\n", pcie_speed_str[pcie_speed]);
         printf("  PCIe Lanes     : %s\n", pcie_lanes_str[pcie_lanes]);
+        printf("  PCIe PTM       : %s\n", pcie_ptm ? "Enabled" : "Disabled");
     }
 
     if (eth_enabled) {
