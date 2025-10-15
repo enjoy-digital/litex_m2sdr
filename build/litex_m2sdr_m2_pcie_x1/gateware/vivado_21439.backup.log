@@ -3,8 +3,8 @@
 # SW Build 5239630 on Fri Nov 08 22:34:34 MST 2024
 # IP Build 5239520 on Sun Nov 10 16:12:51 MST 2024
 # SharedData Build 5239561 on Fri Nov 08 14:39:27 MST 2024
-# Start of session at: Mon Oct 13 18:19:38 2025
-# Process ID         : 310606
+# Start of session at: Tue Oct 14 23:54:35 2025
+# Process ID         : 21439
 # Current directory  : /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware
 # Command line       : vivado -mode batch -source litex_m2sdr_m2_pcie_x1.tcl
 # Log file           : /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/vivado.log
@@ -19,7 +19,7 @@
 # Host memory        : 33205 MB
 # Swap memory        : 2147 MB
 # Total Virtual      : 35353 MB
-# Available Virtual  : 30774 MB
+# Available Virtual  : 30889 MB
 #-----------------------------------------------------------
 source litex_m2sdr_m2_pcie_x1.tcl
 # set_part xc7a200tsbg484-3
@@ -76,102 +76,102 @@ INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200
 INFO: [Device 21-403] Loading part xc7a200tsbg484-3
 INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 7 processes.
 INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
-INFO: [Synth 8-7075] Helper process launched with PID 310658
+INFO: [Synth 8-7075] Helper process launched with PID 21543
 ---------------------------------------------------------------------------------
-Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2011.742 ; gain = 417.828 ; free physical = 21671 ; free virtual = 28279
+Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2059.402 ; gain = 418.766 ; free physical = 22641 ; free virtual = 28414
 ---------------------------------------------------------------------------------
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7.v:53]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie2_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie2_top.v:59]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_core_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_core_top.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7.v:53]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie2_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie2_top.v:59]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_core_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_core_top.v:63]
 INFO: [Synth 8-6157] synthesizing module 'xpm_cdc_single' [/tools/Xilinx/Vivado/2024.2/data/ip/xpm/xpm_cdc/hdl/xpm_cdc.sv:152]
 INFO: [Synth 8-6155] done synthesizing module 'xpm_cdc_single' (0#1) [/tools/Xilinx/Vivado/2024.2/data/ip/xpm/xpm_cdc/hdl/xpm_cdc.sv:152]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_top.v:62]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_top.v:68]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx.v:70]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx_pipeline.v:70]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx_pipeline.v:70]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx_null_gen' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx_null_gen.v:71]
-INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx_null_gen.v:253]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx_null_gen' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx_null_gen.v:71]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_rx.v:70]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx.v:70]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx_thrtl_ctl' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:71]
-INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:573]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx_thrtl_ctl' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:71]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_pipeline.v:71]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_pipeline.v:71]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx.v:70]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_top.v:68]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_7x.v:63]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_bram_top_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:72]
-WARNING: [Synth 8-11581] system function call 'time' not supported [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:139]
-INFO: [Synth 8-251] [1'b0]  ROWS_TX 1 COLS_TX 4 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:139]
-WARNING: [Synth 8-11581] system function call 'time' not supported [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:140]
-INFO: [Synth 8-251] [1'b0]  ROWS_RX 1 COLS_RX 4 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:140]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_brams_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_brams_7x.v:65]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_bram_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_7x.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_top.v:62]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_top.v:68]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx.v:70]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx_pipeline.v:70]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx_pipeline.v:70]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_rx_null_gen' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx_null_gen.v:71]
+INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx_null_gen.v:253]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx_null_gen' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx_null_gen.v:71]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_rx' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_rx.v:70]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx.v:70]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx_thrtl_ctl' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:71]
+INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:573]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx_thrtl_ctl' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:71]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_axi_basic_tx_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_pipeline.v:71]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_pipeline.v:71]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_tx' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx.v:70]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_axi_basic_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_top.v:68]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_7x.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_bram_top_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:72]
+WARNING: [Synth 8-11581] system function call 'time' not supported [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:139]
+INFO: [Synth 8-251] [1'b0]  ROWS_TX 1 COLS_TX 4 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:139]
+WARNING: [Synth 8-11581] system function call 'time' not supported [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:140]
+INFO: [Synth 8-251] [1'b0]  ROWS_RX 1 COLS_RX 4 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:140]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_brams_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_brams_7x.v:65]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_bram_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_7x.v:63]
 INFO: [Synth 8-6157] synthesizing module 'xil_internal_svlib_BRAM_TDP_MACRO' [/tools/Xilinx/Vivado/2024.2/data/verilog/src/unimacro/BRAM_TDP_MACRO.v:30]
 INFO: [Synth 8-6157] synthesizing module 'RAMB36E1' [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:143634]
 INFO: [Synth 8-6155] done synthesizing module 'RAMB36E1' (0#1) [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:143634]
 INFO: [Synth 8-6155] done synthesizing module 'xil_internal_svlib_BRAM_TDP_MACRO' (0#1) [/tools/Xilinx/Vivado/2024.2/data/verilog/src/unimacro/BRAM_TDP_MACRO.v:30]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_bram_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_7x.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_brams_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_brams_7x.v:65]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_bram_top_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_bram_top_7x.v:72]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_bram_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_7x.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_brams_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_brams_7x.v:65]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_bram_top_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_bram_top_7x.v:72]
 INFO: [Synth 8-6157] synthesizing module 'PCIE_2_1' [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:113046]
 INFO: [Synth 8-6155] done synthesizing module 'PCIE_2_1' (0#1) [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:113046]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_7x.v:63]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_pipeline.v:63]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_misc' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_misc.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_misc' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_misc.v:63]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_lane' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_lane.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_lane' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_lane.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_pipe_pipeline.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie_top.v:62]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_top.v:62]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_rx_valid_filter_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:62]
-INFO: [Synth 8-155] case statement is not full and has no default [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:191]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_rx_valid_filter_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:62]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_wrapper' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_wrapper.v:156]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_reset' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_reset.v:67]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_reset' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_reset.v:67]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_qpll_reset' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_qpll_reset.v:66]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_qpll_reset' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_qpll_reset.v:66]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_rate' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_rate.v:67]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_rate' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_rate.v:67]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_drp' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_drp.v:67]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_drp' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtp_pipe_drp.v:67]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_eq' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_eq.v:67]
-INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_eq.v:402]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_rxeq_scan' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_rxeq_scan.v:66]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_rxeq_scan' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_rxeq_scan.v:66]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_eq' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_eq.v:67]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_user' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_user.v:67]
-INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_user.v:354]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_user' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_user.v:67]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_sync' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_sync.v:72]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_sync' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_sync.v:72]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_wrapper' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_wrapper.v:67]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_7x.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_pipeline' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_pipeline.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_misc' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_misc.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_misc' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_misc.v:63]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pcie_pipe_lane' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_lane.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_lane' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_lane.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_pipe_pipeline' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_pipe_pipeline.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie_top.v:62]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_top' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_top.v:62]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_rx_valid_filter_7x' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:62]
+INFO: [Synth 8-155] case statement is not full and has no default [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:191]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_rx_valid_filter_7x' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:62]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_wrapper' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_wrapper.v:156]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_reset' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_reset.v:67]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_reset' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_reset.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_qpll_reset' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_qpll_reset.v:66]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_qpll_reset' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_qpll_reset.v:66]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_rate' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_rate.v:67]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_rate' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_rate.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtp_pipe_drp' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_drp.v:67]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtp_pipe_drp' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtp_pipe_drp.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_eq' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_eq.v:67]
+INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_eq.v:402]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_rxeq_scan' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_rxeq_scan.v:66]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_rxeq_scan' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_rxeq_scan.v:66]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_eq' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_eq.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_user' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_user.v:67]
+INFO: [Synth 8-226] default block is never used [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_user.v:354]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_user' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_user.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_pipe_sync' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_sync.v:72]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_sync' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_sync.v:72]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gt_wrapper' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_wrapper.v:67]
 INFO: [Synth 8-6157] synthesizing module 'GTPE2_CHANNEL' [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:52375]
 INFO: [Synth 8-6155] done synthesizing module 'GTPE2_CHANNEL' (0#1) [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:52375]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtx_cpllpd_ovrd' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtx_cpllpd_ovrd.v:55]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtx_cpllpd_ovrd' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gtx_cpllpd_ovrd.v:55]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_wrapper' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_wrapper.v:67]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7_gtx_cpllpd_ovrd' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtx_cpllpd_ovrd.v:55]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gtx_cpllpd_ovrd' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gtx_cpllpd_ovrd.v:55]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_wrapper' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_wrapper.v:67]
 INFO: [Synth 8-6157] synthesizing module 'BUFG' [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:2676]
 INFO: [Synth 8-6155] done synthesizing module 'BUFG' (0#1) [/tools/Xilinx/Vivado/2024.2/scripts/rt/data/unisim_comp.v:2676]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_wrapper' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_wrapper.v:156]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_top.v:62]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_core_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_core_top.v:63]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie2_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pcie2_top.v:59]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7.v:53]
-WARNING: [Synth 8-6014] Unused sequential element trn_rdllp_src_rdy_d_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:421]
-WARNING: [Synth 8-6014] Unused sequential element reg_tlast_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:655]
-WARNING: [Synth 8-6014] Unused sequential element flush_axi_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_axi_basic_tx_pipeline.v:528]
-WARNING: [Synth 8-6014] Unused sequential element reg_eios_detected_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:135]
-WARNING: [Synth 8-6014] Unused sequential element gt_rx_is_skp0_q_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:144]
-WARNING: [Synth 8-6014] Unused sequential element gt_rx_is_skp1_q_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_gt_rx_valid_filter_7x.v:145]
-WARNING: [Synth 8-6014] Unused sequential element gen3_rdy_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_user.v:562]
-WARNING: [Synth 8-6014] Unused sequential element rxsync_fsm_disable.rxsync_done_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_sync.v:613]
-WARNING: [Synth 8-6014] Unused sequential element pipe_lane[0].gt_rxrcvrdet_c_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7_pipe_wrapper.v:1627]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pipe_wrapper' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_wrapper.v:156]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_gt_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_top.v:62]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_core_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_core_top.v:63]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7_pcie2_top' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pcie2_top.v:59]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7.v:53]
+WARNING: [Synth 8-6014] Unused sequential element trn_rdllp_src_rdy_d_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:421]
+WARNING: [Synth 8-6014] Unused sequential element reg_tlast_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_thrtl_ctl.v:655]
+WARNING: [Synth 8-6014] Unused sequential element flush_axi_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_axi_basic_tx_pipeline.v:528]
+WARNING: [Synth 8-6014] Unused sequential element reg_eios_detected_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:135]
+WARNING: [Synth 8-6014] Unused sequential element gt_rx_is_skp0_q_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:144]
+WARNING: [Synth 8-6014] Unused sequential element gt_rx_is_skp1_q_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_gt_rx_valid_filter_7x.v:145]
+WARNING: [Synth 8-6014] Unused sequential element gen3_rdy_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_user.v:562]
+WARNING: [Synth 8-6014] Unused sequential element rxsync_fsm_disable.rxsync_done_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_sync.v:613]
+WARNING: [Synth 8-6014] Unused sequential element pipe_lane[0].gt_rxrcvrdet_c_reg was removed.  [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7_pipe_wrapper.v:1627]
 WARNING: [Synth 8-7129] Port GT_RXDISPERR[7] in module pcie_s7_gt_wrapper is either unconnected or has no load
 WARNING: [Synth 8-7129] Port GT_RXDISPERR[6] in module pcie_s7_gt_wrapper is either unconnected or has no load
 WARNING: [Synth 8-7129] Port GT_RXDISPERR[5] in module pcie_s7_gt_wrapper is either unconnected or has no load
@@ -274,63 +274,63 @@ WARNING: [Synth 8-7129] Port pipe_tx2_data[6] in module pcie_s7_gt_top is either
 WARNING: [Synth 8-7129] Port pipe_tx2_data[5] in module pcie_s7_gt_top is either unconnected or has no load
 INFO: [Common 17-14] Message 'Synth 8-7129' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
 ---------------------------------------------------------------------------------
-Finished RTL Elaboration : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2122.711 ; gain = 528.797 ; free physical = 21574 ; free virtual = 28168
+Finished RTL Elaboration : Time (s): cpu = 00:00:03 ; elapsed = 00:00:04 . Memory (MB): peak = 2171.371 ; gain = 530.734 ; free physical = 22505 ; free virtual = 28282
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2131.617 ; gain = 537.703 ; free physical = 21574 ; free virtual = 28168
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2183.246 ; gain = 542.609 ; free physical = 22505 ; free virtual = 28282
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2131.617 ; gain = 537.703 ; free physical = 21574 ; free virtual = 28168
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2183.246 ; gain = 542.609 ; free physical = 22505 ; free virtual = 28282
 ---------------------------------------------------------------------------------
-Netlist sorting complete. Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2137.555 ; gain = 0.000 ; free physical = 21571 ; free virtual = 28165
+Netlist sorting complete. Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2189.184 ; gain = 0.000 ; free physical = 22500 ; free virtual = 28277
 INFO: [Netlist 29-17] Analyzing 8 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
 INFO: [Project 1-570] Preparing netlist for logic optimization
 
 Processing XDC Constraints
 Initializing timing engine
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7_ooc.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7_ooc.xdc] for cell 'inst'
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
-INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/pcie_s7_propImpl.xdc].
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7_ooc.xdc] for cell 'inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7_ooc.xdc] for cell 'inst'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
+INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/pcie_s7_propImpl.xdc].
 Resolution: To avoid this warning, move constraints listed in [.Xil/pcie_s7_propImpl.xdc] to another XDC file and exclude this new file from synthesis with the used_in_synthesis property (File Properties dialog in GUI) and re-run elaboration/synthesis.
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
-INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/pcie_s7_propImpl.xdc].
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
+INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/pcie_s7_propImpl.xdc].
 Resolution: To avoid this warning, move constraints listed in [.Xil/pcie_s7_propImpl.xdc] to another XDC file and exclude this new file from synthesis with the used_in_synthesis property (File Properties dialog in GUI) and re-run elaboration/synthesis.
 INFO: [Project 1-236] Implementation specific constraints were found while reading constraint file [/tools/Xilinx/Vivado/2024.2/data/ip/xpm/xpm_cdc/tcl/xpm_cdc_single.tcl]. These constraints will be ignored for synthesis but will be used in implementation. Impacted constraints are listed in the file [.Xil/pcie_s7_propImpl.xdc].
 Resolution: To avoid this warning, move constraints listed in [.Xil/pcie_s7_propImpl.xdc] to another XDC file and exclude this new file from synthesis with the used_in_synthesis property (File Properties dialog in GUI) and re-run elaboration/synthesis.
 INFO: [Project 1-1714] 2 XPM XDC files have been applied to the design.
 Completed Processing XDC Constraints
 
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2273.367 ; gain = 0.000 ; free physical = 21562 ; free virtual = 28156
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2322.996 ; gain = 0.000 ; free physical = 22474 ; free virtual = 28265
 INFO: [Project 1-111] Unisim Transformation Summary:
 No Unisim elements were transformed.
 
-Constraint Validation Runtime : Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2273.367 ; gain = 0.000 ; free physical = 21560 ; free virtual = 28154
+Constraint Validation Runtime : Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2322.996 ; gain = 0.000 ; free physical = 22473 ; free virtual = 28265
 ---------------------------------------------------------------------------------
-Finished Constraint Validation : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2273.367 ; gain = 679.453 ; free physical = 21551 ; free virtual = 28145
+Finished Constraint Validation : Time (s): cpu = 00:00:08 ; elapsed = 00:00:09 . Memory (MB): peak = 2322.996 ; gain = 682.359 ; free physical = 22470 ; free virtual = 28262
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Loading Part and Timing Information
 ---------------------------------------------------------------------------------
 Loading part: xc7a200tsbg484-3
 ---------------------------------------------------------------------------------
-Finished Loading Part and Timing Information : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2281.371 ; gain = 687.457 ; free physical = 21551 ; free virtual = 28145
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:08 ; elapsed = 00:00:09 . Memory (MB): peak = 2331.000 ; gain = 690.363 ; free physical = 22470 ; free virtual = 28262
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Applying 'set_property' XDC Constraints
 ---------------------------------------------------------------------------------
-Applied set_property keep_hierarchy = soft for inst. (constraint file  /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7_ooc.xdc, line 76).
+Applied set_property keep_hierarchy = soft for inst. (constraint file  /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7_ooc.xdc, line 76).
 Applied set_property KEEP_HIERARCHY = SOFT for inst. (constraint file  auto generated constraint).
 Applied set_property KEEP_HIERARCHY = SOFT for inst/inst/phy_lnk_up_cdc. (constraint file  auto generated constraint).
 Applied set_property KEEP_HIERARCHY = SOFT for inst/inst/pl_received_hot_rst_cdc. (constraint file  auto generated constraint).
 ---------------------------------------------------------------------------------
-Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2281.371 ; gain = 687.457 ; free physical = 21551 ; free virtual = 28145
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:08 ; elapsed = 00:00:09 . Memory (MB): peak = 2331.000 ; gain = 690.363 ; free physical = 22470 ; free virtual = 28262
 ---------------------------------------------------------------------------------
 INFO: [Synth 8-802] inferred FSM for state register 'reg_state_eios_det_reg' in module 'pcie_s7_gt_rx_valid_filter_7x'
 INFO: [Synth 8-802] inferred FSM for state register 'fsm_reg' in module 'pcie_s7_gtp_pipe_reset'
@@ -463,7 +463,7 @@ INFO: [Synth 8-3354] encoded FSM with state register 'resetovrd.fsm_reg' using e
 ---------------------------------------------------------------------------------------------------
 INFO: [Synth 8-3354] encoded FSM with state register 'txsync_fsm.fsm_tx_reg' using encoding 'one-hot' in module 'pcie_s7_pipe_sync'
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:09 ; elapsed = 00:00:09 . Memory (MB): peak = 2281.371 ; gain = 687.457 ; free physical = 21549 ; free virtual = 28144
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:09 ; elapsed = 00:00:09 . Memory (MB): peak = 2331.000 ; gain = 690.363 ; free physical = 22467 ; free virtual = 28261
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start RTL Component Statistics 
@@ -573,25 +573,25 @@ INFO: [Synth 8-3332] Sequential element (inst/gt_top_i/pipe_wrapper_i/pipe_lane[
 INFO: [Synth 8-3332] Sequential element (inst/gt_top_i/pipe_wrapper_i/pipe_lane[0].pipe_eq.pipe_eq_i/FSM_onehot_fsm_rx_reg[0]) is unused and will be removed from module pcie_s7_pcie2_top.
 INFO: [Synth 8-3332] Sequential element (inst/gt_top_i/pipe_wrapper_i/pipe_lane[0].pipe_sync_i/FSM_onehot_txsync_fsm.fsm_tx_reg[0]) is unused and will be removed from module pcie_s7_pcie2_top.
 ---------------------------------------------------------------------------------
-Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2281.371 ; gain = 687.457 ; free physical = 21534 ; free virtual = 28130
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2331.000 ; gain = 690.363 ; free physical = 22458 ; free virtual = 28254
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Applying XDC Timing Constraints
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2396.371 ; gain = 802.457 ; free physical = 21384 ; free virtual = 27970
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2445.000 ; gain = 804.363 ; free physical = 22278 ; free virtual = 28081
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Timing Optimization
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Timing Optimization : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2438.402 ; gain = 844.488 ; free physical = 21342 ; free virtual = 27928
+Finished Timing Optimization : Time (s): cpu = 00:00:14 ; elapsed = 00:00:15 . Memory (MB): peak = 2486.031 ; gain = 845.395 ; free physical = 22236 ; free virtual = 28039
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Technology Mapping
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Technology Mapping : Time (s): cpu = 00:00:14 ; elapsed = 00:00:15 . Memory (MB): peak = 2446.410 ; gain = 852.496 ; free physical = 21341 ; free virtual = 27927
+Finished Technology Mapping : Time (s): cpu = 00:00:14 ; elapsed = 00:00:15 . Memory (MB): peak = 2494.039 ; gain = 853.402 ; free physical = 22235 ; free virtual = 28037
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start IO Insertion
@@ -609,37 +609,37 @@ Start Final Netlist Cleanup
 Finished Final Netlist Cleanup
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished IO Insertion : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21221 ; free virtual = 27806
+Finished IO Insertion : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22118 ; free virtual = 27920
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Instances
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Instances : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21220 ; free virtual = 27806
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22118 ; free virtual = 27920
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Rebuilding User Hierarchy
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21217 ; free virtual = 27803
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Ports
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Ports : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21217 ; free virtual = 27803
+Finished Renaming Generated Ports : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21217 ; free virtual = 27803
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Nets
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Nets : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21217 ; free virtual = 27803
+Finished Renaming Generated Nets : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start ROM, RAM, DSP, Shift Register and Retiming Reporting
@@ -687,38 +687,38 @@ Report Cell Usage:
 |16    |FDSE          |    30|
 +------+--------------+------+
 ---------------------------------------------------------------------------------
-Finished Writing Synthesis Report : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.223 ; gain = 994.309 ; free physical = 21217 ; free virtual = 27803
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.852 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 ---------------------------------------------------------------------------------
 Synthesis finished with 0 errors, 0 critical warnings and 384 warnings.
-Synthesis Optimization Runtime : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2588.223 ; gain = 852.559 ; free physical = 21216 ; free virtual = 27802
-Synthesis Optimization Complete : Time (s): cpu = 00:00:16 ; elapsed = 00:00:16 . Memory (MB): peak = 2588.230 ; gain = 994.309 ; free physical = 21216 ; free virtual = 27802
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:14 ; elapsed = 00:00:15 . Memory (MB): peak = 2635.852 ; gain = 855.465 ; free physical = 22114 ; free virtual = 27917
+Synthesis Optimization Complete : Time (s): cpu = 00:00:16 ; elapsed = 00:00:17 . Memory (MB): peak = 2635.859 ; gain = 995.215 ; free physical = 22114 ; free virtual = 27917
 INFO: [Project 1-571] Translating synthesized netlist
-Netlist sorting complete. Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2588.230 ; gain = 0.000 ; free physical = 21376 ; free virtual = 27962
+Netlist sorting complete. Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2635.859 ; gain = 0.000 ; free physical = 22275 ; free virtual = 28081
 INFO: [Netlist 29-17] Analyzing 20 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
 INFO: [Project 1-570] Preparing netlist for logic optimization
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7_ooc.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/synth/pcie_s7_ooc.xdc] for cell 'inst'
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-7' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
-WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7_ooc.xdc] for cell 'inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/synth/pcie_s7_ooc.xdc] for cell 'inst'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'inst'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-7' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
+WARNING: [Vivado 12-508] No pins matched '*'. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'inst'
 INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2644.250 ; gain = 0.000 ; free physical = 21374 ; free virtual = 27960
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2691.879 ; gain = 0.000 ; free physical = 22261 ; free virtual = 28068
 INFO: [Project 1-111] Unisim Transformation Summary:
 No Unisim elements were transformed.
 
@@ -726,27 +726,27 @@ Synth Design complete | Checksum: b7024563
 INFO: [Common 17-83] Releasing license: Synthesis
 131 Infos, 126 Warnings, 0 Critical Warnings and 0 Errors encountered.
 synth_design completed successfully
-synth_design: Time (s): cpu = 00:00:21 ; elapsed = 00:00:20 . Memory (MB): peak = 2644.250 ; gain = 1130.840 ; free physical = 21372 ; free virtual = 27958
-INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2037.002; main = 2037.002; forked = 330.348
-INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3199.086; main = 2644.254; forked = 917.711
+synth_design: Time (s): cpu = 00:00:21 ; elapsed = 00:00:20 . Memory (MB): peak = 2691.879 ; gain = 1266.246 ; free physical = 22261 ; free virtual = 28068
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2030.965; main = 2030.965; forked = 331.287
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3248.715; main = 2691.883; forked = 917.711
 INFO: [Coretcl 2-1174] Renamed 10 cell refs.
 INFO: [Timing 38-35] Done setting XDC timing constraints.
 INFO: [Timing 38-480] Writing timing data to binary archive.
-Write ShapeDB Complete: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 2823.180 ; gain = 8.906 ; free physical = 21322 ; free virtual = 27905
-Wrote PlaceDB: Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2830.164 ; gain = 12.922 ; free physical = 21317 ; free virtual = 27900
-Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2830.164 ; gain = 0.000 ; free physical = 21316 ; free virtual = 27899
+Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2870.613 ; gain = 8.906 ; free physical = 22188 ; free virtual = 28013
+Wrote PlaceDB: Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2877.598 ; gain = 15.891 ; free physical = 22171 ; free virtual = 27996
+Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2877.598 ; gain = 0.000 ; free physical = 22171 ; free virtual = 27996
 Writing XDEF routing.
 Writing XDEF routing logical nets.
 Writing XDEF routing special nets.
-Wrote RouteStorage: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2830.164 ; gain = 0.000 ; free physical = 21307 ; free virtual = 27890
-Wrote Netlist Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2831.164 ; gain = 0.000 ; free physical = 21306 ; free virtual = 27890
-Wrote Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 2831.164 ; gain = 0.000 ; free physical = 21305 ; free virtual = 27890
-Write Physdb Complete: Time (s): cpu = 00:00:00.09 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2831.164 ; gain = 16.891 ; free physical = 21305 ; free virtual = 27889
-INFO: [Common 17-1381] The checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/pcie_s7.dcp' has been generated.
+Wrote RouteStorage: Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2877.598 ; gain = 0.000 ; free physical = 22168 ; free virtual = 27993
+Wrote Netlist Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2877.598 ; gain = 0.000 ; free physical = 22167 ; free virtual = 27992
+Wrote Device Cache: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00 . Memory (MB): peak = 2877.598 ; gain = 0.000 ; free physical = 22165 ; free virtual = 27990
+Write Physdb Complete: Time (s): cpu = 00:00:00.14 ; elapsed = 00:00:00.04 . Memory (MB): peak = 2877.598 ; gain = 15.891 ; free physical = 22164 ; free virtual = 27989
+INFO: [Common 17-1381] The checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/pcie_s7.dcp' has been generated.
 INFO: [Vivado 12-3441] generate_netlist_ip - operation complete
-synth_ip: Time (s): cpu = 00:00:26 ; elapsed = 00:00:25 . Memory (MB): peak = 2831.164 ; gain = 1317.754 ; free physical = 21281 ; free virtual = 27866
-INFO: [Common 17-2834] synth_ip peak Physical Memory [PSS] (MB): overall = 2123.283; main = 2123.283; forked = 330.348
-INFO: [Common 17-2834] synth_ip peak Virtual Memory [VSS] (MB): overall = 3199.086; main = 2831.168; forked = 917.711
+synth_ip: Time (s): cpu = 00:00:26 ; elapsed = 00:00:25 . Memory (MB): peak = 2878.918 ; gain = 1460.223 ; free physical = 22144 ; free virtual = 27970
+INFO: [Common 17-2834] synth_ip peak Physical Memory [PSS] (MB): overall = 2115.013; main = 2115.013; forked = 331.287
+INFO: [Common 17-2834] synth_ip peak Virtual Memory [VSS] (MB): overall = 3248.715; main = 2878.922; forked = 917.711
 # synth_design -directive default -top litex_m2sdr_m2_pcie_x1 -part xc7a200tsbg484-3
 Command: synth_design -directive default -top litex_m2sdr_m2_pcie_x1 -part xc7a200tsbg484-3
 Starting synth_design
@@ -754,7 +754,7 @@ Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
 INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
 INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 7 processes.
 ---------------------------------------------------------------------------------
-Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2831.172 ; gain = 0.000 ; free physical = 21123 ; free virtual = 27709
+Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2878.926 ; gain = 0.000 ; free physical = 21978 ; free virtual = 27814
 ---------------------------------------------------------------------------------
 INFO: [Synth 8-6157] synthesizing module 'litex_m2sdr_m2_pcie_x1' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:21]
 INFO: [Synth 8-3876] $readmem data file 'litex_m2sdr_m2_pcie_x1_mem.init' is read successfully [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:16090]
@@ -972,8 +972,8 @@ WARNING: [Synth 8-7071] port 'PSCLK' of module 'MMCME2_ADV' is unconnected for i
 WARNING: [Synth 8-7071] port 'PSEN' of module 'MMCME2_ADV' is unconnected for instance 'MMCME2_ADV' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17476]
 WARNING: [Synth 8-7071] port 'PSINCDEC' of module 'MMCME2_ADV' is unconnected for instance 'MMCME2_ADV' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17476]
 WARNING: [Synth 8-7023] instance 'MMCME2_ADV' of module 'MMCME2_ADV' has 33 connections declared, but only 10 given [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17476]
-INFO: [Synth 8-6157] synthesizing module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.Xil/Vivado-310606-sensnuc6/realtime/pcie_s7_stub.v:6]
-INFO: [Synth 8-6155] done synthesizing module 'pcie_s7' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.Xil/Vivado-310606-sensnuc6/realtime/pcie_s7_stub.v:6]
+INFO: [Synth 8-6157] synthesizing module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.Xil/Vivado-21439-sensnuc6/realtime/pcie_s7_stub.v:6]
+INFO: [Synth 8-6155] done synthesizing module 'pcie_s7' (0#1) [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.Xil/Vivado-21439-sensnuc6/realtime/pcie_s7_stub.v:6]
 WARNING: [Synth 8-689] width (1) of port connection 'qpll_qplllock' does not match port width (2) of module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17569]
 WARNING: [Synth 8-689] width (1) of port connection 'qpll_qplloutclk' does not match port width (2) of module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17570]
 WARNING: [Synth 8-689] width (1) of port connection 'qpll_qplloutrefclk' does not match port width (2) of module 'pcie_s7' [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17571]
@@ -1119,18 +1119,18 @@ WARNING: [Synth 8-3936] Found unconnected internal register 'storage_6_dat1_reg'
 WARNING: [Synth 8-7129] Port flash_hold in module litex_m2sdr_m2_pcie_x1 is either unconnected or has no load
 WARNING: [Synth 8-7129] Port flash_wp in module litex_m2sdr_m2_pcie_x1 is either unconnected or has no load
 ---------------------------------------------------------------------------------
-Finished RTL Elaboration : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2831.172 ; gain = 0.000 ; free physical = 21110 ; free virtual = 27697
+Finished RTL Elaboration : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2878.926 ; gain = 0.000 ; free physical = 21963 ; free virtual = 27800
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2831.172 ; gain = 0.000 ; free physical = 21110 ; free virtual = 27697
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2878.926 ; gain = 0.000 ; free physical = 21963 ; free virtual = 27800
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2831.172 ; gain = 0.000 ; free physical = 21110 ; free virtual = 27697
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 2878.926 ; gain = 0.000 ; free physical = 21963 ; free virtual = 27800
 ---------------------------------------------------------------------------------
-Netlist sorting complete. Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.08 . Memory (MB): peak = 2831.172 ; gain = 0.000 ; free physical = 21110 ; free virtual = 27697
+Netlist sorting complete. Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.08 . Memory (MB): peak = 2878.926 ; gain = 0.000 ; free physical = 21962 ; free virtual = 27799
 WARNING: [Netlist 29-345] The value of SIM_DEVICE on instance 'BUFGCTRL' of type 'BUFGCTRL' is 'ULTRASCALE'; it is being changed to match the current FPGA architecture, '7SERIES'. For functional simulation to match hardware behavior, the value of SIM_DEVICE should be changed in the source netlist. 
 INFO: [Netlist 29-17] Analyzing 44 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
@@ -1138,8 +1138,8 @@ INFO: [Project 1-570] Preparing netlist for logic optimization
 
 Processing XDC Constraints
 Initializing timing engine
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/pcie_s7/pcie_s7_in_context.xdc] for cell 'pcie_s7'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/pcie_s7/pcie_s7_in_context.xdc] for cell 'pcie_s7'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/pcie_s7/pcie_s7_in_context.xdc] for cell 'pcie_s7'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/pcie_s7/pcie_s7_in_context.xdc] for cell 'pcie_s7'
 Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc]
 CRITICAL WARNING: [Vivado 12-4430] You are lowering the severity from an ERROR. This can potentially lead to board damage or other functionality issues on hardware. If this is not desired, please run 'reset_property SEVERITY [get_drc_checks REQP-49]' to undo this change. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc:309]
 INFO: [Timing 38-2] Deriving generated clocks [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc:345]
@@ -1150,30 +1150,30 @@ INFO: [Project 1-236] Implementation specific constraints were found while readi
 Resolution: To avoid this warning, move constraints listed in [.Xil/litex_m2sdr_m2_pcie_x1_propImpl.xdc] to another XDC file and exclude this new file from synthesis with the used_in_synthesis property (File Properties dialog in GUI) and re-run elaboration/synthesis.
 Completed Processing XDC Constraints
 
-Netlist sorting complete. Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2834.133 ; gain = 0.000 ; free physical = 21103 ; free virtual = 27690
+Netlist sorting complete. Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2882.887 ; gain = 0.000 ; free physical = 21955 ; free virtual = 27793
 INFO: [Project 1-111] Unisim Transformation Summary:
   A total of 11 instances were transformed.
   BUFGMUX => BUFGCTRL (inverted pins: CE0): 1 instance 
   IOBUF => IOBUF (IBUF, OBUFT): 2 instances
   OBUFDS => OBUFDS: 8 instances
 
-Constraint Validation Runtime : Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2834.133 ; gain = 0.000 ; free physical = 21103 ; free virtual = 27690
+Constraint Validation Runtime : Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2882.887 ; gain = 0.000 ; free physical = 21955 ; free virtual = 27793
 ---------------------------------------------------------------------------------
-Finished Constraint Validation : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21103 ; free virtual = 27691
+Finished Constraint Validation : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21949 ; free virtual = 27787
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Loading Part and Timing Information
 ---------------------------------------------------------------------------------
 Loading part: xc7a200tsbg484-3
 ---------------------------------------------------------------------------------
-Finished Loading Part and Timing Information : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21103 ; free virtual = 27691
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21949 ; free virtual = 27787
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Applying 'set_property' XDC Constraints
 ---------------------------------------------------------------------------------
 Applied set_property KEEP_HIERARCHY = SOFT for pcie_s7. (constraint file  auto generated constraint).
 ---------------------------------------------------------------------------------
-Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21102 ; free virtual = 27689
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:10 ; elapsed = 00:00:10 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21949 ; free virtual = 27787
 ---------------------------------------------------------------------------------
 WARNING: [Synth 8-3936] Found unconnected internal register 'storage_17_dat1_reg' and it is trimmed from '21' to '19' bits. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17727]
 WARNING: [Synth 8-3936] Found unconnected internal register 'storage_16_dat1_reg' and it is trimmed from '5' to '3' bits. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:17706]
@@ -1299,7 +1299,7 @@ INFO: [Synth 8-3354] encoded FSM with state register 'jtagphy_state_reg' using e
 ---------------------------------------------------------------------------------------------------
 INFO: [Synth 8-3354] encoded FSM with state register 'grant_reg' using encoding 'one-hot' in module 'litex_m2sdr_m2_pcie_x1'
 ---------------------------------------------------------------------------------
-Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:12 ; elapsed = 00:00:12 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21090 ; free virtual = 27680
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:12 ; elapsed = 00:00:12 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21934 ; free virtual = 27775
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start RTL Component Statistics 
@@ -1492,7 +1492,7 @@ WARNING: [Synth 8-3332] Sequential element (FDCE_13) is unused and will be remov
 WARNING: [Synth 8-3332] Sequential element (FDCE_14) is unused and will be removed from module litex_m2sdr_m2_pcie_x1.
 WARNING: [Synth 8-3332] Sequential element (FDCE_15) is unused and will be removed from module litex_m2sdr_m2_pcie_x1.
 ---------------------------------------------------------------------------------
-Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:23 ; elapsed = 00:00:23 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21050 ; free virtual = 27655
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:22 ; elapsed = 00:00:22 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21894 ; free virtual = 27751
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start ROM, RAM, DSP, Shift Register and Retiming Reporting
@@ -1556,13 +1556,13 @@ Start Applying XDC Timing Constraints
 basesoc_crg_clkout0 in more then one group at line 357 of file /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc
 basesoc_crg_clkout1 in more then one group at line 359 of file /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc
 ---------------------------------------------------------------------------------
-Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:33 ; elapsed = 00:00:33 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21041 ; free virtual = 27646
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:32 ; elapsed = 00:00:32 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21890 ; free virtual = 27748
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Timing Optimization
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Timing Optimization : Time (s): cpu = 00:00:38 ; elapsed = 00:00:38 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21001 ; free virtual = 27606
+Finished Timing Optimization : Time (s): cpu = 00:00:37 ; elapsed = 00:00:38 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21854 ; free virtual = 27712
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start ROM, RAM, DSP, Shift Register and Retiming Reporting
@@ -1638,7 +1638,7 @@ INFO: [Synth 8-7052] The timing for the instance storage_8_reg (implemented as a
 INFO: [Synth 8-7052] The timing for the instance storage_4_reg_0 (implemented as a Block RAM) might be sub-optimal as no optional output register could be merged into the ram block. Providing additional output register may help in improving timing.
 INFO: [Synth 8-7052] The timing for the instance storage_4_reg_1 (implemented as a Block RAM) might be sub-optimal as no optional output register could be merged into the ram block. Providing additional output register may help in improving timing.
 ---------------------------------------------------------------------------------
-Finished Technology Mapping : Time (s): cpu = 00:00:41 ; elapsed = 00:00:41 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Technology Mapping : Time (s): cpu = 00:00:40 ; elapsed = 00:00:41 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start IO Insertion
@@ -1757,37 +1757,37 @@ WARNING: [Synth 8-5396] Clock pin C has keep related attribute (keep/mark_debug/
 WARNING: [Synth 8-5396] Clock pin C has keep related attribute (keep/mark_debug/dont_touch) which could create extra logic on its net [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.v:13804]
 INFO: [Common 17-14] Message 'Synth 8-5396' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
 ---------------------------------------------------------------------------------
-Finished IO Insertion : Time (s): cpu = 00:00:42 ; elapsed = 00:00:43 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27606
+Finished IO Insertion : Time (s): cpu = 00:00:42 ; elapsed = 00:00:42 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Instances
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Instances : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:42 ; elapsed = 00:00:42 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Rebuilding User Hierarchy
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:42 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Ports
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Ports : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Renaming Generated Ports : Time (s): cpu = 00:00:42 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Handling Custom Attributes
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Handling Custom Attributes : Time (s): cpu = 00:00:43 ; elapsed = 00:00:44 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start Renaming Generated Nets
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
-Finished Renaming Generated Nets : Time (s): cpu = 00:00:43 ; elapsed = 00:00:44 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Renaming Generated Nets : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------
 Start ROM, RAM, DSP, Shift Register and Retiming Reporting
@@ -1859,14 +1859,14 @@ Report Cell Usage:
 |45    |OBUFDS       |     8|
 +------+-------------+------+
 ---------------------------------------------------------------------------------
-Finished Writing Synthesis Report : Time (s): cpu = 00:00:43 ; elapsed = 00:00:44 . Memory (MB): peak = 2834.133 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.887 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 ---------------------------------------------------------------------------------
 Synthesis finished with 0 errors, 0 critical warnings and 6439 warnings.
-Synthesis Optimization Runtime : Time (s): cpu = 00:00:40 ; elapsed = 00:00:41 . Memory (MB): peak = 2834.133 ; gain = 0.000 ; free physical = 21000 ; free virtual = 27605
-Synthesis Optimization Complete : Time (s): cpu = 00:00:43 ; elapsed = 00:00:44 . Memory (MB): peak = 2834.141 ; gain = 2.961 ; free physical = 21000 ; free virtual = 27605
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:39 ; elapsed = 00:00:40 . Memory (MB): peak = 2882.887 ; gain = 0.000 ; free physical = 21852 ; free virtual = 27710
+Synthesis Optimization Complete : Time (s): cpu = 00:00:43 ; elapsed = 00:00:43 . Memory (MB): peak = 2882.895 ; gain = 3.961 ; free physical = 21852 ; free virtual = 27710
 INFO: [Project 1-571] Translating synthesized netlist
-INFO: [Project 1-454] Reading design checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/pcie_s7.dcp' for cell 'pcie_s7'
-Netlist sorting complete. Time (s): cpu = 00:00:00.07 ; elapsed = 00:00:00.08 . Memory (MB): peak = 2834.141 ; gain = 0.000 ; free physical = 21165 ; free virtual = 27771
+INFO: [Project 1-454] Reading design checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/pcie_s7.dcp' for cell 'pcie_s7'
+Netlist sorting complete. Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.08 . Memory (MB): peak = 2882.895 ; gain = 0.000 ; free physical = 22016 ; free virtual = 27874
 WARNING: [Netlist 29-345] The value of SIM_DEVICE on instance 'BUFGCTRL' of type 'BUFGCTRL' is 'ULTRASCALE'; it is being changed to match the current FPGA architecture, '7SERIES'. For functional simulation to match hardware behavior, the value of SIM_DEVICE should be changed in the source netlist. 
 INFO: [Netlist 29-17] Analyzing 841 Unisim elements for replacement
 INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
@@ -1887,20 +1887,20 @@ CRITICAL WARNING: [Vivado 12-5201] set_clock_groups: cannot set the clock group 
 WARNING: [Vivado 12-3521] Clock specified in more than one group: basesoc_crg_clkout0 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc:357]
 WARNING: [Vivado 12-3521] Clock specified in more than one group: basesoc_crg_clkout1 [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc:359]
 Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.xdc]
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'pcie_s7/inst'
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'pcie_s7/inst'
-INFO: [Project 1-538] Using original IP XDC constraints instead of the XDC constraints in dcp '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/pcie_s7.dcp'
-Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'pcie_s7/inst'
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-7' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
-WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
-Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'pcie_s7/inst'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'pcie_s7/inst'
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc] for cell 'pcie_s7/inst'
+INFO: [Project 1-538] Using original IP XDC constraints instead of the XDC constraints in dcp '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/pcie_s7.dcp'
+Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'pcie_s7/inst'
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-7' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:82]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:87]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:88]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:89]
+WARNING: [Vivado_Tcl 4-921] Waiver ID 'CDC-1' -to list should not be empty. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc:90]
+Finished Parsing XDC File [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/ip_xilinx_pcie_2_1_7x_late.xdc] for cell 'pcie_s7/inst'
 INFO: [Project 1-1714] 2 XPM XDC files have been applied to the design.
 INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
 INFO: [Project 1-1687] 9 scoped IP constraints or related sub-commands were skipped due to synthesis logic optimizations usually triggered by constant connectivity or unconnected output pins. To review the skipped constraints and messages, run the command 'set_param netlist.IPMsgFiltering false' before opening the design.
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3241.656 ; gain = 0.000 ; free physical = 20836 ; free virtual = 27442
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3288.746 ; gain = 0.000 ; free physical = 21684 ; free virtual = 27542
 INFO: [Project 1-111] Unisim Transformation Summary:
   A total of 294 instances were transformed.
   BUFGMUX => BUFGCTRL (inverted pins: CE0): 1 instance 
@@ -1910,13 +1910,13 @@ INFO: [Project 1-111] Unisim Transformation Summary:
   RAM32X1D => RAM32X1D (RAMD32(x2)): 4 instances
   RAM64M => RAM64M (RAMD64E(x4)): 248 instances
 
-Synth Design complete | Checksum: 31933510
+Synth Design complete | Checksum: bf63568d
 INFO: [Common 17-83] Releasing license: Synthesis
 164 Infos, 369 Warnings, 4 Critical Warnings and 0 Errors encountered.
 synth_design completed successfully
-synth_design: Time (s): cpu = 00:00:55 ; elapsed = 00:00:52 . Memory (MB): peak = 3241.656 ; gain = 410.492 ; free physical = 20836 ; free virtual = 27442
-INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2549.786; main = 2549.786; forked = 329.989
-INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3751.848; main = 3241.660; forked = 917.711
+synth_design: Time (s): cpu = 00:00:54 ; elapsed = 00:00:52 . Memory (MB): peak = 3288.746 ; gain = 409.828 ; free physical = 21684 ; free virtual = 27542
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2541.294; main = 2541.294; forked = 329.911
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3800.602; main = 3288.750; forked = 917.711
 # report_timing_summary -file litex_m2sdr_m2_pcie_x1_timing_synth.rpt
 INFO: [Timing 38-35] Done setting XDC timing constraints.
 INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
@@ -1925,16 +1925,16 @@ INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum o
 # report_utilization -file litex_m2sdr_m2_pcie_x1_utilization_synth.rpt
 # write_checkpoint -force litex_m2sdr_m2_pcie_x1_synth.dcp
 INFO: [Timing 38-480] Writing timing data to binary archive.
-Wrote PlaceDB: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
-Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
+Wrote PlaceDB: Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27517
+Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27517
 Writing XDEF routing.
-Write ShapeDB Complete: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27518
 Writing XDEF routing logical nets.
 Writing XDEF routing special nets.
-Wrote RouteStorage: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
-Wrote Netlist Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
-Wrote Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27417
-Write Physdb Complete: Time (s): cpu = 00:00:00.12 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3249.660 ; gain = 0.000 ; free physical = 20809 ; free virtual = 27416
+Wrote RouteStorage: Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27518
+Wrote Netlist Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27518
+Wrote Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27518
+Write Physdb Complete: Time (s): cpu = 00:00:00.12 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3296.750 ; gain = 0.000 ; free physical = 21658 ; free virtual = 27518
 INFO: [Common 17-1381] The checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1_synth.dcp' has been generated.
 # opt_design -directive default
 Command: opt_design -directive default
@@ -1948,44 +1948,44 @@ INFO: [DRC 23-27] Running DRC with 8 threads
 INFO: [Project 1-461] DRC finished with 0 Errors
 INFO: [Project 1-462] Please refer to the DRC report (report_drc) for more information.
 
-Time (s): cpu = 00:00:03 ; elapsed = 00:00:00.71 . Memory (MB): peak = 3283.762 ; gain = 34.102 ; free physical = 20783 ; free virtual = 27394
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:00.72 . Memory (MB): peak = 3337.203 ; gain = 40.453 ; free physical = 21637 ; free virtual = 27499
 
 Starting Cache Timing Information Task
-Ending Cache Timing Information Task | Checksum: 124093f66
+Ending Cache Timing Information Task | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20783 ; free virtual = 27393
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21637 ; free virtual = 27499
 
 Starting Logic Optimization Task
 
 Phase 1 Initialization
 
 Phase 1.1 Core Generation And Design Setup
-Phase 1.1 Core Generation And Design Setup | Checksum: 124093f66
+Phase 1.1 Core Generation And Design Setup | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20752 ; free virtual = 27362
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21595 ; free virtual = 27457
 
 Phase 1.2 Setup Constraints And Sort Netlist
-Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 124093f66
+Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20752 ; free virtual = 27362
-Phase 1 Initialization | Checksum: 124093f66
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21595 ; free virtual = 27457
+Phase 1 Initialization | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20752 ; free virtual = 27362
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21595 ; free virtual = 27457
 
 Phase 2 Timer Update And Timing Data Collection
 
 Phase 2.1 Timer Update
-Phase 2.1 Timer Update | Checksum: 124093f66
+Phase 2.1 Timer Update | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.6 ; elapsed = 00:00:00.17 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
+Time (s): cpu = 00:00:00.64 ; elapsed = 00:00:00.16 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21594 ; free virtual = 27456
 
 Phase 2.2 Timing Data Collection
-Phase 2.2 Timing Data Collection | Checksum: 124093f66
+Phase 2.2 Timing Data Collection | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.62 ; elapsed = 00:00:00.19 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
-Phase 2 Timer Update And Timing Data Collection | Checksum: 124093f66
+Time (s): cpu = 00:00:00.67 ; elapsed = 00:00:00.18 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21594 ; free virtual = 27456
+Phase 2 Timer Update And Timing Data Collection | Checksum: 1b1d960e3
 
-Time (s): cpu = 00:00:00.63 ; elapsed = 00:00:00.19 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
+Time (s): cpu = 00:00:00.67 ; elapsed = 00:00:00.19 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21594 ; free virtual = 27456
 
 Phase 3 Retarget
 INFO: [Opt 31-1851] Number of loadless carry chains removed were: 0
@@ -1993,76 +1993,76 @@ INFO: [Opt 31-1834] Total Chains To Be Transformed Were: 0 AND Number of Transfo
 INFO: [Opt 31-1566] Pulled 35 inverters resulting in an inversion of 95 pins
 INFO: [Opt 31-138] Pushed 3 inverter(s) to 17 load pin(s).
 INFO: [Opt 31-49] Retargeted 0 cell(s).
-Phase 3 Retarget | Checksum: 16b037117
+Phase 3 Retarget | Checksum: 1929684d3
 
-Time (s): cpu = 00:00:00.89 ; elapsed = 00:00:00.38 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
-Retarget | Checksum: 16b037117
+Time (s): cpu = 00:00:00.92 ; elapsed = 00:00:00.38 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21594 ; free virtual = 27456
+Retarget | Checksum: 1929684d3
 INFO: [Opt 31-389] Phase Retarget created 12 cells and removed 83 cells
 INFO: [Opt 31-1021] In phase Retarget, 10 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
 
 Phase 4 Constant propagation
 INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
-Phase 4 Constant propagation | Checksum: 1cccba2e0
+Phase 4 Constant propagation | Checksum: 110bd71f5
 
-Time (s): cpu = 00:00:00.97 ; elapsed = 00:00:00.46 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
-Constant propagation | Checksum: 1cccba2e0
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.46 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Constant propagation | Checksum: 110bd71f5
 INFO: [Opt 31-389] Phase Constant propagation created 5 cells and removed 16 cells
 INFO: [Opt 31-1021] In phase Constant propagation, 6 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
 
 Phase 5 Sweep
 INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
-Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27362
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
 INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
-Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27361
-Phase 5 Sweep | Checksum: 171ec5e16
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Phase 5 Sweep | Checksum: 123e343b4
 
-Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.69 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27361
-Sweep | Checksum: 171ec5e16
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.69 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Sweep | Checksum: 123e343b4
 INFO: [Opt 31-389] Phase Sweep created 0 cells and removed 474 cells
 INFO: [Opt 31-1021] In phase Sweep, 3059 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
 
 Phase 6 BUFG optimization
-Phase 6 BUFG optimization | Checksum: 171ec5e16
+Phase 6 BUFG optimization | Checksum: 123e343b4
 
-Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.76 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27361
-BUFG optimization | Checksum: 171ec5e16
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.77 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+BUFG optimization | Checksum: 123e343b4
 INFO: [Opt 31-662] Phase BUFG optimization created 0 cells of which 0 are BUFGs and removed 0 cells.
 INFO: [Opt 31-1021] In phase BUFG optimization, 1 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
 
 Phase 7 Shift Register Optimization
 INFO: [Opt 31-1064] SRL Remap converted 0 SRLs to 0 registers and converted 0 registers of register chains to 0 SRLs
-Phase 7 Shift Register Optimization | Checksum: 171ec5e16
+Phase 7 Shift Register Optimization | Checksum: 123e343b4
 
-Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.78 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20751 ; free virtual = 27361
-Shift Register Optimization | Checksum: 171ec5e16
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.78 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Shift Register Optimization | Checksum: 123e343b4
 INFO: [Opt 31-389] Phase Shift Register Optimization created 0 cells and removed 0 cells
 
 Phase 8 Post Processing Netlist
-Phase 8 Post Processing Netlist | Checksum: 171ec5e16
+Phase 8 Post Processing Netlist | Checksum: 123e343b4
 
-Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.81 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20752 ; free virtual = 27362
-Post Processing Netlist | Checksum: 171ec5e16
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.81 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Post Processing Netlist | Checksum: 123e343b4
 INFO: [Opt 31-389] Phase Post Processing Netlist created 0 cells and removed 0 cells
 INFO: [Opt 31-1021] In phase Post Processing Netlist, 33 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
 
 Phase 9 Finalization
 
 Phase 9.1 Finalizing Design Cores and Updating Shapes
-Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 1adf1874c
+Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 1febaafd4
 
-Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20748 ; free virtual = 27359
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
 
 Phase 9.2 Verifying Netlist Connectivity
 
 Starting Connectivity Check Task
 
-Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20748 ; free virtual = 27359
-Phase 9.2 Verifying Netlist Connectivity | Checksum: 1adf1874c
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Phase 9.2 Verifying Netlist Connectivity | Checksum: 1febaafd4
 
-Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20748 ; free virtual = 27359
-Phase 9 Finalization | Checksum: 1adf1874c
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
+Phase 9 Finalization | Checksum: 1febaafd4
 
-Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20748 ; free virtual = 27359
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
 Opt_design Change Summary
 =========================
 
@@ -2079,9 +2079,9 @@ Opt_design Change Summary
 -------------------------------------------------------------------------------------------------------------------------
 
 
-Ending Logic Optimization Task | Checksum: 1adf1874c
+Ending Logic Optimization Task | Checksum: 1febaafd4
 
-Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3283.762 ; gain = 0.000 ; free physical = 20748 ; free virtual = 27359
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3337.203 ; gain = 0.000 ; free physical = 21593 ; free virtual = 27455
 
 Starting Power Optimization Task
 INFO: [Pwropt 34-132] Skipping clock gating for clocks with a period < 2.00 ns.
@@ -2099,27 +2099,27 @@ Starting PowerOpt Patch Enables Task
 INFO: [Pwropt 34-162] WRITE_MODE attribute of 0 BRAM(s) out of a total of 37 has been updated to save power. Run report_power_opt to get a complete listing of the BRAMs updated.
 INFO: [Pwropt 34-201] Structural ODC has moved 0 WE to EN ports
 Number of BRAM Ports augmented: 6 newly gated: 0 Total Ports: 74
-Ending PowerOpt Patch Enables Task | Checksum: 19da68623
+Ending PowerOpt Patch Enables Task | Checksum: 209175242
 
-Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.1 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20646 ; free virtual = 27260
-Ending Power Optimization Task | Checksum: 19da68623
+Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.1 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21491 ; free virtual = 27357
+Ending Power Optimization Task | Checksum: 209175242
 
-Time (s): cpu = 00:00:05 ; elapsed = 00:00:02 . Memory (MB): peak = 3552.660 ; gain = 268.898 ; free physical = 20646 ; free virtual = 27260
+Time (s): cpu = 00:00:05 ; elapsed = 00:00:02 . Memory (MB): peak = 3602.102 ; gain = 264.898 ; free physical = 21491 ; free virtual = 27357
 
 Starting Final Cleanup Task
-Ending Final Cleanup Task | Checksum: 19da68623
+Ending Final Cleanup Task | Checksum: 209175242
 
-Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20646 ; free virtual = 27260
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21491 ; free virtual = 27357
 
 Starting Netlist Obfuscation Task
-Netlist sorting complete. Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.06 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20646 ; free virtual = 27259
-Ending Netlist Obfuscation Task | Checksum: 19f00b64c
+Netlist sorting complete. Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.04 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21491 ; free virtual = 27357
+Ending Netlist Obfuscation Task | Checksum: 1f36d622d
 
-Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.06 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20646 ; free virtual = 27259
+Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.05 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21491 ; free virtual = 27357
 INFO: [Common 17-83] Releasing license: Implementation
 34 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 opt_design completed successfully
-opt_design: Time (s): cpu = 00:00:12 ; elapsed = 00:00:06 . Memory (MB): peak = 3552.660 ; gain = 303.000 ; free physical = 20646 ; free virtual = 27259
+opt_design: Time (s): cpu = 00:00:11 ; elapsed = 00:00:05 . Memory (MB): peak = 3602.102 ; gain = 305.352 ; free physical = 21491 ; free virtual = 27357
 INFO: [Timing 38-35] Done setting XDC timing constraints.
 # set_false_path -from [get_clocks {*s7pciephy_clkout0}] -to [get_clocks {*crg_*clkout0}]
 # set_false_path -from [get_clocks {*crg_*clkout0}] -to [get_clocks {*s7pciephy_clkout0}]
@@ -2130,14 +2130,14 @@ INFO: [Timing 38-35] Done setting XDC timing constraints.
 # set_false_path -from [get_clocks {*s7pciephy_clkout0}] -to [get_clocks {*s7pciephy_clkout1}]
 # set_false_path -from [get_clocks {*s7pciephy_clkout1}] -to [get_clocks {*s7pciephy_clkout0}]
 # reset_property LOC [get_cells -hierarchical -filter {NAME=~pcie_s7/*genblk*.bram36_tdp_bl.bram36_tdp_bl}]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:112]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:111]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:110]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:109]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:113]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:114]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:115]
-CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_15/source/pcie_s7-PCIE_X0Y0.xdc:116]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:112]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:111]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:110]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:109]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:113]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:114]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:115]
+CRITICAL WARNING: [Constraints 18-4427] You are overriding a physical property set by a constraint that originated in a read only source. Your changes will not be saved with a project save. If you wish to make this change permanent, it is recommended you use an unmanaged Tcl file. [/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_19/source/pcie_s7-PCIE_X0Y0.xdc:116]
 # place_design -directive default
 Command: place_design -directive default
 Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
@@ -2158,69 +2158,69 @@ Starting Placer Task
 Phase 1 Placer Initialization
 
 Phase 1.1 Placer Initialization Netlist Sorting
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27259
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21490 ; free virtual = 27357
 Phase 1.1 Placer Initialization Netlist Sorting | Checksum: 1b51acc59
 
-Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27259
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27259
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21490 ; free virtual = 27357
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21490 ; free virtual = 27357
 
 Phase 1.2 IO Placement/ Clock Placement/ Build Placer Device
 WARNING: [Place 30-568] A LUT 'clk100_inst' is driving clock pin of 8 registers. This could lead to large hold time violations. First few involved registers are:
-	FDCE_6 {FDCE}
+	FDCE {FDCE}
+	FDCE_1 {FDCE}
 	FDCE_4 {FDCE}
-	FDCE_5 {FDCE}
-	FDCE_7 {FDCE}
+	FDCE_3 {FDCE}
 	FDCE_2 {FDCE}
 Phase 1.2 IO Placement/ Clock Placement/ Build Placer Device | Checksum: 1d4148cb1
 
-Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27259
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21485 ; free virtual = 27356
 
 Phase 1.3 Build Placer Netlist Model
 Phase 1.3 Build Placer Netlist Model | Checksum: 2b174fb26
 
-Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27260
+Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21484 ; free virtual = 27356
 
 Phase 1.4 Constrain Clocks/Macros
 Phase 1.4 Constrain Clocks/Macros | Checksum: 2b174fb26
 
-Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27260
+Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21484 ; free virtual = 27356
 Phase 1 Placer Initialization | Checksum: 2b174fb26
 
-Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20647 ; free virtual = 27260
+Time (s): cpu = 00:00:06 ; elapsed = 00:00:03 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21484 ; free virtual = 27356
 
 Phase 2 Global Placement
 
 Phase 2.1 Floorplanning
-Phase 2.1 Floorplanning | Checksum: 25a014df1
+Phase 2.1 Floorplanning | Checksum: 228d3e2dd
 
-Time (s): cpu = 00:00:08 ; elapsed = 00:00:03 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20640 ; free virtual = 27252
+Time (s): cpu = 00:00:08 ; elapsed = 00:00:03 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21468 ; free virtual = 27340
 
 Phase 2.2 Update Timing before SLR Path Opt
-Phase 2.2 Update Timing before SLR Path Opt | Checksum: 1f5498d1b
+Phase 2.2 Update Timing before SLR Path Opt | Checksum: 2c47b23b7
 
-Time (s): cpu = 00:00:10 ; elapsed = 00:00:04 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20635 ; free virtual = 27247
+Time (s): cpu = 00:00:10 ; elapsed = 00:00:04 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21468 ; free virtual = 27340
 
 Phase 2.3 Post-Processing in Floorplanning
-Phase 2.3 Post-Processing in Floorplanning | Checksum: 25028d834
+Phase 2.3 Post-Processing in Floorplanning | Checksum: 2815c69a0
 
-Time (s): cpu = 00:00:10 ; elapsed = 00:00:04 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20635 ; free virtual = 27247
+Time (s): cpu = 00:00:10 ; elapsed = 00:00:04 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21468 ; free virtual = 27340
 
 Phase 2.4 Global Place Phase1
-Phase 2.4 Global Place Phase1 | Checksum: 21b83ea02
+Phase 2.4 Global Place Phase1 | Checksum: 2297f50a6
 
-Time (s): cpu = 00:00:26 ; elapsed = 00:00:08 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20616 ; free virtual = 27228
+Time (s): cpu = 00:00:26 ; elapsed = 00:00:08 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21438 ; free virtual = 27311
 
 Phase 2.5 Global Place Phase2
 
 Phase 2.5.1 UpdateTiming Before Physical Synthesis
-Phase 2.5.1 UpdateTiming Before Physical Synthesis | Checksum: 1ecff6fbf
+Phase 2.5.1 UpdateTiming Before Physical Synthesis | Checksum: 1bbf03930
 
-Time (s): cpu = 00:00:27 ; elapsed = 00:00:09 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20614 ; free virtual = 27227
+Time (s): cpu = 00:00:27 ; elapsed = 00:00:09 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21438 ; free virtual = 27312
 
 Phase 2.5.2 Physical Synthesis In Placer
-INFO: [Physopt 32-1035] Found 0 LUTNM shape to break, 1456 LUT instances to create LUTNM shape
+INFO: [Physopt 32-1035] Found 0 LUTNM shape to break, 1467 LUT instances to create LUTNM shape
 INFO: [Physopt 32-1044] Break lutnm for timing: one critical 0, two critical 0, total 0, new lutff created 0
-INFO: [Physopt 32-1138] End 1 Pass. Optimized 691 nets or LUTs. Breaked 0 LUT, combined 691 existing LUTs and moved 0 existing LUT
+INFO: [Physopt 32-1138] End 1 Pass. Optimized 701 nets or LUTs. Breaked 0 LUT, combined 701 existing LUTs and moved 0 existing LUT
 INFO: [Physopt 32-65] No nets found for high-fanout optimization.
 INFO: [Physopt 32-232] Optimized 0 net. Created 0 new instance.
 INFO: [Physopt 32-775] End 1 Pass. Optimized 0 net or cell. Created 0 new cell, deleted 0 existing cell and moved 0 existing cell
@@ -2239,7 +2239,7 @@ INFO: [Physopt 32-846] No candidate cells for URAM register optimization found i
 INFO: [Physopt 32-775] End 1 Pass. Optimized 0 net or cell. Created 0 new cell, deleted 0 existing cell and moved 0 existing cell
 INFO: [Physopt 32-949] No candidate nets found for dynamic/static region interface net replication
 INFO: [Physopt 32-775] End 1 Pass. Optimized 0 net or cell. Created 0 new cell, deleted 0 existing cell and moved 0 existing cell
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20607 ; free virtual = 27220
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21437 ; free virtual = 27312
 
 Summary of Physical Synthesis Optimizations
 ============================================
@@ -2248,7 +2248,7 @@ Summary of Physical Synthesis Optimizations
 -----------------------------------------------------------------------------------------------------------------------------------------------------------
 |  Optimization                                     |  Added Cells  |  Removed Cells  |  Optimized Cells/Nets  |  Dont Touch  |  Iterations  |  Elapsed   |
 -----------------------------------------------------------------------------------------------------------------------------------------------------------
-|  LUT Combining                                    |            0  |            691  |                   691  |           0  |           1  |  00:00:00  |
+|  LUT Combining                                    |            0  |            701  |                   701  |           0  |           1  |  00:00:00  |
 |  Retime                                           |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
 |  Very High Fanout                                 |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
 |  DSP Register                                     |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
@@ -2257,69 +2257,69 @@ Summary of Physical Synthesis Optimizations
 |  BRAM Register                                    |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
 |  URAM Register                                    |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
 |  Dynamic/Static Region Interface Net Replication  |            0  |              0  |                     0  |           0  |           1  |  00:00:00  |
-|  Total                                            |            0  |            691  |                   691  |           0  |           9  |  00:00:00  |
+|  Total                                            |            0  |            701  |                   701  |           0  |           9  |  00:00:00  |
 -----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-Phase 2.5.2 Physical Synthesis In Placer | Checksum: 1bb96e784
+Phase 2.5.2 Physical Synthesis In Placer | Checksum: 1539605a2
 
-Time (s): cpu = 00:00:29 ; elapsed = 00:00:10 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20607 ; free virtual = 27220
-Phase 2.5 Global Place Phase2 | Checksum: 262f058b2
+Time (s): cpu = 00:00:29 ; elapsed = 00:00:10 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21437 ; free virtual = 27313
+Phase 2.5 Global Place Phase2 | Checksum: 18aa66768
 
-Time (s): cpu = 00:00:32 ; elapsed = 00:00:11 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20607 ; free virtual = 27220
-Phase 2 Global Placement | Checksum: 262f058b2
+Time (s): cpu = 00:00:32 ; elapsed = 00:00:11 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21436 ; free virtual = 27312
+Phase 2 Global Placement | Checksum: 18aa66768
 
-Time (s): cpu = 00:00:32 ; elapsed = 00:00:11 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20607 ; free virtual = 27220
+Time (s): cpu = 00:00:32 ; elapsed = 00:00:11 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21436 ; free virtual = 27312
 
 Phase 3 Detail Placement
 
 Phase 3.1 Commit Multi Column Macros
-Phase 3.1 Commit Multi Column Macros | Checksum: 279f6a64c
+Phase 3.1 Commit Multi Column Macros | Checksum: 20ba225ed
 
-Time (s): cpu = 00:00:34 ; elapsed = 00:00:11 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20608 ; free virtual = 27221
+Time (s): cpu = 00:00:33 ; elapsed = 00:00:11 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21435 ; free virtual = 27311
 
 Phase 3.2 Commit Most Macros & LUTRAMs
-Phase 3.2 Commit Most Macros & LUTRAMs | Checksum: 2529fc2c8
+Phase 3.2 Commit Most Macros & LUTRAMs | Checksum: 1d806390b
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20608 ; free virtual = 27220
+Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21435 ; free virtual = 27311
 
 Phase 3.3 Area Swap Optimization
-Phase 3.3 Area Swap Optimization | Checksum: 21a27490f
+Phase 3.3 Area Swap Optimization | Checksum: 23029c3a8
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20608 ; free virtual = 27220
+Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21435 ; free virtual = 27311
 
 Phase 3.4 Pipeline Register Optimization
-Phase 3.4 Pipeline Register Optimization | Checksum: 1ba2a9f35
+Phase 3.4 Pipeline Register Optimization | Checksum: 1d3265121
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20608 ; free virtual = 27220
+Time (s): cpu = 00:00:36 ; elapsed = 00:00:12 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21435 ; free virtual = 27311
 
 Phase 3.5 Fast Optimization
-Phase 3.5 Fast Optimization | Checksum: 1e341fcd6
+Phase 3.5 Fast Optimization | Checksum: 170383ca6
 
-Time (s): cpu = 00:00:40 ; elapsed = 00:00:13 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20605 ; free virtual = 27218
+Time (s): cpu = 00:00:40 ; elapsed = 00:00:13 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21433 ; free virtual = 27309
 
 Phase 3.6 Small Shape Detail Placement
-Phase 3.6 Small Shape Detail Placement | Checksum: 277ed8e7e
+Phase 3.6 Small Shape Detail Placement | Checksum: 14af399ed
 
-Time (s): cpu = 00:00:42 ; elapsed = 00:00:14 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20605 ; free virtual = 27217
+Time (s): cpu = 00:00:42 ; elapsed = 00:00:15 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21433 ; free virtual = 27309
 
 Phase 3.7 Re-assign LUT pins
-Phase 3.7 Re-assign LUT pins | Checksum: 2baf935a4
+Phase 3.7 Re-assign LUT pins | Checksum: 1fc596f88
 
-Time (s): cpu = 00:00:42 ; elapsed = 00:00:15 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20605 ; free virtual = 27217
+Time (s): cpu = 00:00:42 ; elapsed = 00:00:15 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21433 ; free virtual = 27309
 
 Phase 3.8 Pipeline Register Optimization
-Phase 3.8 Pipeline Register Optimization | Checksum: 243b6c536
+Phase 3.8 Pipeline Register Optimization | Checksum: 22b3965bc
 
-Time (s): cpu = 00:00:42 ; elapsed = 00:00:15 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20605 ; free virtual = 27217
+Time (s): cpu = 00:00:42 ; elapsed = 00:00:15 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21433 ; free virtual = 27309
 
 Phase 3.9 Fast Optimization
-Phase 3.9 Fast Optimization | Checksum: 2c986d3a0
+Phase 3.9 Fast Optimization | Checksum: 197c31b99
 
-Time (s): cpu = 00:00:47 ; elapsed = 00:00:16 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27214
-Phase 3 Detail Placement | Checksum: 2c986d3a0
+Time (s): cpu = 00:00:47 ; elapsed = 00:00:16 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21432 ; free virtual = 27308
+Phase 3 Detail Placement | Checksum: 197c31b99
 
-Time (s): cpu = 00:00:47 ; elapsed = 00:00:16 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:47 ; elapsed = 00:00:16 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21432 ; free virtual = 27308
 
 Phase 4 Post Placement Optimization and Clean-Up
 
@@ -2327,7 +2327,7 @@ Phase 4.1 Post Commit Optimization
 INFO: [Timing 38-35] Done setting XDC timing constraints.
 
 Phase 4.1.1 Post Placement Optimization
-Post Placement Optimization Initialization | Checksum: 1cf431ac1
+Post Placement Optimization Initialization | Checksum: 2697b8540
 
 Phase 4.1.1.1 BUFG Insertion
 
@@ -2336,32 +2336,32 @@ Starting Physical Synthesis Task
 Phase 1 Physical Synthesis Initialization
 INFO: [Physopt 32-721] Multithreading enabled for phys_opt_design using a maximum of 8 CPUs
 INFO: [Physopt 32-619] Estimated Timing Summary | WNS=-0.324 | TNS=-0.324 |
-Phase 1 Physical Synthesis Initialization | Checksum: 10511d4f8
+Phase 1 Physical Synthesis Initialization | Checksum: 19334abb9
 
-Time (s): cpu = 00:00:00.89 ; elapsed = 00:00:00.26 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:00.9 ; elapsed = 00:00:00.26 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
 INFO: [Place 46-56] BUFG insertion identified 0 candidate nets. Inserted BUFG: 0, Replicated BUFG Driver: 0, Skipped due to Placement/Routing Conflicts: 0, Skipped due to Timing Degradation: 0, Skipped due to netlist editing failed: 0.
-Ending Physical Synthesis Task | Checksum: 1a77f3bf7
+Ending Physical Synthesis Task | Checksum: 2dbda9aaf
 
-Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.32 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
-Phase 4.1.1.1 BUFG Insertion | Checksum: 1cf431ac1
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.31 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
+Phase 4.1.1.1 BUFG Insertion | Checksum: 2697b8540
 
-Time (s): cpu = 00:00:52 ; elapsed = 00:00:17 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:52 ; elapsed = 00:00:18 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
 
 Phase 4.1.1.2 Post Placement Timing Optimization
-INFO: [Place 30-746] Post Placement Timing Summary WNS=-0.322. For the most accurate timing information please run report_timing.
-Phase 4.1.1.2 Post Placement Timing Optimization | Checksum: 2c70beeb3
+INFO: [Place 30-746] Post Placement Timing Summary WNS=-0.270. For the most accurate timing information please run report_timing.
+Phase 4.1.1.2 Post Placement Timing Optimization | Checksum: 25245e9e8
 
-Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
 
-Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
-Phase 4.1 Post Commit Optimization | Checksum: 2c70beeb3
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
+Phase 4.1 Post Commit Optimization | Checksum: 25245e9e8
 
-Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27308
 
 Phase 4.2 Post Placement Cleanup
-Phase 4.2 Post Placement Cleanup | Checksum: 2c70beeb3
+Phase 4.2 Post Placement Cleanup | Checksum: 25245e9e8
 
-Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
 
 Phase 4.3 Placer Reporting
 
@@ -2371,54 +2371,54 @@ INFO: [Place 30-612] Post-Placement Estimated Congestion
 |           | Global Congestion | Short Congestion  |
 | Direction | Region Size       | Region Size       |
 |___________|___________________|___________________|
-|      North|                1x1|                2x2|
+|      North|                1x1|                4x4|
 |___________|___________________|___________________|
 |      South|                1x1|                2x2|
 |___________|___________________|___________________|
-|       East|                1x1|                1x1|
+|       East|                1x1|                2x2|
 |___________|___________________|___________________|
 |       West|                1x1|                1x1|
 |___________|___________________|___________________|
 
-Phase 4.3.1 Print Estimated Congestion | Checksum: 2c70beeb3
+Phase 4.3.1 Print Estimated Congestion | Checksum: 25245e9e8
 
-Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
-Phase 4.3 Placer Reporting | Checksum: 2c70beeb3
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
+Phase 4.3 Placer Reporting | Checksum: 25245e9e8
 
-Time (s): cpu = 00:00:55 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
 
 Phase 4.4 Final Placement Cleanup
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
 
-Time (s): cpu = 00:00:55 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
-Phase 4 Post Placement Optimization and Clean-Up | Checksum: 36fd8a76c
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
+Phase 4 Post Placement Optimization and Clean-Up | Checksum: 27ba62f69
 
-Time (s): cpu = 00:00:55 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
-Ending Placer Task | Checksum: 2712ecd27
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
+Ending Placer Task | Checksum: 2249eb5cd
 
-Time (s): cpu = 00:00:55 ; elapsed = 00:00:19 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+Time (s): cpu = 00:00:54 ; elapsed = 00:00:19 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
 37 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
 place_design completed successfully
-place_design: Time (s): cpu = 00:00:59 ; elapsed = 00:00:20 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20602 ; free virtual = 27215
+place_design: Time (s): cpu = 00:00:59 ; elapsed = 00:00:20 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21431 ; free virtual = 27307
 # report_utilization -hierarchical -file litex_m2sdr_m2_pcie_x1_utilization_hierarchical_place.rpt
 # report_utilization -file litex_m2sdr_m2_pcie_x1_utilization_place.rpt
 # report_io -file litex_m2sdr_m2_pcie_x1_io.rpt
-report_io: Time (s): cpu = 00:00:00.09 ; elapsed = 00:00:00.12 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20592 ; free virtual = 27204
+report_io: Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.12 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21427 ; free virtual = 27303
 # report_control_sets -verbose -file litex_m2sdr_m2_pcie_x1_control_sets.rpt
-report_control_sets: Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.08 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20594 ; free virtual = 27206
+report_control_sets: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21427 ; free virtual = 27303
 # report_clock_utilization -file litex_m2sdr_m2_pcie_x1_clock_utilization.rpt
 # write_checkpoint -force litex_m2sdr_m2_pcie_x1_place.dcp
 INFO: [Timing 38-480] Writing timing data to binary archive.
-Write ShapeDB Complete: Time (s): cpu = 00:00:00.11 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20593 ; free virtual = 27207
-Wrote PlaceDB: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.45 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20585 ; free virtual = 27216
-Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20585 ; free virtual = 27216
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.11 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21427 ; free virtual = 27305
+Wrote PlaceDB: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.46 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21414 ; free virtual = 27308
+Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21414 ; free virtual = 27308
 Writing XDEF routing.
 Writing XDEF routing logical nets.
 Writing XDEF routing special nets.
-Wrote RouteStorage: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20585 ; free virtual = 27216
-Wrote Netlist Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20583 ; free virtual = 27216
-Wrote Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20583 ; free virtual = 27216
-Write Physdb Complete: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.49 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20583 ; free virtual = 27216
+Wrote RouteStorage: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21413 ; free virtual = 27308
+Wrote Netlist Cache: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21411 ; free virtual = 27308
+Wrote Device Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21411 ; free virtual = 27308
+Write Physdb Complete: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.49 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21411 ; free virtual = 27308
 INFO: [Common 17-1381] The checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1_place.dcp' has been generated.
 # route_design -directive default
 Command: route_design -directive default
@@ -2431,62 +2431,62 @@ INFO: [Route 35-270] Using Router directive 'default'.
 INFO: [Route 35-254] Multithreading enabled for route_design using a maximum of 8 CPUs
 
 Phase 1 Build RT Design
-Checksum: PlaceDB: f3a83000 ConstDB: 0 ShapeSum: e56bb1c3 RouteDB: 981aeb64
-Post Restoration Checksum: NetGraph: d535f51 | NumContArr: c5d8342e | Constraints: c2a8fa9d | Timing: c2a8fa9d
-Phase 1 Build RT Design | Checksum: 2587d88b9
+Checksum: PlaceDB: a71818a6 ConstDB: 0 ShapeSum: e56bb1c3 RouteDB: 981aeb64
+Post Restoration Checksum: NetGraph: b0f83aa1 | NumContArr: f0923578 | Constraints: c2a8fa9d | Timing: c2a8fa9d
+Phase 1 Build RT Design | Checksum: 326dc6553
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:27 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20590 ; free virtual = 27207
+Time (s): cpu = 00:00:34 ; elapsed = 00:00:26 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21420 ; free virtual = 27301
 
 Phase 2 Router Initialization
 
 Phase 2.1 Fix Topology Constraints
-Phase 2.1 Fix Topology Constraints | Checksum: 2587d88b9
+Phase 2.1 Fix Topology Constraints | Checksum: 326dc6553
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:27 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20590 ; free virtual = 27207
+Time (s): cpu = 00:00:34 ; elapsed = 00:00:26 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21419 ; free virtual = 27301
 
 Phase 2.2 Pre Route Cleanup
-Phase 2.2 Pre Route Cleanup | Checksum: 2587d88b9
+Phase 2.2 Pre Route Cleanup | Checksum: 326dc6553
 
-Time (s): cpu = 00:00:36 ; elapsed = 00:00:27 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20590 ; free virtual = 27207
+Time (s): cpu = 00:00:34 ; elapsed = 00:00:26 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21419 ; free virtual = 27301
  Number of Nodes with overlaps = 0
 
 Phase 2.3 Update Timing
-Phase 2.3 Update Timing | Checksum: 1e677917b
+Phase 2.3 Update Timing | Checksum: 2387413f4
 
-Time (s): cpu = 00:00:44 ; elapsed = 00:00:30 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20580 ; free virtual = 27197
-INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.202 | TNS=-0.202 | WHS=-1.202 | THS=-1854.678|
+Time (s): cpu = 00:00:41 ; elapsed = 00:00:29 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21411 ; free virtual = 27294
+INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.150 | TNS=-0.150 | WHS=-1.143 | THS=-1930.804|
 
 
 Router Utilization Summary
-  Global Vertical Routing Utilization    = 0.0324932 %
-  Global Horizontal Routing Utilization  = 0.0276933 %
+  Global Vertical Routing Utilization    = 0.0230388 %
+  Global Horizontal Routing Utilization  = 0.0228024 %
   Routable Net Status*
   *Does not include unroutable nets such as driverless and loadless.
   Run report_route_status for detailed report.
-  Number of Failed Nets               = 15506
+  Number of Failed Nets               = 15511
     (Failed Nets is the sum of unrouted and partially routed nets)
-  Number of Unrouted Nets             = 15506
+  Number of Unrouted Nets             = 15511
   Number of Partially Routed Nets     = 0
   Number of Node Overlaps             = 0
 
-Phase 2 Router Initialization | Checksum: 20d5d11b2
+Phase 2 Router Initialization | Checksum: 23868f331
 
-Time (s): cpu = 00:00:47 ; elapsed = 00:00:31 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20574 ; free virtual = 27191
+Time (s): cpu = 00:00:44 ; elapsed = 00:00:30 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21397 ; free virtual = 27280
 
 Phase 3 Global Routing
-Phase 3 Global Routing | Checksum: 20d5d11b2
+Phase 3 Global Routing | Checksum: 23868f331
 
-Time (s): cpu = 00:00:47 ; elapsed = 00:00:31 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20574 ; free virtual = 27191
+Time (s): cpu = 00:00:44 ; elapsed = 00:00:30 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21397 ; free virtual = 27280
 
 Phase 4 Initial Routing
 
 Phase 4.1 Initial Net Routing Pass
-Phase 4.1 Initial Net Routing Pass | Checksum: 2b2701a72
+Phase 4.1 Initial Net Routing Pass | Checksum: 21dd78a06
 
-Time (s): cpu = 00:00:59 ; elapsed = 00:00:33 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27178
-Phase 4 Initial Routing | Checksum: 2b2701a72
+Time (s): cpu = 00:00:55 ; elapsed = 00:00:32 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21386 ; free virtual = 27269
+Phase 4 Initial Routing | Checksum: 21dd78a06
 
-Time (s): cpu = 00:01:00 ; elapsed = 00:00:33 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27178
+Time (s): cpu = 00:00:55 ; elapsed = 00:00:32 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21386 ; free virtual = 27269
 INFO: [Route 35-580] Design has 2 pins with tight setup and hold constraints.
 
 The top 5 pins with tight setup and hold constraints:
@@ -2504,62 +2504,61 @@ File with complete list of pins: tight_setup_hold_pins.txt
 Phase 5 Rip-up And Reroute
 
 Phase 5.1 Global Iteration 0
- Number of Nodes with overlaps = 1237
- Number of Nodes with overlaps = 154
- Number of Nodes with overlaps = 48
- Number of Nodes with overlaps = 18
+ Number of Nodes with overlaps = 1471
+ Number of Nodes with overlaps = 113
+ Number of Nodes with overlaps = 34
  Number of Nodes with overlaps = 9
- Number of Nodes with overlaps = 1
+ Number of Nodes with overlaps = 3
  Number of Nodes with overlaps = 0
-INFO: [Route 35-416] Intermediate Timing Summary | WNS=-1.144 | TNS=-1.359 | WHS=N/A    | THS=N/A    |
+INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.196 | TNS=-0.456 | WHS=N/A    | THS=N/A    |
 
-Phase 5.1 Global Iteration 0 | Checksum: 181305f38
+Phase 5.1 Global Iteration 0 | Checksum: 2877a5942
 
-Time (s): cpu = 00:01:17 ; elapsed = 00:00:42 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
-Phase 5 Rip-up And Reroute | Checksum: 181305f38
+Time (s): cpu = 00:01:28 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
+Phase 5 Rip-up And Reroute | Checksum: 2877a5942
 
-Time (s): cpu = 00:01:17 ; elapsed = 00:00:42 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
+Time (s): cpu = 00:01:29 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 6 Delay and Skew Optimization
 
 Phase 6.1 Delay CleanUp
 
 Phase 6.1.1 Update Timing
-Phase 6.1.1 Update Timing | Checksum: 1b56e036d
+Phase 6.1.1 Update Timing | Checksum: 233b5cbba
 
-Time (s): cpu = 00:01:18 ; elapsed = 00:00:42 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
-INFO: [Route 35-416] Intermediate Timing Summary | WNS=-1.144 | TNS=-1.359 | WHS=N/A    | THS=N/A    |
+Time (s): cpu = 00:01:30 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
+INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.196 | TNS=-0.456 | WHS=N/A    | THS=N/A    |
 
  Number of Nodes with overlaps = 0
-Phase 6.1 Delay CleanUp | Checksum: 27675f741
+Phase 6.1 Delay CleanUp | Checksum: 28877cd83
 
-Time (s): cpu = 00:01:19 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
+Time (s): cpu = 00:01:30 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 6.2 Clock Skew Optimization
-Phase 6.2 Clock Skew Optimization | Checksum: 27675f741
+Phase 6.2 Clock Skew Optimization | Checksum: 28877cd83
 
-Time (s): cpu = 00:01:19 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
-Phase 6 Delay and Skew Optimization | Checksum: 27675f741
+Time (s): cpu = 00:01:30 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
+Phase 6 Delay and Skew Optimization | Checksum: 28877cd83
 
-Time (s): cpu = 00:01:19 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27177
+Time (s): cpu = 00:01:30 ; elapsed = 00:00:47 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 7 Post Hold Fix
 
 Phase 7.1 Hold Fix Iter
-INFO: [Route 35-416] Intermediate Timing Summary | WNS=-1.144 | TNS=-1.356 | WHS=0.004  | THS=0.000  |
+INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.196 | TNS=-0.453 | WHS=0.004  | THS=0.000  |
 
-Phase 7.1 Hold Fix Iter | Checksum: 277ed550a
+Phase 7.1 Hold Fix Iter | Checksum: 330af114a
 
-Time (s): cpu = 00:01:20 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27177
-Phase 7 Post Hold Fix | Checksum: 277ed550a
+Time (s): cpu = 00:01:32 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
+Phase 7 Post Hold Fix | Checksum: 330af114a
 
-Time (s): cpu = 00:01:20 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27177
+Time (s): cpu = 00:01:32 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 8 Route finalize
 
 Router Utilization Summary
-  Global Vertical Routing Utilization    = 2.23925 %
-  Global Horizontal Routing Utilization  = 2.43886 %
+  Global Vertical Routing Utilization    = 2.18407 %
+  Global Horizontal Routing Utilization  = 2.41441 %
   Routable Net Status*
   *Does not include unroutable nets such as driverless and loadless.
   Run report_route_status for detailed report.
@@ -2573,11 +2572,10 @@ Router Utilization Summary
 --GLOBAL Congestion:
 Utilization threshold used for congestion level computation: 0.85
 Congestion Report
-North Dir 1x1 Area, Max Cong = 74.7748%, No Congested Regions.
-South Dir 1x1 Area, Max Cong = 81.982%, No Congested Regions.
-East Dir 1x1 Area, Max Cong = 89.7059%, Congestion bounded by tiles (Lower Left Tile -> Upper Right Tile):
-   INT_R_X41Y133 -> INT_R_X41Y133
-West Dir 1x1 Area, Max Cong = 63.2353%, No Congested Regions.
+North Dir 1x1 Area, Max Cong = 83.7838%, No Congested Regions.
+South Dir 1x1 Area, Max Cong = 74.7748%, No Congested Regions.
+East Dir 1x1 Area, Max Cong = 83.8235%, No Congested Regions.
+West Dir 1x1 Area, Max Cong = 66.1765%, No Congested Regions.
 
 ------------------------------
 Reporting congestion hotspots
@@ -2593,57 +2591,57 @@ Effective congestion level: 0 Aspect Ratio: 1 Sparse Ratio: 0
 Direction: East
 ----------------
 Congested clusters found at Level 0
-Effective congestion level: 0 Aspect Ratio: 1 Sparse Ratio: 1
+Effective congestion level: 0 Aspect Ratio: 1 Sparse Ratio: 0
 Direction: West
 ----------------
 Congested clusters found at Level 0
 Effective congestion level: 0 Aspect Ratio: 1 Sparse Ratio: 0
 
-Phase 8 Route finalize | Checksum: 277ed550a
+Phase 8 Route finalize | Checksum: 330af114a
 
-Time (s): cpu = 00:01:20 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27177
+Time (s): cpu = 00:01:32 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 9 Verifying routed nets
 
  Verification completed successfully
-Phase 9 Verifying routed nets | Checksum: 277ed550a
+Phase 9 Verifying routed nets | Checksum: 330af114a
 
-Time (s): cpu = 00:01:21 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20560 ; free virtual = 27177
+Time (s): cpu = 00:01:32 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 10 Depositing Routes
-Phase 10 Depositing Routes | Checksum: 25645907e
+Phase 10 Depositing Routes | Checksum: 249db2f9d
 
-Time (s): cpu = 00:01:21 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
+Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 11 Post Process Routing
-Phase 11 Post Process Routing | Checksum: 25645907e
+Phase 11 Post Process Routing | Checksum: 249db2f9d
 
-Time (s): cpu = 00:01:22 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
+Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Phase 12 Post Router Timing
-INFO: [Route 35-57] Estimated Timing Summary | WNS=-1.144 | TNS=-1.356 | WHS=0.004  | THS=0.000  |
+INFO: [Route 35-57] Estimated Timing Summary | WNS=-0.196 | TNS=-0.453 | WHS=0.004  | THS=0.000  |
 
 WARNING: [Route 35-328] Router estimated timing not met.
 Resolution: For a complete and accurate timing signoff, report_timing_summary must be run after route_design. Alternatively, route_design can be run with the -timing_summary option to enable a complete timing signoff at the end of route_design.
-Phase 12 Post Router Timing | Checksum: 25645907e
+Phase 12 Post Router Timing | Checksum: 249db2f9d
 
-Time (s): cpu = 00:01:22 ; elapsed = 00:00:43 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
-Total Elapsed time in route_design: 43.48 secs
+Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
+Total Elapsed time in route_design: 48.09 secs
 
 Phase 13 Post-Route Event Processing
-Phase 13 Post-Route Event Processing | Checksum: 19b3de94d
+Phase 13 Post-Route Event Processing | Checksum: 1baf8121d
 
-Time (s): cpu = 00:01:22 ; elapsed = 00:00:44 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
+Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 INFO: [Route 35-16] Router Completed Successfully
-Ending Routing Task | Checksum: 19b3de94d
+Ending Routing Task | Checksum: 1baf8121d
 
-Time (s): cpu = 00:01:22 ; elapsed = 00:00:44 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
+Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 
 Routing Is Done.
 INFO: [Common 17-83] Releasing license: Implementation
 11 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
 route_design completed successfully
-route_design: Time (s): cpu = 00:01:22 ; elapsed = 00:00:44 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20559 ; free virtual = 27176
+route_design: Time (s): cpu = 00:01:33 ; elapsed = 00:00:48 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21384 ; free virtual = 27267
 # phys_opt_design -directive default
 Command: phys_opt_design -directive default
 Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
@@ -2653,39 +2651,32 @@ INFO: [Vivado_Tcl 4-137] Directive used for phys_opt_design is: default
 
 Starting Initial Update Timing Task
 
-Time (s): cpu = 00:00:04 ; elapsed = 00:00:00.82 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20558 ; free virtual = 27176
-INFO: [Vivado_Tcl 4-1435] PhysOpt_Tcl_Interface Runtime Before Starting Physical Synthesis Task | CPU: 5.30s |  WALL: 1.22s
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20558 ; free virtual = 27176
+Time (s): cpu = 00:00:04 ; elapsed = 00:00:00.91 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
+INFO: [Vivado_Tcl 4-1435] PhysOpt_Tcl_Interface Runtime Before Starting Physical Synthesis Task | CPU: 5.25s |  WALL: 1.32s
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
 
 Starting Physical Synthesis Task
 
 Phase 1 Physical Synthesis Initialization
 INFO: [Physopt 32-721] Multithreading enabled for phys_opt_design using a maximum of 8 CPUs
-INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.593 | TNS=-0.804 | WHS=0.006 | THS=0.000 |
-Phase 1 Physical Synthesis Initialization | Checksum: 202da3fdc
+INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.159 | TNS=-0.159 | WHS=0.006 | THS=0.000 |
+Phase 1 Physical Synthesis Initialization | Checksum: 27701148d
 
-Time (s): cpu = 00:00:03 ; elapsed = 00:00:00.88 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20557 ; free virtual = 27175
-WARNING: [Physopt 32-745] Physical Optimization has determined that the magnitude of the negative slack is too large and it is highly unlikely that slack will be improved. Post-Route Physical Optimization is most effective when WNS is above -0.5ns
+Time (s): cpu = 00:00:03 ; elapsed = 00:00:00.88 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
 
 Phase 2 Critical Path Optimization
-INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.593 | TNS=-0.804 | WHS=0.006 | THS=0.000 |
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: clk4_counter_rst.
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: impl_xilinxasyncresetsynchronizerimpl27_rst_meta.
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: si5351_clk1.
+INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.159 | TNS=-0.159 | WHS=0.006 | THS=0.000 |
 INFO: [Physopt 32-953] Path group WNS did not improve. Path group: basesoc_s7pciephy_clkout1. Processed net: basesoc_s7pciephy_pclk_sel.
 INFO: [Physopt 32-953] Path group WNS did not improve. Path group: basesoc_s7pciephy_clkout1. Processed net: basesoc_s7pciephy_clkout1.
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: clk4_counter_rst.
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: impl_xilinxasyncresetsynchronizerimpl27_rst_meta.
-INFO: [Physopt 32-953] Path group WNS did not improve. Path group: si5351_clk1. Processed net: si5351_clk1.
 INFO: [Physopt 32-953] Path group WNS did not improve. Path group: basesoc_s7pciephy_clkout1. Processed net: basesoc_s7pciephy_pclk_sel.
 INFO: [Physopt 32-953] Path group WNS did not improve. Path group: basesoc_s7pciephy_clkout1. Processed net: basesoc_s7pciephy_clkout1.
-INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.593 | TNS=-0.804 | WHS=0.006 | THS=0.000 |
-Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20556 ; free virtual = 27174
-Phase 2 Critical Path Optimization | Checksum: 202da3fdc
+INFO: [Physopt 32-668] Current Timing Summary | WNS=-0.159 | TNS=-0.159 | WHS=0.006 | THS=0.000 |
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
+Phase 2 Critical Path Optimization | Checksum: 27701148d
 
-Time (s): cpu = 00:00:05 ; elapsed = 00:00:02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20556 ; free virtual = 27174
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20556 ; free virtual = 27174
-INFO: [Physopt 32-669] Post Physical Optimization Timing Summary | WNS=-0.593 | TNS=-0.804 | WHS=0.006 | THS=0.000 |
+Time (s): cpu = 00:00:05 ; elapsed = 00:00:01 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
+INFO: [Physopt 32-669] Post Physical Optimization Timing Summary | WNS=-0.159 | TNS=-0.159 | WHS=0.006 | THS=0.000 |
 
 Summary of Physical Synthesis Optimizations
 ============================================
@@ -2698,25 +2689,25 @@ Summary of Physical Synthesis Optimizations
 -------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20556 ; free virtual = 27174
-Ending Physical Synthesis Task | Checksum: 202da3fdc
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
+Ending Physical Synthesis Task | Checksum: 27701148d
 
-Time (s): cpu = 00:00:05 ; elapsed = 00:00:02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20556 ; free virtual = 27174
+Time (s): cpu = 00:00:05 ; elapsed = 00:00:02 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27267
 INFO: [Common 17-83] Releasing license: Implementation
-20 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+14 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 phys_opt_design completed successfully
 # write_checkpoint -force litex_m2sdr_m2_pcie_x1_route.dcp
 INFO: [Timing 38-480] Writing timing data to binary archive.
-Write ShapeDB Complete: Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20554 ; free virtual = 27173
-Wrote PlaceDB: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.44 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20539 ; free virtual = 27174
-Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20539 ; free virtual = 27174
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.07 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21383 ; free virtual = 27268
+Wrote PlaceDB: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.43 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21370 ; free virtual = 27271
+Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21370 ; free virtual = 27271
 Writing XDEF routing.
 Writing XDEF routing logical nets.
 Writing XDEF routing special nets.
-Wrote RouteStorage: Time (s): cpu = 00:00:00.15 ; elapsed = 00:00:00.08 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20538 ; free virtual = 27175
-Wrote Netlist Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20535 ; free virtual = 27175
-Wrote Device Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20534 ; free virtual = 27175
-Write Physdb Complete: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.55 . Memory (MB): peak = 3552.660 ; gain = 0.000 ; free physical = 20534 ; free virtual = 27175
+Wrote RouteStorage: Time (s): cpu = 00:00:00.15 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21368 ; free virtual = 27272
+Wrote Netlist Cache: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21366 ; free virtual = 27271
+Wrote Device Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21365 ; free virtual = 27272
+Write Physdb Complete: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.54 . Memory (MB): peak = 3602.102 ; gain = 0.000 ; free physical = 21365 ; free virtual = 27272
 INFO: [Common 17-1381] The checkpoint '/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1_route.dcp' has been generated.
 # report_timing_summary -no_header -no_detailed_paths
 INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
@@ -2847,7 +2838,7 @@ Table of Contents
 
     WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
     -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
-     -0.593       -0.804                      2                28163        0.006        0.000                      0                28163       -0.031       -0.031                       1                  9489  
+     -0.159       -0.159                      1                28163        0.006        0.000                      0                28163       -0.031       -0.031                       1                  9489  
 
 
 Timing constraints are not met.
@@ -2886,22 +2877,22 @@ txoutclk_x0y0                {0.000 5.000}        10.000          100.000
 
 Clock                            WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
 -----                            -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
-clk100                             8.352        0.000                      0                    7        0.606        0.000                      0                    7        3.000        0.000                       0                    10  
-  basesoc_crg_clkout0              0.456        0.000                      0                22441        0.072        0.000                      0                22441        2.950        0.000                       0                  6921  
+clk100                             8.474        0.000                      0                    7        0.400        0.000                      0                    7        3.000        0.000                       0                    10  
+  basesoc_crg_clkout0              0.464        0.000                      0                22441        0.050        0.000                      0                22441        2.950        0.000                       0                  6921  
   basesoc_crg_clkout1                                                                                                                                                         60.000        0.000                       0                     3  
   crg_pll_fb                                                                                                                                                                   8.751        0.000                       0                     2  
-dna_clk                            8.996        0.000                      0                  127        0.230        0.000                      0                  127        6.000        0.000                       0                    64  
-icap_clk                         120.565        0.000                      0                  109        0.271        0.000                      0                  109       63.500        0.000                       0                    40  
-jtag_clk                           0.782        0.000                      0                  118        0.170        0.000                      0                  118       23.950        0.000                       0                    65  
+dna_clk                            9.550        0.000                      0                  127        0.348        0.000                      0                  127        6.000        0.000                       0                    64  
+icap_clk                         121.407        0.000                      0                  109        0.332        0.000                      0                  109       63.500        0.000                       0                    40  
+jtag_clk                           0.777        0.000                      0                  118        0.276        0.000                      0                  118       23.950        0.000                       0                    65  
 pcie_x1_m2_clk_p                                                                                                                                                               8.485        0.000                       0                     2  
-rfic_clk                           0.441        0.000                      0                 1094        0.119        0.000                      0                 1094        0.984        0.000                       0                   452  
-si5351_clk0                        0.400        0.000                      0                  322        0.500        0.000                      0                  322       12.520        0.000                       0                   133  
-si5351_clk1                       -0.593       -0.593                      1                  976        0.778        0.000                      0                  976        4.500        0.000                       0                   748  
+rfic_clk                           0.314        0.000                      0                 1094        0.105        0.000                      0                 1094        0.984        0.000                       0                   452  
+si5351_clk0                        0.276        0.000                      0                  322        0.619        0.000                      0                  322       12.520        0.000                       0                   133  
+si5351_clk1                        0.250        0.000                      0                  976        0.912        0.000                      0                  976        4.500        0.000                       0                   748  
 txoutclk_x0y0                                                                                                                                                                  3.000        0.000                       0                     3  
-  basesoc_s7pciephy_clkout0        1.569        0.000                      0                  821        0.074        0.000                      0                  821       -0.031       -0.031                       1                   397  
-  basesoc_s7pciephy_clkout1       -0.211       -0.211                      1                  682        0.074        0.000                      0                  682       -0.031       -0.031                       1                   336  
-  basesoc_s7pciephy_clkout2        4.546        0.000                      0                  466        0.006        0.000                      0                  466        0.033        0.000                       0                    19  
-  basesoc_s7pciephy_clkout3        1.413        0.000                      0                 1679        0.086        0.000                      0                 1679        3.500        0.000                       0                   625  
+  basesoc_s7pciephy_clkout0        1.621        0.000                      0                  821        0.086        0.000                      0                  821       -0.031       -0.031                       1                   397  
+  basesoc_s7pciephy_clkout1       -0.159       -0.159                      1                  682        0.086        0.000                      0                  682       -0.031       -0.031                       1                   336  
+  basesoc_s7pciephy_clkout2        4.763        0.000                      0                  466        0.006        0.000                      0                  466        0.033        0.000                       0                    19  
+  basesoc_s7pciephy_clkout3        1.413        0.000                      0                 1679        0.073        0.000                      0                 1679        3.500        0.000                       0                   625  
   s7pciephy_mmcm_fb                                                                                                                                                            8.751        0.000                       0                     2  
 
 
@@ -2921,7 +2912,7 @@ From Clock    To Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS
 
 Path Group                 From Clock                 To Clock                       WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints  
 ----------                 ----------                 --------                       -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------  
-**async_default**          basesoc_s7pciephy_clkout3  basesoc_s7pciephy_clkout3        6.368        0.000                      0                    2        0.650        0.000                      0                    2  
+**async_default**          basesoc_s7pciephy_clkout3  basesoc_s7pciephy_clkout3        6.436        0.000                      0                    2        0.629        0.000                      0                    2  
 
 
 # report_route_status -file litex_m2sdr_m2_pcie_x1_route_status.rpt
@@ -2968,14 +2959,14 @@ Loading route data...
 Processing options...
 Creating bitmap...
 Creating bitstream...
-Bitstream compression saved 54167136 bits.
+Bitstream compression saved 54592992 bits.
 Writing bitstream ./litex_m2sdr_m2_pcie_x1.bit...
 INFO: [Vivado 12-1842] Bitgen Completed Successfully.
 INFO: [Project 1-1876] WebTalk data collection is mandatory when using a ULT device. To see the specific WebTalk data collected for your design, open the usage_statistics_webtalk.html or usage_statistics_webtalk.xml file in the implementation directory.
 INFO: [Common 17-83] Releasing license: Implementation
 9 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_bitstream completed successfully
-write_bitstream: Time (s): cpu = 00:00:38 ; elapsed = 00:00:14 . Memory (MB): peak = 3612.844 ; gain = 60.184 ; free physical = 20371 ; free virtual = 26998
+write_bitstream: Time (s): cpu = 00:00:39 ; elapsed = 00:00:16 . Memory (MB): peak = 3660.285 ; gain = 58.184 ; free physical = 21184 ; free virtual = 27082
 # write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit "up 0x0             litex_m2sdr_m2_pcie_x1.bit" -file litex_m2sdr_m2_pcie_x1.bin
 Command: write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit {up 0x0             litex_m2sdr_m2_pcie_x1.bit} -file litex_m2sdr_m2_pcie_x1.bin
 Creating config memory files...
@@ -2993,7 +2984,7 @@ Start Address      0x00000000
 End Address        0x00FFFFFF
 
 Addr1         Addr2         Date                    File(s)
-0x00000000    0x002D298B    Oct 13 18:22:37 2025    litex_m2sdr_m2_pcie_x1.bit
+0x00000000    0x002C599B    Oct 14 23:57:43 2025    litex_m2sdr_m2_pcie_x1.bit
 0 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_cfgmem completed successfully
 # set_property BITSTREAM.CONFIG.TIMER_CFG 0x01000000 [current_design]
@@ -3014,14 +3005,14 @@ Loading route data...
 Processing options...
 Creating bitmap...
 Creating bitstream...
-Bitstream compression saved 54167136 bits.
+Bitstream compression saved 54592992 bits.
 Writing bitstream ./litex_m2sdr_m2_pcie_x1_operational.bit...
 INFO: [Vivado 12-1842] Bitgen Completed Successfully.
 INFO: [Project 1-1876] WebTalk data collection is mandatory when using a ULT device. To see the specific WebTalk data collected for your design, open the usage_statistics_webtalk.html or usage_statistics_webtalk.xml file in the implementation directory.
 INFO: [Common 17-83] Releasing license: Implementation
 9 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_bitstream completed successfully
-write_bitstream: Time (s): cpu = 00:00:40 ; elapsed = 00:00:11 . Memory (MB): peak = 3637.336 ; gain = 24.492 ; free physical = 20331 ; free virtual = 26963
+write_bitstream: Time (s): cpu = 00:00:43 ; elapsed = 00:00:14 . Memory (MB): peak = 3685.777 ; gain = 25.492 ; free physical = 21144 ; free virtual = 27046
 # write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit "up 0x0                 litex_m2sdr_m2_pcie_x1_operational.bit" -file litex_m2sdr_m2_pcie_x1_operational.bin
 Command: write_cfgmem -force -format bin -interface spix4 -size 16 -loadbit {up 0x0                 litex_m2sdr_m2_pcie_x1_operational.bit} -file litex_m2sdr_m2_pcie_x1_operational.bin
 Creating config memory files...
@@ -3039,7 +3030,7 @@ Start Address      0x00000000
 End Address        0x00FFFFFF
 
 Addr1         Addr2         Date                    File(s)
-0x00000000    0x002D298B    Oct 13 18:22:49 2025    litex_m2sdr_m2_pcie_x1_operational.bit
+0x00000000    0x002C599B    Oct 14 23:57:58 2025    litex_m2sdr_m2_pcie_x1_operational.bit
 0 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_cfgmem completed successfully
 # set_property BITSTREAM.CONFIG.NEXT_CONFIG_ADDR 0x00800000 [current_design]
@@ -3060,14 +3051,14 @@ Loading route data...
 Processing options...
 Creating bitmap...
 Creating bitstream...
-Bitstream compression saved 54167136 bits.
+Bitstream compression saved 54592992 bits.
 Writing bitstream ./litex_m2sdr_m2_pcie_x1_fallback.bit...
 INFO: [Vivado 12-1842] Bitgen Completed Successfully.
 INFO: [Project 1-1876] WebTalk data collection is mandatory when using a ULT device. To see the specific WebTalk data collected for your design, open the usage_statistics_webtalk.html or usage_statistics_webtalk.xml file in the implementation directory.
 INFO: [Common 17-83] Releasing license: Implementation
 9 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_bitstream completed successfully
-write_bitstream: Time (s): cpu = 00:00:39 ; elapsed = 00:00:11 . Memory (MB): peak = 3675.828 ; gain = 38.492 ; free physical = 20296 ; free virtual = 26934
+write_bitstream: Time (s): cpu = 00:00:41 ; elapsed = 00:00:13 . Memory (MB): peak = 3725.270 ; gain = 39.492 ; free physical = 21095 ; free virtual = 27001
 # write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit "up 0x0                 litex_m2sdr_m2_pcie_x1_fallback.bit" -file litex_m2sdr_m2_pcie_x1_fallback.bin
 Command: write_cfgmem -force -format bin -interface spix1 -size 16 -loadbit {up 0x0                 litex_m2sdr_m2_pcie_x1_fallback.bit} -file litex_m2sdr_m2_pcie_x1_fallback.bin
 Creating config memory files...
@@ -3085,8 +3076,8 @@ Start Address      0x00000000
 End Address        0x00FFFFFF
 
 Addr1         Addr2         Date                    File(s)
-0x00000000    0x002D298B    Oct 13 18:23:00 2025    litex_m2sdr_m2_pcie_x1_fallback.bit
+0x00000000    0x002C599B    Oct 14 23:58:11 2025    litex_m2sdr_m2_pcie_x1_fallback.bit
 0 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
 write_cfgmem completed successfully
 # quit
-INFO: [Common 17-206] Exiting Vivado at Mon Oct 13 18:23:01 2025...
+INFO: [Common 17-206] Exiting Vivado at Tue Oct 14 23:58:12 2025...
