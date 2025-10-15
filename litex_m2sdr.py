@@ -188,6 +188,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         "header"          : 23,
         "ad9361"          : 24,
         "crossbar"        : 25,
+        "scheduler_tx"    : 26,
 
         # GPIO.
         "gpio"            : 21,
@@ -616,9 +617,6 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
                     self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
             ]
-            # self.submodules.pcie_bridge = LitePCIeWishboneBridge(self.pcie_endpoint,
-            # base_address = self.mem_map["csr"])
-            # self.add_wb_master(self.pcie_bridge.wishbone)
         if with_eth:
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
