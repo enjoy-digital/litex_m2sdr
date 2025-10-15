@@ -62,7 +62,8 @@ from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.software import generate_litepcie_software
-# from litescope import LitePCIeWishboneBridge 
+
+from litepcie.frontend.wishbone import LitePCIeWishboneBridge
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -572,7 +573,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
 
-        # !! THIS IS DANGEROUS AS IT IS NOT THE SAME TIME DOMAIN AS THE AD9361 !!
+        # !! THIS IS WRONG AS IT IS NOT THE SAME TIME DOMAIN AS THE AD9361 !!
         # Push TX Timestamp to AD9361 TX scheduler. 
         # ----------------------------------------------
         # pkt_count = Signal(3) # max pkt count in scheduler is 8 #FIXME: make it configurable
