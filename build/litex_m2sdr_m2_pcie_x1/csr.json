@@ -18,8 +18,7 @@
         "header": 47104,
         "ad9361": 49152,
         "crossbar": 51200,
-        "clk_measurement": 61440,
-        "analyzer": 63488
+        "clk_measurement": 61440
     },
     "csr_registers": {
         "ctrl_reset": {
@@ -616,76 +615,6 @@
             "addr": 61500,
             "size": 1,
             "type": "rw"
-        },
-        "analyzer_mux_value": {
-            "addr": 63488,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_trigger_enable": {
-            "addr": 63492,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_trigger_done": {
-            "addr": 63496,
-            "size": 1,
-            "type": "ro"
-        },
-        "analyzer_trigger_mem_write": {
-            "addr": 63500,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_trigger_mem_mask": {
-            "addr": 63504,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_trigger_mem_value": {
-            "addr": 63508,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_trigger_mem_full": {
-            "addr": 63512,
-            "size": 1,
-            "type": "ro"
-        },
-        "analyzer_subsampler_value": {
-            "addr": 63516,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_storage_enable": {
-            "addr": 63520,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_storage_done": {
-            "addr": 63524,
-            "size": 1,
-            "type": "ro"
-        },
-        "analyzer_storage_length": {
-            "addr": 63528,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_storage_offset": {
-            "addr": 63532,
-            "size": 1,
-            "type": "rw"
-        },
-        "analyzer_storage_mem_level": {
-            "addr": 63536,
-            "size": 1,
-            "type": "ro"
-        },
-        "analyzer_storage_mem_data": {
-            "addr": 63540,
-            "size": 1,
-            "type": "ro"
         }
     },
     "constants": {
@@ -696,7 +625,7 @@
         "config_cpu_family": null,
         "config_cpu_name": null,
         "config_cpu_human_name": "unknown",
-        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-06 17:06:44",
+        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-14 23:54:32",
         "config_flash_image_size": 8388608,
         "dma_channels": 1,
         "dma_addr_width": 64,
