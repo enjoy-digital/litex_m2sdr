@@ -22,6 +22,7 @@ class Capability(LiteXModule):
     - pcie_enabled (bool)   : Indicates if PCIe is present.
     - pcie_speed (str)      : PCIe speed (e.g., "gen2").
     - pcie_lanes (int)      : Number of PCIe lanes (e.g., 1, 2, 4, 8).
+    - pcie_ptm (bool)       : PCIe Precision Time Measurement enable status (True if PTM is enabled).
     - eth_enabled (bool)    : Indicates if Ethernet is present.
     - eth_speed (str)       : Ethernet speed (e.g., "1000basex" for 1Gbps).
     - sata_enabled (bool)   : Indicates if SATA is present.
@@ -31,7 +32,7 @@ class Capability(LiteXModule):
     """
     def __init__(self, api_version_str,
         # PCIe.
-        pcie_enabled, pcie_speed, pcie_lanes,
+        pcie_enabled, pcie_speed, pcie_lanes, pcie_ptm,
         # Ethernet.
         eth_enabled, eth_speed,
         # SATA.
@@ -77,6 +78,10 @@ class Capability(LiteXModule):
                 ("``0b10``", "X4"),
                 ("``0b11``", "Reserved"),
             ], description="PCIe lanes configuration."),
+            CSRField("ptm", size=1, offset=4, reset=pcie_ptm, values=[
+                ("``0``", "PTM disabled or not present."),
+                ("``1``", "PTM enabled."),
+            ], description="PCIe Precision Time Measurement (PTM) enable status."),
             # Reserved bits
         ], description="PCIe configuration. Valid only if features.pcie is set.")
 

@@ -245,6 +245,7 @@ class BaseSoC(SoCMini):
             pcie_enabled    = with_pcie,
             pcie_speed      = {1: "gen1", 2: "gen2"}[pcie_gen],
             pcie_lanes      = pcie_lanes,
+            pcie_ptm        = with_pcie_ptm,
 
             # Ethernet Capabilities.
             eth_enabled     = with_eth,
