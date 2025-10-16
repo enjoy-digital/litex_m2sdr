@@ -83,7 +83,6 @@ class CRG(LiteXModule):
 
         # # #
 
-        assert not (with_eth and with_white_rabbit) # FIXME.
 
         # Clk / Rst.
         # ----------
@@ -111,7 +110,7 @@ class CRG(LiteXModule):
 
         # Ethernet PLL.
         # -------------
-        if with_eth or with_sata:
+        if with_eth or with_sata or with_white_rabbit:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, 125e6, margin=0)
@@ -197,7 +196,7 @@ class BaseSoC(SoCMini):
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen="gen2",
-        with_white_rabbit      = False,
+        with_white_rabbit      = False, wr_sfp=1,
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -626,7 +625,7 @@ class BaseSoC(SoCMini):
                 board_name       = "SAWR",
 
                 # SFP.
-                sfp_pads        = platform.request("sfp", 0),
+                sfp_pads        = platform.request("sfp", wr_sfp),
                 sfp_i2c_pads    = sfp_i2c_pads,
                 sfp_tx_polarity = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
                 sfp_rx_polarity = 1, # Inverted on M2SDR.
@@ -844,7 +843,8 @@ def main():
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
-    parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support (on SFP0).")
+    parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
+    parser.add_argument("--wr-sfp",            default=1, type=int,     help="White Rabbit SFP.", choices=[0, 1])
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -890,6 +890,7 @@ def main():
 
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
+        wr_sfp            = args.wr_sfp,
     )
 
     # LiteScope Analyzer Probes.
