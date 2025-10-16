@@ -704,7 +704,7 @@ class BaseSoC(SoCMini):
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
     # PCIe.
-    def add_pcie_probe(self):
+    def add_pcie_probe(self, depth=4096):
         self.pcie_phy.add_ltssm_tracer()
         self.pcie_clk_count = Signal(16)
         self.sync.pclk += self.pcie_clk_count.eq(self.pcie_clk_count + 1)
@@ -722,13 +722,13 @@ class BaseSoC(SoCMini):
             self.pcie_phy._link_status.fields.ltssm
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 4096,
+            depth        = depth,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
 
-    def add_pcie_dma_probe(self):
+    def add_pcie_dma_probe(self, depth=1024):
         assert hasattr(self, "pcie_dma0")
         analyzer_signals = [
             self.pps_gen.pps,      # PPS.
@@ -739,14 +739,14 @@ class BaseSoC(SoCMini):
             self.header.tx.reset,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 1024,
+            depth        = depth,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
 
     # Clocking.
-    def add_si5351_i2c_probe(self):
+    def add_si5351_i2c_probe(self, depth=4096):
         analyzer_signals = [
             # I2C SCL.
             self.si5351.i2c.phy.clkgen.scl_o,
@@ -767,43 +767,43 @@ class BaseSoC(SoCMini):
             self.si5351.sequencer.bus,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 4096,
+            depth        = depth,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
 
     # Ethernet.
-    def add_eth_tx_probe(self):
+    def add_eth_tx_probe(self, depth=1024):
         assert hasattr(self, "eth_streamer")
         analyzer_signals = [
             self.eth_streamer.sink,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 1024,
+            depth        = depth,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
 
     # RFIC.
-    def add_ad9361_spi_probe(self):
+    def add_ad9361_spi_probe(self, depth=4096):
         analyzer_signals = [self.platform.lookup_request("ad9361_spi")]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 4096,
+            depth        = depth,
             clock_domain = "sys",
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
 
-    def add_ad96361_data_probe(self):
+    def add_ad96361_data_probe(self, depth=4096):
         analyzer_signals = [
             self.ad9361.phy.sink,   # TX.
             self.ad9361.phy.source, # RX.
             self.ad9361.prbs_rx.fields.synced,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
-            depth        = 4096,
+            depth        = depth,
             clock_domain = "rfic",
             register     = True,
             csr_csv      = "test/analyzer.csv"
