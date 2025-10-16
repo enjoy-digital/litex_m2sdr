@@ -10,7 +10,7 @@ INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_record
 else ifeq ($(INTERFACE),USE_LITEPCIE)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
 else
@@ -24,6 +24,11 @@ all: $(PROGS)
 # --- Libraries ---
 
 liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
+	$(AR) rcs $@ $+
+	ranlib $@
+
+
+libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	$(AR) rcs $@ $+
 	ranlib $@
 
@@ -45,6 +50,9 @@ m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
+
+m2sdr_record: libliteeth/libliteeth.a m2sdr_record.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Llibliteeth -lm -lliteeth
 
 m2sdr_gpio: liblitepcie/liblitepcie.a m2sdr_gpio.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
