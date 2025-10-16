@@ -12,6 +12,8 @@
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <cstring>
+#include <stdexcept>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -24,6 +26,12 @@
 #include "etherbone.h"
 
 #include "LiteXM2SDRDevice.hpp"
+
+#if USE_LITEETH
+extern "C" {
+#include "liteeth_udp.h"
+}
+#endif
 
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Logger.hpp>
@@ -152,8 +160,11 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _deviceArgs(args), _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
-    _udp_streamer(NULL),
-    _fd(FD_INIT), ad9361_phy(NULL) {
+#if USE_LITEETH
+      _udp_inited(false),
+#endif
+      _fd(FD_INIT), ad9361_phy(NULL) {
+
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -192,11 +203,19 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Can't connect to EtherBone!");
     spi_conn = _fd;
 
-    /* Ethernet streamer */
-    try {
-        _udp_streamer = new LiteXM2SDRUDP(eth_ip, "2345", 0, 20, 1024/8, 8);
-    } catch (std::exception &e) {
-        throw std::runtime_error("can't prepare UDP RX Receiver");
+    /* UDP helper (RX+TX enable). Use defaults for buffer_size/count (pass 0) */
+    {
+        const uint16_t stream_port = 2345;
+        const char *listen_ip = nullptr; // bind INADDR_ANY
+        if (liteeth_udp_init(&_udp,
+                             listen_ip, stream_port,
+                             eth_ip.c_str(), stream_port,
+                             /*rx_enable*/1, /*tx_enable*/1,
+                             /*buffer_size*/0, /*buffer_count*/0,
+                             /*nonblock*/0) < 0) {
+            throw std::runtime_error("liteeth_udp_init failed");
+        }
+        _udp_inited = true;
     }
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
@@ -349,6 +368,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
 
+/***************************************************************************************************
+ *                                          Destructor
+ **************************************************************************************************/
+
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     if (_rx_stream.opened) {
@@ -359,8 +382,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         munmap(_rx_stream.buf,
                _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
 #elif USE_LITEETH
-        _udp_streamer->stop(SOAPY_SDR_RX);
-        _udp_streamer->stop(SOAPY_SDR_TX);
+        /* nothing to stop explicitly in UDP helper */
 #endif
         _rx_stream.opened = false;
     }
@@ -386,9 +408,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 #if USE_LITEPCIE
     close(_fd);
 #elif USE_LITEETH
-    if (_udp_streamer) {
-        delete _udp_streamer;
-        _udp_streamer = NULL;
+    if (_udp_inited) {
+        liteeth_udp_cleanup(&_udp);
+        _udp_inited = false;
     }
     if (_fd) {
         eb_disconnect(&_fd);

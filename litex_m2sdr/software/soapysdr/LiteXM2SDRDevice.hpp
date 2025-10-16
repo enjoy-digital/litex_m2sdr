@@ -6,6 +6,7 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
+#pragma once
 
 #include <mutex>
 #include <cstring>
@@ -13,17 +14,25 @@
 #include <stdexcept>
 #include <iostream>
 #include <memory>
+#include <map>
+#include <vector>
+#include <string>
 
 #include "liblitepcie.h"
 #include "etherbone.h"
 #include "libm2sdr.h"
-#include "LiteXM2SDRUDP.hpp"
 
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Time.hpp>
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
+
+#if USE_LITEETH
+extern "C" {
+#include "liteeth_udp.h"
+}
+#endif
 
 #define DEBUG
 
@@ -114,7 +123,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     int acquireReadBuffer(
         SoapySDR::Stream *stream,
-        size_t &handl,
+        size_t &handle,
         const void **buffs,
         int &flags,
         long long &timeNs,
@@ -340,19 +349,28 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
     void *_dma_buf;
 
-    size_t _rx_buf_size;
-    size_t _tx_buf_size;
-    size_t _rx_buf_count;
-    size_t _tx_buf_count;
-    LiteXM2SDRUDP *_udp_streamer;
+    size_t _rx_buf_size = 0;
+    size_t _tx_buf_size = 0;
+    size_t _rx_buf_count = 0;
+    size_t _tx_buf_count = 0;
+
+#if USE_LITEETH
+    struct liteeth_udp_ctrl _udp;
+    bool _udp_inited = false;
+#endif
 
     struct Stream {
-        Stream() : opened(false), remainderHandle(-1), remainderSamps(0),
-                   remainderOffset(0), remainderBuff(nullptr) {}
+        Stream() :
+            opened(false),
+            buf(nullptr),
+            hw_count(0), sw_count(0), user_count(0),
+            remainderHandle(-1), remainderSamps(0),
+            remainderOffset(0), remainderBuff(nullptr),
+            format() {}
 
         bool opened;
         void *buf;
-        struct pollfd fds;
+        struct pollfd fds{};
         int64_t hw_count, sw_count, user_count;
 
         int32_t remainderHandle;
@@ -367,30 +385,30 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     };
 
     struct RXStream: Stream {
-        double gain[2];
-        bool gainMode[2];
-        double iqbalance[2];
-        double samplerate;
-        double bandwidth;
-        double frequency;
+        double gain[2]{};
+        bool   gainMode[2]{};
+        double iqbalance[2]{};
+        double samplerate = 0.0;
+        double bandwidth  = 0.0;
+        double frequency  = 0.0;
         std::string antenna[2];
 
-        bool overflow;
-        bool burst_end;
+        bool overflow  = false;
+        bool burst_end = false;
     };
 
     struct TXStream: Stream {
-        double gain[2];
-        double iqbalance[2];
-        double samplerate;
-        double bandwidth;
-        double frequency;
+        double gain[2]{};
+        double iqbalance[2]{};
+        double samplerate = 0.0;
+        double bandwidth  = 0.0;
+        double frequency  = 0.0;
         std::string antenna[2];
 
-        bool underflow;
+        bool underflow = false;
 
-        bool burst_end;
-        int32_t burst_samps;
+        bool   burst_end   = false;
+        int32_t burst_samps = 0;
     };
 
     RXStream _rx_stream;
@@ -449,8 +467,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _samplesPerComplex = 2;
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
-    float    _samplesScaling    = 2047.0;
-    float    _rateMult          = 1;
+    float    _samplesScaling    = 2047.0f;
+    float    _rateMult          = 1.0f;
 
     // register protection
     std::mutex _mutex;

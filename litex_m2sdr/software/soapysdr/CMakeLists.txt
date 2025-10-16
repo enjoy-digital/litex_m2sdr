@@ -115,7 +115,8 @@ set(LITEXM2SDR_SOURCE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
-	#${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/etherbone.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/etherbone.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/liteeth_udp.c
 )
 
 if(USE_LITEETH)
@@ -128,7 +129,6 @@ SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    LiteXM2SDRUDP.cpp
     ${LITEXM2SDR_SOURCE}
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )
