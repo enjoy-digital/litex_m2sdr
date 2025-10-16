@@ -114,7 +114,7 @@ class CRG(LiteXModule):
         if with_eth or with_sata:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
-            eth_pll.create_clkout(self.cd_refclk_eth, 156.25e6, margin=0)
+            eth_pll.create_clkout(self.cd_refclk_eth, 125e6, margin=0)
 
         # SATA PLL.
         # ---------
@@ -231,7 +231,7 @@ class BaseSoC(SoCMini):
             with_pcie       = with_pcie,
             with_eth        = with_eth | with_white_rabbit,
             eth_phy         = eth_phy,
-            eth_refclk_freq = {True: 125e6, False: 156.25e6}[with_white_rabbit],
+            eth_refclk_freq = 125e6,
             with_sata       = with_sata,
         )
 
