@@ -49,7 +49,7 @@ blocks:
   id: variable
   parameters:
     comment: ''
-    value: 5760e6
+    value: 5825e6
   states:
     bus_sink: false
     bus_source: false
@@ -118,23 +118,6 @@ blocks:
     coordinate: [416, 164.0]
     rotation: 0
     state: enabled
-- name: blocks_null_sink_0
-  id: blocks_null_sink
-  parameters:
-    affinity: ''
-    alias: ''
-    bus_structure_sink: '[[0,],]'
-    comment: ''
-    num_inputs: '1'
-    type: complex
-    vlen: '1'
-  states:
-    bus_sink: false
-    bus_source: false
-    bus_structure: null
-    coordinate: [424, 288.0]
-    rotation: 0
-    state: enabled
 - name: low_pass_filter_1
   id: low_pass_filter
   parameters:
@@ -168,9 +151,9 @@ blocks:
     alias: ''
     antenna0: A_BALANCED
     antenna1: A_BALANCED
-    bandwidth0: 10e6
+    bandwidth0: 20e6
     bandwidth1: 10e6
-    center_freq0: 5.825e9
+    center_freq0: frequency_carrier
     center_freq1: 5.825e9
     comment: ''
     dc_offset0: '0'
@@ -187,7 +170,7 @@ blocks:
     iq_balance1: '0'
     maxoutbuf: '0'
     minoutbuf: '0'
-    nchan: '2'
+    nchan: '1'
     samp_rate: samp_rate
     settings0: ''
     settings1: ''
@@ -232,7 +215,6 @@ connections:
 - [analog_quadrature_demod_cf_0, '0', low_pass_filter_1, '0']
 - [low_pass_filter_1, '0', NTSC_decoder_c_0, '0']
 - [soapy_custom_source_0, '0', analog_quadrature_demod_cf_0, '0']
-- [soapy_custom_source_0, '1', blocks_null_sink_0, '0']
 
 metadata:
   file_format: 1
