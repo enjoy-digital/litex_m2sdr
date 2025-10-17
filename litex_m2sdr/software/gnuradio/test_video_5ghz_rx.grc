@@ -1,0 +1,238 @@
+options:
+  parameters:
+    author: ''
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: ''
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: top_block
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: prompt
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: ''
+    window_size: 3000,3000
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 4.0]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: bandwidth
+  id: variable
+  parameters:
+    comment: ''
+    value: 5e6
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 228]
+    rotation: 0
+    state: enabled
+- name: frequency_carrier
+  id: variable
+  parameters:
+    comment: ''
+    value: 5760e6
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 164]
+    rotation: 0
+    state: enabled
+- name: samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: 2 * bandwidth
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 92]
+    rotation: 0
+    state: enabled
+- name: NTSC_decoder_c_0
+  id: NTSC_decoder_c
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [808, 120.0]
+    rotation: 0
+    state: enabled
+- name: NTSC_video_stream_converter_c_0
+  id: NTSC_video_stream_converter_c
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    decimation_factor: samp_rate / (360 *240 * 60)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1000, 120]
+    rotation: 0
+    state: enabled
+- name: analog_quadrature_demod_cf_0
+  id: analog_quadrature_demod_cf
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    gain: samp_rate/(2*math.pi*850000000/8.0)
+    maxoutbuf: '0'
+    minoutbuf: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [416, 164.0]
+    rotation: 0
+    state: enabled
+- name: blocks_null_sink_0
+  id: blocks_null_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    bus_structure_sink: '[[0,],]'
+    comment: ''
+    num_inputs: '1'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [424, 288.0]
+    rotation: 0
+    state: enabled
+- name: low_pass_filter_1
+  id: low_pass_filter
+  parameters:
+    affinity: ''
+    alias: ''
+    beta: '6.76'
+    comment: ''
+    cutoff_freq: 2e6
+    decim: '1'
+    gain: '1'
+    interp: '1'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+    type: fir_filter_fff
+    width: 2e6
+    win: window.WIN_HAMMING
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [608, 116.0]
+    rotation: 0
+    state: enabled
+- name: soapy_custom_source_0
+  id: soapy_custom_source
+  parameters:
+    affinity: ''
+    agc0: 'False'
+    agc1: 'False'
+    alias: ''
+    antenna0: A_BALANCED
+    antenna1: A_BALANCED
+    bandwidth0: 10e6
+    bandwidth1: 10e6
+    center_freq0: 5.825e9
+    center_freq1: 5.825e9
+    comment: ''
+    dc_offset0: '0'
+    dc_offset1: '0'
+    dc_removal0: 'False'
+    dc_removal1: 'False'
+    dev_args: bypass_init=0
+    driver: LiteXM2SDR
+    freq_correction0: '0'
+    freq_correction1: '0'
+    gain0: '40'
+    gain1: '0'
+    iq_balance0: '0'
+    iq_balance1: '0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    nchan: '2'
+    samp_rate: samp_rate
+    settings0: ''
+    settings1: ''
+    stream_args: ''
+    tune_args0: ''
+    tune_args1: ''
+    type: fc32
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [152, 236.0]
+    rotation: 0
+    state: true
+- name: video_sdl_sink_0
+  id: video_sdl_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    display_height: 240 * 2
+    display_width: 360 * 2
+    fps: '0'
+    height: '240'
+    num_channels: '1'
+    type: short
+    width: '360'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1312, 284.0]
+    rotation: 0
+    state: enabled
+
+connections:
+- [NTSC_decoder_c_0, '0', NTSC_video_stream_converter_c_0, '0']
+- [NTSC_decoder_c_0, '1', NTSC_video_stream_converter_c_0, '1']
+- [NTSC_decoder_c_0, '2', NTSC_video_stream_converter_c_0, '2']
+- [NTSC_decoder_c_0, '3', NTSC_video_stream_converter_c_0, '3']
+- [NTSC_video_stream_converter_c_0, '0', video_sdl_sink_0, '0']
+- [analog_quadrature_demod_cf_0, '0', low_pass_filter_1, '0']
+- [low_pass_filter_1, '0', NTSC_decoder_c_0, '0']
+- [soapy_custom_source_0, '0', analog_quadrature_demod_cf_0, '0']
+- [soapy_custom_source_0, '1', blocks_null_sink_0, '0']
+
+metadata:
+  file_format: 1
