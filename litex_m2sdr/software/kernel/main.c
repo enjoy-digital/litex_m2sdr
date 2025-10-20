@@ -619,8 +619,12 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan *chan = chan_priv->chan;
 	struct litepcie_device *s = chan->litepcie_dev;
+#if defined(__arm__) || defined(__aarch64__)
 	unsigned long pfn;
-	int is_tx, i, ret;
+#else
+	int ret;
+#endif
+	int is_tx, i;
 
 	if (vma->vm_end - vma->vm_start != DMA_BUFFER_TOTAL_SIZE)
 		return -EINVAL;
