@@ -73,14 +73,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /***********************************************************************************************
     *                              Identification API
     ***********************************************************************************************/
-    std::string getDriverKey(void) const;
-    std::string getHardwareKey(void) const;
+    std::string getDriverKey(void) const override;
+    std::string getHardwareKey(void) const override;
 
     /***********************************************************************************************
     *                                 Channels API
     ***********************************************************************************************/
-    size_t getNumChannels(const int) const;
-    bool getFullDuplex(const int, const size_t) const;
+    size_t getNumChannels(const int) const override;
+    bool getFullDuplex(const int, const size_t) const override;
 
     /***********************************************************************************************
     *                                  Stream API
@@ -88,7 +88,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     std::string getNativeStreamFormat(
         const int /*direction*/,
         const size_t /*channel*/,
-        double &fullScale) const {
+        double &fullScale) const override {
         fullScale = 1.0;
         return SOAPY_SDR_CF32;
     }
@@ -97,7 +97,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const int direction,
         const std::string &format,
         const std::vector<size_t> &channels,
-        const SoapySDR::Kwargs &args);
+        const SoapySDR::Kwargs &args) override;
 
     void closeStream(SoapySDR::Stream *stream) override;
 
@@ -148,7 +148,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::vector<std::string> getStreamFormats(
         const int direction,
-        const size_t channel) const;
+        const size_t channel) const override;
 
     int readStream(
         SoapySDR::Stream *stream,
@@ -156,7 +156,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const size_t numElems,
         int &flags,
         long long &timeNs,
-        const long timeoutUs = 100000);
+        const long timeoutUs = 100000) override;
 
     int writeStream(
         SoapySDR::Stream *stream,
@@ -164,14 +164,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const size_t numElems,
         int &flags,
         const long long timeNs = 0,
-        const long timeoutUs = 100000);
+        const long timeoutUs = 100000) override;
 
     int readStreamStatus(
         SoapySDR::Stream *stream,
         size_t &chanMask,
         int &flags,
         long long &timeNs,
-        const long timeoutUs);
+        const long timeoutUs) override;
 
     /***********************************************************************************************
     *                                    Antenna API
@@ -326,7 +326,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     ***********************************************************************************************/
     bool hasHardwareTime(const std::string &) const override;
     long long getHardwareTime(const std::string &) const override;
-    void setHardwareTime(const long long timeNs, const std::string &);
+    void setHardwareTime(const long long timeNs, const std::string &) override;
 
     /***********************************************************************************************
     *                                    Sensor API
