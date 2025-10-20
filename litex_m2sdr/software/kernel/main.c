@@ -33,10 +33,7 @@
 #include <linux/cdev.h>
 #include <linux/platform_device.h>
 #include <linux/version.h>
-
-#if defined(__arm__) || defined(__aarch64__)
-#include <linux/dma-direct.h>
-#endif
+#include <linux/dma-mapping.h>
 
 #include <linux/ptp_clock_kernel.h>
 
@@ -618,8 +615,7 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan *chan = chan_priv->chan;
 	struct litepcie_device *s = chan->litepcie_dev;
-	unsigned long pfn;
-	int is_tx, i;
+	int is_tx, i, ret;
 
 	if (vma->vm_end - vma->vm_start != DMA_BUFFER_TOTAL_SIZE)
 		return -EINVAL;
@@ -632,31 +628,28 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
-#if defined(__arm__) || defined(__aarch64__)
-		void *va;
-		if (i == 0)
-			dev_info(&s->dev->dev, "Using ARM/AArch64 DMA buffer handling");
-		if (is_tx)
-			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.reader_handle[i]));
-		else
-			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.writer_handle[i]));
-		pfn = page_to_pfn(virt_to_page(va));
-#else
-		if (i == 0)
-			dev_info(&s->dev->dev, "Using non-ARM DMA buffer handling");
-		if (is_tx)
-			pfn = __pa(chan->dma.reader_addr[i]) >> PAGE_SHIFT;
-		else
-			pfn = __pa(chan->dma.writer_addr[i]) >> PAGE_SHIFT;
-#endif
-		/*
-		 * Note: the memory is cached, so the user must explicitly
-		 * flush the CPU caches on architectures which require it.
-		 */
-		if (remap_pfn_range(vma, vma->vm_start + i * DMA_BUFFER_SIZE, pfn,
-				    DMA_BUFFER_SIZE, vma->vm_page_prot)) {
-			dev_err(&s->dev->dev, "mmap remap_pfn_range failed\n");
-			return -EAGAIN;
+		void *cpu_addr;
+		dma_addr_t dma_handle;
+		struct vm_area_struct sub_vma = *vma; /* map one chunk at a time */
+
+		if (is_tx) {
+			cpu_addr   = chan->dma.reader_addr[i];
+			dma_handle = chan->dma.reader_handle[i];
+		} else {
+			cpu_addr   = chan->dma.writer_addr[i];
+			dma_handle = chan->dma.writer_handle[i];
+		}
+
+		sub_vma.vm_start = vma->vm_start + (i * DMA_BUFFER_SIZE);
+		sub_vma.vm_end   = sub_vma.vm_start + DMA_BUFFER_SIZE;
+		sub_vma.vm_pgoff = 0; /* required: offset inside each coherent buffer */
+
+		ret = dma_mmap_coherent(&s->dev->dev, &sub_vma,
+					cpu_addr, dma_handle, DMA_BUFFER_SIZE);
+		if (ret) {
+			dev_err(&s->dev->dev,
+				"dma_mmap_coherent failed for buffer %d (ret=%d)\n", i, ret);
+			return ret;
 		}
 	}
 
