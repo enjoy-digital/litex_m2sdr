@@ -197,7 +197,7 @@ class AD9361RFIC(LiteXModule):
         # --- RFIC clock-domain timestamp counter ---
         self.rfic_time = Signal(64)
         self.sync.rfic += self.rfic_time.eq(self.rfic_time + 1)
-        
+
         # TX Scheduler ---------------------------------------------------------------------------
         self.scheduler_tx = scheduler_tx = Scheduler()
         self.comb += scheduler_tx.now.eq(self.rfic_time)

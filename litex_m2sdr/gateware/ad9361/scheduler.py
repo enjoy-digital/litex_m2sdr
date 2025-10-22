@@ -129,8 +129,10 @@ class Scheduler(LiteXModule): # TODO implement the valid and ready signals prope
                 self.now.eq(manual_now_sig)
             )
         ]
-
         # Connect status signals
+
+        # current_ts_latched = Signal(64)
+        # self.sync += If(self.data_fifo.source.valid, current_ts_latched.eq(self.data_fifo.source.timestamp[0:64]))
         self.comb += [
            # self._fsm_state.status.eq(self.fsm.state),
             self._fifo_level.status.eq(self.data_fifo.level),
@@ -138,7 +140,7 @@ class Scheduler(LiteXModule): # TODO implement the valid and ready signals prope
             self._flags.fields.empty.eq(self.empty),
             self._flags.fields.almost_full.eq(self.almost_full),
             self._flags.fields.almost_empty.eq(self.almost_empty),
-            self._current_ts.status.eq(self.data_fifo.source.timestamp),
+            # self._current_ts.status.eq(current_ts_latched),
             self._now.status.eq(self.now)
         ]
         

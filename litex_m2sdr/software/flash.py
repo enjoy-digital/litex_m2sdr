@@ -24,7 +24,7 @@ def main():
     parser.add_argument("bitstream",                                                        help="Path to the bitstream file.")
     parser.add_argument("-o", "--offset",     type=lambda x: int(x, 0), default=0x00800000, help="Offset for flashing (default: 0x00800000).")
     parser.add_argument("-c", "--device_num", type=int,                 default=0,          help="Select the device number (default = 0).")
-    parser.add_argument("-r", "--rescan",     action="store_true",                          help="Enable PCIe rescan after flashing.")
+    parser.add_argument("-r", "--rescan",     action="store_true",      default=True,       help="Enable PCIe rescan after flashing.")
     args = parser.parse_args()
 
     # Ask for confirmation before flashing.
@@ -39,6 +39,19 @@ def main():
         if confirm.lower() not in ["yes", "y"]:
             print("Flashing aborted.")
             return
+    
+    # Warn when flashing non-default bitstream (file )
+    if "litex_m2sdr_m2_pcie_x1_operational.bin" not in str(args.bitstream):
+        # print in red the warning 
+        print("\033[91m", end="")
+        print(f"Warning: You are flashing a wrong bitstream: {args.bitstream}")
+        print("\033[0m", end="")
+        confirm = input("Are you sure you want to continue? (yes/no): ")
+        if confirm.lower() not in ["yes", "y"]:
+            print("Flashing aborted.")
+            return
+    else:
+        print(f"Flashing default bitstream: {args.bitstream}")
 
     # Flash with selected device.
     flash_bitstream(args.bitstream, args.offset, args.device_num)

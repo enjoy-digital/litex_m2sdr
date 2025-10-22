@@ -8,7 +8,7 @@
 
 import time
 import argparse
-
+import os 
 from litex import RemoteClient
 
 # Header Driver ------------------------------------------------------------------------------------
@@ -24,7 +24,10 @@ class HeaderDriver:
 
 def test_header(header="header", loops=16):
     # Create Bus.
-    bus = RemoteClient()
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
+
+    bus = RemoteClient(csr_csv = csr_path)
     bus.open()
 
     # Header Driver.
