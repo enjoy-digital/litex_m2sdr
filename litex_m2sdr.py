@@ -33,10 +33,11 @@ from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
-from litepcie.common        import *
-from litepcie.phy.s7pciephy import S7PCIEPHY
-from litepcie.frontend.ptm  import PCIePTMSniffer
-from litepcie.frontend.ptm  import PTMCapabilities, PTMRequester
+from litepcie.common            import *
+from litepcie.phy.s7pciephy     import S7PCIEPHY
+from litepcie.frontend.ptm      import PCIePTMSniffer
+from litepcie.frontend.ptm      import PTMCapabilities, PTMRequester
+from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 
 from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
@@ -482,9 +483,18 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
+            from litex.soc.integration.soc import SoCBusHandler
+            from litex.soc.integration.soc import SoCRegion
+            self.dma_bus = SoCBusHandler(
+                name             = "SoCDMABusHandler",
+                standard         = "wishbone",
+                data_width       = 32,
+                address_width    = 64,
+                bursting         = False
+            )
+            self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint, address_width=64, data_width=32, addressing="byte")
+            self.dma_bus.add_slave(name="dma", slave=self.pcie_slave.bus, region=SoCRegion(origin=0x00000000, size=0x100000000)) # FIXME: covers lower 4GB only
             self.add_sata(phy=self.sata_phy, mode="read+write")
-            self.add_ram("sata_rd", origin=0x0002_0000, size=0x200)
-            self.add_ram("sata_wr", origin=0x0002_0200, size=0x200)
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
