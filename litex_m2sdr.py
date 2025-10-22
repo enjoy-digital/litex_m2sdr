@@ -483,6 +483,8 @@ class BaseSoC(SoCMini):
             # Core.
             # -----
             self.add_sata(phy=self.sata_phy, mode="read+write")
+            self.add_ram("sata_rd", origin=0x0002_0000, size=0x200)
+            self.add_ram("sata_wr", origin=0x0002_0200, size=0x200)
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
