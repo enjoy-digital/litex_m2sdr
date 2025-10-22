@@ -496,6 +496,8 @@ class BaseSoC(SoCMini):
             self.dma_bus.add_slave(name="dma", slave=self.pcie_slave.bus, region=SoCRegion(origin=0x00000000, size=0x100000000)) # FIXME: covers lower 4GB only
             self.add_sata(phy=self.sata_phy, mode="read+write")
 
+            self.add_pcie_slave_probe()
+
         # AD9361 RFIC ------------------------------------------------------------------------------
 
         self.ad9361 = AD9361RFIC(
@@ -732,6 +734,17 @@ class BaseSoC(SoCMini):
             self.pcie_phy._link_status.fields.rate,
             self.pcie_phy._link_status.fields.width,
             self.pcie_phy._link_status.fields.ltssm
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
+    def add_pcie_slave_probe(self, depth=4096):
+        analyzer_signals = [
+            self.pcie_slave.bus,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = depth,
