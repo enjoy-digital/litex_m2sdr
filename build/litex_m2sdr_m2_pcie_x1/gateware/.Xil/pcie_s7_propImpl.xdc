@@ -1,5 +1,5 @@
-set_property SRC_FILE_INFO {cfile:/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_20/source/pcie_s7-PCIE_X0Y0.xdc rfile:../.gen/sources_1/ip/pcie_s7_20/source/pcie_s7-PCIE_X0Y0.xdc id:1 order:EARLY scoped_inst:inst} [current_design]
-set_property SRC_FILE_INFO {cfile:/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_20/source/ip_xilinx_pcie_2_1_7x_late.xdc rfile:../.gen/sources_1/ip/pcie_s7_20/source/ip_xilinx_pcie_2_1_7x_late.xdc id:2 order:LATE scoped_inst:inst} [current_design]
+set_property SRC_FILE_INFO {cfile:/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_30/source/pcie_s7-PCIE_X0Y0.xdc rfile:../.gen/sources_1/ip/pcie_s7_30/source/pcie_s7-PCIE_X0Y0.xdc id:1 order:EARLY scoped_inst:inst} [current_design]
+set_property SRC_FILE_INFO {cfile:/home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/.gen/sources_1/ip/pcie_s7_30/source/ip_xilinx_pcie_2_1_7x_late.xdc rfile:../.gen/sources_1/ip/pcie_s7_30/source/ip_xilinx_pcie_2_1_7x_late.xdc id:2 order:LATE scoped_inst:inst} [current_design]
 current_instance inst
 set_property src_info {type:SCOPED_XDC file:1 line:95 export:INPUT save:INPUT read:READ} [current_design]
 set_property LOC GTPE2_CHANNEL_X0Y7 [get_cells {inst/gt_top_i/pipe_wrapper_i/pipe_lane[0].gt_wrapper_i/gtp_channel.gtpe2_channel_i}]

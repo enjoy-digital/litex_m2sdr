@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Tue Oct 14 23:56:27 2025
+| Date         : Wed Oct 22 13:40:00 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_utilization -hierarchical -file litex_m2sdr_m2_pcie_x1_utilization_hierarchical_place.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -22,13 +22,13 @@ Table of Contents
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
 |                          Instance                          |                    Module                   | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs | RAMB36 | RAMB18 | DSP Blocks |
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
-| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       6915 |       5790 |    1120 |    5 | 8102 |     35 |      2 |          0 |
-|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       6593 |       5472 |    1120 |    1 | 7446 |     27 |      2 |          0 |
-|   pcie_s7                                                  |                                     pcie_s7 |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
+| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       7188 |       6063 |    1120 |    5 | 8404 |     35 |      2 |          0 |
+|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       6867 |       5746 |    1120 |    1 | 7748 |     27 |      2 |          0 |
+|   pcie_s7                                                  |                                     pcie_s7 |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
 |     (pcie_s7)                                              |                                     pcie_s7 |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
-|     inst                                                   |                           pcie_s7_pcie2_top |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
+|     inst                                                   |                           pcie_s7_pcie2_top |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
 |       (inst)                                               |                           pcie_s7_pcie2_top |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
-|       inst                                                 |                            pcie_s7_core_top |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
+|       inst                                                 |                            pcie_s7_core_top |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
 |         (inst)                                             |                            pcie_s7_core_top |          8 |          4 |       0 |    4 |   11 |      0 |      0 |          0 |
 |         gt_top_i                                           |                              pcie_s7_gt_top |        200 |        200 |       0 |    0 |  319 |      0 |      0 |          0 |
 |           (gt_top_i)                                       |                              pcie_s7_gt_top |          2 |          2 |       0 |    0 |    8 |      0 |      0 |          0 |

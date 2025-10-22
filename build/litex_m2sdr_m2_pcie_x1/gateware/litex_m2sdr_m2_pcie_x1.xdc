@@ -302,6 +302,22 @@ set_property IOSTANDARD LVCMOS25 [get_ports {ad9361_spi_mosi}]
 set_property LOC M6 [get_ports {ad9361_spi_miso}]
 set_property IOSTANDARD LVCMOS25 [get_ports {ad9361_spi_miso}]
 
+# gpios:0
+set_property LOC V13 [get_ports {gpios[0]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpios[0]}]
+
+# gpios:0
+set_property LOC K18 [get_ports {gpios[1]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpios[1]}]
+
+# gpios:0
+set_property LOC Y18 [get_ports {gpios[2]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpios[2]}]
+
+# gpios:0
+set_property LOC A19 [get_ports {gpios[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {gpios[3]}]
+
 ################################################################################
 # Design constraints
 ################################################################################
@@ -344,19 +360,19 @@ set_max_delay 2 -quiet -from [get_pins -filter {REF_PIN_NAME == C} -of_objects [
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets rfic_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
+set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets icap_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
+
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets dna_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets jtag_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
-
-set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets icap_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
-
-set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets pcie_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
+
+set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_ports si5351_clk1]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 

@@ -202,9 +202,10 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         with_sata              = False, sata_gen="gen2",
         with_white_rabbit      = False,
         with_jtagbone          = True,
-        with_gpio              = False,
+        with_gpio              = True,
         with_rfic_oversampling = False,
     ):
+        print(f"building SOC with variant {variant}")
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
@@ -551,6 +552,16 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
                     self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
             ]
+            # test counter
+            test_time = Signal(64)
+            self.sync.sys += test_time.eq(test_time + 1)
+
+            # CSR exposed in the same sys domain
+            self._test_time = CSRStatus(64, description="test signal for CSR")
+
+            # Just register it in the same clock domain (no CDC needed)
+            self.sync.sys += self._test_time.status.eq(test_time)
+
         if with_eth:
             self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
@@ -575,7 +586,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         # GPIO -------------------------------------------------------------------------------------
 
         if with_gpio:
-
+            print("-----------------------with GPIO -------------------")
             self.gpio = GPIO(
                 rx_packer   = self.ad9361.gpio_rx_packer,
                 tx_unpacker = self.ad9361.gpio_tx_unpacker,
@@ -854,7 +865,7 @@ def main():
     parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
 
     # GPIO parameters.
-    parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
+    parser.add_argument("--with-gpio",       default= True,      action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support (on SFP0).")
@@ -875,14 +886,28 @@ def main():
         r = os.system("cd ../litex_wr_nic/litex_wr_nic/firmware && ./build.py --target acorn") # FIXME: Avoid harcoded path/platform.
         if r != 0:
             raise RuntimeError("White Rabbit Firmware build failed.")
+    
+    # Get variant 
+    value = input("Is your board m2 mounted? (yes/no):")
+    if value.lower() in ["yes", "y"]:
+        variant_in = "m2"  
+    else: 
+        variant_in = "baseboard"
+    
+    value = input("With PCIe ? (yes/no):")
+    if value.lower() in ["yes", "y"]:
+        with_pcie_in = True
+    else:  
+        with_pcie_in = False
+
 
     # Build SoC.
     soc = BaseSoC(
         # Generic.
-        variant       = args.variant,
+        variant       = variant_in,
 
         # PCIe.
-        with_pcie     = args.with_pcie,
+        with_pcie     = with_pcie_in,
         with_pcie_ptm = args.with_pcie_ptm,
         pcie_lanes    = args.pcie_lanes,
 
@@ -918,8 +943,8 @@ def main():
 
     # Builder.
     def get_build_name():
-        r = f"litex_m2sdr_{args.variant}"
-        if args.with_pcie:
+        r = f"litex_m2sdr_{variant_in}"
+        if with_pcie_in:
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"

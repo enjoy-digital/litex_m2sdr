@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Tue Oct 14 23:56:01 2025
+| Date         : Wed Oct 22 13:39:30 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_utilization -file litex_m2sdr_m2_pcie_x1_utilization_synth.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -31,15 +31,15 @@ Table of Contents
 +----------------------------+------+-------+------------+-----------+-------+
 |          Site Type         | Used | Fixed | Prohibited | Available | Util% |
 +----------------------------+------+-------+------------+-----------+-------+
-| Slice LUTs*                | 7809 |     0 |          0 |    134600 |  5.80 |
-|   LUT as Logic             | 6678 |     0 |          0 |    134600 |  4.96 |
+| Slice LUTs*                | 8076 |     0 |          0 |    134600 |  6.00 |
+|   LUT as Logic             | 6945 |     0 |          0 |    134600 |  5.16 |
 |   LUT as Memory            | 1131 |     0 |          0 |     46200 |  2.45 |
 |     LUT as Distributed RAM | 1124 |     0 |            |           |       |
 |     LUT as Shift Register  |    7 |     0 |            |           |       |
-| Slice Registers            | 8426 |     0 |          0 |    269200 |  3.13 |
-|   Register as Flip Flop    | 8426 |     0 |          0 |    269200 |  3.13 |
+| Slice Registers            | 8728 |     0 |          0 |    269200 |  3.24 |
+|   Register as Flip Flop    | 8728 |     0 |          0 |    269200 |  3.24 |
 |   Register as Latch        |    0 |     0 |          0 |    269200 |  0.00 |
-| F7 Muxes                   |   14 |     0 |          0 |     67300 |  0.02 |
+| F7 Muxes                   |   45 |     0 |          0 |     67300 |  0.07 |
 | F8 Muxes                   |    0 |     0 |          0 |     33650 |  0.00 |
 +----------------------------+------+-------+------------+-----------+-------+
 * Warning! The Final LUT count, after physical optimizations and full implementation, is typically lower. Run opt_design after synthesis, if not already completed, for a more realistic count.
@@ -62,7 +62,7 @@ Warning! For any ECO changes, please run place_design if there are unplaced inst
 | 46    |          Yes |           - |          Set |
 | 17    |          Yes |           - |        Reset |
 | 140   |          Yes |         Set |            - |
-| 8223  |          Yes |       Reset |            - |
+| 8525  |          Yes |       Reset |            - |
 +-------+--------------+-------------+--------------+
 
 
@@ -97,9 +97,9 @@ Warning! For any ECO changes, please run place_design if there are unplaced inst
 +-----------------------------+------+-------+------------+-----------+-------+
 |          Site Type          | Used | Fixed | Prohibited | Available | Util% |
 +-----------------------------+------+-------+------------+-----------+-------+
-| Bonded IOB                  |   64 |    64 |          0 |       285 | 22.46 |
-|   IOB Master Pads           |   35 |       |            |           |       |
-|   IOB Slave Pads            |   29 |       |            |           |       |
+| Bonded IOB                  |   68 |    68 |          0 |       285 | 23.86 |
+|   IOB Master Pads           |   38 |       |            |           |       |
+|   IOB Slave Pads            |   30 |       |            |           |       |
 | Bonded IPADs                |    4 |     4 |          0 |        14 | 28.57 |
 | Bonded OPADs                |    2 |     2 |          0 |         8 | 25.00 |
 | PHY_CONTROL                 |    0 |     0 |          0 |        10 |  0.00 |
@@ -113,11 +113,11 @@ Warning! For any ECO changes, please run place_design if there are unplaced inst
 | PHASER_IN/PHASER_IN_PHY     |    0 |     0 |          0 |        40 |  0.00 |
 | IDELAYE2/IDELAYE2_FINEDELAY |    0 |     0 |          0 |       500 |  0.00 |
 | IBUFDS_GTE2                 |    1 |     1 |          0 |         2 | 50.00 |
-| ILOGIC                      |    9 |     9 |          0 |       285 |  3.16 |
-|   IFF_IDDR_Register         |    9 |     9 |            |           |       |
-| OLOGIC                      |   10 |    10 |          0 |       285 |  3.51 |
-|   OUTFF_ODDR_Register       |   10 |    10 |            |           |       |
-|   TFF_ODDR_Register         |    2 |     2 |            |           |       |
+| ILOGIC                      |   13 |    13 |          0 |       285 |  4.56 |
+|   IFF_IDDR_Register         |   13 |    13 |            |           |       |
+| OLOGIC                      |   14 |    14 |          0 |       285 |  4.91 |
+|   OUTFF_ODDR_Register       |   14 |    14 |            |           |       |
+|   TFF_ODDR_Register         |    6 |     6 |            |           |       |
 +-----------------------------+------+-------+------------+-----------+-------+
 
 
@@ -161,32 +161,32 @@ Warning! For any ECO changes, please run place_design if there are unplaced inst
 +---------------+------+----------------------+
 |    Ref Name   | Used |  Functional Category |
 +---------------+------+----------------------+
-| FDRE          | 8223 |         Flop & Latch |
-| LUT3          | 1942 |                  LUT |
-| LUT6          | 1899 |                  LUT |
-| LUT2          | 1252 |                  LUT |
-| LUT4          | 1219 |                  LUT |
-| LUT5          | 1026 |                  LUT |
+| FDRE          | 8525 |         Flop & Latch |
+| LUT6          | 1963 |                  LUT |
+| LUT3          | 1922 |                  LUT |
+| LUT4          | 1265 |                  LUT |
+| LUT2          | 1232 |                  LUT |
+| LUT5          | 1197 |                  LUT |
 | RAMD64E       |  992 |   Distributed Memory |
-| CARRY4        |  463 |           CarryLogic |
-| LUT1          |  456 |                  LUT |
+| CARRY4        |  495 |           CarryLogic |
+| LUT1          |  463 |                  LUT |
 | RAMD32        |  194 |   Distributed Memory |
 | FDSE          |  140 |         Flop & Latch |
 | RAMS32        |   62 |   Distributed Memory |
 | FDPE          |   46 |         Flop & Latch |
+| MUXF7         |   45 |                MuxFx |
 | RAMB36E1      |   35 |         Block Memory |
-| IBUF          |   20 |                   IO |
+| IBUF          |   24 |                   IO |
+| ODDR          |   20 |                   IO |
 | OBUF          |   18 |                   IO |
 | FDCE          |   17 |         Flop & Latch |
-| MUXF7         |   14 |                MuxFx |
-| ODDR          |   12 |                   IO |
+| IDDR          |   13 |                   IO |
 | BUFG          |   11 |                Clock |
-| IDDR          |    9 |                   IO |
 | OBUFDS        |    8 |                   IO |
 | IBUFDS        |    8 |                   IO |
 | SRL16E        |    7 |   Distributed Memory |
+| OBUFT         |    6 |                   IO |
 | RAMB18E1      |    2 |         Block Memory |
-| OBUFT         |    2 |                   IO |
 | BUFGCTRL      |    2 |                Clock |
 | XADC          |    1 |               Others |
 | STARTUPE2     |    1 |               Others |

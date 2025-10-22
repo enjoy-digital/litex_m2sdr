@@ -1,0 +1,1 @@
+openFPGALoader -c ch347_jtag ./build/litex_m2sdr_m2_pcie_x1/gateware/litex_m2sdr_m2_pcie_x1.bit

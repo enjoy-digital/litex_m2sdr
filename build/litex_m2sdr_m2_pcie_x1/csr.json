@@ -14,10 +14,12 @@
         "capability": 26624,
         "time_gen": 34816,
         "si5351": 40960,
-        "pcie_endpoint": 45056,
+        "gpio": 43008,
+        "main": 45056,
         "header": 47104,
         "ad9361": 49152,
         "crossbar": 51200,
+        "pcie_endpoint": 55296,
         "clk_measurement": 61440
     },
     "csr_registers": {
@@ -386,34 +388,29 @@
             "size": 1,
             "type": "ro"
         },
-        "pcie_endpoint_phy_link_status": {
+        "gpio_control": {
+            "addr": 43008,
+            "size": 1,
+            "type": "rw"
+        },
+        "gpio__o": {
+            "addr": 43012,
+            "size": 1,
+            "type": "rw"
+        },
+        "gpio_oe": {
+            "addr": 43016,
+            "size": 1,
+            "type": "rw"
+        },
+        "gpio__i": {
+            "addr": 43020,
+            "size": 1,
+            "type": "ro"
+        },
+        "main_test_time": {
             "addr": 45056,
-            "size": 1,
-            "type": "ro"
-        },
-        "pcie_endpoint_phy_msi_enable": {
-            "addr": 45060,
-            "size": 1,
-            "type": "ro"
-        },
-        "pcie_endpoint_phy_msix_enable": {
-            "addr": 45064,
-            "size": 1,
-            "type": "ro"
-        },
-        "pcie_endpoint_phy_bus_master_enable": {
-            "addr": 45068,
-            "size": 1,
-            "type": "ro"
-        },
-        "pcie_endpoint_phy_max_request_size": {
-            "addr": 45072,
-            "size": 1,
-            "type": "ro"
-        },
-        "pcie_endpoint_phy_max_payload_size": {
-            "addr": 45076,
-            "size": 1,
+            "size": 2,
             "type": "ro"
         },
         "header_tx_control": {
@@ -596,6 +593,36 @@
             "size": 1,
             "type": "rw"
         },
+        "pcie_endpoint_phy_link_status": {
+            "addr": 55296,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_msi_enable": {
+            "addr": 55300,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_msix_enable": {
+            "addr": 55304,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_bus_master_enable": {
+            "addr": 55308,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_max_request_size": {
+            "addr": 55312,
+            "size": 1,
+            "type": "ro"
+        },
+        "pcie_endpoint_phy_max_payload_size": {
+            "addr": 55316,
+            "size": 1,
+            "type": "ro"
+        },
         "clk_measurement_clk0_latch": {
             "addr": 61440,
             "size": 1,
@@ -660,7 +687,7 @@
         "config_cpu_family": null,
         "config_cpu_name": null,
         "config_cpu_human_name": "unknown",
-        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-15 19:04:45",
+        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-22 13:38:02",
         "config_flash_image_size": 8388608,
         "dma_channels": 1,
         "dma_addr_width": 64,

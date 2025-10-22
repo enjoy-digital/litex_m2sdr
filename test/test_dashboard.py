@@ -8,6 +8,7 @@
 import time
 import threading
 import argparse
+import os
 
 from litex import RemoteClient
 
@@ -508,8 +509,10 @@ def main():
     parser.add_argument("--host", default="localhost", help="Host IP address")
     parser.add_argument("--port", default="1234", help="Host bind port")
     args = parser.parse_args()
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
 
-    run_gui(host=args.host, csr_csv=args.csr_csv, port=int(args.port))
+    run_gui(host=args.host, csr_csv=csr_path, port=int(args.port))
 
 if __name__ == "__main__":
     main()

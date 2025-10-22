@@ -7,6 +7,7 @@
 
 import time
 import argparse
+import os 
 
 from litex import RemoteClient
 
@@ -91,7 +92,10 @@ class AGCDriver:
 # Test AGC ------------------------------------------------------------------------------------------
 
 def test_agc(num_measurements=10, delay=1.0, threshold=1000, enable=1, clear=False, agc_selection="rx1_low"):
-    bus = RemoteClient()
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
+
+    bus = RemoteClient(csr_csv= csr_path)
     bus.open()
 
     # Build the full AGC instance name from the selection.
