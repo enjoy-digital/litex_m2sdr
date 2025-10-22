@@ -34,6 +34,7 @@
 #include <linux/platform_device.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
+#include <linux/device.h>
 
 #if defined(__arm__) || defined(__aarch64__)
 #include <linux/dma-direct.h>
@@ -1542,47 +1543,54 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 /* LiteSATA platform device */
 #ifdef CSR_SATA_PHY_BASE
-	{
-		struct resource res[9];
-		struct platform_device *sata_pdev;
-		resource_size_t base = (resource_size_t)litepcie_dev->bar0_addr;
+{
+	struct resource res[5];
+	struct platform_device *sata_pdev;
+	resource_size_t base = (resource_size_t)litepcie_dev->bar0_addr;
 
-#define FILL_REG_RES(_idx,_name,_csr,_size)			\
-		do {						\
-			res[_idx].name  = (_name);		\
-			res[_idx].flags = IORESOURCE_REG;	\
-			res[_idx].start = base + (_csr) - CSR_BASE; \
-			res[_idx].end   = res[_idx].start + (_size) - 1; \
-		} while (0)
+#define FILL_REG_RES(_idx,_name,_csr,_size)                    \
+	do {                                                    \
+		res[_idx].name  = (_name);                      \
+		res[_idx].flags = IORESOURCE_REG;               \
+		res[_idx].start = base + (_csr) - CSR_BASE;     \
+		res[_idx].end   = res[_idx].start + (_size) - 1;\
+	} while (0)
 
-		FILL_REG_RES(0, "ident",  CSR_SATA_IDENTIFY_BASE,   0x100);
-		FILL_REG_RES(1, "phy",    CSR_SATA_PHY_BASE,        0x100);
-		FILL_REG_RES(2, "reader", CSR_SATA_SECTOR2MEM_BASE, 0x100);
-		FILL_REG_RES(3, "writer", CSR_SATA_MEM2SECTOR_BASE, 0x100);
-		FILL_REG_RES(4, "irq",    CSR_SATA_IRQ_BASE,        0x100);
-		FILL_REG_RES(5, "buf_rd", SATA_RD_BASE,             SATA_RD_SIZE);
-		FILL_REG_RES(6, "buf_wr", SATA_WR_BASE,             SATA_WR_SIZE);
+	FILL_REG_RES(0, "ident",  CSR_SATA_IDENTIFY_BASE,   0x100);
+	FILL_REG_RES(1, "phy",    CSR_SATA_PHY_BASE,        0x100);
+	FILL_REG_RES(2, "reader", CSR_SATA_SECTOR2MEM_BASE, 0x100);
+	FILL_REG_RES(3, "writer", CSR_SATA_MEM2SECTOR_BASE, 0x100);
+	FILL_REG_RES(4, "irq",    CSR_SATA_IRQ_BASE,        0x100);
 
 #undef FILL_REG_RES
 
-		res[7].name  = "buf_rd_bus";
-		res[7].flags = IORESOURCE_MEM;
-		res[7].start = SATA_RD_BASE;
-		res[7].end   = SATA_RD_BASE + SATA_RD_SIZE - 1;
+	/* Register with auto ID and set the PCI device as parent */
+	{
+		struct platform_device_info pinfo = {
+			.parent  = &dev->dev,
+			.name    = "litesata",
+			.id      = PLATFORM_DEVID_AUTO,
+			.res     = res,
+			.num_res = ARRAY_SIZE(res),
+		};
 
-		res[8].name  = "buf_wr_bus";
-		res[8].flags = IORESOURCE_MEM;
-		res[8].start = SATA_WR_BASE;
-		res[8].end   = SATA_WR_BASE + SATA_WR_SIZE - 1;
-
-		sata_pdev = platform_device_register_simple("litesata", 1, res, ARRAY_SIZE(res));
-		if (IS_ERR(sata_pdev))
-			dev_warn(&dev->dev, "LiteSATA pdev registration failed: %ld\n", PTR_ERR(sata_pdev));
-		else {
-			dev_info(&dev->dev, "LiteSATA platform device registered (polling mode)\n");
+		sata_pdev = platform_device_register_full(&pinfo);
+		if (IS_ERR(sata_pdev)) {
+			dev_warn(&dev->dev, "LiteSATA pdev registration failed: %ld\n",
+				 PTR_ERR(sata_pdev));
+		} else {
+			/* Ensure it’s always unregistered when the PCI dev goes away */
+			int r = devm_add_action_or_reset(&dev->dev,
+				(void (*)(void *))platform_device_unregister, sata_pdev);
+			if (r) {
+				dev_err(&dev->dev, "failed to hook litesata unregister (%d)\n", r);
+				return r;
+			}
+			dev_info(&dev->dev, "LiteSATA platform device registered (host-DMA)\n");
 			litepcie_dev->sata = sata_pdev;
 		}
 	}
+}
 #endif
 
 	/* PTP */
@@ -1663,12 +1671,6 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 
 #ifdef CSR_UART_XOVER_RXTX_ADDR
 	platform_device_unregister(litepcie_dev->uart);
-#endif
-#ifdef CSR_SATA_PHY_BASE
-	if (litepcie_dev->sata) {
-		platform_device_unregister(litepcie_dev->sata);
-		litepcie_dev->sata = NULL;
-	}
 #endif
 
 	litepcie_free_chdev(litepcie_dev);

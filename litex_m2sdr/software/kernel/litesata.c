@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * LiteX LiteSATA block driver
+ * LiteX LiteSATA block driver — host-DMA version
  *
- * PCIe-host staging mode:
- *  - copies 512B sectors over BAR0 to SoC SRAM,
- *  - programs LiteSATA DMA with the *SoC bus* address of that SRAM.
+ * The FPGA DMA engine now reads/writes directly to host memory.
+ * For each bio_vec, we map its page with the DMA API and program the DMA
+ * registers with that host bus address (preferably <4 GiB if supported).
  *
  * Copyright (c) 2022 Gabriel Somlo <gsomlo@gmail.com>
+ * Host-DMA adaptation (c) 2025 EnjoyDigital / contributors
  */
 
 #include <linux/bits.h>
@@ -24,17 +25,15 @@
 #include <linux/version.h>
 #include <linux/string.h>
 #include <linux/ktime.h>
-
-#define LITESATA_STATS
-
 #include <asm/processor.h> /* cpu_relax() */
+#include <linux/device.h>
 
 #include "litex.h"
 #include "litesata.h"
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                           CSRs                                                  */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* CSRs                                                                      */
+/* ------------------------------------------------------------------------- */
 
 #define LITESATA_ID_STRT   0x00 /* 1bit, w  */
 #define LITESATA_ID_DONE   0x04 /* 1bit, ro */
@@ -70,23 +69,22 @@
 #endif
 #define SECTOR_SHIFT 9
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                         Stats (opt)                                             */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* Stats (optional)                                                          */
+/* ------------------------------------------------------------------------- */
+
+#define LITESATA_STATS
 
 #ifdef LITESATA_STATS
 #include <linux/debugfs.h>
 
 struct lxs_stats {
-	u64 io_cnt;        /* number of submit_bio() calls processed */
+	u64 io_cnt;        /* submit_bio() calls processed */
 	u64 sectors;       /* sectors moved total (both R/W) */
-	u64 ns_copy_out;   /* time spent memcpy_toio() (writes)    */
-	u64 ns_copy_in;    /* time spent memcpy_fromio() (reads)   */
-	u64 ns_prog_dma;   /* time spent programming DMA CSRs       */
-	u64 ns_wait_dma;   /* time spent waiting for DMA complete   */
+	u64 ns_prog_dma;   /* time programming DMA CSRs       */
+	u64 ns_wait_dma;   /* time waiting for DMA complete   */
 };
 static struct lxs_stats litesata_stats;
-
 static struct dentry *litesata_dbgdir;
 
 #define LXS_ADD(_field, _delta) do {                           \
@@ -95,10 +93,7 @@ static struct dentry *litesata_dbgdir;
 	WRITE_ONCE(litesata_stats._field, __v);                 \
 } while (0)
 
-static inline u64 lxs_ktime_to_ns(ktime_t kt)
-{
-	return (u64)ktime_to_ns(kt);
-}
+static inline u64 lxs_ktime_to_ns(ktime_t kt) { return (u64)ktime_to_ns(kt); }
 
 static void lxs_stats_debugfs_init(void)
 {
@@ -108,8 +103,6 @@ static void lxs_stats_debugfs_init(void)
 
 	debugfs_create_u64("io_cnt",      0444, litesata_dbgdir, &litesata_stats.io_cnt);
 	debugfs_create_u64("sectors",     0444, litesata_dbgdir, &litesata_stats.sectors);
-	debugfs_create_u64("ns_copy_out", 0444, litesata_dbgdir, &litesata_stats.ns_copy_out);
-	debugfs_create_u64("ns_copy_in",  0444, litesata_dbgdir, &litesata_stats.ns_copy_in);
 	debugfs_create_u64("ns_prog_dma", 0444, litesata_dbgdir, &litesata_stats.ns_prog_dma);
 	debugfs_create_u64("ns_wait_dma", 0444, litesata_dbgdir, &litesata_stats.ns_wait_dma);
 }
@@ -124,35 +117,32 @@ static void lxs_stats_debugfs_exit(void)
 static inline void lxs_stats_debugfs_init(void) { }
 static inline void lxs_stats_debugfs_exit(void) { }
 static inline u64 lxs_ktime_to_ns(ktime_t kt) { return 0; }
-#endif /* LITESATA_STATS */
+#endif
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                         Types                                                   */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* Types                                                                     */
+/* ------------------------------------------------------------------------- */
 
 struct litesata_dev {
 	struct device *dev;
-
 	struct mutex lock;
 
 	void __iomem *lsident;
 	void __iomem *lsphy;
-	void __iomem *lsreader;
-	void __iomem *lswriter;
+	void __iomem *lsreader; /* DMA regs for READs (device->host)  */
+	void __iomem *lswriter; /* DMA regs for WRITEs (host->device) */
 	void __iomem *lsirq;
-
-	void __iomem *shbuf_rd;
-	void __iomem *shbuf_wr;
-	u64 shbuf_rd_bus;
-	u64 shbuf_wr_bus;
 
 	struct completion dma_done;
 	int irq;
+
+	/* prefer 32-bit DMA if possible */
+	bool dma_32bit;
 };
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                  Helpers / MMIO mapping                                         */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* MMIO helpers                                                              */
+/* ------------------------------------------------------------------------- */
 
 static void __iomem *litesata_get_regs(struct platform_device *pdev, const char *name)
 {
@@ -165,35 +155,28 @@ static void __iomem *litesata_get_regs(struct platform_device *pdev, const char 
 	return devm_platform_ioremap_resource_byname(pdev, name);
 }
 
-static u64 litesata_get_busaddr(struct platform_device *pdev, const char *name)
-{
-	struct resource *res = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	return res ? (u64)res->start : 0;
-}
-
-/* -----------------------------------------------------------------------------------------------*/
-/*                                   DMA kick / completion                                         */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* DMA kick / completion                                                     */
+/* ------------------------------------------------------------------------- */
 /* Caller must hold lbd->lock to prevent interleaving transfers. */
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
-			   u64 soc_bus_addr, sector_t sector, unsigned int count)
+			   dma_addr_t host_bus_addr, sector_t sector, unsigned int nsec)
 {
 	int irq = lbd->irq;
-
 	ktime_t t_prog0, t_prog1, t_wait0, t_wait1;
 
 	if (irq)
 		reinit_completion(&lbd->dma_done);
 
-	/* Program DMA (order matters; do not write 0 to STRT to "reset"). */
+	/* program DMA (order matters; do not write 0 to STRT to "reset") */
 	t_prog0 = ktime_get();
 	litex_write64(regs + LITESATA_DMA_SECT, sector);
-	litex_write16(regs + LITESATA_DMA_NSEC, count);
-	litex_write64(regs + LITESATA_DMA_ADDR, soc_bus_addr);
+	litex_write16(regs + LITESATA_DMA_NSEC, nsec);
+	litex_write64(regs + LITESATA_DMA_ADDR, (u64)host_bus_addr);
 	litex_write8(regs + LITESATA_DMA_STRT, 1);
 	t_prog1 = ktime_get();
 
-	/* Wait for completion */
+	/* wait completion */
 	t_wait0 = ktime_get();
 	if (irq) {
 		wait_for_completion(&lbd->dma_done);
@@ -206,86 +189,72 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 #ifdef LITESATA_STATS
 	LXS_ADD(ns_prog_dma, lxs_ktime_to_ns(ktime_sub(t_prog1, t_prog0)));
 	LXS_ADD(ns_wait_dma, lxs_ktime_to_ns(ktime_sub(t_wait1, t_wait0)));
-	LXS_ADD(sectors, count);
+	LXS_ADD(sectors, nsec);
 #endif
 
-	/* Check completion status. */
+	/* status */
 	if ((litex_read8(regs + LITESATA_DMA_ERR) & 0x01) == 0)
 		return 0;
 
-	dev_err(lbd->dev, "failed transferring sector %lld\n", (long long)sector);
+	dev_err(lbd->dev, "DMA error on sector %lld (nsec=%u)\n",
+		(long long)sector, nsec);
 	return -EIO;
 }
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                               Per-bvec transfer (PIO + DMA)                                     */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* Per-bvec transfer (pure DMA; no memcpy)                                   */
+/* ------------------------------------------------------------------------- */
 
 static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 			    blk_opf_t op, sector_t sector)
 {
-	void __iomem *regs;
-	unsigned int len, off, nsec, i;
-	struct page *pg;
+	void __iomem *regs = op_is_write(op) ? lbd->lswriter : lbd->lsreader;
+	enum dma_data_direction dir = op_is_write(op) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
-	if (!lbd->shbuf_rd || !lbd->shbuf_wr || !lbd->shbuf_rd_bus || !lbd->shbuf_wr_bus)
-		return -ENODEV;
+	unsigned int len  = bv->bv_len;
+	unsigned int off  = bv->bv_offset;
+	struct page *pg   = bv->bv_page;
+	unsigned int nsec = len >> SECTOR_SHIFT;
 
-	regs = op_is_write(op) ? lbd->lswriter : lbd->lsreader;
+	/* basic invariants guaranteed by submit_bio() WARNs */
+	if ((off & (SECTOR_SIZE - 1)) || (len & (SECTOR_SIZE - 1)) || nsec == 0)
+		return -EINVAL;
 
-	len  = bv->bv_len;
-	off  = bv->bv_offset;
-	pg   = bv->bv_page;
-	nsec = len >> SECTOR_SHIFT;
-
-	for (i = 0; i < nsec; i++) {
-		void *kaddr = kmap_local_page(pg);
-		void *src   = (char *)kaddr + off + (i << SECTOR_SHIFT);
-		int err;
-
-		ktime_t tcpy0, tcpy1, tcpy2;
-
-		mutex_lock(&lbd->lock);
-
-		if (op_is_write(op)) {
-			/* Host → BAR0 staging window. */
-			tcpy0 = ktime_get();
-			memcpy_toio(lbd->shbuf_wr, src, SECTOR_SIZE);
-			tcpy1 = ktime_get();
-
-			err = litesata_do_dma(lbd, regs, lbd->shbuf_wr_bus, sector + i, 1);
-			tcpy2 = tcpy1; /* no post-copy on write */
-		} else {
-			/* Device → BAR0 staging window via DMA, then BAR0 → host copy. */
-			tcpy0 = ktime_get(); /* just for symmetry; not used before DMA */
-			err = litesata_do_dma(lbd, regs, lbd->shbuf_rd_bus, sector + i, 1);
-			tcpy1 = ktime_get();
-			if (!err)
-				memcpy_fromio(src, lbd->shbuf_rd, SECTOR_SIZE);
-			tcpy2 = ktime_get();
-		}
-
-		mutex_unlock(&lbd->lock);
-		kunmap_local(kaddr);
-
-		if (err)
-			return err;
-
-#ifdef LITESATA_STATS
-		if (op_is_write(op)) {
-			LXS_ADD(ns_copy_out, lxs_ktime_to_ns(ktime_sub(tcpy1, tcpy0)));
-		} else {
-			LXS_ADD(ns_copy_in, lxs_ktime_to_ns(ktime_sub(tcpy2, tcpy1)));
-		}
-#endif
+	/*
+	 * Map the buffer for DMA. Each bio_vec points into a single page
+	 * (possibly less than a page). We program one DMA per bio_vec.
+	 */
+	dma_addr_t dma = dma_map_page(lbd->dev, pg, off, len, dir);
+	if (dma_mapping_error(lbd->dev, dma)) {
+		dev_err(lbd->dev, "dma_map_page failed (len=%u)\n", len);
+		return -EIO;
 	}
 
+	/*
+	 * If we really must keep addresses <4 GiB (32-bit), dma_set_mask()
+	 * in probe() will make the API bounce as needed. Still, double-check
+	 * and warn if firmware was *strictly* 32-bit and we somehow got >4G.
+	 */
+	if (lbd->dma_32bit && upper_32_bits(dma)) {
+		dev_warn_once(lbd->dev, "32-bit DMA requested but got addr >4G (0x%llx); using IOMMU/bounce.\n",
+			      (unsigned long long)dma);
+	}
+
+	mutex_lock(&lbd->lock);
+	/* Single DMA for the whole bio_vec */
+	{
+		int err = litesata_do_dma(lbd, regs, dma, sector, nsec);
+		mutex_unlock(&lbd->lock);
+		dma_unmap_page(lbd->dev, dma, len, dir);
+		if (err)
+			return err;
+	}
 	return 0;
 }
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                      Block ops / submit                                         */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* Block ops / submit                                                         */
+/* ------------------------------------------------------------------------- */
 
 static void litesata_submit_bio(struct bio *bio)
 {
@@ -307,7 +276,7 @@ static void litesata_submit_bio(struct bio *bio)
 			dev_err(lbd->dev, "error %s sectors %lld..%lld\n",
 				op_is_write(op) ? "writing" : "reading",
 				(long long)sector,
-				(long long)(sector + (bvec.bv_len >> SECTOR_SHIFT)));
+				(long long)(sector + (bvec.bv_len >> SECTOR_SHIFT) - 1));
 			bio_io_error(bio);
 			return;
 		}
@@ -325,9 +294,9 @@ static const struct block_device_operations litesata_fops = {
 	.submit_bio	= litesata_submit_bio,
 };
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                          IRQ path                                               */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* IRQ path                                                                   */
+/* ------------------------------------------------------------------------- */
 
 static irqreturn_t litesata_interrupt(int irq, void *arg)
 {
@@ -373,8 +342,7 @@ static int litesata_irq_init(struct platform_device *pdev,
 	if (IS_ERR(lbd->lsirq))
 		return PTR_ERR(lbd->lsirq);
 
-	ret = devm_request_irq(dev, lbd->irq, litesata_interrupt, 0,
-			       "litesata", lbd);
+	ret = devm_request_irq(dev, lbd->irq, litesata_interrupt, 0, "litesata", lbd);
 	if (ret < 0) {
 		dev_warn(dev, "IRQ request error %d, using polling\n", ret);
 		goto use_polling;
@@ -396,9 +364,9 @@ use_polling:
 	return 0;
 }
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                     IDENT / capacity                                            */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* IDENT / capacity                                                           */
+/* ------------------------------------------------------------------------- */
 
 static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 {
@@ -425,9 +393,7 @@ static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 	if ((litex_read8(lbd->lsident + LITESATA_ID_DONE) & 0x01) == 0)
 		return -ENODEV;
 
-	/* Read IDENTIFY response into buf.
-	 * FIXME: make buf be u32[64], read in-place, and use le/be helpers.
-	 */
+	/* Read IDENTIFY response into buf (pairs of 16-bit words per 32-bit). */
 	for (i = 0; i < 128 && litex_read8(lbd->lsident + LITESATA_ID_SRCVLD); i += 2) {
 		data = litex_read32(lbd->lsident + LITESATA_ID_SRCDAT);
 		litex_write8(lbd->lsident + LITESATA_ID_SRCRDY, 1);
@@ -453,13 +419,18 @@ static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 	return 0;
 }
 
-/* -----------------------------------------------------------------------------------------------*/
-/*                                   Probe / remove / module                                       */
-/* -----------------------------------------------------------------------------------------------*/
+/* ------------------------------------------------------------------------- */
+/* Probe / module                                                             */
+/* ------------------------------------------------------------------------- */
 
 static void litesata_devm_put_disk(void *gendisk)
 {
 	put_disk(gendisk);
+}
+
+static void litesata_devm_del_disk(void *gendisk)
+{
+	del_gendisk(gendisk);
 }
 
 static int litesata_probe(struct platform_device *pdev)
@@ -477,11 +448,28 @@ static int litesata_probe(struct platform_device *pdev)
 	lbd->dev = dev;
 	mutex_init(&lbd->lock);
 
-	lbd->lsident = litesata_get_regs(pdev, "ident");
+	/*
+	 * Prefer 32-bit DMA addresses (to keep FPGA addressing simple).
+	 * If not possible, fall back to 64-bit but warn once.
+	 */
+	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (err) {
+		err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+		if (err) {
+			dev_err(dev, "No suitable DMA mask (need 32/64-bit)\n");
+			return err;
+		}
+		dev_warn(dev, "Using 64-bit DMA addresses (could exceed 4GiB)\n");
+		lbd->dma_32bit = false;
+	} else {
+		lbd->dma_32bit = true;
+	}
+
+	lbd->lsident  = litesata_get_regs(pdev, "ident");
 	if (IS_ERR(lbd->lsident))
 		return PTR_ERR(lbd->lsident);
 
-	lbd->lsphy = litesata_get_regs(pdev, "phy");
+	lbd->lsphy    = litesata_get_regs(pdev, "phy");
 	if (IS_ERR(lbd->lsphy))
 		return PTR_ERR(lbd->lsphy);
 
@@ -492,14 +480,6 @@ static int litesata_probe(struct platform_device *pdev)
 	lbd->lswriter = litesata_get_regs(pdev, "writer");
 	if (IS_ERR(lbd->lswriter))
 		return PTR_ERR(lbd->lswriter);
-
-	lbd->shbuf_rd = litesata_get_regs(pdev, "buf_rd");
-	if (IS_ERR(lbd->shbuf_rd)) lbd->shbuf_rd = NULL;
-	lbd->shbuf_wr = litesata_get_regs(pdev, "buf_wr");
-	if (IS_ERR(lbd->shbuf_wr)) lbd->shbuf_wr = NULL;
-
-	lbd->shbuf_rd_bus = litesata_get_busaddr(pdev, "buf_rd_bus");
-	lbd->shbuf_wr_bus = litesata_get_busaddr(pdev, "buf_wr_bus");
 
 	/* Identify disk, get model and size. */
 	err = litesata_init_ident(lbd, &size);
@@ -535,18 +515,24 @@ static int litesata_probe(struct platform_device *pdev)
 
 	gendisk->private_data = lbd;
 	gendisk->fops = &litesata_fops;
-	strcpy(gendisk->disk_name, "litesata");
+	/* Make disk name unique per instance, e.g. litesata1, litesata2, … */
+	snprintf(gendisk->disk_name, DISK_NAME_LEN, "litesata%d", pdev->id);
 	set_capacity(gendisk, size);
 
 	err = add_disk(gendisk);
 	if (err)
 		return err;
 
+	err = devm_add_action_or_reset(dev, litesata_devm_del_disk, gendisk);
+	if (err)
+		return dev_err_probe(dev, err, "Can't register del_disk action\n");
+
 #ifdef LITESATA_STATS
 	lxs_stats_debugfs_init();
 #endif
 
-	dev_info(dev, "probe success; sector size = %d\n", SECTOR_SIZE);
+	dev_info(dev, "probe success; sector size = %d, dma_%sbit\n",
+		 SECTOR_SIZE, lbd->dma_32bit ? "32" : "64");
 	return 0;
 }
 
@@ -557,8 +543,17 @@ static const struct of_device_id litesata_match[] = {
 MODULE_DEVICE_TABLE(of, litesata_match);
 MODULE_ALIAS("platform:litesata");
 
+static int litesata_remove(struct platform_device *pdev)
+{
+#ifdef LITESATA_STATS
+	lxs_stats_debugfs_exit();
+#endif
+	return 0;
+}
+
 static struct platform_driver litesata_driver = {
 	.probe = litesata_probe,
+	.remove = litesata_remove,
 	.driver = {
 		.name = "litesata",
 		.of_match_table = litesata_match,
@@ -579,6 +574,6 @@ void __exit litesata_exit(void)
 #endif
 }
 
-MODULE_DESCRIPTION("LiteX LiteSATA block driver");
-MODULE_AUTHOR("Gabriel Somlo <gsomlo@gmail.com>");
+MODULE_DESCRIPTION("LiteX LiteSATA block driver (host-DMA)");
+MODULE_AUTHOR("Gabriel Somlo <gsomlo@gmail.com> / EnjoyDigital");
 MODULE_LICENSE("GPL v2");
