@@ -1,20 +1,29 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * LiteX LiteSATA block driver
+ * LiteX LiteSATA block driver + LitePCIe glue
  *
  * PCIe-host staging mode:
  *  - copies 512B sectors over BAR0 to SoC SRAM,
  *  - programs LiteSATA DMA with the *SoC bus* address of that SRAM.
  *
- * MSI model (new): the PCIe core raises MSIs for LiteSATA completions:
+ * MSI model: the PCIe core raises MSIs for LiteSATA completions:
  *   - SATA_SECTOR2MEM_INTERRUPT  (reader completion)
  *   - SATA_MEM2SECTOR_INTERRUPT  (writer completion)
  * The PCI driver’s ISR acks them and calls the hooks below.
  *
- * This file handles the DMA and block layer. One DMA at a time (guarded by a
- * mutex) so a single completion object is sufficient for both directions.
+ * The LiteSATA part handles the DMA and block layer. One DMA at a time
+ * (guarded by a mutex) so a single completion object is sufficient for
+ * both directions.
+ *
+ * Hardening:
+ * - Strict 32-bit DMA mask (no fallback to 64-bit).
+ * - Per-I/O enforcement: any DMA >= 4GiB bounces through a GFP_DMA32
+ *   coherent buffer (or errors if bouncing disabled).
+ * - Optional knobs to force polling, wait for MSI with timeout + fallback,
+ *   insert an IRQ arming delay, and early-poll window to catch fast DONE.
  *
  * Copyright (c) 2022 Gabriel Somlo <gsomlo@gmail.com>
+ * Copyright (c) 2024 EnjoyDigital / LitePCIe contributors
  */
 
 #include <linux/bits.h>
@@ -30,7 +39,6 @@
 #include <linux/ioport.h>
 #include <linux/version.h>
 #include <linux/string.h>
-#include <linux/dma-mapping.h>
 #include <linux/completion.h>
 #include <linux/ratelimit.h>
 #include <linux/sched.h>
@@ -65,6 +73,19 @@ MODULE_PARM_DESC(irq_arm_delay_us, "Delay (us) after STRT before waiting on MSI"
 static unsigned int litesata_early_poll_us = 50;
 module_param_named(early_poll_us, litesata_early_poll_us, uint, 0644);
 MODULE_PARM_DESC(early_poll_us, "Early poll window (us) after STRT to catch fast DONE");
+
+/* 32-bit DMA enforcement & optional software bounce */
+static bool litesata_strict_32bit = true;
+module_param_named(strict_32bit, litesata_strict_32bit, bool, 0644);
+MODULE_PARM_DESC(strict_32bit, "Require 32-bit DMA mask at probe (no 64-bit fallback)");
+
+static bool litesata_force_bounce = false;
+module_param_named(force_bounce, litesata_force_bounce, bool, 0644);
+MODULE_PARM_DESC(force_bounce, "Always use 32-bit coherent bounce buffers for I/O");
+
+static bool litesata_no_bounce = false;
+module_param_named(no_bounce, litesata_no_bounce, bool, 0644);
+MODULE_PARM_DESC(no_bounce, "Never bounce (debug only; will error if DMA addr >= 4GiB)");
 
 /* -------- LiteSATA register layout -------- */
 
@@ -144,6 +165,28 @@ static void __iomem *litesata_get_regs(struct platform_device *pdev, const char 
 	return devm_platform_ioremap_resource_byname(pdev, name);
 }
 
+/* Bounce-buffer helpers (strict 32-bit coherent memory) */
+struct litesata_bounce {
+	void           *cpu;
+	dma_addr_t      dma;
+	size_t          len;
+};
+
+static int litesata_bounce_alloc(struct litesata_dev *lbd, size_t len, struct litesata_bounce *b)
+{
+	b->cpu = dma_alloc_coherent(lbd->dev, len, &b->dma, GFP_KERNEL | GFP_DMA32);
+	if (!b->cpu)
+		return -ENOMEM;
+	b->len = len;
+	return 0;
+}
+
+static void litesata_bounce_free(struct litesata_dev *lbd, struct litesata_bounce *b)
+{
+	if (b->cpu)
+		dma_free_coherent(lbd->dev, b->len, b->cpu, b->dma);
+}
+
 /* caller must hold lbd->lock to prevent interleaving transfers */
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
@@ -210,7 +253,6 @@ check_err_and_exit:
 	return -EIO;
 }
 
-
 /* Process a single bvec of a bio. */
 static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 			    blk_opf_t op, sector_t sector)
@@ -227,33 +269,68 @@ static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 	if ((off & (SECTOR_SIZE - 1)) || (len & (SECTOR_SIZE - 1)) || nsec == 0)
 		return -EINVAL;
 
-	/*
-	 * Map the buffer for DMA. Each bio_vec points into a single page
-	 * (possibly less than a page). We program one DMA per bio_vec.
-	 */
-	dma_addr_t dma = dma_map_page(lbd->dev, pg, off, len, dir);
-	if (dma_mapping_error(lbd->dev, dma)) {
-		dev_err(lbd->dev, "dma_map_page failed (len=%u)\n", len);
-		return -EIO;
+	/* Choose DMA address: direct map or bounce */
+	dma_addr_t dma = (dma_addr_t)0;
+	bool need_bounce = litesata_force_bounce;
+	struct litesata_bounce bounce = { 0 };
+
+	if (!need_bounce) {
+		dma = dma_map_page(lbd->dev, pg, off, len, dir);
+		if (dma_mapping_error(lbd->dev, dma)) {
+			dev_err(lbd->dev, "dma_map_page failed (len=%u)\n", len);
+			return -EIO;
+		}
+		/* Enforce < 4GiB */
+		if (upper_32_bits(dma)) {
+			need_bounce = true;
+			if (litesata_no_bounce) {
+				dma_unmap_page(lbd->dev, dma, len, dir);
+				dev_err(lbd->dev, "DMA addr >= 4GiB (0x%llx) and bouncing disabled\n",
+					(unsigned long long)dma);
+				return -EIO;
+			}
+		}
 	}
 
-	/*
-	 * If we really must keep addresses <4 GiB (32-bit), dma_set_mask()
-	 * in probe() will make the API bounce as needed. Still, double-check
-	 * and warn if firmware was *strictly* 32-bit and we somehow got >4G.
-	 */
-	if (lbd->dma_32bit && upper_32_bits(dma)) {
-		dev_warn_once(lbd->dev,
-			      "32-bit DMA requested but got addr >4G (0x%llx); using IOMMU/bounce.\n",
-			      (unsigned long long)dma);
+	if (need_bounce) {
+		int ret = litesata_bounce_alloc(lbd, len, &bounce);
+		if (ret) {
+			dev_err(lbd->dev, "Failed to alloc 32-bit bounce buffer (%u bytes)\n", len);
+			if (!litesata_force_bounce && dma)
+				dma_unmap_page(lbd->dev, dma, len, dir);
+			return ret;
+		}
+		/* For writes: copy source into bounce before DMA */
+		if (op_is_write(op)) {
+			void *src = kmap_local_page(pg) + off;
+			memcpy(bounce.cpu, src, len);
+			kunmap_local(src);
+		}
+		/* If we had a direct map, drop it; we use the bounce now */
+		if (!litesata_force_bounce && dma && !upper_32_bits(dma))
+			dma_unmap_page(lbd->dev, dma, len, dir);
+		dma = bounce.dma; /* definitely <4GiB due to GFP_DMA32 */
 	}
 
 	mutex_lock(&lbd->lock);
-	/* Single DMA for the whole bio_vec */
 	{
 		int err = litesata_do_dma(lbd, regs, dma, sector, nsec);
 		mutex_unlock(&lbd->lock);
-		dma_unmap_page(lbd->dev, dma, len, dir);
+
+		/* For reads: copy back from bounce to the bio page */
+		if (need_bounce && !op_is_write(op) && !err) {
+			void *dst = kmap_local_page(pg) + off;
+			memcpy(dst, bounce.cpu, len);
+			kunmap_local(dst);
+		}
+
+		/* Free / unmap */
+		if (need_bounce) {
+			litesata_bounce_free(lbd, &bounce);
+		} else {
+			dma_unmap_page(lbd->dev, dma, len, dir);
+		}
+
 		if (err)
 			return err;
 	}
@@ -319,7 +396,6 @@ static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 		return -ENODEV;
 
 	/* read `identify` response into buf */
-	// FIXME: make buf be u32[64], read in-place, and use le/be/2cpu
 	for (i = 0; i < 128 && litex_read8(lbd->lsident + LITESATA_ID_SRCVLD); i += 2) {
 		data = litex_read32(lbd->lsident + LITESATA_ID_SRCDAT);
 		litex_write8(lbd->lsident + LITESATA_ID_SRCRDY, 1);
@@ -327,7 +403,6 @@ static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 		buf[i + 1] = (data >> 16) & 0xffff;
 	}
 	/* get disk model */
-	// FIXME: there's gotta be a better way to do this :)
 	for (i = 0; i < 18; i++) {
 		model[2*i + 0] = (buf[27+i] >> 8) & 0xff;
 		model[2*i + 1] = (buf[27+i] >> 0) & 0xff;
@@ -371,22 +446,13 @@ static int litesata_probe(struct platform_device *pdev)
 	mutex_init(&lbd->lock);
 	init_completion(&lbd->dma_done);
 
-	/*
-	 * Prefer 32-bit DMA addresses (to keep FPGA addressing simple).
-	 * If not possible, fall back to 64-bit but warn once.
-	 */
+	/* Enforce 32-bit DMA addresses; fail otherwise. */
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (err) {
-		err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
-		if (err) {
-			dev_err(dev, "No suitable DMA mask (need 32/64-bit)\n");
-			return err;
-		}
-		dev_warn(dev, "Using 64-bit DMA addresses (could exceed 4GiB)\n");
-		lbd->dma_32bit = false;
-	} else {
-		lbd->dma_32bit = true;
+		dev_err(dev, "This platform cannot provide 32-bit DMA; refusing to bind\n");
+		return err;
 	}
+	lbd->dma_32bit = true;
 
 	lbd->lsident  = litesata_get_regs(pdev, "ident");
 	if (IS_ERR(lbd->lsident))
@@ -433,7 +499,6 @@ static int litesata_probe(struct platform_device *pdev)
 
 	gendisk->private_data = lbd;
 	gendisk->fops = &litesata_fops;
-	/* Make disk name unique per instance, e.g. litesata1, litesata2, … */
 	snprintf(gendisk->disk_name, DISK_NAME_LEN, "litesata%d", pdev->id);
 	set_capacity(gendisk, size);
 
@@ -449,14 +514,11 @@ static int litesata_probe(struct platform_device *pdev)
 	WRITE_ONCE(lbd_global, lbd);
 
 	dev_info(dev,
-		 "probe success; sector size = %d, dma_%sbit (%s)\n",
+		 "probe success; sector size = %d, dma_%sbit (%s), bounce=%s, strict32=%s\n",
 		 SECTOR_SIZE, lbd->dma_32bit ? "32" : "64",
-#if LITESATA_FORCE_POLLING
-		 "POLLING"
-#else
-		 "MSI-driven, poll fallback"
-#endif
-	);
+		 litesata_force_polling ? "POLLING" : "MSI-driven+poll",
+		 litesata_force_bounce ? "forced" : (litesata_no_bounce ? "disabled" : "auto"),
+		 litesata_strict_32bit ? "on" : "off");
 	return 0;
 }
 
