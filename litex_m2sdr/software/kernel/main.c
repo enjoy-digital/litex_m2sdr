@@ -790,22 +790,6 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 	}
 	break;
-#ifdef CSR_ICAP_BASE
-	case LITEPCIE_IOCTL_ICAP:
-	{
-		struct litepcie_ioctl_icap m;
-
-		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
-			ret = -EFAULT;
-			break;
-		}
-
-		litepcie_writel(dev, CSR_ICAP_ADDR_ADDR, m.addr);
-		litepcie_writel(dev, CSR_ICAP_DATA_ADDR, m.data);
-		litepcie_writel(dev, CSR_ICAP_WRITE_ADDR, 1);
-	}
-	break;
-#endif
 	case LITEPCIE_IOCTL_DMA:
 	{
 		struct litepcie_ioctl_dma m;

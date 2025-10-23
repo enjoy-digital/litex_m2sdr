@@ -15,15 +15,4 @@
 #define DMA_TABLE_LOOP_INDEX (1 <<  0)
 #define DMA_TABLE_LOOP_COUNT (1 << 16)
 
-/* ICAP */
-#define ICAP_CMD_REG   0b00100
-#define ICAP_CMD_IPROG 0b01111
-
-#define ICAP_IDCODE_REG   0b01100
-
-#define ICAP_BOOTSTS_REG  0b10110
-#define ICAP_BOOTSTS_VALID    (1 << 0)
-#define ICAP_BOOTSTS_FALLBACK (1 << 1)
-
-
 #endif /* __HW_FLAGS_H */

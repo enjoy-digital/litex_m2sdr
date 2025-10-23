@@ -45,13 +45,6 @@ void litepcie_writel(int fd, uint32_t addr, uint32_t val) {
     checked_ioctl(fd, LITEPCIE_IOCTL_REG, &m);
 }
 
-void litepcie_reload(int fd) {
-    struct litepcie_ioctl_icap m;
-    m.addr = ICAP_CMD_REG;
-    m.data = ICAP_CMD_IPROG;
-    checked_ioctl(fd, LITEPCIE_IOCTL_ICAP, &m);
-}
-
 void _check_ioctl(int status, const char *file, int line) {
     if (status) {
         fprintf(stderr, "Failed ioctl at %s:%d: %s\n", file, line, strerror(errno));

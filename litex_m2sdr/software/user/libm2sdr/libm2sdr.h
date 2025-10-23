@@ -19,6 +19,16 @@ extern "C" {
 
 /* Constants */
 
+/* ICAP */
+#define ICAP_CMD_REG   0b00100
+#define ICAP_CMD_IPROG 0b01111
+
+#define ICAP_IDCODE_REG   0b01100
+
+#define ICAP_BOOTSTS_REG  0b10110
+#define ICAP_BOOTSTS_VALID    (1 << 0)
+#define ICAP_BOOTSTS_FALLBACK (1 << 1)
+
 /* Macros */
 
 #ifdef USE_LITEPCIE

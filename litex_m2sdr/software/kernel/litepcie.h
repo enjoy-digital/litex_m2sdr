@@ -22,11 +22,6 @@ struct litepcie_ioctl_reg {
 	uint8_t is_write;
 };
 
-struct litepcie_ioctl_icap {
-	uint8_t addr;
-	uint32_t data;
-};
-
 struct litepcie_ioctl_dma {
 	uint8_t loopback_enable;
 };
@@ -69,7 +64,6 @@ struct litepcie_ioctl_mmap_dma_update {
 #define LITEPCIE_IOCTL 'S'
 
 #define LITEPCIE_IOCTL_REG               _IOWR(LITEPCIE_IOCTL,  0, struct litepcie_ioctl_reg)
-#define LITEPCIE_IOCTL_ICAP              _IOWR(LITEPCIE_IOCTL,  2, struct litepcie_ioctl_icap)
 
 #define LITEPCIE_IOCTL_DMA                       _IOW(LITEPCIE_IOCTL,  20, struct litepcie_ioctl_dma)
 #define LITEPCIE_IOCTL_DMA_WRITER                _IOWR(LITEPCIE_IOCTL, 21, struct litepcie_ioctl_dma_writer)
