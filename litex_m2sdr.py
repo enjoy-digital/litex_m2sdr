@@ -284,9 +284,9 @@ class BaseSoC(SoCMini):
         # Time Generator ---------------------------------------------------------------------------
 
         self.time_gen = TimeGenerator(
-            clk        = si5351_clk1,
-            clk_freq   = 100e6,
-            with_csr   = True,
+            clk      = si5351_clk1,
+            clk_freq = 100e6,
+            with_csr = True,
         )
         self.time_gen.add_cdc()
 
@@ -343,10 +343,10 @@ class BaseSoC(SoCMini):
                 assert pcie_lanes == 1
             pcie_dmas = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
-                data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
-                bar0_size   = 0x10_0000,
-                with_ptm    = with_pcie_ptm,
-                cd          = "sys",
+                data_width = {1: 64, 2: 64, 4: 128}[pcie_lanes],
+                bar0_size  = 0x10_0000,
+                with_ptm   = with_pcie_ptm,
+                cd         = "sys",
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
@@ -380,11 +380,11 @@ class BaseSoC(SoCMini):
             # ---------------------
             if with_sata:
                 self.dma_bus = SoCBusHandler(
-                    name             = "SoCDMABusHandler",
-                    standard         = "wishbone",
-                    data_width       = 32,
-                    address_width    = 64,
-                    bursting         = False
+                    name          = "SoCDMABusHandler",
+                    standard      = "wishbone",
+                    data_width    = 32,
+                    address_width = 64,
+                    bursting      = False,
                 )
                 self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
                     address_width = 64,
