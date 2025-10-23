@@ -366,11 +366,16 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
+            soc_msis = {}
+            soc_msis.update({
+                "SATA_SECTOR2MEM" : Signal(),
+                "SATA_MEM2SECTOR" : Signal(),
+            })
             self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
-                with_msi              = True,
+                with_msi              = True, msis = soc_msis,
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
@@ -505,7 +510,13 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_sata(phy=self.sata_phy, mode="read+write")
+            self.add_sata(phy=self.sata_phy, mode="read+write", with_irq=False)
+            if with_pcie:
+                self.comb += [
+                    soc_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
+                    soc_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
+                ]
+
             self.add_pcie_slave_probe()
 
         # AD9361 RFIC ------------------------------------------------------------------------------
