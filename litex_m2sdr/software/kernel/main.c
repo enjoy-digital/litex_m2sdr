@@ -169,6 +169,24 @@ static inline void litepcie_writel(struct litepcie_device *s, uint32_t addr, uin
 }
 
 /* -----------------------------------------------------------------------------------------------*/
+/*                                 Capabilities                                                   */
+/* -----------------------------------------------------------------------------------------------*/
+
+static bool litepcie_soc_has_sata(struct litepcie_device *s)
+{
+#ifdef CSR_CAPABILITY_FEATURES_ADDR
+	u32 features = litepcie_readl(s, CSR_CAPABILITY_FEATURES_ADDR);
+	bool sata_enabled =
+		(features >> CSR_CAPABILITY_FEATURES_SATA_OFFSET) &
+		((1U << CSR_CAPABILITY_FEATURES_SATA_SIZE) - 1);
+	return sata_enabled;
+#else
+	/* Old bitstreams may not include the capability block; keep old behavior. */
+	return false;
+#endif
+}
+
+/* -----------------------------------------------------------------------------------------------*/
 /*                               LitePCIe Interrupts                                              */
 /* -----------------------------------------------------------------------------------------------*/
 
@@ -1563,7 +1581,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 /* LiteSATA platform device */
 #ifdef CSR_SATA_PHY_BASE
-{
+if (litepcie_soc_has_sata(litepcie_dev)) {
 	struct resource res[5];
 	struct platform_device *sata_pdev;
 	resource_size_t base = (resource_size_t)litepcie_dev->bar0_addr;
@@ -1685,12 +1703,16 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 	/* Stop the DMAs */
 	litepcie_stop_dma(litepcie_dev);
 
+#ifdef CSR_SATA_PHY_BASE
+if (litepcie_soc_has_sata(litepcie_dev)) {
 	/* Disable SATA interrupts */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
     litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
 #endif
 #ifdef SATA_MEM2SECTOR_INTERRUPT
     litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+#endif
+}
 #endif
 
 	/* Disable all interrupts */
