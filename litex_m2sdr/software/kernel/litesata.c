@@ -23,7 +23,7 @@
  *   insert an IRQ arming delay, and early-poll window to catch fast DONE.
  *
  * Copyright (c) 2022 Gabriel Somlo <gsomlo@gmail.com>
- * Copyright (c) 2024 EnjoyDigital / LitePCIe contributors
+ * Copyright (c) 2025 EnjoyDigital
  */
 
 #include <linux/bits.h>
@@ -70,7 +70,7 @@ static unsigned int litesata_irq_arm_delay_us = 0;
 module_param_named(irq_arm_delay_us, litesata_irq_arm_delay_us, uint, 0644);
 MODULE_PARM_DESC(irq_arm_delay_us, "Delay (us) after STRT before waiting on MSI");
 
-static unsigned int litesata_early_poll_us = 50;
+static unsigned int litesata_early_poll_us = 0;
 module_param_named(early_poll_us, litesata_early_poll_us, uint, 0644);
 MODULE_PARM_DESC(early_poll_us, "Early poll window (us) after STRT to catch fast DONE");
 
