@@ -388,17 +388,17 @@ class BaseSoC(SoCMini):
                     name          = "SoCDMABusHandler",
                     standard      = "wishbone",
                     data_width    = 32,
-                    address_width = 64,
+                    address_width = 32,
                     bursting      = False,
                 )
                 self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
-                    address_width = 64,
+                    address_width = 32,
                     data_width    = 32,
                     addressing    = "byte",
                 )
                 self.dma_bus.add_slave(name="dma",
                     slave  = self.pcie_slave.bus,
-                    region = SoCRegion(origin=0x00000000, size=0x100000000)
+                    region = SoCRegion(origin=0x00000000, size=0x1_0000_0000)
                 )
 
             # PTM.
@@ -517,7 +517,7 @@ class BaseSoC(SoCMini):
                     soc_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
                 ]
 
-            self.add_pcie_slave_probe()
+            #self.add_pcie_slave_probe()
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
