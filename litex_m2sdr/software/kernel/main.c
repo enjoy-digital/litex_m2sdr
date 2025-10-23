@@ -8,6 +8,7 @@
  *
  */
 
+/* Linux Includes */
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -31,13 +32,12 @@
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
-
 #if defined(__arm__) || defined(__aarch64__)
 #include <linux/dma-direct.h>
 #endif
-
 #include <linux/ptp_clock_kernel.h>
 
+/* LiteX Includes */
 #include "litepcie.h"
 #include "csr.h"
 #include "config.h"
@@ -57,8 +57,8 @@ extern int litesata_init(void);
 extern void litesata_exit(void);
 
 /* LiteSATA MSI notify hooks */
-extern void litesata_msi_signal_reader(void); /* SECTOR2MEM done */
-extern void litesata_msi_signal_writer(void); /* MEM2SECTOR done */
+extern void litesata_msi_signal_reader(void);
+extern void litesata_msi_signal_writer(void);
 
 #define LITEPCIE_NAME "m2sdr"
 #define LITEPCIE_MINOR_COUNT 32
