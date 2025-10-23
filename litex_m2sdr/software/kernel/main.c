@@ -16,13 +16,9 @@
 #include <linux/errno.h>
 #include <linux/mm.h>
 #include <linux/fs.h>
-#include <linux/mmtimer.h>
-#include <linux/miscdevice.h>
-#include <linux/posix-timers.h>
 #include <linux/interrupt.h>
 #include <linux/time.h>
 #include <linux/math64.h>
-#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/pci.h>
 #include <linux/pci_regs.h>
