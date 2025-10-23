@@ -6,6 +6,14 @@
  *  - copies 512B sectors over BAR0 to SoC SRAM,
  *  - programs LiteSATA DMA with the *SoC bus* address of that SRAM.
  *
+ * MSI model (new): the PCIe core raises MSIs for LiteSATA completions:
+ *   - SATA_SECTOR2MEM_INTERRUPT  (reader completion)
+ *   - SATA_MEM2SECTOR_INTERRUPT  (writer completion)
+ * The PCI driver’s ISR acks them and calls the hooks below.
+ *
+ * This file handles the DMA and block layer. One DMA at a time (guarded by a
+ * mutex) so a single completion object is sufficient for both directions.
+ *
  * Copyright (c) 2022 Gabriel Somlo <gsomlo@gmail.com>
  */
 
@@ -23,9 +31,24 @@
 #include <linux/version.h>
 #include <linux/string.h>
 #include <linux/dma-mapping.h>
+#include <linux/completion.h>
+#include <linux/ratelimit.h>
+#include <linux/sched.h>
+#include <linux/compiler.h>
 
 #include "litex.h"
 #include "litesata.h"
+
+/* -------- Optional test mode: force polling instead of MSI -------- */
+#ifndef LITESATA_FORCE_POLLING
+#define LITESATA_FORCE_POLLING    0   /* set to 1 to force polling */
+#endif
+
+#ifndef LITESATA_DMA_WAIT_TIMEOUT_MS
+#define LITESATA_DMA_WAIT_TIMEOUT_MS  2000 /* timeout per DMA before polling */
+#endif
+
+/* -------- LiteSATA register layout -------- */
 
 #define LITESATA_ID_STRT   0x00 // 1bit, w
 #define LITESATA_ID_DONE   0x04 // 1bit, ro
@@ -68,23 +91,27 @@ struct litesata_dev {
 	bool dma_32bit;
 };
 
-/* Single-instance MSI notification hook (minimal integration):
+/* ------------------------------------------------------------------ */
+/* Single-instance MSI notification hooks (minimal integration):
  * The PCI driver calls these when the corresponding MSI fires.
- * If you add multi-instance later, replace this with a small registry.
+ * If you add multi-instance later, replace this with a registry keyed
+ * by PCI device or platform device.
  */
 static struct litesata_dev *lbd_global;
 
 void litesata_msi_signal_reader(void) /* SECTOR2MEM done */
 {
-	if (lbd_global)
-		complete(&lbd_global->dma_done);
+	struct litesata_dev *lbd = READ_ONCE(lbd_global);
+	if (lbd)
+		complete(&lbd->dma_done);
 }
 EXPORT_SYMBOL_GPL(litesata_msi_signal_reader);
 
 void litesata_msi_signal_writer(void) /* MEM2SECTOR done */
 {
-	if (lbd_global)
-		complete(&lbd_global->dma_done);
+	struct litesata_dev *lbd = READ_ONCE(lbd_global);
+	if (lbd)
+		complete(&lbd->dma_done);
 }
 EXPORT_SYMBOL_GPL(litesata_msi_signal_writer);
 
@@ -103,10 +130,7 @@ static void __iomem *litesata_get_regs(struct platform_device *pdev, const char 
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
 {
-	/* If MSI notify hooks are wired (PCI ISR will call us), use completion;
-	 * otherwise poll the DONE bit like before.
-	 */
-	bool use_msi = (lbd_global != NULL);
+	bool use_msi = !LITESATA_FORCE_POLLING && READ_ONCE(lbd_global) != NULL;
 
 	if (use_msi)
 		reinit_completion(&lbd->dma_done);
@@ -115,22 +139,34 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 	litex_write64(regs + LITESATA_DMA_SECT, sector);
 	litex_write16(regs + LITESATA_DMA_NSEC, count);
 	litex_write64(regs + LITESATA_DMA_ADDR, (u64)host_bus_addr);
+	/* Make sure the address/len are visible to the device before start */
+	wmb();
 	litex_write8(regs + LITESATA_DMA_STRT, 1);
 
 	if (use_msi) {
-		/* Wait until PCI ISR notifies us */
-		wait_for_completion(&lbd->dma_done);
-	} else {
-		/* Polling fallback */
-		while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0)
+		unsigned long to = msecs_to_jiffies(LITESATA_DMA_WAIT_TIMEOUT_MS);
+		if (!wait_for_completion_timeout(&lbd->dma_done, to)) {
+			/* MSI might have been lost or arrived before reinit; poll as fallback */
+			dev_warn_ratelimited(lbd->dev, "MSI timeout; falling back to polling for this DMA\n");
+			use_msi = false;
+		}
+	}
+
+	if (!use_msi) {
+		/* Poll for completion; periodically reschedule to avoid soft lockups */
+		unsigned int spins = 0;
+		while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0) {
 			cpu_relax();
+			if ((++spins & 0xFFFF) == 0)
+				cond_resched();
+		}
 	}
 
 	/* check if DMA xfer successful */
 	if ((litex_read8(regs + LITESATA_DMA_ERR) & 0x01) == 0)
 		return 0;
 
-	dev_err(lbd->dev, "failed transfering sector %Ld\n", sector);
+	dev_err(lbd->dev, "failed transferring sector %lld\n", (long long)sector);
 	return -EIO;
 }
 
@@ -369,10 +405,17 @@ static int litesata_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, err, "Can't register del_disk action\n");
 
 	/* Minimal single-instance registration for MSI notify hooks */
-	lbd_global = lbd;
+	WRITE_ONCE(lbd_global, lbd);
 
-	dev_info(dev, "probe success; sector size = %d, dma_%sbit (MSI-driven, poll fallback)\n",
-		 SECTOR_SIZE, lbd->dma_32bit ? "32" : "64");
+	dev_info(dev,
+		 "probe success; sector size = %d, dma_%sbit (%s)\n",
+		 SECTOR_SIZE, lbd->dma_32bit ? "32" : "64",
+#if LITESATA_FORCE_POLLING
+		 "POLLING"
+#else
+		 "MSI-driven, poll fallback"
+#endif
+	);
 	return 0;
 }
 
@@ -385,6 +428,8 @@ MODULE_ALIAS("platform:litesata");
 
 static int litesata_remove(struct platform_device *pdev)
 {
+	/* Clear the global hook to avoid stray completes after remove */
+	WRITE_ONCE(lbd_global, NULL);
 	return 0;
 }
 
