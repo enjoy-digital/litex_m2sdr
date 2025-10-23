@@ -22,6 +22,8 @@ from litex.soc.interconnect     import stream
 
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder  import *
+from litex.soc.integration.soc      import SoCBusHandler
+from litex.soc.integration.soc      import SoCRegion
 
 from litex.soc.cores.clock     import *
 from litex.soc.cores.led       import LedChaser
@@ -33,10 +35,11 @@ from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
-from litepcie.common        import *
-from litepcie.phy.s7pciephy import S7PCIEPHY
-from litepcie.frontend.ptm  import PCIePTMSniffer
-from litepcie.frontend.ptm  import PTMCapabilities, PTMRequester
+from litepcie.common            import *
+from litepcie.phy.s7pciephy     import S7PCIEPHY
+from litepcie.frontend.ptm      import PCIePTMSniffer
+from litepcie.frontend.ptm      import PTMCapabilities, PTMRequester
+from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 
 from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
@@ -373,6 +376,26 @@ class BaseSoC(SoCMini):
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
+            # Host <-> SoC DMA Bus.
+            # ---------------------
+            if with_sata:
+                self.dma_bus = SoCBusHandler(
+                    name             = "SoCDMABusHandler",
+                    standard         = "wishbone",
+                    data_width       = 32,
+                    address_width    = 64,
+                    bursting         = False
+                )
+                self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
+                    address_width = 64,
+                    data_width    = 32,
+                    addressing    = "byte",
+                )
+                self.dma_bus.add_slave(name="dma",
+                    slave  = self.pcie_slave.bus,
+                    region = SoCRegion(origin=0x00000000, size=0x100000000)
+                )
+
             # PTM.
             # ----
             if with_pcie_ptm:
@@ -483,8 +506,6 @@ class BaseSoC(SoCMini):
             # Core.
             # -----
             self.add_sata(phy=self.sata_phy, mode="read+write")
-            self.add_ram("sata_rd", origin=0x0002_0000, size=0x200)
-            self.add_ram("sata_wr", origin=0x0002_0200, size=0x200)
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
