@@ -5,6 +5,12 @@ KERNEL_PATH ?= /lib/modules/$(KERNEL_VERSION)/build
 obj-m = m2sdr.o
 m2sdr-objs = main.o liteuart.o litesata.o
 
+# Polling by default; set to 0 to allow SATA MSIs.
+LITESATA_FORCE_POLLING ?= 1
+ifneq ($(strip $(LITESATA_FORCE_POLLING)),0)
+ccflags-y += -DLITESATA_FORCE_POLLING
+endif
+
 # Default target
 all: m2sdr.ko
 

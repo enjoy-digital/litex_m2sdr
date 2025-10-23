@@ -1609,13 +1609,17 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 			litepcie_dev->sata = sata_pdev;
 		}
 
-		/* Enable LiteSATA completion MSIs */
+#ifndef LITESATA_FORCE_POLLING
+        /* Enable LiteSATA completion MSIs */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
-    	litepcie_enable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
+        litepcie_enable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
 #endif
 #ifdef SATA_MEM2SECTOR_INTERRUPT
-    	litepcie_enable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+        litepcie_enable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
 #endif
+#else
+        dev_info(&dev->dev, "LiteSATA: forcing polling; SATA MSIs not enabled\n");
+#endif /* LITESATA_FORCE_POLLING */
 	}
 }
 #endif
