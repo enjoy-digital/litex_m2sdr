@@ -198,7 +198,7 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        with_sata              = False, sata_gen="gen2",
+        with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=1,
         with_jtagbone          = True,
         with_gpio              = False,
@@ -255,7 +255,7 @@ class BaseSoC(SoCMini):
 
             # SATA Capabilities.
             sata_enabled    = with_sata,
-            sata_gen        = sata_gen,
+            sata_gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
 
             # GPIO Capabilities.
             gpio_enabled    = with_gpio,
@@ -497,7 +497,7 @@ class BaseSoC(SoCMini):
             self.sata_phy = LiteSATAPHY(platform.device,
                 refclk     = ClockSignal("refclk_sata"),
                 pads       = platform.request("sata"),
-                gen        = sata_gen,
+                gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
                 clk_freq   = sys_clk_freq,
                 data_width = 16,
                 qpll       = self.qpll.get_channel("sata"),
@@ -872,7 +872,8 @@ def main():
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
 
     # SATA parameters.
-    parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
+    parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
+    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation.", choices=[1, 2, 3])
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
@@ -919,6 +920,7 @@ def main():
 
         # SATA.
         with_sata     = args.with_sata,
+        sata_gen      = args.sata_gen,
 
         # GPIOs.
         with_gpio     = args.with_gpio,
