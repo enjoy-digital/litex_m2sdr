@@ -61,6 +61,10 @@ extern void liteuart_exit(void);
 extern int litesata_init(void);
 extern void litesata_exit(void);
 
+/* LiteSATA MSI notify hooks */
+extern void litesata_msi_signal_reader(void); /* SECTOR2MEM done */
+extern void litesata_msi_signal_writer(void); /* MEM2SECTOR done */
+
 #define LITEPCIE_NAME "m2sdr"
 #define LITEPCIE_MINOR_COUNT 32
 
@@ -414,6 +418,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	irq_vector &= irq_enable;
 	clear_mask = 0;
 
+	/* DMAs */
 	for (i = 0; i < s->channels; i++) {
 		chan = &s->chan[i];
 		/* dma reader interrupt handling */
@@ -449,6 +454,21 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			clear_mask |= (1 << chan->dma.writer_interrupt);
 		}
 	}
+
+	/* SATA */
+#ifdef SATA_SECTOR2MEM_INTERRUPT
+    if (irq_vector & (1 << SATA_SECTOR2MEM_INTERRUPT)) {
+        litesata_msi_signal_reader();
+        clear_mask |= (1 << SATA_SECTOR2MEM_INTERRUPT);
+    }
+#endif
+
+#ifdef SATA_MEM2SECTOR_INTERRUPT
+    if (irq_vector & (1 << SATA_MEM2SECTOR_INTERRUPT)) {
+        litesata_msi_signal_writer();
+        clear_mask |= (1 << SATA_MEM2SECTOR_INTERRUPT);
+    }
+#endif
 
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
 	litepcie_writel(s, CSR_PCIE_MSI_CLEAR_ADDR, clear_mask);
@@ -1560,7 +1580,6 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	FILL_REG_RES(1, "phy",    CSR_SATA_PHY_BASE,        0x100);
 	FILL_REG_RES(2, "reader", CSR_SATA_SECTOR2MEM_BASE, 0x100);
 	FILL_REG_RES(3, "writer", CSR_SATA_MEM2SECTOR_BASE, 0x100);
-	FILL_REG_RES(4, "irq",    CSR_SATA_IRQ_BASE,        0x100);
 
 #undef FILL_REG_RES
 
@@ -1589,6 +1608,14 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 			dev_info(&dev->dev, "LiteSATA platform device registered (host-DMA)\n");
 			litepcie_dev->sata = sata_pdev;
 		}
+
+		/* Enable LiteSATA completion MSIs */
+#ifdef SATA_SECTOR2MEM_INTERRUPT
+    	litepcie_enable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
+#endif
+#ifdef SATA_MEM2SECTOR_INTERRUPT
+    	litepcie_enable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+#endif
 	}
 }
 #endif
@@ -1653,6 +1680,14 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 
 	/* Stop the DMAs */
 	litepcie_stop_dma(litepcie_dev);
+
+	/* Disable SATA interrupts */
+#ifdef SATA_SECTOR2MEM_INTERRUPT
+    litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
+#endif
+#ifdef SATA_MEM2SECTOR_INTERRUPT
+    litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+#endif
 
 	/* Disable all interrupts */
 	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);

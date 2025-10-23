@@ -14,7 +14,6 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/highmem.h>
-#include <linux/interrupt.h>
 #include <linux/litex.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
@@ -50,13 +49,6 @@
 #define LITESATA_DMA_DONE  0x18 // 1bit, ro
 #define LITESATA_DMA_ERR   0x1c // 1bit, ro
 
-#define LITESATA_IRQ_STS   0x00 // 2bit, ro
-#define LITESATA_IRQ_PEND  0x04 // 2bit, rw
-#define LITESATA_IRQ_ENA   0x08 // 2bit, w
-
-#define LSIRQ_RD BIT(0)
-#define LSIRQ_WR BIT(1)
-
 #ifndef SECTOR_SIZE
 #define SECTOR_SIZE 512
 #endif
@@ -71,12 +63,30 @@ struct litesata_dev {
 	void __iomem *lsphy;
 	void __iomem *lsreader;
 	void __iomem *lswriter;
-	void __iomem *lsirq;
 
-	struct completion dma_done;
-	int irq;
+	struct completion dma_done; /* completed by MSI notify hooks */
 	bool dma_32bit;
 };
+
+/* Single-instance MSI notification hook (minimal integration):
+ * The PCI driver calls these when the corresponding MSI fires.
+ * If you add multi-instance later, replace this with a small registry.
+ */
+static struct litesata_dev *lbd_global;
+
+void litesata_msi_signal_reader(void) /* SECTOR2MEM done */
+{
+	if (lbd_global)
+		complete(&lbd_global->dma_done);
+}
+EXPORT_SYMBOL_GPL(litesata_msi_signal_reader);
+
+void litesata_msi_signal_writer(void) /* MEM2SECTOR done */
+{
+	if (lbd_global)
+		complete(&lbd_global->dma_done);
+}
+EXPORT_SYMBOL_GPL(litesata_msi_signal_writer);
 
 static void __iomem *litesata_get_regs(struct platform_device *pdev, const char *name)
 {
@@ -93,9 +103,12 @@ static void __iomem *litesata_get_regs(struct platform_device *pdev, const char 
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
 {
-	int irq = lbd->irq;
+	/* If MSI notify hooks are wired (PCI ISR will call us), use completion;
+	 * otherwise poll the DONE bit like before.
+	 */
+	bool use_msi = (lbd_global != NULL);
 
-	if (irq)
+	if (use_msi)
 		reinit_completion(&lbd->dma_done);
 
 	/* NOTE: do *not* start by writing 0 to LITESATA_DMA_STRT!!! */
@@ -104,12 +117,14 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 	litex_write64(regs + LITESATA_DMA_ADDR, (u64)host_bus_addr);
 	litex_write8(regs + LITESATA_DMA_STRT, 1);
 
-	if (irq)
+	if (use_msi) {
+		/* Wait until PCI ISR notifies us */
 		wait_for_completion(&lbd->dma_done);
-
-	// FIXME: should we implement a timeout here?
-	// (or some other way to improve polling mode)?
-	while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0);
+	} else {
+		/* Polling fallback */
+		while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0)
+			cpu_relax();
+	}
 
 	/* check if DMA xfer successful */
 	if ((litex_read8(regs + LITESATA_DMA_ERR) & 0x01) == 0)
@@ -151,7 +166,8 @@ static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 	 * and warn if firmware was *strictly* 32-bit and we somehow got >4G.
 	 */
 	if (lbd->dma_32bit && upper_32_bits(dma)) {
-		dev_warn_once(lbd->dev, "32-bit DMA requested but got addr >4G (0x%llx); using IOMMU/bounce.\n",
+		dev_warn_once(lbd->dev,
+			      "32-bit DMA requested but got addr >4G (0x%llx); using IOMMU/bounce.\n",
 			      (unsigned long long)dma);
 	}
 
@@ -201,73 +217,6 @@ static const struct block_device_operations litesata_fops = {
 	.owner		= THIS_MODULE,
 	.submit_bio	= litesata_submit_bio,
 };
-
-static irqreturn_t litesata_interrupt(int irq, void *arg)
-{
-	struct litesata_dev *lbd = arg;
-	u32 pend;
-
-	/* should be either LSIRQ_RD or LSIRQ_WR (but never *both*)! */
-	pend = litex_read32(lbd->lsirq + LITESATA_IRQ_PEND);
-
-	/* acknowledge interrupt */
-	litex_write32(lbd->lsirq + LITESATA_IRQ_PEND, pend);
-
-	/* signal DMA xfer completion */
-	complete(&lbd->dma_done);
-
-	return IRQ_HANDLED;
-}
-
-static void litesata_devm_irq_off(void *data)
-{
-	struct litesata_dev *lbd = data;
-
-	litex_write32(lbd->lsirq + LITESATA_IRQ_ENA, 0);
-}
-
-static int litesata_irq_init(struct platform_device *pdev,
-			     struct litesata_dev *lbd)
-{
-	struct device *dev = &pdev->dev;
-	int ret;
-
-	ret = platform_get_irq_optional(pdev, 0);
-	if (ret < 0 && ret != -ENXIO)
-		return ret;
-	if (ret > 0)
-		lbd->irq = ret;
-	else {
-		dev_warn(dev, "Failed to get IRQ, using polling\n");
-		goto use_polling;
-	}
-
-	lbd->lsirq = litesata_get_regs(pdev, "irq");
-	if (IS_ERR(lbd->lsirq))
-		return PTR_ERR(lbd->lsirq);
-
-	ret = devm_request_irq(dev, lbd->irq, litesata_interrupt, 0, "litesata", lbd);
-	if (ret < 0) {
-		dev_warn(dev, "IRQ request error %d, using polling\n", ret);
-		goto use_polling;
-	}
-
-	ret = devm_add_action_or_reset(dev, litesata_devm_irq_off, lbd);
-	if (ret)
-		return dev_err_probe(dev, ret, "Can't register irq_off action\n");
-
-	/* Clear & enable DMA-completion interrupts */
-	litex_write32(lbd->lsirq + LITESATA_IRQ_PEND, LSIRQ_RD | LSIRQ_WR);
-	litex_write32(lbd->lsirq + LITESATA_IRQ_ENA, LSIRQ_RD | LSIRQ_WR);
-
-	init_completion(&lbd->dma_done);
-
-	return 0;
-
-use_polling:
-	lbd->irq = 0;
-	return 0;
-}
 
 static int litesata_init_ident(struct litesata_dev *lbd, sector_t *size)
 {
@@ -343,6 +292,7 @@ static int litesata_probe(struct platform_device *pdev)
 
 	lbd->dev = dev;
 	mutex_init(&lbd->lock);
+	init_completion(&lbd->dma_done);
 
 	/*
 	 * Prefer 32-bit DMA addresses (to keep FPGA addressing simple).
@@ -382,11 +332,6 @@ static int litesata_probe(struct platform_device *pdev)
 	if (err)
 		return err;
 
-	/* Configure interrupts (or fall back to polling). */
-	err = litesata_irq_init(pdev, lbd);
-	if (err)
-		return err;
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 9, 0)
 	{
 		struct queue_limits lim = {
@@ -423,7 +368,10 @@ static int litesata_probe(struct platform_device *pdev)
 	if (err)
 		return dev_err_probe(dev, err, "Can't register del_disk action\n");
 
-	dev_info(dev, "probe success; sector size = %d, dma_%sbit\n",
+	/* Minimal single-instance registration for MSI notify hooks */
+	lbd_global = lbd;
+
+	dev_info(dev, "probe success; sector size = %d, dma_%sbit (MSI-driven, poll fallback)\n",
 		 SECTOR_SIZE, lbd->dma_32bit ? "32" : "64");
 	return 0;
 }
@@ -437,9 +385,6 @@ MODULE_ALIAS("platform:litesata");
 
 static int litesata_remove(struct platform_device *pdev)
 {
-#ifdef LITESATA_STATS
-	lxs_stats_debugfs_exit();
-#endif
 	return 0;
 }
 
@@ -452,7 +397,7 @@ static struct platform_driver litesata_driver = {
 	},
 };
 
-/* Build-into-main: expose init/exit rather than being its own module */
+/* Built-into-main: expose init/exit rather than being its own module */
 int __init litesata_init(void)
 {
 	return platform_driver_register(&litesata_driver);
