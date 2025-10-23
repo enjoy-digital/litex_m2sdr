@@ -17,7 +17,6 @@
 
 #include "csr.h"
 #include "soc.h"
-#include "flags.h"
 #include "libm2sdr.h"
 #include "m2sdr_flash.h"
 

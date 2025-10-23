@@ -45,7 +45,6 @@
 #include "litepcie.h"
 #include "csr.h"
 #include "config.h"
-#include "flags.h"
 #include "soc.h"
 #include "mem.h"
 

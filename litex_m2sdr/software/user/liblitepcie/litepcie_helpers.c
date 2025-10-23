@@ -17,8 +17,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include "flags.h"
-
 #include "litepcie_helpers.h"
 #include "litepcie.h"
 

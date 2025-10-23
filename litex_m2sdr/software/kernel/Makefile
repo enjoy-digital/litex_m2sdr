@@ -15,7 +15,7 @@ endif
 all: m2sdr.ko
 
 # Build the module
-m2sdr.ko: main.c liteuart.c litesata.c litepcie.h config.h flags.h csr.h soc.h litex.h
+m2sdr.ko: main.c liteuart.c litesata.c litepcie.h config.h csr.h soc.h litex.h
 	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 # Install the module to the kernel directory, enable auto-load on boot, and install udev rule to set

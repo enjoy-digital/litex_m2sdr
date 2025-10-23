@@ -23,8 +23,6 @@
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
 
-#include "flags.h"
-
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 
