@@ -22,6 +22,8 @@ from litex.soc.interconnect     import stream
 
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder  import *
+from litex.soc.integration.soc      import SoCBusHandler
+from litex.soc.integration.soc      import SoCRegion
 
 from litex.soc.cores.clock     import *
 from litex.soc.cores.led       import LedChaser
@@ -33,10 +35,11 @@ from litex.soc.cores.spi_flash import S7SPIFlash
 
 from litex.build.generic_platform import IOStandard, Subsignal, Pins
 
-from litepcie.common        import *
-from litepcie.phy.s7pciephy import S7PCIEPHY
-from litepcie.frontend.ptm  import PCIePTMSniffer
-from litepcie.frontend.ptm  import PTMCapabilities, PTMRequester
+from litepcie.common            import *
+from litepcie.phy.s7pciephy     import S7PCIEPHY
+from litepcie.frontend.ptm      import PCIePTMSniffer
+from litepcie.frontend.ptm      import PTMCapabilities, PTMRequester
+from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 
 from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
@@ -195,7 +198,7 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        with_sata              = False, sata_gen="gen2",
+        with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=1,
         with_jtagbone          = True,
         with_gpio              = False,
@@ -252,7 +255,7 @@ class BaseSoC(SoCMini):
 
             # SATA Capabilities.
             sata_enabled    = with_sata,
-            sata_gen        = sata_gen,
+            sata_gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
 
             # GPIO Capabilities.
             gpio_enabled    = with_gpio,
@@ -281,9 +284,9 @@ class BaseSoC(SoCMini):
         # Time Generator ---------------------------------------------------------------------------
 
         self.time_gen = TimeGenerator(
-            clk        = si5351_clk1,
-            clk_freq   = 100e6,
-            with_csr   = True,
+            clk      = si5351_clk1,
+            clk_freq = 100e6,
+            with_csr = True,
         )
         self.time_gen.add_cdc()
 
@@ -340,10 +343,10 @@ class BaseSoC(SoCMini):
                 assert pcie_lanes == 1
             pcie_dmas = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
-                data_width  = {1: 64, 2: 64, 4: 128}[pcie_lanes],
-                bar0_size   = 0x10_0000,
-                with_ptm    = with_pcie_ptm,
-                cd          = "sys",
+                data_width = {1: 64, 2: 64, 4: 128}[pcie_lanes],
+                bar0_size  = 0x10_0000,
+                with_ptm   = with_pcie_ptm,
+                cd         = "sys",
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
@@ -361,17 +364,46 @@ class BaseSoC(SoCMini):
                 }
             )
 
+            # MSIs
+            # ----
+            pcie_msis = {}
+            if with_sata:
+                pcie_msis.update({
+                    "SATA_SECTOR2MEM" : Signal(),
+                    "SATA_MEM2SECTOR" : Signal(),
+                })
+
             # Core.
             # -----
             self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
-                with_msi              = True,
+                with_msi              = True, msis = pcie_msis,
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
+
+            # Host <-> SoC DMA Bus.
+            # ---------------------
+            if with_sata:
+                self.dma_bus = SoCBusHandler(
+                    name          = "SoCDMABusHandler",
+                    standard      = "wishbone",
+                    data_width    = 32,
+                    address_width = 32,
+                    bursting      = False,
+                )
+                self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
+                    address_width = 32,
+                    data_width    = 32,
+                    addressing    = "byte",
+                )
+                self.dma_bus.add_slave(name="dma",
+                    slave  = self.pcie_slave.bus,
+                    region = SoCRegion(origin=0x00000000, size=0x1_0000_0000)
+                )
 
             # PTM.
             # ----
@@ -474,7 +506,7 @@ class BaseSoC(SoCMini):
             self.sata_phy = LiteSATAPHY(platform.device,
                 refclk     = ClockSignal("refclk_sata"),
                 pads       = platform.request("sata"),
-                gen        = sata_gen,
+                gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
                 clk_freq   = sys_clk_freq,
                 data_width = 16,
                 qpll       = self.qpll.get_channel("sata"),
@@ -482,7 +514,14 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_sata(phy=self.sata_phy, mode="read+write")
+            self.add_sata(phy=self.sata_phy, mode="read+write", with_irq=False)
+            if with_pcie:
+                self.comb += [
+                    soc_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
+                    soc_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
+                ]
+
+            #self.add_pcie_slave_probe()
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
@@ -728,6 +767,17 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
+    def add_pcie_slave_probe(self, depth=4096):
+        analyzer_signals = [
+            self.pcie_slave.bus,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
     def add_pcie_dma_probe(self, depth=1024):
         assert hasattr(self, "pcie_dma0")
         analyzer_signals = [
@@ -837,7 +887,8 @@ def main():
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
 
     # SATA parameters.
-    parser.add_argument("--with-sata",       action="store_true",     help="Enable SATA Storage.")
+    parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
+    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation.", choices=[1, 2, 3])
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
@@ -884,6 +935,7 @@ def main():
 
         # SATA.
         with_sata     = args.with_sata,
+        sata_gen      = args.sata_gen,
 
         # GPIOs.
         with_gpio     = args.with_gpio,
@@ -914,6 +966,8 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+        if args.with_sata:
+            r += f"_sata"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
         return r
