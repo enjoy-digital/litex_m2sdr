@@ -949,6 +949,8 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+        if args.with_sata:
+            r += f"_sata"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
         return r
