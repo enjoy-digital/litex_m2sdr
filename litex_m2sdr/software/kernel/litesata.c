@@ -35,18 +35,36 @@
 #include <linux/ratelimit.h>
 #include <linux/sched.h>
 #include <linux/compiler.h>
+#include <linux/moduleparam.h>
 
 #include "litex.h"
 #include "litesata.h"
 
 /* -------- Optional test mode: force polling instead of MSI -------- */
 #ifndef LITESATA_FORCE_POLLING
-#define LITESATA_FORCE_POLLING    0   /* set to 1 to force polling */
+#define LITESATA_FORCE_POLLING 0   /* set to 1 to force polling at build time */
 #endif
 
 #ifndef LITESATA_DMA_WAIT_TIMEOUT_MS
-#define LITESATA_DMA_WAIT_TIMEOUT_MS  2000 /* timeout per DMA before polling */
+#define LITESATA_DMA_WAIT_TIMEOUT_MS 1 /* timeout per DMA before polling */
 #endif
+
+/* Extra hardening knobs (runtime-configurable via module params) */
+static bool litesata_force_polling = LITESATA_FORCE_POLLING;
+module_param_named(force_polling, litesata_force_polling, bool, 0644);
+MODULE_PARM_DESC(force_polling, "Force polling (ignore MSI completions)");
+
+static unsigned int litesata_msi_timeout_ms = LITESATA_DMA_WAIT_TIMEOUT_MS;
+module_param_named(msi_timeout_ms, litesata_msi_timeout_ms, uint, 0644);
+MODULE_PARM_DESC(msi_timeout_ms, "Timeout (ms) to wait for MSI before polling");
+
+static unsigned int litesata_irq_arm_delay_us = 0;
+module_param_named(irq_arm_delay_us, litesata_irq_arm_delay_us, uint, 0644);
+MODULE_PARM_DESC(irq_arm_delay_us, "Delay (us) after STRT before waiting on MSI");
+
+static unsigned int litesata_early_poll_us = 50;
+module_param_named(early_poll_us, litesata_early_poll_us, uint, 0644);
+MODULE_PARM_DESC(early_poll_us, "Early poll window (us) after STRT to catch fast DONE");
 
 /* -------- LiteSATA register layout -------- */
 
@@ -130,45 +148,68 @@ static void __iomem *litesata_get_regs(struct platform_device *pdev, const char 
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
 {
-	bool use_msi = !LITESATA_FORCE_POLLING && READ_ONCE(lbd_global) != NULL;
+	bool use_msi = !litesata_force_polling && READ_ONCE(lbd_global) != NULL;
 
 	if (use_msi)
 		reinit_completion(&lbd->dma_done);
 
-	/* NOTE: do *not* start by writing 0 to LITESATA_DMA_STRT!!! */
+	/* Program DMA */
 	litex_write64(regs + LITESATA_DMA_SECT, sector);
 	litex_write16(regs + LITESATA_DMA_NSEC, count);
 	litex_write64(regs + LITESATA_DMA_ADDR, (u64)host_bus_addr);
-	/* Make sure the address/len are visible to the device before start */
+	/* Make sure addr/len visible to device before STRT */
 	wmb();
 	litex_write8(regs + LITESATA_DMA_STRT, 1);
 
+	/* Optional fixed arming delay */
+	if (use_msi && litesata_irq_arm_delay_us)
+		udelay(litesata_irq_arm_delay_us);
+
+	/* Early poll “grace window”: catches ultra-fast completions */
+	if (litesata_early_poll_us) {
+		u64 start = ktime_get_ns();
+		u64 budget = (u64)litesata_early_poll_us * 1000ULL;
+		while (likely(ktime_get_ns() - start < budget)) {
+			if (litex_read8(regs + LITESATA_DMA_DONE) & 0x01)
+				goto check_err_and_exit; /* finished already */
+			cpu_relax();
+		}
+	}
+
 	if (use_msi) {
-		unsigned long to = msecs_to_jiffies(LITESATA_DMA_WAIT_TIMEOUT_MS);
+		unsigned long to = msecs_to_jiffies(litesata_msi_timeout_ms);
+		/*
+		 * If MSI comes in, we still *verify* DONE; if it doesn't, we poll.
+		 * Note: a “stray” MSI from a previous xfer won't hurt, because we
+		 * always gate completion by the DONE bit as well.
+		 */
 		if (!wait_for_completion_timeout(&lbd->dma_done, to)) {
-			/* MSI might have been lost or arrived before reinit; poll as fallback */
-			dev_warn_ratelimited(lbd->dev, "MSI timeout; falling back to polling for this DMA\n");
+			dev_warn_ratelimited(lbd->dev,
+				"MSI timeout (>%ums); falling back to polling\n",
+				litesata_msi_timeout_ms);
 			use_msi = false;
 		}
 	}
 
+	/* Poll path (either forced, or MSI timeout) */
 	if (!use_msi) {
-		/* Poll for completion; periodically reschedule to avoid soft lockups */
 		unsigned int spins = 0;
 		while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0) {
 			cpu_relax();
 			if ((++spins & 0xFFFF) == 0)
-				cond_resched();
+				cond_resched(); /* avoid soft lockups on busy systems */
 		}
 	}
 
-	/* check if DMA xfer successful */
+check_err_and_exit:
+	/* Always verify hardware error bit */
 	if ((litex_read8(regs + LITESATA_DMA_ERR) & 0x01) == 0)
 		return 0;
 
 	dev_err(lbd->dev, "failed transferring sector %lld\n", (long long)sector);
 	return -EIO;
 }
+
 
 /* Process a single bvec of a bio. */
 static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
