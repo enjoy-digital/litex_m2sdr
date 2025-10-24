@@ -105,9 +105,11 @@ def main():
     # print(f"Current FIFO Head Timestamp: {current_ts}")
     for i in range(10):
         test_now = scheduler.read_test_schedule_now()
-        print(f"Test increment: {test_now}")
-        time.sleep(1)
-    
+        temperature = (float(getattr(bus.regs, "xadc_temperature").read()) * 503.975/4096) - 273.15
+        print(f"Main test increment counter: {test_now}")
+        print(f"FPGA Temperature : {temperature} °C")
+        time.sleep(0.5)
+
     bus.close()
     print("Done.")
 

@@ -285,7 +285,6 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
         # Time Generator ---------------------------------------------------------------------------
-
         self.time_gen = TimeGenerator(
             clk      = si5351_clk1,
             clk_freq = 100e6,
@@ -324,7 +323,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         # Leds -------------------------------------------------------------------------------------
 
         led_pad = platform.request("user_led")
-        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
+        self.leds = LedChaser(pads=Signal(), sys_clk_freq=0.5*sys_clk_freq)
         self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
