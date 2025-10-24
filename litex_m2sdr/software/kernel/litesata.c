@@ -529,11 +529,17 @@ static const struct of_device_id litesata_match[] = {
 MODULE_DEVICE_TABLE(of, litesata_match);
 MODULE_ALIAS("platform:litesata");
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 static int litesata_remove(struct platform_device *pdev)
+#else
+static void litesata_remove(struct platform_device *pdev)
+#endif
 {
 	/* Clear the global hook to avoid stray completes after remove */
 	WRITE_ONCE(lbd_global, NULL);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0)
 	return 0;
+#endif
 }
 
 static struct platform_driver litesata_driver = {
