@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 ---------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date         : Wed Oct 22 13:40:00 2025
+| Date         : Fri Oct 24 17:14:09 2025
 | Host         : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command      : report_utilization -hierarchical -file litex_m2sdr_m2_pcie_x1_utilization_hierarchical_place.rpt
 | Design       : litex_m2sdr_m2_pcie_x1
@@ -22,18 +22,18 @@ Table of Contents
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
 |                          Instance                          |                    Module                   | Total LUTs | Logic LUTs | LUTRAMs | SRLs |  FFs | RAMB36 | RAMB18 | DSP Blocks |
 +------------------------------------------------------------+---------------------------------------------+------------+------------+---------+------+------+--------+--------+------------+
-| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       7188 |       6063 |    1120 |    5 | 8404 |     35 |      2 |          0 |
-|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       6867 |       5746 |    1120 |    1 | 7748 |     27 |      2 |          0 |
-|   pcie_s7                                                  |                                     pcie_s7 |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
+| litex_m2sdr_m2_pcie_x1                                     |                                       (top) |       7150 |       6025 |    1120 |    5 | 8406 |     35 |      2 |          0 |
+|   (litex_m2sdr_m2_pcie_x1)                                 |                                       (top) |       6830 |       5709 |    1120 |    1 | 7750 |     27 |      2 |          0 |
+|   pcie_s7                                                  |                                     pcie_s7 |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
 |     (pcie_s7)                                              |                                     pcie_s7 |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
-|     inst                                                   |                           pcie_s7_pcie2_top |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
+|     inst                                                   |                           pcie_s7_pcie2_top |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
 |       (inst)                                               |                           pcie_s7_pcie2_top |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
-|       inst                                                 |                            pcie_s7_core_top |        321 |        317 |       0 |    4 |  656 |      8 |      0 |          0 |
+|       inst                                                 |                            pcie_s7_core_top |        322 |        318 |       0 |    4 |  656 |      8 |      0 |          0 |
 |         (inst)                                             |                            pcie_s7_core_top |          8 |          4 |       0 |    4 |   11 |      0 |      0 |          0 |
-|         gt_top_i                                           |                              pcie_s7_gt_top |        200 |        200 |       0 |    0 |  319 |      0 |      0 |          0 |
+|         gt_top_i                                           |                              pcie_s7_gt_top |        199 |        199 |       0 |    0 |  319 |      0 |      0 |          0 |
 |           (gt_top_i)                                       |                              pcie_s7_gt_top |          2 |          2 |       0 |    0 |    8 |      0 |      0 |          0 |
 |           gt_rx_valid_filter[0].GT_RX_VALID_FILTER_7x_inst |               pcie_s7_gt_rx_valid_filter_7x |         20 |         20 |       0 |    0 |   30 |      0 |      0 |          0 |
-|           pipe_wrapper_i                                   |                        pcie_s7_pipe_wrapper |        178 |        178 |       0 |    0 |  281 |      0 |      0 |          0 |
+|           pipe_wrapper_i                                   |                        pcie_s7_pipe_wrapper |        177 |        177 |       0 |    0 |  281 |      0 |      0 |          0 |
 |             (pipe_wrapper_i)                               |                        pcie_s7_pipe_wrapper |          1 |          1 |       0 |    0 |    2 |      0 |      0 |          0 |
 |             gtp_pipe_reset.gtp_pipe_reset_i                |                      pcie_s7_gtp_pipe_reset |         26 |         26 |       0 |    0 |   44 |      0 |      0 |          0 |
 |             pipe_lane[0].gt_wrapper_i                      |                          pcie_s7_gt_wrapper |          0 |          0 |       0 |    0 |    0 |      0 |      0 |          0 |
@@ -41,11 +41,11 @@ Table of Contents
 |             pipe_lane[0].gtp_pipe_rate.gtp_pipe_rate_i     |                       pcie_s7_gtp_pipe_rate |         23 |         23 |       0 |    0 |   39 |      0 |      0 |          0 |
 |             pipe_lane[0].pipe_eq.pipe_eq_i                 |                             pcie_s7_pipe_eq |         71 |         71 |       0 |    0 |   66 |      0 |      0 |          0 |
 |             pipe_lane[0].pipe_sync_i                       |                           pcie_s7_pipe_sync |          9 |          9 |       0 |    0 |   21 |      0 |      0 |          0 |
-|             pipe_lane[0].pipe_user_i                       |                           pcie_s7_pipe_user |         33 |         33 |       0 |    0 |   51 |      0 |      0 |          0 |
-|         pcie_top_i                                         |                            pcie_s7_pcie_top |        115 |        115 |       0 |    0 |  322 |      8 |      0 |          0 |
+|             pipe_lane[0].pipe_user_i                       |                           pcie_s7_pipe_user |         32 |         32 |       0 |    0 |   51 |      0 |      0 |          0 |
+|         pcie_top_i                                         |                            pcie_s7_pcie_top |        116 |        116 |       0 |    0 |  322 |      8 |      0 |          0 |
 |           (pcie_top_i)                                     |                            pcie_s7_pcie_top |          1 |          1 |       0 |    0 |   16 |      0 |      0 |          0 |
-|           axi_basic_top                                    |                       pcie_s7_axi_basic_top |        104 |        104 |       0 |    0 |  252 |      0 |      0 |          0 |
-|             rx_inst                                        |                        pcie_s7_axi_basic_rx |         79 |         79 |       0 |    0 |  154 |      0 |      0 |          0 |
+|           axi_basic_top                                    |                       pcie_s7_axi_basic_top |        105 |        105 |       0 |    0 |  252 |      0 |      0 |          0 |
+|             rx_inst                                        |                        pcie_s7_axi_basic_rx |         80 |         80 |       0 |    0 |  154 |      0 |      0 |          0 |
 |               rx_null_gen_inst                             |               pcie_s7_axi_basic_rx_null_gen |         31 |         31 |       0 |    0 |   13 |      0 |      0 |          0 |
 |               rx_pipeline_inst                             |               pcie_s7_axi_basic_rx_pipeline |         51 |         51 |       0 |    0 |  141 |      0 |      0 |          0 |
 |             tx_inst                                        |                        pcie_s7_axi_basic_tx |         25 |         25 |       0 |    0 |   98 |      0 |      0 |          0 |

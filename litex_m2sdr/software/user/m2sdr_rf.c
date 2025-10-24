@@ -32,6 +32,7 @@
 
 /* Variables */
 /*-----------*/
+//#define USE_LITEPCIE
 
 #ifdef USE_LITEPCIE
 static char m2sdr_device[1024];
