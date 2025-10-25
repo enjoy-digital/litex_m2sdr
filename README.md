@@ -290,7 +290,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
 2. **Ethernet and PCIe Tests:**
    - For Ethernet tests, if the board is mounted in an Acorn Mini Baseboard:
    ```
-   ./litex_m2sdr.py --with-ethernet --ethernet-sfp=0 --build --load
+   ./litex_m2sdr.py --with-eth --eth-sfp=0 --build --load
    ping 192.168.1.50
    ```
    - For PCIe tests, if the board is mounted directly in an M2 slot:
