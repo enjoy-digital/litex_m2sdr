@@ -517,8 +517,8 @@ class BaseSoC(SoCMini):
             self.add_sata(phy=self.sata_phy, mode="read+write", with_irq=False)
             if with_pcie:
                 self.comb += [
-                    soc_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
-                    soc_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
+                    pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
+                    pcie_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
                 ]
 
             #self.add_pcie_slave_probe()
