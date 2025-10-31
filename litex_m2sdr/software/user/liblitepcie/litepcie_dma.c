@@ -140,13 +140,23 @@ void litepcie_dma_cleanup(struct litepcie_dma_ctrl *dma)
     litepcie_release_dma(dma->fds.fd, dma->use_reader, dma->use_writer);
 
     if (dma->zero_copy) {
-        if (dma->use_reader)
+        if (dma->use_reader) {
             munmap(dma->buf_wr, dma->mmap_dma_info.dma_tx_buf_size * dma->mmap_dma_info.dma_tx_buf_count);
-        if (dma->use_writer)
+            dma->buf_wr = NULL;
+        }
+        if (dma->use_writer) {
             munmap(dma->buf_rd, dma->mmap_dma_info.dma_tx_buf_size * dma->mmap_dma_info.dma_tx_buf_count);
+            dma->buf_rd = NULL;
+        }
     } else {
-        free(dma->buf_rd);
-        free(dma->buf_wr);
+        if (dma->use_reader) {
+            free(dma->buf_wr);
+            dma->buf_wr = NULL;
+        }
+        if (dma->use_writer) {
+            free(dma->buf_rd);
+            dma->buf_rd = NULL;
+        }
     }
 
     if (dma->shared_fd != 1)
