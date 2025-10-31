@@ -377,10 +377,10 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     if (_rx_stream.opened) {
 #if USE_LITEPCIE
          /* Release the DMA engine. */
-        litepcie_release_dma(_fd, 0, 1);
-
-        munmap(_rx_stream.buf,
-               _dma_mmap_info.dma_rx_buf_size * _dma_mmap_info.dma_rx_buf_count);
+        if (_rx_stream.dma.buf_rd != NULL) {
+            litepcie_dma_cleanup(&_rx_stream.dma);
+        }
+        _rx_stream.buf = NULL;
 #elif USE_LITEETH
         /* nothing to stop explicitly in UDP helper */
 #endif
@@ -390,10 +390,10 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 #if USE_LITEPCIE
     if (_tx_stream.opened) {
         /* Release the DMA engine. */
-        litepcie_release_dma(_fd, 1, 0);
-
-        munmap(_tx_stream.buf,
-               _dma_mmap_info.dma_tx_buf_size * _dma_mmap_info.dma_tx_buf_count);
+        if (_tx_stream.dma.buf_wr) {
+            litepcie_dma_cleanup(&_tx_stream.dma);
+        }
+        _rx_stream.buf = NULL;
         _tx_stream.opened = false;
     }
 #endif
