@@ -316,6 +316,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     if (stream == RX_STREAM) {
 #if USE_LITEPCIE
         litepcie_dma_cleanup(&_rx_stream.dma);
+        _rx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_rx_stream.buf);
 #endif
@@ -323,6 +324,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
         litepcie_dma_cleanup(&_tx_stream.dma);
+        _tx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_tx_stream.buf);
 #endif
