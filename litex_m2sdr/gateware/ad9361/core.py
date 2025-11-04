@@ -204,8 +204,8 @@ class AD9361RFIC(LiteXModule):
 
         # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            scheduler_tx.sink.connect(tx_cdc.source, omit={"ready"}) , # connect scheduler to tx_cdc 
-            gpio_tx_unpacker.sink.connect(scheduler_tx.source, omit={"valid"}), # connect gpio unpacker to scheduler except valid and ready that will be managed by the scheduler
+            scheduler_tx.sink.connect(tx_cdc.source), # , omit={"ready"}) , # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source)  # WTF was that for? , omit={"valid"}), # connect gpio unpacker to scheduler
         ]
 
         self.comb += [

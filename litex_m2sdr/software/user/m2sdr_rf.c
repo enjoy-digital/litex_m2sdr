@@ -139,6 +139,28 @@ void gpio_set_value(unsigned gpio, int value)
 
 }
 
+/*Get hardware time*/
+static int64_t getHardwareTime(void * conn)
+{
+    uint32_t control_reg = 0;
+    int64_t time_ns = 0;
+
+    /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
+    control_reg = m2sdr_readl(conn, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
+    m2sdr_writel(conn, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
+    m2sdr_writel(conn, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+
+    /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
+    time_ns |= ((int64_t)(m2sdr_readl(conn, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
+    time_ns |= ((int64_t)(m2sdr_readl(conn, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
+
+    /* Debug log the hardware time in nanoseconds. */
+
+    return time_ns;
+}
+
 /* M2SDR Init */
 /*------------*/
 
@@ -434,9 +456,18 @@ static void m2sdr_init(
     if (enable_oversample) {
         ad9361_enable_oversampling(ad9361_phy);
     }
+    uint64_t hw_time_ns = 0;
+    for (int i = 0; i < 10; i++) {
+        hw_time_ns = getHardwareTime(conn);
+        printf("Hardware time (ns): %lld\n", (long long)hw_time_ns);
+        sleep(1);
+    }
 
     m2sdr_close(conn);
 }
+
+
+
 
 /* Help */
 /*------*/

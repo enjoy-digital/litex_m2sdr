@@ -1,7 +1,7 @@
 #!/bin/bash
 # Smart reinitialization script for the m2sdr driver
 # Author: Ismail Essaidi
-# Purpose: Automatically reload the m2sdr kernel module if m2sdr_util fails to init.
+# Purpose: Automatically reload the m2sdr kernel module if m2sdr_util info fails to init.
 
 set -e  # Exit on errors
 set -o pipefail

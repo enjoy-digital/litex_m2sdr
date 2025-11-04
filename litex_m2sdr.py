@@ -847,6 +847,7 @@ def main():
     parser.add_argument("--flash-multiboot", action="store_true", help="Flash multiboot bitstreams.")
     parser.add_argument("--rescan",          action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+    parser.add_argument("--sim",             action="store_true", help="Run in simulation mode.")
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
@@ -978,6 +979,8 @@ def main():
         prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),    verify=True)
         prog.flash(soc.platform.image_size,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
 
+    # if args.sim:
+        
     # Rescan PCIe Bus.
     if args.rescan:
         subprocess.run("sudo sh -c 'cd litex_m2sdr/software && ./rescan.py'", shell=True)
