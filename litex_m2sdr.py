@@ -272,8 +272,7 @@ class BaseSoC(SoCMini):
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
-        if not with_gpio:
-            self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
+        self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
 
         # SI5351 ClkIn/Out.
         si5351_clk_in = Signal()
@@ -593,26 +592,11 @@ class BaseSoC(SoCMini):
         # GPIO -------------------------------------------------------------------------------------
 
         if with_gpio:
-
             self.gpio = GPIO(
                 rx_packer   = self.ad9361.gpio_rx_packer,
                 tx_unpacker = self.ad9361.gpio_tx_unpacker,
             )
-            # GPIO0   : Sync/ClkIn.
-            # GPIO1-3 : Synchro_GPIO1-3.
-            self.gpio.connect_to_pads(pads=platform.request("gpios"))
-
-            # Drive led from GPIO0 when in loopback mode to ease test/verification.
-            self.sync += If(self.gpio._control.fields.loopback, led_pad.eq(self.gpio.i_async[0]))
-
-           # Use GPIO0 as ClkIn.
-            self.comb += self.si5351.clkin_ufl.eq(self.gpio.i_async[0])
-
-            #platform.add_extension([
-            #    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),
-            #])
-
-            #self.comb += platform.request('wr_clk_out').eq(ClockSignal('wr'))
+            self.gpio.connect_to_pads(pads=platform.request("gpios")) # TP1-2.
 
         # White Rabbit -----------------------------------------------------------------------------
 
