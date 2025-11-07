@@ -7,6 +7,7 @@ from litex.soc.interconnect import stream
 from litex.gen import *
 # import your actual scheduler and layouts
 
+import argparse
 import sys 
 import subprocess
 sys.path.append("..")  # add parent directory to path
@@ -29,9 +30,9 @@ class Top(Module):
         self.sink   = self.sched.sink
         self.source = self.sched.source
         self.data_fifo = self.sched.data_fifo
-        # self.fsm = self.sched.fsm
+        #self.fsm = self.sched.fsm
         # Always accept output (no backpressure) so it's easy to observe
-        self.comb += [ self.sched.source.ready.eq(1),     
+        self.comb += [ self.source.ready.eq(1)
                     ]
 
 def drive_packet(dut, ts_when_due, n_words):
@@ -74,11 +75,12 @@ def drive_packet(dut, ts_when_due, n_words):
 
 def stimulus(dut):
     print("[stim] Starting stimulus...")
-    frames_per_packet = 8176 // 8  # 64-bit words
-    number_of_packets = 8
-    data_size = frames_per_packet * number_of_packets + 2
+    frames_per_packet = 8176 // 8  # 64-bit words (1022 frames per packet)
+    number_of_packets = 4
+    data_size = frames_per_packet * number_of_packets
     # Let 'now' run a little
-    for _ in range(20): 
+    wait = 20
+    for _ in range(wait): 
         yield dut.reset.eq(1)
         yield
     yield dut.reset.eq(0)
@@ -87,15 +89,20 @@ def stimulus(dut):
     yield from drive_packet(dut, ts1, data_size)
 
     # Let time advance; observe that streaming begins only when now >= ts1
-    wait = ts1 + 500
+    wait = 2 * ts1
     for _ in range(wait): yield
 
     # A second packet due later
-    ts2 = data_size + wait
+    ts2 = data_size + wait + 2*frames_per_packet
     yield from drive_packet(dut, ts2, frames_per_packet * 1)
-    for _ in range(1500): yield
+    for _ in range(3000): yield
 
 def main():
+    argparser = argparse.ArgumentParser(description="Scheduler Testbench")
+    argparser.add_argument("--gtk",         action="store_true",        help="open GTKWave at end of simulation")
+    argparser.add_argument("--vcd-name",   default="scheduler_tb.vcd", help="VCD output filename")
+    args = argparser.parse_args()
+
     top = Top()
     print("Top created, starting simulation...")
     gens = [
@@ -104,9 +111,10 @@ def main():
     run_simulation(
         top, gens,
         clocks={"sys": 1e9/CLK_HZ},      # 10 ns period
-        vcd_name="scheduler_tb.vcd" # open in GTKWave    
+        vcd_name=args.vcd_name # open in GTKWave    
     )
-    subprocess.run("gtkwave scheduler_tb.vcd gtkwave_config.sav", shell=True)
+    if args.gtk:
+        subprocess.run("gtkwave scheduler_tb.vcd gtkwave_config.sav", shell=True)
 
 if __name__ == "__main__":
     main()
