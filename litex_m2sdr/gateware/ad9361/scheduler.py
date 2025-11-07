@@ -32,7 +32,6 @@ class Scheduler(LiteXModule):
         # Data Fifo: stores multiple packets
         frames_per_packet = packet_size // (data_width // 8) # a frame is 8 bytes ==> 1022 frames_per_packet
         self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout_with_ts(data_width), depth=frames_per_packet*max_packets) # depth is in number of frames
-        self.out = stream.Endpoint(dma_layout(data_width)) # o (for debug purpose only, not used currently)
         self.state = Signal(8) # for debug purpose only, not used currently
 
         # Counters for debugging
@@ -116,11 +115,9 @@ class Scheduler(LiteXModule):
                 source.first.eq(data_fifo.source.first),
                 source.last.eq(data_fifo.source.last),
                 source.data.eq(data_fifo.source.data),
-                source.valid.eq(data_fifo.source.valid),# & (data_fifo.source.timestamp <= self.now)),
+                source.valid.eq(data_fifo.source.valid & (data_fifo.source.timestamp <= self.now)),
                 data_fifo.source.ready.eq(source.ready & (data_fifo.source.timestamp <= self.now)),
             ]
-
-        self.comb += self.out.connect(source) # debug output
        
         # ────────────────────────────────────────────────
             #  CSR Exposure
