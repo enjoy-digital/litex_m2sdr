@@ -178,6 +178,8 @@ static inline void litepcie_writel(struct litepcie_device *s, uint32_t addr, uin
 /*                                 Capabilities                                                   */
 /* -----------------------------------------------------------------------------------------------*/
 
+#ifdef CSR_SATA_PHY_BASE
+
 /* Check if the SoC has SATA capability */
 static bool litepcie_soc_has_sata(struct litepcie_device *s)
 {
@@ -192,6 +194,8 @@ static bool litepcie_soc_has_sata(struct litepcie_device *s)
 	return false;
 #endif
 }
+
+#endif
 
 /* -----------------------------------------------------------------------------------------------*/
 /*                               LitePCIe Interrupts                                              */
