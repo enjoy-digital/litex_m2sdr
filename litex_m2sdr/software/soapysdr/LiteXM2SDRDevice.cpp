@@ -301,9 +301,48 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _oversampling = std::stoi(args.at("oversampling"));
     }
 
+    /* RefClk Selection */
+    int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
+    std::string clock_source = "internal"; /* Default XO. */
+    if (args.count("refclk_freq") > 0) {
+        refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
+    }
+    if (args.count("clock_source") > 0) {
+        clock_source = args.at("clock_source");
+    }
     if (do_init) {
-        /* Initialize SI531 Clocking. */
-        m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+
+        /* Initialize SI5351 Clocking */
+#ifdef CSR_SI5351_BASE
+        if (clock_source == "internal") {
+            /* SI5351B, XO reference */
+            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+                SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
+            if (refclk_hz == 40000000) {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_xo_40m_config,
+                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
+            } else {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_xo_38p4m_config,
+                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
+            }
+        } else {
+            /* SI5351C, external 10 MHz CLKIN from u.FL */
+            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+                  SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+                  SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
+            if (refclk_hz == 40000000) {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_clkin_10m_40m_config,
+                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+            } else {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_clkin_10m_38p4m_config,
+                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+            }
+        }
+#endif
 
         /* Power-up AD9361 */
         litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
@@ -313,10 +352,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     /* Initialize AD9361 RFIC. */
-    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync    = -1;
-    default_init_param.gpio_cal_sw1 = -1;
-    default_init_param.gpio_cal_sw2 = -1;
+    default_init_param.reference_clk_rate = refclk_hz;
+    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync          = -1;
+    default_init_param.gpio_cal_sw1       = -1;
+    default_init_param.gpio_cal_sw2       = -1;
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
     if (do_init) {
