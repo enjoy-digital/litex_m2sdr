@@ -68,11 +68,11 @@ const uint8_t si5351_xo_config[][2] = {
     { 0x0F, 0x00 },  // PLL src=XTAL (25MHz), CLKIN_DIV=1
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x2F },  // CLK0: LVCMOS 8mA, MS0 src=PLLB
-    { 0x11, 0x2F },  // CLK1: LVCMOS 8mA, MS1 src=PLLB
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
     { 0x12, 0x00 },  // CLK2: OFF.
     { 0x13, 0x00 },  // CLK3: OFF.
-    { 0x14, 0x2F },  // CLK4: LVCMOS 8mA, MS4 src=PLLB
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
     { 0x15, 0x00 },  // CLK5: OFF.
     { 0x16, 0x00 },  // CLK6: OFF.
     { 0x17, 0x00 },  // CLK7: OFF.
@@ -199,11 +199,11 @@ const uint8_t si5351_clkin_10m_config[][2] = {
     { 0x0F, 0x04 },  // PLL source = CLKIN @ 10MHz, CLKIN_DIV=4
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x0F },  // CLK0: LVCMOS 8mA, MS0 src=PLLB
-    { 0x11, 0x0F },  // CLK1: LVCMOS 8mA, MS1 src=PLLB
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
     { 0x12, 0x00 },  // CLK2: OFF.
     { 0x13, 0x00 },  // CLK3: OFF.
-    { 0x14, 0x0F },  // CLK4: LVCMOS 8mA, MS4 src=PLLB
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
     { 0x15, 0x00 },  // CLK5: OFF.
     { 0x16, 0x00 },  // CLK6: OFF.
     { 0x17, 0x00 },  // CLK7: OFF.
