@@ -170,19 +170,38 @@ static void m2sdr_init(
         /* Supported by SI5351B & C Versions */
         printf("Using internal XO as SI5351 RefClk...\n");
         m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
-        );
-        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
+            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)); /* SI5351B Version. */
+
+        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
+        if (refclk_freq == 40000000) {
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_xo_40m_config,
+                sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
+        } else { /* default to 38.4 MHz */
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_xo_38p4m_config,
+                sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
+        }
 
     /* External Sync */
     } else if (strcmp(sync_mode, "external") == 0) {
         /* Only Supported by SI5351C Version */
         printf("Using 10MHz input as SI5351 RefClk...\n");
         m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
-              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)   /* ClkIn from uFL. */
-        );
-        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_clkin_10m_38p4m_config, sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
+              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* ClkIn from uFL.  */
+
+        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
+        if (refclk_freq == 40000000) {
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_40m_config,
+                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+        } else { /* default to 38.4 MHz */
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_38p4m_config,
+                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+        }
+
     /* Invalid Sync */
     } else {
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
@@ -191,16 +210,18 @@ static void m2sdr_init(
     }
 #endif
 
+
     /* Initialize AD9361 SPI */
     printf("Initializing AD9361 SPI...\n");
     m2sdr_ad9361_spi_init(conn, 1);
 
     /* Initialize AD9361 RFIC */
     printf("Initializing AD9361 RFIC...\n");
-    default_init_param.gpio_resetb  = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync    = -1;
-    default_init_param.gpio_cal_sw1 = -1;
-    default_init_param.gpio_cal_sw2 = -1;
+    default_init_param.reference_clk_rate = refclk_freq;
+    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync          = -1;
+    default_init_param.gpio_cal_sw1       = -1;
+    default_init_param.gpio_cal_sw2       = -1;
 
     if (strcmp(chan_mode, "1t1r") == 0) {
         printf("Setting Channel Mode to 1T1R.\n");
@@ -639,6 +660,7 @@ int main(int argc, char **argv)
     #endif
 
     /* Initialize RF. */
+    printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
     m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
 
     return 0;

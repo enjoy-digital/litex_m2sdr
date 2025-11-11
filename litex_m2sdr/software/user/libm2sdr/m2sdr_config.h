@@ -48,8 +48,8 @@
 #define SI5351C_10MHZ_CLK_IN_FROM_PLL 0b0
 #define SI5351C_10MHZ_CLK_IN_FROM_UFL 0b1
 
-/* SI5351B-C Default Config from XO (38.4MHz on MS0, MS4 and 100MHz on MS1) */
-/*--------------------------------------------------------------------------*/
+/* SI5351B-C Default Config from XO to 38.4MHz on MS0, MS4 and 100MHz on MS1. */
+/*----------------------------------------------------------------------------*/
 
 const uint8_t si5351_xo_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
@@ -179,8 +179,8 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
     { 0xB7, 0x12 },  // XTAL_CL=0 (6pF loading)
 };
 
-/* SI5351C Default Config from 10MHz ClkIn (38.4MHz on MS0, MS4 and 100MHz on MS1) */
-/*---------------------------------------------------------------------------------*/
+/* SI5351C Default Config from 10MHz ClkIn to 38.4MHz on MS0, MS4 and 100MHz on MS1. */
+/*-----------------------------------------------------------------------------------*/
 
 const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
@@ -308,6 +308,263 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
 
     /* Crystal Load Capacitance */
     { 0xB7, 0x12 }, // XTAL_CL=0 (6pF loading)
+};
+
+/* SI5351B-C Config from XO to 40MHz on MS0, MS4 and 100MHz on MS1. */
+/*------------------------------------------------------------------*/
+const uint8_t si5351_xo_40m_config[][2] = {
+    /* Interrupt Mask Configuration */
+    { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
+
+    /* Output Enable Control */
+    { 0x03, 0x00 },  // All CLK outputs enabled via register (OEB pin disabled)
+
+    /* PLL Reset Control */
+    { 0x04, 0x10 },  // Disable reset on PLLA LOS (bit4=1), PLLB reset normal (bit5=0)
+
+    /* I2C Configuration */
+    { 0x07, 0x01 },  // I2C address: 0x60 (default)
+
+    /* Clock Input Configuration */
+    { 0x0F, 0x00 },  // PLL src=XTAL (25MHz), CLKIN_DIV=1
+
+    /* Output Channel Configuration (CLK0-CLK7) */
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
+    { 0x12, 0x00 },  // CLK2: OFF.
+    { 0x13, 0x00 },  // CLK3: OFF.
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
+    { 0x15, 0x00 },  // CLK5: OFF.
+    { 0x16, 0x00 },  // CLK6: OFF.
+    { 0x17, 0x00 },  // CLK7: OFF.
+
+    /* PLL Configuration (VCO = 800MHz from 25MHz XTAL, integer) */
+    { 0x22, 0x00 },
+    { 0x23, 0x01 },
+    { 0x24, 0x00 },
+    { 0x25, 0x0E },
+    { 0x26, 0x00 },
+    { 0x27, 0x00 },
+    { 0x28, 0x00 },
+    { 0x29, 0x00 },
+
+    /* MS0 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x2A, 0x00 },
+    { 0x2B, 0x01 },
+    { 0x2C, 0x00 },
+    { 0x2D, 0x08 },
+    { 0x2E, 0x00 },
+    { 0x2F, 0x00 },
+    { 0x30, 0x00 },
+    { 0x31, 0x00 },
+
+    /* MS1 Configuration (Output Divider 8 for 100MHz, integer) */
+    { 0x32, 0x00 },
+    { 0x33, 0x01 },
+    { 0x34, 0x00 },
+    { 0x35, 0x02 },
+    { 0x36, 0x00 },
+    { 0x37, 0x00 },
+    { 0x38, 0x00 },
+    { 0x39, 0x00 },
+
+    /* MS2 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x3A, 0x00 },
+    { 0x3B, 0x01 },
+    { 0x3C, 0x00 },
+    { 0x3D, 0x08 },
+    { 0x3E, 0x00 },
+    { 0x3F, 0x00 },
+    { 0x40, 0x00 },
+    { 0x41, 0x00 },
+
+    /* MS3 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x42, 0x00 },
+    { 0x43, 0x01 },
+    { 0x44, 0x00 },
+    { 0x45, 0x08 },
+    { 0x46, 0x00 },
+    { 0x47, 0x00 },
+    { 0x48, 0x00 },
+    { 0x49, 0x00 },
+
+    /* MS4 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x4A, 0x00 },
+    { 0x4B, 0x01 },
+    { 0x4C, 0x00 },
+    { 0x4D, 0x08 },
+    { 0x4E, 0x00 },
+    { 0x4F, 0x00 },
+    { 0x50, 0x00 },
+    { 0x51, 0x00 },
+
+    /* MS5 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x52, 0x00 },
+    { 0x53, 0x01 },
+    { 0x54, 0x00 },
+    { 0x55, 0x08 },
+    { 0x56, 0x00 },
+    { 0x57, 0x00 },
+    { 0x58, 0x00 },
+    { 0x59, 0x00 },
+
+    /* MS6 / MS7 (Output Divider 20 for 40MHz, integer) */
+    { 0x5A, 0x14 },
+    { 0x5B, 0x14 },
+
+    /* Spread-Spectrum, Fractional Stepping Disabled */
+    { 0x95, 0x00 },
+    { 0x96, 0x00 },
+    { 0x97, 0x00 },
+    { 0x98, 0x00 },
+    { 0x99, 0x00 },
+    { 0x9A, 0x00 },
+    { 0x9B, 0x00 },
+
+    /* VCXO Configuration */
+    { 0xA2, 0xF2 },
+    { 0xA3, 0xFD },
+    { 0xA4, 0x01 },
+
+    /* Phase Offset Configuration */
+    { 0xA5, 0x00 },
+    { 0xA6, 0x00 },
+    { 0xA7, 0x00 },
+    { 0xA8, 0x00 },
+    { 0xA9, 0x00 },
+    { 0xAA, 0x00 },
+
+    /* Crystal Load Capacitance */
+    { 0xB7, 0x12 },
+};
+
+
+/* SI5351C Default Config from 10MHz ClkIn to 40MHz on MS0, MS4 and 100MHz on MS1. */
+/*---------------------------------------------------------------------------------*/
+const uint8_t si5351_clkin_10m_40m_config[][2] = {
+    /* Interrupt Mask Configuration */
+    { 0x02, 0x4B },  // Int masks: LOL_B=1, XO_LOS=1, others=0
+
+    /* Output Enable Control */
+    { 0x03, 0x00 },  // All CLK outputs enabled via register (OEB pin disabled)
+
+    /* PLL Reset Control */
+    { 0x04, 0x20 },  // Disable reset on PLLB LOS (bit5=1), PLLA reset normal
+
+    /* I2C Configuration */
+    { 0x07, 0x01 },  // I2C address: 0x60 (default)
+
+    /* Clock Input Configuration */
+    { 0x0F, 0x00 },  // PLL source = CLKIN @ 10MHz, CLKIN_DIV=1
+
+    /* Output Channel Configuration (CLK0-CLK7) */
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
+    { 0x12, 0x00 },  // CLK2: OFF.
+    { 0x13, 0x00 },  // CLK3: OFF.
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
+    { 0x15, 0x00 },  // CLK5: OFF.
+    { 0x16, 0x00 },  // CLK6: OFF.
+    { 0x17, 0x00 },  // CLK7: OFF.
+
+    /* PLL Configuration (VCO = 800MHz from 10MHz input, integer) */
+    { 0x1A, 0x00 },
+    { 0x1B, 0x01 },
+    { 0x1C, 0x00 },
+    { 0x1D, 0x26 },
+    { 0x1E, 0x00 },
+    { 0x1F, 0x00 },
+    { 0x20, 0x00 },
+    { 0x21, 0x00 },
+
+    /* MS0 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x2A, 0x00 },
+    { 0x2B, 0x01 },
+    { 0x2C, 0x00 },
+    { 0x2D, 0x08 },
+    { 0x2E, 0x00 },
+    { 0x2F, 0x00 },
+    { 0x30, 0x00 },
+    { 0x31, 0x00 },
+
+    /* MS1 Configuration (Output Divider 8 for 100MHz, integer) */
+    { 0x32, 0x00 },
+    { 0x33, 0x01 },
+    { 0x34, 0x00 },
+    { 0x35, 0x02 },
+    { 0x36, 0x00 },
+    { 0x37, 0x00 },
+    { 0x38, 0x00 },
+    { 0x39, 0x00 },
+
+    /* MS2 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x3A, 0x00 },
+    { 0x3B, 0x01 },
+    { 0x3C, 0x00 },
+    { 0x3D, 0x08 },
+    { 0x3E, 0x00 },
+    { 0x3F, 0x00 },
+    { 0x40, 0x00 },
+    { 0x41, 0x00 },
+
+    /* MS3 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x42, 0x00 },
+    { 0x43, 0x01 },
+    { 0x44, 0x00 },
+    { 0x45, 0x08 },
+    { 0x46, 0x00 },
+    { 0x47, 0x00 },
+    { 0x48, 0x00 },
+    { 0x49, 0x00 },
+
+    /* MS4 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x4A, 0x00 },
+    { 0x4B, 0x01 },
+    { 0x4C, 0x00 },
+    { 0x4D, 0x08 },
+    { 0x4E, 0x00 },
+    { 0x4F, 0x00 },
+    { 0x50, 0x00 },
+    { 0x51, 0x00 },
+
+    /* MS5 Configuration (Output Divider 20 for 40MHz, integer) */
+    { 0x52, 0x00 },
+    { 0x53, 0x01 },
+    { 0x54, 0x00 },
+    { 0x55, 0x08 },
+    { 0x56, 0x00 },
+    { 0x57, 0x00 },
+    { 0x58, 0x00 },
+    { 0x59, 0x00 },
+
+    /* MS6 / MS7 (Output Divider 20 for 40MHz, integer) */
+    { 0x5A, 0x14 },
+    { 0x5B, 0x14 },
+
+    /* Spread-Spectrum, Fractional Stepping Disabled */
+    { 0x95, 0x00 },
+    { 0x96, 0x00 },
+    { 0x97, 0x00 },
+    { 0x98, 0x00 },
+    { 0x99, 0x00 },
+    { 0x9A, 0x00 },
+    { 0x9B, 0x00 },
+
+    /* VCXO Configuration */
+    { 0xA2, 0x00 },
+    { 0xA3, 0x00 },
+    { 0xA4, 0x00 },
+
+    /* Phase Offset Configuration */
+    { 0xA5, 0x00 },
+    { 0xA6, 0x00 },
+    { 0xA7, 0x00 },
+    { 0xA8, 0x00 },
+    { 0xA9, 0x00 },
+    { 0xAA, 0x00 },
+
+    /* Crystal Load Capacitance */
+    { 0xB7, 0x12 },
 };
 
 /* AD9361 Default Config */
