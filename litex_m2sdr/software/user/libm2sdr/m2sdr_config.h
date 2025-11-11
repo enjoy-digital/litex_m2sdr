@@ -51,7 +51,7 @@
 /* SI5351B-C Default Config from XO (38.4MHz on MS0, MS4 and 100MHz on MS1) */
 /*--------------------------------------------------------------------------*/
 
-const uint8_t si5351_xo_config[][2] = {
+const uint8_t si5351_xo_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
@@ -182,7 +182,7 @@ const uint8_t si5351_xo_config[][2] = {
 /* SI5351C Default Config from 10MHz ClkIn (38.4MHz on MS0, MS4 and 100MHz on MS1) */
 /*---------------------------------------------------------------------------------*/
 
-const uint8_t si5351_clkin_10m_config[][2] = {
+const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x4B },  // Int masks: LOL_B=1, XO_LOS=1, others=0
 

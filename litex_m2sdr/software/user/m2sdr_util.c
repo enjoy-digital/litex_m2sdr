@@ -92,7 +92,7 @@ static void test_si5351_init(void)
     void *conn = m2sdr_open();
 
     printf("\e[1m[> SI5351 Init...\e[0m\n");
-    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
     printf("Done.\n");
 
     m2sdr_close(conn);

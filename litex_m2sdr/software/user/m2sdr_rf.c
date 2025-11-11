@@ -172,7 +172,7 @@ static void m2sdr_init(
         m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) /* SI5351B Version. */
         );
-        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_config, sizeof(si5351_xo_config)/sizeof(si5351_xo_config[0]));
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
 
     /* External Sync */
     } else if (strcmp(sync_mode, "external") == 0) {
@@ -182,7 +182,7 @@ static void m2sdr_init(
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)    | /* SI5351C Version. */
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)   /* ClkIn from uFL. */
         );
-        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_clkin_10m_config, sizeof(si5351_clkin_10m_config)/sizeof(si5351_clkin_10m_config[0]));
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_clkin_10m_38p4m_config, sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
     /* Invalid Sync */
     } else {
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
