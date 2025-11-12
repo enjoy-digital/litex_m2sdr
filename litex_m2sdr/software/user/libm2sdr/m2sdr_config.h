@@ -18,15 +18,15 @@
 /* Parameters */
 /*------------*/
 
-#define DEFAULT_REFCLK_FREQ    ((int64_t)38400000) /* Reference Clock */
-#define DEFAULT_SAMPLERATE               30720000  /* RF Samplerate */
-#define DEFAULT_BANDWIDTH                56000000  /* RF Bandwidth */
+#define DEFAULT_REFCLK_FREQ    ((int64_t)38400000)  /* Reference Clock */
+#define DEFAULT_SAMPLERATE               30720000   /* RF Samplerate */
+#define DEFAULT_BANDWIDTH                56000000   /* RF Bandwidth */
 #define DEFAULT_TX_FREQ      ((int64_t) 2400000000) /* TX (TX1/2) Center Freq in Hz */
 #define DEFAULT_RX_FREQ      ((int64_t) 2400000000) /* RX (RX1/2) Center Freq in Hz */
-#define DEFAULT_TX_GAIN                       -20  /* TX Gain in dB -89 ->  0 dB */
-#define DEFAULT_RX_GAIN                         0  /* RX Gain in dB   0 -> 76 dB */
-#define DEFAULT_LOOPBACK                        0  /* Internal loopback */
-#define DEFAULT_BIST_TONE_FREQ            1000000  /* BIST Tone Freq in Hz */
+#define DEFAULT_TX_GAIN                       -20   /* TX Gain in dB -89 ->  0 dB */
+#define DEFAULT_RX_GAIN                         0   /* RX Gain in dB   0 -> 76 dB */
+#define DEFAULT_LOOPBACK                        0   /* Internal loopback */
+#define DEFAULT_BIST_TONE_FREQ            1000000   /* BIST Tone Freq in Hz */
 
 #define TX_FREQ_MIN   47000000 /* Hz */
 #define TX_FREQ_MAX 6000000000 /* Hz */
@@ -65,21 +65,21 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x00 },  // PLL src=XTAL (25MHz), CLKIN_DIV=1
+    { 0x0F, 0x00 },  // PLLB, src=XTAL (25MHz)
 
     /* Output Channel Configuration (CLK0-CLK7) */
     { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
     { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
-    { 0x12, 0x00 },  // CLK2: OFF.
-    { 0x13, 0x00 },  // CLK3: OFF.
+    { 0x12, 0x8C },  // CLK2: OFF.
+    { 0x13, 0x8C },  // CLK3: OFF.
     { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
-    { 0x15, 0x00 },  // CLK5: OFF.
-    { 0x16, 0x00 },  // CLK6: OFF.
-    { 0x17, 0x00 },  // CLK7: OFF.
+    { 0x15, 0x8C },  // CLK5: OFF.
+    { 0x16, 0x8C },  // CLK6: OFF.
+    { 0x17, 0x8C },  // CLK7: OFF.
 
     /* PLLB Configuration (VCO = 844.8MHz from 25MHz XTAL) */
-    { 0x22, 0x42 },  // PLLB feedback: Multisynth NA (integer mode)
-    { 0x23, 0x40 },  // PLLB reset=normal
+    { 0x22, 0x42 },
+    { 0x23, 0x40 },
     { 0x24, 0x00 },
     { 0x25, 0x0E },
     { 0x26, 0xE5 },
@@ -107,26 +107,6 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
     { 0x38, 0x00 },
     { 0x39, 0x2B },
 
-    /* MS2 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x3A, 0x00 },
-    { 0x3B, 0x01 },
-    { 0x3C, 0x00 },
-    { 0x3D, 0x09 },
-    { 0x3E, 0x00 },
-    { 0x3F, 0x00 },
-    { 0x40, 0x00 },
-    { 0x41, 0x00 },
-
-    /* MS3 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x42, 0x00 },
-    { 0x43, 0x01 },
-    { 0x44, 0x00 },
-    { 0x45, 0x09 },
-    { 0x46, 0x00 },
-    { 0x47, 0x00 },
-    { 0x48, 0x00 },
-    { 0x49, 0x00 },
-
     /* MS4 Configuration (Output Divider 22 for 38.4MHz) */
     { 0x4A, 0x00 },
     { 0x4B, 0x01 },
@@ -137,30 +117,14 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
     { 0x50, 0x00 },
     { 0x51, 0x00 },
 
-    /* MS5 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x52, 0x00 },
-    { 0x53, 0x01 },
-    { 0x54, 0x00 },
-    { 0x55, 0x09 },
-    { 0x56, 0x00 },
-    { 0x57, 0x00 },
-    { 0x58, 0x00 },
-    { 0x59, 0x00 },
-
-    /* MS6 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x5A, 0x16 },
-
-    /* MS7 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x5B, 0x16 },
-
     /* Spread-Spectrum, Fractional Stepping Disabled */
-    { 0x95, 0x00 },  // SSDN_P2=0, SSC_EN=0 => no SS
-    { 0x96, 0x00 },  // Reserved = 0
-    { 0x97, 0x00 },  // SSDN_P3=0, SSC_MODE=0 => off
-    { 0x98, 0x00 },  // Reserved = 0
-    { 0x99, 0x00 },  // SSDN_P1=0
-    { 0x9A, 0x00 },  // SSUDP=0 => no up/down spread
-    { 0x9B, 0x00 },  // Reserved = 0
+    { 0x95, 0x00 },
+    { 0x96, 0x00 },
+    { 0x97, 0x00 },
+    { 0x98, 0x00 },
+    { 0x99, 0x00 },
+    { 0x9A, 0x00 },
+    { 0x9B, 0x00 },
 
     /* VCXO Configuration */
     { 0xA2, 0xF2 },
@@ -168,12 +132,12 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
     { 0xA4, 0x01 },
 
     /* Phase Offset Configuration */
-    { 0xA5, 0x00 },  // CLK0 phase offset=0
-    { 0xA6, 0x00 },  // CLK1 phase offset=0
-    { 0xA7, 0x00 },  // CLK2 phase offset=0
-    { 0xA8, 0x00 },  // CLK3 phase offset=0
-    { 0xA9, 0x00 },  // CLK4 phase offset=0
-    { 0xAA, 0x00 },  // CLK5 phase offset=0
+    { 0xA5, 0x00 },
+    { 0xA6, 0x00 },
+    { 0xA7, 0x00 },
+    { 0xA8, 0x00 },
+    { 0xA9, 0x00 },
+    { 0xAA, 0x00 },
 
     /* Crystal Load Capacitance */
     { 0xB7, 0x12 },  // XTAL_CL=0 (6pF loading)
@@ -196,19 +160,19 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x04 },  // PLL source = CLKIN @ 10MHz, CLKIN_DIV=4
+    { 0x0F, 0x04 },  // PLLA, src=CLKIN (10MHz), CLKIN_DIV=1.
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
-    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
-    { 0x12, 0x00 },  // CLK2: OFF.
-    { 0x13, 0x00 },  // CLK3: OFF.
-    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
-    { 0x15, 0x00 },  // CLK5: OFF.
-    { 0x16, 0x00 },  // CLK6: OFF.
-    { 0x17, 0x00 },  // CLK7: OFF.
+    { 0x10, 0x0D },  // CLK0: LVCMOS 4mA, MS0 src=PLLA
+    { 0x11, 0x0D },  // CLK1: LVCMOS 4mA, MS1 src=PLLA
+    { 0x12, 0x8C },  // CLK2: OFF.
+    { 0x13, 0x8C },  // CLK3: OFF.
+    { 0x14, 0x0D },  // CLK4: LVCMOS 4mA, MS4 src=PLLA
+    { 0x15, 0x8C },  // CLK5: OFF.
+    { 0x16, 0x8C },  // CLK6: OFF.
+    { 0x17, 0x8C },  // CLK7: OFF.
 
-    /* PLLB Configuration (VCO = 844.8MHz from 10MHz input) */
+    /* PLLA Configuration (VCO = 844.8MHz from 10MHz input) */
     { 0x1A, 0x00 },
     { 0x1B, 0x19 },
     { 0x1C, 0x00 },
@@ -238,26 +202,6 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     { 0x38, 0x00 },
     { 0x39, 0x2B },
 
-    /* MS2 Configuration (Output Divider for 38.4MHz) */
-    { 0x3A, 0x00 },
-    { 0x3B, 0x01 },
-    { 0x3C, 0x00 },
-    { 0x3D, 0x09 },
-    { 0x3E, 0x00 },
-    { 0x3F, 0x00 },
-    { 0x40, 0x00 },
-    { 0x41, 0x00 },
-
-    /* MS3 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x42, 0x00 },
-    { 0x43, 0x01 },
-    { 0x44, 0x00 },
-    { 0x45, 0x09 },
-    { 0x46, 0x00 },
-    { 0x47, 0x00 },
-    { 0x48, 0x00 },
-    { 0x49, 0x00 },
-
     /* MS4 Configuration (Output Divider 22 for 38.4MHz) */
     { 0x4A, 0x00 },
     { 0x4B, 0x01 },
@@ -268,30 +212,14 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     { 0x50, 0x00 },
     { 0x51, 0x00 },
 
-    /* MS5 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x52, 0x00 },
-    { 0x53, 0x01 },
-    { 0x54, 0x00 },
-    { 0x55, 0x09 },
-    { 0x56, 0x00 },
-    { 0x57, 0x00 },
-    { 0x58, 0x00 },
-    { 0x59, 0x00 },
-
-    /* MS6 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x5A, 0x16 },
-
-    /* MS7 Configuration (Output Divider 22 for 38.4MHz) */
-    { 0x5B, 0x16 },
-
     /* Spread-Spectrum, Fractional Stepping Disabled */
-    { 0x95, 0x00 }, // SSDN_P2=0, SSC_EN=0 => no SS
-    { 0x96, 0x00 }, // Reserved = 0
-    { 0x97, 0x00 }, // SSDN_P3=0, SSC_MODE=0 => off
-    { 0x98, 0x00 }, // Reserved = 0
-    { 0x99, 0x00 }, // SSDN_P1=0
-    { 0x9A, 0x00 }, // SSUDP=0 => no up/down spread
-    { 0x9B, 0x00 }, // Reserved = 0
+    { 0x95, 0x00 },
+    { 0x96, 0x00 },
+    { 0x97, 0x00 },
+    { 0x98, 0x00 },
+    { 0x99, 0x00 },
+    { 0x9A, 0x00 },
+    { 0x9B, 0x00 },
 
     /* VCXO Configuration */
     { 0xA2, 0x00 },
@@ -299,12 +227,12 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     { 0xA4, 0x00 },
 
     /* Phase Offset Configuration */
-    { 0xA5, 0x00 }, // CLK0 phase offset=0
-    { 0xA6, 0x00 }, // CLK1 phase offset=0
-    { 0xA7, 0x00 }, // CLK2 phase offset=0
-    { 0xA8, 0x00 }, // CLK3 phase offset=0
-    { 0xA9, 0x00 }, // CLK4 phase offset=0
-    { 0xAA, 0x00 }, // CLK5 phase offset=0
+    { 0xA5, 0x00 },
+    { 0xA6, 0x00 },
+    { 0xA7, 0x00 },
+    { 0xA8, 0x00 },
+    { 0xA9, 0x00 },
+    { 0xAA, 0x00 },
 
     /* Crystal Load Capacitance */
     { 0xB7, 0x12 }, // XTAL_CL=0 (6pF loading)
@@ -326,19 +254,19 @@ const uint8_t si5351_xo_40m_config[][2] = {
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x00 },  // PLL src=XTAL (25MHz), CLKIN_DIV=1
+    { 0x0F, 0x00 },   // PLLB, src=XTAL (25MHz).
 
     /* Output Channel Configuration (CLK0-CLK7) */
     { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
     { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
-    { 0x12, 0x00 },  // CLK2: OFF.
-    { 0x13, 0x00 },  // CLK3: OFF.
+    { 0x12, 0x8C },  // CLK2: OFF.
+    { 0x13, 0x8C },  // CLK3: OFF.
     { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
-    { 0x15, 0x00 },  // CLK5: OFF.
-    { 0x16, 0x00 },  // CLK6: OFF.
-    { 0x17, 0x00 },  // CLK7: OFF.
+    { 0x15, 0x8C },  // CLK5: OFF.
+    { 0x16, 0x8C },  // CLK6: OFF.
+    { 0x17, 0x8C },  // CLK7: OFF.
 
-    /* PLL Configuration (VCO = 800MHz from 25MHz XTAL, integer) */
+    /* PLLB Configuration (VCO = 800MHz from 25MHz XTAL, integer) */
     { 0x22, 0x00 },
     { 0x23, 0x01 },
     { 0x24, 0x00 },
@@ -368,26 +296,6 @@ const uint8_t si5351_xo_40m_config[][2] = {
     { 0x38, 0x00 },
     { 0x39, 0x00 },
 
-    /* MS2 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x3A, 0x00 },
-    { 0x3B, 0x01 },
-    { 0x3C, 0x00 },
-    { 0x3D, 0x08 },
-    { 0x3E, 0x00 },
-    { 0x3F, 0x00 },
-    { 0x40, 0x00 },
-    { 0x41, 0x00 },
-
-    /* MS3 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x42, 0x00 },
-    { 0x43, 0x01 },
-    { 0x44, 0x00 },
-    { 0x45, 0x08 },
-    { 0x46, 0x00 },
-    { 0x47, 0x00 },
-    { 0x48, 0x00 },
-    { 0x49, 0x00 },
-
     /* MS4 Configuration (Output Divider 20 for 40MHz, integer) */
     { 0x4A, 0x00 },
     { 0x4B, 0x01 },
@@ -397,20 +305,6 @@ const uint8_t si5351_xo_40m_config[][2] = {
     { 0x4F, 0x00 },
     { 0x50, 0x00 },
     { 0x51, 0x00 },
-
-    /* MS5 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x52, 0x00 },
-    { 0x53, 0x01 },
-    { 0x54, 0x00 },
-    { 0x55, 0x08 },
-    { 0x56, 0x00 },
-    { 0x57, 0x00 },
-    { 0x58, 0x00 },
-    { 0x59, 0x00 },
-
-    /* MS6 / MS7 (Output Divider 20 for 40MHz, integer) */
-    { 0x5A, 0x14 },
-    { 0x5B, 0x14 },
 
     /* Spread-Spectrum, Fractional Stepping Disabled */
     { 0x95, 0x00 },
@@ -435,7 +329,7 @@ const uint8_t si5351_xo_40m_config[][2] = {
     { 0xAA, 0x00 },
 
     /* Crystal Load Capacitance */
-    { 0xB7, 0x12 },
+    { 0xB7, 0x12 }, // XTAL_CL=0 (6pF loading)
 };
 
 
@@ -455,19 +349,19 @@ const uint8_t si5351_clkin_10m_40m_config[][2] = {
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x00 },  // PLL source = CLKIN @ 10MHz, CLKIN_DIV=1
+    { 0x0F, 0x04 },  // PLLA, src=CLKIN (10MHz), CLKIN_DIV=1.
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
-    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
-    { 0x12, 0x00 },  // CLK2: OFF.
-    { 0x13, 0x00 },  // CLK3: OFF.
-    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
-    { 0x15, 0x00 },  // CLK5: OFF.
-    { 0x16, 0x00 },  // CLK6: OFF.
-    { 0x17, 0x00 },  // CLK7: OFF.
+    { 0x10, 0x0D },  // CLK0: LVCMOS 4mA, MS0 src=PLLA
+    { 0x11, 0x0D },  // CLK1: LVCMOS 4mA, MS1 src=PLLA
+    { 0x12, 0x8C },  // CLK2: OFF.
+    { 0x13, 0x8C },  // CLK3: OFF.
+    { 0x14, 0x0D },  // CLK4: LVCMOS 4mA, MS4 src=PLLA
+    { 0x15, 0x8C },  // CLK5: OFF.
+    { 0x16, 0x8C },  // CLK6: OFF.
+    { 0x17, 0x8C },  // CLK7: OFF.
 
-    /* PLL Configuration (VCO = 800MHz from 10MHz input, integer) */
+    /* PLLA Configuration (VCO = 800MHz from 10MHz input, integer) */
     { 0x1A, 0x00 },
     { 0x1B, 0x01 },
     { 0x1C, 0x00 },
@@ -497,26 +391,6 @@ const uint8_t si5351_clkin_10m_40m_config[][2] = {
     { 0x38, 0x00 },
     { 0x39, 0x00 },
 
-    /* MS2 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x3A, 0x00 },
-    { 0x3B, 0x01 },
-    { 0x3C, 0x00 },
-    { 0x3D, 0x08 },
-    { 0x3E, 0x00 },
-    { 0x3F, 0x00 },
-    { 0x40, 0x00 },
-    { 0x41, 0x00 },
-
-    /* MS3 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x42, 0x00 },
-    { 0x43, 0x01 },
-    { 0x44, 0x00 },
-    { 0x45, 0x08 },
-    { 0x46, 0x00 },
-    { 0x47, 0x00 },
-    { 0x48, 0x00 },
-    { 0x49, 0x00 },
-
     /* MS4 Configuration (Output Divider 20 for 40MHz, integer) */
     { 0x4A, 0x00 },
     { 0x4B, 0x01 },
@@ -526,20 +400,6 @@ const uint8_t si5351_clkin_10m_40m_config[][2] = {
     { 0x4F, 0x00 },
     { 0x50, 0x00 },
     { 0x51, 0x00 },
-
-    /* MS5 Configuration (Output Divider 20 for 40MHz, integer) */
-    { 0x52, 0x00 },
-    { 0x53, 0x01 },
-    { 0x54, 0x00 },
-    { 0x55, 0x08 },
-    { 0x56, 0x00 },
-    { 0x57, 0x00 },
-    { 0x58, 0x00 },
-    { 0x59, 0x00 },
-
-    /* MS6 / MS7 (Output Divider 20 for 40MHz, integer) */
-    { 0x5A, 0x14 },
-    { 0x5B, 0x14 },
 
     /* Spread-Spectrum, Fractional Stepping Disabled */
     { 0x95, 0x00 },
@@ -564,7 +424,7 @@ const uint8_t si5351_clkin_10m_40m_config[][2] = {
     { 0xAA, 0x00 },
 
     /* Crystal Load Capacitance */
-    { 0xB7, 0x12 },
+    { 0xB7, 0x12 }, // XTAL_CL=0 (6pF loading)
 };
 
 /* AD9361 Default Config */
