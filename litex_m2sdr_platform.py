@@ -27,10 +27,10 @@ _io = [
 
     # SI5351 Clocking.
     ("si5351", 0,
-        Subsignal("scl",        Pins("AA20"), Misc("PULLUP=TRUE"), IOStandard("LVCMOS33")), # SI5351_SCL.
-        Subsignal("sda",        Pins("AB21"), Misc("PULLUP=TRUE"), IOStandard("LVCMOS33")), # SI5351_SDA.
-        Subsignal("ssen_clkin", Pins("W22"),                       IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
-        Subsignal("pwm",        Pins("W19"),                       IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
+        Subsignal("scl",        Pins("AA20"), Misc("PULLUP=TRUE"),                IOStandard("LVCMOS33")), # SI5351_SCL.
+        Subsignal("sda",        Pins("AB21"), Misc("PULLUP=TRUE"),                IOStandard("LVCMOS33")), # SI5351_SDA.
+        Subsignal("ssen_clkin", Pins("W22"),  Misc("SLEW=SLOW"), Misc("DRIVE=4"), IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
+        Subsignal("pwm",        Pins("W19"),                                      IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ),
     ("si5351_clk0",       0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
     ("si5351_clk1",       0, Pins("E19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_1.
