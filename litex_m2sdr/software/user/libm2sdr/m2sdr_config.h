@@ -148,39 +148,39 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
 
 const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
-    { 0x02, 0x4B },  // Int masks: LOL_B=1, XO_LOS=1, others=0
+    { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
     /* Output Enable Control */
     { 0x03, 0x00 },  // All CLK outputs enabled via register (OEB pin disabled)
 
     /* PLL Reset Control */
-    { 0x04, 0x20 },  // Disable reset on PLLB LOS (bit5=1), PLLA reset normal
+    { 0x04, 0x10 },  // Disable reset on PLLA LOS (bit4=1), PLLB reset normal (bit5=0)
 
     /* I2C Configuration */
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x04 },  // PLLA, src=CLKIN (10MHz), CLKIN_DIV=1.
+    { 0x0F, 0x08 },  // PLLB, src=CLKIN (10MHz), CLKIN_DIV=1.
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x0D },  // CLK0: LVCMOS 4mA, MS0 src=PLLA
-    { 0x11, 0x0D },  // CLK1: LVCMOS 4mA, MS1 src=PLLA
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
     { 0x12, 0x8C },  // CLK2: OFF.
     { 0x13, 0x8C },  // CLK3: OFF.
-    { 0x14, 0x0D },  // CLK4: LVCMOS 4mA, MS4 src=PLLA
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
     { 0x15, 0x8C },  // CLK5: OFF.
     { 0x16, 0x8C },  // CLK6: OFF.
     { 0x17, 0x8C },  // CLK7: OFF.
 
-    /* PLLA Configuration (VCO = 844.8MHz from 10MHz input) */
-    { 0x1A, 0x00 },
-    { 0x1B, 0x19 },
-    { 0x1C, 0x00 },
-    { 0x1D, 0x28 },
-    { 0x1E, 0x3D },
-    { 0x1F, 0x00 },
-    { 0x20, 0x00 },
-    { 0x21, 0x0B },
+    /* PLLB Configuration (VCO = 844.8MHz from 10MHz input) */
+    { 0x22, 0x00 },
+    { 0x23, 0x19 },
+    { 0x24, 0x00 },
+    { 0x25, 0x28 },
+    { 0x26, 0x3D },
+    { 0x27, 0x00 },
+    { 0x28, 0x00 },
+    { 0x29, 0x0B },
 
     /* MS0 Configuration (Output Divider 22 for 38.4MHz) */
     { 0x2A, 0x00 },
@@ -337,39 +337,39 @@ const uint8_t si5351_xo_40m_config[][2] = {
 /*---------------------------------------------------------------------------------*/
 const uint8_t si5351_clkin_10m_40m_config[][2] = {
     /* Interrupt Mask Configuration */
-    { 0x02, 0x4B },  // Int masks: LOL_B=1, XO_LOS=1, others=0
+    { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
     /* Output Enable Control */
     { 0x03, 0x00 },  // All CLK outputs enabled via register (OEB pin disabled)
 
     /* PLL Reset Control */
-    { 0x04, 0x20 },  // Disable reset on PLLB LOS (bit5=1), PLLA reset normal
+    { 0x04, 0x10 },  // Disable reset on PLLA LOS (bit4=1), PLLB reset normal (bit5=0)
 
     /* I2C Configuration */
     { 0x07, 0x01 },  // I2C address: 0x60 (default)
 
     /* Clock Input Configuration */
-    { 0x0F, 0x04 },  // PLLA, src=CLKIN (10MHz), CLKIN_DIV=1.
+    { 0x0F, 0x08 },  // PLLB, src=CLKIN (10MHz), CLKIN_DIV=1.
 
     /* Output Channel Configuration (CLK0-CLK7) */
-    { 0x10, 0x0D },  // CLK0: LVCMOS 4mA, MS0 src=PLLA
-    { 0x11, 0x0D },  // CLK1: LVCMOS 4mA, MS1 src=PLLA
+    { 0x10, 0x2D },  // CLK0: LVCMOS 4mA, MS0 src=PLLB
+    { 0x11, 0x2D },  // CLK1: LVCMOS 4mA, MS1 src=PLLB
     { 0x12, 0x8C },  // CLK2: OFF.
     { 0x13, 0x8C },  // CLK3: OFF.
-    { 0x14, 0x0D },  // CLK4: LVCMOS 4mA, MS4 src=PLLA
+    { 0x14, 0x2D },  // CLK4: LVCMOS 4mA, MS4 src=PLLB
     { 0x15, 0x8C },  // CLK5: OFF.
     { 0x16, 0x8C },  // CLK6: OFF.
     { 0x17, 0x8C },  // CLK7: OFF.
 
-    /* PLLA Configuration (VCO = 800MHz from 10MHz input, integer) */
-    { 0x1A, 0x00 },
-    { 0x1B, 0x01 },
-    { 0x1C, 0x00 },
-    { 0x1D, 0x26 },
-    { 0x1E, 0x00 },
-    { 0x1F, 0x00 },
-    { 0x20, 0x00 },
-    { 0x21, 0x00 },
+    /* PLLB Configuration (VCO = 800MHz from 10MHz input, integer) */
+    { 0x22, 0x00 },
+    { 0x23, 0x01 },
+    { 0x24, 0x00 },
+    { 0x25, 0x26 },
+    { 0x26, 0x00 },
+    { 0x27, 0x00 },
+    { 0x28, 0x00 },
+    { 0x29, 0x00 },
 
     /* MS0 Configuration (Output Divider 20 for 40MHz, integer) */
     { 0x2A, 0x00 },
