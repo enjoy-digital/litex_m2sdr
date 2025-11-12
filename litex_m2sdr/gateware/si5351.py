@@ -289,12 +289,14 @@ class SI5351(LiteXModule):
 
         # VCXO PWM.
         # ---------
+        pwm_o = Signal()
         self.pwm = PWM(
-            pwm            = pads.pwm,
+            pwm            = pwm_o,
             default_enable = 1,
             default_width  = 1024,
             default_period = 2048,
         )
+        self.comb += pads.pwm.eq(Mux(self.version == SI5351_C_VERSION, 1, pwm_o))
 
         # Enable / Clkin.
         # ---------------
@@ -308,7 +310,7 @@ class SI5351(LiteXModule):
             o_O  = si5351_clkin,
         )
 
-        # ClkIn/Enable Ouptut.
+        # ClkIn/Enable Output.
         si5351_ddr_i1 = Signal()
         si5351_ddr_i2 = Signal()
         self.comb += [
