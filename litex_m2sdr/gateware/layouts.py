@@ -13,5 +13,5 @@ def dma_layout_with_ts(data_width):
     ]
 
 # metadata layout for scheduler tx
-def metadata_layout(timestamp_width=64, ptr_width=8):
-    return [("timestamp", timestamp_width), ("ptr", ptr_width)]
+def metadata_layout(meta_data_width=64):
+    return [ ("header", meta_data_width), ("timestamp", meta_data_width)]

@@ -35,13 +35,13 @@ class Scheduler(LiteXModule):
         self.state = Signal(8) # for debug purpose only, not used currently
 
         # Counters for debugging
-        frame_count = Signal(13) # max 1022 frames per packet * 8 bytes = 8176 bytes
+        frame_count = Signal(13) 
         pkt_count = Signal(4) # max 8 packets
         
         ready_to_read = Signal()
         # Combinational: define handshake condition
         self.comb += ready_to_read.eq(sink.valid & sink.ready)
-
+        
         # Sequential: update frame and packet counters on clock edges
         self.sync += [
             If(ready_to_read,
@@ -77,48 +77,14 @@ class Scheduler(LiteXModule):
                 )
             ]
 
-        if fsm:
-            self.comb += [        # connect fifo output to source.data  (can't use connect because of timestamp field)
-            #source.data.eq(data_fifo.source.data),
+        self.comb += [
             source.first.eq(data_fifo.source.first),
             source.last.eq(data_fifo.source.last),
-            source.valid.eq(data_fifo.source.valid),
-            #data_fifo.source.ready.eq(source.ready) # ommit valid because we will control when to read from fifo in the FSM
-            ]
-             # ────────────────────────────────────────────────
-            #  FSM for scheduling
-            # ────────────────────────────────────────────────
-            self.fsm = fsm = FSM(reset_state="RESET")
-            self.submodules.fsm = fsm   
-            
-            fsm.act("RESET",
-                NextState("WAIT"),
-            )
-
-            fsm.act("WAIT", # Read if I can otherwise wait
-                source.ready.eq(0), # not streaming
-                If((data_fifo.source.timestamp <= self.now) & (data_fifo.source.valid),
-                    NextState("STREAM")
-                )
-            )
-            fsm.act("STREAM",
-                source.valid.eq(data_fifo.source.valid & (data_fifo.source.timestamp <= self.now)),  # should be 1 ==> ready to stream out 
-                data_fifo.source.ready.eq(source.ready & (data_fifo.source.timestamp <= self.now)),  # pop from fifo if source is ready
-                source.data.eq(data_fifo.source.data),
-                If((data_fifo.source.timestamp > self.now) | (~data_fifo.source.valid),
-                    NextState("WAIT")
-                )
-            )
-            
-        else:
-            self.comb += [
-                source.first.eq(data_fifo.source.first),
-                source.last.eq(data_fifo.source.last),
-                source.data.eq(data_fifo.source.data),
-                source.valid.eq(data_fifo.source.valid & (data_fifo.source.timestamp <= self.now)),
-                data_fifo.source.ready.eq(source.ready & (data_fifo.source.timestamp <= self.now)),
-            ]
-       
+            source.data.eq(data_fifo.source.data),
+            source.valid.eq(data_fifo.source.valid & (data_fifo.source.timestamp <= self.now)),
+            data_fifo.source.ready.eq(source.ready & (data_fifo.source.timestamp <= self.now)),
+        ]
+        
         # ────────────────────────────────────────────────
             #  CSR Exposure
         # ────────────────────────────────────────────────

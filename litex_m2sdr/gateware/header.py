@@ -103,7 +103,7 @@ class HeaderInserterExtracter(LiteXModule):
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready,
                     NextValue(self.timestamp, sink.data[0:64]),
-                    NextValue(self.update, 1), # only update for a new frame
+                    NextValue(self.update, 1), # only update for a new packet
                     NextState("FRAME")
                 )
             )
@@ -114,7 +114,7 @@ class HeaderInserterExtracter(LiteXModule):
             source.timestamp.eq(self.timestamp), # propagate timestamp # TODO check if it is propagated correctly
             NextValue(self.update, 0),
             If(self.header_enable,
-                source.first.eq(("cycles" == 0) & (mode == "extracter")),
+                source.first.eq((cycles == 0) & (mode == "extracter")),
                 source.last.eq( cycles == (self.frame_cycles - 1)),
                 If(source.valid & source.ready,
                     NextValue(cycles, cycles + 1),
