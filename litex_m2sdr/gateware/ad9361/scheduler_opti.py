@@ -21,14 +21,24 @@ class Scheduler(LiteXModule):
     def __init__(self, frames_per_packet = 1024, data_width=64, max_packets=8, meta_data_frames_per_packet = 2, with_csr = True): # just to start then maybe expand it to more packets
         assert frames_per_packet % (data_width // 8) == 0 # packet size must be multiple of data width in bytes (a frame is 8 bytes)
         assert meta_data_frames_per_packet == 2  # we have 2 frames for metadata: header + timestamp
+        # Signals.
+        # --------
+        frame_in_count = Signal(10) # max 1024 frames per packet 
+        frame_out_count = Signal(10) # max 1024 frames per packet 
+        pkt_in_count = Signal(4) # max 8 packets
+        
+        push_to_fifo_sink = Signal()
+        pop_from_fifo_source = Signal()
+        
         # Inputs/Outputs
         self.reset = Signal() # i
         self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i  (from TX_CDC)
         self.source = source = stream.Endpoint(dma_layout(data_width)) # o  (to gpio_tx_unpacker)
+        self.timestamp = Signal(64) # i (timestamp of the packet at fifo output)
+        self.header = Signal(64) # i (header of the packet at fifo output)
         self.now = Signal(64) # i (current time: drive in RFIC domain)
         # Data Fifo: stores multiple packets
         self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout(data_width), depth=frames_per_packet*max_packets) # depth is in number of frames
-        self.metadata_fifo = metadata_fifo = stream.SyncFIFO(layout=metadata_layout(data_width), depth=meta_data_frames_per_packet*max_packets)
         self.state = Signal(8) # for debug purpose only, not used currently
 
         
@@ -39,17 +49,15 @@ class Scheduler(LiteXModule):
         self.comb += [
             sink.ready.eq(data_fifo.sink.ready), # backpressure
             data_fifo.sink.valid.eq(sink.valid),
-            # data_fifo.sink.data.eq(sink.data),
+            data_fifo.sink.data.eq(sink.data), # push data with timestamp and header into fifo
             data_fifo.sink.first.eq(sink.first),
             data_fifo.sink.last.eq(sink.last),
-            # metadata_fifo.sink.timestamp.eq(self.timestamp),
-            # metadata_fifo.sink.header.eq(self.header),
         ]
 
         self.comb += [
                 If(self.reset,
                     self.state.eq(STATE_RESET)
-                ).Elif((self.metadata_fifo.source.timestamp <= self.now) & self.data_fifo.source.valid,
+                ).Elif((self.timestamp <= self.now) & self.data_fifo.source.valid,
                     self.state.eq(STATE_STREAM)
                 ).Else(
                     self.state.eq(STATE_WAIT)
@@ -57,76 +65,95 @@ class Scheduler(LiteXModule):
             ]
 
         # Output side: only present data when timestamp <= now
-        self.comb += [
-            source.first.eq(data_fifo.source.first),
-            source.last.eq(data_fifo.source.last),
-            source.data.eq(data_fifo.source.data),
-            source.valid.eq(data_fifo.source.valid & (metadata_fifo.source.timestamp <= self.now)),
-            data_fifo.source.ready.eq(source.ready & (metadata_fifo.source.timestamp <= self.now)),
-        ]
+        # self.comb += [
+        #     source.first.eq(data_fifo.source.first),
+        #     source.last.eq(data_fifo.source.last),
+        #     source.data.eq(data_fifo.source.data),
+        #     source.valid.eq(data_fifo.source.valid & (metadata_fifo.source.timestamp <= self.now)),
+        #     data_fifo.source.ready.eq(source.ready & (metadata_fifo.source.timestamp <= self.now)),
+        # ]
 
-        # Signals.
-        # --------
-        frame_count = Signal(10) # max 1024 frames per packet 
-        pkt_count = Signal(4) # max 8 packets
+
+
+        self.comb += push_to_fifo_sink.eq(sink.valid & sink.ready)
+        self.comb += pop_from_fifo_source.eq(source.valid & source.ready)
+
+        #SIMPLIFIED VERSION:
+        # Latch timestamp on first frame
+        latched_ts = Signal(64)
+        self.sync += If(data_fifo.source.valid & data_fifo.source.first & ~self.streaming,
+            latched_ts.eq(data_fifo.source.data[:64])  # assuming timestamp packed in low bits
+        )
+
+        # Start streaming once time has come
+        If((self.now >= latched_ts) & data_fifo.source.valid,
+            self.streaming.eq(1)
+        )
+
+        # default: don't pop
+        self.comb += data_fifo.source.ready.eq(0)
+
+        # When time has come, forward continuously
+        stream_enable = Signal()
+        self.comb += stream_enable.eq((self.now >= latched_ts) & data_fifo.source.valid)
+
+        self.comb += [
+            self.source.valid.eq(stream_enable),
+            self.source.data.eq(data_fifo.source.data),
+            data_fifo.source.ready.eq(self.source.ready & stream_enable),
+        ]
 
         # FSM.
         # ----
-        self.fsm = fsm = FSM(reset_state="RESET")
+        # self.fsm = fsm = FSM(reset_state="RESET")
         #self.comb += self.fsm.reset.eq(self.reset)
 
-        # Reset.
-        fsm.act("RESET",
-            NextValue(frame_count, 0),
-            NextState("HEADER")
-        )
+        # # Reset.
+        # fsm.act("RESET",
+        #     NextValue(frame_in_count, 0),
+        #     NextState("READ")
+        # )
 
-        # Header.
-        fsm.act("HEADER",
-            If(sink.valid & sink.ready,
-                metadata_fifo.sink.header.eq(sink.data[0:64]),
-                metadata_fifo.sink.valid.eq(1),
-                # metadata_fifo.source.header.eq(sink.data[0:64]),
-                NextValue(frame_count, frame_count + 1),
-                NextState("TIMESTAMP")
-            )
-        )
-        # Timestamp.
-        fsm.act("TIMESTAMP",
-            If(sink.valid & sink.ready,
-                metadata_fifo.sink.timestamp.eq(sink.data[0:64]),
-                metadata_fifo.sink.valid.eq(1),
-                # metadata_fifo.source.timestamp.eq(sink.data[0:64]),
-                NextValue(frame_count, frame_count + 1),
-                NextState("FRAME")
-            )
-        )
+        # # READ.
+        # fsm.act("READ",
+        #     If(push_to_fifo_sink,
+        #         data_fifo.sink.valid.eq(1), # could be eq(push_to_fifo_sink) without if
+        #         data_fifo.sink.ready.eq(1),
+        #         data_fifo.sink.data.eq(sink.data[0:64]),
+        #         NextValue(frame_in_count, frame_in_count + 1),
+        #         NextValue(pkt_in_count, pkt_in_count + 1),
+        #         data_fifo.source.valid.eq(1),  # pop the header if source.ready (drop it for now)
+        #         data_fifo.source.first.eq(0),  
+        #         NextValue(frame_out_count, frame_out_count + source.ready), # is popped when source.ready
+        #         NextState("STREAM")
+        #     )
+        # )
+        # # STREAM & READ.
+        # fsm.act("STREAM_READ",
+        #     If(push_to_fifo_sink,
+        #         NextState("READ")
+        #     )
+        # )
 
-        # Frame.
-        fsm.act("FRAME",
-            metadata_fifo.sink.valid.eq(1),
-            NextValue(data_fifo.sink.data, sink.data[0:64]),
-            NextValue(frame_count, frame_count + 1),
-            If(frame_count == (frames_per_packet - 1),
-                NextState("HEADER")
-            )
-        )
+        # # STREAM.
+        # fsm.act("STREAM",
+        #     If(push_to_fifo_sink,
+        #        NextState("STREAM_READ"))
+        #     .Elif(push_to_fifo_sink & ts_condition,
+        #         NextState("READ"))
+        #     .Else(
+        #         NextState("STREAM")
+        #     )
+        # )
 
-        # metadata fifo flow control
-        pop_meta = Signal()
-        pop_meta_count = Signal(2)   # can count 0..3
-        self.comb += [
-            metadata_fifo.source.ready.eq(source.valid & source.ready & (metadata_fifo.source.timestamp <= self.now)), # ready to pop
-            pop_meta.eq(metadata_fifo.source.ready)
-        ] 
-        
-        # increment on every metadata pop
-        self.sync += If(pop_meta, pop_meta_count.eq(pop_meta_count + 1))
-        self.sync += If(pop_meta_count == 2, pop_meta_count.eq(0))
-        self.comb += [
-            metadata_fifo.source.valid.eq(pop_meta & (pop_meta_count == 0)), 
-            # metadata_fifo.sink.valid.eq((frame_count <= 2) & sink.valid & sink.ready),
-        ]
+        # fsm.act("STALL",
+        #     If(push_to_fifo_sink,
+        #        NextState("READ"))
+        #     .Else(
+        #        NextState("STALL"))
+        # )
+
+
         # ────────────────────────────────────────────────
             #  CSR Exposure
         # ────────────────────────────────────────────────
