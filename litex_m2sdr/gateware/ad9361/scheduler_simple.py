@@ -11,11 +11,6 @@ from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
-from litex_m2sdr.gateware.layouts import metadata_layout
-
-STATE_STREAM = ord('S')  
-STATE_WAIT   = ord('W')  
-STATE_RESET  = ord('R')
 
 class Scheduler(LiteXModule): 
     def __init__(self, frames_per_packet = 1024, data_width=64, max_packets=8, meta_data_frames_per_packet = 2, with_csr = True): # just to start then maybe expand it to more packets
@@ -36,7 +31,7 @@ class Scheduler(LiteXModule):
         # States
         self.streaming = streaming =  Signal(reset=0)
         frame_count = Signal(10)   # enough for 0..1023 (1024 frames)
-        latched_ts = Signal(64)
+        self.latched_ts = latched_ts = Signal(64)
         latched_header = Signal(64)
 
         # Always Read from upstream if I can
@@ -49,76 +44,112 @@ class Scheduler(LiteXModule):
         ]
 
         # ---------------------------
-        # 1. Capture header + timestamp
+        # Capture header + timestamp
         # ---------------------------
         # This triggers only once per packet.
-        meta_data = Signal()
+        is_header    = Signal()
+        is_timestamp = Signal()
         self.comb += [ 
-            If(data_fifo.source.valid & data_fifo.source.first & (frame_count == 0) & ~streaming,
-                meta_data.eq(1),
-                )
-            .Elif(data_fifo.sink.valid & (frame_count == 1) & ~streaming,
-                meta_data.eq(1),
-                )
-            .Else(meta_data.eq(0))
+            is_header.eq(data_fifo.source.valid & ~streaming & (frame_count == 0)),
+            is_timestamp.eq(data_fifo.source.valid & ~streaming & (frame_count == 1)),
         ]
 
 
         # Generate second
-        data_fifo_sink_second = Signal()
+        # data_fifo_sink_second = Signal()
+        # self.sync += [
+        #     data_fifo_sink_second.eq(data_fifo.sink.first),  # delay 1 cycle
+        # ]
+        # ------------------------------------------------
+        # Latching Metadata only when we consume from Fifo
+        # ------------------------------------------------
         self.sync += [
-            data_fifo_sink_second.eq(data_fifo.sink.first),  # delay 1 cycle
-        ]
-
-        self.sync += [
-            If(data_fifo.sink.valid & data_fifo.sink.first  & ~streaming, 
-                latched_header.eq(data_fifo.sink.data)
-            ),
-            If(data_fifo.sink.valid & data_fifo_sink_second & ~streaming,
-                latched_ts.eq(data_fifo.sink.data),
+            If(data_fifo.source.ready & data_fifo.source.valid,
+                If(is_header,   
+                    latched_header.eq(data_fifo.source.data)
+                ),
+                If(is_timestamp,
+                    latched_ts.eq(data_fifo.source.data),
+                )
             )
         ]
 
         # ---------------------------
-        # 2. Start streaming when time has come
+        # Start streaming when time has come
         # ---------------------------
+        can_start = Signal()
+        self.comb += can_start.eq((self.now >= latched_ts) &
+                                (frame_count == 2) &
+                                data_fifo.source.valid)
         self.sync += [
-            If((self.now >= latched_ts) & (frame_count == 2) & data_fifo.source.valid,
+            If(can_start & ~streaming,
                 streaming.eq(1)
             )
         ]
-
         # ---------------------------
-        # 3. Streaming logic
-        # ---------------------------
-
-        # Default: not reading FIFO
-        self.comb += data_fifo.source.ready.eq(0)
-
-        stream_enable = Signal()
-        self.comb += stream_enable.eq(streaming & data_fifo.source.valid)
-
         # Assign output
+        # ---------------------------
         self.comb += [
-            source.valid.eq(stream_enable),
+            source.valid.eq(streaming & data_fifo.source.valid),
             source.data.eq(data_fifo.source.data)
         ]
 
         # Pop FIFO when downstream is ready
-        self.comb += data_fifo.source.ready.eq((source.ready & stream_enable) | meta_data)
+        pop_meta = is_header | is_timestamp
+        self.comb += data_fifo.source.ready.eq((source.ready & streaming) | pop_meta)
 
         # Count frames
         self.sync += [
-            If((stream_enable & source.ready) | meta_data,
+            If(data_fifo.source.ready & data_fifo.source.valid,
                 frame_count.eq(frame_count + 1)
             )
         ]
         # ---------------------------
-        # 4. Reset for next packet
+        # Reset for next packet
         # ---------------------------
         self.sync += [
-            If((frame_count == 1023) & stream_enable & source.ready,
+            If((frame_count == frames_per_packet - 1) & streaming & data_fifo.source.ready & data_fifo.source.valid,
                 frame_count.eq(0),
                 streaming.eq(0)
             )
         ]
+        # ────────────────────────────────────────────────
+        #      CSR Exposure
+        # ────────────────────────────────────────────────
+        if with_csr:
+            self.add_csr()
+
+    def add_csr(self):
+        # Control
+        self._reset      = CSRStorage(fields=[CSRField("reset", size=1, description="Reset scheduler FSM")])
+        self._manual_now = CSRStorage(64, description="Manually set current timestamp for test")
+        self._set_ts = CSRStorage(fields=[CSRField("use_manual", size=1, description="1=use manual now value instead of Timestamp at fifo")])
+
+        # Status
+        self._fifo_level = CSRStatus(16, description="Current FIFO level in words")
+        self._flags      = CSRStatus(fields=[
+            CSRField("full",         size=1),
+            CSRField("empty",        size=1),
+            CSRField("almost_full",  size=1),
+            CSRField("almost_empty", size=1)
+        ])
+        self._current_ts = CSRStatus(64, description="Current Timestamp at FIFO output")
+        self._now        = CSRStatus(64, description="Current time from rfic domain")
+
+        # Drive internal signals from CSRs
+        manual_now_sig = Signal(64)
+        self.comb += [
+            manual_now_sig.eq(self._manual_now.storage),
+            If(self._set_ts.fields.use_manual,
+                self.now.eq(manual_now_sig)
+            )
+        ]
+        # Connect status signals
+
+        self.comb += [
+            self._current_ts.status.eq(self.latched_ts),
+            self._now.status.eq(self.now),
+            self._fifo_level.status.eq(self.data_fifo.level),
+
+        ]
+        

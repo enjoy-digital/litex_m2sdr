@@ -98,7 +98,6 @@ class Scheduler(LiteXModule):
         self._set_ts = CSRStorage(fields=[CSRField("use_manual", size=1, description="1=use manual now value instead of Timestamp at fifo")])
 
         # Status
-        #self._fsm_state  = CSRStatus(8, description="Current FSM state (RESET=0, WAIT=1, STREAM=2)")
         self._fifo_level = CSRStatus(16, description="Current FIFO level in words")
         self._flags      = CSRStatus(fields=[
             CSRField("full",         size=1),
