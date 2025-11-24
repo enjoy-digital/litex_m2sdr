@@ -25,7 +25,9 @@ class Scheduler(LiteXModule):
         self.header = Signal(64) # i (header of the packet at fifo output)
         self.now = Signal(64) # i (current time: drive in RFIC domain)
         # Data Fifo: stores multiple packets
-        self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout(data_width), depth=frames_per_packet*max_packets) # depth is in number of frames
+        self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout(data_width), 
+                                                        depth=frames_per_packet * max_packets,
+                                                        with_bram=True) 
 
 
         # States
@@ -54,12 +56,6 @@ class Scheduler(LiteXModule):
             is_timestamp.eq(data_fifo.source.valid & ~streaming & (frame_count == 1)),
         ]
 
-
-        # Generate second
-        # data_fifo_sink_second = Signal()
-        # self.sync += [
-        #     data_fifo_sink_second.eq(data_fifo.sink.first),  # delay 1 cycle
-        # ]
         # ------------------------------------------------
         # Latching Metadata only when we consume from Fifo
         # ------------------------------------------------
@@ -127,12 +123,6 @@ class Scheduler(LiteXModule):
 
         # Status
         self._fifo_level = CSRStatus(16, description="Current FIFO level in words")
-        self._flags      = CSRStatus(fields=[
-            CSRField("full",         size=1),
-            CSRField("empty",        size=1),
-            CSRField("almost_full",  size=1),
-            CSRField("almost_empty", size=1)
-        ])
         self._current_ts = CSRStatus(64, description="Current Timestamp at FIFO output")
         self._now        = CSRStatus(64, description="Current time from rfic domain")
 
@@ -145,11 +135,9 @@ class Scheduler(LiteXModule):
             )
         ]
         # Connect status signals
-
         self.comb += [
             self._current_ts.status.eq(self.latched_ts),
             self._now.status.eq(self.now),
             self._fifo_level.status.eq(self.data_fifo.level),
-
         ]
         

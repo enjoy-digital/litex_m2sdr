@@ -13,7 +13,6 @@ from litex.soc.interconnect import stream
 from litepcie.common import *
 
 # Constants / Helpers ------------------------------------------------------------------------------
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts 
 
 _16_BIT_MODE = 0
 _8_BIT_MODE  = 1
@@ -25,8 +24,8 @@ def _sign_extend(data, nbits=16):
 
 class AD9361TXBitMode(LiteXModule):
     def __init__(self):
-        self.sink   = sink   = stream.Endpoint(dma_layout_with_ts(64))
-        self.source = source = stream.Endpoint(dma_layout_with_ts(64))
+        self.sink   = sink   = stream.Endpoint(dma_layout(64))
+        self.source = source = stream.Endpoint(dma_layout(64))
         self.mode   = mode   = Signal()
 
         # # #

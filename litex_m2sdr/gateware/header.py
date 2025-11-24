@@ -13,7 +13,6 @@ from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts
 
 # Header Inserter/Extracter ------------------------------------------------------------------------
 
@@ -22,7 +21,7 @@ class HeaderInserterExtracter(LiteXModule):
         assert data_width == 64 # 8 bytes
         assert mode in ["inserter", "extracter"]
         self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i   
-        self.source = source = stream.Endpoint(dma_layout_with_ts(data_width)) # o  
+        self.source = source = stream.Endpoint(dma_layout(data_width)) # o  
 
         self.reset         = Signal() # i
 
@@ -110,8 +109,7 @@ class HeaderInserterExtracter(LiteXModule):
 
         # Frame.
         fsm.act("FRAME",
-            sink.connect(source, omit={"first", "timestamp"}),
-            source.timestamp.eq(self.timestamp), # propagate timestamp # TODO check if it is propagated correctly
+            sink.connect(source, omit={"first"}),
             NextValue(self.update, 0),
             If(self.header_enable,
                 source.first.eq((cycles == 0) & (mode == "extracter")),
