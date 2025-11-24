@@ -15,8 +15,7 @@ class ExperimentManager:
         self.config = ConfigLoader(config_file)
         # Create experiment folder
         if experiment_name:
-            # Format: vcd_outputs/test_1_future_timestamps_2025-01-15_14-30-45.vcd
-            self.experiment_name = f"{experiment_name}_{timestamp}"
+            self.experiment_name = f"{experiment_name}"
         else:
             # Default: timestamp-based
             self.experiment_name = f"{timestamp}"

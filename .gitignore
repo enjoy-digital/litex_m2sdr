@@ -15,3 +15,4 @@ modules.order
 __pycache__
 *.csv
 build/
+*.vcd
