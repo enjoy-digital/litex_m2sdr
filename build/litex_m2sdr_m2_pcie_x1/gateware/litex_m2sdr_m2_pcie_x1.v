@@ -9,7 +9,7 @@
 // Filename   : litex_m2sdr_m2_pcie_x1.v
 // Device     : xc7a200tsbg484-3
 // LiteX sha1 : d89f19e55
-// Date       : 2025-10-24 17:12:12
+// Date       : 2025-11-24 12:02:16
 //------------------------------------------------------------------------------
 
 `timescale 1ns / 1ps
@@ -441,9 +441,8 @@ BaseSoC
 │    └─── tx_pipeline (Pipeline)
 │    └─── scheduler_tx (Scheduler)
 │    │    └─── data_fifo (SyncFIFO)
-│    │    │    └─── fifo (SyncFIFO)
-│    │    └─── fsm (FSM)
-│    │    └─── fsm (FSM)
+│    │    │    └─── fifo (SyncFIFOBuffered)
+│    │    │    │    └─── fifo (SyncFIFO)
 │    └─── rx_pipeline (Pipeline)
 │    └─── ad9361prbsgenerator_0* (AD9361PRBSGenerator)
 │    └─── ad9361prbschecker_0* (AD9361PRBSChecker)
@@ -496,17 +495,16 @@ BaseSoC
 │    │    └─── csrstatus_3* (CSRStatus)
 │    │    └─── csrstatus_4* (CSRStatus)
 │    │    └─── csrstatus_5* (CSRStatus)
-│    │    └─── csrstatus_6* (CSRStatus)
 │    │    └─── csrstorage_9* (CSRStorage)
-│    │    └─── csrstatus_7* (CSRStatus)
+│    │    └─── csrstatus_6* (CSRStatus)
 │    │    └─── csrstorage_10* (CSRStorage)
-│    │    └─── csrstatus_8* (CSRStatus)
+│    │    └─── csrstatus_7* (CSRStatus)
 │    │    └─── csrstorage_11* (CSRStorage)
-│    │    └─── csrstatus_9* (CSRStatus)
+│    │    └─── csrstatus_8* (CSRStatus)
 │    │    └─── csrstorage_12* (CSRStorage)
-│    │    └─── csrstatus_10* (CSRStatus)
+│    │    └─── csrstatus_9* (CSRStatus)
 │    │    └─── csrstorage_13* (CSRStorage)
-│    │    └─── csrstatus_11* (CSRStatus)
+│    │    └─── csrstatus_10* (CSRStatus)
 │    └─── csrbank_1* (CSRBank)
 │    │    └─── csrstatus_0* (CSRStatus)
 │    │    └─── csrstatus_1* (CSRStatus)
@@ -626,20 +624,8 @@ BaseSoC
 │    │    └─── csrstatus_4* (CSRStatus)
 │    │    └─── csrstatus_5* (CSRStatus)
 └─── csr_interconnect (InterconnectShared)
-└─── [ODDR]
-└─── [IDDR]
-└─── [ODDR]
-└─── [IDDR]
-└─── [ODDR]
-└─── [IDDR]
-└─── [ODDR]
-└─── [ODDR]
 └─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
+└─── [IOBUF]
 └─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
@@ -648,16 +634,12 @@ BaseSoC
 └─── [FDPE]
 └─── [IOBUF]
 └─── [IOBUF]
-└─── [IOBUF]
-└─── [IOBUF]
 └─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
-└─── [ODDR]
-└─── [IDDR]
-└─── [ODDR]
-└─── [ODDR]
+└─── [FDPE]
+└─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
@@ -697,15 +679,31 @@ BaseSoC
 └─── [FDPE]
 └─── [FDPE]
 └─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
-└─── [FDPE]
+└─── [ODDR]
+└─── [ODDR]
+└─── [ODDR]
+└─── [ODDR]
+└─── [IDDR]
+└─── [IDDR]
+└─── [ODDR]
 └─── [IDDR]
 └─── [ODDR]
 └─── [ODDR]
 └─── [IDDR]
 └─── [ODDR]
 └─── [ODDR]
+└─── [IDDR]
+└─── [ODDR]
+└─── [ODDR]
+└─── [IDDR]
+└─── [ODDR]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [FDPE]
+└─── [IOBUF]
+└─── [FDPE]
+└─── [FDPE]
 * : Generated name.
 []: BlackBox.
 */
@@ -714,8 +712,8 @@ BaseSoC
 // Signals
 //------------------------------------------------------------------------------
 
-reg     [1:0] ad9361spimaster_next_state = 2'd0;
-reg     [1:0] ad9361spimaster_state = 2'd0;
+reg     [1:0] ad9361rfic_next_state = 2'd0;
+reg     [1:0] ad9361rfic_state = 2'd0;
 wire          basesoc;
 wire          basesoc_ad9361_ad9361phy;
 wire          basesoc_ad9361_ad9361phy_loopback0;
@@ -937,61 +935,55 @@ wire          basesoc_ad9361_rx_cdc_source_source_last;
 wire   [63:0] basesoc_ad9361_rx_cdc_source_source_payload_data;
 wire          basesoc_ad9361_rx_cdc_source_source_ready;
 wire          basesoc_ad9361_rx_cdc_source_source_valid;
-wire          basesoc_ad9361_scheduler_tx_almost_empty0;
-wire          basesoc_ad9361_scheduler_tx_almost_empty1;
-wire          basesoc_ad9361_scheduler_tx_almost_full0;
-wire          basesoc_ad9361_scheduler_tx_almost_full1;
+wire          basesoc_ad9361_scheduler_tx_can_start;
 reg           basesoc_ad9361_scheduler_tx_current_ts_re = 1'd0;
-reg    [63:0] basesoc_ad9361_scheduler_tx_current_ts_status = 64'd0;
+wire   [63:0] basesoc_ad9361_scheduler_tx_current_ts_status;
 wire          basesoc_ad9361_scheduler_tx_current_ts_we;
 reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_consume = 13'd0;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_do_read;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last;
 wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data;
-wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last;
 wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data;
-wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp;
-reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_level = 13'd0;
+reg    [13:0] basesoc_ad9361_scheduler_tx_data_fifo_level0 = 14'd0;
+wire   [13:0] basesoc_ad9361_scheduler_tx_data_fifo_level1;
 reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_produce = 13'd0;
 wire   [12:0] basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr;
-wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r;
+wire   [65:0] basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_rdport_re;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_re;
+reg           basesoc_ad9361_scheduler_tx_data_fifo_readable = 1'd0;
 reg           basesoc_ad9361_scheduler_tx_data_fifo_replace = 1'd0;
-reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_first = 1'd0;
-reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_last = 1'd0;
-reg    [63:0] basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data = 64'd0;
-reg    [63:0] basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp = 64'd0;
-reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_ready = 1'd0;
-reg           basesoc_ad9361_scheduler_tx_data_fifo_sink_valid = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_sink_first;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_sink_last;
+wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_sink_ready;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_sink_valid;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_source_first;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_source_last;
 wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
-wire   [63:0] basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp;
-reg           basesoc_ad9361_scheduler_tx_data_fifo_source_ready = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_data_fifo_source_ready;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_source_valid;
-wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din;
-wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
+wire   [65:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din;
+wire   [65:0] basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable;
 reg    [12:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr = 13'd0;
-wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_r;
-wire  [129:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w;
+wire   [65:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_r;
+wire   [65:0] basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w;
 wire          basesoc_ad9361_scheduler_tx_data_fifo_wrport_we;
-wire          basesoc_ad9361_scheduler_tx_empty0;
-wire          basesoc_ad9361_scheduler_tx_empty1;
 reg           basesoc_ad9361_scheduler_tx_fifo_level_re = 1'd0;
 wire   [15:0] basesoc_ad9361_scheduler_tx_fifo_level_status;
 wire          basesoc_ad9361_scheduler_tx_fifo_level_we;
-reg           basesoc_ad9361_scheduler_tx_flags_re = 1'd0;
-reg     [3:0] basesoc_ad9361_scheduler_tx_flags_status = 4'd0;
-wire          basesoc_ad9361_scheduler_tx_flags_we;
-wire          basesoc_ad9361_scheduler_tx_full0;
-wire          basesoc_ad9361_scheduler_tx_full1;
-wire   [15:0] basesoc_ad9361_scheduler_tx_level;
+reg     [9:0] basesoc_ad9361_scheduler_tx_frame_count = 10'd0;
+wire          basesoc_ad9361_scheduler_tx_is_header;
+wire          basesoc_ad9361_scheduler_tx_is_timestamp;
+reg    [63:0] basesoc_ad9361_scheduler_tx_latched_header = 64'd0;
+reg    [63:0] basesoc_ad9361_scheduler_tx_latched_ts = 64'd0;
 reg           basesoc_ad9361_scheduler_tx_manual_now_re = 1'd0;
 wire   [63:0] basesoc_ad9361_scheduler_tx_manual_now_sig;
 reg    [63:0] basesoc_ad9361_scheduler_tx_manual_now_storage = 64'd0;
@@ -1004,22 +996,21 @@ reg           basesoc_ad9361_scheduler_tx_reset_re = 1'd0;
 reg           basesoc_ad9361_scheduler_tx_reset_storage = 1'd0;
 reg           basesoc_ad9361_scheduler_tx_set_ts_re = 1'd0;
 reg           basesoc_ad9361_scheduler_tx_set_ts_storage = 1'd0;
-wire          basesoc_ad9361_scheduler_tx_sink_sink_first;
-wire          basesoc_ad9361_scheduler_tx_sink_sink_last;
-wire   [63:0] basesoc_ad9361_scheduler_tx_sink_sink_payload_data;
-wire   [63:0] basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp;
+reg           basesoc_ad9361_scheduler_tx_sink_sink_first = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_sink_sink_last = 1'd0;
+reg    [63:0] basesoc_ad9361_scheduler_tx_sink_sink_payload_data = 64'd0;
 reg           basesoc_ad9361_scheduler_tx_sink_sink_ready = 1'd0;
-wire          basesoc_ad9361_scheduler_tx_sink_sink_valid;
-reg           basesoc_ad9361_scheduler_tx_source_source_first = 1'd0;
-reg           basesoc_ad9361_scheduler_tx_source_source_last = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_sink_sink_valid = 1'd0;
+wire          basesoc_ad9361_scheduler_tx_source_source_first;
+wire          basesoc_ad9361_scheduler_tx_source_source_last;
 reg    [63:0] basesoc_ad9361_scheduler_tx_source_source_payload_data = 64'd0;
 reg           basesoc_ad9361_scheduler_tx_source_source_ready = 1'd0;
 reg           basesoc_ad9361_scheduler_tx_source_source_valid = 1'd0;
+reg           basesoc_ad9361_scheduler_tx_streaming = 1'd0;
 wire          basesoc_ad9361_scheduler_tx_use_manual;
 wire          basesoc_ad9361_sink_sink_first;
 wire          basesoc_ad9361_sink_sink_last;
 wire   [63:0] basesoc_ad9361_sink_sink_payload_data;
-wire   [63:0] basesoc_ad9361_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_sink_sink_ready;
 wire          basesoc_ad9361_sink_sink_valid;
 wire          basesoc_ad9361_source_source_first;
@@ -1048,13 +1039,11 @@ wire          basesoc_ad9361_tx_bitmode_mode;
 wire          basesoc_ad9361_tx_bitmode_sink_first;
 wire          basesoc_ad9361_tx_bitmode_sink_last;
 wire   [63:0] basesoc_ad9361_tx_bitmode_sink_payload_data;
-wire   [63:0] basesoc_ad9361_tx_bitmode_sink_payload_timestamp;
 reg           basesoc_ad9361_tx_bitmode_sink_ready = 1'd0;
 wire          basesoc_ad9361_tx_bitmode_sink_valid;
 reg           basesoc_ad9361_tx_bitmode_source_first = 1'd0;
 reg           basesoc_ad9361_tx_bitmode_source_last = 1'd0;
 reg    [63:0] basesoc_ad9361_tx_bitmode_source_payload_data = 64'd0;
-reg    [63:0] basesoc_ad9361_tx_bitmode_source_payload_timestamp = 64'd0;
 wire          basesoc_ad9361_tx_bitmode_source_ready;
 wire          basesoc_ad9361_tx_bitmode_source_source_first;
 wire          basesoc_ad9361_tx_bitmode_source_source_last;
@@ -1065,30 +1054,26 @@ reg           basesoc_ad9361_tx_bitmode_source_valid = 1'd0;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_first;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data;
-wire   [63:0] basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_ready;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_sink_valid;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_first = 1'd0;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_last = 1'd0;
 reg    [63:0] basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data = 64'd0;
-reg    [63:0] basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp = 64'd0;
 wire          basesoc_ad9361_tx_buffer_pipe_valid_source_ready;
 reg           basesoc_ad9361_tx_buffer_pipe_valid_source_valid = 1'd0;
 wire          basesoc_ad9361_tx_buffer_sink_sink_first;
 wire          basesoc_ad9361_tx_buffer_sink_sink_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_sink_sink_payload_data;
-wire   [63:0] basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_sink_sink_ready;
 wire          basesoc_ad9361_tx_buffer_sink_sink_valid;
 wire          basesoc_ad9361_tx_buffer_source_source_first;
 wire          basesoc_ad9361_tx_buffer_source_source_last;
 wire   [63:0] basesoc_ad9361_tx_buffer_source_source_payload_data;
-wire   [63:0] basesoc_ad9361_tx_buffer_source_source_payload_timestamp;
 wire          basesoc_ad9361_tx_buffer_source_source_ready;
 wire          basesoc_ad9361_tx_buffer_source_source_valid;
 wire          basesoc_ad9361_tx_cdc_cd_rst;
-wire  [129:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_din;
-wire  [129:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
+wire   [65:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_din;
+wire   [65:0] basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_re;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable;
 wire          basesoc_ad9361_tx_cdc_cdc_asyncfifo_we;
@@ -1097,11 +1082,9 @@ wire    [2:0] basesoc_ad9361_tx_cdc_cdc_consume_wdomain;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_in_first;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_in_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data;
-wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_out_first;
 wire          basesoc_ad9361_tx_cdc_cdc_fifo_out_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data;
-wire   [63:0] basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_graycounter0_ce;
 (* dont_touch = "true" *)
 reg     [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter0_q = 3'd0;
@@ -1116,33 +1099,29 @@ wire    [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next;
 reg     [2:0] basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary = 3'd0;
 wire    [2:0] basesoc_ad9361_tx_cdc_cdc_produce_rdomain;
 wire    [1:0] basesoc_ad9361_tx_cdc_cdc_rdport_adr;
-wire  [129:0] basesoc_ad9361_tx_cdc_cdc_rdport_dat_r;
+wire   [65:0] basesoc_ad9361_tx_cdc_cdc_rdport_dat_r;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_first;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_sink_payload_data;
-wire   [63:0] basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_ready;
 wire          basesoc_ad9361_tx_cdc_cdc_sink_valid;
 wire          basesoc_ad9361_tx_cdc_cdc_source_first;
 wire          basesoc_ad9361_tx_cdc_cdc_source_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_cdc_source_payload_data;
-wire   [63:0] basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_cdc_source_ready;
 wire          basesoc_ad9361_tx_cdc_cdc_source_valid;
 wire    [1:0] basesoc_ad9361_tx_cdc_cdc_wrport_adr;
-wire  [129:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_r;
-wire  [129:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
+wire   [65:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_r;
+wire   [65:0] basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
 wire          basesoc_ad9361_tx_cdc_cdc_wrport_we;
 wire          basesoc_ad9361_tx_cdc_sink_sink_first;
 wire          basesoc_ad9361_tx_cdc_sink_sink_last;
 wire   [63:0] basesoc_ad9361_tx_cdc_sink_sink_payload_data;
-wire   [63:0] basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp;
 wire          basesoc_ad9361_tx_cdc_sink_sink_ready;
 wire          basesoc_ad9361_tx_cdc_sink_sink_valid;
 reg           basesoc_ad9361_tx_cdc_source_source_first = 1'd0;
 reg           basesoc_ad9361_tx_cdc_source_source_last = 1'd0;
 reg    [63:0] basesoc_ad9361_tx_cdc_source_source_payload_data = 64'd0;
-reg    [63:0] basesoc_ad9361_tx_cdc_source_source_payload_timestamp = 64'd0;
 reg           basesoc_ad9361_tx_cdc_source_source_ready = 1'd0;
 reg           basesoc_ad9361_tx_cdc_source_source_valid = 1'd0;
 wire          basesoc_ad9361rfic_ad9361prbschecker0_ce0;
@@ -2805,7 +2784,6 @@ wire          basesoc_rx_sink_valid;
 reg           basesoc_rx_source_first = 1'd0;
 reg           basesoc_rx_source_last = 1'd0;
 reg    [63:0] basesoc_rx_source_payload_data = 64'd0;
-reg    [63:0] basesoc_rx_source_payload_timestamp = 64'd0;
 wire          basesoc_rx_source_ready;
 reg           basesoc_rx_source_valid = 1'd0;
 wire   [63:0] basesoc_rx_timestamp;
@@ -3666,7 +3644,6 @@ wire          basesoc_tx_sink_valid;
 reg           basesoc_tx_source_first = 1'd0;
 reg           basesoc_tx_source_last = 1'd0;
 reg    [63:0] basesoc_tx_source_payload_data = 64'd0;
-reg    [63:0] basesoc_tx_source_payload_timestamp = 64'd0;
 wire          basesoc_tx_source_ready;
 reg           basesoc_tx_source_valid = 1'd0;
 reg    [63:0] basesoc_tx_timestamp = 64'd0;
@@ -3785,10 +3762,6 @@ wire   [15:0] csr_bankarray_csrbank0_scheduler_tx_fifo_level_r;
 reg           csr_bankarray_csrbank0_scheduler_tx_fifo_level_re = 1'd0;
 wire   [15:0] csr_bankarray_csrbank0_scheduler_tx_fifo_level_w;
 reg           csr_bankarray_csrbank0_scheduler_tx_fifo_level_we = 1'd0;
-wire    [3:0] csr_bankarray_csrbank0_scheduler_tx_flags_r;
-reg           csr_bankarray_csrbank0_scheduler_tx_flags_re = 1'd0;
-wire    [3:0] csr_bankarray_csrbank0_scheduler_tx_flags_w;
-reg           csr_bankarray_csrbank0_scheduler_tx_flags_we = 1'd0;
 wire   [31:0] csr_bankarray_csrbank0_scheduler_tx_manual_now0_r;
 reg           csr_bankarray_csrbank0_scheduler_tx_manual_now0_re = 1'd0;
 wire   [31:0] csr_bankarray_csrbank0_scheduler_tx_manual_now0_w;
@@ -4421,10 +4394,10 @@ wire          from3033_clk;
 wire          from3033_rst;
 wire          from3224_clk;
 wire          from3224_rst;
-wire          from7252_clk;
-wire          from7252_rst;
-wire          from7415_clk;
-wire          from7415_rst;
+wire          from7250_clk;
+wire          from7250_rst;
+wire          from7401_clk;
+wire          from7401_rst;
 reg     [1:0] grant = 2'd0;
 (* dont_touch = "true" *)
 reg           icap_clk = 1'd0;
@@ -5560,8 +5533,6 @@ wire          s7pciephy_reset6;
 wire          s7pciephy_reset7;
 reg     [1:0] s7spiflash_next_state = 2'd0;
 reg     [1:0] s7spiflash_state = 2'd0;
-reg     [1:0] scheduler_next_state = 2'd0;
-reg     [1:0] scheduler_state = 2'd0;
 reg           shared_ack = 1'd0;
 wire   [29:0] shared_adr;
 wire    [1:0] shared_bte;
@@ -5633,10 +5604,10 @@ wire          to3033_clk;
 wire          to3033_rst;
 wire          to3224_clk;
 wire          to3224_rst;
-wire          to7252_clk;
-wire          to7252_rst;
-wire          to7415_clk;
-wire          to7415_rst;
+wire          to7250_clk;
+wire          to7250_rst;
+wire          to7401_clk;
+wire          to7401_rst;
 reg     [2:0] txheaderextracter_next_state = 3'd0;
 reg     [2:0] txheaderextracter_state = 3'd0;
 reg     [2:0] uartbone_next_state = 3'd0;
@@ -5675,7 +5646,6 @@ assign basesoc_tx_source_ready = basesoc_ad9361_sink_sink_ready;
 assign basesoc_ad9361_sink_sink_first = basesoc_tx_source_first;
 assign basesoc_ad9361_sink_sink_last = basesoc_tx_source_last;
 assign basesoc_ad9361_sink_sink_payload_data = basesoc_tx_source_payload_data;
-assign basesoc_ad9361_sink_sink_payload_timestamp = basesoc_tx_source_payload_timestamp;
 assign basesoc_rx_sink_valid = basesoc_ad9361_source_source_valid;
 assign basesoc_ad9361_source_source_ready = basesoc_rx_sink_ready;
 assign basesoc_rx_sink_first = basesoc_ad9361_source_source_first;
@@ -6543,7 +6513,7 @@ always @(*) begin
         end
     endcase
 end
-assign time_clk = si5351_clk0;
+assign time_clk = si5351_clk1;
 assign basesoc_time_gen_time_read_ps_i = basesoc_time_gen_read;
 assign basesoc_time_gen_time_write_ps_i = basesoc_time_gen_write1;
 assign basesoc_time_gen_write0 = basesoc_time_gen_time_write_ps_o;
@@ -10297,6 +10267,8 @@ assign basesoc_basesoc_buffering_syncfifo1_syncfifo1_writable = (basesoc_basesoc
 assign basesoc_basesoc_buffering_syncfifo1_syncfifo1_readable = (basesoc_basesoc_buffering_syncfifo1_level0 != 1'd0);
 assign basesoc_ad9361_tx_bitmode_mode = basesoc_ad9361_csrfield_mode;
 assign basesoc_ad9361_rx_bitmode_mode = basesoc_ad9361_csrfield_mode;
+assign basesoc_ad9361_scheduler_tx_source_source_first = basesoc_ad9361_gpio_tx_unpacker_sink_first;
+assign basesoc_ad9361_scheduler_tx_source_source_last = basesoc_ad9361_gpio_tx_unpacker_sink_last;
 assign basesoc_ad9361_gpio_tx_unpacker_source_ready = basesoc_ad9361_ad9361phy_sink_ready;
 assign basesoc_ad9361_ad9361phy_sink_payload_qa = basesoc_ad9361_gpio_tx_unpacker_source_payload_data[31:16];
 assign basesoc_ad9361_ad9361phy_sink_payload_qb = basesoc_ad9361_gpio_tx_unpacker_source_payload_data[63:48];
@@ -10344,22 +10316,22 @@ assign ad9361_spi_cs_n = (~basesoc_ad9361_ad9361spimaster_chip_select);
 assign basesoc_ad9361_ad9361spimaster_mosi = basesoc_ad9361_ad9361spimaster_mosi_shift_reg[23];
 assign basesoc_ad9361_ad9361spimaster_miso_status = basesoc_ad9361_ad9361spimaster_miso_shift_reg;
 always @(*) begin
-    ad9361spimaster_next_state <= 2'd0;
+    ad9361rfic_next_state <= 2'd0;
     basesoc_ad9361_ad9361spimaster_chip_select <= 1'd0;
     basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= 8'd0;
     basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce <= 1'd0;
     basesoc_ad9361_ad9361spimaster_done <= 1'd0;
     basesoc_ad9361_ad9361spimaster_shift <= 1'd0;
-    ad9361spimaster_next_state <= ad9361spimaster_state;
-    case (ad9361spimaster_state)
+    ad9361rfic_next_state <= ad9361rfic_state;
+    case (ad9361rfic_state)
         1'd1: begin
             if (basesoc_ad9361_ad9361spimaster_clk_clr) begin
-                ad9361spimaster_next_state <= 2'd2;
+                ad9361rfic_next_state <= 2'd2;
             end
         end
         2'd2: begin
             if ((basesoc_ad9361_ad9361spimaster_length == basesoc_ad9361_ad9361spimaster_cnt)) begin
-                ad9361spimaster_next_state <= 2'd3;
+                ad9361rfic_next_state <= 2'd3;
             end else begin
                 basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= (basesoc_ad9361_ad9361spimaster_cnt + basesoc_ad9361_ad9361spimaster_clk_clr);
                 basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce <= 1'd1;
@@ -10369,13 +10341,13 @@ always @(*) begin
         end
         2'd3: begin
             if (basesoc_ad9361_ad9361spimaster_clk_set) begin
-                ad9361spimaster_next_state <= 1'd0;
+                ad9361rfic_next_state <= 1'd0;
             end
             basesoc_ad9361_ad9361spimaster_shift <= 1'd1;
         end
         default: begin
             if (basesoc_ad9361_ad9361spimaster_start) begin
-                ad9361spimaster_next_state <= 1'd1;
+                ad9361rfic_next_state <= 1'd1;
             end
             basesoc_ad9361_ad9361spimaster_done <= 1'd1;
             basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value <= 1'd0;
@@ -10454,15 +10426,14 @@ always @(*) begin
         basesoc_ad9361_gpio_rx_packer_source_payload_data[63:60] <= 1'd0;
     end
 end
-assign from7252_clk = sys_clk;
-assign to7252_clk = rfic_clk;
+assign from7250_clk = sys_clk;
+assign to7250_clk = rfic_clk;
 assign basesoc_ad9361_tx_cdc_cd_rst = (sys_rst | rfic_rst);
 assign basesoc_ad9361_tx_cdc_cdc_sink_valid = basesoc_ad9361_tx_cdc_sink_sink_valid;
 assign basesoc_ad9361_tx_cdc_sink_sink_ready = basesoc_ad9361_tx_cdc_cdc_sink_ready;
 assign basesoc_ad9361_tx_cdc_cdc_sink_first = basesoc_ad9361_tx_cdc_sink_sink_first;
 assign basesoc_ad9361_tx_cdc_cdc_sink_last = basesoc_ad9361_tx_cdc_sink_sink_last;
 assign basesoc_ad9361_tx_cdc_cdc_sink_payload_data = basesoc_ad9361_tx_cdc_sink_sink_payload_data;
-assign basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp = basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp;
 always @(*) begin
     basesoc_ad9361_tx_cdc_source_source_valid <= 1'd0;
     basesoc_ad9361_tx_cdc_source_source_valid <= basesoc_ad9361_scheduler_tx_sink_sink_valid;
@@ -10484,24 +10455,17 @@ always @(*) begin
     basesoc_ad9361_tx_cdc_source_source_payload_data <= basesoc_ad9361_scheduler_tx_sink_sink_payload_data;
     basesoc_ad9361_tx_cdc_source_source_payload_data <= basesoc_ad9361_tx_cdc_cdc_source_payload_data;
 end
-always @(*) begin
-    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= 64'd0;
-    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp;
-    basesoc_ad9361_tx_cdc_source_source_payload_timestamp <= basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp;
-end
-assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_din = {basesoc_ad9361_tx_cdc_cdc_fifo_in_last, basesoc_ad9361_tx_cdc_cdc_fifo_in_first, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data};
-assign {basesoc_ad9361_tx_cdc_cdc_fifo_out_last, basesoc_ad9361_tx_cdc_cdc_fifo_out_first, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data} = basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
+assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_din = {basesoc_ad9361_tx_cdc_cdc_fifo_in_last, basesoc_ad9361_tx_cdc_cdc_fifo_in_first, basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data};
+assign {basesoc_ad9361_tx_cdc_cdc_fifo_out_last, basesoc_ad9361_tx_cdc_cdc_fifo_out_first, basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data} = basesoc_ad9361_tx_cdc_cdc_asyncfifo_dout;
 assign basesoc_ad9361_tx_cdc_cdc_sink_ready = basesoc_ad9361_tx_cdc_cdc_asyncfifo_writable;
 assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_we = basesoc_ad9361_tx_cdc_cdc_sink_valid;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_first = basesoc_ad9361_tx_cdc_cdc_sink_first;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_last = basesoc_ad9361_tx_cdc_cdc_sink_last;
 assign basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_data = basesoc_ad9361_tx_cdc_cdc_sink_payload_data;
-assign basesoc_ad9361_tx_cdc_cdc_fifo_in_payload_timestamp = basesoc_ad9361_tx_cdc_cdc_sink_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_cdc_source_valid = basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable;
 assign basesoc_ad9361_tx_cdc_cdc_source_first = basesoc_ad9361_tx_cdc_cdc_fifo_out_first;
 assign basesoc_ad9361_tx_cdc_cdc_source_last = basesoc_ad9361_tx_cdc_cdc_fifo_out_last;
 assign basesoc_ad9361_tx_cdc_cdc_source_payload_data = basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_data;
-assign basesoc_ad9361_tx_cdc_cdc_source_payload_timestamp = basesoc_ad9361_tx_cdc_cdc_fifo_out_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_cdc_asyncfifo_re = basesoc_ad9361_tx_cdc_cdc_source_ready;
 assign basesoc_ad9361_tx_cdc_cdc_graycounter0_ce = (basesoc_ad9361_tx_cdc_cdc_asyncfifo_writable & basesoc_ad9361_tx_cdc_cdc_asyncfifo_we);
 assign basesoc_ad9361_tx_cdc_cdc_graycounter1_ce = (basesoc_ad9361_tx_cdc_cdc_asyncfifo_readable & basesoc_ad9361_tx_cdc_cdc_asyncfifo_re);
@@ -10530,8 +10494,8 @@ always @(*) begin
     end
 end
 assign basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next = (basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary ^ basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary[2:1]);
-assign from7415_clk = rfic_clk;
-assign to7415_clk = sys_clk;
+assign from7401_clk = rfic_clk;
+assign to7401_clk = sys_clk;
 assign basesoc_ad9361_rx_cdc_cd_rst = (rfic_rst | sys_rst);
 assign basesoc_ad9361_rx_cdc_cdc_sink_valid = basesoc_ad9361_rx_cdc_sink_sink_valid;
 assign basesoc_ad9361_rx_cdc_sink_sink_ready = basesoc_ad9361_rx_cdc_cdc_sink_ready;
@@ -10588,13 +10552,11 @@ assign basesoc_ad9361_tx_buffer_sink_sink_ready = basesoc_ad9361_tx_buffer_pipe_
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_first = basesoc_ad9361_tx_buffer_sink_sink_first;
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_last = basesoc_ad9361_tx_buffer_sink_sink_last;
 assign basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data = basesoc_ad9361_tx_buffer_sink_sink_payload_data;
-assign basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp = basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp;
 assign basesoc_ad9361_tx_buffer_source_source_valid = basesoc_ad9361_tx_buffer_pipe_valid_source_valid;
 assign basesoc_ad9361_tx_buffer_pipe_valid_source_ready = basesoc_ad9361_tx_buffer_source_source_ready;
 assign basesoc_ad9361_tx_buffer_source_source_first = basesoc_ad9361_tx_buffer_pipe_valid_source_first;
 assign basesoc_ad9361_tx_buffer_source_source_last = basesoc_ad9361_tx_buffer_pipe_valid_source_last;
 assign basesoc_ad9361_tx_buffer_source_source_payload_data = basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data;
-assign basesoc_ad9361_tx_buffer_source_source_payload_timestamp = basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp;
 assign basesoc_ad9361_rx_buffer_pipe_valid_sink_ready = ((~basesoc_ad9361_rx_buffer_pipe_valid_source_valid) | basesoc_ad9361_rx_buffer_pipe_valid_source_ready);
 assign basesoc_ad9361_rx_buffer_pipe_valid_sink_valid = basesoc_ad9361_rx_buffer_sink_sink_valid;
 assign basesoc_ad9361_rx_buffer_sink_sink_ready = basesoc_ad9361_rx_buffer_pipe_valid_sink_ready;
@@ -10615,7 +10577,6 @@ always @(*) begin
     basesoc_ad9361_tx_bitmode_source_first <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_last <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_payload_data <= 64'd0;
-    basesoc_ad9361_tx_bitmode_source_payload_timestamp <= 64'd0;
     basesoc_ad9361_tx_bitmode_source_source_ready <= 1'd0;
     basesoc_ad9361_tx_bitmode_source_valid <= 1'd0;
     if ((basesoc_ad9361_tx_bitmode_mode == 1'd0)) begin
@@ -10624,7 +10585,6 @@ always @(*) begin
         basesoc_ad9361_tx_bitmode_source_first <= basesoc_ad9361_tx_bitmode_sink_first;
         basesoc_ad9361_tx_bitmode_source_last <= basesoc_ad9361_tx_bitmode_sink_last;
         basesoc_ad9361_tx_bitmode_source_payload_data <= basesoc_ad9361_tx_bitmode_sink_payload_data;
-        basesoc_ad9361_tx_bitmode_source_payload_timestamp <= basesoc_ad9361_tx_bitmode_sink_payload_timestamp;
     end
     if ((basesoc_ad9361_tx_bitmode_mode == 1'd1)) begin
         basesoc_ad9361_tx_bitmode_converter_sink_valid <= basesoc_ad9361_tx_bitmode_sink_valid;
@@ -10712,44 +10672,39 @@ assign basesoc_ad9361_sink_sink_ready = basesoc_ad9361_tx_buffer_sink_sink_ready
 assign basesoc_ad9361_tx_buffer_sink_sink_first = basesoc_ad9361_sink_sink_first;
 assign basesoc_ad9361_tx_buffer_sink_sink_last = basesoc_ad9361_sink_sink_last;
 assign basesoc_ad9361_tx_buffer_sink_sink_payload_data = basesoc_ad9361_sink_sink_payload_data;
-assign basesoc_ad9361_tx_buffer_sink_sink_payload_timestamp = basesoc_ad9361_sink_sink_payload_timestamp;
 assign basesoc_ad9361_tx_bitmode_sink_valid = basesoc_ad9361_tx_buffer_source_source_valid;
 assign basesoc_ad9361_tx_buffer_source_source_ready = basesoc_ad9361_tx_bitmode_sink_ready;
 assign basesoc_ad9361_tx_bitmode_sink_first = basesoc_ad9361_tx_buffer_source_source_first;
 assign basesoc_ad9361_tx_bitmode_sink_last = basesoc_ad9361_tx_buffer_source_source_last;
 assign basesoc_ad9361_tx_bitmode_sink_payload_data = basesoc_ad9361_tx_buffer_source_source_payload_data;
-assign basesoc_ad9361_tx_bitmode_sink_payload_timestamp = basesoc_ad9361_tx_buffer_source_source_payload_timestamp;
 assign basesoc_ad9361_tx_cdc_sink_sink_valid = basesoc_ad9361_tx_bitmode_source_valid;
 assign basesoc_ad9361_tx_bitmode_source_ready = basesoc_ad9361_tx_cdc_sink_sink_ready;
 assign basesoc_ad9361_tx_cdc_sink_sink_first = basesoc_ad9361_tx_bitmode_source_first;
 assign basesoc_ad9361_tx_cdc_sink_sink_last = basesoc_ad9361_tx_bitmode_source_last;
 assign basesoc_ad9361_tx_cdc_sink_sink_payload_data = basesoc_ad9361_tx_bitmode_source_payload_data;
-assign basesoc_ad9361_tx_cdc_sink_sink_payload_timestamp = basesoc_ad9361_tx_bitmode_source_payload_timestamp;
-assign basesoc_ad9361_scheduler_tx_level = basesoc_ad9361_scheduler_tx_data_fifo_level;
-assign basesoc_ad9361_scheduler_tx_full0 = (basesoc_ad9361_scheduler_tx_data_fifo_level == 13'd8176);
-assign basesoc_ad9361_scheduler_tx_almost_full0 = (basesoc_ad9361_scheduler_tx_data_fifo_level >= 13'd7154);
-assign basesoc_ad9361_scheduler_tx_empty0 = (basesoc_ad9361_scheduler_tx_data_fifo_level == 1'd0);
-assign basesoc_ad9361_scheduler_tx_almost_empty0 = (basesoc_ad9361_scheduler_tx_data_fifo_level <= 10'd1022);
-assign basesoc_ad9361_scheduler_tx_sink_sink_valid = basesoc_ad9361_scheduler_tx_data_fifo_sink_valid;
-assign basesoc_ad9361_scheduler_tx_sink_sink_first = basesoc_ad9361_scheduler_tx_data_fifo_sink_first;
-assign basesoc_ad9361_scheduler_tx_sink_sink_last = basesoc_ad9361_scheduler_tx_data_fifo_sink_last;
-assign basesoc_ad9361_scheduler_tx_sink_sink_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data;
-assign basesoc_ad9361_scheduler_tx_sink_sink_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp;
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_sink_sink_ready <= 1'd0;
+    basesoc_ad9361_scheduler_tx_sink_sink_ready <= basesoc_ad9361_tx_cdc_source_source_ready;
+    basesoc_ad9361_scheduler_tx_sink_sink_ready <= basesoc_ad9361_scheduler_tx_data_fifo_sink_ready;
+end
+assign basesoc_ad9361_scheduler_tx_data_fifo_sink_valid = basesoc_ad9361_scheduler_tx_sink_sink_valid;
+assign basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data = basesoc_ad9361_scheduler_tx_sink_sink_payload_data;
+assign basesoc_ad9361_scheduler_tx_data_fifo_sink_first = basesoc_ad9361_scheduler_tx_sink_sink_first;
+assign basesoc_ad9361_scheduler_tx_data_fifo_sink_last = basesoc_ad9361_scheduler_tx_sink_sink_last;
+assign basesoc_ad9361_scheduler_tx_is_header = ((basesoc_ad9361_scheduler_tx_data_fifo_source_valid & (~basesoc_ad9361_scheduler_tx_streaming)) & (basesoc_ad9361_scheduler_tx_frame_count == 1'd0));
+assign basesoc_ad9361_scheduler_tx_is_timestamp = ((basesoc_ad9361_scheduler_tx_data_fifo_source_valid & (~basesoc_ad9361_scheduler_tx_streaming)) & (basesoc_ad9361_scheduler_tx_frame_count == 1'd1));
+assign basesoc_ad9361_scheduler_tx_can_start = (((basesoc_ad9361_scheduler_tx_now >= basesoc_ad9361_scheduler_tx_latched_ts) & (basesoc_ad9361_scheduler_tx_frame_count == 2'd2)) & basesoc_ad9361_scheduler_tx_data_fifo_source_valid);
+always @(*) begin
+    basesoc_ad9361_scheduler_tx_source_source_valid <= 1'd0;
+    basesoc_ad9361_scheduler_tx_source_source_valid <= basesoc_ad9361_gpio_tx_unpacker_sink_valid;
+    basesoc_ad9361_scheduler_tx_source_source_valid <= (basesoc_ad9361_scheduler_tx_streaming & basesoc_ad9361_scheduler_tx_data_fifo_source_valid);
+end
 always @(*) begin
     basesoc_ad9361_scheduler_tx_source_source_payload_data <= 64'd0;
     basesoc_ad9361_scheduler_tx_source_source_payload_data <= basesoc_ad9361_gpio_tx_unpacker_sink_payload_data;
     basesoc_ad9361_scheduler_tx_source_source_payload_data <= basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
 end
-always @(*) begin
-    basesoc_ad9361_scheduler_tx_source_source_first <= 1'd0;
-    basesoc_ad9361_scheduler_tx_source_source_first <= basesoc_ad9361_gpio_tx_unpacker_sink_first;
-    basesoc_ad9361_scheduler_tx_source_source_first <= basesoc_ad9361_scheduler_tx_data_fifo_source_first;
-end
-always @(*) begin
-    basesoc_ad9361_scheduler_tx_source_source_last <= 1'd0;
-    basesoc_ad9361_scheduler_tx_source_source_last <= basesoc_ad9361_gpio_tx_unpacker_sink_last;
-    basesoc_ad9361_scheduler_tx_source_source_last <= basesoc_ad9361_scheduler_tx_data_fifo_source_last;
-end
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_ready = ((basesoc_ad9361_scheduler_tx_source_source_ready & basesoc_ad9361_scheduler_tx_streaming) | (basesoc_ad9361_scheduler_tx_is_header | basesoc_ad9361_scheduler_tx_is_timestamp));
 assign basesoc_ad9361_scheduler_tx_manual_now_sig = basesoc_ad9361_scheduler_tx_manual_now_storage;
 always @(*) begin
     basesoc_ad9361_scheduler_tx_now <= 64'd0;
@@ -10758,30 +10713,23 @@ always @(*) begin
         basesoc_ad9361_scheduler_tx_now <= basesoc_ad9361_scheduler_tx_manual_now_sig;
     end
 end
-assign basesoc_ad9361_scheduler_tx_fifo_level_status = basesoc_ad9361_scheduler_tx_data_fifo_level;
-assign basesoc_ad9361_scheduler_tx_full1 = basesoc_ad9361_scheduler_tx_full0;
-assign basesoc_ad9361_scheduler_tx_empty1 = basesoc_ad9361_scheduler_tx_empty0;
-assign basesoc_ad9361_scheduler_tx_almost_full1 = basesoc_ad9361_scheduler_tx_almost_full0;
-assign basesoc_ad9361_scheduler_tx_almost_empty1 = basesoc_ad9361_scheduler_tx_almost_empty0;
+assign basesoc_ad9361_scheduler_tx_current_ts_status = basesoc_ad9361_scheduler_tx_latched_ts;
 assign basesoc_ad9361_scheduler_tx_now_status = basesoc_ad9361_scheduler_tx_now;
-assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din = {basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data};
-assign {basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data} = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
-always @(*) begin
-    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= 1'd0;
-    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= basesoc_ad9361_scheduler_tx_sink_sink_ready;
-    basesoc_ad9361_scheduler_tx_data_fifo_sink_ready <= basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable;
-end
+assign basesoc_ad9361_scheduler_tx_fifo_level_status = basesoc_ad9361_scheduler_tx_data_fifo_level1;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_din = {basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data};
+assign {basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first, basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data} = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout;
+assign basesoc_ad9361_scheduler_tx_data_fifo_sink_ready = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable;
 assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we = basesoc_ad9361_scheduler_tx_data_fifo_sink_valid;
 assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_first = basesoc_ad9361_scheduler_tx_data_fifo_sink_first;
 assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_last = basesoc_ad9361_scheduler_tx_data_fifo_sink_last;
 assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_data;
-assign basesoc_ad9361_scheduler_tx_data_fifo_fifo_in_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_sink_payload_timestamp;
-assign basesoc_ad9361_scheduler_tx_data_fifo_source_valid = basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable;
+assign basesoc_ad9361_scheduler_tx_data_fifo_source_valid = basesoc_ad9361_scheduler_tx_data_fifo_readable;
 assign basesoc_ad9361_scheduler_tx_data_fifo_source_first = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_first;
 assign basesoc_ad9361_scheduler_tx_data_fifo_source_last = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_last;
 assign basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_data;
-assign basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp = basesoc_ad9361_scheduler_tx_data_fifo_fifo_out_payload_timestamp;
-assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re = basesoc_ad9361_scheduler_tx_data_fifo_source_ready;
+assign basesoc_ad9361_scheduler_tx_data_fifo_re = basesoc_ad9361_scheduler_tx_data_fifo_source_ready;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re = (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable & ((~basesoc_ad9361_scheduler_tx_data_fifo_readable) | basesoc_ad9361_scheduler_tx_data_fifo_re));
+assign basesoc_ad9361_scheduler_tx_data_fifo_level1 = (basesoc_ad9361_scheduler_tx_data_fifo_level0 + basesoc_ad9361_scheduler_tx_data_fifo_readable);
 always @(*) begin
     basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr <= 13'd0;
     if (basesoc_ad9361_scheduler_tx_data_fifo_replace) begin
@@ -10795,33 +10743,9 @@ assign basesoc_ad9361_scheduler_tx_data_fifo_wrport_we = (basesoc_ad9361_schedul
 assign basesoc_ad9361_scheduler_tx_data_fifo_do_read = (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re);
 assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr = basesoc_ad9361_scheduler_tx_data_fifo_consume;
 assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_dout = basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r;
-assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable = (basesoc_ad9361_scheduler_tx_data_fifo_level != 13'd8176);
-assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable = (basesoc_ad9361_scheduler_tx_data_fifo_level != 1'd0);
-always @(*) begin
-    basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= 1'd0;
-    basesoc_ad9361_scheduler_tx_source_source_valid <= 1'd0;
-    scheduler_next_state <= 2'd0;
-    basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= 1'd0;
-    scheduler_next_state <= scheduler_state;
-    case (scheduler_state)
-        1'd1: begin
-            basesoc_ad9361_scheduler_tx_source_source_valid <= 1'd0;
-            if (((basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now) & basesoc_ad9361_scheduler_tx_data_fifo_source_valid)) begin
-                scheduler_next_state <= 2'd2;
-            end
-        end
-        2'd2: begin
-            basesoc_ad9361_scheduler_tx_source_source_valid <= (basesoc_ad9361_scheduler_tx_data_fifo_source_valid & (basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now));
-            basesoc_ad9361_scheduler_tx_data_fifo_source_ready <= (basesoc_ad9361_scheduler_tx_source_source_ready & (basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp <= basesoc_ad9361_scheduler_tx_now));
-            if (((basesoc_ad9361_scheduler_tx_data_fifo_source_payload_timestamp > basesoc_ad9361_scheduler_tx_now) | (~basesoc_ad9361_scheduler_tx_data_fifo_source_valid))) begin
-                scheduler_next_state <= 1'd1;
-            end
-        end
-        default: begin
-            scheduler_next_state <= 1'd1;
-        end
-    endcase
-end
+assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_re = basesoc_ad9361_scheduler_tx_data_fifo_do_read;
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable = (basesoc_ad9361_scheduler_tx_data_fifo_level0 != 14'd8192);
+assign basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_readable = (basesoc_ad9361_scheduler_tx_data_fifo_level0 != 1'd0);
 assign basesoc_ad9361_rx_cdc_sink_sink_valid = basesoc_ad9361_gpio_rx_packer_source_valid;
 assign basesoc_ad9361_gpio_rx_packer_source_ready = basesoc_ad9361_rx_cdc_sink_sink_ready;
 assign basesoc_ad9361_rx_cdc_sink_sink_first = basesoc_ad9361_gpio_rx_packer_source_first;
@@ -10936,7 +10860,6 @@ always @(*) begin
     basesoc_tx_source_first <= 1'd0;
     basesoc_tx_source_last <= 1'd0;
     basesoc_tx_source_payload_data <= 64'd0;
-    basesoc_tx_source_payload_timestamp <= 64'd0;
     basesoc_tx_source_valid <= 1'd0;
     basesoc_tx_timestamp_txheaderextracter_next_value2 <= 64'd0;
     basesoc_tx_timestamp_txheaderextracter_next_value_ce2 <= 1'd0;
@@ -10977,11 +10900,10 @@ always @(*) begin
             basesoc_tx_sink_ready <= basesoc_tx_source_ready;
             basesoc_tx_source_last <= basesoc_tx_sink_last;
             basesoc_tx_source_payload_data <= basesoc_tx_sink_payload_data;
-            basesoc_tx_source_payload_timestamp <= basesoc_tx_timestamp;
             basesoc_tx_update_txheaderextracter_next_value3 <= 1'd0;
             basesoc_tx_update_txheaderextracter_next_value_ce3 <= 1'd1;
             if (basesoc_tx_header_enable0) begin
-                basesoc_tx_source_first <= 1'd0;
+                basesoc_tx_source_first <= ((basesoc_tx_cycles == 1'd0) & 1'd1);
                 basesoc_tx_source_last <= (basesoc_tx_cycles == (basesoc_tx_frame_cycles - 1'd1));
                 if ((basesoc_tx_source_valid & basesoc_tx_source_ready)) begin
                     basesoc_tx_cycles_txheaderextracter_next_value0 <= (basesoc_tx_cycles + 1'd1);
@@ -11015,7 +10937,6 @@ always @(*) begin
     basesoc_rx_source_first <= 1'd0;
     basesoc_rx_source_last <= 1'd0;
     basesoc_rx_source_payload_data <= 64'd0;
-    basesoc_rx_source_payload_timestamp <= 64'd0;
     basesoc_rx_source_valid <= 1'd0;
     basesoc_rx_update_rxheaderinserter_next_value1 <= 1'd0;
     basesoc_rx_update_rxheaderinserter_next_value_ce1 <= 1'd0;
@@ -11053,11 +10974,10 @@ always @(*) begin
             basesoc_rx_sink_ready <= basesoc_rx_source_ready;
             basesoc_rx_source_last <= basesoc_rx_sink_last;
             basesoc_rx_source_payload_data <= basesoc_rx_sink_payload_data;
-            basesoc_rx_source_payload_timestamp <= basesoc_rx_timestamp;
             basesoc_rx_update_rxheaderinserter_next_value1 <= 1'd0;
             basesoc_rx_update_rxheaderinserter_next_value_ce1 <= 1'd1;
             if (basesoc_rx_header_enable0) begin
-                basesoc_rx_source_first <= 1'd0;
+                basesoc_rx_source_first <= ((basesoc_rx_cycles == 1'd0) & 1'd0);
                 basesoc_rx_source_last <= (basesoc_rx_cycles == (basesoc_rx_frame_cycles - 1'd1));
                 if ((basesoc_rx_source_valid & basesoc_rx_source_ready)) begin
                     basesoc_rx_cycles_rxheaderinserter_next_value0 <= (basesoc_rx_cycles + 1'd1);
@@ -11414,20 +11334,11 @@ always @(*) begin
         csr_bankarray_csrbank0_scheduler_tx_fifo_level_we <= csr_bankarray_interface0_bank_bus_re;
     end
 end
-assign csr_bankarray_csrbank0_scheduler_tx_flags_r = csr_bankarray_interface0_bank_bus_dat_w[3:0];
-always @(*) begin
-    csr_bankarray_csrbank0_scheduler_tx_flags_re <= 1'd0;
-    csr_bankarray_csrbank0_scheduler_tx_flags_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 4'd14))) begin
-        csr_bankarray_csrbank0_scheduler_tx_flags_re <= csr_bankarray_interface0_bank_bus_we;
-        csr_bankarray_csrbank0_scheduler_tx_flags_we <= csr_bankarray_interface0_bank_bus_re;
-    end
-end
 assign csr_bankarray_csrbank0_scheduler_tx_current_ts1_r = csr_bankarray_interface0_bank_bus_dat_w;
 always @(*) begin
     csr_bankarray_csrbank0_scheduler_tx_current_ts1_re <= 1'd0;
     csr_bankarray_csrbank0_scheduler_tx_current_ts1_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 4'd15))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 4'd14))) begin
         csr_bankarray_csrbank0_scheduler_tx_current_ts1_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_scheduler_tx_current_ts1_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11436,7 +11347,7 @@ assign csr_bankarray_csrbank0_scheduler_tx_current_ts0_r = csr_bankarray_interfa
 always @(*) begin
     csr_bankarray_csrbank0_scheduler_tx_current_ts0_re <= 1'd0;
     csr_bankarray_csrbank0_scheduler_tx_current_ts0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd16))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 4'd15))) begin
         csr_bankarray_csrbank0_scheduler_tx_current_ts0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_scheduler_tx_current_ts0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11445,7 +11356,7 @@ assign csr_bankarray_csrbank0_scheduler_tx_now1_r = csr_bankarray_interface0_ban
 always @(*) begin
     csr_bankarray_csrbank0_scheduler_tx_now1_re <= 1'd0;
     csr_bankarray_csrbank0_scheduler_tx_now1_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd17))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd16))) begin
         csr_bankarray_csrbank0_scheduler_tx_now1_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_scheduler_tx_now1_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11454,7 +11365,7 @@ assign csr_bankarray_csrbank0_scheduler_tx_now0_r = csr_bankarray_interface0_ban
 always @(*) begin
     csr_bankarray_csrbank0_scheduler_tx_now0_re <= 1'd0;
     csr_bankarray_csrbank0_scheduler_tx_now0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd18))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd17))) begin
         csr_bankarray_csrbank0_scheduler_tx_now0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_scheduler_tx_now0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11463,7 +11374,7 @@ assign csr_bankarray_csrbank0_prbs_tx0_r = csr_bankarray_interface0_bank_bus_dat
 always @(*) begin
     csr_bankarray_csrbank0_prbs_tx0_re <= 1'd0;
     csr_bankarray_csrbank0_prbs_tx0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd19))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd18))) begin
         csr_bankarray_csrbank0_prbs_tx0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_prbs_tx0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11472,7 +11383,7 @@ assign csr_bankarray_csrbank0_prbs_rx_r = csr_bankarray_interface0_bank_bus_dat_
 always @(*) begin
     csr_bankarray_csrbank0_prbs_rx_re <= 1'd0;
     csr_bankarray_csrbank0_prbs_rx_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd20))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd19))) begin
         csr_bankarray_csrbank0_prbs_rx_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_prbs_rx_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11481,7 +11392,7 @@ assign csr_bankarray_csrbank0_agc_count_rx1_low_control0_r = csr_bankarray_inter
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx1_low_control0_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx1_low_control0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd21))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd20))) begin
         csr_bankarray_csrbank0_agc_count_rx1_low_control0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx1_low_control0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11490,7 +11401,7 @@ assign csr_bankarray_csrbank0_agc_count_rx1_low_status_r = csr_bankarray_interfa
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx1_low_status_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx1_low_status_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd22))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd21))) begin
         csr_bankarray_csrbank0_agc_count_rx1_low_status_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx1_low_status_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11499,7 +11410,7 @@ assign csr_bankarray_csrbank0_agc_count_rx1_high_control0_r = csr_bankarray_inte
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx1_high_control0_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx1_high_control0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd23))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd22))) begin
         csr_bankarray_csrbank0_agc_count_rx1_high_control0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx1_high_control0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11508,7 +11419,7 @@ assign csr_bankarray_csrbank0_agc_count_rx1_high_status_r = csr_bankarray_interf
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx1_high_status_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx1_high_status_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd24))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd23))) begin
         csr_bankarray_csrbank0_agc_count_rx1_high_status_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx1_high_status_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11517,7 +11428,7 @@ assign csr_bankarray_csrbank0_agc_count_rx2_low_control0_r = csr_bankarray_inter
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx2_low_control0_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx2_low_control0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd25))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd24))) begin
         csr_bankarray_csrbank0_agc_count_rx2_low_control0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx2_low_control0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11526,7 +11437,7 @@ assign csr_bankarray_csrbank0_agc_count_rx2_low_status_r = csr_bankarray_interfa
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx2_low_status_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx2_low_status_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd26))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd25))) begin
         csr_bankarray_csrbank0_agc_count_rx2_low_status_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx2_low_status_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11535,7 +11446,7 @@ assign csr_bankarray_csrbank0_agc_count_rx2_high_control0_r = csr_bankarray_inte
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx2_high_control0_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx2_high_control0_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd27))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd26))) begin
         csr_bankarray_csrbank0_agc_count_rx2_high_control0_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx2_high_control0_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11544,7 +11455,7 @@ assign csr_bankarray_csrbank0_agc_count_rx2_high_status_r = csr_bankarray_interf
 always @(*) begin
     csr_bankarray_csrbank0_agc_count_rx2_high_status_re <= 1'd0;
     csr_bankarray_csrbank0_agc_count_rx2_high_status_we <= 1'd0;
-    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd28))) begin
+    if ((csr_bankarray_csrbank0_sel & (csr_bankarray_interface0_bank_bus_adr[8:0] == 5'd27))) begin
         csr_bankarray_csrbank0_agc_count_rx2_high_status_re <= csr_bankarray_interface0_bank_bus_we;
         csr_bankarray_csrbank0_agc_count_rx2_high_status_we <= csr_bankarray_interface0_bank_bus_re;
     end
@@ -11586,15 +11497,6 @@ assign basesoc_ad9361_scheduler_tx_use_manual = basesoc_ad9361_scheduler_tx_set_
 assign csr_bankarray_csrbank0_scheduler_tx_set_ts0_w = basesoc_ad9361_scheduler_tx_set_ts_storage;
 assign csr_bankarray_csrbank0_scheduler_tx_fifo_level_w = basesoc_ad9361_scheduler_tx_fifo_level_status;
 assign basesoc_ad9361_scheduler_tx_fifo_level_we = csr_bankarray_csrbank0_scheduler_tx_fifo_level_we;
-always @(*) begin
-    basesoc_ad9361_scheduler_tx_flags_status <= 4'd0;
-    basesoc_ad9361_scheduler_tx_flags_status[0] <= basesoc_ad9361_scheduler_tx_full1;
-    basesoc_ad9361_scheduler_tx_flags_status[1] <= basesoc_ad9361_scheduler_tx_empty1;
-    basesoc_ad9361_scheduler_tx_flags_status[2] <= basesoc_ad9361_scheduler_tx_almost_full1;
-    basesoc_ad9361_scheduler_tx_flags_status[3] <= basesoc_ad9361_scheduler_tx_almost_empty1;
-end
-assign csr_bankarray_csrbank0_scheduler_tx_flags_w = basesoc_ad9361_scheduler_tx_flags_status;
-assign basesoc_ad9361_scheduler_tx_flags_we = csr_bankarray_csrbank0_scheduler_tx_flags_we;
 assign csr_bankarray_csrbank0_scheduler_tx_current_ts1_w = basesoc_ad9361_scheduler_tx_current_ts_status[63:32];
 assign csr_bankarray_csrbank0_scheduler_tx_current_ts0_w = basesoc_ad9361_scheduler_tx_current_ts_status[31:0];
 assign basesoc_ad9361_scheduler_tx_current_ts_we = csr_bankarray_csrbank0_scheduler_tx_current_ts0_we;
@@ -13592,10 +13494,10 @@ always @(posedge from3224_clk) begin
     impl_xilinxmultiregimpl20_regs1 <= impl_xilinxmultiregimpl20_regs0;
 end
 
-always @(posedge from7252_clk) begin
+always @(posedge from7250_clk) begin
     basesoc_ad9361_tx_cdc_cdc_graycounter0_q_binary <= basesoc_ad9361_tx_cdc_cdc_graycounter0_q_next_binary;
     basesoc_ad9361_tx_cdc_cdc_graycounter0_q <= basesoc_ad9361_tx_cdc_cdc_graycounter0_q_next;
-    if (from7252_rst) begin
+    if (from7250_rst) begin
         basesoc_ad9361_tx_cdc_cdc_graycounter0_q <= 3'd0;
         basesoc_ad9361_tx_cdc_cdc_graycounter0_q_binary <= 3'd0;
     end
@@ -13603,10 +13505,10 @@ always @(posedge from7252_clk) begin
     impl_xilinxmultiregimpl38_regs1 <= impl_xilinxmultiregimpl38_regs0;
 end
 
-always @(posedge from7415_clk) begin
+always @(posedge from7401_clk) begin
     basesoc_ad9361_rx_cdc_cdc_graycounter0_q_binary <= basesoc_ad9361_rx_cdc_cdc_graycounter0_q_next_binary;
     basesoc_ad9361_rx_cdc_cdc_graycounter0_q <= basesoc_ad9361_rx_cdc_cdc_graycounter0_q_next;
-    if (from7415_rst) begin
+    if (from7401_rst) begin
         basesoc_ad9361_rx_cdc_cdc_graycounter0_q <= 3'd0;
         basesoc_ad9361_rx_cdc_cdc_graycounter0_q_binary <= 3'd0;
     end
@@ -14913,7 +14815,7 @@ always @(posedge sys_clk) begin
     if ((basesoc_ad9361_ad9361spimaster_clk_set & basesoc_ad9361_ad9361spimaster_shift)) begin
         basesoc_ad9361_ad9361spimaster_miso_shift_reg <= {basesoc_ad9361_ad9361spimaster_miso_shift_reg[22:0], basesoc_ad9361_ad9361spimaster_miso};
     end
-    ad9361spimaster_state <= ad9361spimaster_next_state;
+    ad9361rfic_state <= ad9361rfic_next_state;
     if (basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value_ce) begin
         basesoc_ad9361_ad9361spimaster_cnt <= basesoc_ad9361_ad9361spimaster_cnt_ad9361rfic_next_value;
     end
@@ -14922,7 +14824,6 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_tx_buffer_pipe_valid_source_first <= basesoc_ad9361_tx_buffer_pipe_valid_sink_first;
         basesoc_ad9361_tx_buffer_pipe_valid_source_last <= basesoc_ad9361_tx_buffer_pipe_valid_sink_last;
         basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data <= basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_data;
-        basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp <= basesoc_ad9361_tx_buffer_pipe_valid_sink_payload_timestamp;
     end
     if (((~basesoc_ad9361_rx_buffer_pipe_valid_source_valid) | basesoc_ad9361_rx_buffer_pipe_valid_source_ready)) begin
         basesoc_ad9361_rx_buffer_pipe_valid_source_valid <= basesoc_ad9361_rx_buffer_pipe_valid_sink_valid;
@@ -14975,30 +14876,46 @@ always @(posedge sys_clk) begin
     if (basesoc_ad9361_rx_bitmode_converter_load_part) begin
         basesoc_ad9361_rx_bitmode_converter_source_payload_valid_token_count <= (basesoc_ad9361_rx_bitmode_converter_demux + 1'd1);
     end
-    if (((basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable) & (~basesoc_ad9361_scheduler_tx_data_fifo_replace))) begin
-        if ((basesoc_ad9361_scheduler_tx_data_fifo_produce == 13'd8175)) begin
-            basesoc_ad9361_scheduler_tx_data_fifo_produce <= 1'd0;
-        end else begin
-            basesoc_ad9361_scheduler_tx_data_fifo_produce <= (basesoc_ad9361_scheduler_tx_data_fifo_produce + 1'd1);
+    if ((basesoc_ad9361_scheduler_tx_data_fifo_source_ready & basesoc_ad9361_scheduler_tx_data_fifo_source_valid)) begin
+        if (basesoc_ad9361_scheduler_tx_is_header) begin
+            basesoc_ad9361_scheduler_tx_latched_header <= basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
+        end
+        if (basesoc_ad9361_scheduler_tx_is_timestamp) begin
+            basesoc_ad9361_scheduler_tx_latched_ts <= basesoc_ad9361_scheduler_tx_data_fifo_source_payload_data;
         end
     end
-    if (basesoc_ad9361_scheduler_tx_data_fifo_do_read) begin
-        if ((basesoc_ad9361_scheduler_tx_data_fifo_consume == 13'd8175)) begin
-            basesoc_ad9361_scheduler_tx_data_fifo_consume <= 1'd0;
-        end else begin
-            basesoc_ad9361_scheduler_tx_data_fifo_consume <= (basesoc_ad9361_scheduler_tx_data_fifo_consume + 1'd1);
+    if ((basesoc_ad9361_scheduler_tx_can_start & (~basesoc_ad9361_scheduler_tx_streaming))) begin
+        basesoc_ad9361_scheduler_tx_streaming <= 1'd1;
+    end
+    if ((basesoc_ad9361_scheduler_tx_data_fifo_source_ready & basesoc_ad9361_scheduler_tx_data_fifo_source_valid)) begin
+        basesoc_ad9361_scheduler_tx_frame_count <= (basesoc_ad9361_scheduler_tx_frame_count + 1'd1);
+    end
+    if (((((basesoc_ad9361_scheduler_tx_frame_count == 10'd1023) & basesoc_ad9361_scheduler_tx_streaming) & basesoc_ad9361_scheduler_tx_data_fifo_source_ready) & basesoc_ad9361_scheduler_tx_data_fifo_source_valid)) begin
+        basesoc_ad9361_scheduler_tx_frame_count <= 1'd0;
+        basesoc_ad9361_scheduler_tx_streaming <= 1'd0;
+    end
+    if (basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_re) begin
+        basesoc_ad9361_scheduler_tx_data_fifo_readable <= 1'd1;
+    end else begin
+        if (basesoc_ad9361_scheduler_tx_data_fifo_re) begin
+            basesoc_ad9361_scheduler_tx_data_fifo_readable <= 1'd0;
         end
+    end
+    if (((basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable) & (~basesoc_ad9361_scheduler_tx_data_fifo_replace))) begin
+        basesoc_ad9361_scheduler_tx_data_fifo_produce <= (basesoc_ad9361_scheduler_tx_data_fifo_produce + 1'd1);
+    end
+    if (basesoc_ad9361_scheduler_tx_data_fifo_do_read) begin
+        basesoc_ad9361_scheduler_tx_data_fifo_consume <= (basesoc_ad9361_scheduler_tx_data_fifo_consume + 1'd1);
     end
     if (((basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_we & basesoc_ad9361_scheduler_tx_data_fifo_syncfifo_writable) & (~basesoc_ad9361_scheduler_tx_data_fifo_replace))) begin
         if ((~basesoc_ad9361_scheduler_tx_data_fifo_do_read)) begin
-            basesoc_ad9361_scheduler_tx_data_fifo_level <= (basesoc_ad9361_scheduler_tx_data_fifo_level + 1'd1);
+            basesoc_ad9361_scheduler_tx_data_fifo_level0 <= (basesoc_ad9361_scheduler_tx_data_fifo_level0 + 1'd1);
         end
     end else begin
         if (basesoc_ad9361_scheduler_tx_data_fifo_do_read) begin
-            basesoc_ad9361_scheduler_tx_data_fifo_level <= (basesoc_ad9361_scheduler_tx_data_fifo_level - 1'd1);
+            basesoc_ad9361_scheduler_tx_data_fifo_level0 <= (basesoc_ad9361_scheduler_tx_data_fifo_level0 - 1'd1);
         end
     end
-    scheduler_state <= scheduler_next_state;
     if (((~basesoc_ad9361rfic_agc_count_rx1_low_enable) | basesoc_ad9361rfic_agc_count_rx1_low_clear)) begin
         basesoc_ad9361rfic_agc_count_rx1_low_count <= 1'd0;
     end else begin
@@ -15157,48 +15074,45 @@ always @(posedge sys_clk) begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_fifo_level_w;
             end
             4'd14: begin
-                csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_flags_w;
-            end
-            4'd15: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_current_ts1_w;
             end
-            5'd16: begin
+            4'd15: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_current_ts0_w;
             end
-            5'd17: begin
+            5'd16: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_now1_w;
             end
-            5'd18: begin
+            5'd17: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_scheduler_tx_now0_w;
             end
-            5'd19: begin
+            5'd18: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_prbs_tx0_w;
             end
-            5'd20: begin
+            5'd19: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_prbs_rx_w;
             end
-            5'd21: begin
+            5'd20: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx1_low_control0_w;
             end
-            5'd22: begin
+            5'd21: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx1_low_status_w;
             end
-            5'd23: begin
+            5'd22: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx1_high_control0_w;
             end
-            5'd24: begin
+            5'd23: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx1_high_status_w;
             end
-            5'd25: begin
+            5'd24: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx2_low_control0_w;
             end
-            5'd26: begin
+            5'd25: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx2_low_status_w;
             end
-            5'd27: begin
+            5'd26: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx2_high_control0_w;
             end
-            5'd28: begin
+            5'd27: begin
                 csr_bankarray_interface0_bank_bus_dat_r <= csr_bankarray_csrbank0_agc_count_rx2_high_status_w;
             end
         endcase
@@ -15246,7 +15160,6 @@ always @(posedge sys_clk) begin
     end
     basesoc_ad9361_scheduler_tx_set_ts_re <= csr_bankarray_csrbank0_scheduler_tx_set_ts0_re;
     basesoc_ad9361_scheduler_tx_fifo_level_re <= csr_bankarray_csrbank0_scheduler_tx_fifo_level_re;
-    basesoc_ad9361_scheduler_tx_flags_re <= csr_bankarray_csrbank0_scheduler_tx_flags_re;
     basesoc_ad9361_scheduler_tx_current_ts_re <= csr_bankarray_csrbank0_scheduler_tx_current_ts0_re;
     basesoc_ad9361_scheduler_tx_now_re <= csr_bankarray_csrbank0_scheduler_tx_now0_re;
     if (csr_bankarray_csrbank0_prbs_tx0_re) begin
@@ -16266,7 +16179,6 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_ad9361phy_re <= 1'd0;
         basesoc_ad9361_tx_buffer_pipe_valid_source_valid <= 1'd0;
         basesoc_ad9361_tx_buffer_pipe_valid_source_payload_data <= 64'd0;
-        basesoc_ad9361_tx_buffer_pipe_valid_source_payload_timestamp <= 64'd0;
         basesoc_ad9361_rx_buffer_pipe_valid_source_valid <= 1'd0;
         basesoc_ad9361_rx_buffer_pipe_valid_source_payload_data <= 64'd0;
         basesoc_ad9361_tx_bitmode_converter_mux <= 1'd0;
@@ -16274,9 +16186,14 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_rx_bitmode_converter_source_payload_valid_token_count <= 2'd0;
         basesoc_ad9361_rx_bitmode_converter_demux <= 1'd0;
         basesoc_ad9361_rx_bitmode_converter_strobe_all <= 1'd0;
-        basesoc_ad9361_scheduler_tx_data_fifo_level <= 13'd0;
+        basesoc_ad9361_scheduler_tx_data_fifo_readable <= 1'd0;
+        basesoc_ad9361_scheduler_tx_data_fifo_level0 <= 14'd0;
         basesoc_ad9361_scheduler_tx_data_fifo_produce <= 13'd0;
         basesoc_ad9361_scheduler_tx_data_fifo_consume <= 13'd0;
+        basesoc_ad9361_scheduler_tx_streaming <= 1'd0;
+        basesoc_ad9361_scheduler_tx_frame_count <= 10'd0;
+        basesoc_ad9361_scheduler_tx_latched_ts <= 64'd0;
+        basesoc_ad9361_scheduler_tx_latched_header <= 64'd0;
         basesoc_ad9361_scheduler_tx_reset_storage <= 1'd0;
         basesoc_ad9361_scheduler_tx_reset_re <= 1'd0;
         basesoc_ad9361_scheduler_tx_manual_now_storage <= 64'd0;
@@ -16284,7 +16201,6 @@ always @(posedge sys_clk) begin
         basesoc_ad9361_scheduler_tx_set_ts_storage <= 1'd0;
         basesoc_ad9361_scheduler_tx_set_ts_re <= 1'd0;
         basesoc_ad9361_scheduler_tx_fifo_level_re <= 1'd0;
-        basesoc_ad9361_scheduler_tx_flags_re <= 1'd0;
         basesoc_ad9361_scheduler_tx_current_ts_re <= 1'd0;
         basesoc_ad9361_scheduler_tx_now_re <= 1'd0;
         basesoc_ad9361rfic_prbs_tx_storage <= 1'd0;
@@ -16421,8 +16337,7 @@ always @(posedge sys_clk) begin
         litepciedmawriter_fsm_state <= 1'd0;
         litepciedmareader_resetinserter_state <= 1'd0;
         litepciedmareader_fsm_state <= 1'd0;
-        ad9361spimaster_state <= 2'd0;
-        scheduler_state <= 2'd0;
+        ad9361rfic_state <= 2'd0;
         txheaderextracter_state <= 3'd0;
         rxheaderinserter_state <= 3'd0;
         wishbone2csr_state <= 1'd0;
@@ -16601,10 +16516,10 @@ always @(posedge to3224_clk) begin
     impl_xilinxmultiregimpl19_regs1 <= impl_xilinxmultiregimpl19_regs0;
 end
 
-always @(posedge to7252_clk) begin
+always @(posedge to7250_clk) begin
     basesoc_ad9361_tx_cdc_cdc_graycounter1_q_binary <= basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next_binary;
     basesoc_ad9361_tx_cdc_cdc_graycounter1_q <= basesoc_ad9361_tx_cdc_cdc_graycounter1_q_next;
-    if (to7252_rst) begin
+    if (to7250_rst) begin
         basesoc_ad9361_tx_cdc_cdc_graycounter1_q <= 3'd0;
         basesoc_ad9361_tx_cdc_cdc_graycounter1_q_binary <= 3'd0;
     end
@@ -16612,10 +16527,10 @@ always @(posedge to7252_clk) begin
     impl_xilinxmultiregimpl37_regs1 <= impl_xilinxmultiregimpl37_regs0;
 end
 
-always @(posedge to7415_clk) begin
+always @(posedge to7401_clk) begin
     basesoc_ad9361_rx_cdc_cdc_graycounter1_q_binary <= basesoc_ad9361_rx_cdc_cdc_graycounter1_q_next_binary;
     basesoc_ad9361_rx_cdc_cdc_graycounter1_q <= basesoc_ad9361_rx_cdc_cdc_graycounter1_q_next;
-    if (to7415_rst) begin
+    if (to7401_rst) begin
         basesoc_ad9361_rx_cdc_cdc_graycounter1_q <= 3'd0;
         basesoc_ad9361_rx_cdc_cdc_graycounter1_q_binary <= 3'd0;
     end
@@ -17690,19 +17605,19 @@ OBUFDS OBUFDS_7(
 );
 
 //------------------------------------------------------------------------------
-// Memory storage_13: 4-words x 130-bit
+// Memory storage_13: 4-words x 66-bit
 //------------------------------------------------------------------------------
-// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 130 
+// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 66 
 // Port 1 | Read: Sync  | Write: ---- | 
-reg [129:0] storage_13[0:3];
-reg [129:0] storage_13_dat0;
-reg [129:0] storage_13_dat1;
-always @(posedge from7252_clk) begin
+reg [65:0] storage_13[0:3];
+reg [65:0] storage_13_dat0;
+reg [65:0] storage_13_dat1;
+always @(posedge from7250_clk) begin
 	if (basesoc_ad9361_tx_cdc_cdc_wrport_we)
 		storage_13[basesoc_ad9361_tx_cdc_cdc_wrport_adr] <= basesoc_ad9361_tx_cdc_cdc_wrport_dat_w;
 	storage_13_dat0 <= storage_13[basesoc_ad9361_tx_cdc_cdc_wrport_adr];
 end
-always @(posedge to7252_clk) begin
+always @(posedge to7250_clk) begin
 	storage_13_dat1 <= storage_13[basesoc_ad9361_tx_cdc_cdc_rdport_adr];
 end
 assign basesoc_ad9361_tx_cdc_cdc_wrport_dat_r = storage_13_dat0;
@@ -17717,12 +17632,12 @@ assign basesoc_ad9361_tx_cdc_cdc_rdport_dat_r = storage_13_dat1;
 reg [65:0] storage_14[0:3];
 reg [65:0] storage_14_dat0;
 reg [65:0] storage_14_dat1;
-always @(posedge from7415_clk) begin
+always @(posedge from7401_clk) begin
 	if (basesoc_ad9361_rx_cdc_cdc_wrport_we)
 		storage_14[basesoc_ad9361_rx_cdc_cdc_wrport_adr] <= basesoc_ad9361_rx_cdc_cdc_wrport_dat_w;
 	storage_14_dat0 <= storage_14[basesoc_ad9361_rx_cdc_cdc_wrport_adr];
 end
-always @(posedge to7415_clk) begin
+always @(posedge to7401_clk) begin
 	storage_14_dat1 <= storage_14[basesoc_ad9361_rx_cdc_cdc_rdport_adr];
 end
 assign basesoc_ad9361_rx_cdc_cdc_wrport_dat_r = storage_14_dat0;
@@ -17730,21 +17645,24 @@ assign basesoc_ad9361_rx_cdc_cdc_rdport_dat_r = storage_14_dat1;
 
 
 //------------------------------------------------------------------------------
-// Memory storage_15: 8176-words x 130-bit
+// Memory storage_15: 8192-words x 66-bit
 //------------------------------------------------------------------------------
-// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 130 
-// Port 1 | Read: Async | Write: ---- | 
-reg [129:0] storage_15[0:8175];
-reg [129:0] storage_15_dat0;
+// Port 0 | Read: Sync  | Write: Sync | Mode: Read-First  | Write-Granularity: 66 
+// Port 1 | Read: Sync  | Write: ---- | 
+reg [65:0] storage_15[0:8191];
+reg [65:0] storage_15_dat0;
+reg [65:0] storage_15_dat1;
 always @(posedge sys_clk) begin
 	if (basesoc_ad9361_scheduler_tx_data_fifo_wrport_we)
 		storage_15[basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr] <= basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_w;
 	storage_15_dat0 <= storage_15[basesoc_ad9361_scheduler_tx_data_fifo_wrport_adr];
 end
 always @(posedge sys_clk) begin
+	if (basesoc_ad9361_scheduler_tx_data_fifo_rdport_re)
+		storage_15_dat1 <= storage_15[basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr];
 end
 assign basesoc_ad9361_scheduler_tx_data_fifo_wrport_dat_r = storage_15_dat0;
-assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r = storage_15[basesoc_ad9361_scheduler_tx_data_fifo_rdport_adr];
+assign basesoc_ad9361_scheduler_tx_data_fifo_rdport_dat_r = storage_15_dat1;
 
 
 //------------------------------------------------------------------------------
@@ -19168,7 +19086,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_38 (
 	// Inputs.
-	.C   (from7252_clk),
+	.C   (from7250_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
@@ -19186,13 +19104,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_39 (
 	// Inputs.
-	.C   (from7252_clk),
+	.C   (from7250_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl19_rst_meta),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (from7252_rst)
+	.Q   (from7250_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -19204,7 +19122,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_40 (
 	// Inputs.
-	.C   (to7252_clk),
+	.C   (to7250_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
@@ -19222,13 +19140,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_41 (
 	// Inputs.
-	.C   (to7252_clk),
+	.C   (to7250_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl20_rst_meta),
 	.PRE (basesoc_ad9361_tx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (to7252_rst)
+	.Q   (to7250_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -19240,7 +19158,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_42 (
 	// Inputs.
-	.C   (from7415_clk),
+	.C   (from7401_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
@@ -19258,13 +19176,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_43 (
 	// Inputs.
-	.C   (from7415_clk),
+	.C   (from7401_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl21_rst_meta),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (from7415_rst)
+	.Q   (from7401_rst)
 );
 
 (* ars_ff1 = "true", async_reg = "true" *)
@@ -19276,7 +19194,7 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_44 (
 	// Inputs.
-	.C   (to7415_clk),
+	.C   (to7401_clk),
 	.CE  (1'd1),
 	.D   (1'd0),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
@@ -19294,13 +19212,13 @@ FDPE #(
 	.INIT (1'd1)
 ) FDPE_45 (
 	// Inputs.
-	.C   (to7415_clk),
+	.C   (to7401_clk),
 	.CE  (1'd1),
 	.D   (impl_xilinxasyncresetsynchronizerimpl22_rst_meta),
 	.PRE (basesoc_ad9361_rx_cdc_cd_rst),
 
 	// Outputs.
-	.Q   (to7415_rst)
+	.Q   (to7401_rst)
 );
 
 //------------------------------------------------------------------------------
@@ -19888,5 +19806,5 @@ IDDR #(
 endmodule
 
 // -----------------------------------------------------------------------------
-//  Auto-Generated by LiteX on 2025-10-24 17:12:12.
+//  Auto-Generated by LiteX on 2025-11-24 12:02:16.
 //------------------------------------------------------------------------------

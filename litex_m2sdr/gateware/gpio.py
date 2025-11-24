@@ -13,7 +13,6 @@ from litex.gen import *
 
 from litepcie.common import *
 
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts
 # GPIO RX Packer -----------------------------------------------------------------------------------
 
 class GPIORXPacker(LiteXModule):

@@ -21,8 +21,7 @@ from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
-from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts
+from litex_m2sdr.gateware.ad9361.scheduler_simple   import Scheduler
 
 
 # Architecture -------------------------------------------------------------------------------------
@@ -89,7 +88,7 @@ class AD9361RFIC(LiteXModule):
         self.enable_datapath = Signal(reset=1)
 
          # Stream Endpoints ------------------------------------------------------------------------
-        self.sink   = stream.Endpoint(dma_layout_with_ts(64))
+        self.sink   = stream.Endpoint(dma_layout(64))
         self.source = stream.Endpoint(dma_layout(64))
 
         # Config/Control/Status registers ----------------------------------------------------------
@@ -161,7 +160,7 @@ class AD9361RFIC(LiteXModule):
 
         # Cross domain crossing --------------------------------------------------------------------
         self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
-            layout  = dma_layout_with_ts(64),
+            layout  = dma_layout(64),
             cd_from = "sys",
             cd_to   = "rfic",
             with_common_rst = True
@@ -174,7 +173,7 @@ class AD9361RFIC(LiteXModule):
         )
 
         # Buffers (For Timings) --------------------------------------------------------------------
-        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout_with_ts(64))
+        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
 
         # BitMode ----------------------------------------------------------------------------------
@@ -187,7 +186,7 @@ class AD9361RFIC(LiteXModule):
 
         # TX.  # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         # ---
-        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode ->
+        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
@@ -204,8 +203,8 @@ class AD9361RFIC(LiteXModule):
 
         # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            scheduler_tx.sink.connect(tx_cdc.source), # , omit={"ready"}) , # connect scheduler to tx_cdc 
-            gpio_tx_unpacker.sink.connect(scheduler_tx.source)  # WTF was that for? , omit={"valid"}), # connect gpio unpacker to scheduler
+            scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source) # connect gpio unpacker to scheduler
         ]
 
         self.comb += [

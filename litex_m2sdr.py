@@ -524,19 +524,6 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
 
-        # !! THIS IS WRONG AS IT IS NOT THE SAME TIME DOMAIN AS THE AD9361 !!
-        # Push TX Timestamp to AD9361 TX scheduler. 
-        # ----------------------------------------------
-        # pkt_count = Signal(3) # max pkt count in scheduler is 8 #FIXME: make it configurable
-        
-        # # update metadata in ad9361 scheduler when we get a new frame from the header
-        # If(self.header.update, # we got a new timestamp ==> push it to the AD9361 TX scheduler metadata
-        #     self.ad9361.scheduler_tx.metadata.valid.eq(1), # trying to push the metadata
-        #     self.ad9361.scheduler_tx.metadata.timestamp[0:64].eq(self.header.timestamp),
-        #     NextValue(pkt_count, pkt_count + 1),
-        #     self.ad9361.scheduler_tx.metadata.ptr.eq(pkt_count)
-        # )
-
 
         # Crossbar.
         # ---------
@@ -847,7 +834,6 @@ def main():
     parser.add_argument("--flash-multiboot", action="store_true", help="Flash multiboot bitstreams.")
     parser.add_argument("--rescan",          action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
-    parser.add_argument("--sim",             action="store_true", help="Run in simulation mode.")
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
@@ -872,11 +858,11 @@ def main():
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
-    probeopts.add_argument("--with-ad9361-spi-probe",      action="store_true", help="Enable AD9361 SPI Probe.")
-    probeopts.add_argument("--with-ad9361-data-probe",     action="store_true", help="Enable AD9361 Data Probe.")
-    probeopts.add_argument("--with-ad9361-scheduler-tx-probe",action="store_true", help="Enable AD9361 scheduler TX.")
-    probeopts.add_argument("--with-pcie-dma-probe",        action="store_true", help="Enable PCIe DMA Probe.")
-    probeopts.add_argument("--with-eth-tx-probe",          action="store_true", help="Enable Ethernet Tx Probe.")
+    probeopts.add_argument("--with-ad9361-spi-probe",           action="store_true", help="Enable AD9361 SPI Probe.")
+    probeopts.add_argument("--with-ad9361-data-probe",          action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-ad9361-scheduler-tx-probe",  action="store_true", help="Enable AD9361 scheduler TX.")
+    probeopts.add_argument("--with-pcie-dma-probe",             action="store_true", help="Enable PCIe DMA Probe.")
+    probeopts.add_argument("--with-eth-tx-probe",               action="store_true", help="Enable Ethernet Tx Probe.")
 
     args = parser.parse_args()
 
@@ -979,7 +965,6 @@ def main():
         prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),    verify=True)
         prog.flash(soc.platform.image_size,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
 
-    # if args.sim:
         
     # Rescan PCIe Bus.
     if args.rescan:

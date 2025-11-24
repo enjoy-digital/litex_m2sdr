@@ -1,0 +1,24 @@
+#-----------------------------------------------------------
+# Vivado v2024.2 (64-bit)
+# SW Build 5239630 on Fri Nov 08 22:34:34 MST 2024
+# IP Build 5239520 on Sun Nov 10 16:12:51 MST 2024
+# SharedData Build 5239561 on Fri Nov 08 14:39:27 MST 2024
+# Start of session at: Mon Nov 24 11:43:17 2025
+# Process ID         : 3388452
+# Current directory  : /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware
+# Command line       : vivado -mode batch -source litex_m2sdr_m2_pcie_x1.tcl
+# Log file           : /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/vivado.log
+# Journal file       : /home/sens/litex_m2sdr/build/litex_m2sdr_m2_pcie_x1/gateware/vivado.jou
+# Running On         : sensnuc6
+# Platform           : Ubuntu
+# Operating System   : Ubuntu 22.04.5 LTS
+# Processor Detail   : 12th Gen Intel(R) Core(TM) i7-1260P
+# CPU Frequency      : 2500.000 MHz
+# CPU Physical cores : 12
+# CPU Logical cores  : 16
+# Host memory        : 33205 MB
+# Swap memory        : 2147 MB
+# Total Virtual      : 35352 MB
+# Available Virtual  : 27443 MB
+#-----------------------------------------------------------
+source litex_m2sdr_m2_pcie_x1.tcl

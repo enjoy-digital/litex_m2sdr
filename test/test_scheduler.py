@@ -103,7 +103,7 @@ def main():
     # --- Show FIFO head timestamp
     # current_ts = scheduler.read_current_ts()
     # print(f"Current FIFO Head Timestamp: {current_ts}")
-    for i in range(10):
+    for _ in range(10):
         test_now = scheduler.read_test_schedule_now()
         temperature = (float(getattr(bus.regs, "xadc_temperature").read()) * 503.975/4096) - 273.15
         print(f"Main test increment counter: {test_now}")

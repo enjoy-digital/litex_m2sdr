@@ -518,68 +518,63 @@
             "size": 1,
             "type": "ro"
         },
-        "ad9361_scheduler_tx_flags": {
-            "addr": 49208,
-            "size": 1,
-            "type": "ro"
-        },
         "ad9361_scheduler_tx_current_ts": {
-            "addr": 49212,
+            "addr": 49208,
             "size": 2,
             "type": "ro"
         },
         "ad9361_scheduler_tx_now": {
-            "addr": 49220,
+            "addr": 49216,
             "size": 2,
             "type": "ro"
         },
         "ad9361_prbs_tx": {
-            "addr": 49228,
+            "addr": 49224,
             "size": 1,
             "type": "rw"
         },
         "ad9361_prbs_rx": {
-            "addr": 49232,
+            "addr": 49228,
             "size": 1,
             "type": "ro"
         },
         "ad9361_agc_count_rx1_low_control": {
-            "addr": 49236,
+            "addr": 49232,
             "size": 1,
             "type": "rw"
         },
         "ad9361_agc_count_rx1_low_status": {
-            "addr": 49240,
+            "addr": 49236,
             "size": 1,
             "type": "ro"
         },
         "ad9361_agc_count_rx1_high_control": {
-            "addr": 49244,
+            "addr": 49240,
             "size": 1,
             "type": "rw"
         },
         "ad9361_agc_count_rx1_high_status": {
-            "addr": 49248,
+            "addr": 49244,
             "size": 1,
             "type": "ro"
         },
         "ad9361_agc_count_rx2_low_control": {
-            "addr": 49252,
+            "addr": 49248,
             "size": 1,
             "type": "rw"
         },
         "ad9361_agc_count_rx2_low_status": {
-            "addr": 49256,
+            "addr": 49252,
             "size": 1,
             "type": "ro"
         },
         "ad9361_agc_count_rx2_high_control": {
-            "addr": 49260,
+            "addr": 49256,
             "size": 1,
             "type": "rw"
         },
         "ad9361_agc_count_rx2_high_status": {
-            "addr": 49264,
+            "addr": 49260,
             "size": 1,
             "type": "ro"
         },
@@ -687,7 +682,7 @@
         "config_cpu_family": null,
         "config_cpu_name": null,
         "config_cpu_human_name": "unknown",
-        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-10-24 17:12:12",
+        "config_identifier": "litex-m2sdr soc / m2 variant / built on 2025-11-24 12:02:16",
         "config_flash_image_size": 8388608,
         "dma_channels": 1,
         "dma_addr_width": 64,
