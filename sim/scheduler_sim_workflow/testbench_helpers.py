@@ -1,4 +1,4 @@
-def drive_packet(dut, ts_when_due, packet_id=0, header=0xDEADBEEF, frames_per_packet=1024, verbose=False):
+def drive_packet(dut, ts_when_due, packet_id=0, test_id = 1, header=0xDEADBEEF, frames_per_packet=1024, verbose=False):
     """
     Drive one packet into sched.sink with a given timestamp.
     
@@ -32,7 +32,7 @@ def drive_packet(dut, ts_when_due, packet_id=0, header=0xDEADBEEF, frames_per_pa
         elif i == 1:
             yield dut.sink.data.eq(ts_when_due)
         else:
-            yield dut.sink.data.eq((packet_id << 16) | i)
+            yield dut.sink.data.eq((test_id << 32) | (packet_id << 16) | i)
         
         # Wait for handshake
         while True:

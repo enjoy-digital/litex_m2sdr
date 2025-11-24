@@ -1,6 +1,6 @@
 ======================================================================
 SCHEDULER TESTBENCH CONFIGURATION REPORT
-Generated: 2025-11-23 20:51:10
+Generated: 2025-11-24 11:07:29
 Config File: /home/sens/litex_m2sdr/sim/scheduler_sim_workflow/test_config.yaml
 ======================================================================
 
@@ -17,3 +17,5 @@ Config File: /home/sens/litex_m2sdr/sim/scheduler_sim_workflow/test_config.yaml
   - test_1_future_timestamps: Two packets with timestamps well in the future (no urgency)
   - test_2_mixed_timing: Mixed urgency - 1st urgent, 2nd in future
   - test_3_back_to_back_packets: Rapid fire - drive packets with minimal delay
+  - test_4_late_timestamp: Edge case - packet with overdue or 'now' timestamp
+  - test_5_multiple_packets_queued: Stress test - drive 8 packets (max capacity)

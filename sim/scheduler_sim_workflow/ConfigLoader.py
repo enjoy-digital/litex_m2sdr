@@ -78,6 +78,6 @@ class ConfigLoader:
 
 # Example usage
 if __name__ == "__main__":
-    config = TestConfig("test_config.yaml")
+    config = ConfigLoader("test_config.yaml")
     report = config.generate_config_report()
     print(report)
