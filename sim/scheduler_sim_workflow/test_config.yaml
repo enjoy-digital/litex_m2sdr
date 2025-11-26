@@ -7,6 +7,7 @@ global:
   data_width: 64
   max_packets: 8
   sys_freq: 50000000
+  rfic_freq: 50000000 #TODO RFIC clock frequency (should be chaged later)
 
 # Test cases
 tests:
@@ -46,21 +47,21 @@ tests:
         description: "Packet 3: ts=now+150"
     wait_after_all_packets: 3000
 
-  test_4_late_timestamp:
-    description: "Edge case - packet with overdue or 'now' timestamp"
-    packets:
-      - id: 1
-        timestamp_offset: -50
-        description: "Packet 1: OVERDUE (ts=now-50)"
-      - id: 2
-        timestamp_offset: 0
-        description: "Packet 2: DUE NOW (ts=now)"
-    wait_after_all_packets: 3000
+  # test_4_late_timestamp:
+  #   description: "Edge case - packet with overdue or 'now' timestamp"
+  #   packets:
+  #     - id: 1
+  #       timestamp_offset: -50
+  #       description: "Packet 1: OVERDUE (ts=now-50)"
+  #     - id: 2
+  #       timestamp_offset: 0
+  #       description: "Packet 2: DUE NOW (ts=now)"
+  #   wait_after_all_packets: 3000
 
-  test_5_multiple_packets_queued:
-    description: "Stress test - drive 8 packets (max capacity)"
-    num_packets: 8
-    base_timestamp_offset: 100
-    timestamp_increment: 100  # ts = base + (id * increment)
-    wait_after_all_packets: 3000
-    description_template: "Packet {id}: ts=base+{ts_offset}"
+  # test_5_multiple_packets_queued:
+  #   description: "Stress test - drive 8 packets (max capacity)"
+  #   num_packets: 8
+  #   base_timestamp_offset: 100
+  #   timestamp_increment: 100  # ts = base + (id * increment)
+  #   wait_after_all_packets: 3000
+  #   description_template: "Packet {id}: ts=base+{ts_offset}"

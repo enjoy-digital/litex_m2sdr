@@ -281,7 +281,7 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             with_csr   = True,
         )
 
-        # FIXME: Try to avoid CDC, change sys_clk? is somehow si5351_clk1 (investigate)
+        # FIXME: Try to avoid CDC, change sys_clk? 
         time_sys = Signal(64)
         self.time_sync = BusSynchronizer(
             width   = 64,

@@ -12,59 +12,70 @@ import time
 import os
 
 class SchedulerDriver:
-    """Hardware interface for the AD9361 TX Scheduler."""
+    """Interface for AD9361 TX Scheduler."""
 
     def __init__(self, bus, name="ad9361_scheduler_tx"):
         self.bus = bus
         self.name = name
 
-    def _get_reg(self, reg_suffix):
-        """Return a register handle dynamically by suffix."""
+    def _reg(self, suffix):
+        """Dynamic CSR accessor."""
         try:
-            return getattr(self.bus.regs, f"{self.name}_{reg_suffix}")
+            return getattr(self.bus.regs, f"{self.name}_{suffix}")
         except AttributeError:
-            raise AttributeError(f"Register '{self.name}_{reg_suffix}' not found in CSR map.")
+            raise AttributeError(f"CSR '{self.name}_{suffix}' not found in CSR map.")
+    # ───────────────────────────────────────────────
+    #  READ METHODS
+    # ───────────────────────────────────────────────
+    # def read_now(self):
+    #     """Read current RFIC time."""
+    #     return self._reg("now").read()
 
-    # ---- Read methods -------------------------------------------------------
+    # def read_fifo_level(self):
+    #     """Read FIFO fill level."""
+    #     return self._reg("fifo_level").read()
+    def enable_write(self, enable):
+        """Enable or disable manual time writing."""
+        ctrl = self._reg("control").read()
+        if enable:
+            self._reg("control").write(ctrl | 0b100)  # Set enable bit
+        else:
+            self._reg("control").write(ctrl & ~0b100)  # Clear enable bit
 
     def read_current_ts(self):
-        """Read timestamp of the packet currently at FIFO output."""
-        return self._get_reg("current_ts").read()
-
-    def read_time_now(self):
-        """Read current time from the RFIC domain counter."""
-        return self._get_reg("now").read()
+        """Read timestamp at FIFO output."""
+        return self._reg("current_ts").read()
     
-    def read_test_schedule_now(self):
-        return getattr(self.bus.regs, f"main_test_time").read()
-
-    def read_fifo_level(self):
-        """Return current FIFO fill level (in words)."""
-        return self._get_reg("fifo_level").read()
-
-    def read_flags(self):
-        """Return bitfield of scheduler flags (full, empty, etc)."""
-        return self._get_reg("flags").read()
-
-    # ---- Write / control methods -------------------------------------------
-
-    def reset(self):
-        """Reset the scheduler FSM."""
-        self._get_reg("reset").write(1)
-
-    def write_time_now(self, time_ns):
-        """
-        Set a new manual time value (in nanoseconds).
-        This also toggles the 'use_manual' control bit in _set_ts.
-        """
-        self._get_reg("manual_now").write(int(time_ns))
-        # Toggle enable bit to apply
-        self._get_reg("set_ts").write(1)
-        self._get_reg("set_ts").write(0)
+    def read_now(self):
+        """Read current time in nanoseconds"""
+        # Pulse read trigger (Bit1)
+        ctrl = self._reg("control").read()
+        self._reg("control").write(ctrl | 0b10)
+        # self._reg("control").write(ctrl & ~0b10)
+        return self._reg("read_time").read()
     
-    def dump_csr_regs(self):
+    # ───────────────────────────────────────────────
+    #  WRITE METHODS
+    # ───────────────────────────────────────────────
+    # def reset(self):
+    #     """Pulse reset bit."""
+    #     self._reg("reset").write(1)
+
+    def write_manual_time(self, time_ns):
+        """Set new time value in nanoseconds"""
+        self._reg("write_time").write(int(time_ns))
+        # Pulse write trigger (Bit2)
+        ctrl = self._reg("control").read()
+        self._reg("control").write(ctrl | 0b100)
+        self._reg("control").write(ctrl & ~0b100)
+
+    # ───────────────────────────────────────────────
+    #  DEBUG UTILITIES
+    # ───────────────────────────────────────────────
+    def dump_all(self):
+        """Print all CSR registers."""
         for name, reg in self.bus.regs.__dict__.items():
-            print("0x{:08x} : 0x{:08x} {}".format(reg.addr, reg.read(), name))
+            print(f"0x{reg.addr:08x} : 0x{reg.read():08x} {name}")
     
 
 
@@ -80,38 +91,41 @@ def main():
     print("Connected to LiteX server.\n")
 
     scheduler = SchedulerDriver(bus=bus, name="ad9361_scheduler_tx")
+    # scheduler.enable_write(True)
+    # assert scheduler._reg("control").read() == 0x00000005, "Testing enable write"
+    # print("Write enabled successfully.👍")
+    # scheduler.enable_write(False)
+    # assert scheduler._reg("control").read() == 0x00000001, "Testing disable write"
+    # print("Write disabled successfully.👍")
 
-    # --- Read current status
-    now = scheduler.read_time_now()
-    print(f"Current Time (now): {now}")
+    # -------------------------------------------------------------------------
+    # 2. SET MANUAL TIME
+    # -------------------------------------------------------------------------
+    for i in range(50):
+        now = scheduler.read_now()
+        print(f"Now before manual write : {now}")
+        if i % 5 == 0:
+            new_time = 0  # reset to 0 every 5 iterations
+            print(f"\nSetting manual now = {new_time}")
+            scheduler.write_manual_time(new_time)
+            continue
+        time.sleep(1)
 
-    fifo_level = scheduler.read_fifo_level()
-    print(f"FIFO Level: {fifo_level}")
-
-    flags = scheduler.read_flags()
-    print(f"Flags: 0x{flags:08x}")
-
-    # --- Set manual time value
-    new_time = 1697050000000000
-    print(f"\nSetting manual time to {new_time} ns ...")
-    scheduler.write_time_now(new_time)
-
-    # --- Verify update
-    now = scheduler.read_time_now()
-    print(f"Updated Time (now): {now}")
+    bus.close()
+    print("\nDone.\n")
 
     # --- Show FIFO head timestamp
     # current_ts = scheduler.read_current_ts()
-    # print(f"Current FIFO Head Timestamp: {current_ts}")
-    for _ in range(10):
-        test_now = scheduler.read_test_schedule_now()
-        temperature = (float(getattr(bus.regs, "xadc_temperature").read()) * 503.975/4096) - 273.15
-        print(f"Main test increment counter: {test_now}")
-        print(f"FPGA Temperature : {temperature} °C")
-        time.sleep(0.5)
+    # # print(f"Current FIFO Head Timestamp: {current_ts}")
+    # for _ in range(10):
+    #     test_now = scheduler.read_test_schedule_now()
+    #     temperature = (float(getattr(bus.regs, "xadc_temperature").read()) * 503.975/4096) - 273.15
+    #     print(f"Main test increment counter: {test_now}")
+    #     print(f"FPGA Temperature : {temperature} °C")
+    #     time.sleep(0.5)
 
-    bus.close()
-    print("Done.")
+    # bus.close()
+    # print("Done.")
 
 
 if __name__ == "__main__":
