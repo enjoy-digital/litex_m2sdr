@@ -11,7 +11,7 @@ from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts, metadata_layout
+from litex_m2sdr.gateware.layouts import dma_layout_with_ts
 
 STATE_STREAM = ord('S')  
 STATE_WAIT   = ord('W')  
@@ -19,7 +19,6 @@ STATE_RESET  = ord('R')
 
 class Scheduler(LiteXModule): 
     def __init__(self, packet_size=8176, data_width=64, max_packets=8, with_csr = True): # just to start then maybe expand it to more packets
-        fsm = False  
 
         assert packet_size % (data_width // 8) == 0 # packet size must be multiple of data width in bytes
     

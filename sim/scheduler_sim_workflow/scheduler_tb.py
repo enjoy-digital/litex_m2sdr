@@ -15,20 +15,25 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, BASE_DIR)
 
 from litex_m2sdr.gateware.ad9361.scheduler_simple import Scheduler
-from testbench_helpers import wait, drive_packet
+from testbench_helpers import wait, drive_packet, write_manual_time, read_time, read_current_ts, read_fifo_level
 
 sys_freq = 50000000  # sys clock for the sim (20 ns period)
 
 class Top(Module):
     def __init__(self, frames_per_packet=1024, data_width=64, max_packets=8):
         # If your scheduler normally runs in "rfic", keep it in sys for this sim
-        self.submodules.top = Scheduler(frames_per_packet, data_width, max_packets)
+        self.clk = Signal()
+
+        self.submodules.top = ClockDomainsRenamer("rfic")(Scheduler(frames_per_packet, data_width, max_packets))
         # Simple free-running timebase for 'now'
         self.now = Signal(64)
-        self.sync += self.now.eq(self.now + 1)
-        self.comb += self.top.now.eq(self.now)
+        # self.sync += self.now.eq(self.now + 1)
+        # self.comb += self.top.now.eq(self.now)
         self.reset = self.top.reset
-
+        self._write_time = self.top._write_time
+        self._current_ts = self.top._current_ts
+        self.write_time_manually = self.top.write_time_manually
+        self.control = self.top._control
         # Shorthand handles
         self.sink   = self.top.sink
         self.source = self.top.source
@@ -57,6 +62,11 @@ class SchedulerTestbench():
         self.config.list_tests()
         print("\n")
         for test_id ,test_name in enumerate(self.config.get_all_tests()):
+            if test_id == 0:
+                yield from read_time(self.dut)
+            elif test_id == 2:
+                yield from write_manual_time(self.dut, self.current_time - 100)
+            
             yield from self.run_test(test_name, test_id + 1)
         
         print("\n[TB] ========== ALL TESTS COMPLETED ==========\n")
@@ -170,6 +180,7 @@ def main():
     data_width = experiment.config.get_global_param("data_width", 64)
     max_packets = experiment.config.get_global_param("max_packets", 8)
     sys_freq = experiment.config.get_global_param("sys_freq", 50000000)
+    rfic_freq = experiment.config.get_global_param("rfic_freq", 50000000)
 
     top = Top(frames_per_packet, data_width, max_packets)
 
@@ -186,7 +197,7 @@ def main():
     ]
     run_simulation(
         top, gens,
-        clocks={"sys": 1e9/sys_freq},    # sys clock period
+        clocks={"sys": 1e9/sys_freq, "rfic": 1e9/rfic_freq},    # sys clock period
         vcd_name=vcd_path                # Use generated VCD path
     )
     

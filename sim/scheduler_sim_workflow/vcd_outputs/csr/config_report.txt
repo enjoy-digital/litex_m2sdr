@@ -1,0 +1,20 @@
+======================================================================
+SCHEDULER TESTBENCH CONFIGURATION REPORT
+Generated: 2025-11-26 21:03:52
+Config File: /home/sens/litex_m2sdr/sim/scheduler_sim_workflow/test_config.yaml
+======================================================================
+
+[Config] Global Parameters:
+  - frames_per_packet: 1024
+  - wait_initial_cycles: 20
+  - wait_between_packets: 10
+  - wait_final_cycles: 500
+  - data_width: 64
+  - max_packets: 8
+  - sys_freq: 50000000
+  - rfic_freq: 50000000
+
+[Config] Available Tests:
+  - test_1_future_timestamps: Two packets with timestamps well in the future (no urgency)
+  - test_2_mixed_timing: Mixed urgency - 1st urgent, 2nd in future
+  - test_3_back_to_back_packets: Rapid fire - drive packets with minimal delay

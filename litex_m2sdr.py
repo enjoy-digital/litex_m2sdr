@@ -290,10 +290,15 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             clk_freq = 100e6,
             with_csr = True,
         )
+<<<<<<< HEAD
         #=========================== from UPSTREAM (not sure)===============================
         #self.time_gen.add_cdc()
         #====================================================================================
         # FIXME: Try to avoid CDC, change sys_clk? is somehow si5351_clk1 (investigate)
+=======
+
+        # FIXME: Try to avoid CDC, change sys_clk? 
+>>>>>>> e679043 (- gateware synthesizes)
         time_sys = Signal(64)
         self.time_sync = BusSynchronizer(
             width   = 64,
@@ -1042,9 +1047,6 @@ def main():
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
-<<<<<<< HEAD
-        soc.add_ad96361_data_probe()
-=======
         soc.add_ad9361_data_probe()
     if args.with_ad9361_scheduler_tx_probe:
         soc.add_ad9361_scheduler_tx_probe()
@@ -1053,7 +1055,6 @@ def main():
     if args.with_eth_tx_probe:
         soc.add_eth_tx_probe()
     
->>>>>>> 2b9dd74 (- add litescope for debugging in gateware but what I want to debug is too large to be added into litescope ==> Create a testbench and use Verilator on the .v generated))
 
     # Builder.
     def get_build_name():

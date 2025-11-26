@@ -1,0 +1,43 @@
+global:
+  frames_per_packet: 1024
+  wait_initial_cycles: 20
+  wait_between_packets: 10
+  wait_final_cycles: 500
+  data_width: 64
+  max_packets: 8
+  sys_freq: 50000000
+  rfic_freq: 50000000
+tests:
+  test_1_future_timestamps:
+    description: Two packets with timestamps well in the future (no urgency)
+    packets:
+    - id: 1
+      timestamp: 100
+      description: 'Packet 1: ts=100 (80 cycles in future)'
+    - id: 2
+      timestamp_offset: 200
+      description: 'Packet 2: ts=200 (plenty of time)'
+    wait_after_all_packets: 3000
+  test_2_mixed_timing:
+    description: Mixed urgency - 1st urgent, 2nd in future
+    packets:
+    - id: 1
+      timestamp_offset: 10
+      description: 'Packet 1: urgent (10 cycles from now)'
+    - id: 2
+      timestamp_offset: 500
+      description: 'Packet 2: in future (500 cycles from now)'
+    wait_after_all_packets: 3000
+  test_3_back_to_back_packets:
+    description: Rapid fire - drive packets with minimal delay
+    packets:
+    - id: 1
+      timestamp_offset: 50
+      description: 'Packet 1: ts=now+50'
+    - id: 2
+      timestamp_offset: 100
+      description: 'Packet 2: ts=now+100'
+    - id: 3
+      timestamp_offset: 150
+      description: 'Packet 3: ts=now+150'
+    wait_after_all_packets: 3000
