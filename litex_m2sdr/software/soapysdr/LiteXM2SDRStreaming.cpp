@@ -146,7 +146,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.fds.fd     = _fd;
         _tx_stream.dma.fds.fd = _fd;
 #endif
-        _tx_stream.fds.events = POLLOUT;
+        _tx_stream.fds.events = POLLOUT; 
 
 #if USE_LITEPCIE
         /* Initialize TX DMA Reader */
@@ -159,8 +159,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("DMA Reader/TX not available (litepcie_dma_init failed).");
 
         /* Get Buffer and Parameters from TX DMA Reader */
-        _tx_stream.buf = _tx_stream.dma.buf_wr;
-        _tx_buf_size   = _tx_stream.dma.mmap_dma_info.dma_tx_buf_size - TX_DMA_HEADER_SIZE;
+        _tx_stream.buf = _tx_stream.dma.buf_wr; 
+        _tx_buf_size   = _tx_stream.dma.mmap_dma_info.dma_tx_buf_size ;//- TX_DMA_HEADER_SIZE; // !!! FIXEME: should not take out DMA_HEADER_SIZE because header will be transmitted to dma
         _tx_buf_count  = _tx_stream.dma.mmap_dma_info.dma_tx_buf_count;
 
         /* Ensure the DMA is disabled initially to avoid counters being in a bad state. */
@@ -348,7 +348,7 @@ size_t SoapyLiteXM2SDR::getStreamMTU(SoapySDR::Stream *stream) const {
         /* Each sample is 2 * Complex{Int16}. */
         return _rx_buf_size / (_nChannels * _bytesPerComplex);
     } else if (stream == TX_STREAM) {
-        return _tx_buf_size / (_nChannels * _bytesPerComplex);
+        return _tx_buf_size / 8;// (_nChannels * _bytesPerComplex);
     } else {
         throw std::runtime_error("SoapySDR::getStreamMTU(): Invalid stream.");
     }
@@ -373,7 +373,7 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
     if (stream == RX_STREAM) {
         buffs[0] = (char *)_rx_stream.buf + handle * _dma_mmap_info.dma_rx_buf_size + RX_DMA_HEADER_SIZE;
     } else if (stream == TX_STREAM) {
-        buffs[0] = (char *)_tx_stream.buf + handle * _dma_mmap_info.dma_tx_buf_size + TX_DMA_HEADER_SIZE;
+        buffs[0] = (char *)_tx_stream.buf + handle * _dma_mmap_info.dma_tx_buf_size ; //+ TX_DMA_HEADER_SIZE;
     } else {
         throw std::runtime_error("SoapySDR::getDirectAccessBufferAddrs(): Invalid stream.");
     }
@@ -597,36 +597,33 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     /* Update the DMA counters. */
     handle = _tx_stream.user_count;
     _tx_stream.user_count++;
-
     /* Write Sync Word and Timestamp to DMA header */
-#if defined(_TX_DMA_HEADER_TEST)
-    {
-        printf("Inserting TX DMA Header...\n");
-        uint32_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
-        printf("Last TX Timestamp (from CSR): %u\n", last_timestamp);
-        /* Header is at the beginning of the DMA buffer */
-        uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
+// #if defined(_TX_DMA_HEADER_TEST)
+//     {
 
-        /* Extract Sync Word to bytes 0 to 8 of the Header */
-        uint64_t header = DMA_HEADER_SYNC_WORD;
-        *reinterpret_cast<uint64_t*>(tx_buffer) = header;
+//         /* Header is at the beginning of the DMA buffer */
+//         uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
 
-        /* Compute the number of samples per DMA buffer. */
-        uint32_t samples_per_buffer = _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
+//         /* Extract Sync Word to bytes 0 to 8 of the Header */
+//         uint64_t header = DMA_HEADER_SYNC_WORD;
+//         *reinterpret_cast<uint64_t*>(tx_buffer) = header;
 
-        /* Compute time increment (in nanoseconds) for this buffer */
-        uint64_t time_increment = static_cast<uint64_t>((samples_per_buffer / _tx_stream.samplerate) * 1e9);
+//         /* Compute the number of samples per DMA buffer. */
+//         uint32_t samples_per_buffer = _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
 
-        /* Write Timestamp */
-        static uint64_t fakeTimestamp = 0;
-        fakeTimestamp += time_increment;
-        *reinterpret_cast<uint64_t*>(tx_buffer + 8) = fakeTimestamp;
-        // printf("TX DMA Header inserted: timestamp increment: %lu, new timestamp: %lu",
-        //               time_increment, fakeTimestamp);
-        SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp increment: %llu, new timestamp: %llu",
-                      time_increment, fakeTimestamp);
-    }
-#endif
+//         /* Compute time increment (in nanoseconds) for this buffer */
+//         uint64_t time_increment = static_cast<uint64_t>((samples_per_buffer / _tx_stream.samplerate) * 1e9);
+
+//         /* Write Timestamp */
+//         static uint64_t fakeTimestamp = 0;
+//         fakeTimestamp += time_increment;
+//         *reinterpret_cast<uint64_t*>(tx_buffer + 8) = fakeTimestamp;
+//         // printf("TX DMA Header inserted: timestamp increment: %lu, new timestamp: %lu",
+//         //               time_increment, fakeTimestamp);
+//         SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp increment: %llu, new timestamp: %llu",
+//                       time_increment, fakeTimestamp);
+//     }
+// #endif
 
 
     /* Detect underflows. */
@@ -919,7 +916,7 @@ int SoapyLiteXM2SDR::readStream(
 
     return returnedElems;
 }
-// static uint64_t s_tx_fake_timestamp = 0;
+static uint64_t s_tx_fake_timestamp = 0;
 /* Write to the TX stream. */
 int SoapyLiteXM2SDR::writeStream(
     SoapySDR::Stream *stream,
@@ -931,11 +928,11 @@ int SoapyLiteXM2SDR::writeStream(
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
-
-    //printf("SoapyLiteXM2SDR::writeStream: _bytesPerComplex=%zu, _nChannels=%zu\n", _bytesPerComplex, _nChannels);
+    printf("\n ********************************* \nSoapyLiteXM2SDR::writeStream: _bytesPerComplex=%u, _nChannels=%u, numElems=%lu\n", _bytesPerComplex, _nChannels, numElems);
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
     size_t samp_avail = 0;
+    // printf("previous write remainder samps = %lu\n", _tx_stream.remainderSamps);
 
     /* If there's a remainder buffer from a previous write, process that first. */
     if (_tx_stream.remainderHandle >= 0) {
@@ -948,6 +945,7 @@ int SoapyLiteXM2SDR::writeStream(
 
         /* Write out channels to the remainder buffer. */
         for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
+            printf("[PREVIOUS WRITE]\n");
             this->interleave(
                 buffs[i],
                 _tx_stream.remainderBuff + remainderOffset + (_tx_stream.channels[i] * _bytesPerComplex),
@@ -987,66 +985,110 @@ int SoapyLiteXM2SDR::writeStream(
         }
         return ret;
     }
-
+    
     _tx_stream.remainderHandle = handle;
+    printf("line 992: _tx_stream.remainderSamps = ret = %u\n", ret);
     _tx_stream.remainderSamps = ret;
+
+
 // #if defined(_TX_DMA_HEADER_TEST)
 //     {
-//         const int buf_offset = handle % _dma_mmap_info.dma_tx_buf_count;
-//         uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
+    const int buf_offset = handle % _dma_mmap_info.dma_tx_buf_count;
+    printf("buf_offset = %i, dma_buff_size = %lu\n", buf_offset, _dma_mmap_info.dma_tx_buf_size);
+    uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
 
-//         /* The payload area is dma_tx_buf_size - TX_DMA_HEADER_SIZE bytes. */
-//         const uint32_t payload_bytes = _dma_mmap_info.dma_tx_buf_size - TX_DMA_HEADER_SIZE;
-//         const uint32_t samples_per_buffer = payload_bytes / (_nChannels * _bytesPerComplex);
+    /* The payload area is dma_tx_buf_size - TX_DMA_HEADER_SIZE bytes. */
+    const uint32_t payload_bytes = _dma_mmap_info.dma_tx_buf_size; //- TX_DMA_HEADER_SIZE;
+    const uint32_t samples_per_buffer = payload_bytes / 8;/// (_nChannels * _bytesPerComplex);
 
-//         /* Optional: Verify the number of samples per buffer matches expectation (1022). */
-//         const uint32_t EXPECTED_SAMPLES_PER_PACKET = 1022;
-//         if (samples_per_buffer != EXPECTED_SAMPLES_PER_PACKET) {
-//             SoapySDR_logf(SOAPY_SDR_WARNING, "writeStream: samples_per_buffer=%u (expected %u).",
-//                 samples_per_buffer, EXPECTED_SAMPLES_PER_PACKET);
-//         }
+    /* Optional: Verify the number of samples per buffer matches expectation (1022). */
+    const uint32_t EXPECTED_SAMPLES_PER_PACKET = 1024;
+    if (samples_per_buffer !=  EXPECTED_SAMPLES_PER_PACKET) {
+        SoapySDR_logf(SOAPY_SDR_WARNING, "writeStream: samples_per_buffer=%u (expected %u).",
+            samples_per_buffer, EXPECTED_SAMPLES_PER_PACKET);
+    }
 
-//         /* Write the sync word (8 bytes) */
-//         *reinterpret_cast<uint64_t*>(tx_buffer) = DMA_HEADER_SYNC_WORD;
+    /* Write the sync word (8 bytes) */
+    *reinterpret_cast<uint64_t*>(tx_buffer) = DMA_HEADER_SYNC_WORD;
 
-//         /* Determine the timestamp to write:
-//          * - If user provided timeNs (non-zero), use that.
-//          * - Otherwise compute a fake timestamp based on the last fake timestamp plus the buffer duration.
-//          */
-//         uint64_t timestamp_to_write = 0;
-//         if (timeNs != 0) {
-//             timestamp_to_write = static_cast<uint64_t>(timeNs);
-//         } else {
-//             /* Compute time increment in ns using payload samples / samplerate */
-//             const double samples = static_cast<double>(samples_per_buffer);
-//             const double time_increment_ns = (samples / static_cast<double>(_tx_stream.samplerate)) * 1e9;
-//             if (s_tx_fake_timestamp == 0) {
-//                 s_tx_fake_timestamp = static_cast<uint64_t>(time_increment_ns); // start at one increment
-//             } else {
-//                 s_tx_fake_timestamp += static_cast<uint64_t>(time_increment_ns);
-//             }
-//             timestamp_to_write = s_tx_fake_timestamp;
-//         }
+    /* Determine the timestamp to write:
+        * - If user provided timeNs (non-zero), use that.
+        * - Otherwise compute a fake timestamp based on the last fake timestamp plus the buffer duration.
+        */
+    uint64_t timestamp_to_write = 0;
+    if (timeNs != 0) {
+        timestamp_to_write = static_cast<uint64_t>(timeNs);
+    } else {
+        /* Compute time increment in ns using payload samples / samplerate */
+        const double samples = static_cast<double>(samples_per_buffer);
+        const double time_increment_ns = (samples / static_cast<double>(_tx_stream.samplerate)) * 1e9;
+        if (s_tx_fake_timestamp == 0) {
+            s_tx_fake_timestamp = static_cast<uint64_t>(time_increment_ns); // start at one increment
+        } else {
+            s_tx_fake_timestamp += static_cast<uint64_t>(time_increment_ns);
+        }
+        timestamp_to_write = s_tx_fake_timestamp;
+        
+    }
+    printf("writeStream: Writing TX DMA Timestamp: %llu ns\n", (unsigned long long)timestamp_to_write);
+    /* Write timestamp at bytes 8..16 of header (uint64_t). */
+    *reinterpret_cast<uint64_t*>(tx_buffer + 8) = timestamp_to_write;
 
-//         /* Write timestamp at bytes 8..16 of header (uint64_t). */
-//         *reinterpret_cast<uint64_t*>(tx_buffer + 8) = timestamp_to_write;
-
-//         SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: inserting TX header (handle=%zu, buf_offset=%d) ts=%llu samples=%u",
-//                       handle, buf_offset, (unsigned long long)timestamp_to_write, samples_per_buffer);
+    SoapySDR_logf(SOAPY_SDR_DEBUG, "writeStream: inserting TX header (handle=%zu, buf_offset=%d) ts=%llu samples=%u",
+                    handle, buf_offset, (unsigned long long)timestamp_to_write, samples_per_buffer);
+    // 1. Store header and timestamp
+    uint8_t packet_buffer[16 + 1022*8];   // 16 header + payload
+    uint64_t *hdr = reinterpret_cast<uint64_t*>(packet_buffer);
+    hdr[0] = DMA_HEADER_SYNC_WORD;   // 8B header
+    hdr[1] = timestamp_to_write;     // 8B timestamp
 //     }
 // #endif
-    const size_t n = std::min((returnedElems - samp_avail), _tx_stream.remainderSamps);
+    const size_t n = 1024;//std::min((returnedElems - samp_avail), _tx_stream.remainderSamps);
 
     /* Write out channels to the new buffer. */
-    for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
+    // printf("n = %lu, samples available = %lu\n",  n, samp_avail);
+    // for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
+    //     // printf("_tx_stream.channels[i] * _bytesPerComplex %lu\n",  _tx_stream.channels[i] * _bytesPerComplex); // is equal to 0 
+
+    //     this->interleave(
+    //         buffs[i],
+    //         _tx_stream.remainderBuff + (_tx_stream.channels[i] * _bytesPerComplex),
+    //         n,
+    //         _tx_stream.format,
+    //         samp_avail
+    //     );
+    // }
+
+
+
+    // 2. Copy user payload samples just after the first 16 bytes
+    uint8_t *payload_ptr = packet_buffer + 16;
+    size_t payload_samples =1022; // std::min(numElems, (size_t)1022);
+
+    for(size_t ch = 0; ch < _tx_stream.channels.size(); ch++)
+    {
         this->interleave(
-            buffs[i],
-            _tx_stream.remainderBuff + (_tx_stream.channels[i] * _bytesPerComplex),
-            n,
+            buffs[ch],                         // user samples
+            payload_ptr + ch * _bytesPerComplex,
+            payload_samples,
             _tx_stream.format,
             samp_avail
         );
     }
+
+    // 3. Now copy entire packet to DMA buffer
+
+    // base_ptr returned by acquireWriteBuffer
+    uint8_t *dma_ptr = reinterpret_cast<uint8_t*>(_tx_stream.remainderBuff);
+
+    // packet size in bytes
+    size_t packet_bytes = 16 + payload_samples * _bytesPerComplex;
+
+    memcpy(dma_ptr, packet_buffer, packet_bytes);
+
+    uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
+    printf("[CSR] Last TX Timestamp (from CSR): %lu\n ", last_timestamp);
+
 #if USE_LITEETH
     _udp_streamer->set_data(_tx_stream.remainderBuff, n * _nChannels * _bytesPerComplex);
 #endif
