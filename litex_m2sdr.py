@@ -202,7 +202,7 @@ class BaseSoC(SoCMini):
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen=2,
-        with_white_rabbit      = False, wr_sfp=1,
+        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16,
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -292,14 +292,6 @@ class BaseSoC(SoCMini):
         )
         self.time_gen.add_cdc()
 
-        # PPS Generator ----------------------------------------------------------------------------
-
-        self.pps_gen = PPSGenerator(
-            clk_freq = sys_clk_freq,
-            time     = self.time_gen.time,
-            reset    = self.time_gen.time_change,
-        )
-
         # JTAGBone ---------------------------------------------------------------------------------
 
         if with_jtagbone:
@@ -385,7 +377,6 @@ class BaseSoC(SoCMini):
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # Host <-> SoC DMA Bus.
             # ---------------------
@@ -604,9 +595,6 @@ class BaseSoC(SoCMini):
         # White Rabbit -----------------------------------------------------------------------------
 
         if with_white_rabbit:
-
-            dac_bits = 16
-
             from litex.soc.cores.uart import UARTPHY, UART
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
@@ -651,7 +639,7 @@ class BaseSoC(SoCMini):
 
                 # Board name.
                 board_name       = "SAWR",
-                dac_bits = dac_bits,
+                dac_bits = wr_dac_bits,
 
                 # SFP.
                 sfp_pads        = platform.request("sfp", wr_sfp),
@@ -670,6 +658,8 @@ class BaseSoC(SoCMini):
                 wb_slave_origin = 0x0004_0000,
                 wb_slave_size   = 0x0004_0000
             )
+            
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_out_pulse)
 
             LiteXWRNICSoC.add_sources(self)
 
@@ -685,7 +675,7 @@ class BaseSoC(SoCMini):
             self.refclk_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = dac_bits,
+                 ctrl_size   = wr_dac_bits,
                  )
             self.comb += [
                 self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data),
@@ -699,7 +689,7 @@ class BaseSoC(SoCMini):
             self.dmtd_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = dac_bits,
+                 ctrl_size   = wr_dac_bits,
                  )
             self.comb += [
                 self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data),
@@ -771,7 +761,7 @@ class BaseSoC(SoCMini):
     def add_pcie_dma_probe(self, depth=1024):
         assert hasattr(self, "pcie_dma0")
         analyzer_signals = [
-            self.pps_gen.pps,      # PPS.
+            self.pps_out,          # PPS.
             self.pcie_dma0.sink,   # RX.
             self.pcie_dma0.source, # TX.
             self.pcie_dma0.synchronizer.synced,
@@ -886,6 +876,7 @@ def main():
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
     parser.add_argument("--wr-sfp",            default=1, type=int,     help="White Rabbit SFP.", choices=[0, 1])
+    parser.add_argument("--wr-dac-bits",       default=16, type=int,    help="White Rabbit freq control word size")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -933,6 +924,7 @@ def main():
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
         wr_sfp            = args.wr_sfp,
+        wr_dac_bits       = args.wr_dac_bits,
     )
 
     # LiteScope Analyzer Probes.

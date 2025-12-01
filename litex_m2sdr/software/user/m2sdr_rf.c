@@ -202,6 +202,24 @@ static void m2sdr_init(
                 sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
         }
 
+    } else if (strcmp(sync_mode, "white-rabbit") == 0) {
+        /* Only Supported by SI5351C Version */
+        printf("Using white-rabbit clock as SI5351 RefClk...\n");
+        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
+              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
+              SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* ClkIn from uFL.  */
+
+        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
+        if (refclk_freq == 40000000) {
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_40m_config,
+                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+        } else { /* default to 38.4 MHz */
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_38p4m_config,
+                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+        }
+
     /* Invalid Sync */
     } else {
         fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
