@@ -113,7 +113,7 @@ class CRG(LiteXModule):
 
         # Ethernet PLL.
         # -------------
-        if with_eth or with_sata or with_white_rabbit:
+        if with_eth or with_sata:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, 125e6, margin=0)
@@ -132,11 +132,14 @@ class CRG(LiteXModule):
             self.refclk_mmcm = S7MMCM(speedgrade=-3)
             self.comb += self.refclk_mmcm.reset.eq(self.rst)
             self.refclk_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
-            self.refclk_mmcm.create_clkout(self.cd_clk_125m_gtp,  125e6, margin=0)
             self.refclk_mmcm.expose_dps("clk200", with_csr=False)
-            self.refclk_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
-            self.comb += self.cd_refclk_eth.clk.eq(self.cd_clk_125m_gtp.clk)
 
+            self.refclk_mmcm.create_clkout(self.cd_clk_125m_gtp,  125e6, margin=0)
+            self.refclk_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
+            
+            self.refclk_mmcm.create_clkout(self.cd_refclk_eth,  125e6, margin=0)
+            self.refclk_mmcm.params.update(p_CLKOUT1_USE_FINE_PS="TRUE")
+            
             # DMTD MMCM (62.5MHz).
             self.dmtd_mmcm = S7MMCM(speedgrade=-3)
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
@@ -602,6 +605,8 @@ class BaseSoC(SoCMini):
 
         if with_white_rabbit:
 
+            dac_bits = 16
+
             from litex.soc.cores.uart import UARTPHY, UART
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
@@ -646,6 +651,7 @@ class BaseSoC(SoCMini):
 
                 # Board name.
                 board_name       = "SAWR",
+                dac_bits = dac_bits,
 
                 # SFP.
                 sfp_pads        = platform.request("sfp", wr_sfp),
@@ -679,7 +685,7 @@ class BaseSoC(SoCMini):
             self.refclk_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = 16,
+                 ctrl_size   = dac_bits,
                  )
             self.comb += [
                 self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data),
@@ -693,7 +699,7 @@ class BaseSoC(SoCMini):
             self.dmtd_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = 16,
+                 ctrl_size   = dac_bits,
                  )
             self.comb += [
                 self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data),
