@@ -157,7 +157,8 @@ static void m2sdr_init(
     bool     enable_8bit_mode,
     bool     enable_oversample,
     const char *chan_mode,
-    const char *sync_mode
+    const char *sync_mode,
+    bool     dma_sync
 ) {
     void *conn = m2sdr_open();
 
@@ -227,6 +228,11 @@ static void m2sdr_init(
         exit(1);
     }
 #endif
+
+    if (dma_sync) {
+        m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+        m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_ENABLE_ADDR, 1);
+    }
 
 
     /* Initialize AD9361 SPI */
@@ -488,6 +494,7 @@ static void help(void)
            "  -h                     Show this help message and exit.\n"
 #ifdef USE_LITEPCIE
            "  -c device_num          Select the device (default: 0).\n"
+           "  -dma-sync              Enable DMA synchronization (default: disabled).\n"
 #elif defined(USE_LITEETH)
            "  -i ip_address          Target IP address for Etherbone (required).\n"
            "  -p port                Port number (default = 1234).\n"
@@ -495,7 +502,7 @@ static void help(void)
            "  -8bit                  Enable 8-bit mode (default: disabled).\n"
            "  -oversample            Enable oversample mode (default: disabled).\n"
            "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
-           "  -sync mode             Set synchronization mode ('internal' or 'external', default: internal).\n"
+           "  -sync mode             Set synchronization mode ('internal', 'external' or 'white-rabbit', default: internal).\n"
            "\n"
            "  -refclk_freq freq      Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
            "  -samplerate sps        Set RF samplerate in SPS (default: %d).\n"
@@ -542,6 +549,7 @@ static struct option options[] = {
     { "oversample",       no_argument },              /* 14 */
     { "chan",             required_argument },        /* 15 */
     { "sync",             required_argument },        /* 16 */
+    { "dma-sync",         no_argument },              /* 17 */
     { NULL },
 };
 
@@ -567,6 +575,7 @@ int main(int argc, char **argv)
     bool     enable_oversample = false;
     char     chan_mode[16] = "2t2r";
     char     sync_mode[16] = "internal";
+    bool     dma_sync      = false;
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
     samplerate     = DEFAULT_SAMPLERATE;
@@ -662,6 +671,9 @@ int main(int argc, char **argv)
                     strncpy(sync_mode, optarg, sizeof(sync_mode));
                     sync_mode[sizeof(sync_mode) - 1] = '\0';
                     break;
+                case 17: /* dma-sync */
+		    dma_sync = true;
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -679,7 +691,7 @@ int main(int argc, char **argv)
 
     /* Initialize RF. */
     printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode, dma_sync);
 
     return 0;
 }
