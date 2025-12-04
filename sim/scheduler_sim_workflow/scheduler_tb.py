@@ -14,7 +14,7 @@ import os, sys, argparse, subprocess
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, BASE_DIR)
 
-from litex_m2sdr.gateware.ad9361.scheduler_simple import Scheduler
+from litex_m2sdr.gateware.ad9361.scheduler import Scheduler
 from testbench_helpers import wait, drive_packet, write_manual_time, read_time, read_current_ts, read_fifo_level
 
 sys_freq = 50000000  # sys clock for the sim (20 ns period)

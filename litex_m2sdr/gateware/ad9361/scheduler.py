@@ -6,129 +6,176 @@
 
 
 from migen import *
+from migen.genlib.cdc import MultiReg, PulseSynchronizer
 from litex.gen import *
 from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
-from litex_m2sdr.gateware.layouts import dma_layout_with_ts
-
-STATE_STREAM = ord('S')  
-STATE_WAIT   = ord('W')  
-STATE_RESET  = ord('R')
 
 class Scheduler(LiteXModule): 
-    def __init__(self, packet_size=8176, data_width=64, max_packets=8, with_csr = True): # just to start then maybe expand it to more packets
+    def __init__(self, frames_per_packet = 1024, data_width=64, max_packets=8, meta_data_frames_per_packet = 2, init=0, with_csr = True): # just to start then maybe expand it to more packets
+        assert frames_per_packet % (data_width // 8) == 0 # packet size must be multiple of data width in bytes (a frame is 8 bytes)
+        assert meta_data_frames_per_packet == 2  # we have 2 frames for metadata: header + timestamp
 
-        assert packet_size % (data_width // 8) == 0 # packet size must be multiple of data width in bytes
-    
         # Inputs/Outputs
         self.reset = Signal() # i
-        self.sink   = sink   = stream.Endpoint(dma_layout_with_ts(data_width)) # i  (from TX_CDC)
+        self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i  (from TX_CDC)
         self.source = source = stream.Endpoint(dma_layout(data_width)) # o  (to gpio_tx_unpacker)
+        self.timestamp = Signal(64) # i (timestamp of the packet at fifo output)
+        self.header = Signal(64) # i (header of the packet at fifo output)
         self.now = Signal(64) # i (current time: drive in RFIC domain)
-        
-        # Data Fifo: stores multiple packets
-        frames_per_packet = packet_size // (data_width // 8) # a frame is 8 bytes ==> 1022 frames_per_packet
-        self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout_with_ts(data_width), depth=frames_per_packet*max_packets) # depth is in number of frames
-        self.state = Signal(8) # for debug purpose only, not used currently
+        self.write_time_manually = Signal()
+        self.manual_now = Signal(64)
 
-        # Counters for debugging
-        frame_count = Signal(13) 
-        pkt_count = Signal(4) # max 8 packets
-        
-        ready_to_read = Signal()
-        # Combinational: define handshake condition
-        self.comb += ready_to_read.eq(sink.valid & sink.ready)
-        
-        # Sequential: update frame and packet counters on clock edges
+        # Data Fifo: stores multiple packets
+        self.data_fifo = data_fifo = stream.SyncFIFO(layout=dma_layout(data_width), depth=frames_per_packet * max_packets) 
+
+        # Time Handling.
         self.sync += [
-            If(ready_to_read,
-                If(frame_count == frames_per_packet - 1,
-                    frame_count.eq(0),
-                    pkt_count.eq(pkt_count + 1)
-                ).Else(
-                    frame_count.eq(frame_count + 1)
-                )
+            # Disable: Reset Time to 0.
+            If(self.write_time_manually,
+                self.now.eq(self.manual_now),
+            # Increment.
+            ).Else(
+                self.now.eq(self.now + 1),
             )
         ]
-        
-        # ────────────────────────────────────────────────
-        #  FIFO connections
-        # ────────────────────────────────────────────────
+
+        # States
+        self.streaming = streaming =  Signal(reset=0)
+        frame_count = Signal(10)   # enough for 0..1023 (1024 frames)
+        self.latched_ts = latched_ts = Signal(64)
+        latched_header = Signal(64)
+
         # Always Read from upstream if I can
         self.comb += [
             sink.ready.eq(data_fifo.sink.ready), # backpressure
             data_fifo.sink.valid.eq(sink.valid),
-            data_fifo.sink.data.eq(sink.data),
+            data_fifo.sink.data.eq(sink.data), # push data with timestamp and header into fifo
             data_fifo.sink.first.eq(sink.first),
             data_fifo.sink.last.eq(sink.last),
-            data_fifo.sink.timestamp.eq(sink.timestamp)
         ]
 
-        self.comb += [
-                If(self.reset,
-                    self.state.eq(STATE_RESET)
-                ).Elif((self.data_fifo.source.timestamp <= self.now) & self.data_fifo.source.valid,
-                    self.state.eq(STATE_STREAM)
-                ).Else(
-                    self.state.eq(STATE_WAIT)
+        # ---------------------------
+        # Capture header + timestamp
+        # ---------------------------
+        # This triggers only once per packet.
+        is_header    = Signal()
+        is_timestamp = Signal()
+        self.comb += [ 
+            is_header.eq(data_fifo.source.valid & ~streaming & (frame_count == 0)),
+            is_timestamp.eq(data_fifo.source.valid & ~streaming & (frame_count == 1)),
+        ]
+
+        # ------------------------------------------------
+        # Latching Metadata only when we consume from Fifo
+        # ------------------------------------------------
+        self.sync += [
+            If(data_fifo.source.ready & data_fifo.source.valid,
+                If(is_header,   
+                    latched_header.eq(data_fifo.source.data)
+                ),
+                If(is_timestamp,
+                    latched_ts.eq(data_fifo.source.data),
                 )
-            ]
-
-        self.comb += [
-            source.first.eq(data_fifo.source.first),
-            source.last.eq(data_fifo.source.last),
-            source.data.eq(data_fifo.source.data),
-            source.valid.eq(data_fifo.source.valid & (data_fifo.source.timestamp <= self.now)),
-            data_fifo.source.ready.eq(source.ready & (data_fifo.source.timestamp <= self.now)),
+            )
         ]
-        
-        # ────────────────────────────────────────────────
-            #  CSR Exposure
-        # ────────────────────────────────────────────────
-        # if with_csr:
-        #     self.add_csr()
 
+        # ---------------------------
+        # Start streaming when time has come
+        # ---------------------------
+        can_start = Signal()
+        self.comb += can_start.eq((self.now >= latched_ts) &
+                                (frame_count == 2) &
+                                data_fifo.source.valid)
+        self.sync += [
+            If(can_start & ~streaming,
+                streaming.eq(1)
+            )
+        ]
+        # ---------------------------
+        # Assign output
+        # ---------------------------
+        self.comb += [
+            source.valid.eq(streaming & data_fifo.source.valid),
+            source.data.eq(data_fifo.source.data),
+            source.first.eq(data_fifo.source.first & streaming),
+            source.last.eq(data_fifo.source.last & streaming)
+        ]
+
+        # Pop FIFO when downstream is ready
+        pop_meta = is_header | is_timestamp
+        self.comb += data_fifo.source.ready.eq((source.ready & streaming) | pop_meta)
+
+        # Count frames
+        self.sync += [
+            If(data_fifo.source.ready & data_fifo.source.valid,
+                frame_count.eq(frame_count + 1)
+            )
+        ]
+        # ---------------------------
+        # Reset for next packet
+        # ---------------------------
+        self.sync += [
+            If((frame_count == frames_per_packet - 1) & streaming & data_fifo.source.ready & data_fifo.source.valid,
+                frame_count.eq(0),
+                streaming.eq(0)
+            )
+        ]
+        # ────────────────────────────────────────────────
+        #      CSR Exposure
+        # ────────────────────────────────────────────────
+        if with_csr:
+            self.add_csr()
+
+    
     def add_csr(self):
         # Control
-        self._reset      = CSRStorage(fields=[CSRField("reset", size=1, description="Reset scheduler FSM")])
-        self._manual_now = CSRStorage(64, description="Manually set current timestamp for test")
-        self._set_ts = CSRStorage(fields=[CSRField("use_manual", size=1, description="1=use manual now value instead of Timestamp at fifo")])
+        self._control = CSRStorage(fields=[
+            CSRField("enable", size=1, offset=0, values=[
+                ("``0b0``", "Scheduler Disabled."),
+                ("``0b1``", "Scheduler Enabled."),
+            ], reset=1),
+            CSRField("read", size=1, offset=1, pulse=True),
+            CSRField("write", size=1, offset=2, pulse=True),
+            CSRField("read_current_ts", size=1, offset=3, pulse=True),
+        ])
 
         # Status
         self._fifo_level = CSRStatus(16, description="Current FIFO level in words")
-        self._flags      = CSRStatus(fields=[
-            CSRField("full",         size=1),
-            CSRField("empty",        size=1),
-            CSRField("almost_full",  size=1),
-            CSRField("almost_empty", size=1)
-        ])
         self._current_ts = CSRStatus(64, description="Current Timestamp at FIFO output")
-        self._now        = CSRStatus(64, description="Current time from rfic domain")
+        self._read_time  = CSRStatus(64, description="Current time from rfic domain")
+        self._write_time = CSRStorage(64, description="Write Time (ns) (SW Time -> FPGA).")
+        # ---------------------------
+        # Important to Sync from scheduler domain to sys domain
 
-        # Drive internal signals from CSRs
-        manual_now_sig = Signal(64)
-        self.comb += [
-            manual_now_sig.eq(self._manual_now.storage),
-            If(self._set_ts.fields.use_manual,
-                self.now.eq(manual_now_sig)
-            )
-        ]
-        # Connect status signals
+        # Time Write (SW -> FPGA).
+        self.specials += MultiReg(self._write_time.storage, self.manual_now, "rfic")
+        time_write_ps = PulseSynchronizer("sys", "rfic")
+        self.submodules += time_write_ps
+        self.comb += time_write_ps.i.eq(self._control.fields.write)
+        self.comb += self.write_time_manually.eq(time_write_ps.o)
 
-        # current_ts_latched = Signal(64)
-        # self.sync += If(self.data_fifo.source.valid, current_ts_latched.eq(self.data_fifo.source.timestamp[0:64]))
-        self.comb += [
-           # self._fsm_state.status.eq(self.fsm.state),
-            self._fifo_level.status.eq(self.data_fifo.level),
-            self._flags.fields.full.eq(self.full),
-            self._flags.fields.empty.eq(self.empty),
-            self._flags.fields.almost_full.eq(self.almost_full),
-            self._flags.fields.almost_empty.eq(self.almost_empty),
-            # self._current_ts.status.eq(current_ts_latched),
-            self._now.status.eq(self.now)
-        ]
-        
+        # Time Read (RFIC -> SW). 
+        time_read = Signal(64)
+        time_read_ps = PulseSynchronizer("sys", "rfic")
+        self.submodules += time_read_ps
+        self.comb += time_read_ps.i.eq(self._control.fields.read)
+        self.sync.rfic += If(time_read_ps.o, time_read.eq(self.now))
+        self.specials += MultiReg(time_read, self._read_time.status)         # rfic -> sys
+       
 
+        # # Read current ts in the Fifo
+        # current_ts = Signal(64)
+        # current_ts_ps = PulseSynchronizer("sys", "rfic")
+        # self.submodules += current_ts_ps
+        # self.comb += current_ts_ps.i.eq(self._control.fields.read_current_ts)
+        # self.sync.rfic += If(current_ts_ps.o, current_ts.eq(self.latched_ts_shadow))
+        # self.specials += MultiReg(current_ts, self._current_ts.status)         # rfic -> sys
+
+        # # Read Fifo level
+        # fifo_level_sys = Signal(16)
+        # self.comb += fifo_level_sys.eq(self.data_fifo.level)
+        # self.specials += MultiReg(fifo_level_sys, self._fifo_level.status)
     
