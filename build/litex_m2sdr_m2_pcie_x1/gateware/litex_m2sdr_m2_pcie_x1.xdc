@@ -366,13 +366,13 @@ set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets jtag
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets icap_clk]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 
-set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
-
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets pcie_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
+
+set_clock_groups -group [get_clocks -include_generated_clocks -of [get_nets clk10_clk]] -group [get_clocks -include_generated_clocks -of [get_nets basesoc_crg_clkin]] -asynchronous
 
 set_clock_groups -group [get_clocks -include_generated_clocks -of [get_ports si5351_clk1]] -group [get_clocks -include_generated_clocks -of [get_nets sys_clk]] -asynchronous
 

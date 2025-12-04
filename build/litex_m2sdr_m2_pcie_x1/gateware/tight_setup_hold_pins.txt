@@ -2,7 +2,8 @@
 | Launch Setup Clock | Launch Hold Clock | Pin       |
 +====================+===================+===========+
 | si5351_clk1        | si5351_clk1       | FDPE_55/D |
-| jtag_clk           | jtag_clk          | FDPE_13/D |
 | jtag_clk           | jtag_clk          | FDPE_11/D |
+| jtag_clk           | jtag_clk          | FDPE_13/D |
 | jtag_clk           | jtag_clk          | FDPE_7/D  |
+| si5351_clk0        | si5351_clk0       | FDPE_51/D |
 +--------------------+-------------------+-----------+

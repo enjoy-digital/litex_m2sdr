@@ -1,7 +1,7 @@
 Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 -------------------------------------------------------------------------------------------------------------------------------------------------
 | Tool Version     : Vivado v.2024.2 (lin64) Build 5239630 Fri Nov 08 22:34:34 MST 2024
-| Date             : Wed Nov 26 22:27:59 2025
+| Date             : Thu Dec  4 14:19:40 2025
 | Host             : sensnuc6 running 64-bit Ubuntu 22.04.5 LTS
 | Command          : report_power -file litex_m2sdr_m2_pcie_x1_power.rpt
 | Design           : litex_m2sdr_m2_pcie_x1
@@ -33,7 +33,7 @@ Table of Contents
 | Total On-Chip Power (W)  | 1.179        |
 | Design Power Budget (W)  | Unspecified* |
 | Power Budget Margin (W)  | NA           |
-| Dynamic (W)              | 1.018        |
+| Dynamic (W)              | 1.017        |
 | Device Static (W)        | 0.162        |
 | Effective TJA (C/W)      | 3.3          |
 | Max Ambient (C)          | 96.1         |
@@ -52,16 +52,16 @@ Table of Contents
 +--------------------------+-----------+----------+-----------+-----------------+
 | On-Chip                  | Power (W) | Used     | Available | Utilization (%) |
 +--------------------------+-----------+----------+-----------+-----------------+
-| Clocks                   |     0.080 |       19 |       --- |             --- |
+| Clocks                   |     0.079 |       19 |       --- |             --- |
 | Slice Logic              |     0.023 |    18601 |       --- |             --- |
-|   LUT as Logic           |     0.020 |     6137 |    133800 |            4.59 |
+|   LUT as Logic           |     0.020 |     6112 |    133800 |            4.57 |
 |   Register               |     0.001 |     8864 |    267600 |            3.31 |
 |   CARRY4                 |     0.001 |      505 |     33450 |            1.51 |
 |   LUT as Distributed RAM |    <0.001 |     1120 |     46200 |            2.42 |
 |   LUT as Shift Register  |    <0.001 |        5 |     46200 |            0.01 |
 |   F7/F8 Muxes            |    <0.001 |       16 |    133800 |            0.01 |
 |   Others                 |     0.000 |       93 |       --- |             --- |
-| Signals                  |     0.043 |    16502 |       --- |             --- |
+| Signals                  |     0.043 |    16505 |       --- |             --- |
 | Block RAM                |     0.078 |       36 |       365 |            9.86 |
 | MMCM                     |     0.108 |        1 |        10 |           10.00 |
 | PLL                      |     0.104 |        1 |        10 |           10.00 |
@@ -81,7 +81,7 @@ Table of Contents
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
 | Source    | Voltage (V) | Total (A) | Dynamic (A) | Static (A) | Powerup (A) | Budget (A)  | Margin (A) |
 +-----------+-------------+-----------+-------------+------------+-------------+-------------+------------+
-| Vccint    |       1.000 |     0.336 |       0.301 |      0.035 |       NA    | Unspecified | NA         |
+| Vccint    |       1.000 |     0.335 |       0.300 |      0.035 |       NA    | Unspecified | NA         |
 | Vccaux    |       1.800 |     0.156 |       0.125 |      0.031 |       NA    | Unspecified | NA         |
 | Vcco33    |       3.300 |     0.006 |       0.001 |      0.005 |       NA    | Unspecified | NA         |
 | Vcco25    |       2.500 |     0.139 |       0.134 |      0.005 |       NA    | Unspecified | NA         |
@@ -166,11 +166,11 @@ Table of Contents
 +------------------------+-----------+
 | Name                   | Power (W) |
 +------------------------+-----------+
-| litex_m2sdr_m2_pcie_x1 |     1.018 |
+| litex_m2sdr_m2_pcie_x1 |     1.017 |
 |   IOBUF_5              |     0.002 |
-|   pcie_s7              |     0.247 |
-|     inst               |     0.247 |
-|       inst             |     0.247 |
+|   pcie_s7              |     0.248 |
+|     inst               |     0.248 |
+|       inst             |     0.248 |
 +------------------------+-----------+
 
 

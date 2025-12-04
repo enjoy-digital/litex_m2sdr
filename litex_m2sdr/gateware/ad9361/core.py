@@ -21,7 +21,7 @@ from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
-from litex_m2sdr.gateware.ad9361.scheduler_simple   import Scheduler
+from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
 
 
 # Architecture -------------------------------------------------------------------------------------

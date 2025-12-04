@@ -8,4 +8,4 @@ Start Address      0x00000000
 End Address        0x00FFFFFF
 
 Addr1         Addr2         Date                    File(s)
-0x00000000    0x0029F74B    Nov 26 22:28:30 2025    litex_m2sdr_m2_pcie_x1_operational.bit
+0x00000000    0x00289573    Dec  4 14:20:08 2025    litex_m2sdr_m2_pcie_x1_operational.bit
