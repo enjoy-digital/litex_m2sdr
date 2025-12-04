@@ -11,6 +11,7 @@ from litex import RemoteClient
 import time
 import os
 import subprocess
+import argparse
 
 class SchedulerDriver:
     """Interface for AD9361 TX Scheduler."""
@@ -81,12 +82,20 @@ class SchedulerDriver:
 # Main test routine
 # ----------------------------------------------------------------------------
 def main():
+    parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    # Build/Load/Utilities.
+    parser.add_argument("--init-rfic",           action="store_true", help="Init RFIC")
+    args = parser.parse_args()
+
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     csr_path = os.path.join(root_dir, "csr.csv")
-
-    print("Initializing the RFIC ...")
-    result = subprocess.run("cd ../litex_m2sdr/software/user && ./m2sdr_rf", shell=True, capture_output=True, text=True)
-    print(result.stdout)
+    
+    if (args.init_rfic):
+        print("Initializing the RFIC ...")
+        result = subprocess.run("cd ../litex_m2sdr/software/user && ./m2sdr_rf", shell=True, capture_output=True, text=True)
+        print(result.stdout)
+    else:
+        print("If running for the first time try initializing the RFIC by running:\n./test_scheduler.py --init-rfic\n")
 
     bus = RemoteClient(csr_csv= csr_path)
     bus.open()

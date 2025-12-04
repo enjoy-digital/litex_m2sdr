@@ -272,7 +272,10 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
 
         # SI5351 Control.
         si5351_pads   = platform.request("si5351")
-        self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
+        self.si5351 = SI5351(pads=si5351_pads, i2c_base=0xa000) # FIXME     had to hard code it because upstream changes result in this error:   
+                                                                #           File "./litex_m2sdr.py", line 275, in __init__
+                                                                #           self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
+                                                                #           TypeError: SoCCSRHandler.address_map() got an unexpected keyword argument 'origin'
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
@@ -290,15 +293,12 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             clk_freq = 100e6,
             with_csr = True,
         )
-<<<<<<< HEAD
-        #=========================== from UPSTREAM (not sure)===============================
+        #=========================== from UPSTREAM (not sure: maybe I should delete the FIXME later and replace it by this) ================================
         #self.time_gen.add_cdc()
         #====================================================================================
-        # FIXME: Try to avoid CDC, change sys_clk? is somehow si5351_clk1 (investigate)
-=======
+
 
         # FIXME: Try to avoid CDC, change sys_clk? 
->>>>>>> e679043 (- gateware synthesizes)
         time_sys = Signal(64)
         self.time_sync = BusSynchronizer(
             width   = 64,
@@ -309,7 +309,8 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
             self.time_sync.i.eq(self.time_gen.time),
             time_sys.eq(self.time_sync.o),
         ]
-
+        # END OF FIXME: Try to avoid CDC, change sys_clk? 
+        
         # PPS Generator ----------------------------------------------------------------------------
 
         self.pps_gen = PPSGenerator(
@@ -627,10 +628,8 @@ class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIX
         # GPIO -------------------------------------------------------------------------------------
 
         if with_gpio:
-<<<<<<< HEAD
-=======
+
             print("-----------------------with GPIO -------------------")
->>>>>>> 6c0d9bc (flashing over SRAM works (bash script created) but causes CSR to be 0xFFFF)
             self.gpio = GPIO(
                 rx_packer   = self.ad9361.gpio_rx_packer,
                 tx_unpacker = self.ad9361.gpio_tx_unpacker,
