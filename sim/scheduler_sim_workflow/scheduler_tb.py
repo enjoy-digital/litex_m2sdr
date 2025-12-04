@@ -44,7 +44,7 @@ class Top(Module):
 class SchedulerTestbench():
     """Main testbench orchestrator using config-driven approach."""
     
-    def __init__(self, dut, config = ExperimentManager(config_file ="test_config.yaml").config):
+    def __init__(self, dut, config = ExperimentManager(config_file ="alltest_config.yaml").config):
 
         self.dut = dut
         self.config = config
@@ -159,23 +159,27 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
             Examples:
-            # Run all tests and save VCD
+            # Run alltest_config.yaml (default) and save VCD
             python scheduler_tb.py
             
-            # Run with custom VCD directory
-            python scheduler_tb.py --vcd-dir my_simulations
+            # Run to run specific test that will be saved later as mytest.vcd
+            python scheduler_tb.py --xp-name mytest
             
-            # Open latest VCD in GTKWave automatically
+            # Open latest experiment VCD in GTKWave automatically
             python scheduler_tb.py --gtk
             
         """
     )
+    argparser.add_argument("--config-file",    default="alltest_config.yaml", help="YAML configuration file for tests")
     argparser.add_argument("--gtk",              action="store_true",        help="Open GTKWave at end of simulation")
     argparser.add_argument("--vcd-dir",         default="vcd_outputs",      help="Directory to store VCD files")
-    argparser.add_argument("--experiment-name",  default="",                  help="Name of the experiment (used in folder and VCD naming)")
+    argparser.add_argument("--xp-name",  default="",                  help="Name of the experiment (used in folder and VCD naming)")
     args = argparser.parse_args()
 
-    experiment = ExperimentManager(experiment_name=args.experiment_name, config_file="test_config.yaml", vcd_dir=args.vcd_dir)
+    if args.config_file.endswith("_config.yaml") == False:
+        raise Exception("config file name must end in _config.yaml \nExample: mytest_config.yaml")
+    xp_name = args.config_file[:args.config_file.find("_config.yaml")]
+    experiment = ExperimentManager(experiment_name=xp_name, config_file=args.config_file, vcd_dir=args.vcd_dir)
     frames_per_packet = experiment.config.get_global_param("frames_per_packet", 1024)
     data_width = experiment.config.get_global_param("data_width", 64)
     max_packets = experiment.config.get_global_param("max_packets", 8)

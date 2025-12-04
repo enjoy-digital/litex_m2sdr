@@ -1,0 +1,41 @@
+global:
+  frames_per_packet: 1024
+  wait_initial_cycles: 20
+  wait_between_packets: 10
+  wait_final_cycles: 500
+  data_width: 64
+  max_packets: 8
+  sys_freq: 50000000
+  rfic_freq: 50000000
+tests:
+  test_1_future_timestamps:
+    description: 9 packets to fill up the fifo
+    packets:
+    - id: 1
+      timestamp: 10240
+      description: 'Packet 1: ts=10240 (after 10 packets)'
+    - id: 2
+      timestamp_offset: 20
+      description: 'Packet 2: ts= now + 20 (ts late) ==> will fire right after previous'
+    - id: 3
+      timestamp_offset: 20
+      description: 'Packet 3: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 4
+      timestamp_offset: 20
+      description: 'Packet 4: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 5
+      timestamp_offset: 20
+      description: 'Packet 5: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 6
+      timestamp_offset: 20
+      description: 'Packet 6: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 7
+      timestamp_offset: 20
+      description: 'Packet 7: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 8
+      timestamp_offset: 20
+      description: 'Packet 8: ts=now + 20 (ts late) ==> will fire right after previous'
+    - id: 9
+      timestamp_offset: 20
+      description: 'Packet 8: ts=now + 20 (ts late) ==> will fire right after previous'
+    wait_after_all_packets: 10240

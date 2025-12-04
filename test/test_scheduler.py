@@ -10,6 +10,7 @@ Description:
 from litex import RemoteClient
 import time
 import os
+import subprocess
 
 class SchedulerDriver:
     """Interface for AD9361 TX Scheduler."""
@@ -27,9 +28,6 @@ class SchedulerDriver:
     # ───────────────────────────────────────────────
     #  READ METHODS
     # ───────────────────────────────────────────────
-    # def read_now(self):
-    #     """Read current RFIC time."""
-    #     return self._reg("now").read()
 
     # def read_fifo_level(self):
     #     """Read FIFO fill level."""
@@ -51,7 +49,7 @@ class SchedulerDriver:
         # Pulse read trigger (Bit1)
         ctrl = self._reg("control").read()
         self._reg("control").write(ctrl | 0b10)
-        # self._reg("control").write(ctrl & ~0b10)
+        self._reg("control").write(ctrl & ~0b10)
         return self._reg("read_time").read()
     
     # ───────────────────────────────────────────────
@@ -86,27 +84,22 @@ def main():
     root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     csr_path = os.path.join(root_dir, "csr.csv")
 
+    print("Initializing the RFIC ...")
+    result = subprocess.run("cd ../litex_m2sdr/software/user && ./m2sdr_rf", shell=True, capture_output=True, text=True)
+    print(result.stdout)
+
     bus = RemoteClient(csr_csv= csr_path)
     bus.open()
     print("Connected to LiteX server.\n")
 
     scheduler = SchedulerDriver(bus=bus, name="ad9361_scheduler_tx")
-    # scheduler.enable_write(True)
-    # assert scheduler._reg("control").read() == 0x00000005, "Testing enable write"
-    # print("Write enabled successfully.👍")
-    # scheduler.enable_write(False)
-    # assert scheduler._reg("control").read() == 0x00000001, "Testing disable write"
-    # print("Write disabled successfully.👍")
 
-    # -------------------------------------------------------------------------
-    # 2. SET MANUAL TIME
-    # -------------------------------------------------------------------------
-    for i in range(50):
+    for i in range(10):
         now = scheduler.read_now()
-        print(f"Now before manual write : {now}")
+        print(f"Reading RFIC clock: now = {now}")
         if i % 5 == 0:
             new_time = 0  # reset to 0 every 5 iterations
-            print(f"\nSetting manual now = {new_time}")
+            print(f"\nManual time writing: now = {new_time}\n")
             scheduler.write_manual_time(new_time)
             continue
         time.sleep(1)
@@ -114,18 +107,7 @@ def main():
     bus.close()
     print("\nDone.\n")
 
-    # --- Show FIFO head timestamp
-    # current_ts = scheduler.read_current_ts()
-    # # print(f"Current FIFO Head Timestamp: {current_ts}")
-    # for _ in range(10):
-    #     test_now = scheduler.read_test_schedule_now()
-    #     temperature = (float(getattr(bus.regs, "xadc_temperature").read()) * 503.975/4096) - 273.15
-    #     print(f"Main test increment counter: {test_now}")
-    #     print(f"FPGA Temperature : {temperature} °C")
-    #     time.sleep(0.5)
-
-    # bus.close()
-    # print("Done.")
+  
 
 
 if __name__ == "__main__":

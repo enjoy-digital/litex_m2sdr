@@ -5,7 +5,7 @@ from datetime import datetime
 class ExperimentManager:
     """ Manages experiment setup including VCD and config handling."""
 
-    def __init__(self, experiment_name = None, config_file = "test_config.yaml", vcd_dir="vcd_outputs"):
+    def __init__(self, experiment_name = None, config_file = "alltests_config.yaml", vcd_dir="vcd_outputs"):
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         self.config_file = config_file
