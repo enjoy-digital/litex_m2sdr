@@ -1075,31 +1075,12 @@ int SoapyLiteXM2SDR::writeStream(
             samp_avail
         );
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
+
     /* UDP path: no mid-buffer send; submission happens in releaseWriteBuffer(). */
-=======
-
-    // 3. Now copy entire packet to DMA buffer
-
-    // base_ptr returned by acquireWriteBuffer
-    uint8_t *dma_ptr = reinterpret_cast<uint8_t*>(_tx_stream.remainderBuff);
-
-    // packet size in bytes
-    size_t packet_bytes = 16 + payload_samples * _bytesPerComplex;
-
-    memcpy(dma_ptr, packet_buffer, packet_bytes);
-
-    uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
-    printf("[CSR] Last TX Timestamp (from CSR): %lu\n ", last_timestamp);
-
 #if USE_LITEETH
     _udp_streamer->set_data(_tx_stream.remainderBuff, n * _nChannels * _bytesPerComplex);
 #endif
->>>>>>> 87215ba (Issues found and fixed:)
-=======
-    /* UDP path: no mid-buffer send; submission happens in releaseWriteBuffer(). */
->>>>>>> f4b41db (Pulled latest LiteXM2SDRStreaming.cpp:)
+
     _tx_stream.remainderSamps -= n;
     _tx_stream.remainderOffset += n;
 
