@@ -7,7 +7,7 @@ from datetime import datetime
 class ConfigLoader:
     """Load and manage test configuration from YAML."""
     
-    def __init__(self, config_file="test_config.yaml"):
+    def __init__(self, config_file="alltest_config.yaml"):
         """Load the YAML config file."""
         self.config_file = config_file
         self.config = self._load_yaml()

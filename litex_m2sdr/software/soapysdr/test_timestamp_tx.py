@@ -88,12 +88,15 @@ def main():
     while time.time() - start_time < args.time:
         # Calculate target timestamp for this buffer
         target_time = hw_time + (buffer_count * buffer_time_ns)
-        print(f"Buffer {buffer_count}: target_time={target_time}")
+        print(f"\n--------------------------------------------------------")
+        print(f"Writing packet {buffer_count}: packet_timestamp={target_time}")
+
         # Prepare buffer
         buffs = [tone]
         
         # Write with timestamp
         SoapyStreamResult = sdr.writeStream(tx_stream, buffs, buffer_size, flags=0, timeNs=target_time, timeoutUs=1000000)
+        print(f"--------------------------------------------------------\n")
 
         if SoapyStreamResult.ret < 0:
             if SoapyStreamResult.ret == SoapySDR.SOAPY_SDR_TIMEOUT:
