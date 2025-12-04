@@ -17,3 +17,4 @@ __pycache__
 build/
 *.vcd
 litex_m2sdr/software/soapysdr/build_debug/
+demo/
