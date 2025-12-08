@@ -127,15 +127,31 @@ bool gpio_is_valid(int number)
 {
  switch(number) {
     case AD9361_GPIO_RESET_PIN:
+#ifdef CSR_AD9361_SEND_PULSE_ADDR
+    case CSR_AD9361_SEND_PULSE_ADDR:
+#endif
         return true;
     default:
         return false;
     }
 }
 
+void * gpio_set_value_conn = NULL;
 void gpio_set_value(unsigned gpio, int value)
 {
-
+	switch(gpio) {
+#ifdef CSR_AD9361_SEND_PULSE_ADDR
+                case CSR_AD9361_SEND_PULSE_ADDR:
+                        m2sdr_writel(gpio_set_value_conn, CSR_AD9361_SEND_PULSE_ADDR, value);
+                        if(value == 0) { // wait for pulse to be sent
+                                while(m2sdr_readl(gpio_set_value_conn, CSR_AD9361_SYNC_PULSE_DONE_ADDR) == 0) {
+                                        usleep(10000);
+                                }
+                        }
+                        return;
+#endif
+                default:
+        }
 }
 
 /* M2SDR Init */
@@ -158,9 +174,11 @@ static void m2sdr_init(
     bool     enable_oversample,
     const char *chan_mode,
     const char *sync_mode,
-    bool     dma_sync
+    bool     dma_sync,
+    bool     adc_sync
 ) {
     void *conn = m2sdr_open();
+    gpio_set_value_conn = conn;
 
 #ifdef CSR_SI5351_BASE
     /* Initialize SI5351 Clocking */
@@ -205,21 +223,35 @@ static void m2sdr_init(
 
     } else if (strcmp(sync_mode, "white-rabbit") == 0) {
         /* Only Supported by SI5351C Version */
-        printf("Using white-rabbit clock as SI5351 RefClk...\n");
-        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
-              SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* ClkIn from uFL.  */
+	if(!adc_sync) {
+		printf("Using white-rabbit clock as SI5351 RefClk...\n");
+		m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
+		      SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
+		      SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* 10MHz ClkIn from uFL.  */
 
-        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
-        if (refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
-        } else { /* default to 38.4 MHz */
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
-        }
+		/* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
+		if (refclk_freq == 40000000) {
+		    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+			si5351_clkin_10m_40m_config,
+			sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+		} else { /* default to 38.4 MHz */
+		    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+			si5351_clkin_10m_38p4m_config,
+			sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+		}
+	} else {
+		printf("Using white-rabbit clock as AD9361 RefClk...\n");
+		m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
+		      SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
+		      SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* 62.5MHz ClkIn from white-rabbit.  */
+        	
+		printf("Force RefClk : 62500000 Hz\n");
+		refclk_freq = 62500000;
+
+		m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+			si5351_clkin_passthrough_xo_100m_config,
+			sizeof(si5351_clkin_passthrough_xo_100m_config)/sizeof(si5351_clkin_passthrough_xo_100m_config));
+	}
 
     /* Invalid Sync */
     } else {
@@ -243,7 +275,11 @@ static void m2sdr_init(
     printf("Initializing AD9361 RFIC...\n");
     default_init_param.reference_clk_rate = refclk_freq;
     default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
+#ifdef CSR_AD9361_SEND_PULSE_ADDR
+    default_init_param.gpio_sync          = CSR_AD9361_SEND_PULSE_ADDR;
+#else
     default_init_param.gpio_sync          = -1;
+#endif
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
 
@@ -298,6 +334,15 @@ static void m2sdr_init(
     printf("Setting RX LO Freq to %f MHz.\n", rx_freq/1e6);
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
     ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
+
+#ifdef CSR_AD9361_SEND_PULSE_ADDR
+    /* ad9361 mcs sync */
+    if(adc_sync) {
+        for(int step=0; step <= 5; ++step) {
+                ad9361_mcs(ad9361_phy, step);
+        }
+    }
+#endif
 
     /* Configure AD9361 TX/RX FIRs */
     ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
@@ -494,7 +539,7 @@ static void help(void)
            "  -h                     Show this help message and exit.\n"
 #ifdef USE_LITEPCIE
            "  -c device_num          Select the device (default: 0).\n"
-           "  -dma-sync              Enable DMA synchronization (default: disabled).\n"
+           "  -dma-sync              Enable DMA synchronization (default: disabled) (require -sync white-rabbit).\n"
 #elif defined(USE_LITEETH)
            "  -i ip_address          Target IP address for Etherbone (required).\n"
            "  -p port                Port number (default = 1234).\n"
@@ -503,6 +548,9 @@ static void help(void)
            "  -oversample            Enable oversample mode (default: disabled).\n"
            "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
            "  -sync mode             Set synchronization mode ('internal', 'external' or 'white-rabbit', default: internal).\n"
+#ifdef CSR_AD9361_SEND_PULSE_ADDR
+           "  -adc-sync              Enable ad9361 adc/dac synchronisation (require -sync white-rabbit).\n"
+#endif
            "\n"
            "  -refclk_freq freq      Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
            "  -samplerate sps        Set RF samplerate in SPS (default: %d).\n"
@@ -550,6 +598,7 @@ static struct option options[] = {
     { "chan",             required_argument },        /* 15 */
     { "sync",             required_argument },        /* 16 */
     { "dma-sync",         no_argument },              /* 17 */
+    { "adc-sync",         no_argument },              /* 18 */
     { NULL },
 };
 
@@ -576,6 +625,7 @@ int main(int argc, char **argv)
     char     chan_mode[16] = "2t2r";
     char     sync_mode[16] = "internal";
     bool     dma_sync      = false;
+    bool     adc_sync      = false;
 
     refclk_freq    = DEFAULT_REFCLK_FREQ;
     samplerate     = DEFAULT_SAMPLERATE;
@@ -674,6 +724,9 @@ int main(int argc, char **argv)
                 case 17: /* dma-sync */
 		    dma_sync = true;
                     break;
+                case 18: /* adc-sync */
+		    adc_sync = true;
+                    break;
                 default:
                     fprintf(stderr, "unknown option index: %d\n", option_index);
                     exit(1);
@@ -691,7 +744,7 @@ int main(int argc, char **argv)
 
     /* Initialize RF. */
     printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode, dma_sync);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode, dma_sync, adc_sync);
 
     return 0;
 }
