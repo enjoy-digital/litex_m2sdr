@@ -202,7 +202,7 @@ class BaseSoC(SoCMini):
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen=2,
-        with_white_rabbit      = False, wr_sfp=1,
+        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16,
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -650,6 +650,9 @@ class BaseSoC(SoCMini):
                 # Board name.
                 board_name       = "SAWR",
 
+                # Main/DMTD PLL.
+                dac_bits = wr_dac_bits,
+
                 # SFP.
                 sfp_pads        = platform.request("sfp", wr_sfp),
                 sfp_i2c_pads    = sfp_i2c_pads,
@@ -682,7 +685,7 @@ class BaseSoC(SoCMini):
             self.refclk_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = 16,
+                 ctrl_size   = wr_dac_bits,
                  )
             self.comb += [
                 self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data),
@@ -696,7 +699,7 @@ class BaseSoC(SoCMini):
             self.dmtd_mmcm_ps_gen = PSGen(
                  cd_psclk    = "clk200",
                  cd_sys      = "wr",
-                 ctrl_size   = 16,
+                 ctrl_size   = wr_dac_bits,
                  )
             self.comb += [
                 self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data),
@@ -883,6 +886,7 @@ def main():
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
     parser.add_argument("--wr-sfp",            default=1, type=int,     help="White Rabbit SFP.", choices=[0, 1])
+    parser.add_argument("--wr-dac-bits",       default=16, type=int,    help="White Rabbit MMCM phase-shift control word width (in bits).")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -930,6 +934,7 @@ def main():
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
         wr_sfp            = args.wr_sfp,
+        wr_dac_bits       = args.wr_dac_bits,
     )
 
     # LiteScope Analyzer Probes.
