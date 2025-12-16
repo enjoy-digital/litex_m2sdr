@@ -113,10 +113,10 @@ class AD9361PHY(LiteXModule):
         rx_frame_ibufds = Signal()
         rx_frame        = Signal()
         self.specials += [
-            Instance("IBUFDS",
-                i_I  = pads.rx_frame_p,
+            Instance("IBUFDS", # IBUFDS for differential to single-ended conversion (for robustness) 
+                i_I  = pads.rx_frame_p, # signal from AD9361 indicating whether the RX frame is valid
                 i_IB = pads.rx_frame_n,
-                o_O  = rx_frame_ibufds
+                o_O  = rx_frame_ibufds # RX frame is valid
             ),
             Instance("IDDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE_PIPELINED",
@@ -125,7 +125,7 @@ class AD9361PHY(LiteXModule):
                 i_S  = 0,
                 i_R  = 0,
                 i_D  = rx_frame_ibufds,
-                o_Q1 = rx_frame,
+                o_Q1 = rx_frame, # rx_frame is used for sample selection (2R2T) or channel selection (1R1T). it comes from 
                 o_Q2 = Open(),
             )
         ]
@@ -168,8 +168,8 @@ class AD9361PHY(LiteXModule):
                     i_S  = 0,
                     i_R  = 0,
                     i_D  = rx_data_ibufds[i],
-                    o_Q1 = rx_data_half_i[i],
-                    o_Q2 = rx_data_half_q[i],
+                    o_Q1 = rx_data_half_i[i], # I on rising edge
+                    o_Q2 = rx_data_half_q[i], # Q on falling edge
                 )
             ]
         rx_data_ia  = Signal(12)

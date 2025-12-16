@@ -21,6 +21,8 @@ from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
+from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
+
 
 # Architecture -------------------------------------------------------------------------------------
 #
@@ -179,19 +181,34 @@ class AD9361RFIC(LiteXModule):
         self.rx_bitmode = rx_bitmode = AD9361RXBitMode()
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
-
+       
         # Data Flow --------------------------------------------------------------------------------
 
-        # TX.
+        # TX.  # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
         # ---
-        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
+        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
             tx_bitmode,
-            tx_cdc,
-            gpio_tx_unpacker,
+            tx_cdc
         )
+        # --- RFIC clock-domain timestamp counter ---
+        self.rfic_time = Signal(64)
+        self.sync.rfic += self.rfic_time.eq(self.rfic_time + 1)
+        self._rfic_time = CSRStatus(64, description="RFIC clock-domain time counter.")
+        self.sync.rfic += self._rfic_time.status.eq(self.rfic_time)
+
+        # TX Scheduler ---------------------------------------------------------------------------
+        self.submodules.scheduler_tx = scheduler_tx = ClockDomainsRenamer("rfic")(Scheduler())
+
+
+        # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
+        self.comb += [
+            scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source) # connect gpio unpacker to scheduler
+        ]
+
         self.comb += [
             gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
             self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),
@@ -202,7 +219,7 @@ class AD9361RFIC(LiteXModule):
 
         # RX.
         # ---
-        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source.
+        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source (AD9361) -> sink (header)
         self.comb += [
             self.phy.source.connect(gpio_rx_packer.sink, keep={"valid", "ready"}),
             gpio_rx_packer.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),

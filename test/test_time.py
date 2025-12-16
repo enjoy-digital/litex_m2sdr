@@ -11,6 +11,7 @@ import argparse
 import datetime
 
 from litex import RemoteClient
+import os 
 
 # Time Module Driver -------------------------------------------------------------------------------
 
@@ -85,8 +86,11 @@ def main():
     parser.add_argument("--duration", type=float,   default=5.0, help="Total duration for reading hardware time in seconds")
     parser.add_argument("--enable",   default=1,    type=int,    help="Enable Time Generator (1=enabled, 0=disabled)")
     args = parser.parse_args()
+    
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
 
-    bus = RemoteClient(host=args.host, port=args.port, csr_csv=args.csr_csv)
+    bus = RemoteClient(host=args.host, port=args.port, csr_csv=csr_path)
     bus.open()
 
     # Instantiate the TimeDriver using the CSR name "time_gen"

@@ -8,6 +8,7 @@
 
 import time
 import argparse
+import os 
 
 from litex import RemoteClient
 
@@ -70,7 +71,10 @@ class ClkDriver:
 # Test Frequency -----------------------------------------------------------------------------------
 
 def test_frequency(num_measurements=10, delay_between_tests=1.0):
-    bus = RemoteClient()
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
+
+    bus = RemoteClient(csr_csv= csr_path)
     bus.open()
 
     # Create a ClkDriver for each clock.

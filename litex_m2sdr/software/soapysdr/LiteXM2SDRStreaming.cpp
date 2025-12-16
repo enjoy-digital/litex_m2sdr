@@ -450,6 +450,7 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
 #else
         buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_size;
 #endif
+
     } else {
         throw std::runtime_error("SoapySDR::getDirectAccessBufferAddrs(): Invalid stream.");
     }
@@ -689,6 +690,9 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         *reinterpret_cast<uint64_t*>(tx_buffer + 8) = fakeTimestamp;
         SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp increment: %llu, new timestamp: %llu",
                       time_increment, fakeTimestamp);
+        
+        uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
+        printf("[FROM CSR] Last TX Timestamp = %lu\n ", last_timestamp);
     }
 #endif
 
@@ -1071,7 +1075,12 @@ int SoapyLiteXM2SDR::writeStream(
             samp_avail
         );
     }
+
     /* UDP path: no mid-buffer send; submission happens in releaseWriteBuffer(). */
+#if USE_LITEETH
+    _udp_streamer->set_data(_tx_stream.remainderBuff, n * _nChannels * _bytesPerComplex);
+#endif
+
     _tx_stream.remainderSamps -= n;
     _tx_stream.remainderOffset += n;
 

@@ -3,7 +3,7 @@
 import argparse
 
 from litex import RemoteClient
-
+import os 
 # XADC Driver --------------------------------------------------------------------------------------
 
 class XADCDriver:
@@ -69,7 +69,10 @@ def main():
     parser.add_argument("--port",    default=1234, type=int, help="Remote port (default: 1234)")
     args = parser.parse_args()
 
-    bus = RemoteClient(host=args.host, port=args.port, csr_csv=args.csr_csv)
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    csr_path = os.path.join(root_dir, "csr.csv")
+
+    bus = RemoteClient(host=args.host, port=args.port, csr_csv=csr_path)
     bus.open()
 
     xadc = XADCDriver(bus)

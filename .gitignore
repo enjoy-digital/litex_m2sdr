@@ -14,3 +14,9 @@ modules.order
 *.order.cmd
 __pycache__
 *.csv
+build/
+*.vcd
+litex_m2sdr/software/soapysdr/build_debug/
+demo/
+.vscode/
+sim/scheduler_sim_workflow/vcd_outputs/

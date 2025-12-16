@@ -63,6 +63,8 @@ from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.software import generate_litepcie_software
 
+from litepcie.frontend.wishbone import LitePCIeWishboneBridge
+
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
@@ -150,7 +152,7 @@ class CRG(LiteXModule):
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
-class BaseSoC(SoCMini):
+class BaseSoC(SoCMini): # self.header.tx.timestamp is not assigned anywhere #FIXME
     SoCCore.csr_map = {
         # SoC.
         "ctrl"            : 0,
@@ -189,6 +191,7 @@ class BaseSoC(SoCMini):
         "header"          : 23,
         "ad9361"          : 24,
         "crossbar"        : 25,
+        "scheduler_tx"    : 26,
 
         # GPIO.
         "gpio"            : 21,
@@ -204,9 +207,10 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16,
         with_jtagbone          = True,
-        with_gpio              = False,
+        with_gpio              = True,
         with_rfic_oversampling = False,
     ):
+        print(f"building SOC with variant {variant}")
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
@@ -271,7 +275,10 @@ class BaseSoC(SoCMini):
 
         # SI5351 Control.
         si5351_pads   = platform.request("si5351")
-        self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
+        self.si5351 = SI5351(pads=si5351_pads, i2c_base=0xa000) # FIXME     had to hard code it because upstream changes result in this error:   
+                                                                #           File "./litex_m2sdr.py", line 275, in __init__
+                                                                #           self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
+                                                                #           TypeError: SoCCSRHandler.address_map() got an unexpected keyword argument 'origin'
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
@@ -284,14 +291,29 @@ class BaseSoC(SoCMini):
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
         # Time Generator ---------------------------------------------------------------------------
-
         self.time_gen = TimeGenerator(
             clk      = si5351_clk1,
             clk_freq = 100e6,
             with_csr = True,
         )
-        self.time_gen.add_cdc()
+        #=========================== from UPSTREAM (not sure: maybe I should delete the FIXME later and replace it by this) ================================
+        #self.time_gen.add_cdc()
+        #====================================================================================
 
+
+        # FIXME: Try to avoid CDC, change sys_clk? 
+        time_sys = Signal(64)
+        self.time_sync = BusSynchronizer(
+            width   = 64,
+            idomain = "time",
+            odomain = "sys",
+        )
+        self.comb += [
+            self.time_sync.i.eq(self.time_gen.time),
+            time_sys.eq(self.time_sync.o),
+        ]
+        # END OF FIXME: Try to avoid CDC, change sys_clk? 
+        
         # PPS Generator ----------------------------------------------------------------------------
 
         self.pps_gen = PPSGenerator(
@@ -310,7 +332,7 @@ class BaseSoC(SoCMini):
         # Leds -------------------------------------------------------------------------------------
 
         led_pad = platform.request("user_led")
-        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
+        self.leds = LedChaser(pads=Signal(), sys_clk_freq=0.5*sys_clk_freq)
         self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
@@ -539,7 +561,7 @@ class BaseSoC(SoCMini):
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
-        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)
+        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)        
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -551,38 +573,52 @@ class BaseSoC(SoCMini):
 
         # TX/RX Datapath ---------------------------------------------------------------------------
 
+        # TX Datapath: PCIe/Eth/Sata (DMA) -> Crossbar -> Header -> AD9361 (check AD9361 core.py to follow the rest of the dataflow) -------------------------
+        # RX Datapath: AD9361 -> Header -> Crossbar -> PCIe/Eth/Sata (DMA) -------------------------
+
         # AD9361 <-> Header.
         # ------------------
         self.comb += [
-            self.header.tx.source.connect(self.ad9361.sink),
-            self.ad9361.source.connect(self.header.rx.sink),
+            self.header.tx.source.connect(self.ad9361.sink), # TX: Header -> AD9361.
+            self.ad9361.source.connect(self.header.rx.sink), # RX: AD9361 -> Header.
         ]
+
 
         # Crossbar.
         # ---------
-        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True) # Crossbar is a MUX/DEMUX that can connect multiple sources (PCI, Eth, Sata) DMAs to a single sink (header) and vice versa.
 
-        # TX: Comms -> Crossbar -> Header.
+        # TX: Comms (DMA) -> Crossbar -> Header. 
         # --------------------------------
         if with_pcie:
             self.comb += [
-                self.pcie_dma0.source.connect(self.crossbar.mux.sink0),
+                self.pcie_dma0.source.connect(self.crossbar.mux.sink0), # TX: PCIe DMA -> Crossbar.
                 If(self.crossbar.mux.sel == 0,
                     self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
             ]
+            # test counter
+            test_time = Signal(64)
+            self.sync.sys += test_time.eq(test_time + 1)
+
+            # CSR exposed in the same sys domain
+            self._test_time = CSRStatus(64, description="test signal for CSR")
+
+            # Just register it in the same clock domain (no CDC needed)
+            self.sync.sys += self._test_time.status.eq(test_time)
+
         if with_eth:
             self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
             pass # TODO.
-        self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
+        self.comb += self.crossbar.mux.source.connect(self.header.tx.sink) # TX: Crossbar -> Header.
 
-        # RX: Header -> Crossbar -> Comms.
+        # RX: Header -> Crossbar -> Comms (DMA)
         # --------------------------------
-        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink, omit={"timestamp"}) # RX: Header -> Crossbar.
         if with_pcie:
             self.comb += [
-                self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
+                self.crossbar.demux.source0.connect(self.pcie_dma0.sink), # RX: Crossbar -> PCIe DMA.
                 If(self.crossbar.demux.sel == 0,
                     self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
                 )
@@ -595,6 +631,8 @@ class BaseSoC(SoCMini):
         # GPIO -------------------------------------------------------------------------------------
 
         if with_gpio:
+
+            print("-----------------------with GPIO -------------------")
             self.gpio = GPIO(
                 rx_packer   = self.ad9361.gpio_rx_packer,
                 tx_unpacker = self.ad9361.gpio_tx_unpacker,
@@ -836,7 +874,8 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
-    def add_ad96361_data_probe(self, depth=4096):
+
+    def add_ad9361_data_probe(self):
         analyzer_signals = [
             self.ad9361.phy.sink,   # TX.
             self.ad9361.phy.source, # RX.
@@ -847,6 +886,57 @@ class BaseSoC(SoCMini):
             clock_domain = "rfic",
             register     = True,
             csr_csv      = "test/analyzer.csv"
+
+        )
+        
+    def add_ad9361_scheduler_tx_probe(self):
+        analyzer_signals = [
+            self.ad9361.scheduler_tx.data_fifo.level,
+            # self.ad9361.scheduler_tx.fsm,
+            # self.ad9361.scheduler_tx.now,
+            # self.ad9361.scheduler_tx.source.valid,
+            # self.ad9361.scheduler_tx.source.ready,
+            # self.ad9361.scheduler_tx.source.data,
+            # self.ad9361.scheduler_tx.sink.valid,
+            # self.ad9361.scheduler_tx.sink.ready,
+            # self.ad9361.scheduler_tx.sink.data,
+            self.ad9361.tx_cdc.source.valid,
+            self.ad9361.gpio_tx_unpacker.sink.ready
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth = 256,
+            clock_domain = "rfic",
+            register = True,
+            csr_csv = "analyzer.csv"
+        )
+
+    def add_pcie_dma_probe(self):
+        assert hasattr(self, "pcie_dma0")
+        analyzer_signals = [
+            self.pps_gen.pps,      # PPS.
+            self.pcie_dma0.sink,   # RX.
+            self.pcie_dma0.source, # TX.
+            self.pcie_dma0.synchronizer.synced,
+            self.header.rx.reset,
+            self.header.tx.reset,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
+        )
+
+    def add_eth_tx_probe(self):
+        assert hasattr(self, "eth_streamer")
+        analyzer_signals = [
+            self.eth_streamer.sink,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = 1024,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "analyzer.csv"
         )
 
 # Build --------------------------------------------------------------------------------------------
@@ -881,7 +971,7 @@ def main():
     parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation.", choices=[1, 2, 3])
 
     # GPIO parameters.
-    parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
+    parser.add_argument("--with-gpio",       default= True,      action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
@@ -896,6 +986,7 @@ def main():
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-ad9361-scheduler-tx-probe",action="store_true", help="Enable AD9361 scheduler TX.")
 
     args = parser.parse_args()
 
@@ -905,14 +996,28 @@ def main():
         r = os.system("cd ../litex_wr_nic/litex_wr_nic/firmware && ./build.py --target acorn") # FIXME: Avoid harcoded path/platform.
         if r != 0:
             raise RuntimeError("White Rabbit Firmware build failed.")
+    
+    # Get variant 
+    value = input("Is your board m2 mounted? (yes/no):")
+    if value.lower() in ["yes", "y"]:
+        variant_in = "m2"  
+    else: 
+        variant_in = "baseboard"
+    
+    value = input("With PCIe ? (yes/no):")
+    if value.lower() in ["yes", "y"]:
+        with_pcie_in = True
+    else:  
+        with_pcie_in = False
+
 
     # Build SoC.
     soc = BaseSoC(
         # Generic.
-        variant       = args.variant,
+        variant       = variant_in,
 
         # PCIe.
-        with_pcie     = args.with_pcie,
+        with_pcie     = with_pcie_in,
         with_pcie_ptm = args.with_pcie_ptm,
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
@@ -949,12 +1054,19 @@ def main():
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
-        soc.add_ad96361_data_probe()
+        soc.add_ad9361_data_probe()
+    if args.with_ad9361_scheduler_tx_probe:
+        soc.add_ad9361_scheduler_tx_probe()
+    if args.with_pcie_dma_probe:
+        soc.add_pcie_dma_probe()
+    if args.with_eth_tx_probe:
+        soc.add_eth_tx_probe()
+    
 
     # Builder.
     def get_build_name():
-        r = f"litex_m2sdr_{args.variant}"
-        if args.with_pcie:
+        r = f"litex_m2sdr_{variant_in}"
+        if with_pcie_in:
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
@@ -991,6 +1103,7 @@ def main():
         prog.flash(            0x0000_0000,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_fallback.bin"),    verify=True)
         prog.flash(soc.platform.image_size,  builder.get_bitstream_filename(mode="flash").replace(".bin", "_operational.bin"), verify=True)
 
+        
     # Rescan PCIe Bus.
     if args.rescan:
         subprocess.run("sudo sh -c 'cd litex_m2sdr/software && ./rescan.py'", shell=True)

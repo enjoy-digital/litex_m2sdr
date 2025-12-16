@@ -13,14 +13,15 @@ from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
+
 # Header Inserter/Extracter ------------------------------------------------------------------------
 
 class HeaderInserterExtracter(LiteXModule):
     def __init__(self, mode="inserter", data_width=64, with_csr=True):
-        assert data_width == 64
+        assert data_width == 64 # 8 bytes
         assert mode in ["inserter", "extracter"]
-        self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i
-        self.source = source = stream.Endpoint(dma_layout(data_width)) # o
+        self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i   
+        self.source = source = stream.Endpoint(dma_layout(data_width)) # o  
 
         self.reset         = Signal() # i
 
@@ -65,7 +66,7 @@ class HeaderInserterExtracter(LiteXModule):
             )
         )
 
-        # Inserter specific.
+        # Inserter specific. (RX)
         if mode == "inserter":
             # Header.
             fsm.act("HEADER",
@@ -81,12 +82,12 @@ class HeaderInserterExtracter(LiteXModule):
                 source.valid.eq(1),
                 source.data[0:64].eq(self.timestamp),
                 If(source.valid & source.ready,
-                    NextValue(self.update, 1),
+                    NextValue(self.update, 1), # only update for a new frame
                     NextState("FRAME"),
                 )
             )
 
-        # Extracter specific.
+        # Extracter specific. (TX)
         if mode == "extracter":
             # Header.
             fsm.act("HEADER",
@@ -101,7 +102,7 @@ class HeaderInserterExtracter(LiteXModule):
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready,
                     NextValue(self.timestamp, sink.data[0:64]),
-                    NextValue(self.update, 1),
+                    NextValue(self.update, 1), # only update for a new packet
                     NextState("FRAME")
                 )
             )
@@ -191,12 +192,12 @@ class TXRXHeader(LiteXModule):
                     self.last_rx_timestamp.status.eq(0),
                 ),
                 # TX Update.
-                If(self.tx.update,
+                If(self.tx.update, # only when a new frame is started
                     self.last_tx_header.status.eq(self.tx.header),
                     self.last_tx_timestamp.status.eq(self.tx.timestamp),
                 ),
                 # RX Update.
-                If(self.rx.update,
+                If(self.rx.update, # only when a new frame is started
                     self.last_rx_header.status.eq(self.rx.header),
                     self.last_rx_timestamp.status.eq(self.rx.timestamp),
                 )
