@@ -23,7 +23,6 @@ from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSC
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 from litex_m2sdr.gateware.ad9361.scheduler   import Scheduler
 
-
 # Architecture -------------------------------------------------------------------------------------
 #
 # The AD9361 PHY has the following simplified architecture:
@@ -128,13 +127,12 @@ class AD9361RFIC(LiteXModule):
                 ("``0b1``", " 8-bit mode."),
             ], description="Sample format.")
         ])
-        self._en_scheduler_tx = CSRStorage(fields=[
+        self._scheduler_tx = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, values=[
                 ("``0b0``", "disable scheduler_tx."),
                 ("``0b1``", "enable scheduler_tx."),
             ], description="add scheduler tx in TX path.")
         ])
-
         # # #
 
         # Clocking ---------------------------------------------------------------------------------
@@ -187,12 +185,12 @@ class AD9361RFIC(LiteXModule):
         self.rx_bitmode = rx_bitmode = AD9361RXBitMode()
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
-       
+
         # Data Flow --------------------------------------------------------------------------------
 
-        # TX.  # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
+        # TX.
         # ---
-        # (header) source -> AD9361 Sink  -> TX Buffer -> TX BitMode -> TX CDC
+        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
@@ -207,18 +205,12 @@ class AD9361RFIC(LiteXModule):
 
         # TX Scheduler ---------------------------------------------------------------------------
         self.submodules.scheduler_tx = scheduler_tx = ClockDomainsRenamer("rfic")(Scheduler())
+        self.comb += scheduler_tx.enable.eq(self._scheduler_tx.fields.enable)
 
         # TX CDC -> Scheduler_tx (if enabled) -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            If(self._en_scheduler_tx.fields.enable,
-               scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
-               gpio_tx_unpacker.sink.connect(scheduler_tx.source) # connect gpio unpacker to scheduler
-            ).Else(
-                gpio_tx_unpacker.sink.connect(tx_cdc.source)
-            )            
-        ]
-
-        self.comb += [
+            scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
+            gpio_tx_unpacker.sink.connect(scheduler_tx.source), # connect gpio unpacker to scheduler
             gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
             self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),
             self.phy.sink.qa.eq(gpio_tx_unpacker.source.data[1*16:2*16]),

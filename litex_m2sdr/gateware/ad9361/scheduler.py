@@ -14,12 +14,13 @@ from litex.soc.interconnect.csr import *
 
 
 class Scheduler(LiteXModule): 
-    def __init__(self, frames_per_packet = 1024, data_width=64, max_packets=8, meta_data_frames_per_packet = 2, init=0, with_csr = True): # just to start then maybe expand it to more packets
+    def __init__(self, frames_per_packet = 1024, data_width=64, max_packets=8, meta_data_frames_per_packet = 2, with_csr = True): # just to start then maybe expand it to more packets
         assert frames_per_packet % (data_width // 8) == 0 # packet size must be multiple of data width in bytes (a frame is 8 bytes)
         assert meta_data_frames_per_packet == 2  # we have 2 frames for metadata: header + timestamp
 
         # Inputs/Outputs
         self.reset = Signal() # i
+        self.enable = Signal() # i
         self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i  (from TX_CDC)
         self.source = source = stream.Endpoint(dma_layout(data_width)) # o  (to gpio_tx_unpacker)
         self.timestamp = Signal(64) # i (timestamp of the packet at fifo output)
@@ -48,13 +49,31 @@ class Scheduler(LiteXModule):
         self.latched_ts = latched_ts = Signal(64)
         latched_header = Signal(64)
 
-        # Always Read from upstream if I can
+        # ---------------------------
+        # Input Assignement
+        # ---------------------------
+        # Default: pure bypass
         self.comb += [
-            sink.ready.eq(data_fifo.sink.ready), # backpressure
-            data_fifo.sink.valid.eq(sink.valid),
-            data_fifo.sink.data.eq(sink.data), # push data with timestamp and header into fifo
-            data_fifo.sink.first.eq(sink.first),
-            data_fifo.sink.last.eq(sink.last),
+            source.valid.eq(sink.valid),
+            source.data.eq(sink.data),
+            source.first.eq(sink.first),
+            source.last.eq(sink.last),
+            sink.ready.eq(source.ready),
+        ]
+        # Scheduled mode overrides
+        self.comb += [
+            If(self.enable,  # Always Read from upstream if I can
+                sink.ready.eq(data_fifo.sink.ready), # backpressure
+                data_fifo.sink.valid.eq(sink.valid),
+                data_fifo.sink.data.eq(sink.data), # push data with timestamp and header into fifo
+                data_fifo.sink.first.eq(sink.first),
+                data_fifo.sink.last.eq(sink.last),
+            ).Else(
+                data_fifo.sink.valid.eq(0),
+                data_fifo.sink.data.eq(0),
+                data_fifo.sink.first.eq(0),
+                data_fifo.sink.last.eq(0),
+            )
         ]
 
         # ---------------------------
@@ -72,7 +91,7 @@ class Scheduler(LiteXModule):
         # Latching Metadata only when we consume from Fifo
         # ------------------------------------------------
         self.sync += [
-            If(data_fifo.source.ready & data_fifo.source.valid,
+            If(data_fifo.source.ready & data_fifo.source.valid & self.enable, # enable added as a condition
                 If(is_header,   
                     latched_header.eq(data_fifo.source.data)
                 ),
@@ -88,7 +107,8 @@ class Scheduler(LiteXModule):
         can_start = Signal()
         self.comb += can_start.eq((self.now >= latched_ts) &
                                 (frame_count == 2) &
-                                data_fifo.source.valid)
+                                data_fifo.source.valid &
+                                self.enable)
         self.sync += [
             If(can_start & ~streaming,
                 streaming.eq(1)
@@ -98,19 +118,22 @@ class Scheduler(LiteXModule):
         # Assign output
         # ---------------------------
         self.comb += [
-            source.valid.eq(streaming & data_fifo.source.valid),
-            source.data.eq(data_fifo.source.data),
-            source.first.eq(data_fifo.source.first & streaming),
-            source.last.eq(data_fifo.source.last & streaming)
+            If(self.enable,
+                source.valid.eq(streaming & data_fifo.source.valid),
+                source.data.eq(data_fifo.source.data),
+                source.first.eq(data_fifo.source.first & streaming),
+                source.last.eq(data_fifo.source.last & streaming)
+            )
         ]
-
-        # Pop FIFO when downstream is ready
         pop_meta = is_header | is_timestamp
-        self.comb += data_fifo.source.ready.eq((source.ready & streaming) | pop_meta)
+        self.comb += data_fifo.source.ready.eq(self.enable & 
+                                               ((source.ready & streaming) | pop_meta))  # Pop FIFO when downstream is ready
 
+        # ---------------------------
         # Count frames
+        # ---------------------------
         self.sync += [
-            If(data_fifo.source.ready & data_fifo.source.valid,
+            If(data_fifo.source.ready & data_fifo.source.valid & self.enable,
                 frame_count.eq(frame_count + 1)
             )
         ]
@@ -118,7 +141,7 @@ class Scheduler(LiteXModule):
         # Reset for next packet
         # ---------------------------
         self.sync += [
-            If((frame_count == frames_per_packet - 1) & streaming & data_fifo.source.ready & data_fifo.source.valid,
+            If(~self.enable | ((frame_count == frames_per_packet - 1) & streaming & data_fifo.source.ready & data_fifo.source.valid),
                 frame_count.eq(0),
                 streaming.eq(0)
             )

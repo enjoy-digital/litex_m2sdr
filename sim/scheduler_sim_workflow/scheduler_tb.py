@@ -29,6 +29,7 @@ class Top(Module):
         self.now = Signal(64)
         # self.sync += self.now.eq(self.now + 1)
         # self.comb += self.top.now.eq(self.now)
+        self.enable = self.top.enable
         self.reset = self.top.reset
         self._write_time = self.top._write_time
         self._current_ts = self.top._current_ts

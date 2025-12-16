@@ -12,6 +12,7 @@ def drive_packet(dut, ts_when_due, packet_id=0, test_id = 1, header=0xDEADBEEF, 
     print(f"      [drive] Packet {packet_id}: ts={ts_when_due}, frames={frames_per_packet}")
     
     yield dut.sink.valid.eq(1)
+    yield dut.enable.eq(1)
     sink_ready = (yield dut.sink.ready)
     
     # Wait until FIFO can accept
