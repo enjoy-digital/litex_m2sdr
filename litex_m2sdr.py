@@ -307,12 +307,6 @@ class BaseSoC(SoCMini):
             platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
             platform.add_false_path_constraints(self.jtagbone.phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
-        # Leds -------------------------------------------------------------------------------------
-
-        led_pad = platform.request("user_led")
-        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
-        self.sync += led_pad.eq(self.leds.pads)
-
         # ICAP -------------------------------------------------------------------------------------
 
         self.icap = ICAP()
@@ -539,8 +533,14 @@ class BaseSoC(SoCMini):
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
         self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
-        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)        
+        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)      
 
+        # Leds -------------------------------------------------------------------------------------
+
+        led_pad = platform.request("user_led")
+        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
+        self.sync += led_pad.eq(self.ad9361.scheduler_tx.enable)
+        
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
         self.header = TXRXHeader(data_width=64)

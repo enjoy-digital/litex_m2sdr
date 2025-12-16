@@ -45,7 +45,7 @@ class Scheduler(LiteXModule):
 
         # States
         self.streaming = streaming =  Signal(reset=0)
-        frame_count = Signal(10)   # enough for 0..1023 (1024 frames)
+        self.frame_count = frame_count = Signal(10)   # enough for 0..1023 (1024 frames)
         self.latched_ts = latched_ts = Signal(64)
         latched_header = Signal(64)
 
@@ -163,9 +163,16 @@ class Scheduler(LiteXModule):
 
         # Status
         self._fifo_level = CSRStatus(16, description="Current FIFO level in words")
+        
         self._current_ts = CSRStatus(64, description="Current Timestamp at FIFO output")
         self._read_time  = CSRStatus(64, description="Current time from rfic domain")
         self._write_time = CSRStorage(64, description="Write Time (ns) (SW Time -> FPGA).")
+
+        #Debug
+        # self._streaming = CSRStatus(1,   description="Scheduler status: streaming flag")
+        # self.comb+= [
+        #     self._streaming.status.eq(self.streaming),
+        # ]
         # ---------------------------
         # Important to Sync from scheduler domain to sys domain
 

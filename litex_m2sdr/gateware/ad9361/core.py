@@ -131,7 +131,8 @@ class AD9361RFIC(LiteXModule):
             CSRField("enable", size=1, offset=0, values=[
                 ("``0b0``", "disable scheduler_tx."),
                 ("``0b1``", "enable scheduler_tx."),
-            ], description="add scheduler tx in TX path.")
+            ], reset=0b0,
+            description="add scheduler tx in TX path.")
         ])
         # # #
 
@@ -196,6 +197,7 @@ class AD9361RFIC(LiteXModule):
             tx_buffer,
             tx_bitmode,
             tx_cdc
+            # gpio_tx_unpacker
         )
         # --- RFIC clock-domain timestamp counter ---
         self.rfic_time = Signal(64)
