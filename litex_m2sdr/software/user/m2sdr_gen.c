@@ -141,7 +141,13 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
 
             /* Generate tone and fill Write buffer */
             int num_samples = DMA_BUFFER_SIZE / 8; // 8 bytes per sample: TX1_I, TX1_Q, TX2_I, TX2_Q
-            for (int j = 0; j < num_samples; j++) {
+            *(uint64_t *)buf_wr = 0x5aa55aa55aa55aa5ULL;
+            ((int16_t *)buf_wr)[4 * 1 + 0] = (sample_count & 0xFFF);
+            ((int16_t *)buf_wr)[4 * 1 + 1] = (sample_count & 0xFFF);
+            ((int16_t *)buf_wr)[4 * 1 + 2] = (sample_count & 0xFFF);
+            ((int16_t *)buf_wr)[4 * 1 + 3] = (sample_count & 0xFFF);
+
+            for (int j = 2; j < num_samples; j++) {
                 float I = 0.0;
                 float Q = 0.0;
 
@@ -192,8 +198,17 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
         int64_t duration = get_time_ms() - last_time;
         if (duration > 200) {
             /* Print banner every 10 lines */
-            if (i % 10 == 0)
+            if (i % 10 == 0) {
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   UNDERFLOWS\e[0m\n");
+                uint64_t last_timestamp = litepcie_readl(fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
+                printf("[FROM CSR] Last TX Timestamp = %llu\n", last_timestamp);
+                uint64_t last_header = litepcie_readl(fd, CSR_HEADER_LAST_TX_HEADER_ADDR);
+                printf("[FROM CSR] Last TX Header = %llu\n", last_header);
+                // uint64_t current_time = litepcie_readl(fd, CSR_TIME_GEN_READ_TIME_ADDR);
+                // printf("[FROM CSR] current HW time = %lu\n", current_time);
+                printf("writing timestamp %lu\n", sample_count);
+            }
+                
             i++;
             /* Print statistics */
             printf("%10.2f %10" PRIu64 " %10" PRIu64 " %10ld\n",

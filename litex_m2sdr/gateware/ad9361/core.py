@@ -128,6 +128,12 @@ class AD9361RFIC(LiteXModule):
                 ("``0b1``", " 8-bit mode."),
             ], description="Sample format.")
         ])
+        self._en_scheduler_tx = CSRStorage(fields=[
+            CSRField("enable", size=1, offset=0, values=[
+                ("``0b0``", "disable scheduler_tx."),
+                ("``0b1``", "enable scheduler_tx."),
+            ], description="add scheduler tx in TX path.")
+        ])
 
         # # #
 
@@ -202,11 +208,14 @@ class AD9361RFIC(LiteXModule):
         # TX Scheduler ---------------------------------------------------------------------------
         self.submodules.scheduler_tx = scheduler_tx = ClockDomainsRenamer("rfic")(Scheduler())
 
-
-        # TX CDC -> Scheduler_tx -> GPIOTXUnpacker -> PHY.
+        # TX CDC -> Scheduler_tx (if enabled) -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
-            gpio_tx_unpacker.sink.connect(scheduler_tx.source) # connect gpio unpacker to scheduler
+            If(self._en_scheduler_tx.fields.enable,
+               scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
+               gpio_tx_unpacker.sink.connect(scheduler_tx.source) # connect gpio unpacker to scheduler
+            ).Else(
+                gpio_tx_unpacker.sink.connect(tx_cdc.source)
+            )            
         ]
 
         self.comb += [

@@ -133,10 +133,6 @@ class Scheduler(LiteXModule):
     def add_csr(self):
         # Control
         self._control = CSRStorage(fields=[
-            CSRField("enable", size=1, offset=0, values=[
-                ("``0b0``", "Scheduler Disabled."),
-                ("``0b1``", "Scheduler Enabled."),
-            ], reset=1),
             CSRField("read", size=1, offset=1, pulse=True),
             CSRField("write", size=1, offset=2, pulse=True),
             CSRField("read_current_ts", size=1, offset=3, pulse=True),

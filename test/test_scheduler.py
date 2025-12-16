@@ -30,9 +30,30 @@ class SchedulerDriver:
     #  READ METHODS
     # ───────────────────────────────────────────────
 
-    # def read_fifo_level(self):
-    #     """Read FIFO fill level."""
-    #     return self._reg("fifo_level").read()
+    def enable_scheduler(self, enable, reset=0):
+        """add (enable) scheduler in TX pipeline"""
+        enable_scheduler = getattr(self.bus.regs, "ad9361_scheduler_tx").read()
+        if reset:
+            getattr(self.bus.regs, "ad9361_scheduler_tx").write(0)
+        else:
+            if enable:
+                getattr(self.bus.regs, "ad9361_scheduler_tx").write(enable_scheduler | 0b1)
+            else:
+                getattr(self.bus.regs, "ad9361_scheduler_tx").write(enable_scheduler & ~0b1)
+        enable_scheduler = getattr(self.bus.regs, "ad9361_scheduler_tx").read()
+        print(f"Scheduler Status: {enable_scheduler}")
+        
+
+    def enable_header(self, enable):
+        """enable header"""
+        header_tx_control = getattr(self.bus.regs, "header_tx_control").read()
+        if enable:
+            getattr(self.bus.regs, "header_tx_control").write(header_tx_control | 0b10)
+        else:
+            getattr(self.bus.regs, "header_tx_control").write(header_tx_control & ~0b10)
+        header_tx_control = getattr(self.bus.regs, "header_tx_control").read()
+        print(f"Header Control Status: {header_tx_control}")
+        
     def enable_write(self, enable):
         """Enable or disable manual time writing."""
         ctrl = self._reg("control").read()
@@ -76,6 +97,16 @@ class SchedulerDriver:
         for name, reg in self.bus.regs.__dict__.items():
             print(f"0x{reg.addr:08x} : 0x{reg.read():08x} {name}")
     
+    def test_time(self, epochs = 10, new_time = 0):
+        for i in range(epochs):
+            now = self.read_now()
+            print(f"Reading RFIC clock: now = {now}")
+            if i % 5 == 0:
+                print(f"\nManual time writing: now = {new_time}\n")
+                self.write_manual_time(new_time)
+                continue
+            time.sleep(1)
+    
 
 
 # ----------------------------------------------------------------------------
@@ -87,7 +118,7 @@ def main():
     parser.add_argument("--init-rfic",           action="store_true", help="Init RFIC")
     args = parser.parse_args()
 
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "."))
     csr_path = os.path.join(root_dir, "csr.csv")
     
     if (args.init_rfic):
@@ -102,16 +133,17 @@ def main():
     print("Connected to LiteX server.\n")
 
     scheduler = SchedulerDriver(bus=bus, name="ad9361_scheduler_tx")
+    scheduler.enable_scheduler(enable= 0,reset=1)
+    scheduler.enable_scheduler(enable=1)
 
-    for i in range(10):
-        now = scheduler.read_now()
-        print(f"Reading RFIC clock: now = {now}")
-        if i % 5 == 0:
-            new_time = 0  # reset to 0 every 5 iterations
-            print(f"\nManual time writing: now = {new_time}\n")
-            scheduler.write_manual_time(new_time)
-            continue
-        time.sleep(1)
+    scheduler.enable_header(enable=1)
+
+
+    # scheduler.test_time()
+
+    # scheduler.enable_scheduler(enable=0)
+    # scheduler.test_time()
+    scheduler.dump_all()
 
     bus.close()
     print("\nDone.\n")
