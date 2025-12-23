@@ -204,8 +204,16 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
                 printf("[FROM CSR] Last TX Timestamp = %llu\n", last_timestamp);
                 uint64_t last_header = litepcie_readl(fd, CSR_HEADER_LAST_TX_HEADER_ADDR);
                 printf("[FROM CSR] Last TX Header = %llu\n", last_header);
-                // uint64_t current_time = litepcie_readl(fd, CSR_TIME_GEN_READ_TIME_ADDR);
-                // printf("[FROM CSR] current HW time = %lu\n", current_time);
+                // uint64_t scheduler_status = litepcie_readl(fd, CSR_AD9361_SCHEDULER_TX_STATUS_ADDR);
+                // uint8_t sink_ready, sink_valid, source_ready, source_valid;
+                // sink_valid = scheduler_status & 0b1;
+                // sink_ready = scheduler_status & 0b10;
+                // source_valid = scheduler_status & 0b100;
+                // source_ready = scheduler_status & 0b1000;
+
+                // printf("[FROM CSR] sink_valid = %u, sink_ready = %u, source_valid = %u, source_ready = %u\n", sink_valid,sink_ready,
+                //                                                                                             source_valid,source_ready);
+            
                 printf("writing timestamp %lu\n", sample_count);
             }
                 

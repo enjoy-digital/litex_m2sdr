@@ -539,7 +539,7 @@ class BaseSoC(SoCMini):
 
         led_pad = platform.request("user_led")
         self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
-        self.sync += led_pad.eq(self.ad9361.scheduler_tx.enable)
+        # self.sync += led_pad.eq(self.ad9361.scheduler_tx.enable)
         
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -794,6 +794,25 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
+    def add_tx_probe(self, depth=1024):  # PCIe/Eth/Sata (DMA) -> Crossbar -> Header -> AD9361
+        assert hasattr(self, "pcie_dma0")
+        analyzer_signals = [
+            self.pcie_dma0.source, 
+            self.header.tx.source,
+            self.ad9361.sink,
+            # self.ad9361.tx_buffer.sink,
+            # self.ad9361.tx_bitmode.sink,
+            # self.ad9361.tx_cdc.sink,
+            # self.ad9361.scheduler_tx.sink,
+            self.ad9361.phy.sink,             
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+    
     # Clocking.
     def add_si5351_i2c_probe(self, depth=4096):
         analyzer_signals = [
@@ -904,6 +923,7 @@ def main():
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-tx-probe",          action="store_true", help="Enable TX datapath Probe.")
 
     # Version Tracability 
     parser.add_argument("--description",         default="None",        help="Gateware version description")
@@ -965,6 +985,8 @@ def main():
         soc.add_pcie_probe()
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
+    if args.with_tx_probe:
+        soc.add_tx_probe()
     if args.with_si5351_i2c_probe:
         soc.add_si5351_i2c_probe()
     if args.with_eth_tx_probe:

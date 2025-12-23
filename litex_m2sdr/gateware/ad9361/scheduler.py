@@ -39,7 +39,7 @@ class Scheduler(LiteXModule):
                 self.now.eq(self.manual_now),
             # Increment.
             ).Else(
-                self.now.eq(self.now + 1),
+                self.now.eq(self.now + self.enable),
             )
         ]
 
@@ -167,6 +167,22 @@ class Scheduler(LiteXModule):
         self._current_ts = CSRStatus(64, description="Current Timestamp at FIFO output")
         self._read_time  = CSRStatus(64, description="Current time from rfic domain")
         self._write_time = CSRStorage(64, description="Write Time (ns) (SW Time -> FPGA).")
+        # self._status     = CSRStatus(fields=[
+        #     CSRField("sink_valid", size=1, offset=0),
+        #     CSRField("sink_ready", size=1, offset=1),
+        #     CSRField("source_valid", size=1, offset=2),
+        #     CSRField("source_ready", size=1, offset=3),
+        #     CSRField("fifo_sink_ready", size=1, offset=4),
+        #     CSRField("fifo_source_ready", size=1, offset=5),
+        # ])
+        # self.comb += [
+        #     self._status.fields.sink_valid.eq(self.sink.valid),
+        #     self._status.fields.sink_ready.eq(self.sink.ready),
+        #     self._status.fields.source_valid.eq(self.source.valid),
+        #     self._status.fields.source_ready.eq(self.source.ready),
+        #     # self._status.fields.fifo_sink_ready.eq(self.data_fifo.sink.ready),
+        #     # self._status.fields.fifo_source_ready.eq(self.data_fifo.source.ready),
+        # ]
 
         #Debug
         # self._streaming = CSRStatus(1,   description="Scheduler status: streaming flag")
@@ -190,18 +206,3 @@ class Scheduler(LiteXModule):
         self.comb += time_read_ps.i.eq(self._control.fields.read)
         self.sync.rfic += If(time_read_ps.o, time_read.eq(self.now))
         self.specials += MultiReg(time_read, self._read_time.status)         # rfic -> sys
-       
-
-        # # Read current ts in the Fifo
-        # current_ts = Signal(64)
-        # current_ts_ps = PulseSynchronizer("sys", "rfic")
-        # self.submodules += current_ts_ps
-        # self.comb += current_ts_ps.i.eq(self._control.fields.read_current_ts)
-        # self.sync.rfic += If(current_ts_ps.o, current_ts.eq(self.latched_ts_shadow))
-        # self.specials += MultiReg(current_ts, self._current_ts.status)         # rfic -> sys
-
-        # # Read Fifo level
-        # fifo_level_sys = Signal(16)
-        # self.comb += fifo_level_sys.eq(self.data_fifo.level)
-        # self.specials += MultiReg(fifo_level_sys, self._fifo_level.status)
-    

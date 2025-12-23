@@ -135,15 +135,16 @@ def main():
     scheduler = SchedulerDriver(bus=bus, name="ad9361_scheduler_tx")
     scheduler.enable_scheduler(enable= 0,reset=1)
     scheduler.enable_scheduler(enable=1)
+    scheduler.test_time(new_time=100)
 
-    scheduler.enable_header(enable=1)
+    scheduler.enable_scheduler(enable=0)
 
 
-    # scheduler.test_time()
+    scheduler.test_time(new_time=100)
 
     # scheduler.enable_scheduler(enable=0)
     # scheduler.test_time()
-    scheduler.dump_all()
+    # scheduler.dump_all()
 
     bus.close()
     print("\nDone.\n")

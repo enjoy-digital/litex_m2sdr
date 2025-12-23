@@ -196,7 +196,7 @@ class AD9361RFIC(LiteXModule):
             self.sink,
             tx_buffer,
             tx_bitmode,
-            tx_cdc
+            tx_cdc,
             # gpio_tx_unpacker
         )
         # --- RFIC clock-domain timestamp counter ---

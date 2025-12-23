@@ -83,7 +83,7 @@ def main():
 
     # Open the LiteXM2SDR device using the SoapySDR driver.
     sdr = SoapySDR.Device({"driver": "LiteXM2SDR"})
-
+    print("Opened LiteXM2SDR device.")
     # Basic RF configuration using the selected channel.
     sdr.setSampleRate(SOAPY_SDR_TX, args.channel, args.samplerate)
     sdr.setFrequency( SOAPY_SDR_TX, args.channel, args.freq)
@@ -95,6 +95,7 @@ def main():
         tone_buf = generate_tone(args.tone_freq, args.samplerate, args.ampl)
         def get_samples():
             while True:
+                print(f"Generated tone buffer with {len(tone_buf)} samples.")
                 yield tone_buf
         mode = "tone"
     else:
