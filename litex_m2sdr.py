@@ -763,7 +763,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     def add_pcie_slave_probe(self, depth=4096):
@@ -774,7 +774,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     def add_pcie_dma_probe(self, depth=1024):
@@ -791,7 +791,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     def add_tx_probe(self, depth=1024):  # PCIe/Eth/Sata (DMA) -> Crossbar -> Header -> AD9361
@@ -800,17 +800,13 @@ class BaseSoC(SoCMini):
             self.pcie_dma0.source, 
             self.header.tx.source,
             self.ad9361.sink,
-            # self.ad9361.tx_buffer.sink,
-            # self.ad9361.tx_bitmode.sink,
-            # self.ad9361.tx_cdc.sink,
-            # self.ad9361.scheduler_tx.sink,
             self.ad9361.phy.sink,             
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
     
     # Clocking.
@@ -838,7 +834,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     # Ethernet.
@@ -851,7 +847,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     # RFIC.
@@ -861,7 +857,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "sys",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
     def add_ad9361_data_probe(self, depth=4096):
@@ -874,7 +870,7 @@ class BaseSoC(SoCMini):
             depth        = depth,
             clock_domain = "rfic",
             register     = True,
-            csr_csv      = "test/analyzer.csv"
+            csr_csv      = "litescope/analyzer.csv"
         )
 
 # Build --------------------------------------------------------------------------------------------
@@ -996,6 +992,11 @@ def main():
     if args.with_ad9361_data_probe:
         soc.add_ad96361_data_probe()
 
+    def get_csr_name():
+        if args.with_pcie_probe or args.with_pcie_dma_probe or args.with_tx_probe or args.with_si5351_i2c_probe or args.with_eth_tx_probe or args.with_ad9361_spi_probe or args.with_ad9361_data_probe:
+            return "litescope/csr.csv"
+        else:
+            return "test/csr.csv"
     # Builder.
     def get_build_name():
         r = f"litex_m2sdr_{variant_in}"
@@ -1009,7 +1010,7 @@ def main():
             r += f"_white_rabbit"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv=get_csr_name())
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.

@@ -192,13 +192,6 @@ class AD9361RFIC(LiteXModule):
         # TX.
         # ---
         # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
-        self.tx_pipeline = stream.Pipeline(
-            self.sink,
-            tx_buffer,
-            tx_bitmode,
-            tx_cdc,
-            # gpio_tx_unpacker
-        )
         # --- RFIC clock-domain timestamp counter ---
         self.rfic_time = Signal(64)
         self.sync.rfic += self.rfic_time.eq(self.rfic_time + 1)
@@ -207,12 +200,20 @@ class AD9361RFIC(LiteXModule):
 
         # TX Scheduler ---------------------------------------------------------------------------
         self.submodules.scheduler_tx = scheduler_tx = ClockDomainsRenamer("rfic")(Scheduler())
-        self.comb += scheduler_tx.enable.eq(self._scheduler_tx.fields.enable)
+        self.comb += scheduler_tx.enable.eq(self._scheduler_tx.fields.enable)   
+        
+        self.tx_pipeline = stream.Pipeline(
+            self.sink,
+            tx_buffer,
+            tx_bitmode,
+            tx_cdc,
+            scheduler_tx,
+            gpio_tx_unpacker
+        )
+
 
         # TX CDC -> Scheduler_tx (if enabled) -> GPIOTXUnpacker -> PHY.
         self.comb += [
-            scheduler_tx.sink.connect(tx_cdc.source),  # connect scheduler to tx_cdc 
-            gpio_tx_unpacker.sink.connect(scheduler_tx.source), # connect gpio unpacker to scheduler
             gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
             self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),
             self.phy.sink.qa.eq(gpio_tx_unpacker.source.data[1*16:2*16]),
