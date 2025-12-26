@@ -144,8 +144,8 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
             *(uint64_t *)buf_wr = 0x5aa55aa55aa55aa5ULL;
             ((int16_t *)buf_wr)[4 * 1 + 0] = (sample_count & 0xFFF);
             ((int16_t *)buf_wr)[4 * 1 + 1] = (sample_count & 0xFFF);
-            ((int16_t *)buf_wr)[4 * 1 + 2] = (sample_count & 0xFFF);
-            ((int16_t *)buf_wr)[4 * 1 + 3] = (sample_count & 0xFFF);
+            ((int16_t *)buf_wr)[4 * 1 + 2] = 0;
+            ((int16_t *)buf_wr)[4 * 1 + 3] = 0;
 
             for (int j = 2; j < num_samples; j++) {
                 float I = 0.0;

@@ -91,6 +91,7 @@ class HeaderInserterExtracter(LiteXModule):
         if mode == "extracter":
             # Header.
             fsm.act("HEADER",
+                sink.connect(source),
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready & sink.first,
                     NextValue(self.header, sink.data[0:64]),
@@ -99,6 +100,7 @@ class HeaderInserterExtracter(LiteXModule):
             )
             # Timestamp.
             fsm.act("TIMESTAMP",
+                sink.connect(source),
                 sink.ready.eq(1),
                 If(sink.valid & sink.ready,
                     NextValue(self.timestamp, sink.data[0:64]),

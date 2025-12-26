@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--trig",  action="store_true", help="Trigger on Ready rising edge.")
     parser.add_argument("--list",     action="store_true", help="List analyzer signals.")
-    parser.add_argument("--header",  default=0x5aa55aa55aa55aa5, help="Trigger when header is seen.")
+    parser.add_argument("--header", action="store_true", help="Trigger when header is seen.")
     parser.add_argument("--offset",    default=128,         help="Capture Offset.")
     parser.add_argument("--length",    default=512,         help="Capture Length.")
     parser.add_argument("--filename",  default="dump",      help="Output filename.")
@@ -43,32 +43,50 @@ def main():
     if args.list:
         list_analyzer_signals()
         sys.exit(0)
-        
-    list_analyzer_signals()
-    while True:
-        trig_idx = int(input("Choose the signal number to trigger on: "))
-        trigger_signal = get_trigger_signal(trig_idx)
-        input(f"Using trigger signal: {trigger_signal}\nPress to confirm")
-        break
-    while True:
-        trig_pattern = input("\nChoose trigger pattern:\n\t1: rising Edge\n\t2: falling Edge\nEnter choice: ")
-        if trig_pattern == "1":
-            analyzer.add_rising_edge_trigger(trigger_signal)
+    if args.trig:    
+        list_analyzer_signals()
+        while True:
+            trig_idx = int(input("Choose the signal number to trigger on: "))
+            trigger_signal = get_trigger_signal(trig_idx)
+            input(f"Using trigger signal: {trigger_signal}\nPress to confirm")
             break
-        elif trig_pattern == "2":
-            analyzer.add_falling_edge_trigger(trigger_signal)
-            break
+        while True:
+            trig_pattern = input("\nChoose trigger pattern:\n\t1: rising Edge\n\t2: falling Edge\nEnter choice: ")
+            if trig_pattern == "1":
+                analyzer.add_rising_edge_trigger(trigger_signal)
+                break
+            elif trig_pattern == "2":
+                analyzer.add_falling_edge_trigger(trigger_signal)
+                break
+            else:
+                print("Invalid trigger pattern. Please enter 1 or 2.")
+    elif args.header:
+        list_analyzer_signals()
+        value = input("Do you want to specify a different trigger signal than 'basesoc_basesoc_buffering_next_source_payload_data'? (y/n): ")
+        if value.lower() == 'y':
+            while True:
+                trig_idx = int(input("Choose the signal number to trigger on: "))
+                trigger_signal = get_trigger_signal(trig_idx)
+                input(f"Using trigger signal: {trigger_signal}\nPress to confirm")
+                break
         else:
-            print("Invalid trigger pattern. Please enter 1 or 2.")
-
+            trigger_signal = "basesoc_basesoc_buffering_next_source_payload_data"
+        value = input("Do you want to specify a different trigger header value than 0x5aa55aa55aa55aa5? (y/n): ")
+        if value.lower() == 'y':
+            header = int(input("Enter the trigger header value in hex (default is 0x5aa55aa55aa55aa5): "))
+            if not header:
+                header = 0x5aa55aa55aa55aa5
+        else:
+            header = 0x5aa55aa55aa55aa5
+        analyzer.configure_trigger(cond={str(trigger_signal): f"0b{header:064b}"})
     analyzer.configure_subsampler(1)
     analyzer.run(offset=int(args.offset), length=int(args.length))
     analyzer.wait_done()
     analyzer.upload()
     if args.filename:
-        analyzer.save(str(args.filename) + ".vcd")
+        analyzer.save("vcd/" + str(args.filename) + ".vcd")
     else:
-        analyzer.save(trigger_signal + ".vcd")
+        analyzer.save("vcd/" + trigger_signal + ".vcd")
     # # #
 
     wb.close()

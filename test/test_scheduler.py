@@ -133,14 +133,19 @@ def main():
     print("Connected to LiteX server.\n")
 
     scheduler = SchedulerDriver(bus=bus, name="ad9361_scheduler_tx")
-    scheduler.enable_scheduler(enable= 0,reset=1)
-    scheduler.enable_scheduler(enable=1)
-    scheduler.test_time(new_time=100)
+    scheduler.enable_scheduler(enable=0, reset=1)
+    scheduler.enable_header(enable=1)
 
-    scheduler.enable_scheduler(enable=0)
+    scheduler.write_manual_time(time_ns=0x1fffffffffffffff)
+    print(scheduler.read_current_ts())
+    # scheduler.enable_scheduler(enable= 0,reset=1)
+    # scheduler.enable_scheduler(enable=1)
+    # scheduler.test_time(new_time=100)
+
+    # scheduler.enable_scheduler(enable=0)
 
 
-    scheduler.test_time(new_time=100)
+    # scheduler.test_time(new_time=100)
 
     # scheduler.enable_scheduler(enable=0)
     # scheduler.test_time()

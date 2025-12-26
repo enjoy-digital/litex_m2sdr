@@ -800,6 +800,9 @@ class BaseSoC(SoCMini):
             self.pcie_dma0.source, 
             self.header.tx.source,
             self.ad9361.sink,
+            self.ad9361.scheduler_tx.latched_ts,
+            self.ad9361.scheduler_tx.frame_count,
+            self.ad9361.scheduler_tx.now,
             self.ad9361.phy.sink,             
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
