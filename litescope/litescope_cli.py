@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--trig",  action="store_true", help="Trigger on Ready rising edge.")
     parser.add_argument("--list",     action="store_true", help="List analyzer signals.")
     parser.add_argument("--header", action="store_true", help="Trigger when header is seen.")
+    parser.add_argument("--frame-count", action="store_true", help="Trigger when frame count reaches 1.")
     parser.add_argument("--offset",    default=128,         help="Capture Offset.")
     parser.add_argument("--length",    default=512,         help="Capture Length.")
     parser.add_argument("--filename",  default="dump",      help="Output filename.")
@@ -79,6 +80,10 @@ def main():
         else:
             header = 0x5aa55aa55aa55aa5
         analyzer.configure_trigger(cond={str(trigger_signal): f"0b{header:064b}"})
+    elif args.frame_count:
+        trigger_signal = "basesoc_ad9361_scheduler_frame_count"
+        analyzer.configure_trigger(cond={str(trigger_signal): f"0b{1:064b}"})
+    
     analyzer.configure_subsampler(1)
     analyzer.run(offset=int(args.offset), length=int(args.length))
     analyzer.wait_done()
