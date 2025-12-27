@@ -74,7 +74,7 @@ def main():
             trigger_signal = "basesoc_basesoc_buffering_next_source_payload_data"
         value = input("Do you want to specify a different trigger header value than 0x5aa55aa55aa55aa5? (y/n): ")
         if value.lower() == 'y':
-            header = int(input("Enter the trigger header value in hex (default is 0x5aa55aa55aa55aa5): "))
+            header = int(input("Enter the trigger header value in hex (default is 0x5aa55aa55aa55aa5): "), 16)
             if not header:
                 header = 0x5aa55aa55aa55aa5
         else:
