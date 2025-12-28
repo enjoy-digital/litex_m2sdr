@@ -1028,19 +1028,67 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
 void SoapyLiteXM2SDR::setTXTimestampMode(bool enable) {
     _tx_stream.timestamp_mode = enable;
 }
+
 bool SoapyLiteXM2SDR::getTXTimestampMode() const {
     return _tx_stream.timestamp_mode;
 }
+
 uint64_t SoapyLiteXM2SDR::getTXSampleCount() const {
     return _tx_stream.sample_count;
 }
+
 uint64_t SoapyLiteXM2SDR::getTXBaseTimestamp() const {
     return _tx_stream.base_timestamp;
 }
+
 uint64_t SoapyLiteXM2SDR::getTXNextTimestamp() const {
     return _tx_stream.next_timestamp;
 }
 
+void SoapyLiteXM2SDR::enableScheduler(bool enable) const {
+    uint32_t control_reg = 0;
+    /* Enable scheduler */
+    control_reg = litex_m2sdr_readl(_fd, CSR_AD9361_SCHEDULER_TX_ADDR);
+    if (enable)
+        control_reg |= (1 << CSR_AD9361_SCHEDULER_TX_ENABLE_OFFSET);
+    else 
+        control_reg &= ~(1 << CSR_AD9361_SCHEDULER_TX_ENABLE_OFFSET);
+    printf("scheduler_tx control_reg = %u\n",control_reg);
+    litex_m2sdr_writel(_fd, CSR_AD9361_SCHEDULER_TX_ADDR, control_reg);
+
+}
+
+long long SoapyLiteXM2SDR::getRFICTime() const {
+    uint32_t control_reg = 0;
+    int64_t time_ns = 0;
+
+    /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
+    control_reg = litex_m2sdr_readl(_fd, CSR_AD9361_SCHEDULER_TX_CONTROL_ADDR);
+    control_reg |= (1 << CSR_AD9361_SCHEDULER_TX_CONTROL_READ_OFFSET);
+    litex_m2sdr_writel(_fd, CSR_AD9361_SCHEDULER_TX_CONTROL_ADDR, control_reg);
+
+    /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_AD9361_SCHEDULER_TX_READ_TIME_ADDR + 0)) << 32);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_AD9361_SCHEDULER_TX_READ_TIME_ADDR + 4)) <<  0);
+
+    /* Debug log the hardware time in nanoseconds. */
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", (long long)time_ns);
+
+    return static_cast<long long>(time_ns);
+}
+
+void SoapyLiteXM2SDR::enableHeader(bool enable) const {
+    litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
+            (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+            (enable << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
+}
+
+long long SoapyLiteXM2SDR::getHeaderLastTimestamp() const {
+    uint64_t last_timestamp = 0;
+    last_timestamp |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR+ 0)) << 32);
+    last_timestamp |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR + 4)) << 0);
+    return last_timestamp;
+}
 /***************************************************************************************************
 *                                        Stream API
 ***************************************************************************************************/

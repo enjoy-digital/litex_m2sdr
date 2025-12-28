@@ -324,6 +324,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint64_t getTXSampleCount() const;
     uint64_t getTXBaseTimestamp() const;
     uint64_t getTXNextTimestamp() const;
+    long long getRFICTime() const;
+    void enableScheduler(bool enable) const;
+    
+    void enableHeader(bool enable) const;
+    long long getHeaderLastTimestamp() const;
+ 
+
 
     /***********************************************************************************************
     *                                    Clocking API

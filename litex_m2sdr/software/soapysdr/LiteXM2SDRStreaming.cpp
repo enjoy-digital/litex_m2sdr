@@ -32,11 +32,7 @@ static constexpr size_t RX_DMA_HEADER_SIZE = 0;
 #endif
 
 /* TX DMA Header */
-#if USE_LITEPCIE && defined(_TX_DMA_HEADER_TEST)
-static constexpr size_t TX_DMA_HEADER_SIZE = 16;
-#else
-static constexpr size_t TX_DMA_HEADER_SIZE = 0;
-#endif
+static size_t TX_DMA_HEADER_SIZE = 0;
 
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
@@ -174,7 +170,30 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
         }
-
+        /* Configure TX Timestamp mode */
+        bool timestamp_mode = false;
+        auto iterator = searchArgs.find("timestamp_mode");
+        if (iterator != searchArgs.end()) {
+            std::string mode = iterator->second;
+            if (mode == "1") {
+                /* Enable header */
+                enableHeader(true);
+                TX_DMA_HEADER_SIZE = 16;
+                timestamp_mode = true;
+            } else if (mode == "0") {
+                /* Disable header */
+                enableHeader(false);
+                TX_DMA_HEADER_SIZE = 0;
+                timestamp_mode = false;
+            } else {
+                throw std::runtime_error("Invalid timestamp_mode in searchArgs: " + mode + "; use '0' or '1'");
+            }
+        } else { 
+            /* Default is disabled */
+            timestamp_mode = false;
+        }
+        printf("Timestamp mode is: %u\n", timestamp_mode);
+        _tx_stream.timestamp_mode = timestamp_mode;
         /* Configure the file descriptor watcher. */
 
 #if USE_LITEPCIE
@@ -280,25 +299,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     } else {
         throw std::runtime_error("Invalid direction.");
     }
-    /* Configure TX Timestamp mode */
-    bool timestamp_mode = false;
-    auto it = searchArgs.find("timestamp_mode");
-    if (it != searchArgs.end()) {
-        std::string mode = it->second;
-        if (mode == "1") {
-            
-            timestamp_mode = true;
-        } else if (mode == "0") {
-            timestamp_mode = false;
-        } else {
-            throw std::runtime_error("Invalid timestamp_mode in searchArgs: " + mode + "; use '0' or '1'");
-        }
-    } else { 
-        /* Default is disabled */
-        timestamp_mode = false;
-    }
-    printf("Timestamp mode is: %u\n", timestamp_mode);
-    _tx_stream.timestamp_mode = timestamp_mode;
 
     /* Configure 2T2R/1T1R mode (PHY) */
     litex_m2sdr_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
@@ -385,7 +385,9 @@ int SoapyLiteXM2SDR::activateStream(
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
         if (_tx_stream.timestamp_mode) {
-            _tx_stream.base_timestamp = this->getHardwareTime(std::string());
+            this->enableScheduler(false);
+            _tx_stream.base_timestamp = this->getRFICTime();//this->getHardwareTime(std::string());
+            printf("rfic base HW time = %llu\n", this->getRFICTime());
         }
 #elif USE_LITEETH
         /* Crossbar Mux: Select Ethernet streaming */
@@ -737,8 +739,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
 
         SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp: %llu", tx_frame_timestamp);
         // printf("TX DMA Header inserted: timestamp: %lu\n", tx_frame_timestamp);
-        // uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
-        // printf("[FROM CSR] Last TX Timestamp = %lu\n ", last_timestamp);
+        uint64_t last_timestamp = getHeaderLastTimestamp();
+        printf("[FROM CSR] Last TX Timestamp = %lu\n ", last_timestamp);
     }
 
 #endif
