@@ -1023,6 +1023,25 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
 }
 
 /***************************************************************************************************
+*                                        Timestamp API
+**************************************************************************************************/
+void SoapyLiteXM2SDR::setTXTimestampMode(bool enable) {
+    _tx_stream.timestamp_mode = enable;
+}
+bool SoapyLiteXM2SDR::getTXTimestampMode() const {
+    return _tx_stream.timestamp_mode;
+}
+uint64_t SoapyLiteXM2SDR::getTXSampleCount() const {
+    return _tx_stream.sample_count;
+}
+uint64_t SoapyLiteXM2SDR::getTXBaseTimestamp() const {
+    return _tx_stream.base_timestamp;
+}
+uint64_t SoapyLiteXM2SDR::getTXNextTimestamp() const {
+    return _tx_stream.next_timestamp;
+}
+
+/***************************************************************************************************
 *                                        Stream API
 ***************************************************************************************************/
 

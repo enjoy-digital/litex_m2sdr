@@ -51,16 +51,14 @@ def main():
     # Setup TX stream with timestamp mode enabled
     tx_stream = sdr.setupStream(SOAPY_SDR_TX, SOAPY_SDR_CF32, [args.channel], 
                                dict(timestamp_mode="1"))
-    
+
     # Get stream MTU
-    mtu = sdr.getStreamMTU(tx_stream)
-    print(f"Stream MTU: {mtu} samples")
+    samples_per_buffer = sdr.getStreamMTU(tx_stream)
+    print(f"Stream MTU: {samples_per_buffer} samples")
     
     # Calculate buffer size and timing
-    buffer_size = mtu
-    samples_per_buffer = buffer_size
     buffer_time_ns = int((samples_per_buffer / args.rate) * 1e9)
-    
+
     print(f"Buffer timing: {buffer_time_ns} ns per buffer ({samples_per_buffer} samples)")
     
     # Activate stream
@@ -76,7 +74,7 @@ def main():
     
     # Generate test signal (tone)
     freq_tone = 1e6  # 1 MHz tone
-    t = np.arange(buffer_size) / args.rate
+    t = np.arange(samples_per_buffer) / args.rate
     tone = np.exp(2j * np.pi * freq_tone * t).astype(np.complex64)
     
     # Transmission loop
@@ -93,7 +91,7 @@ def main():
         buffs = [tone]
         
         # Write with timestamp
-        SoapyStreamResult = sdr.writeStream(tx_stream, buffs, buffer_size, flags=0, timeNs=target_time, timeoutUs=1000000)
+        SoapyStreamResult = sdr.writeStream(tx_stream, buffs, samples_per_buffer, flags=0, timeNs=target_time, timeoutUs=1000000)
         if SoapyStreamResult.ret < 0:
             if SoapyStreamResult.ret == SoapySDR.SOAPY_SDR_TIMEOUT:
                 if args.verbose:

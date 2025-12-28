@@ -136,7 +136,7 @@ def main():
     scheduler.enable_scheduler(enable=0, reset=1)
     scheduler.enable_header(enable=1)
 
-    scheduler.write_manual_time(time_ns=0x1fffffffffffffff)
+    scheduler.write_manual_time(time_ns=0xfcffffffffffffff)
     print(scheduler.read_current_ts())
     # scheduler.enable_scheduler(enable= 0,reset=1)
     # scheduler.enable_scheduler(enable=1)

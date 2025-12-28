@@ -280,6 +280,25 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     } else {
         throw std::runtime_error("Invalid direction.");
     }
+    /* Configure TX Timestamp mode */
+    bool timestamp_mode = false;
+    auto it = searchArgs.find("timestamp_mode");
+    if (it != searchArgs.end()) {
+        std::string mode = it->second;
+        if (mode == "1") {
+            
+            timestamp_mode = true;
+        } else if (mode == "0") {
+            timestamp_mode = false;
+        } else {
+            throw std::runtime_error("Invalid timestamp_mode in searchArgs: " + mode + "; use '0' or '1'");
+        }
+    } else { 
+        /* Default is disabled */
+        timestamp_mode = false;
+    }
+    printf("Timestamp mode is: %u\n", timestamp_mode);
+    _tx_stream.timestamp_mode = timestamp_mode;
 
     /* Configure 2T2R/1T1R mode (PHY) */
     litex_m2sdr_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
@@ -365,6 +384,9 @@ int SoapyLiteXM2SDR::activateStream(
         /* Configure the DMA engine for TX, but don't enable it yet. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
+        if (_tx_stream.timestamp_mode) {
+            _tx_stream.base_timestamp = this->getHardwareTime(std::string());
+        }
 #elif USE_LITEETH
         /* Crossbar Mux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
@@ -624,7 +646,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     SoapySDR::Stream *stream,
     size_t &handle,
     void **buffs,
-    const long timeoutUs) {
+    const long timeoutUs
+    /*const long long tx_timestamp = 0*/) {
     (void)timeoutUs;
     if (stream != TX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
@@ -694,6 +717,30 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
         printf("[FROM CSR] Last TX Timestamp = %lu\n ", last_timestamp);
     }
+#else
+    if (_tx_stream.timestamp_mode) {
+        /* Header is at the beginning of the DMA buffer */
+        uint8_t *tx_buffer = reinterpret_cast<uint8_t*>(_tx_stream.buf) + (buf_offset * _dma_mmap_info.dma_tx_buf_size);
+
+        /* Extract Sync Word to bytes 0 to 8 of the Header */
+        uint64_t header = DMA_HEADER_SYNC_WORD;
+        *reinterpret_cast<uint64_t*>(tx_buffer) = header;
+        
+        /* Compute the number of samples per DMA buffer and update sample count in _tx_stream */
+        uint32_t samples_per_buffer = _dma_mmap_info.dma_tx_buf_size / (_nChannels * _bytesPerComplex);
+        _tx_stream.sample_count += samples_per_buffer;
+
+        /* Compute time increment (in nanoseconds) for this buffer */
+        uint64_t tx_frame_timestamp = _tx_stream.base_timestamp + static_cast<uint64_t>((_tx_stream.sample_count / _tx_stream.samplerate) * 1e9);
+        *reinterpret_cast<uint64_t*>(tx_buffer + 8) = tx_frame_timestamp;
+        _tx_stream.next_timestamp = tx_frame_timestamp;
+
+        SoapySDR_logf(SOAPY_SDR_DEBUG, "TX DMA Header inserted: timestamp: %llu", tx_frame_timestamp);
+        // printf("TX DMA Header inserted: timestamp: %lu\n", tx_frame_timestamp);
+        // uint64_t last_timestamp = litex_m2sdr_readl(_fd, CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
+        // printf("[FROM CSR] Last TX Timestamp = %lu\n ", last_timestamp);
+    }
+
 #endif
 
 
@@ -1000,7 +1047,7 @@ int SoapyLiteXM2SDR::writeStream(
     const void *const *buffs,
     const size_t numElems,
     int &flags,
-    const long long timeNs,
+    const long long tx_timestamp,
     const long timeoutUs) {
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
@@ -1035,7 +1082,7 @@ int SoapyLiteXM2SDR::writeStream(
         _tx_stream.remainderOffset += n;
 
         if (_tx_stream.remainderSamps == 0) {
-            this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
+            this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, tx_timestamp);
             _tx_stream.remainderHandle = -1;
             _tx_stream.remainderOffset = 0;
         }
@@ -1047,7 +1094,6 @@ int SoapyLiteXM2SDR::writeStream(
 
     /* Acquire a new write buffer from the DMA engine / UDP helper. */
     size_t handle;
-
     int ret = this->acquireWriteBuffer(
         stream,
         handle,
@@ -1085,7 +1131,7 @@ int SoapyLiteXM2SDR::writeStream(
     _tx_stream.remainderOffset += n;
 
     if (_tx_stream.remainderSamps == 0) {
-        this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
+        this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, tx_timestamp);
         _tx_stream.remainderHandle = -1;
         _tx_stream.remainderOffset = 0;
     }

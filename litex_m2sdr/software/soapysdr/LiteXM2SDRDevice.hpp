@@ -37,7 +37,7 @@ extern "C" {
 #define DEBUG
 
 //#define _RX_DMA_HEADER_TEST
-#define _TX_DMA_HEADER_TEST
+// #define _TX_DMA_HEADER_TEST
 
 /* Thresholds above which we switch to 8-bit mode: */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
@@ -163,7 +163,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const void * const *buffs,
         const size_t numElems,
         int &flags,
-        const long long timeNs = 0,
+        const long long tx_timestamp = 0,
         const long timeoutUs = 100000) override;
 
     int readStreamStatus(
@@ -316,6 +316,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     SoapySDR::RangeList getBandwidthRange(
         const int direction,
         const size_t channel) const override;
+    /***************************************************************************************************
+    *                                        Timestamp API
+    **************************************************************************************************/
+    void setTXTimestampMode(bool enable);
+    bool getTXTimestampMode() const;
+    uint64_t getTXSampleCount() const;
+    uint64_t getTXBaseTimestamp() const;
+    uint64_t getTXNextTimestamp() const;
 
     /***********************************************************************************************
     *                                    Clocking API
@@ -409,6 +417,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
         bool   burst_end   = false;
         int32_t burst_samps = 0;
+        // timestamp management
+        bool timestamp_mode;
+        uint64_t sample_count;
+        uint64_t base_timestamp;
+        uint64_t next_timestamp;
     };
 
     RXStream _rx_stream;

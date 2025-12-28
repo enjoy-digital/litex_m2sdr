@@ -26,7 +26,7 @@ struct TXStream: Stream {
     // Timestamp tracking for LimeSuiteNG-style operation
     uint64_t sample_count;           // Total samples transmitted
     uint64_t base_timestamp;         // Base timestamp when stream was activated
-    uint64_t next_tx_timestamp;      // Next timestamp to transmit at
+    uint64_t next_timestamp;      // Next timestamp to transmit at
     bool timestamp_mode;             // Enable timestamp-based transmission
 };
 ```
