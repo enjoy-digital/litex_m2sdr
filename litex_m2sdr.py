@@ -853,7 +853,7 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
-    def add_ad96361_data_probe(self, depth=4096):
+    def add_ad9361_data_probe(self, depth=4096):
         analyzer_signals = [
             self.ad9361.phy.sink,   # TX.
             self.ad9361.phy.source, # RX.
@@ -966,7 +966,7 @@ def main():
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
-        soc.add_ad96361_data_probe()
+        soc.add_ad9361_data_probe()
 
     # Builder.
     def get_build_name():
