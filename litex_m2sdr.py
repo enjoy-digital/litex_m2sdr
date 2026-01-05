@@ -176,6 +176,7 @@ class BaseSoC(SoCMini):
         "pcie_phy"         : 10,
         "pcie_msi"         : 11,
         "pcie_dma0"        : 12,
+        "ptm_requester"    : 34,
 
         # Eth.
         "eth_phy"          : 14,
@@ -185,18 +186,21 @@ class BaseSoC(SoCMini):
         # SATA.
         "sata_phy"         : 18,
         "sata_core"        : 19,
-        "sata_rx_streamer" : 26,
-        "sata_tx_streamer" : 27,
+        "sata_identify"    : 26,
+        "sata_mem2sector"  : 27,
+        "sata_sector2mem"  : 28,
+        "sata_rx_streamer" : 29,
+        "sata_tx_streamer" : 32,
+
+        # GPIO.
+        "gpio"             : 21,
 
         # SDR.
         "si5351"           : 20,
         "header"           : 23,
         "ad9361"           : 24,
         "crossbar"         : 25,
-        "txrx_loopback"    : 28,
-
-        # GPIO.
-        "gpio"             : 21,
+        "txrx_loopback"    : 33,
 
         # Measurements/Analyzer.
         "clk_measurement"  : 30,
