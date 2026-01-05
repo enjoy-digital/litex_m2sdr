@@ -52,24 +52,24 @@ _io = [
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERp3")), # PCIe_RX3_P
-        Subsignal("rx_n",  Pins("M2:PERn3")), # PCIe_RX3_N.
-        Subsignal("tx_p",  Pins("M2:PETp3")), # PCIe_TX3_P.
-        Subsignal("tx_n",  Pins("M2:PETn3")), # PCIe_TX3_N.
+        Subsignal("rx_p",  Pins("M2:PERp3")),   # PCIe_RX3_P
+        Subsignal("rx_n",  Pins("M2:PERn3")),   # PCIe_RX3_N.
+        Subsignal("tx_p",  Pins("M2:PETp3")),   # PCIe_TX3_P.
+        Subsignal("tx_n",  Pins("M2:PETn3")),   # PCIe_TX3_N.
     ),
     ("pcie_x1_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
         Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
         Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
-        Subsignal("rx_p",  Pins("M2:PERp0")), # PCIe_RX0_P
-        Subsignal("rx_n",  Pins("M2:PERn0")), # PCIe_RX0_N.
-        Subsignal("tx_p",  Pins("M2:PETp0")), # PCIe_TX0_P.
-        Subsignal("tx_n",  Pins("M2:PETn0")), # PCIe_TX0_N.
+        Subsignal("rx_p",  Pins("M2:PERp0")),   # PCIe_RX0_P
+        Subsignal("rx_n",  Pins("M2:PERn0")),   # PCIe_RX0_N.
+        Subsignal("tx_p",  Pins("M2:PETp0")),   # PCIe_TX0_P.
+        Subsignal("tx_n",  Pins("M2:PETn0")),   # PCIe_TX0_N.
     ),
     ("pcie_x2_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("clk_p", Pins("M2:REFClkp")),        # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")),        # PCIe_REF_CLK_N.
         Subsignal("rx_p",  Pins("M2:PERp0 M2:PERp1")), # PCIe_RX0-1_P
         Subsignal("rx_n",  Pins("M2:PERn0 M2:PERn1")), # PCIe_RX0-1_N.
         Subsignal("tx_p",  Pins("M2:PETp0 M2:PETp1")), # PCIe_TX0-1_P.
@@ -77,8 +77,8 @@ _io = [
     ),
     ("pcie_x4_m2", 0,
         Subsignal("rst_n", Pins("M2:PERSTn"), IOStandard("LVCMOS33"), Misc("PULLUP=TRUE")), # PCIe_PERST.
-        Subsignal("clk_p", Pins("M2:REFClkp")), # PCIe_REF_CLK_P.
-        Subsignal("clk_n", Pins("M2:REFClkn")), # PCIe_REF_CLK_N.
+        Subsignal("clk_p", Pins("M2:REFClkp")),                          # PCIe_REF_CLK_P.
+        Subsignal("clk_n", Pins("M2:REFClkn")),                          # PCIe_REF_CLK_N.
         Subsignal("rx_p",  Pins("M2:PERp0 M2:PERp1 M2:PERp2 M2:PERp3")), # PCIe_RX0-3_P.
         Subsignal("rx_n",  Pins("M2:PERn0 M2:PERn1 M2:PERn2 M2:PERn3")), # PCIe_RX0-3_N.
         Subsignal("tx_p",  Pins("M2:PETp0 M2:PETp1 M2:PETp2 M2:PETp3")), # PCIe_TX0-3_P.
@@ -120,29 +120,30 @@ _io = [
     # GPIOs.
     ("gpios", 0, Pins("E22 D22"), IOStandard("LVCMOS33")), # TP1-2.
 ]
+
 _io_baseboard = [ # Note: These IOs are only available when the board is plugged in Acorn Baseboard Mini.
-    # SFP-0.
+    # SFP-0 (uses PCIe lane 2 pins).
     ("sfp", 0,
-        Subsignal("txp", Pins("B6")),  # PCIe_TX2_P.
-        Subsignal("txn", Pins("A6")),  # PCIe_TX2_N.
-        Subsignal("rxp", Pins("B10")), # PCIe_RX2_P.
-        Subsignal("rxn", Pins("A10")), # PCIe_RX2_N.
+        Subsignal("txp", Pins("M2:PETp2")), # PCIe_TX2_P / Polarity Swap on M2SDR.
+        Subsignal("txn", Pins("M2:PETn2")), # PCIe_TX2_N / Polarity Swap on M2SDR.
+        Subsignal("rxp", Pins("M2:PERp2")), # PCIe_RX2_N / Polarity Swap on M2SDR and Baseboard.
+        Subsignal("rxn", Pins("M2:PERn2")), # PCIe_RX2_P / Polarity Swap on M2SDR and Baseboard.
     ),
 
-    # SFP-1.
-    ("sfp", 1,
-        Subsignal("txp", Pins("D5")),  # PCIe_TX1_P.
-        Subsignal("txn", Pins("C5")),  # PCIe_TX1_N.
-        Subsignal("rxp", Pins("D11")), # PCIe_RX1_P.
-        Subsignal("rxn", Pins("C11")), # PCIe_RX1_N.
+    # SFP-1 (uses PCIe lane 1 pins).
+    ("sfp", 1, # TX: Inverted on M2SDR, RX: Inverted on M2SDR and Baseboard.
+        Subsignal("txp", Pins("M2:PETp1")), # PCIe_TX1_N / Polarity Swap on M2SDR.
+        Subsignal("txn", Pins("M2:PETn1")), # PCIe_TX1_P / Polarity Swap on M2SDR.
+        Subsignal("rxp", Pins("M2:PERp1")), # PCIe_RX1_N / Polarity Swap on M2SDR and Baseboard.
+        Subsignal("rxn", Pins("M2:PERn1")), # PCIe_RX1_P / Polarity Swap on M2SDR and Baseboard.
     ),
 
-    # SATA.
+    # SATA (uses PCIe lane 0 pins).
     ("sata", 0,
-        Subsignal("tx_p",  Pins("D7")), # PCIe_TX0_N / Inverted.
-        Subsignal("tx_n",  Pins("C7")), # PCIe_TX0_P / Inverted.
-        Subsignal("rx_p",  Pins("D9")), # PCIe_RX0_N / Inverted.
-        Subsignal("rx_n",  Pins("C9")), # PCIe_RX0_P / Inverted.
+        Subsignal("tx_p", Pins("M2:PETp0")), # PCIe_TX0_N / Polarity Swap on M2SDR.
+        Subsignal("tx_n", Pins("M2:PETn0")), # PCIe_TX0_P / Polarity Swap on M2SDR.
+        Subsignal("rx_p", Pins("M2:PERp0")), # PCIe_RX0_N / Polarity Swap on M2SDR.
+        Subsignal("rx_n", Pins("M2:PERn0")), # PCIe_RX0_P / Polarity Swap on M2SDR.
     ),
 ]
 
