@@ -49,7 +49,7 @@ from litesata.phy import LiteSATAPHY
 
 from litescope import LiteScopeAnalyzer
 
-from litex_m2sdr import Platform
+from litex_m2sdr import Platform, _io_baseboard
 
 from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
@@ -210,6 +210,8 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
+        if variant == "baseboard":
+            platform.add_extension(_io_baseboard)
         if (with_eth or with_sata) and (variant != "baseboard"):
             msg = "Ethernet and SATA are only supported when mounted in the LiteX Acorn Baseboard Mini! "
             msg += "Available here: https://enjoy-digital-shop.myshopify.com/products/litex-acorn-baseboard-mini"
@@ -489,20 +491,6 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
-            # IOs.
-            # ----
-            _sata_io = [
-                ("sata", 0,
-                    # Inverted on M2SDR.
-                    Subsignal("tx_p",  Pins("D7")),
-                    Subsignal("tx_n",  Pins("C7")),
-                    # Inverted on M2SDR.
-                    Subsignal("rx_p",  Pins("D9")),
-                    Subsignal("rx_n",  Pins("C9")),
-                ),
-            ]
-            platform.add_extension(_sata_io)
-
             # PHY.
             # ----
             self.sata_phy = LiteSATAPHY(platform.device,
