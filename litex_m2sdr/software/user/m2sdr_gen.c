@@ -4,7 +4,7 @@
  *
  * This file is part of LiteX-M2SDR project.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  * Description:
  * This utility generates tone, white noise, or PRBS signals into interleaved 16-bit I/Q samples for

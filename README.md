@@ -3,7 +3,7 @@
                           / /__/ / __/ -_)>  </___/ /|_/ / __/_\ \/ // / , _/
                          /____/_/\__/\__/_/|_|   /_/  /_/____/___/____/_/|_|
                                   LiteX based M2 SDR FPGA board.
-                               Copyright (c) 2024-2025 Enjoy-Digital.
+                               Copyright (c) 2024-2026 Enjoy-Digital.
 
 ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
 
