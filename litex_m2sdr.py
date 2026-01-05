@@ -61,6 +61,7 @@ from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
+from litex_m2sdr.gateware.loopback    import TXRXLoopback
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -186,13 +187,13 @@ class BaseSoC(SoCMini):
         "sata_core"        : 19,
         "sata_rx_streamer" : 26,
         "sata_tx_streamer" : 27,
-        "sata_replay"      : 28,
 
         # SDR.
         "si5351"           : 20,
         "header"           : 23,
         "ad9361"           : 24,
         "crossbar"         : 25,
+        "txrx_loopback"    : 28,
 
         # GPIO.
         "gpio"             : 21,
@@ -226,7 +227,7 @@ class BaseSoC(SoCMini):
         SoCMini.__init__(self, platform, sys_clk_freq,
             ident             = f"LiteX-M2SDR SoC / {variant} variant / built on",
             ident_version     = True,
-            csr_address_width = 15,
+            csr_address_width = 14,
         )
 
         # Clocking ---------------------------------------------------------------------------------
@@ -523,10 +524,6 @@ class BaseSoC(SoCMini):
             self.sata_rx_streamer = LiteSATAStream2Sectors(port=self.sata_crossbar.get_port())
             self.sata_tx_streamer = LiteSATASectors2Stream(port=self.sata_crossbar.get_port())
 
-            # Replay Control (Software convenience).
-            # --------------------------------------
-            self.sata_replay = CSRStorage(description="When set, route SATA TX streamer into RX path (replay).")
-
             # IRQs.
             # -----
             if with_pcie:
@@ -561,11 +558,21 @@ class BaseSoC(SoCMini):
 
         # TX/RX Datapath ---------------------------------------------------------------------------
 
-        # AD9361 <-> Header.
-        # ------------------
+
+        # AD9361 <-> Loopback <-> Header.
+        # -------------------------------
+        self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+
+        # Header TX -> Loopback -> RFIC TX.
         self.comb += [
-            self.header.tx.source.connect(self.ad9361.sink),
-            self.ad9361.source.connect(self.header.rx.sink),
+            self.header.tx.source.connect(self.txrx_loopback.tx_sink),
+            self.txrx_loopback.tx_source.connect(self.ad9361.sink),
+        ]
+
+        # RFIC RX -> Loopback -> Header RX.
+        self.comb += [
+            self.ad9361.source.connect(self.txrx_loopback.rx_sink),
+            self.txrx_loopback.rx_source.connect(self.header.rx.sink),
         ]
 
         # Crossbar.
@@ -601,14 +608,6 @@ class BaseSoC(SoCMini):
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
-
-        # Replay.
-        # -------
-        if with_sata:
-            self.comb += If(self.sata_replay.storage,
-                self.header.rx.source.ready.eq(1),
-                self.sata_tx_streamer.source.eq(self.crossbar.demux.sink),
-            )
 
         # GPIO -------------------------------------------------------------------------------------
 
