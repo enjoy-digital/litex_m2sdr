@@ -4,7 +4,7 @@
  *
  * This file is part of LiteX-M2SDR.
  *
- * Copyright (C) 2024-2025 Enjoy-Digital
+ * Copyright (C) 2024-2026 Enjoy-Digital
  *
  */
 

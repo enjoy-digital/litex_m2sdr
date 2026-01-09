@@ -10,9 +10,9 @@ INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
@@ -61,6 +61,9 @@ m2sdr_gpio: liblitepcie/liblitepcie.a m2sdr_gpio.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
 endif
 
+m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a m2sdr_sata.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -llitepcie -lm2sdr -lliteeth
+
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
@@ -81,6 +84,9 @@ m2sdr_play: liblitepcie/liblitepcie.a m2sdr_play.o
 
 m2sdr_record: liblitepcie/liblitepcie.a m2sdr_record.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+
+m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sata.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
 
 m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate

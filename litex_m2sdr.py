@@ -3,7 +3,7 @@
 #
 # This file is part of LiteX-M2SDR.
 #
-# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+# Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
@@ -46,10 +46,11 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 
 from litesata.phy import LiteSATAPHY
+from litesata.frontend.stream import LiteSATAStream2Sectors, LiteSATASectors2Stream
 
 from litescope import LiteScopeAnalyzer
 
-from litex_m2sdr import Platform
+from litex_m2sdr import Platform, _io_baseboard
 
 from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
@@ -60,6 +61,7 @@ from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
+from litex_m2sdr.gateware.loopback    import TXRXLoopback
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -153,49 +155,56 @@ class CRG(LiteXModule):
 class BaseSoC(SoCMini):
     SoCCore.csr_map = {
         # SoC.
-        "ctrl"            : 0,
-        "uart"            : 1,
-        "icap"            : 2,
-        "flash_cs_n"      : 3,
-        "xadc"            : 4,
-        "dna"             : 5,
-        "flash"           : 6,
-        "leds"            : 7,
-        "identifier_mem"  : 8,
-        "timer0"          : 9,
+        "ctrl"             :  0,
+        "uart"             :  1,
+        "icap"             :  2,
+        "flash_cs_n"       :  3,
+        "xadc"             :  4,
+        "dna"              :  5,
+        "flash"            :  6,
+        "leds"             :  7,
+        "identifier_mem"   :  8,
+        "timer0"           :  9,
 
         # Capability.
-        "capability"      : 13,
+        "capability"       : 13,
 
         # Time.
-        "time_gen"        : 17,
+        "time_gen"         : 17,
 
         # PCIe.
-        "pcie_phy"        : 10,
-        "pcie_msi"        : 11,
-        "pcie_dma0"       : 12,
+        "pcie_phy"         : 10,
+        "pcie_msi"         : 11,
+        "pcie_dma0"        : 12,
+        "ptm_requester"    : 34,
 
         # Eth.
-        "eth_phy"         : 14,
-        "eth_rx_streamer" : 15,
-        "eth_tx_streamer" : 16,
+        "eth_phy"          : 14,
+        "eth_rx_streamer"  : 15,
+        "eth_tx_streamer"  : 16,
 
         # SATA.
-        "sata_phy"        : 18,
-        "sata_core"       : 19,
-
-        # SDR.
-        "si5351"          : 20,
-        "header"          : 23,
-        "ad9361"          : 24,
-        "crossbar"        : 25,
+        "sata_phy"         : 18,
+        "sata_core"        : 19,
+        "sata_identify"    : 26,
+        "sata_mem2sector"  : 27,
+        "sata_sector2mem"  : 28,
+        "sata_rx_streamer" : 29,
+        "sata_tx_streamer" : 32,
 
         # GPIO.
-        "gpio"            : 21,
+        "gpio"             : 21,
+
+        # SDR.
+        "si5351"           : 20,
+        "header"           : 23,
+        "ad9361"           : 24,
+        "crossbar"         : 25,
+        "txrx_loopback"    : 33,
 
         # Measurements/Analyzer.
-        "clk_measurement" : 30,
-        "analyzer"        : 31,
+        "clk_measurement"  : 30,
+        "analyzer"         : 31,
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
@@ -210,6 +219,8 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
+        if variant == "baseboard":
+            platform.add_extension(_io_baseboard)
         if (with_eth or with_sata) and (variant != "baseboard"):
             msg = "Ethernet and SATA are only supported when mounted in the LiteX Acorn Baseboard Mini! "
             msg += "Available here: https://enjoy-digital-shop.myshopify.com/products/litex-acorn-baseboard-mini"
@@ -218,8 +229,9 @@ class BaseSoC(SoCMini):
         # SoCMini ----------------------------------------------------------------------------------
 
         SoCMini.__init__(self, platform, sys_clk_freq,
-            ident         = f"LiteX-M2SDR SoC / {variant} variant / built on",
-            ident_version = True,
+            ident             = f"LiteX-M2SDR SoC / {variant} variant / built on",
+            ident_version     = True,
+            csr_address_width = 15,
         )
 
         # Clocking ---------------------------------------------------------------------------------
@@ -366,8 +378,10 @@ class BaseSoC(SoCMini):
             pcie_msis = {}
             if with_sata:
                 pcie_msis.update({
-                    "SATA_SECTOR2MEM" : Signal(),
-                    "SATA_MEM2SECTOR" : Signal(),
+                    "SATA_SECTOR2MEM"  : Signal(),
+                    "SATA_MEM2SECTOR"  : Signal(),
+                    "SATA_STREAM2SECT" : Signal(),
+                    "SATA_SECT2STREAM" : Signal(),
                 })
 
             # Core.
@@ -483,20 +497,6 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
-            # IOs.
-            # ----
-            _sata_io = [
-                ("sata", 0,
-                    # Inverted on M2SDR.
-                    Subsignal("tx_p",  Pins("D7")),
-                    Subsignal("tx_n",  Pins("C7")),
-                    # Inverted on M2SDR.
-                    Subsignal("rx_p",  Pins("D9")),
-                    Subsignal("rx_n",  Pins("C9")),
-                ),
-            ]
-            platform.add_extension(_sata_io)
-
             # PHY.
             # ----
             self.sata_phy = LiteSATAPHY(platform.device,
@@ -517,7 +517,18 @@ class BaseSoC(SoCMini):
                     pcie_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
                 ]
 
-            #self.add_pcie_slave_probe()
+            # Streamers.
+            # ----------
+            self.sata_rx_streamer = LiteSATAStream2Sectors(port=self.sata_crossbar.get_port())
+            self.sata_tx_streamer = LiteSATASectors2Stream(port=self.sata_crossbar.get_port())
+
+            # IRQs.
+            # -----
+            if with_pcie:
+                self.comb += [
+                    pcie_msis["SATA_STREAM2SECT"].eq(self.sata_rx_streamer.irq),
+                    pcie_msis["SATA_SECT2STREAM"].eq(self.sata_tx_streamer.irq),
+                ]
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
@@ -545,11 +556,21 @@ class BaseSoC(SoCMini):
 
         # TX/RX Datapath ---------------------------------------------------------------------------
 
-        # AD9361 <-> Header.
-        # ------------------
+
+        # AD9361 <-> Loopback <-> Header.
+        # -------------------------------
+        self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+
+        # Header TX -> Loopback -> RFIC TX.
         self.comb += [
-            self.header.tx.source.connect(self.ad9361.sink),
-            self.ad9361.source.connect(self.header.rx.sink),
+            self.header.tx.source.connect(self.txrx_loopback.tx_sink),
+            self.txrx_loopback.tx_source.connect(self.ad9361.sink),
+        ]
+
+        # RFIC RX -> Loopback -> Header RX.
+        self.comb += [
+            self.ad9361.source.connect(self.txrx_loopback.rx_sink),
+            self.txrx_loopback.rx_source.connect(self.header.rx.sink),
         ]
 
         # Crossbar.
@@ -568,7 +589,7 @@ class BaseSoC(SoCMini):
         if with_eth:
             self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
         if with_sata:
-            pass # TODO.
+            self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
 
         # RX: Header -> Crossbar -> Comms.
@@ -584,7 +605,7 @@ class BaseSoC(SoCMini):
         if with_eth:
             self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
-            pass # TODO.
+            self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
 
         # GPIO -------------------------------------------------------------------------------------
 
@@ -642,6 +663,9 @@ class BaseSoC(SoCMini):
 
                 # Board name.
                 board_name       = "SAWR",
+                dac_bits = wr_dac_bits,
+
+                # Main/DMTD PLL.
                 dac_bits = wr_dac_bits,
 
                 # SFP.
@@ -847,7 +871,7 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
-    def add_ad96361_data_probe(self, depth=4096):
+    def add_ad9361_data_probe(self, depth=4096):
         analyzer_signals = [
             self.ad9361.phy.sink,   # TX.
             self.ad9361.phy.source, # RX.
@@ -962,7 +986,7 @@ def main():
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
-        soc.add_ad96361_data_probe()
+        soc.add_ad9361_data_probe()
 
     # Builder.
     def get_build_name():
