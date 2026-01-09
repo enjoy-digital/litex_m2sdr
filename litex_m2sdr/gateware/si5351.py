@@ -346,7 +346,7 @@ class SI5351(LiteXModule):
             ], reset=default_version),
             CSRField("clkin_src",  size=1, offset=1, values=[
                 ("``0b0``", "10MHz ClkIn from FPGA (clk10)."),
-                ("``0b1``", "10MHz ClkIn from uFL."),
+                ("``0b1``", "10MHz ClkIn from uFL or 62.5MHz clkin from white-rabbit for passthrough."),
             ], reset=default_clkin),
             CSRField("ss_en",  size=1, offset=2, values=[
                 ("``0b0``", "SI5351B Spread spectrum disabled."),

@@ -115,7 +115,7 @@ class CRG(LiteXModule):
 
         # Ethernet PLL.
         # -------------
-        if with_eth or with_sata or with_white_rabbit:
+        if with_eth or with_sata:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, 125e6, margin=0)
@@ -138,10 +138,10 @@ class CRG(LiteXModule):
 
             self.refclk_mmcm.create_clkout(self.cd_clk_125m_gtp,  125e6, margin=0)
             self.refclk_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
-
+            
             self.refclk_mmcm.create_clkout(self.cd_refclk_eth,  125e6, margin=0)
             self.refclk_mmcm.params.update(p_CLKOUT1_USE_FINE_PS="TRUE")
-
+            
             # DMTD MMCM (62.5MHz).
             self.dmtd_mmcm = S7MMCM(speedgrade=-3)
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
@@ -211,7 +211,7 @@ class BaseSoC(SoCMini):
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen=2,
-        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16,
+        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16, with_adc_sync=False,
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -287,7 +287,10 @@ class BaseSoC(SoCMini):
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
-        self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
+        if with_adc_sync: # the ufl port is used to send the PPS to the AD9361, so we can use this signal for the SI5351 clkin passthrough
+            self.comb += self.si5351.clkin_ufl.eq(ClockSignal("wr")) 
+        else :
+            self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
 
         # SI5351 ClkIn/Out.
         si5351_clk_in = Signal()
@@ -303,14 +306,6 @@ class BaseSoC(SoCMini):
             with_csr = True,
         )
         self.time_gen.add_cdc()
-
-        # PPS Generator ----------------------------------------------------------------------------
-
-        self.pps_gen = PPSGenerator(
-            clk_freq = sys_clk_freq,
-            time     = self.time_gen.time,
-            reset    = self.time_gen.time_change,
-        )
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -399,7 +394,6 @@ class BaseSoC(SoCMini):
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # Host <-> SoC DMA Bus.
             # ---------------------
@@ -625,7 +619,6 @@ class BaseSoC(SoCMini):
         # White Rabbit -----------------------------------------------------------------------------
 
         if with_white_rabbit:
-
             from litex.soc.cores.uart import UARTPHY, UART
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
@@ -670,6 +663,7 @@ class BaseSoC(SoCMini):
 
                 # Board name.
                 board_name       = "SAWR",
+                dac_bits = wr_dac_bits,
 
                 # Main/DMTD PLL.
                 dac_bits = wr_dac_bits,
@@ -691,6 +685,14 @@ class BaseSoC(SoCMini):
                 wb_slave_origin = 0x0004_0000,
                 wb_slave_size   = 0x0004_0000
             )
+            
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_out_pulse)
+
+            if with_adc_sync:
+                platform.add_extension([
+                    ("wr_clk_out", 0, Pins("V13"), IOStandard("LVCMOS33")),
+                ])
+                self.ad9361.add_sync_in_gpio(self.pps_out, platform.request('wr_clk_out'))
 
             LiteXWRNICSoC.add_sources(self)
 
@@ -740,6 +742,18 @@ class BaseSoC(SoCMini):
                 "{{*crg_s7mmcm0_clkout}}",
                 "{{*crg_s7mmcm1_clkout}}",
             )
+        else :
+            # PPS Generator ----------------------------------------------------------------------------
+
+            self.pps_gen = PPSGenerator(
+                clk_freq = sys_clk_freq,
+                time     = self.time_gen.time,
+                reset    = self.time_gen.time_change,
+            )
+            self.pps_out = Signal()
+            self.comb += self.pps_out.eq(self.pps_gen.pps)
+            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
+
 
         # Clk Measurements -------------------------------------------------------------------------
 
@@ -792,7 +806,7 @@ class BaseSoC(SoCMini):
     def add_pcie_dma_probe(self, depth=1024):
         assert hasattr(self, "pcie_dma0")
         analyzer_signals = [
-            self.pps_gen.pps,      # PPS.
+            self.pps_out,          # PPS.
             self.pcie_dma0.sink,   # RX.
             self.pcie_dma0.source, # TX.
             self.pcie_dma0.synchronizer.synced,
@@ -907,7 +921,8 @@ def main():
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
     parser.add_argument("--wr-sfp",            default=1, type=int,     help="White Rabbit SFP.", choices=[0, 1])
-    parser.add_argument("--wr-dac-bits",       default=16, type=int,    help="White Rabbit MMCM phase-shift control word width (in bits).")
+    parser.add_argument("--wr-dac-bits",       default=16, type=int,    help="White Rabbit freq control word size")
+    parser.add_argument("--with-adc-sync",     action="store_true",     help="Enable ad9361 adc/dac synchronisation (require hardware modification).")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -956,6 +971,7 @@ def main():
         with_white_rabbit = args.with_white_rabbit,
         wr_sfp            = args.wr_sfp,
         wr_dac_bits       = args.wr_dac_bits,
+        with_adc_sync     = args.with_adc_sync,
     )
 
     # LiteScope Analyzer Probes.

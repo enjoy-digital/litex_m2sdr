@@ -283,3 +283,34 @@ class AD9361RFIC(LiteXModule):
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
             iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]]
         )
+
+    def add_sync_in_gpio(self, pps_in, sync_in_pad):
+        self.send_pulse = CSRStorage(fields=[
+            CSRField("send_pulse", size=1, offset= 0, values=[
+                ("``0b0``", "Don't send pulse"),
+                ("``0b1``", "Do send pulse"),
+            ])])
+        self.sync_pulse_done = CSRStatus(fields=[
+            CSRField("done", size=1, offset=0, values=[
+                ("``0b0``", "Not done"),
+                ("``0b1``", "Done"),
+            ])
+        ])
+
+        send_next = Signal()
+        pps_out = Signal()
+        self.comb += sync_in_pad.eq(pps_out)
+        self.sync.wr += If(self.send_pulse.fields.send_pulse,
+                        send_next.eq(1),
+                        self.sync_pulse_done.fields.done.eq(0))
+
+        pps_buf = Signal()
+        self.sync.wr += pps_buf.eq(pps_in)
+        self.sync.wr += If(pps_in & ~pps_buf, # PPS rising edge
+                        pps_out.eq(send_next),
+                        send_next.eq(0))
+
+        self.sync.wr += If(pps_buf & ~pps_in, # PPS falling edge
+                        self.sync_pulse_done.fields.done.eq(pps_out),
+                        pps_out.eq(0))
+
