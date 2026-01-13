@@ -46,6 +46,7 @@
 #include <linux/moduleparam.h>
 #include <linux/jiffies.h>
 #include <linux/ktime.h>
+#include <linux/atomic.h>
 
 #include "litex.h"
 #include "litesata.h"
@@ -56,7 +57,7 @@
 #endif
 
 #ifndef LITESATA_DMA_WAIT_TIMEOUT_MS
-#define LITESATA_DMA_WAIT_TIMEOUT_MS 1 /* timeout per DMA before polling */
+#define LITESATA_DMA_WAIT_TIMEOUT_MS 10 /* timeout per DMA before polling */
 #endif
 
 /* DONE wait timeouts (ms). */
@@ -140,6 +141,9 @@ struct litesata_dev {
 	bool dma_32bit;
 };
 
+static atomic64_t litesata_msi_reader_cnt = ATOMIC64_INIT(0);
+static atomic64_t litesata_msi_writer_cnt = ATOMIC64_INIT(0);
+
 /* ------------------------------------------------------------------ */
 /* Single-instance MSI notification hooks (minimal integration):
  * The PCI driver calls these when the corresponding MSI fires.
@@ -151,16 +155,21 @@ static struct litesata_dev *lbd_global;
 void litesata_msi_signal_reader(void) /* SECTOR2MEM done */
 {
 	struct litesata_dev *lbd = READ_ONCE(lbd_global);
-	if (lbd)
+	if (lbd) {
+		atomic64_inc(&litesata_msi_reader_cnt);
 		complete(&lbd->dma_done);
+	}
 }
+
 EXPORT_SYMBOL_GPL(litesata_msi_signal_reader);
 
 void litesata_msi_signal_writer(void) /* MEM2SECTOR done */
 {
 	struct litesata_dev *lbd = READ_ONCE(lbd_global);
-	if (lbd)
+	if (lbd) {
+		atomic64_inc(&litesata_msi_writer_cnt);
 		complete(&lbd->dma_done);
+	}
 }
 EXPORT_SYMBOL_GPL(litesata_msi_signal_writer);
 
@@ -248,17 +257,25 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 
 	/*
 	 * MSI is only a hint. We may get stray/early MSIs. Always gate on DONE.
+	 * Avoid an "early fallback" window that effectively turns MSI into polling.
 	 */
 	if (use_msi) {
-		unsigned long to = msecs_to_jiffies(litesata_msi_timeout_ms);
+		unsigned long to = msecs_to_jiffies(LITESATA_DONE_TIMEOUT_MSI_MS);
 		if (!wait_for_completion_timeout(&lbd->dma_done, to)) {
 			dev_warn_ratelimited(lbd->dev,
-				"MSI timeout (>%ums); falling back to polling\n",
-				litesata_msi_timeout_ms);
+				"No MSI within %ums; falling back to polling\n",
+				LITESATA_DONE_TIMEOUT_MSI_MS);
 			use_msi = false;
+		} else {
+			dev_dbg_ratelimited(lbd->dev, "MSI completion observed\n");
 		}
 	}
 
+#if 0
+	dev_info(lbd->dev, "MSI counts: r=%lld w=%lld\n",
+		(long long)atomic64_read(&litesata_msi_reader_cnt),
+		(long long)atomic64_read(&litesata_msi_writer_cnt));
+#endif
 	/* Always wait for DONE with a bound timeout (no infinite hang). */
 	ret = litesata_wait_done(lbd, regs,
 				 use_msi ? LITESATA_DONE_TIMEOUT_MSI_MS
