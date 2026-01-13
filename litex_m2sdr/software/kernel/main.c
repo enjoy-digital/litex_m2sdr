@@ -507,8 +507,19 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	}
 #endif
 
+	/* Clear ALL interrupts */
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
 	litepcie_writel(s, CSR_PCIE_MSI_CLEAR_ADDR, clear_mask);
+#endif
+
+	/* Signal SATA completions */
+#ifdef SATA_SECTOR2MEM_INTERRUPT
+	if (irq_vector & (1 << SATA_SECTOR2MEM_INTERRUPT))
+		litesata_msi_signal_reader();
+#endif
+#ifdef SATA_MEM2SECTOR_INTERRUPT
+	if (irq_vector & (1 << SATA_MEM2SECTOR_INTERRUPT))
+		litesata_msi_signal_writer();
 #endif
 
 	return IRQ_HANDLED;
@@ -1602,7 +1613,7 @@ if (litepcie_soc_has_sata(litepcie_dev)) {
 			litepcie_dev->sata = sata_pdev;
 		}
 
-#ifndef LITESATA_FORCE_POLLING
+#if (LITESATA_FORCE_POLLING == 0)
         /* Enable LiteSATA completion MSIs */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
         litepcie_enable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);

@@ -44,6 +44,8 @@
 #include <linux/sched.h>
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
+#include <linux/jiffies.h>
+#include <linux/ktime.h>
 
 #include "litex.h"
 #include "litesata.h"
@@ -55,6 +57,14 @@
 
 #ifndef LITESATA_DMA_WAIT_TIMEOUT_MS
 #define LITESATA_DMA_WAIT_TIMEOUT_MS 1 /* timeout per DMA before polling */
+#endif
+
+/* DONE wait timeouts (ms). */
+#ifndef LITESATA_DONE_TIMEOUT_MSI_MS
+#define LITESATA_DONE_TIMEOUT_MSI_MS 10
+#endif
+#ifndef LITESATA_DONE_TIMEOUT_POLL_MS
+#define LITESATA_DONE_TIMEOUT_POLL_MS 1000
 #endif
 
 /* Extra hardening knobs (runtime-configurable via module params) */
@@ -187,11 +197,28 @@ static void litesata_bounce_free(struct litesata_dev *lbd, struct litesata_bounc
 		dma_free_coherent(lbd->dev, b->len, b->cpu, b->dma);
 }
 
+/* DONE is the ground truth; always wait for it with a bound timeout. */
+static int litesata_wait_done(struct litesata_dev *lbd, void __iomem *regs, unsigned int timeout_ms)
+{
+	unsigned long deadline = jiffies + msecs_to_jiffies(timeout_ms);
+	unsigned int spins = 0;
+
+	while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0) {
+		cpu_relax();
+		if (time_after(jiffies, deadline))
+			return -ETIMEDOUT;
+		if ((++spins & 0xFFFF) == 0)
+			cond_resched();
+	}
+	return 0;
+}
+
 /* caller must hold lbd->lock to prevent interleaving transfers */
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
 {
 	bool use_msi = !litesata_force_polling && READ_ONCE(lbd_global) != NULL;
+	int ret;
 
 	if (use_msi)
 		reinit_completion(&lbd->dma_done);
@@ -219,13 +246,11 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 		}
 	}
 
+	/*
+	 * MSI is only a hint. We may get stray/early MSIs. Always gate on DONE.
+	 */
 	if (use_msi) {
 		unsigned long to = msecs_to_jiffies(litesata_msi_timeout_ms);
-		/*
-		 * If MSI comes in, we still *verify* DONE; if it doesn't, we poll.
-		 * Note: a “stray” MSI from a previous xfer won't hurt, because we
-		 * always gate completion by the DONE bit as well.
-		 */
 		if (!wait_for_completion_timeout(&lbd->dma_done, to)) {
 			dev_warn_ratelimited(lbd->dev,
 				"MSI timeout (>%ums); falling back to polling\n",
@@ -234,14 +259,17 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 		}
 	}
 
-	/* Poll path (either forced, or MSI timeout) */
-	if (!use_msi) {
-		unsigned int spins = 0;
-		while ((litex_read8(regs + LITESATA_DMA_DONE) & 0x01) == 0) {
-			cpu_relax();
-			if ((++spins & 0xFFFF) == 0)
-				cond_resched(); /* avoid soft lockups on busy systems */
-		}
+	/* Always wait for DONE with a bound timeout (no infinite hang). */
+	ret = litesata_wait_done(lbd, regs,
+				 use_msi ? LITESATA_DONE_TIMEOUT_MSI_MS
+					 : LITESATA_DONE_TIMEOUT_POLL_MS);
+	if (ret) {
+		dev_err(lbd->dev,
+			"DMA DONE timeout (%s) sector=%lld nsec=%u addr=0x%llx\n",
+			use_msi ? "msi" : "poll",
+			(long long)sector, count,
+			(unsigned long long)host_bus_addr);
+		return ret;
 	}
 
 check_err_and_exit:
