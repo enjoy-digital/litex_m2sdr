@@ -548,6 +548,9 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     /* Detect overflows of the underlying circular buffer. */
     if ((_rx_stream.hw_count - _rx_stream.sw_count) >
         ((int64_t)_dma_mmap_info.dma_rx_buf_count / 2)) {
+        /* Calculate the number of lost buffers before draining. */
+        int64_t lost_buffers = _rx_stream.hw_count - _rx_stream.sw_count;
+
         /* Drain all buffers to get out of the overflow quicker. */
         struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
         mmap_dma_update.sw_count = _rx_stream.hw_count;
@@ -557,6 +560,11 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         handle = -1;
 
         flags |= SOAPY_SDR_END_ABRUPT;
+
+        /* Encode lost buffer count in flags for applications that want it. */
+        flags |= LITEX_HAS_OVERFLOW_COUNT;
+        flags |= (((int)lost_buffers) << LITEX_OVERFLOW_COUNT_SHIFT) & LITEX_OVERFLOW_COUNT_MASK;
+
         return SOAPY_SDR_OVERFLOW;
     } else {
         /* Get the buffer. */
