@@ -398,6 +398,10 @@ static void m2sdr_rf_init(
      * performs a full AD9361 reconfiguration including calibrations.
      * Without this, TX signal quality may be degraded. */
     printf("Configuring AD9361 channel mode...\n");
+
+    /* PHY control register must be set right before ad9361_set_no_ch_mode() */
+    m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, num_channels == 1 ? 1 : 0);
+
     ad9361_phy->pdata->rx2tx2 = (num_channels == 2);
     if (num_channels == 1) {
         ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1;
