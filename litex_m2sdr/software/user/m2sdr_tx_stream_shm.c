@@ -393,6 +393,24 @@ static void m2sdr_rf_init(
 
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
+    /* Configure channel mode to match SoapySDR setupStream() behavior.
+     * This sets up the port control and calls ad9361_set_no_ch_mode() which
+     * performs a full AD9361 reconfiguration including calibrations.
+     * Without this, TX signal quality may be degraded. */
+    printf("Configuring AD9361 channel mode...\n");
+    ad9361_phy->pdata->rx2tx2 = (num_channels == 2);
+    if (num_channels == 1) {
+        ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1;
+    } else {
+        ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+    }
+    /* AD9361 Port Control 2t2r timing enable */
+    struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
+    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
+    if (num_channels == 2)
+        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+    ad9361_set_no_ch_mode(ad9361_phy, num_channels);
+
     /* Configure AD9361 Samplerate */
     printf("Setting TX Samplerate to %.2f MSPS.\n", samplerate/1e6);
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
