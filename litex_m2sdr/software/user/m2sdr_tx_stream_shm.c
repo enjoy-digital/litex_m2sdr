@@ -415,8 +415,35 @@ static void m2sdr_rf_init(
         pd->port_ctrl.pp_conf[0] |= (1 << 2);
     ad9361_set_no_ch_mode(ad9361_phy, num_channels);
 
-    /* Configure AD9361 Samplerate */
+    /* Configure AD9361 Samplerate with proper FIR interpolation for low rates.
+     * This matches SoapySDR's setSampleRate() behavior which is critical for
+     * signal quality at low sample rates. */
     printf("Setting TX Samplerate to %.2f MSPS.\n", samplerate/1e6);
+
+    /* For sample rates below 2.5 Msps, enable FIR interpolation.
+     * SoapySDR uses interpolation=2 for rates 1.25-2.5 Msps and
+     * interpolation=4 for rates < 1.25 Msps. */
+    if (samplerate < 1250000) {
+        printf("Setting TX FIR Interpolation to 4 (< 1.25 Msps Samplerate).\n");
+        ad9361_phy->tx_fir_int    = 4;
+        ad9361_phy->bypass_tx_fir = 0;
+        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
+        tx_fir_cfg.tx_int = 4;
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
+        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+    } else if (samplerate < 2500000) {
+        printf("Setting TX FIR Interpolation to 2 (< 2.5 Msps Samplerate).\n");
+        ad9361_phy->tx_fir_int    = 2;
+        ad9361_phy->bypass_tx_fir = 0;
+        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
+        tx_fir_cfg.tx_int = 2;
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
+        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+    } else {
+        /* For higher sample rates, just set the default FIR config */
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+    }
+
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
 
     /* Configure AD9361 TX Bandwidth */
@@ -426,9 +453,6 @@ static void m2sdr_rf_init(
     /* Configure AD9361 TX Frequency */
     printf("Setting TX LO Freq to %.2f MHz.\n", tx_freq/1e6);
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
-
-    /* Configure AD9361 TX FIR */
-    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
 
     /* Configure AD9361 TX Attenuation (same for both channels)
      * Note: tx_gain is negative dB attenuation (e.g., -10 means 10dB attenuation)
@@ -442,6 +466,9 @@ static void m2sdr_rf_init(
 
     /* 16-bit mode (samples in 16-bit words) */
     m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
+
+    /* Enable Synchronizer (disable bypass) - matches SoapySDR */
+    m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 
     m2sdr_close(conn);
 }
@@ -540,6 +567,7 @@ static void m2sdr_play_from_shm(
                 size_t copy_size = (shm->chunk_bytes < DMA_BUFFER_SIZE) ?
                                     shm->chunk_bytes : DMA_BUFFER_SIZE;
                 memcpy(buf_wr, src, copy_size);
+
 
                 /* Zero-pad if SHM chunk is smaller than DMA buffer */
                 if (copy_size < DMA_BUFFER_SIZE) {
