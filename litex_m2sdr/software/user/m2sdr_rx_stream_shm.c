@@ -175,24 +175,32 @@ typedef struct {
     uint16_t num_channels;
 } shm_ring_buffer_t;
 
+/* RX: C is the producer, Julia is the consumer.
+ * C writes samples then updates write_index with release semantics.
+ * Julia reads write_index with acquire semantics to see the samples.
+ * Julia updates read_index with release semantics after consuming.
+ * C reads read_index with acquire semantics before overwriting slots. */
+
 static inline uint64_t shm_get_write_index(shm_ring_buffer_t *shm) {
     return *(volatile uint64_t *)(shm->data + OFFSET_WRITE_INDEX);
 }
 
 static inline void shm_set_write_index(shm_ring_buffer_t *shm, uint64_t val) {
-    *(volatile uint64_t *)(shm->data + OFFSET_WRITE_INDEX) = val;
+    /* Release: ensures sample data is visible before index update */
+    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_WRITE_INDEX), val, __ATOMIC_RELEASE);
 }
 
 static inline uint64_t shm_get_read_index(shm_ring_buffer_t *shm) {
-    return *(volatile uint64_t *)(shm->data + OFFSET_READ_INDEX);
+    /* Acquire: ensures we see Julia consumer's release-store of read_index */
+    return __atomic_load_n((volatile uint64_t *)(shm->data + OFFSET_READ_INDEX), __ATOMIC_ACQUIRE);
 }
 
 static inline void shm_set_chunks_written(shm_ring_buffer_t *shm, uint64_t val) {
-    *(volatile uint64_t *)(shm->data + OFFSET_CHUNKS_WRITTEN) = val;
+    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_CHUNKS_WRITTEN), val, __ATOMIC_RELAXED);
 }
 
 static inline void shm_set_overflow_count(shm_ring_buffer_t *shm, uint64_t val) {
-    *(volatile uint64_t *)(shm->data + OFFSET_OVERFLOW_COUNT) = val;
+    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_OVERFLOW_COUNT), val, __ATOMIC_RELAXED);
 }
 
 static inline void shm_set_lost_samples(shm_ring_buffer_t *shm, uint64_t val) {
