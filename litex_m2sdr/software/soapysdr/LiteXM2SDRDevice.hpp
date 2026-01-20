@@ -45,6 +45,30 @@ extern "C" {
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
+/*
+ * LiteX M2SDR specific flags for RX overflow buffer count reporting.
+ *
+ * When SOAPY_SDR_OVERFLOW is returned from acquireReadBuffer(), the flags
+ * parameter contains the number of lost DMA buffers.
+ *
+ * Check for LITEX_HAS_OVERFLOW_COUNT in flags to determine if the count
+ * is available. If set, extract the count using:
+ *   int lost_buffers = (flags & LITEX_OVERFLOW_COUNT_MASK) >> LITEX_OVERFLOW_COUNT_SHIFT;
+ *
+ * This allows applications to calculate the exact number of lost samples:
+ *   lost_samples = lost_buffers * samples_per_buffer
+ *
+ * Bit layout (flags is int, 32 bits):
+ *   Bits 0-7:   Standard SoapySDR flags (OVERFLOW, TIMEOUT, etc.)
+ *   Bits 8-15:  Reserved
+ *   Bit 16:     LITEX_HAS_OVERFLOW_COUNT (SOAPY_SDR_USER_FLAG0)
+ *   Bits 17-30: Lost buffer count (14 bits, up to 16K buffers)
+ *   Bit 31:     Sign bit (unused)
+ */
+#define LITEX_HAS_OVERFLOW_COUNT    SOAPY_SDR_USER_FLAG0
+#define LITEX_OVERFLOW_COUNT_SHIFT  17
+#define LITEX_OVERFLOW_COUNT_MASK   0x7FFE0000  /* 14 bits for count (up to 16K buffers) */
+
 #if USE_LITEPCIE
 #define FD_INIT -1
 #define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
