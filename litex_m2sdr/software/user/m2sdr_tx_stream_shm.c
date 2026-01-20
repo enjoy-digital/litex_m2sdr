@@ -487,7 +487,7 @@ static void m2sdr_play_from_shm(
     int i = 0;
     size_t samples_transmitted = 0;
     int64_t last_time;
-    int64_t reader_sw_count_last = 0;
+    int64_t reader_hw_count_last = 0;
     uint64_t chunks_read = 0;
     uint64_t underflow_count = 0;
     uint64_t buffer_empty_count = 0;
@@ -495,28 +495,54 @@ static void m2sdr_play_from_shm(
     /* Samples per DMA buffer (accounting for all channels) */
     size_t samples_per_dma = DMA_BUFFER_SIZE / (SAMPLE_SIZE_COMPLEX_INT16 * shm->num_channels);
 
-    /* Initialize DMA */
-    if (litepcie_dma_init(&dma, device_name, 0))  /* zero_copy = 0 */
+    /* Initialize DMA in zero-copy mode for proper per-buffer tracking.
+     * This fixes a race condition where copy mode would send stale data
+     * because the bulk write() sends all 256 buffers at once. */
+    if (litepcie_dma_init(&dma, device_name, 1)) {  /* zero_copy = 1 */
+        fprintf(stderr, "litepcie_dma_init failed\n");
         exit(1);
+    }
     dma.reader_enable = 1;
+
+    /* Get DMA buffer info for zero-copy mode */
+    uint32_t dma_buf_size = dma.mmap_dma_info.dma_tx_buf_size;
+    uint32_t dma_buf_count = dma.mmap_dma_info.dma_tx_buf_count;
+
+    if (dma.buf_wr == NULL || dma.buf_wr == MAP_FAILED) {
+        fprintf(stderr, "DMA TX buffer not mapped correctly\n");
+        exit(1);
+    }
+
+    if (dma_buf_count == 0 || dma_buf_size == 0) {
+        fprintf(stderr, "DMA buffer info not populated (buf_count=%u, buf_size=%u)\n",
+                dma_buf_count, dma_buf_size);
+        fprintf(stderr, "This may indicate the driver doesn't support zero-copy mode.\n");
+        exit(1);
+    }
+
+    /* User-side buffer tracking for zero-copy mode */
+    int64_t user_count = 0;  /* Next buffer to fill */
+    int64_t hw_count = 0;    /* Last buffer consumed by HW */
 
     /* Crossbar Mux: select PCIe streaming for TX */
     m2sdr_writel(dma.fds.fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
 
-    printf("Starting DMA play from shared memory...\n");
-    printf("  DMA buffer size: %d bytes (%zu samples/channel)\n",
-           DMA_BUFFER_SIZE, samples_per_dma);
+    printf("Starting DMA play from shared memory (zero-copy mode)...\n");
+    printf("  DMA buffer size: %u bytes (%zu samples/channel)\n",
+           dma_buf_size, samples_per_dma);
+    printf("  DMA buffer count: %u\n", dma_buf_count);
     printf("  SHM chunk size: %u bytes (%u samples/channel)\n",
            shm->chunk_bytes, shm->chunk_size);
 
     /* Verify chunk sizes match */
-    if (shm->chunk_bytes != DMA_BUFFER_SIZE) {
-        fprintf(stderr, "Warning: SHM chunk size (%u) != DMA buffer size (%d)\n",
-                shm->chunk_bytes, DMA_BUFFER_SIZE);
+    if (shm->chunk_bytes != dma_buf_size) {
+        fprintf(stderr, "Warning: SHM chunk size (%u) != DMA buffer size (%u)\n",
+                shm->chunk_bytes, dma_buf_size);
         fprintf(stderr, "         Data will be copied with potential mismatch!\n");
     }
 
     last_time = get_time_ms();
+    int64_t sw_count_tmp = 0;  /* Used for litepcie_dma_reader calls */
 
     for (;;) {
         if (!keep_running)
@@ -525,25 +551,45 @@ static void m2sdr_play_from_shm(
         if (num_samples > 0 && samples_transmitted >= num_samples)
             break;
 
-        /* Update DMA status */
-        litepcie_dma_process(&dma);
+        /* Get current HW count to know how many buffers are available */
+        litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
 
-        /* Detect DMA underflow */
-        if (dma.reader_sw_count - dma.reader_hw_count < 0) {
+        /* Detect DMA underflow: HW has consumed more than we've submitted */
+        if (hw_count > user_count) {
             underflow_count++;
             shm_set_underflow_count(shm, underflow_count);
             if (!quiet) {
                 fprintf(stderr, "\rUNDERFLOW #%" PRIu64 "\n", underflow_count);
             }
+            /* Resync: HW is ahead, so we need to catch up */
+            user_count = hw_count;
         }
 
-        /* Write to DMA from shared memory */
-        while (1) {
-            /* Get DMA write buffer */
-            char *buf_wr = litepcie_dma_next_write_buffer(&dma);
-            if (!buf_wr)
-                break;
+        /* Calculate how many buffers we can fill */
+        int64_t buffers_pending = user_count - hw_count;
+        int64_t buffers_available = (int64_t)dma_buf_count - buffers_pending;
 
+        /* If no buffers available, poll and wait */
+        if (buffers_available <= 0) {
+            int ret = poll(&dma.fds, 1, 100);
+            if (ret < 0) {
+                perror("poll");
+                break;
+            } else if (ret == 0) {
+                /* Timeout - check for termination conditions */
+                continue;
+            }
+            /* Re-check after poll */
+            litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
+            buffers_pending = user_count - hw_count;
+            buffers_available = (int64_t)dma_buf_count - buffers_pending;
+        }
+
+        /* Fill available DMA buffers from shared memory.
+         * Only submit buffers when we have real data from SHM.
+         * If SHM is empty, break out and wait - we have DMA buffer headroom.
+         * This avoids sending zeros which cause CN0 drops. */
+        while (buffers_available > 0) {
             /* Check if data available in shared memory */
             if (!shm_can_read(shm)) {
                 /* Check if producer is done */
@@ -552,26 +598,39 @@ static void m2sdr_play_from_shm(
                     keep_running = 0;
                     break;
                 }
-                /* No data yet - send zeros to maintain continuous TX.
-                 * This causes SNR fluctuations but preserves code phase for CDMA tracking.
-                 * Track the count so Julia can monitor buffer health. */
+                /* No data yet. Check how many buffers are still queued in DMA.
+                 * If we have enough headroom, wait for Julia. If running low,
+                 * send zeros to prevent underflow. */
+                int64_t current_pending = user_count - hw_count;
+                if (current_pending >= 8) {
+                    /* We have at least 8 buffers queued - safe to wait */
+                    break;
+                }
+                /* Running low on queued buffers - send zeros to prevent underflow */
                 buffer_empty_count++;
                 shm_set_buffer_empty_count(shm, buffer_empty_count);
-                memset(buf_wr, 0, DMA_BUFFER_SIZE);
+                if (!quiet) {
+                    fprintf(stderr, "\rBUF_EMPTY #%" PRIu64 " (pending=%" PRId64 ")\n",
+                            buffer_empty_count, current_pending);
+                }
+                int buf_offset = user_count % dma_buf_count;
+                char *buf_wr = dma.buf_wr + buf_offset * dma_buf_size;
+                memset(buf_wr, 0, dma_buf_size);
             } else {
                 /* Copy data from shared memory to DMA buffer */
+                int buf_offset = user_count % dma_buf_count;
+                char *buf_wr = dma.buf_wr + buf_offset * dma_buf_size;
                 uint64_t read_idx = shm_get_read_index(shm);
                 uint8_t *src = shm_slot_ptr(shm, read_idx);
 
                 /* Handle size mismatch: copy min of both sizes */
-                size_t copy_size = (shm->chunk_bytes < DMA_BUFFER_SIZE) ?
-                                    shm->chunk_bytes : DMA_BUFFER_SIZE;
+                size_t copy_size = (shm->chunk_bytes < dma_buf_size) ?
+                                    shm->chunk_bytes : dma_buf_size;
                 memcpy(buf_wr, src, copy_size);
 
-
                 /* Zero-pad if SHM chunk is smaller than DMA buffer */
-                if (copy_size < DMA_BUFFER_SIZE) {
-                    memset(buf_wr + copy_size, 0, DMA_BUFFER_SIZE - copy_size);
+                if (copy_size < dma_buf_size) {
+                    memset(buf_wr + copy_size, 0, dma_buf_size - copy_size);
                 }
 
                 /* Update read index */
@@ -580,12 +639,26 @@ static void m2sdr_play_from_shm(
                 shm_set_read_index(shm, read_idx + 1);
                 shm_set_chunks_read(shm, chunks_read);
             }
+
+            /* Memory barrier to ensure the DMA buffer write is visible before
+             * we tell the kernel the buffer is ready. This prevents a race
+             * where DMA might read stale/partial data. */
+            __sync_synchronize();
+
+            /* Advance user count and tell kernel this buffer is ready */
+            user_count++;
+            struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
+            mmap_dma_update.sw_count = user_count;
+            checked_ioctl(dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
+
+            buffers_available--;
         }
 
         /* Statistics every 200ms */
         int64_t duration = get_time_ms() - last_time;
         if (!quiet && duration > 200) {
-            double speed = (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
+            litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
+            double speed = (double)(hw_count - reader_hw_count_last) * dma_buf_size * 8 / ((double)duration * 1e6);
             uint64_t size_mb = (samples_transmitted * SAMPLE_SIZE_COMPLEX_INT16 * shm->num_channels) / 1024 / 1024;
 
             if (i % 10 == 0) {
@@ -598,7 +671,7 @@ static void m2sdr_play_from_shm(
                 speed, chunks_read, size_mb, underflow_count, buffer_empty_count);
 
             last_time = get_time_ms();
-            reader_sw_count_last = dma.reader_sw_count;
+            reader_hw_count_last = hw_count;
         }
     }
 
