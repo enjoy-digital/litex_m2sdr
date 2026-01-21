@@ -438,6 +438,12 @@ static void m2sdr_rf_init(
     /* 16-bit mode (12-bit samples in 16-bit words) */
     m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
 
+    /* Enable Synchronizer (disable bypass) - matches SoapySDR */
+    m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+
+    /* Disable DMA loopback - matches SoapySDR */
+    m2sdr_writel(conn, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+
     m2sdr_close(conn);
 }
 
@@ -480,6 +486,11 @@ static void m2sdr_stream_to_shm(
 
     /* Crossbar Demux: select PCIe streaming for RX */
     m2sdr_writel(dma.fds.fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+
+    /* Reset DMA counters to ensure clean state (matches SoapySDR behavior).
+     * This prevents stale counter values from previous runs causing issues.
+     * Call with enable=0 to reset counters before starting. */
+    litepcie_dma_writer(dma.fds.fd, 0, &dma.writer_hw_count, &dma.writer_sw_count);
 
     printf("Starting DMA stream to shared memory...\n");
     printf("  DMA buffer size: %d bytes (%zu samples/channel)\n",
