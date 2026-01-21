@@ -55,6 +55,7 @@
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
+#include "csr.h"
 
 /* Shared memory header offsets (0-indexed for C) */
 #define SHM_HEADER_SIZE         64
@@ -470,6 +471,15 @@ static void m2sdr_rf_init(
     /* Enable Synchronizer (disable bypass) - matches SoapySDR */
     m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 
+    /* Configure TX DMA header control - matches SoapySDR setupStream() behavior:
+     * Enable TX control but disable header insertion */
+    m2sdr_writel(conn, CSR_HEADER_TX_CONTROL_ADDR,
+        (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+        (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
+
+    /* Disable DMA loopback - matches SoapySDR */
+    m2sdr_writel(conn, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+
     m2sdr_close(conn);
 }
 
@@ -526,6 +536,13 @@ static void m2sdr_play_from_shm(
 
     /* Crossbar Mux: select PCIe streaming for TX */
     m2sdr_writel(dma.fds.fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+
+    /* Reset DMA counters to ensure clean state (matches SoapySDR behavior).
+     * This prevents stale counter values from previous runs causing underflows.
+     * Call with enable=0 first to reset, then enable=1 will be used in the loop. */
+    int64_t sw_count_init = 0;
+    litepcie_dma_reader(dma.fds.fd, 0, &hw_count, &sw_count_init);
+    user_count = hw_count;  /* Sync user_count with actual HW state */
 
     printf("Starting DMA play from shared memory (zero-copy mode)...\n");
     printf("  DMA buffer size: %u bytes (%zu samples/channel)\n",
