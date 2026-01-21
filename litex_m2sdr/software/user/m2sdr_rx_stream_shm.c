@@ -319,6 +319,36 @@ static void shm_destroy(shm_ring_buffer_t *shm) {
     }
 }
 
+/* AGC Mode Parsing */
+/*------------------*/
+
+static const char *agc_mode_names[] = {
+    "manual",
+    "fast_attack",
+    "slow_attack",
+    "hybrid"
+};
+
+static uint8_t parse_agc_mode(const char *mode_str) {
+    if (strcasecmp(mode_str, "manual") == 0 || strcasecmp(mode_str, "mgc") == 0)
+        return RF_GAIN_MGC;
+    if (strcasecmp(mode_str, "fast_attack") == 0 || strcasecmp(mode_str, "fast") == 0)
+        return RF_GAIN_FASTATTACK_AGC;
+    if (strcasecmp(mode_str, "slow_attack") == 0 || strcasecmp(mode_str, "slow") == 0)
+        return RF_GAIN_SLOWATTACK_AGC;
+    if (strcasecmp(mode_str, "hybrid") == 0)
+        return RF_GAIN_HYBRID_AGC;
+    fprintf(stderr, "Error: unknown AGC mode '%s'\n", mode_str);
+    fprintf(stderr, "Valid modes: manual, fast_attack, slow_attack, hybrid\n");
+    exit(1);
+}
+
+static const char *agc_mode_to_string(uint8_t mode) {
+    if (mode <= RF_GAIN_HYBRID_AGC)
+        return agc_mode_names[mode];
+    return "unknown";
+}
+
 /* RF Initialization */
 /*-------------------*/
 
@@ -327,6 +357,7 @@ static void m2sdr_rf_init(
     int64_t  bandwidth,
     int64_t  rx_freq,
     int64_t  rx_gain,
+    uint8_t  agc_mode,
     uint8_t  num_channels
 ) {
     void *conn = m2sdr_open();
@@ -389,8 +420,16 @@ static void m2sdr_rf_init(
     /* Configure AD9361 RX FIR */
     ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
+    /* Configure AD9361 RX Gain Control Mode */
+    printf("Setting RX AGC mode to %s.\n", agc_mode_to_string(agc_mode));
+    ad9361_set_rx_gain_control_mode(ad9361_phy, 0, agc_mode);
+    if (num_channels == 2) {
+        ad9361_set_rx_gain_control_mode(ad9361_phy, 1, agc_mode);
+    }
+
     /* Configure AD9361 RX Gain (same for both channels) */
-    printf("Setting RX Gain to %ld dB.\n", rx_gain);
+    printf("Setting RX Gain to %ld dB%s.\n", rx_gain,
+           agc_mode != RF_GAIN_MGC ? " (initial, AGC will adjust)" : "");
     ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
     if (num_channels == 2) {
         ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
@@ -562,6 +601,8 @@ static void help(void)
            "  -bandwidth bw          Set the RF bandwidth in Hz (default: %d).\n"
            "  -rx_freq freq          Set the RX frequency in Hz (default: %" PRId64 ").\n"
            "  -rx_gain gain          Set the RX gain in dB (default: %d).\n"
+           "  -agc_mode mode         Set AGC mode (default: manual).\n"
+           "                         Modes: manual, fast_attack, slow_attack, hybrid\n"
            "  -channels n            Number of RX channels: 1 or 2 (default: 1).\n"
            "\n"
            "Shared Memory Configuration:\n"
@@ -584,6 +625,7 @@ static struct option options[] = {
     { "bandwidth",   required_argument, NULL, 'b' },
     { "rx_freq",     required_argument, NULL, 'f' },
     { "rx_gain",     required_argument, NULL, 'g' },
+    { "agc_mode",    required_argument, NULL, 'a' },
     { "channels",    required_argument, NULL, 'C' },
     { "shm_path",    required_argument, NULL, 'p' },
     { "buffer_time", required_argument, NULL, 't' },
@@ -603,6 +645,7 @@ int main(int argc, char **argv)
     int64_t  bandwidth   = DEFAULT_BANDWIDTH;
     int64_t  rx_freq     = DEFAULT_RX_FREQ;
     int64_t  rx_gain     = DEFAULT_RX_GAIN;
+    uint8_t  agc_mode    = RF_GAIN_MGC;  /* manual gain control by default */
     uint8_t  num_channels = 1;
     uint8_t  quiet       = 0;
 
@@ -640,6 +683,9 @@ int main(int argc, char **argv)
         case 'g':
             rx_gain = (int64_t)strtod(optarg, NULL);
             break;
+        case 'a':
+            agc_mode = parse_agc_mode(optarg);
+            break;
         case 'C':
             num_channels = (uint8_t)atoi(optarg);
             if (num_channels != 1 && num_channels != 2) {
@@ -670,6 +716,7 @@ int main(int argc, char **argv)
     printf("Sample rate: %.2f MHz\n", samplerate / 1e6);
     printf("RX frequency: %.2f MHz\n", rx_freq / 1e6);
     printf("RX gain: %ld dB\n", rx_gain);
+    printf("AGC mode: %s\n", agc_mode_to_string(agc_mode));
     printf("Bandwidth: %.2f MHz\n", bandwidth / 1e6);
     printf("Channels: %d (%s)\n", num_channels, num_channels == 2 ? "2T2R" : "1T1R");
     printf("Shared memory: %s\n", shm_path);
@@ -681,7 +728,7 @@ int main(int argc, char **argv)
     printf("\n");
 
     /* Initialize RF */
-    m2sdr_rf_init(samplerate, bandwidth, rx_freq, rx_gain, num_channels);
+    m2sdr_rf_init(samplerate, bandwidth, rx_freq, rx_gain, agc_mode, num_channels);
 
     /* Create shared memory - chunk size = DMA buffer size (no rechunking) */
     shm_ring_buffer_t *shm = shm_create(shm_path, DMA_BUFFER_SIZE,
