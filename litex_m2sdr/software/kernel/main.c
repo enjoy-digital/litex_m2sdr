@@ -495,14 +495,12 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	/* Handle SATA interrupts */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
 	if (irq_vector & (1 << SATA_SECTOR2MEM_INTERRUPT)) {
-		litesata_msi_signal_reader();
 		clear_mask |= (1 << SATA_SECTOR2MEM_INTERRUPT);
 	}
 #endif
 
 #ifdef SATA_MEM2SECTOR_INTERRUPT
 	if (irq_vector & (1 << SATA_MEM2SECTOR_INTERRUPT)) {
-		litesata_msi_signal_writer();
 		clear_mask |= (1 << SATA_MEM2SECTOR_INTERRUPT);
 	}
 #endif
