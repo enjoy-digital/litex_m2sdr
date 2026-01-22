@@ -467,6 +467,7 @@ static void m2sdr_stream_to_shm(
     uint64_t lost_samples = 0;
     uint64_t buffer_full_count = 0;
     uint64_t pending_lost_samples = 0;  /* Samples lost since last written chunk */
+    int64_t last_overflow_hw_count = 0; /* Track hw_count at last overflow detection */
 
     /* Samples per DMA buffer (accounting for all channels) */
     size_t samples_per_dma = DMA_BUFFER_SIZE / (SAMPLE_SIZE_COMPLEX_INT16 * shm->num_channels);
@@ -509,15 +510,23 @@ static void m2sdr_stream_to_shm(
         /* Update DMA status */
         litepcie_dma_process(&dma);
 
-        /* Check for DMA overflow BEFORE processing buffers
-         * This ensures we know how many samples were lost before each chunk
+        /* Check for DMA overflow BEFORE processing buffers.
+         * Only count NEW overflows since last check (hw_count advancement).
+         * This ensures we know how many samples were lost before each chunk.
          */
-        if (dma.writer_hw_count > dma.writer_sw_count + 16) {
-            uint64_t lost_buffers = dma.writer_hw_count - dma.writer_sw_count - 1;
+        if (dma.writer_hw_count > dma.writer_sw_count + 16 &&
+            dma.writer_hw_count > last_overflow_hw_count) {
+            /* Count only the new buffers lost since last overflow detection */
+            uint64_t new_hw_count = dma.writer_hw_count;
+            uint64_t baseline = (last_overflow_hw_count > dma.writer_sw_count + 16)
+                                ? last_overflow_hw_count
+                                : dma.writer_sw_count + 16;
+            uint64_t lost_buffers = new_hw_count - baseline;
             uint64_t newly_lost = lost_buffers * samples_per_dma;
             overflow_count++;
             lost_samples += newly_lost;
             pending_lost_samples += newly_lost;
+            last_overflow_hw_count = new_hw_count;
             shm_set_overflow_count(shm, overflow_count);
             shm_set_lost_samples(shm, lost_samples);
 
@@ -536,6 +545,33 @@ static void m2sdr_stream_to_shm(
             /* Wait for space in ring buffer */
             while (!shm_can_write(shm)) {
                 buffer_full_count++;
+                /* While waiting, refresh DMA counters to detect overflows.
+                 * Note: litepcie_dma_writer() is just an ioctl that returns
+                 * current hw_count/sw_count - it doesn't drain any buffers.
+                 * This is critical because overflows typically happen when
+                 * Julia is slow to consume chunks from the SHM ring buffer. */
+                litepcie_dma_writer(dma.fds.fd, 1, &dma.writer_hw_count, &dma.writer_sw_count);
+                /* Only count NEW overflows since last check */
+                if (dma.writer_hw_count > dma.writer_sw_count + 16 &&
+                    dma.writer_hw_count > last_overflow_hw_count) {
+                    uint64_t new_hw_count = dma.writer_hw_count;
+                    uint64_t baseline = (last_overflow_hw_count > dma.writer_sw_count + 16)
+                                        ? last_overflow_hw_count
+                                        : dma.writer_sw_count + 16;
+                    uint64_t lost_buffers = new_hw_count - baseline;
+                    uint64_t newly_lost = lost_buffers * samples_per_dma;
+                    overflow_count++;
+                    lost_samples += newly_lost;
+                    pending_lost_samples += newly_lost;
+                    last_overflow_hw_count = new_hw_count;
+                    shm_set_overflow_count(shm, overflow_count);
+                    shm_set_lost_samples(shm, lost_samples);
+
+                    if (!quiet) {
+                        fprintf(stderr, "\rOVERFLOW #%" PRIu64 ": lost %" PRIu64 " buffers (%" PRIu64 " samples total)\n",
+                            overflow_count, lost_buffers, lost_samples);
+                    }
+                }
                 usleep(10);
                 if (!keep_running)
                     goto done;
