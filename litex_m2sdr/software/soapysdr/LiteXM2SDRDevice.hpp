@@ -22,6 +22,7 @@
 #include "etherbone.h"
 #include "libm2sdr.h"
 
+#include <SoapySDR/Constants.h>
 #include <SoapySDR/Device.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Time.hpp>
@@ -65,6 +66,9 @@ extern "C" {
  *   Bits 17-30: Lost buffer count (14 bits, up to 16K buffers)
  *   Bit 31:     Sign bit (unused)
  */
+#ifndef SOAPY_SDR_USER_FLAG0
+#define SOAPY_SDR_USER_FLAG0 (1 << 16)
+#endif
 #define LITEX_HAS_OVERFLOW_COUNT    SOAPY_SDR_USER_FLAG0
 #define LITEX_OVERFLOW_COUNT_SHIFT  17
 #define LITEX_OVERFLOW_COUNT_MASK   0x7FFE0000  /* 14 bits for count (up to 16K buffers) */
