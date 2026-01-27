@@ -48,6 +48,7 @@ def main():
     # Kernel compilation.
     if (args.interface == "litepcie"):
         run_command("cd kernel && make clean all")
+        run_command("cd kernel && sudo make install")
 
     # Utilities compilation.
     run_command(f"cd user   && make clean INTERFACE={interface} all")
