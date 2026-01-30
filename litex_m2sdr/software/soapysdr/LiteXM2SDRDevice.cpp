@@ -545,6 +545,12 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
     }
 #endif
 
+#if USE_LITEPCIE
+    key += "-pcie";
+#elif USE_LITEETH
+    key += "-eth";
+#endif
+
     return key;
 }
 
