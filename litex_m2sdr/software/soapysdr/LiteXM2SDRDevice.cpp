@@ -1098,7 +1098,6 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     std::vector<double> sampleRates;
 
     /* Standard SampleRates */
-    sampleRates.push_back(25e6 / 96); /* 260.42 KSPS (Minimum sample rate). */
     sampleRates.push_back(1.0e6);     /*      1 MSPS. */
     sampleRates.push_back(2.5e6);     /*    2.5 MSPS. */
     sampleRates.push_back(5.0e6);     /*      5 MSPS. */
@@ -1123,7 +1122,7 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
     const int /*direction*/,
     const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
-    results.push_back(SoapySDR::Range(25e6 / 96, 122.88e6));
+    results.push_back(SoapySDR::Range(0.55e6, 122.88e6));
     return results;
 }
 
