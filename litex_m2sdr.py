@@ -265,12 +265,19 @@ class BaseSoC(SoCMini):
             # SATA Capabilities.
             sata_enabled    = with_sata,
             sata_gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
+            sata_mode       = "read+write",
 
             # GPIO Capabilities.
             gpio_enabled    = with_gpio,
 
             # White Rabbit Capabilities.
             wr_enabled      = with_white_rabbit,
+
+            # Board.
+            variant        = variant,
+            jtagbone       = with_jtagbone,
+            eth_sfp        = eth_sfp,
+            wr_sfp         = wr_sfp,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
