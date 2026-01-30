@@ -543,6 +543,16 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     /* Pump UDP helper once with caller timeout (ms). */
     liteeth_udp_process(&_udp, static_cast<int>(timeoutUs / 1000));
 
+    int avail = liteeth_udp_buffers_available_read(&_udp);
+    if (avail <= 0) {
+        return SOAPY_SDR_TIMEOUT;
+    }
+    /* Drop older buffers under load to keep the most recent samples. */
+    while (avail > 1) {
+        (void)liteeth_udp_next_read_buffer(&_udp);
+        avail--;
+    }
+
     uint8_t *src = liteeth_udp_next_read_buffer(&_udp);
     if (!src) {
         return SOAPY_SDR_TIMEOUT;
