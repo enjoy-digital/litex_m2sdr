@@ -559,8 +559,12 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         flags |= SOAPY_SDR_END_ABRUPT;
 
         /* Encode lost buffer count in flags for applications that want it. */
-        flags |= LITEX_HAS_OVERFLOW_COUNT;
-        flags |= (((int)lost_buffers) << LITEX_OVERFLOW_COUNT_SHIFT) & LITEX_OVERFLOW_COUNT_MASK;
+        {
+            const int64_t max_count = (LITEX_OVERFLOW_COUNT_MASK >> LITEX_OVERFLOW_COUNT_SHIFT);
+            const int64_t clamped = (lost_buffers > max_count) ? max_count : lost_buffers;
+            flags |= LITEX_HAS_OVERFLOW_COUNT;
+            flags |= ((int)clamped << LITEX_OVERFLOW_COUNT_SHIFT) & LITEX_OVERFLOW_COUNT_MASK;
+        }
 
         return SOAPY_SDR_OVERFLOW;
     } else {
