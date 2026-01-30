@@ -358,6 +358,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _rx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_rx_stream.buf);
+        _rx_stream.buf = NULL;
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
@@ -366,7 +367,9 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _tx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_tx_stream.buf);
+        _tx_stream.buf = NULL;
 #endif
+        _tx_stream.opened = false;
     }
 }
 
