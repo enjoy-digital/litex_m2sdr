@@ -98,6 +98,31 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("RX stream already opened.");
         }
 
+        /* Determine channels: prioritize searchArgs over the provided vector */
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            selected_channels = parse_channel_list(it->second);
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no device argument overrides it */
+            selected_channels = channels;
+        } else {
+            /* Default to channel 0 if nothing provided */
+            selected_channels = {0};
+        }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid RX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid RX channel index: must be 0 (RX1) or 1 (RX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual RX channels must be {0, 1} for RX1+RX2");
+        }
+
         /* Configure the file descriptor watcher. */
 #if USE_LITEPCIE
         _rx_stream.fds.fd     = _fd;
@@ -135,8 +160,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
                                    : 4096;
 
-        /* Use current (or default 1) channels for sizing; we’ll re-evaluate after channels selection. */
-        const size_t chs       = _nChannels ? _nChannels : 1;
+        const size_t chs       = selected_channels.size();
         const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
         const size_t buf_count = 2;
 
@@ -151,6 +175,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
+    } else {
+        if (_nChannels && selected_channels.size() != _nChannels) {
+            throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
+        }
     }
 
     _rx_buf_size  = _udp.buf_size;
@@ -165,19 +193,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.opened = true;
         _rx_stream.format = format;
 
-        /* Determine channels: prioritize searchArgs over the provided vector */
-        std::vector<size_t> selected_channels;
-        auto it = searchArgs.find("channels");
-        if (it != searchArgs.end()) {
-            selected_channels = parse_channel_list(it->second);
-        } else if (!channels.empty()) {
-            /* Use the provided channels vector if no device argument overrides it */
-            selected_channels = channels;
-        } else {
-            /* Default to channel 0 if nothing provided */
-            selected_channels = {0};
-        }
-
         /* Log the selected RX channels for debugging */
         if (selected_channels.size() == 1) {
             SoapySDR_logf(SOAPY_SDR_INFO, "RX setupStream: Selected channel %zu", selected_channels[0]);
@@ -191,6 +206,31 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
+        }
+
+        /* Determine channels: override provided vector if searchArgs contains "channels" */
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            selected_channels = parse_channel_list(it->second);
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no override is present */
+            selected_channels = channels;
+        } else {
+            /* Default to TX1 if nothing is specified */
+            selected_channels = {0};
+        }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid TX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid TX channel index: must be 0 (TX1) or 1 (TX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual TX channels must be {0, 1} for TX1+TX2");
         }
 
         /* Configure the file descriptor watcher. */
@@ -229,7 +269,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
                                    : 4096;
 
-        const size_t chs       = _nChannels ? _nChannels : 1;
+        const size_t chs       = selected_channels.size();
         const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
         const size_t buf_count = 2;
 
@@ -244,6 +284,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
+    } else {
+        if (_nChannels && selected_channels.size() != _nChannels) {
+            throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
+        }
     }
 
     _tx_buf_size  = _udp.buf_size;
@@ -257,19 +301,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _tx_stream.opened = true;
         _tx_stream.format = format;
-
-        /* Determine channels: override provided vector if searchArgs contains "channels" */
-        std::vector<size_t> selected_channels;
-        auto it = searchArgs.find("channels");
-        if (it != searchArgs.end()) {
-            selected_channels = parse_channel_list(it->second);
-        } else if (!channels.empty()) {
-            /* Use the provided channels vector if no override is present */
-            selected_channels = channels;
-        } else {
-            /* Default to TX1 if nothing is specified */
-            selected_channels = {0};
-        }
 
         _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
