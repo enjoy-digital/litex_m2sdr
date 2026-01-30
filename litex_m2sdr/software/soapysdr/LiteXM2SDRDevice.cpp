@@ -929,9 +929,18 @@ void SoapyLiteXM2SDR::setSampleRate(
     _rateMult = 1.0;
 
 #if USE_LITEPCIE
-    /* For PCIe, if the sample rate is above 61.44 MSPS, switch to 8-bit mode + oversampling. */
-    if (rate > LITEPCIE_8BIT_THRESHOLD) // keeping 16-bit mode unless it is specified in arguments
+    /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
+    if (rate > LITEPCIE_8BIT_THRESHOLD) {
+        if (_bitMode != 8) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
+                rate / 1e6);
+        }
+        _bitMode      = 8;
         _oversampling = 1;
+    } else {
+        _oversampling = 0;
+    }
 #elif USE_LITEETH
     /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
     if (rate > LITEETH_8BIT_THRESHOLD) {
