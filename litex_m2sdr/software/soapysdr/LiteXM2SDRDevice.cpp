@@ -524,7 +524,28 @@ std::string SoapyLiteXM2SDR::getDriverKey(void) const {
 }
 
 std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
-    return "R01";
+    std::string key = "LiteX-M2SDR";
+
+#ifdef CSR_CAPABILITY_BOARD_INFO_ADDR
+    {
+        const uint32_t board_info = litex_m2sdr_readl(_fd, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        const int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) &
+                            ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
+        switch (variant) {
+        case 0:
+            key += "-m2";
+            break;
+        case 1:
+            key += "-baseboard";
+            break;
+        default:
+            key += "-unknown";
+            break;
+        }
+    }
+#endif
+
+    return key;
 }
 
 /***************************************************************************************************
