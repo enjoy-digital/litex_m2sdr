@@ -7,14 +7,11 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
-import time
 import argparse
 
 from migen import *
 
 from litex.gen import *
-from litex.gen.genlib.cdc import BusSynchronizer
-
 from litex.build.generic_platform import Subsignal, Pins
 
 from litex.soc.interconnect.csr import *
@@ -33,15 +30,12 @@ from litex.soc.cores.dna       import DNA
 from litex.soc.cores.gpio      import GPIOOut
 from litex.soc.cores.spi_flash import S7SPIFlash
 
-from litex.build.generic_platform import IOStandard, Subsignal, Pins
+from litex.build.generic_platform import IOStandard
 
 from litepcie.common            import *
 from litepcie.phy.s7pciephy     import S7PCIEPHY
-from litepcie.frontend.ptm      import PCIePTMSniffer
-from litepcie.frontend.ptm      import PTMCapabilities, PTMRequester
 from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 
-from liteeth.common           import convert_ip
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 
@@ -60,7 +54,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
-from litex_m2sdr.gateware.gpio        import GPIO, GPIORXPacker, GPIOTXUnpacker
+from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
 
 from litex_m2sdr.software import generate_litepcie_software
@@ -290,7 +284,6 @@ class BaseSoC(SoCMini):
         self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
 
         # SI5351 ClkIn/Out.
-        si5351_clk_in = Signal()
         si5351_clk0   = platform.request("si5351_clk0")
         si5351_clk1   = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
@@ -779,6 +772,7 @@ class BaseSoC(SoCMini):
         )
 
     def add_pcie_slave_probe(self, depth=4096):
+        assert hasattr(self, "pcie_slave")
         analyzer_signals = [
             self.pcie_slave.bus,
         ]
@@ -836,9 +830,9 @@ class BaseSoC(SoCMini):
 
     # Ethernet.
     def add_eth_tx_probe(self, depth=1024):
-        assert hasattr(self, "eth_streamer")
+        assert hasattr(self, "eth_tx_streamer")
         analyzer_signals = [
-            self.eth_streamer.sink,
+            self.eth_tx_streamer.sink,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = depth,
@@ -996,7 +990,7 @@ def main():
         prog = soc.platform.create_programmer()
         prog.reset()
     
-    # Load Bistream.
+    # Load Bitstream.
     if args.load:
         prog = soc.platform.create_programmer()
         prog.load_bitstream(os.path.join(builder.gateware_dir, soc.build_name + ".bit"))
