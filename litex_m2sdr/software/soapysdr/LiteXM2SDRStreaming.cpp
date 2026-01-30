@@ -561,6 +561,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         _rx_stream.sw_count = _rx_stream.hw_count;
         handle = -1;
 
+        _rx_stream.overflow = true;
         flags |= SOAPY_SDR_END_ABRUPT;
 
         /* Encode lost buffer count in flags for applications that want it. */
@@ -1102,8 +1103,19 @@ int SoapyLiteXM2SDR::readStreamStatus(
     long long &/*timeNs*/,
     const long timeoutUs){
 
-    /* For now we only suport TX stream. */
-    if(stream != TX_STREAM){
+    if (stream == RX_STREAM) {
+        if (_rx_stream.overflow) {
+            _rx_stream.overflow = false;
+            SoapySDR::log(SOAPY_SDR_SSI, "O");
+            return SOAPY_SDR_OVERFLOW;
+        }
+    } else if (stream == TX_STREAM) {
+        if (_tx_stream.underflow) {
+            _tx_stream.underflow = false;
+            SoapySDR::log(SOAPY_SDR_SSI, "U");
+            return SOAPY_SDR_UNDERFLOW;
+        }
+    } else {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
@@ -1113,12 +1125,6 @@ int SoapyLiteXM2SDR::readStreamStatus(
 
     /* Poll for status events until the timeout expires. */
     while (true) {
-        if(_tx_stream.underflow){
-            _tx_stream.underflow=false;
-            SoapySDR::log(SOAPY_SDR_SSI, "U");
-            return SOAPY_SDR_UNDERFLOW;
-        }
-
         /* Sleep for a fraction of the total timeout. */
         const auto sleepTimeUs = std::min<long>(1000, timeoutUs/10);
         std::this_thread::sleep_for(std::chrono::microseconds(sleepTimeUs));
