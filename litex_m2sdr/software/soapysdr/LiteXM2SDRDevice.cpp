@@ -28,12 +28,6 @@
 
 #include "LiteXM2SDRDevice.hpp"
 
-#if USE_LITEETH
-extern "C" {
-#include "liteeth_udp.h"
-}
-#endif
-
 #include <SoapySDR/Registry.hpp>
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
@@ -252,21 +246,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
     _spi_id = spi_register_fd(_fd);
-
-    /* UDP helper (RX+TX enable). Use defaults for buffer_size/count (pass 0) */
-    {
-        const uint16_t stream_port = 2345;
-        const char *listen_ip = nullptr; // bind INADDR_ANY
-        if (liteeth_udp_init(&_udp,
-                             listen_ip, stream_port,
-                             eth_ip.c_str(), stream_port,
-                             /*rx_enable*/1, /*tx_enable*/1,
-                             /*buffer_size*/0, /*buffer_count*/0,
-                             /*nonblock*/0) < 0) {
-            throw std::runtime_error("liteeth_udp_init failed");
-        }
-        _udp_inited = true;
-    }
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 

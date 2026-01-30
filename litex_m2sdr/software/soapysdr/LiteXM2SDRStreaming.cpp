@@ -89,7 +89,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
         const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
-                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 1234);
+                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
 
         const size_t buf_complex = searchArgs.count("udp_buf_complex")
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
@@ -110,6 +110,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("UDP init failed.");
         }
         _udp_inited = true;
+        SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
     }
 
     _rx_buf_size  = _udp.buf_size;
@@ -205,7 +206,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
         const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
-                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 1234);
+                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
 
         const size_t buf_complex = searchArgs.count("udp_buf_complex")
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
@@ -225,6 +226,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("UDP init failed.");
         }
         _udp_inited = true;
+        SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
     }
 
     _tx_buf_size  = _udp.buf_size;
