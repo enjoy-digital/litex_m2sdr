@@ -122,6 +122,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
             throw std::runtime_error("Dual RX channels must be {0, 1} for RX1+RX2");
         }
+        if (_tx_stream.opened && selected_channels.size() != _tx_stream.channels.size()) {
+            throw std::runtime_error("RX/TX channel count mismatch; close TX or use matching channels");
+        }
 
         /* Configure the file descriptor watcher. */
 #if USE_LITEPCIE
@@ -231,6 +234,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
         if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
             throw std::runtime_error("Dual TX channels must be {0, 1} for TX1+TX2");
+        }
+        if (_rx_stream.opened && selected_channels.size() != _rx_stream.channels.size()) {
+            throw std::runtime_error("RX/TX channel count mismatch; close RX or use matching channels");
         }
 
         /* Configure the file descriptor watcher. */
