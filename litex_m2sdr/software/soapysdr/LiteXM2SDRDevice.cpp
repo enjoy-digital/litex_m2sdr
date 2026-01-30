@@ -854,13 +854,23 @@ void SoapyLiteXM2SDR::setFrequency(
     const SoapySDR::Kwargs &/*args*/) {
     std::unique_lock<std::mutex> lock(_mutex);
 
+    if (name != "RF" && name != "BB") {
+        throw std::runtime_error("SoapyLiteXM2SDR::setFrequency(): unsupported name " + name);
+    }
+
+    const std::string freqName = (name == "BB") ? "RF" : name;
+
     SoapySDR::logf(SOAPY_SDR_DEBUG,
-        "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s, %f MHz)",
+        "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s%s, %f MHz)",
         dir2Str(direction),
         channel,
-        name.c_str(),
+        freqName.c_str(),
+        (name == "BB") ? " (BB->RF)" : "",
         frequency / 1e6);
-    _cachedFreqValues[direction][channel][name] = frequency;
+    _cachedFreqValues[direction][channel][freqName] = frequency;
+    if (name == "BB") {
+        _cachedFreqValues[direction][channel]["BB"] = frequency;
+    }
     if (direction == SOAPY_SDR_TX)
         _tx_stream.frequency = frequency;
     if (direction == SOAPY_SDR_RX)
@@ -877,8 +887,25 @@ void SoapyLiteXM2SDR::setFrequency(
 
 double SoapyLiteXM2SDR::getFrequency(
     const int direction,
-    const size_t /*channel*/,
-    const std::string &/*name*/) const {
+    const size_t channel,
+    const std::string &name) const {
+
+    if (name != "RF" && name != "BB") {
+        throw std::runtime_error("SoapyLiteXM2SDR::getFrequency(): unsupported name " + name);
+    }
+
+    const std::string freqName = (name == "BB") ? "RF" : name;
+
+    auto dirIt = _cachedFreqValues.find(direction);
+    if (dirIt != _cachedFreqValues.end()) {
+        auto chIt = dirIt->second.find(channel);
+        if (chIt != dirIt->second.end()) {
+            auto nameIt = chIt->second.find(freqName);
+            if (nameIt != chIt->second.end()) {
+                return nameIt->second;
+            }
+        }
+    }
 
     uint64_t lo_freq = 0;
 
@@ -896,6 +923,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
     const size_t /*channel*/) const {
     std::vector<std::string> opts;
     opts.push_back("RF");
+    opts.push_back("BB");
     return opts;
 }
 
@@ -917,7 +945,7 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
  *                                        Sample Rate API
  **************************************************************************************************/
 
-/* FIXME: Improve listFrequencies. */
+/* listFrequencies now exposes RF and BB; BB currently aliases RF. */
 
 void SoapyLiteXM2SDR::setSampleMode() {
     /* 8-bit mode */
