@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <cstring>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -45,23 +46,72 @@ extern "C" {
 
 /* AD9361 SPI */
 
-static void *spi_conn;
+namespace {
+std::mutex spi_map_mutex;
+std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
+uint8_t spi_next_id = 0;
+
+uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
+{
+    std::lock_guard<std::mutex> lock(spi_map_mutex);
+    uint8_t id = spi_next_id;
+    for (uint16_t i = 0; i < 256; i++) {
+        if (spi_fd_map.find(id) == spi_fd_map.end()) {
+            spi_next_id = static_cast<uint8_t>(id + 1);
+            spi_fd_map[id] = fd;
+            return id;
+        }
+        id = static_cast<uint8_t>(id + 1);
+    }
+    throw std::runtime_error("spi_register_fd(): no free SPI ids available");
+}
+
+void spi_unregister_fd(uint8_t id)
+{
+    std::lock_guard<std::mutex> lock(spi_map_mutex);
+    spi_fd_map.erase(id);
+}
+
+litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
+{
+    std::lock_guard<std::mutex> lock(spi_map_mutex);
+    auto it = spi_fd_map.find(spi->id_no);
+    if (it == spi_fd_map.end()) {
+#if USE_LITEPCIE
+        return FD_INIT;
+#else
+        return nullptr;
+#endif
+    }
+    return it->second;
+}
+} // namespace
 
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
-int spi_write_then_read(struct spi_device * /*spi*/,
+int spi_write_then_read(struct spi_device *spi,
                         const unsigned char *txbuf, unsigned n_tx,
                         unsigned char *rxbuf, unsigned n_rx)
 {
+    litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
+#if USE_LITEPCIE
+    if (fd < 0)
+        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
+    void *conn = (void *)(intptr_t)fd;
+#else
+    if (!fd)
+        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
+    void *conn = fd;
+#endif
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(spi_conn, txbuf[0] << 8 | txbuf[1]);
+        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
 
     /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(spi_conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
 
     /* Unsupported. */
     } else {
@@ -186,7 +236,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (_fd < 0)
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
     /* Global file descriptor for AD9361 lib. */
-    spi_conn = (void *)(intptr_t)_fd;
+    _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 #elif USE_LITEETH
@@ -201,7 +251,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _fd = eb_connect(eth_ip.c_str(), "1234", 1);
     if (!_fd)
         throw std::runtime_error("Can't connect to EtherBone!");
-    spi_conn = _fd;
+    _spi_id = spi_register_fd(_fd);
 
     /* UDP helper (RX+TX enable). Use defaults for buffer_size/count (pass 0) */
     {
@@ -357,6 +407,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     default_init_param.gpio_sync          = -1;
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
+    default_init_param.id_no = _spi_id;
     ad9361_init(&ad9361_phy, &default_init_param, do_init);
 
     if (do_init) {
@@ -414,6 +465,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
+    spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
 #if USE_LITEPCIE
          /* Release the DMA engine. */

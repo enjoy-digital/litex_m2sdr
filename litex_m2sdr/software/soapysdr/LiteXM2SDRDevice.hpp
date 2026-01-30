@@ -17,6 +17,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <cstdint>
 
 #include "liblitepcie.h"
 #include "etherbone.h"
@@ -488,6 +489,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     litex_m2sdr_device_desc_t _fd;
     struct ad9361_rf_phy *ad9361_phy;
+    uint8_t _spi_id = 0;
 
     uint32_t _bitMode           = 16;
     uint32_t _oversampling      = 0;
