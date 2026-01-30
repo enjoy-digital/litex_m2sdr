@@ -401,6 +401,7 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.time0_count = _rx_stream.user_count;
         _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
         _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        _rx_stream.time_warned = false;
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "RX timed activation requested for %lld ns; timing not supported, starting immediately",
@@ -560,6 +561,14 @@ static inline long long samples_to_ns(double sample_rate, long long samples)
     return static_cast<long long>(std::llround(ns));
 }
 
+static inline void warn_once_time(SoapyLiteXM2SDR::RXStream &rx, const char *msg)
+{
+    if (!rx.time_warned) {
+        SoapySDR::log(SOAPY_SDR_WARNING, msg);
+        rx.time_warned = true;
+    }
+}
+
 /* Acquire a buffer for reading. */
 int SoapyLiteXM2SDR::acquireReadBuffer(
     SoapySDR::Stream *stream,
@@ -654,6 +663,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         _rx_stream.time0_count = _rx_stream.user_count;
         _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
         _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        _rx_stream.time_warned = false;
 
         /* Encode lost buffer count in flags for applications that want it. */
         {
@@ -715,11 +725,20 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
                      samples_to_ns(_rx_stream.samplerate,
                                    static_cast<long long>(_rx_stream.user_count - _rx_stream.time0_count) *
                                    static_cast<long long>(samples_per_buffer));
+            const long long now = this->getHardwareTime("");
+            if (now <= _rx_stream.last_time_ns) {
+                _rx_stream.time_valid = false;
+                warn_once_time(_rx_stream, "RX hardware time appears stuck; disabling SOAPY_SDR_HAS_TIME");
+            }
             flags |= SOAPY_SDR_HAS_TIME;
             if (timeNs < _rx_stream.last_time_ns) {
                 timeNs = _rx_stream.last_time_ns;
             } else {
                 _rx_stream.last_time_ns = timeNs;
+            }
+        } else if (!_rx_stream.time_valid) {
+            if (_rx_stream.samplerate <= 0.0) {
+                warn_once_time(_rx_stream, "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
             }
         }
         return samples_per_buffer;
@@ -1097,6 +1116,8 @@ int SoapyLiteXM2SDR::readStream(
             } else {
                 _rx_stream.last_time_ns = timeNs;
             }
+        } else if (_rx_stream.samplerate <= 0.0) {
+            warn_once_time(_rx_stream, "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
         }
 
         /* Read out channels from the remainder buffer. */
@@ -1156,6 +1177,8 @@ int SoapyLiteXM2SDR::readStream(
         } else {
             _rx_stream.last_time_ns = timeNs;
         }
+    } else if (_rx_stream.samplerate <= 0.0) {
+        warn_once_time(_rx_stream, "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
     }
 
     /* Read out channels from the new buffer. */
