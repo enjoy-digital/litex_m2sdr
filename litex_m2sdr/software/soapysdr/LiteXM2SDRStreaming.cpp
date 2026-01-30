@@ -195,6 +195,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _rx_stream.opened = true;
         _rx_stream.format = format;
+        _rx_stream.remainderHandle = -1;
+        _rx_stream.remainderSamps  = 0;
+        _rx_stream.remainderOffset = 0;
 
         /* Log the selected RX channels for debugging */
         if (selected_channels.size() == 1) {
@@ -307,6 +310,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _tx_stream.opened = true;
         _tx_stream.format = format;
+        _tx_stream.remainderHandle = -1;
+        _tx_stream.remainderSamps  = 0;
+        _tx_stream.remainderOffset = 0;
 
         _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
