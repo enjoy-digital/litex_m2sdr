@@ -376,8 +376,8 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 /* Activate the specified stream (configure the DMA engines). */
 int SoapyLiteXM2SDR::activateStream(
     SoapySDR::Stream *stream,
-    const int /*flags*/,
-    const long long /*timeNs*/,
+    const int flags,
+    const long long timeNs,
     const size_t /*numElems*/) {
 
     /* RX */
@@ -396,6 +396,11 @@ int SoapyLiteXM2SDR::activateStream(
 #endif
         _rx_stream.user_count = 0;
         _rx_stream.burst_end = false;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "RX timed activation requested for %lld ns; timing not supported, starting immediately",
+                (long long)timeNs);
+        }
 
     /* TX */
     } else if (stream == TX_STREAM) {
@@ -411,7 +416,15 @@ int SoapyLiteXM2SDR::activateStream(
         /* Crossbar Mux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
         /* No explicit start; pacing handled by client cadence if needed. */
+        _tx_stream.user_count = 0;
 #endif
+        _tx_stream.pendingWriteBufs.clear();
+        _tx_stream.burst_end = false;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_DEBUG,
+                "TX timed activation requested for %lld ns; timing is enforced on buffer submission",
+                (long long)timeNs);
+        }
     }
 
     return 0;
@@ -420,8 +433,8 @@ int SoapyLiteXM2SDR::activateStream(
 /* Deactivate the specified stream (disable DMA engine). */
 int SoapyLiteXM2SDR::deactivateStream(
     SoapySDR::Stream *stream,
-    const int /*flags*/,
-    const long long /*timeNs*/) {
+    const int flags,
+    const long long timeNs) {
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
 #if USE_LITEPCIE
@@ -433,6 +446,11 @@ int SoapyLiteXM2SDR::deactivateStream(
          * will be set
          */
         _rx_stream.burst_end = true;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "RX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
+                (long long)timeNs);
+        }
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
         /* Disable the DMA engine for TX. */
@@ -440,6 +458,11 @@ int SoapyLiteXM2SDR::deactivateStream(
 #elif USE_LITEETH
         /* No-op for UDP helper. */
 #endif
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "TX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
+                (long long)timeNs);
+        }
     }
     return 0;
 }
@@ -770,7 +793,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         return SOAPY_SDR_TIMEOUT;
     }
     buffs[0] = dst;
-    handle   = 0; /* submission is done in releaseWriteBuffer() */
+    handle   = _tx_stream.user_count++;
+    _tx_stream.pendingWriteBufs[handle] = dst;
     (void)timeoutUs;
     return getStreamMTU(stream);
 #endif
@@ -778,12 +802,49 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
 
 /* Release a write buffer after use. */
 void SoapyLiteXM2SDR::releaseWriteBuffer(
-    SoapySDR::Stream */*stream*/,
+    SoapySDR::Stream *stream,
     size_t handle,
-    const size_t /*numElems*/,
-    int &/*flags*/,
-    const long long /*timeNs*/) {
-    /* XXX: Inspect user-provided numElems and flags, and act upon them? */
+    const size_t numElems,
+    int &flags,
+    const long long timeNs) {
+    if ((flags & SOAPY_SDR_HAS_TIME) && timeNs > 0) {
+        while (true) {
+            const long long now = this->getHardwareTime("");
+            if (now >= timeNs) {
+                break;
+            }
+            const long long delta = timeNs - now;
+            const long long sleep_us = std::min<long long>(1000, std::max<long long>(1, delta / 1000));
+            std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
+        }
+    }
+
+    if (flags & SOAPY_SDR_END_BURST) {
+        _tx_stream.burst_end = true;
+    }
+
+    const size_t mtu = this->getStreamMTU(stream);
+    if (numElems < mtu) {
+        uint8_t *buf = nullptr;
+#if USE_LITEPCIE
+        const size_t buf_offset = handle % _dma_mmap_info.dma_tx_buf_count;
+        buf = reinterpret_cast<uint8_t*>(_tx_stream.buf) +
+              (buf_offset * _dma_mmap_info.dma_tx_buf_size) + TX_DMA_HEADER_SIZE;
+#elif USE_LITEETH
+        auto it = _tx_stream.pendingWriteBufs.find(handle);
+        if (it != _tx_stream.pendingWriteBufs.end()) {
+            buf = it->second;
+            _tx_stream.pendingWriteBufs.erase(it);
+        } else {
+            buf = reinterpret_cast<uint8_t*>(_tx_stream.remainderBuff);
+        }
+#endif
+        if (buf) {
+            const size_t offset_bytes = numElems * _nChannels * _bytesPerComplex;
+            const size_t zero_bytes = (mtu - numElems) * _nChannels * _bytesPerComplex;
+            std::memset(buf + offset_bytes, 0, zero_bytes);
+        }
+    }
 
 #if USE_LITEPCIE
     /* Update the DMA counters so that the engine can submit this buffer. */
@@ -791,7 +852,12 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     mmap_dma_update.sw_count = handle + 1;
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
 #elif USE_LITEETH
-    (void)handle;
+    if (numElems >= mtu) {
+        auto it = _tx_stream.pendingWriteBufs.find(handle);
+        if (it != _tx_stream.pendingWriteBufs.end()) {
+            _tx_stream.pendingWriteBufs.erase(it);
+        }
+    }
     if (liteeth_udp_write_submit(&_udp) < 0) {
         _tx_stream.underflow = true;
         SoapySDR_logf(SOAPY_SDR_ERROR, "UDP write_submit failed.");

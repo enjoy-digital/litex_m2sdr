@@ -438,6 +438,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
         bool   burst_end   = false;
         int32_t burst_samps = 0;
+        std::map<size_t, uint8_t*> pendingWriteBufs;
     };
 
     RXStream _rx_stream;
