@@ -17,6 +17,7 @@
 #include <sstream>
 #include <algorithm>
 #include <cstdlib>
+#include <cmath>
 
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
@@ -396,6 +397,10 @@ int SoapyLiteXM2SDR::activateStream(
 #endif
         _rx_stream.user_count = 0;
         _rx_stream.burst_end = false;
+        _rx_stream.time0_ns = this->getHardwareTime("");
+        _rx_stream.time0_count = _rx_stream.user_count;
+        _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+        _rx_stream.last_time_ns = _rx_stream.time0_ns;
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "RX timed activation requested for %lld ns; timing not supported, starting immediately",
@@ -546,6 +551,15 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
 
 static constexpr uint64_t DMA_HEADER_SYNC_WORD = 0x5aa55aa55aa55aa5ULL;
 
+static inline long long samples_to_ns(double sample_rate, long long samples)
+{
+    if (sample_rate <= 0.0) {
+        return 0;
+    }
+    const double ns = (static_cast<double>(samples) * 1e9) / sample_rate;
+    return static_cast<long long>(std::llround(ns));
+}
+
 /* Acquire a buffer for reading. */
 int SoapyLiteXM2SDR::acquireReadBuffer(
     SoapySDR::Stream *stream,
@@ -636,6 +650,10 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
         _rx_stream.overflow = true;
         flags |= SOAPY_SDR_END_ABRUPT;
+        _rx_stream.time0_ns = this->getHardwareTime("");
+        _rx_stream.time0_count = _rx_stream.user_count;
+        _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+        _rx_stream.last_time_ns = _rx_stream.time0_ns;
 
         /* Encode lost buffer count in flags for applications that want it. */
         {
@@ -667,6 +685,12 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
             /* Assign the extracted timestamp to the provided timeNs reference. */
             timeNs = static_cast<long long>(timestamp);
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
 
             /* Track the previous timestamp */
             static uint64_t prevTimestamp = 0;
@@ -685,7 +709,20 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         handle = _rx_stream.user_count;
         _rx_stream.user_count++;
 
-        return getStreamMTU(stream);
+        const size_t samples_per_buffer = getStreamMTU(stream);
+        if (_rx_stream.time_valid && !(flags & SOAPY_SDR_HAS_TIME)) {
+            timeNs = _rx_stream.time0_ns +
+                     samples_to_ns(_rx_stream.samplerate,
+                                   static_cast<long long>(_rx_stream.user_count - _rx_stream.time0_count) *
+                                   static_cast<long long>(samples_per_buffer));
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
+        }
+        return samples_per_buffer;
     }
 #endif
 }
@@ -1051,6 +1088,17 @@ int SoapyLiteXM2SDR::readStream(
             samp_avail = n;
         }
 
+        if (_rx_stream.time_valid) {
+            timeNs = _rx_stream.remainderTimeNs +
+                     samples_to_ns(_rx_stream.samplerate, _rx_stream.remainderOffset);
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
+        }
+
         /* Read out channels from the remainder buffer. */
         for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
             const uint32_t chan = _rx_stream.channels[i];
@@ -1095,8 +1143,20 @@ int SoapyLiteXM2SDR::readStream(
 
     _rx_stream.remainderHandle = handle;
     _rx_stream.remainderSamps = ret;
+    _rx_stream.remainderTimeNs = timeNs;
 
     const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
+
+    if (_rx_stream.time_valid) {
+        timeNs = _rx_stream.remainderTimeNs +
+                 samples_to_ns(_rx_stream.samplerate, _rx_stream.remainderOffset);
+        flags |= SOAPY_SDR_HAS_TIME;
+        if (timeNs < _rx_stream.last_time_ns) {
+            timeNs = _rx_stream.last_time_ns;
+        } else {
+            _rx_stream.last_time_ns = timeNs;
+        }
+    }
 
     /* Read out channels from the new buffer. */
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {

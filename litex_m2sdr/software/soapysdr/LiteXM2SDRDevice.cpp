@@ -1080,6 +1080,13 @@ void SoapyLiteXM2SDR::setSampleRate(
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
+
+    if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
+        _rx_stream.time0_ns = this->getHardwareTime("");
+        _rx_stream.time0_count = _rx_stream.user_count;
+        _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+        _rx_stream.last_time_ns = _rx_stream.time0_ns;
+    }
 }
 
 
