@@ -1010,6 +1010,17 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
+    else {
+        /* Restore default FIR configs when above 2.5 Msps. */
+        ad9361_phy->rx_fir_dec    = 1;
+        ad9361_phy->tx_fir_int    = 1;
+        ad9361_phy->bypass_rx_fir = 0;
+        ad9361_phy->bypass_tx_fir = 0;
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
+        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+    }
 
     /* Set the sample rate for the TX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_TX) {
