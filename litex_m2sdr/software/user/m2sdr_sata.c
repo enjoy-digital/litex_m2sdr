@@ -52,7 +52,12 @@ static uint64_t parse_u64(const char *s)
 
 static uint32_t parse_u32(const char *s)
 {
-    return (uint32_t)parse_u64(s);
+    uint64_t v = parse_u64(s);
+    if (v > UINT32_MAX) {
+        fprintf(stderr, "Value out of range for u32: %" PRIu64 "\n", v);
+        exit(1);
+    }
+    return (uint32_t)v;
 }
 
 static void msleep(unsigned ms)
@@ -555,6 +560,10 @@ int main(int argc, char **argv)
         if (optind + 2 > argc) help();
         uint64_t dst_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            fprintf(stderr, "nsectors must be > 0\n");
+            return 1;
+        }
         do_record(dst_sector, nsectors, timeout_ms);
         return 0;
     }
@@ -563,6 +572,10 @@ int main(int argc, char **argv)
         if (optind + 2 > argc) help();
         uint64_t src_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            fprintf(stderr, "nsectors must be > 0\n");
+            return 1;
+        }
         do_play(src_sector, nsectors, timeout_ms);
         return 0;
     }
@@ -572,6 +585,10 @@ int main(int argc, char **argv)
         uint64_t src_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
         const char *dst     = argv[optind++];
+        if (nsectors == 0) {
+            fprintf(stderr, "nsectors must be > 0\n");
+            return 1;
+        }
         do_replay(src_sector, nsectors, dst, timeout_ms);
         return 0;
     }
@@ -581,6 +598,10 @@ int main(int argc, char **argv)
         uint64_t src_sector = parse_u64(argv[optind++]);
         uint64_t dst_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            fprintf(stderr, "nsectors must be > 0\n");
+            return 1;
+        }
         do_copy(src_sector, dst_sector, nsectors, timeout_ms);
         return 0;
     }
