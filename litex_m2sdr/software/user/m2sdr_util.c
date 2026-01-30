@@ -491,6 +491,15 @@ static void info(void)
     bool wr_enabled   = (features >> CSR_CAPABILITY_FEATURES_WR_OFFSET)   & ((1 << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1);
     bool jtagbone_enabled = (features >> CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1);
 
+    {
+        uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
+        const char *variant_str[] = {"M.2", "Baseboard", "Reserved", "Reserved"};
+        const char *variant_name  = (variant < 4) ? variant_str[variant] : "Unknown";
+        printf("Board:\n");
+        printf("  Variant        : %s\n", variant_name);
+    }
+
     printf("Features:\n");
     printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
     printf("  Ethernet       : %s\n", eth_enabled  ? "Yes" : "No");
@@ -498,21 +507,6 @@ static void info(void)
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
-
-    {
-        uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
-        int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
-        int eth_sfp  = (board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
-        int wr_sfp   = (board_info >> CSR_CAPABILITY_BOARD_INFO_WR_SFP_OFFSET)  & ((1 << CSR_CAPABILITY_BOARD_INFO_WR_SFP_SIZE)  - 1);
-        const char *variant_str[] = {"M.2", "Baseboard", "Reserved", "Reserved"};
-        const char *variant_name  = (variant < 4) ? variant_str[variant] : "Unknown";
-        printf("Board:\n");
-        printf("  Variant        : %s\n", variant_name);
-        if (eth_enabled)
-            printf("  Ethernet SFP   : %d\n", eth_sfp);
-        if (wr_enabled)
-            printf("  WR SFP         : %d\n", wr_sfp);
-    }
 
     if (pcie_enabled) {
         uint32_t pcie_config = m2sdr_readl(conn, CSR_CAPABILITY_PCIE_CONFIG_ADDR);
@@ -531,6 +525,11 @@ static void info(void)
         int eth_speed = (eth_config >> CSR_CAPABILITY_ETH_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_ETH_CONFIG_SPEED_SIZE) - 1);
         const char *eth_speed_str[] = {"1Gbps", "2.5Gbps"};
         printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed]);
+        {
+            uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+            int eth_sfp  = (board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
+            printf("  Ethernet SFP   : %d\n", eth_sfp);
+        }
     }
 
     if (sata_enabled) {
@@ -542,6 +541,12 @@ static void info(void)
         const char *sata_mode_str[] = {"Read-only", "Write-only", "Read+Write", "Reserved"};
         const char *sata_mode_name = (sata_mode < 4) ? sata_mode_str[sata_mode] : "Unknown";
         printf("  SATA Mode      : %s\n", sata_mode_name);
+    }
+
+    if (wr_enabled) {
+        uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        int wr_sfp   = (board_info >> CSR_CAPABILITY_BOARD_INFO_WR_SFP_OFFSET)  & ((1 << CSR_CAPABILITY_BOARD_INFO_WR_SFP_SIZE)  - 1);
+        printf("  WR SFP         : %d\n", wr_sfp);
     }
 #endif
     printf("\n");
