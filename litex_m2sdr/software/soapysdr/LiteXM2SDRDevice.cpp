@@ -559,7 +559,7 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 ***************************************************************************************************/
 
 size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
-    return this->_nChannels;
+    return 2;
 }
 
 bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
