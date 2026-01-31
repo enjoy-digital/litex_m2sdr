@@ -84,6 +84,12 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
 
 #endif
 
+    /* Clamp amplitude to safe range */
+    if (amplitude < 0.0)
+        amplitude = 0.0;
+    if (amplitude > 1.0)
+        amplitude = 1.0;
+
     /* Print parameters */
     printf("Starting signal generation with parameters:\n");
     printf("  Device: %s\n", device_name);
@@ -114,6 +120,7 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
 
     /* Seed random number generator for white noise */
     srand(time(NULL));
+    uint32_t lfsr = (uint32_t)rand() | 1u;
 
     /* Test Loop */
     last_time = get_time_ms();
@@ -151,8 +158,14 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
                     phi += omega;
                     if (phi >= 2 * M_PI) phi -= 2 * M_PI;
                 } else if (strcmp(signal_type, "white") == 0) {
-                    I = ((float)rand() / RAND_MAX * 2.0 - 1.0) * amplitude;
-                    Q = ((float)rand() / RAND_MAX * 2.0 - 1.0) * amplitude;
+                    /* Fast LFSR-based noise (avoid rand() in hot loop) */
+                    lfsr ^= lfsr << 13;
+                    lfsr ^= lfsr >> 17;
+                    lfsr ^= lfsr << 5;
+                    int16_t ni = (int16_t)(lfsr & 0xFFFF);
+                    int16_t nq = (int16_t)((lfsr >> 16) & 0xFFFF);
+                    I = (ni / 32768.0f) * amplitude;
+                    Q = (nq / 32768.0f) * amplitude;
                 } else if (strcmp(signal_type, "prbs") == 0) {
                     int32_t value_I = 0;
                     int32_t value_Q = 0;
