@@ -50,30 +50,51 @@ void intHandler(int dummy) {
 /* Connection Functions */
 /*----------------------*/
 
+static void *g_conn = NULL;
+
 static void * m2sdr_open(void) {
+    if (g_conn)
+        return g_conn;
 #ifdef USE_LITEPCIE
     int fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    g_conn = (void *)(intptr_t)fd;
+    return g_conn;
 #elif defined(USE_LITEETH)
     struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
     if (!eb) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    g_conn = eb;
+    return g_conn;
 #endif
 }
 
 static void m2sdr_close(void *conn) {
+    if (!conn)
+        return;
 #ifdef USE_LITEPCIE
     close((int)(intptr_t)conn);
 #elif defined(USE_LITEETH)
     eb_disconnect((struct eb_connection **)&conn);
 #endif
+    if (conn == g_conn)
+        g_conn = NULL;
+}
+
+static void m2sdr_close_global(void) {
+#ifdef USE_LITEPCIE
+    if (g_conn)
+        close((int)(intptr_t)g_conn);
+#elif defined(USE_LITEETH)
+    if (g_conn)
+        eb_disconnect((struct eb_connection **)&g_conn);
+#endif
+    g_conn = NULL;
 }
 
 /* AD9361 */
@@ -101,8 +122,6 @@ int spi_write_then_read(struct spi_device *spi,
         m2sdr_close(conn);
         exit(1);
     }
-
-    m2sdr_close(conn);
 
     return 0;
 }
@@ -677,6 +696,8 @@ int main(int argc, char **argv)
     /* Initialize RF. */
     printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
     m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain1, rx_gain2, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
+
+    m2sdr_close_global();
 
     return 0;
 }
