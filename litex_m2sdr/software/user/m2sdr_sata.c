@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
@@ -63,6 +64,13 @@ static uint32_t parse_u32(const char *s)
 static void msleep(unsigned ms)
 {
     usleep(ms * 1000);
+}
+
+static int64_t get_time_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 /* Connection functions ------------------------------------------------------ */
@@ -244,9 +252,12 @@ static void wait_done(const char *name,
                       uint32_t (*done_fn)(void *),
                       uint32_t (*err_fn)(void *),
                       void *conn,
-                      int timeout_ms)
+                      int timeout_ms,
+                      uint64_t nsectors)
 {
     int elapsed = 0;
+    int64_t start = get_time_ms();
+    int64_t last  = start;
     for (;;) {
         uint32_t done = done_fn(conn);
         uint32_t err  = err_fn(conn);
@@ -258,6 +269,14 @@ static void wait_done(const char *name,
         if (timeout_ms >= 0 && elapsed >= timeout_ms) {
             fprintf(stderr, "%s: timeout\n", name);
             exit(1);
+        }
+        int64_t now = get_time_ms();
+        if (now - last >= 500) {
+            double mb = (double)nsectors * 512.0 / (1024.0 * 1024.0);
+            double s  = (double)(now - start) / 1000.0;
+            double mbps = (s > 0.0) ? (mb / s) : 0.0;
+            fprintf(stderr, "%s: in progress (%.1f MB, %.2f MB/s)\n", name, mb, mbps);
+            last = now;
         }
         msleep(10);
         elapsed += 10;
@@ -279,7 +298,7 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
     sata_rx_program(conn, dst_sector, nsectors);
     sata_rx_start(conn);
 
-    wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms);
+    wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
 
     m2sdr_close(conn);
 }
@@ -299,7 +318,7 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
     sata_tx_program(conn, src_sector, nsectors);
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms);
+    wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
 
     m2sdr_close(conn);
 }
@@ -318,7 +337,7 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
     sata_tx_program(conn, src_sector, nsectors);
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms);
+    wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
 
     m2sdr_close(conn);
 }
@@ -342,8 +361,8 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
     msleep(5);
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms);
-    wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms);
+    wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
 
     m2sdr_close(conn);
 }
