@@ -19,6 +19,7 @@
 #include <time.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -51,6 +52,16 @@ sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     keep_running = 0;
+}
+
+static bool confirm_flash_write(void)
+{
+    char buf[8];
+    fprintf(stderr, "WARNING: flash_write can overwrite the FPGA image.\n");
+    fprintf(stderr, "Type 'YES' to continue: ");
+    if (!fgets(buf, sizeof(buf), stdin))
+        return false;
+    return (strncmp(buf, "YES", 3) == 0);
 }
 
 /* Connection Functions */
@@ -1533,6 +1544,10 @@ int main(int argc, char **argv)
         filename = argv[optind++];
         if (optind < argc)
             offset = strtoul(argv[optind++], NULL, 0);
+        if (!confirm_flash_write()) {
+            fprintf(stderr, "Aborted.\n");
+            exit(1);
+        }
         flash_write(filename, offset);
     }
 #endif
