@@ -693,6 +693,33 @@ int main(int argc, char **argv)
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
     #endif
 
+    /* Basic range checks (avoid invalid AD9361 configs). */
+    if (samplerate < 550000) {
+        fprintf(stderr, "Invalid samplerate: %u (must be >= 550000)\n", samplerate);
+        exit(1);
+    }
+    if (bandwidth < 200000 || bandwidth > 56000000) {
+        fprintf(stderr, "Invalid bandwidth: %d (must be 200k..56M)\n", bandwidth);
+        exit(1);
+    }
+    if (tx_freq < 47000000 || tx_freq > 6000000000LL) {
+        fprintf(stderr, "Invalid tx_freq: %" PRId64 " (must be 47M..6G)\n", tx_freq);
+        exit(1);
+    }
+    if (rx_freq < 70000000 || rx_freq > 6000000000LL) {
+        fprintf(stderr, "Invalid rx_freq: %" PRId64 " (must be 70M..6G)\n", rx_freq);
+        exit(1);
+    }
+    if (tx_gain < -89 || tx_gain > 0) {
+        fprintf(stderr, "Invalid tx_gain: %" PRId64 " (must be -89..0 dB)\n", tx_gain);
+        exit(1);
+    }
+    if (rx_gain1 < 0 || rx_gain1 > 73 || rx_gain2 < 0 || rx_gain2 > 73) {
+        fprintf(stderr, "Invalid rx_gain: %" PRId64 ", %" PRId64 " (must be 0..73 dB)\n",
+                rx_gain1, rx_gain2);
+        exit(1);
+    }
+
     /* Initialize RF. */
     printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
     m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain1, rx_gain2, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
