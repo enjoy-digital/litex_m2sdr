@@ -99,18 +99,27 @@ static void liteuart_work(struct work_struct *w)
 	struct liteuart_port *uart = container_of(w, struct liteuart_port, work);
 	struct uart_port *port = &uart->port;
 	unsigned char __iomem *membase = port->membase;
-	unsigned int flg = TTY_NORMAL;
-	int ch;
 	unsigned long status;
+	unsigned char buf[256];
+	unsigned int buflen = 0;
 
 	while ((status = !litex_read8(membase + OFF_RXEMPTY)) == 1) {
-		ch = litex_read8(membase + OFF_RXTX);
+		int ch = litex_read8(membase + OFF_RXTX);
 		port->icount.rx++;
 
 		/* no overflow bits in status */
-		if (!(uart_handle_sysrq_char(port, ch)))
-			uart_insert_char(port, status, 0, ch, flg);
+		if (uart_handle_sysrq_char(port, ch))
+			continue;
 
+		buf[buflen++] = (unsigned char)ch;
+		if (buflen == sizeof(buf)) {
+			tty_insert_flip_string(&port->state->port, buf, buflen);
+			tty_flip_buffer_push(&port->state->port);
+			buflen = 0;
+		}
+	}
+	if (buflen) {
+		tty_insert_flip_string(&port->state->port, buf, buflen);
 		tty_flip_buffer_push(&port->state->port);
 	}
 }
@@ -124,25 +133,27 @@ static void liteuart_timer(struct timer_list *t)
 #endif
 	struct uart_port *port = &uart->port;
 	unsigned char __iomem *membase = port->membase;
-	unsigned int flg = TTY_NORMAL;
-	int ch;
 	unsigned long status;
-	uint16_t length = 0;
+	unsigned char buf[256];
+	unsigned int buflen = 0;
 
 	while ((status = !litex_read8(membase + OFF_RXEMPTY)) == 1) {
-		/* stop blocking this callback: delegate to a workqueue */
-		if (length > 256) {
-			queue_work(uart->workqueue, &uart->work);
-			break;
-		}
-		length++;
-		ch = litex_read8(membase + OFF_RXTX);
+		int ch = litex_read8(membase + OFF_RXTX);
 		port->icount.rx++;
 
 		/* no overflow bits in status */
-		if (!(uart_handle_sysrq_char(port, ch)))
-			uart_insert_char(port, status, 0, ch, flg);
+		if (uart_handle_sysrq_char(port, ch))
+			continue;
 
+		buf[buflen++] = (unsigned char)ch;
+		if (buflen == sizeof(buf)) {
+			tty_insert_flip_string(&port->state->port, buf, buflen);
+			tty_flip_buffer_push(&port->state->port);
+			buflen = 0;
+		}
+	}
+	if (buflen) {
+		tty_insert_flip_string(&port->state->port, buf, buflen);
 		tty_flip_buffer_push(&port->state->port);
 	}
 
