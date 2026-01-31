@@ -126,6 +126,9 @@ MODULE_PARM_DESC(no_bounce, "Never bounce (debug only; will error if DMA addr >=
 #define SECTOR_SIZE 512
 #endif
 #define SECTOR_SHIFT 9
+#define LITESATA_MAX_SECTORS (4096)            /* 2 MiB */
+#define LITESATA_MAX_SEGMENTS (64)
+#define LITESATA_MAX_SEGMENT_SIZE (2 * 1024 * 1024)
 
 struct litesata_dev {
 	struct device *dev;
@@ -540,6 +543,9 @@ static int litesata_probe(struct platform_device *pdev)
 		struct queue_limits lim = {
 			.physical_block_size = SECTOR_SIZE,
 			.logical_block_size  = SECTOR_SIZE,
+			.max_hw_sectors      = LITESATA_MAX_SECTORS,
+			.max_segments        = LITESATA_MAX_SEGMENTS,
+			.max_segment_size    = LITESATA_MAX_SEGMENT_SIZE,
 		};
 		gendisk = blk_alloc_disk(&lim, NUMA_NO_NODE);
 	}
@@ -548,6 +554,9 @@ static int litesata_probe(struct platform_device *pdev)
 	if (!IS_ERR_OR_NULL(gendisk) && gendisk->queue) {
 		blk_queue_logical_block_size(gendisk->queue, SECTOR_SIZE);
 		blk_queue_physical_block_size(gendisk->queue, SECTOR_SIZE);
+		blk_queue_max_hw_sectors(gendisk->queue, LITESATA_MAX_SECTORS);
+		blk_queue_max_segments(gendisk->queue, LITESATA_MAX_SEGMENTS);
+		blk_queue_max_segment_size(gendisk->queue, LITESATA_MAX_SEGMENT_SIZE);
 	}
 #endif
 	if (IS_ERR(gendisk))
