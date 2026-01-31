@@ -290,7 +290,7 @@ static void liteuart_set_termios(struct uart_port *port, struct ktermios *new,
 	spin_lock_irqsave(&port->lock, flags);
 
 	/* update baudrate */
-	baud = uart_get_baud_rate(port, new, old, 0, 460800);
+	baud = uart_get_baud_rate(port, new, old, 0, 2000000);
 	uart_update_timeout(port, new->c_cflag, baud);
 
 	spin_unlock_irqrestore(&port->lock, flags);
