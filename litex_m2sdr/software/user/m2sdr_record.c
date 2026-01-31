@@ -135,6 +135,11 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
                     to_write = size - total_len;
                 }
                 len = fwrite(buf_rd + data_off, 1, to_write, fo);
+                if (len != to_write) {
+                    perror("fwrite");
+                    keep_running = 0;
+                    break;
+                }
                 total_len += len;
             }
         }
@@ -288,6 +293,11 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
                     to_write = size - total_len;
 
                 size_t n = fwrite(buf + data_off, 1, to_write, fo);
+                if (n != to_write) {
+                    perror("fwrite");
+                    keep_running = 0;
+                    break;
+                }
                 total_len += n;
             }
 

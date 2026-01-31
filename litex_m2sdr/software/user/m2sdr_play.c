@@ -153,6 +153,10 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
 
             /* Read data from File and fill Write buffer */
             len = fread(buf_wr, 1, DMA_BUFFER_SIZE, fi);
+            if (ferror(fi)) {
+                perror("fread");
+                keep_running = 0;
+            }
             if (feof(fi)) {
                 /* Rewind on end of file, but not for stdin */
                 current_loop += 1;
