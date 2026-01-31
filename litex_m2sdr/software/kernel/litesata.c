@@ -133,14 +133,16 @@ MODULE_PARM_DESC(no_bounce, "Never bounce (debug only; will error if DMA addr >=
 struct litesata_dev {
 	struct device *dev;
 
-	struct mutex lock;
+	struct mutex lock_reader;
+	struct mutex lock_writer;
 
 	void __iomem *lsident;
 	void __iomem *lsphy;
 	void __iomem *lsreader;
 	void __iomem *lswriter;
 
-	struct completion dma_done; /* completed by MSI notify hooks */
+	struct completion dma_done_reader; /* completed by MSI notify hooks */
+	struct completion dma_done_writer; /* completed by MSI notify hooks */
 	bool dma_32bit;
 };
 
@@ -160,7 +162,7 @@ void litesata_msi_signal_reader(void) /* SECTOR2MEM done */
 	struct litesata_dev *lbd = READ_ONCE(lbd_global);
 	if (lbd) {
 		atomic64_inc(&litesata_msi_reader_cnt);
-		complete(&lbd->dma_done);
+		complete(&lbd->dma_done_reader);
 	}
 }
 
@@ -171,7 +173,7 @@ void litesata_msi_signal_writer(void) /* MEM2SECTOR done */
 	struct litesata_dev *lbd = READ_ONCE(lbd_global);
 	if (lbd) {
 		atomic64_inc(&litesata_msi_writer_cnt);
-		complete(&lbd->dma_done);
+		complete(&lbd->dma_done_writer);
 	}
 }
 EXPORT_SYMBOL_GPL(litesata_msi_signal_writer);
@@ -227,13 +229,14 @@ static int litesata_wait_done(struct litesata_dev *lbd, void __iomem *regs, unsi
 
 /* caller must hold lbd->lock to prevent interleaving transfers */
 static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
-			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count)
+			   dma_addr_t host_bus_addr, sector_t sector, unsigned int count,
+			   struct completion *done)
 {
 	bool use_msi = !litesata_force_polling && READ_ONCE(lbd_global) != NULL;
 	int ret;
 
 	if (use_msi)
-		reinit_completion(&lbd->dma_done);
+		reinit_completion(done);
 
 	/* Program DMA */
 	litex_write64(regs + LITESATA_DMA_SECT, sector);
@@ -264,7 +267,7 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 	 */
 	if (use_msi) {
 		unsigned long to = msecs_to_jiffies(LITESATA_DONE_TIMEOUT_MSI_MS);
-		if (!wait_for_completion_timeout(&lbd->dma_done, to)) {
+		if (!wait_for_completion_timeout(done, to)) {
 			dev_warn_ratelimited(lbd->dev,
 				"No MSI within %ums; falling back to polling\n",
 				LITESATA_DONE_TIMEOUT_MSI_MS);
@@ -310,6 +313,8 @@ static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 			    blk_opf_t op, sector_t sector)
 {
 	void __iomem *regs = op_is_write(op) ? lbd->lswriter : lbd->lsreader;
+	struct mutex *lock = op_is_write(op) ? &lbd->lock_writer : &lbd->lock_reader;
+	struct completion *done = op_is_write(op) ? &lbd->dma_done_writer : &lbd->dma_done_reader;
 	enum dma_data_direction dir = op_is_write(op) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
 	unsigned int len  = bv->bv_len;
@@ -364,10 +369,10 @@ static int litesata_do_bvec(struct litesata_dev *lbd, struct bio_vec *bv,
 		dma = bounce.dma; /* definitely <4GiB due to GFP_DMA32 */
 	}
 
-	mutex_lock(&lbd->lock);
+	mutex_lock(lock);
 	{
-		int err = litesata_do_dma(lbd, regs, dma, sector, nsec);
-		mutex_unlock(&lbd->lock);
+		int err = litesata_do_dma(lbd, regs, dma, sector, nsec, done);
+		mutex_unlock(lock);
 
 		/* For reads: copy back from bounce to the bio page */
 		if (need_bounce && !op_is_write(op) && !err) {
@@ -506,8 +511,10 @@ static int litesata_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	lbd->dev = dev;
-	mutex_init(&lbd->lock);
-	init_completion(&lbd->dma_done);
+	mutex_init(&lbd->lock_reader);
+	mutex_init(&lbd->lock_writer);
+	init_completion(&lbd->dma_done_reader);
+	init_completion(&lbd->dma_done_writer);
 
 	/* Enforce 32-bit DMA addresses; fail otherwise. */
 	err = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
