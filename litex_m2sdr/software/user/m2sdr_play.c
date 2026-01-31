@@ -163,6 +163,9 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
                     len += fread(buf_wr + len, 1, DMA_BUFFER_SIZE - len, fi);
                 }
             }
+            if (len < DMA_BUFFER_SIZE) {
+                memset(buf_wr + len, 0, DMA_BUFFER_SIZE - len);
+            }
         }
 
         /* Statistics every 200ms. */
