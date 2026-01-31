@@ -234,6 +234,9 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 {
 	bool use_msi = !litesata_force_polling && READ_ONCE(lbd_global) != NULL;
 	int ret;
+	u64 t_start_ns = 0;
+
+	t_start_ns = ktime_get_ns();
 
 	if (use_msi)
 		reinit_completion(done);
@@ -298,7 +301,18 @@ static int litesata_do_dma(struct litesata_dev *lbd, void __iomem *regs,
 check_err_and_exit:
 	/* Always verify hardware error bit */
 	if ((litex_read8(regs + LITESATA_DMA_ERR) & 0x01) == 0)
+	{
+		u64 t_end_ns = ktime_get_ns();
+		u64 bytes = (u64)count * SECTOR_SIZE;
+		u64 dur_ns = (t_end_ns > t_start_ns) ? (t_end_ns - t_start_ns) : 0;
+		u64 mbps = dur_ns ? (bytes * 1000ULL * 1000ULL * 1000ULL) / (dur_ns * 1024ULL * 1024ULL) : 0;
+		dev_dbg_ratelimited(lbd->dev,
+			"DMA ok: %u sectors (%llu bytes), %llu ns, ~%llu MiB/s\n",
+			count, (unsigned long long)bytes,
+			(unsigned long long)dur_ns,
+			(unsigned long long)mbps);
 		return 0;
+	}
 
 	dev_err(lbd->dev, "failed transferring sector %lld\n", (long long)sector);
 	return -EIO;
