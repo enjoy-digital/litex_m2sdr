@@ -375,7 +375,7 @@ static void help(void)
            "\n"
            "Arguments:\n"
            "filename              File to record I/Q samples to (optional, omit to monitor stream).\n"
-           "size                  Number of samples to record (optional, 0 for infinite).\n");
+           "size                  Number of bytes to record (optional, 0 for infinite).\n");
     exit(1);
 }
 
