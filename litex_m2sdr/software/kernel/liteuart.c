@@ -476,6 +476,8 @@ static void liteuart_console_write(struct console *co, const char *s,
 	unsigned long flags;
 
 	uart = (struct liteuart_port *)xa_load(&liteuart_array, co->index);
+	if (!uart)
+		return;
 	port = &uart->port;
 
 	spin_lock_irqsave(&port->lock, flags);
