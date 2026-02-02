@@ -656,8 +656,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listGains(
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
-        gains.push_back("RF");
-        gains.push_back("PGA"); /* Backward-compatible alias. */
+        gains.push_back("PGA");
     }
     return gains;
 }
