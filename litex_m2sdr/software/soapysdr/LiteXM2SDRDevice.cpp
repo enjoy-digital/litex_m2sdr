@@ -528,7 +528,7 @@ void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channe
     if (direction == SOAPY_SDR_TX) {
         this->setSampleRate(SOAPY_SDR_TX, channel, _tx_stream.samplerate);
         this->setAntenna(SOAPY_SDR_TX,    channel, _tx_stream.antenna[channel]);
-        this->setFrequency(SOAPY_SDR_TX,  channel, "BB", _tx_stream.frequency);
+        this->setFrequency(SOAPY_SDR_TX,  channel, "RF", _tx_stream.frequency);
         this->setBandwidth(SOAPY_SDR_TX,  channel, _tx_stream.bandwidth);
         this->setGain(SOAPY_SDR_TX,       channel, _tx_stream.gain[channel]);
         this->setIQBalance(SOAPY_SDR_TX,  channel, _tx_stream.iqbalance[channel]);
@@ -536,7 +536,7 @@ void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channe
     if (direction == SOAPY_SDR_RX) {
         this->setSampleRate(SOAPY_SDR_RX, channel, _rx_stream.samplerate);
         this->setAntenna(SOAPY_SDR_RX,    channel, _rx_stream.antenna[channel]);
-        this->setFrequency(SOAPY_SDR_RX,  channel, "BB", _rx_stream.frequency);
+        this->setFrequency(SOAPY_SDR_RX,  channel, "RF", _rx_stream.frequency);
         this->setBandwidth(SOAPY_SDR_RX,  channel, _rx_stream.bandwidth);
         this->setGainMode(SOAPY_SDR_RX,   channel, _rx_stream.gainMode[channel]);
         this->setGain(SOAPY_SDR_RX,       channel, _rx_stream.gain[channel]);
@@ -893,18 +893,16 @@ void SoapyLiteXM2SDR::setFrequency(
         throw std::runtime_error("SoapyLiteXM2SDR::setFrequency(): unsupported name " + name);
     }
 
-    const std::string freqName = (name == "BB") ? "RF" : name;
-
     SoapySDR::logf(SOAPY_SDR_DEBUG,
         "SoapyLiteXM2SDR::setFrequency(%s, ch%d, %s%s, %f MHz)",
         dir2Str(direction),
         channel,
-        freqName.c_str(),
-        (name == "BB") ? " (BB->RF)" : "",
+        name.c_str(),
+        (name == "BB") ? " (baseband)" : "",
         frequency / 1e6);
-    _cachedFreqValues[direction][channel][freqName] = frequency;
+    _cachedFreqValues[direction][channel][name] = frequency;
     if (name == "BB") {
-        _cachedFreqValues[direction][channel]["BB"] = frequency;
+        return; /* No baseband NCO support; cache only. */
     }
     if (direction == SOAPY_SDR_TX)
         _tx_stream.frequency = frequency;
@@ -929,17 +927,19 @@ double SoapyLiteXM2SDR::getFrequency(
         throw std::runtime_error("SoapyLiteXM2SDR::getFrequency(): unsupported name " + name);
     }
 
-    const std::string freqName = (name == "BB") ? "RF" : name;
-
     auto dirIt = _cachedFreqValues.find(direction);
     if (dirIt != _cachedFreqValues.end()) {
         auto chIt = dirIt->second.find(channel);
         if (chIt != dirIt->second.end()) {
-            auto nameIt = chIt->second.find(freqName);
+            auto nameIt = chIt->second.find(name);
             if (nameIt != chIt->second.end()) {
                 return nameIt->second;
             }
         }
+    }
+
+    if (name == "BB") {
+        return 0.0;
     }
 
     uint64_t lo_freq = 0;
@@ -965,7 +965,11 @@ std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
 SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
     const int direction,
     const size_t /*channel*/,
-    const std::string &/*name*/) const {
+    const std::string &name) const {
+
+    if (name == "BB") {
+        return(SoapySDR::RangeList(1, SoapySDR::Range(0, 0)));
+    }
 
     if (direction == SOAPY_SDR_TX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(47000000, 6000000000ull)));
