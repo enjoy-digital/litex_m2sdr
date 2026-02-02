@@ -441,7 +441,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.antenna[0]   = "A";
         _rx_stream.gainMode[0]  = false;
         _rx_stream.gain[0]      = 0;
-        _tx_stream.gain[0]      = -20;
+        _tx_stream.gain[0]      = 20;
         _rx_stream.iqbalance[0] = 1.0;
         _tx_stream.iqbalance[0] = 1.0;
         channel_configure(SOAPY_SDR_RX, 0);
@@ -452,7 +452,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.antenna[1]   = "A";
         _rx_stream.gainMode[1]  = false;
         _rx_stream.gain[1]      = 0;
-        _tx_stream.gain[1]      = -20;
+        _tx_stream.gain[1]      = 20;
         _rx_stream.iqbalance[1] = 1.0;
         _tx_stream.iqbalance[1] = 1.0;
         channel_configure(SOAPY_SDR_RX, 1);
