@@ -44,6 +44,13 @@ namespace {
 std::mutex spi_map_mutex;
 std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
 uint8_t spi_next_id = 0;
+litex_m2sdr_device_desc_t spi_last_fd =
+#if USE_LITEPCIE
+    FD_INIT;
+#else
+    nullptr;
+#endif
+bool spi_warned_fallback = false;
 
 uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
 {
@@ -53,6 +60,7 @@ uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
         if (spi_fd_map.find(id) == spi_fd_map.end()) {
             spi_next_id = static_cast<uint8_t>(id + 1);
             spi_fd_map[id] = fd;
+            spi_last_fd = fd;
             return id;
         }
         id = static_cast<uint8_t>(id + 1);
@@ -64,6 +72,15 @@ void spi_unregister_fd(uint8_t id)
 {
     std::lock_guard<std::mutex> lock(spi_map_mutex);
     spi_fd_map.erase(id);
+    if (spi_fd_map.empty()) {
+#if USE_LITEPCIE
+        spi_last_fd = FD_INIT;
+#else
+        spi_last_fd = nullptr;
+#endif
+    } else {
+        spi_last_fd = spi_fd_map.begin()->second;
+    }
 }
 
 litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
@@ -71,6 +88,19 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
     std::lock_guard<std::mutex> lock(spi_map_mutex);
     auto it = spi_fd_map.find(spi->id_no);
     if (it == spi_fd_map.end()) {
+#if USE_LITEPCIE
+        if (spi_last_fd >= 0) {
+#else
+        if (spi_last_fd) {
+#endif
+            if (!spi_warned_fallback) {
+                spi_warned_fallback = true;
+                fprintf(stderr,
+                        "spi_write_then_read(): SPI id %u not found, using last registered fd\n",
+                        (unsigned)spi->id_no);
+            }
+            return spi_last_fd;
+        }
 #if USE_LITEPCIE
         return FD_INIT;
 #else
