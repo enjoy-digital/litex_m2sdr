@@ -72,7 +72,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     else
         dma->use_reader = 1;
 
-    if (litepcie_dma_init(dma, dev->device_path, 0) < 0)
+    if (litepcie_dma_init(dma, dev->device_path, dev->zero_copy ? 1 : 0) < 0)
         return M2SDR_ERR_IO;
 
     if (module == M2SDR_RX)
@@ -143,6 +143,36 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
 #endif
 
     return M2SDR_ERR_OK;
+}
+
+void m2sdr_sync_params_init(struct m2sdr_sync_params *params)
+{
+    if (!params)
+        return;
+    memset(params, 0, sizeof(*params));
+    params->timeout_ms = 1000;
+    params->format = M2SDR_FORMAT_SC16_Q11;
+}
+
+int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params)
+{
+    if (!dev || !params)
+        return M2SDR_ERR_INVAL;
+
+    dev->zero_copy = params->zero_copy ? 1 : 0;
+    if (params->module == M2SDR_RX) {
+        m2sdr_set_rx_header(dev, params->rx_header_enable, params->rx_strip_header);
+    } else {
+        m2sdr_set_tx_header(dev, params->tx_header_enable);
+    }
+
+    return m2sdr_sync_config(dev,
+                             params->module,
+                             params->format,
+                             params->num_buffers,
+                             params->buffer_size,
+                             params->num_transfers,
+                             params->timeout_ms);
 }
 
 #ifdef USE_LITEPCIE

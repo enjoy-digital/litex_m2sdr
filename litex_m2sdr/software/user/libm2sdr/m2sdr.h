@@ -239,6 +239,9 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                       unsigned num_transfers,
                       unsigned timeout_ms);
 
+void m2sdr_sync_params_init(struct m2sdr_sync_params *params);
+int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params);
+
 int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   void *samples,
                   unsigned num_samples,
@@ -276,3 +279,15 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
 size_t m2sdr_format_size(enum m2sdr_format format);
 void  *m2sdr_alloc_buffer(enum m2sdr_format format, unsigned num_samples);
 void   m2sdr_free_buffer(void *buf);
+struct m2sdr_sync_params {
+    enum m2sdr_module module;
+    enum m2sdr_format format;
+    unsigned num_buffers;
+    unsigned buffer_size;
+    unsigned num_transfers;
+    unsigned timeout_ms;
+    bool zero_copy;
+    bool rx_header_enable;
+    bool rx_strip_header;
+    bool tx_header_enable;
+};

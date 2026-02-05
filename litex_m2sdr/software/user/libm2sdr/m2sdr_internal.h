@@ -49,6 +49,7 @@ struct m2sdr_dev {
     int tx_header_enable;
     enum m2sdr_format rx_format;
     enum m2sdr_format tx_format;
+    uint8_t zero_copy;
     unsigned rx_buffer_size;
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
