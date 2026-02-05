@@ -181,4 +181,10 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_S
 	install -m 644 ../doc/libm2sdr/example_tone_tx.c $(PREFIX)/share/litex_m2sdr/examples
 	install -m 644 ../doc/libm2sdr/example_rx_n.c $(PREFIX)/share/litex_m2sdr/examples
 
+check:
+	$(MAKE) clean all
+	$(MAKE) examples
+	cmake -S ../soapysdr -B ../soapysdr/build
+	cmake --build ../soapysdr/build
+
 -include $(wildcard *.d)
