@@ -137,9 +137,10 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 static void test_si5351_init(void)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     printf("\e[1m[> SI5351 Init...\e[0m\n");
-    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
+    m2sdr_si5351_i2c_config(handle, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
     printf("Done.\n");
 
     m2sdr_close_dev(conn);
@@ -151,12 +152,13 @@ static void test_si5351_dump(void)
     int i;
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     printf("\e[1m[> SI5351 Registers Dump:\e[0m\n");
     printf("--------------------------\n");
 
     for (i = 0; i < 256; i++) {
-        if (m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, i, &value, 1, true)) {
+        if (m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, i, &value, 1, true)) {
             printf("Reg 0x%02x: 0x%02x\n", i, value);
         } else {
             fprintf(stderr, "Failed to read reg 0x%02x\n", i);
@@ -170,8 +172,9 @@ static void test_si5351_dump(void)
 static void test_si5351_write(uint8_t reg, uint8_t value)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
-    if (m2sdr_si5351_i2c_write(conn, SI5351_I2C_ADDR, reg, &value, 1)) {
+    if (m2sdr_si5351_i2c_write(handle, SI5351_I2C_ADDR, reg, &value, 1)) {
         printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
     } else {
         fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
@@ -185,8 +188,9 @@ static void test_si5351_read(uint8_t reg)
     uint8_t value;
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
-    if (m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, reg, &value, 1, true)) {
+    if (m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, reg, &value, 1, true)) {
         printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
     } else {
         fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
@@ -205,13 +209,14 @@ static void test_ad9361_dump(void)
     int i;
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(conn, 0);
+    m2sdr_ad9361_spi_init(handle, 0);
 
     /* AD9361 SPI Dump of all the Registers */
     for (i=0; i<1024; i++)
-        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(conn, i));
+        printf("Reg 0x%03x: 0x%04x\n", i, m2sdr_ad9361_spi_read(handle, i));
 
     printf("\n");
 
@@ -221,11 +226,12 @@ static void test_ad9361_dump(void)
 static void test_ad9361_write(uint16_t reg, uint16_t value)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(conn, 0);
+    m2sdr_ad9361_spi_init(handle, 0);
 
-    m2sdr_ad9361_spi_write(conn, reg, value);
+    m2sdr_ad9361_spi_write(handle, reg, value);
     printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
 
     m2sdr_close_dev(conn);
@@ -236,11 +242,12 @@ static void test_ad9361_read(uint16_t reg)
     uint16_t value;
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(conn, 0);
+    m2sdr_ad9361_spi_init(handle, 0);
 
-    value = m2sdr_ad9361_spi_read(conn, reg);
+    value = m2sdr_ad9361_spi_read(handle, reg);
     printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
     m2sdr_close_dev(conn);
@@ -265,11 +272,12 @@ static void print_separator(void)
 static void test_ad9361_port_dump(void)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(conn, 0);
-    uint8_t reg010 = m2sdr_ad9361_spi_read(conn, 0x010);
-    uint8_t reg011 = m2sdr_ad9361_spi_read(conn, 0x011);
-    uint8_t reg012 = m2sdr_ad9361_spi_read(conn, 0x012);
+    m2sdr_ad9361_spi_init(handle, 0);
+    uint8_t reg010 = m2sdr_ad9361_spi_read(handle, 0x010);
+    uint8_t reg011 = m2sdr_ad9361_spi_read(handle, 0x011);
+    uint8_t reg012 = m2sdr_ad9361_spi_read(handle, 0x012);
     printf("\e[1m[> AD9361 Parallel Port Configuration Dump:\e[0m\n");
     printf("-------------------------------------------\n");
 
@@ -393,13 +401,14 @@ static const char* decode_ensm_state(uint8_t state)
 static void test_ad9361_ensm_dump(void)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
     /* AD9361 SPI Init */
-    m2sdr_ad9361_spi_init(conn, 0);
-    uint8_t reg013 = m2sdr_ad9361_spi_read(conn, 0x013);
-    uint8_t reg014 = m2sdr_ad9361_spi_read(conn, 0x014);
-    uint8_t reg015 = m2sdr_ad9361_spi_read(conn, 0x015);
-    uint8_t reg016 = m2sdr_ad9361_spi_read(conn, 0x016);
-    uint8_t reg017 = m2sdr_ad9361_spi_read(conn, 0x017);
+    m2sdr_ad9361_spi_init(handle, 0);
+    uint8_t reg013 = m2sdr_ad9361_spi_read(handle, 0x013);
+    uint8_t reg014 = m2sdr_ad9361_spi_read(handle, 0x014);
+    uint8_t reg015 = m2sdr_ad9361_spi_read(handle, 0x015);
+    uint8_t reg016 = m2sdr_ad9361_spi_read(handle, 0x016);
+    uint8_t reg017 = m2sdr_ad9361_spi_read(handle, 0x017);
     printf("\e[1m[> AD9361 ENSM Dump:\e[0m\n");
     printf("--------------------\n");
     /* Separator */
@@ -516,6 +525,7 @@ static void info(void)
     unsigned char soc_identifier[256];
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
 
     printf("\e[1m[> SoC Info:\e[0m\n");
     printf("------------\n");
@@ -625,12 +635,12 @@ static void info(void)
 #ifdef CSR_SI5351_BASE
     printf("\e[1m[> SI5351 Info:\e[0m\n");
     printf("---------------\n");
-    if (m2sdr_si5351_i2c_check_litei2c(conn)) {
-        bool si5351_present = m2sdr_si5351_i2c_poll(conn, SI5351_I2C_ADDR);
+    if (m2sdr_si5351_i2c_check_litei2c(handle)) {
+        bool si5351_present = m2sdr_si5351_i2c_poll(handle, SI5351_I2C_ADDR);
         printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
         if (si5351_present) {
             uint8_t status;
-            m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, 0x00, &status, 1, true);
+            m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, 0x00, &status, 1, true);
             printf("Device Status    : 0x%02x\n", status);
             printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");
             printf("  LOL_B          : %s\n", (status & 0x40) ? "Unlocked"       : "Locked");
@@ -639,7 +649,7 @@ static void info(void)
             printf("  REVID          : 0x%01x\n", status & 0x03);
 
             uint8_t rev;
-            m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
+            m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, 0x0F, &rev, 1, true);
             printf("PLL Input Source : 0x%02x\n", rev);
             printf("  PLLB_SRC       : %s\n", (rev & 0x08) ? "CLKIN" : "XTAL");
             printf("  PLLA_SRC       : %s\n", (rev & 0x04) ? "CLKIN" : "XTAL");
@@ -652,14 +662,14 @@ static void info(void)
 
     printf("\e[1m[> AD9361 Info:\e[0m\n");
     printf("---------------\n");
-    m2sdr_ad9361_spi_init(conn, 0);
-    uint16_t product_id = m2sdr_ad9361_spi_read(conn, REG_PRODUCT_ID);
+    m2sdr_ad9361_spi_init(handle, 0);
+    uint16_t product_id = m2sdr_ad9361_spi_read(handle, REG_PRODUCT_ID);
     bool ad9361_present = (product_id == 0xa);
     printf("AD9361 Presence    : %s\n", ad9361_present ? "Yes" : "No");
     if (ad9361_present) {
         printf("AD9361 Product ID  : %04x \n", product_id);
         printf("AD9361 Temperature : %0.1f °C\n",
-            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(conn, REG_TEMPERATURE) * 1000000, 1140)/1000);
+            (double)DIV_ROUND_CLOSEST(m2sdr_ad9361_spi_read(handle, REG_TEMPERATURE) * 1000000, 1140)/1000);
     }
 
     printf("\n\e[1m[> Board Time:\e[0m\n");
