@@ -21,6 +21,12 @@
 
 #define AD9361_GPIO_RESET_PIN 0
 
+#if defined(__GNUC__) || defined(__clang__)
+#define M2SDR_WEAK __attribute__((weak))
+#else
+#define M2SDR_WEAK
+#endif
+
 static struct m2sdr_dev *g_rf_dev;
 static struct ad9361_rf_phy *ad9361_phy;
 
@@ -36,9 +42,9 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
 #endif
 }
 
-static int spi_write_then_read(struct spi_device *spi,
-                               const unsigned char *txbuf, unsigned n_tx,
-                               unsigned char *rxbuf, unsigned n_rx)
+int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
+                                   const unsigned char *txbuf, unsigned n_tx,
+                                   unsigned char *rxbuf, unsigned n_rx)
 {
     (void)spi;
     void *conn = m2sdr_conn(g_rf_dev);
@@ -54,28 +60,28 @@ static int spi_write_then_read(struct spi_device *spi,
     return 0;
 }
 
-static void udelay(unsigned long usecs)
+void M2SDR_WEAK udelay(unsigned long usecs)
 {
     usleep(usecs);
 }
 
-static void mdelay(unsigned long msecs)
+void M2SDR_WEAK mdelay(unsigned long msecs)
 {
     usleep(msecs * 1000);
 }
 
-static unsigned long msleep_interruptible(unsigned int msecs)
+unsigned long M2SDR_WEAK msleep_interruptible(unsigned int msecs)
 {
     usleep(msecs * 1000);
     return 0;
 }
 
-static bool gpio_is_valid(int number)
+bool M2SDR_WEAK gpio_is_valid(int number)
 {
     return number == AD9361_GPIO_RESET_PIN;
 }
 
-static void gpio_set_value(unsigned gpio, int value)
+void M2SDR_WEAK gpio_set_value(unsigned gpio, int value)
 {
     (void)gpio;
     (void)value;
