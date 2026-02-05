@@ -31,6 +31,8 @@
 #include <time.h>
 
 #include "liblitepcie.h"
+#include "m2sdr.h"
+#include "config.h"
 
 /* Variables */
 /*-----------*/
@@ -53,7 +55,7 @@ static int get_prbs_bit(void) {
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
-static void m2sdr_gen(const char *device_name, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type) {
+static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type) {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
@@ -61,12 +63,18 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
     int64_t last_time;
     uint64_t sw_underflows = 0;
     int64_t hw_count_stop = 0;
-    int fd;
+    struct m2sdr_dev *dev = NULL;
+    int fd = -1;
 
     /* Open device for CSR access */
-    fd = open(device_name, O_RDWR);
+    if (m2sdr_open(&dev, device_id) != 0) {
+        fprintf(stderr, "Could not open device: %s\n", device_id);
+        exit(1);
+    }
+    fd = m2sdr_get_fd(dev);
     if (fd < 0) {
-        perror("Failed to open device");
+        fprintf(stderr, "No PCIe fd available\n");
+        m2sdr_close(dev);
         exit(1);
     }
 
@@ -102,8 +110,9 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
     printf("  Zero-Copy Mode: %d\n", zero_copy);
 
     /* Initialize DMA */
-    if (litepcie_dma_init(&dma, device_name, zero_copy)) {
+    if (litepcie_dma_init(&dma, "", zero_copy)) {
         close(fd);
+        m2sdr_close(dev);
         exit(1);
     }
 
@@ -233,6 +242,7 @@ static void m2sdr_gen(const char *device_name, double sample_rate, double freque
     litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, 0);
 #endif
     close(fd);
+    m2sdr_close(dev);
 }
 
 /* Help */
@@ -348,7 +358,7 @@ int main(int argc, char **argv) {
     }
 
     /* Select device */
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
+    snprintf(m2sdr_device, sizeof(m2sdr_device), "pcie:/dev/m2sdr%d", m2sdr_device_num);
 
     /* Generate and play tone with optional PPS */
     m2sdr_gen(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type);

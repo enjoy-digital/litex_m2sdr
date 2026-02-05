@@ -16,6 +16,7 @@
 #include <fcntl.h>
 
 #include "libm2sdr.h"
+#include "m2sdr.h"
 
 /* Variables */
 /*-----------*/
@@ -31,31 +32,38 @@ static char m2sdr_port[16] = "1234";
 /* Connection Functions */
 /*----------------------*/
 
-static void * m2sdr_open(void) {
+static struct m2sdr_dev *g_dev = NULL;
+
+static void * m2sdr_open_dev(void) {
+    if (g_dev)
+        return m2sdr_get_handle(g_dev);
 #ifdef USE_LITEPCIE
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    return m2sdr_get_handle(g_dev);
 #elif defined(USE_LITEETH)
-    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
-    if (!eb) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    return m2sdr_get_handle(g_dev);
 #endif
 }
 
-static void m2sdr_close(void *conn) {
-#ifdef USE_LITEPCIE
-    close((int)(intptr_t)conn);
-#elif defined(USE_LITEETH)
-    eb_disconnect((struct eb_connection **)&conn);
-#endif
+static void m2sdr_close_dev(void *conn) {
+    (void)conn;
+    if (g_dev) {
+        m2sdr_close(g_dev);
+        g_dev = NULL;
+    }
 }
+
 
 /* GPIO Control Functions */
 /*-----------------------*/
@@ -219,7 +227,7 @@ int main(int argc, char **argv) {
     #endif
 
     /* Open connection */
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
     if (conn == NULL) {
         exit(1);
     }
@@ -228,7 +236,7 @@ int main(int argc, char **argv) {
     configure_gpio(conn, gpio_enable, loopback_enable, source_csr, output_data, output_enable);
 
     /* Close connection */
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 
     return 0;
 }
