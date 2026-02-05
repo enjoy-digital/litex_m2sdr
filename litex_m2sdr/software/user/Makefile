@@ -143,7 +143,8 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so 
 		install -D -m 755 $(lib) $(PREFIX)/lib; \
 	)
 	install -d $(PREFIX)/lib/pkgconfig
-	install -m 644 libm2sdr/m2sdr.pc $(PREFIX)/lib/pkgconfig
+	sed -e "s|^prefix=.*|prefix=$(PREFIX)|" libm2sdr/m2sdr.pc > $(PREFIX)/lib/pkgconfig/m2sdr.pc
+	chmod 644 $(PREFIX)/lib/pkgconfig/m2sdr.pc
 	install -d $(PREFIX)/include/litex_m2sdr
 	install -d $(PREFIX)/include/litex_m2sdr/kernel
 	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel
