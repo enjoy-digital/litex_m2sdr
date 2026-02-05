@@ -17,7 +17,18 @@ else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
 
-PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+
+LIBM2SDR_OBJS = \
+	libm2sdr/m2sdr_si5351_i2c.o \
+	libm2sdr/m2sdr_ad9361_spi.o \
+	libm2sdr/m2sdr_flash.o \
+	libm2sdr/m2sdr_device.o \
+	libm2sdr/m2sdr_stream.o \
+	libm2sdr/m2sdr_rf.o \
+	libm2sdr/m2sdr_hal_litepcie.o \
+	libm2sdr/m2sdr_hal_liteeth.o \
+	libliteeth/etherbone.o
 
 all: $(PROGS)
 
@@ -32,12 +43,12 @@ libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o \
-	libm2sdr/m2sdr_device.o libm2sdr/m2sdr_stream.o libm2sdr/m2sdr_rf.o \
-	libm2sdr/m2sdr_hal_litepcie.o libm2sdr/m2sdr_hal_liteeth.o \
-	libliteeth/etherbone.o
+libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS)
 	$(AR) rcs $@ $+
 	ranlib $@
+
+libm2sdr/libm2sdr.so: $(LIBM2SDR_OBJS)
+	$(CC) -shared -o $@ $^
 
 ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
 	$(AR) rcs $@ $+
@@ -125,11 +136,13 @@ install: $(BINARIES)
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
 
-install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 	install -d $(PREFIX)/lib
 	$(foreach lib,$^, \
 		install -D -m 755 $(lib) $(PREFIX)/lib; \
 	)
+	install -d $(PREFIX)/lib/pkgconfig
+	install -m 644 libm2sdr/m2sdr.pc $(PREFIX)/lib/pkgconfig
 	install -d $(PREFIX)/include/litex_m2sdr
 	install -d $(PREFIX)/include/litex_m2sdr/kernel
 	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel

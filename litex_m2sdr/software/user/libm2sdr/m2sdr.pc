@@ -1,0 +1,10 @@
+prefix=/usr/local
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: m2sdr
+Description: LiteX-M2SDR C API
+Version: 0.1.0
+Libs: -L${libdir} -lm2sdr
+Cflags: -I${includedir}/litex_m2sdr/libm2sdr -I${includedir}/litex_m2sdr
