@@ -304,11 +304,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
     /* Configure Mode based on _bitMode */
+    SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
     m2sdr_set_bitmode(_dev, _bitMode == 8);
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
+    SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
     /* Enable Synchronizer */
     litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 
@@ -363,6 +365,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         /* Initialize SI5351 Clocking */
 #ifdef CSR_SI5351_BASE
+        SoapySDR::log(SOAPY_SDR_INFO, "Initializing SI5351");
         if (clock_source == "internal") {
             /* SI5351B, XO reference */
             litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
@@ -394,13 +397,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
         /* Power-up AD9361 */
+        SoapySDR::log(SOAPY_SDR_INFO, "Powering up AD9361");
         litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b11);
 
         /* Initialize AD9361 SPI. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 SPI");
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
     /* Initialize AD9361 RFIC. */
+    SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
     default_init_param.reference_clk_rate = refclk_hz;
     default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync          = -1;
@@ -414,10 +420,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
 
         /* Some defaults to avoid throwing. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
         this->setClockSource("internal");
 
@@ -437,6 +445,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.gain[0]      = 20;
         _rx_stream.iqbalance[0] = 1.0;
         _tx_stream.iqbalance[0] = 1.0;
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 0");
         channel_configure(SOAPY_SDR_RX, 0);
         channel_configure(SOAPY_SDR_TX, 0);
 
@@ -448,6 +457,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.gain[1]      = 20;
         _rx_stream.iqbalance[1] = 1.0;
         _tx_stream.iqbalance[1] = 1.0;
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 1");
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);
     }
