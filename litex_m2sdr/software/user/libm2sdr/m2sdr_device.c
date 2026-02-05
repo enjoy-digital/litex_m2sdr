@@ -161,12 +161,12 @@ void m2sdr_close(struct m2sdr_dev *dev)
     free(dev);
 }
 
-int m2sdr_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+int m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     return m2sdr_hal_readl(dev, addr, val);
 }
 
-int m2sdr_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+int m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     return m2sdr_hal_writel(dev, addr, val);
 }
@@ -206,7 +206,7 @@ static int m2sdr_read_ident(struct m2sdr_dev *dev, char *buf, size_t len)
 
     for (size_t i = 0; i < max; i++) {
         uint32_t v;
-        if (m2sdr_readl(dev, CSR_IDENTIFIER_MEM_BASE + 4 * i, &v) != 0)
+        if (m2sdr_reg_read(dev, CSR_IDENTIFIER_MEM_BASE + 4 * i, &v) != 0)
             return M2SDR_ERR_IO;
         buf[i] = (char)(v & 0xff);
         if (buf[i] == '\0')
@@ -234,8 +234,8 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
 
     /* Serial from DNA */
     uint32_t high = 0, low = 0;
-    if (m2sdr_readl(dev, CSR_DNA_ID_ADDR + 0, &high) == 0 &&
-        m2sdr_readl(dev, CSR_DNA_ID_ADDR + 4, &low) == 0) {
+    if (m2sdr_reg_read(dev, CSR_DNA_ID_ADDR + 0, &high) == 0 &&
+        m2sdr_reg_read(dev, CSR_DNA_ID_ADDR + 4, &low) == 0) {
         snprintf(info->serial, sizeof(info->serial), "%x%08x", high, low);
     }
 
@@ -286,16 +286,16 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
         return M2SDR_ERR_INVAL;
 
     uint32_t ctrl;
-    if (m2sdr_readl(dev, CSR_TIME_GEN_CONTROL_ADDR, &ctrl) != 0)
+    if (m2sdr_reg_read(dev, CSR_TIME_GEN_CONTROL_ADDR, &ctrl) != 0)
         return M2SDR_ERR_IO;
 
-    m2sdr_writel(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
-    m2sdr_writel(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
+    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
+    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
 
     uint32_t hi, lo;
-    if (m2sdr_readl(dev, CSR_TIME_GEN_READ_TIME_ADDR + 0, &hi) != 0)
+    if (m2sdr_reg_read(dev, CSR_TIME_GEN_READ_TIME_ADDR + 0, &hi) != 0)
         return M2SDR_ERR_IO;
-    if (m2sdr_readl(dev, CSR_TIME_GEN_READ_TIME_ADDR + 4, &lo) != 0)
+    if (m2sdr_reg_read(dev, CSR_TIME_GEN_READ_TIME_ADDR + 4, &lo) != 0)
         return M2SDR_ERR_IO;
 
     *time_ns = ((uint64_t)hi << 32) | lo;
@@ -307,9 +307,10 @@ int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
     if (!dev)
         return M2SDR_ERR_INVAL;
 
-    m2sdr_writel(dev, CSR_TIME_GEN_LOAD_TIME_ADDR + 0, (uint32_t)(time_ns >> 32));
-    m2sdr_writel(dev, CSR_TIME_GEN_LOAD_TIME_ADDR + 4, (uint32_t)(time_ns & 0xffffffffu));
-    m2sdr_writel(dev, CSR_TIME_GEN_CONTROL_ADDR, 0x1); /* load */
+    m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, (uint32_t)(time_ns >> 32));
+    m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, (uint32_t)(time_ns & 0xffffffffu));
+    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET));
+    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, 0);
     return M2SDR_ERR_OK;
 }
 
@@ -320,7 +321,7 @@ int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
     dev->rx_header_enable = enable ? 1 : 0;
     dev->rx_strip_header = strip_header ? 1 : 0;
 
-    m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+    m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
         (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
         ((enable ? 1 : 0) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
     return M2SDR_ERR_OK;
@@ -332,7 +333,7 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
         return M2SDR_ERR_INVAL;
     dev->tx_header_enable = enable ? 1 : 0;
 
-    m2sdr_writel(dev, CSR_HEADER_TX_CONTROL_ADDR,
+    m2sdr_reg_write(dev, CSR_HEADER_TX_CONTROL_ADDR,
         (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
         ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
     return M2SDR_ERR_OK;
@@ -344,7 +345,7 @@ int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool so
         return M2SDR_ERR_INVAL;
 #ifdef CSR_GPIO_BASE
     uint32_t control = 0;
-    if (m2sdr_readl(dev, CSR_GPIO_CONTROL_ADDR, &control) != 0)
+    if (m2sdr_reg_read(dev, CSR_GPIO_CONTROL_ADDR, &control) != 0)
         return M2SDR_ERR_IO;
     if (enable) {
         control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
@@ -359,7 +360,7 @@ int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool so
     } else {
         control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
     }
-    m2sdr_writel(dev, CSR_GPIO_CONTROL_ADDR, control);
+    m2sdr_reg_write(dev, CSR_GPIO_CONTROL_ADDR, control);
     return M2SDR_ERR_OK;
 #else
     (void)enable;
@@ -374,8 +375,8 @@ int m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe)
     if (!dev)
         return M2SDR_ERR_INVAL;
 #ifdef CSR_GPIO_BASE
-    m2sdr_writel(dev, CSR_GPIO__O_ADDR, value & 0xF);
-    m2sdr_writel(dev, CSR_GPIO_OE_ADDR, oe & 0xF);
+    m2sdr_reg_write(dev, CSR_GPIO__O_ADDR, value & 0xF);
+    m2sdr_reg_write(dev, CSR_GPIO_OE_ADDR, oe & 0xF);
     return M2SDR_ERR_OK;
 #else
     (void)value;
@@ -390,7 +391,7 @@ int m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value)
         return M2SDR_ERR_INVAL;
 #ifdef CSR_GPIO_BASE
     uint32_t v = 0;
-    if (m2sdr_readl(dev, CSR_GPIO__I_ADDR, &v) != 0)
+    if (m2sdr_reg_read(dev, CSR_GPIO__I_ADDR, &v) != 0)
         return M2SDR_ERR_IO;
     *value = v & 0xF;
     return M2SDR_ERR_OK;

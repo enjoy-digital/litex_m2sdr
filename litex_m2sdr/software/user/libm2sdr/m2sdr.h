@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -92,8 +93,8 @@ int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
 
 /* Register access */
-int  m2sdr_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
-int  m2sdr_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
+int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
 /* Low-level transport handle (for DMA/advanced use) */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);

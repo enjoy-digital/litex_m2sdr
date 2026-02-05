@@ -13,9 +13,9 @@
 #include "m2sdr_ad9361_spi.h"
 #include "m2sdr_si5351_i2c.h"
 
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
+#include "platform.h"
+#include "ad9361.h"
+#include "ad9361_api.h"
 
 #include "csr.h"
 
@@ -116,7 +116,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 #ifdef CSR_SI5351_BASE
     /* Initialize SI5351 Clocking */
     if (strcmp(cfg->sync_mode, "internal") == 0) {
-        m2sdr_writel(dev, CSR_SI5351_CONTROL_ADDR,
+        m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
 
         if (cfg->refclk_freq == 40000000) {
@@ -129,7 +129,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
                 sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
         }
     } else if (strcmp(cfg->sync_mode, "external") == 0) {
-        m2sdr_writel(dev, CSR_SI5351_CONTROL_ADDR,
+        m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
 
@@ -162,14 +162,14 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
         default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
         default_init_param.two_t_two_r_timing_enable     = 0;
-        m2sdr_writel(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+        m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1);
     }
     if (strcmp(cfg->chan_mode, "2t2r") == 0) {
         default_init_param.two_rx_two_tx_mode_enable     = 1;
         default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
         default_init_param.two_t_two_r_timing_enable     = 1;
-        m2sdr_writel(dev, CSR_AD9361_PHY_CONTROL_ADDR, 0);
+        m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 0);
     }
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
@@ -215,7 +215,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     ad9361_bist_loopback(ad9361_phy, cfg->loopback);
 
     /* 8-bit mode */
-    m2sdr_writel(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0);
+    m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0);
 
     if (cfg->bist_tx_tone)
         ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, cfg->bist_tone_freq, 0, 0x0);
@@ -223,7 +223,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
         ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, cfg->bist_tone_freq, 0, 0x0);
 
     if (cfg->bist_prbs) {
-        m2sdr_writel(dev, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
+        m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
         ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
     }
 

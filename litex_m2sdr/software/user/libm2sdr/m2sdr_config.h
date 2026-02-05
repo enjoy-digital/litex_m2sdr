@@ -18,6 +18,10 @@
 /* Parameters */
 /*------------*/
 
+#ifndef M2SDR_CONFIG_DEF
+#define M2SDR_CONFIG_DEF static
+#endif
+
 #define DEFAULT_REFCLK_FREQ    ((int64_t)38400000)  /* Reference Clock */
 #define DEFAULT_SAMPLERATE               30720000   /* RF Samplerate */
 #define DEFAULT_BANDWIDTH                56000000   /* RF Bandwidth */
@@ -51,7 +55,7 @@
 /* SI5351B-C Default Config from XO to 38.4MHz on MS0, MS4 and 100MHz on MS1. */
 /*----------------------------------------------------------------------------*/
 
-const uint8_t si5351_xo_38p4m_config[][2] = {
+M2SDR_CONFIG_DEF const uint8_t si5351_xo_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
@@ -146,7 +150,7 @@ const uint8_t si5351_xo_38p4m_config[][2] = {
 /* SI5351C Default Config from 10MHz ClkIn to 38.4MHz on MS0, MS4 and 100MHz on MS1. */
 /*-----------------------------------------------------------------------------------*/
 
-const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
+M2SDR_CONFIG_DEF const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
@@ -240,7 +244,7 @@ const uint8_t si5351_clkin_10m_38p4m_config[][2] = {
 
 /* SI5351B-C Config from XO to 40MHz on MS0, MS4 and 100MHz on MS1. */
 /*------------------------------------------------------------------*/
-const uint8_t si5351_xo_40m_config[][2] = {
+M2SDR_CONFIG_DEF const uint8_t si5351_xo_40m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
@@ -335,7 +339,7 @@ const uint8_t si5351_xo_40m_config[][2] = {
 
 /* SI5351C Default Config from 10MHz ClkIn to 40MHz on MS0, MS4 and 100MHz on MS1. */
 /*---------------------------------------------------------------------------------*/
-const uint8_t si5351_clkin_10m_40m_config[][2] = {
+M2SDR_CONFIG_DEF const uint8_t si5351_clkin_10m_40m_config[][2] = {
     /* Interrupt Mask Configuration */
     { 0x02, 0x33 },  // Int masks: CLK_LOS(1), LOL_A(1) enabled, XO_LOS(0), LOL_B(0), SYS_INIT(0) disabled
 
@@ -430,7 +434,7 @@ const uint8_t si5351_clkin_10m_40m_config[][2] = {
 /* AD9361 Default Config */
 /*-----------------------*/
 
-AD9361_InitParam default_init_param = {
+M2SDR_CONFIG_DEF AD9361_InitParam default_init_param = {
     /* Device selection */
     ID_AD9361,  // dev_sel
     /* Identification number */
@@ -672,7 +676,7 @@ AD9361_InitParam default_init_param = {
 
 /* Note: Filter from BladeRF project: https://github.com/Nuand/bladeRF/fpga_common/src/ad936x_params.c */
 
-AD9361_RXFIRConfig rx_fir_config = {
+M2SDR_CONFIG_DEF AD9361_RXFIRConfig rx_fir_config = {
     3,   // rx (RX1 = 1, RX2 = 2, both = 3)
     -6,  // rx_gain (-12, -6, 0, or 6 dB)
     1,   // rx_dec (decimate by 1, 2, or 4)
@@ -736,7 +740,7 @@ AD9361_RXFIRConfig rx_fir_config = {
     0                      // rx_bandwidth
 };
 
-AD9361_RXFIRConfig rx_fir_config_dec2 = {
+M2SDR_CONFIG_DEF AD9361_RXFIRConfig rx_fir_config_dec2 = {
     3,   // rx (RX1 = 1, RX2 = 2, both = 3)
     -6,  // rx_gain (-12, -6, 0, or 6 dB)
     2,   // rx_dec (decimate by 1, 2, or 4)
@@ -801,7 +805,7 @@ AD9361_RXFIRConfig rx_fir_config_dec2 = {
     0                      // rx_bandwidth
 };
 
-AD9361_RXFIRConfig rx_fir_config_dec4 = {
+M2SDR_CONFIG_DEF AD9361_RXFIRConfig rx_fir_config_dec4 = {
     3,   // rx (RX1 = 1, RX2 = 2, both = 3)
     -6,  // rx_gain (-12, -6, 0, or 6 dB)
     4,   // rx_dec (decimate by 1, 2, or 4)
@@ -871,7 +875,7 @@ AD9361_RXFIRConfig rx_fir_config_dec4 = {
 
 /* Note: Filter from BladeRF project: https://github.com/Nuand/bladeRF/fpga_common/src/ad936x_params.c */
 
-AD9361_TXFIRConfig tx_fir_config = {
+M2SDR_CONFIG_DEF AD9361_TXFIRConfig tx_fir_config = {
     3,  // tx (TX1 = 1, TX2 = 2, both = 3)
     0,  // tx_gain (-6 or 0 dB)
     1,  // tx_int (interpolate by 1, 2, or 4)
@@ -906,7 +910,7 @@ AD9361_TXFIRConfig tx_fir_config = {
     0                      // tx_bandwidth
 };
 
-AD9361_TXFIRConfig tx_fir_config_int2 = {
+M2SDR_CONFIG_DEF AD9361_TXFIRConfig tx_fir_config_int2 = {
     3,  // tx (TX1 = 1, TX2 = 2, both = 3)
     0,  // tx_gain (-6 or 0 dB)
     2,  // tx_int (interpolate by 1, 2, or 4)
@@ -971,7 +975,7 @@ AD9361_TXFIRConfig tx_fir_config_int2 = {
     0                      // tx_bandwidth
 };
 
-AD9361_TXFIRConfig tx_fir_config_int4 = {
+M2SDR_CONFIG_DEF AD9361_TXFIRConfig tx_fir_config_int4 = {
     3,  // tx (TX1 = 1, TX2 = 2, both = 3)
     0,  // tx_gain (-6 or 0 dB)
     4,  // tx_int (interpolate by 1, 2, or 4)

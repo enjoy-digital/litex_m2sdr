@@ -87,11 +87,11 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dev->rx_timeout_ms = timeout_ms;
 
         if (!dev->rx_header_enable) {
-            m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+            m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
                 (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
                 (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
         }
-        m2sdr_writel(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+        m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
     } else {
         dev->tx_configured = 1;
         dev->tx_format = format;
@@ -123,11 +123,11 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dev->rx_timeout_ms = timeout_ms;
 
         if (!dev->rx_header_enable) {
-            m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+            m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
                 (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
                 (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
         }
-        m2sdr_writel(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+        m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
     } else {
         dev->tx_configured = 1;
         dev->tx_format = format;
