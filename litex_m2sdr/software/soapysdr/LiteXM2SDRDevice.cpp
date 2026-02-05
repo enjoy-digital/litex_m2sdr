@@ -549,7 +549,10 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 
 #ifdef CSR_CAPABILITY_BOARD_INFO_ADDR
     {
-        const uint32_t board_info = litex_m2sdr_readl(_dev, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        struct m2sdr_capabilities caps;
+        uint32_t board_info = 0;
+        if (m2sdr_get_capabilities(_dev, &caps) == 0)
+            board_info = caps.board_info;
         const int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) &
                             ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
         switch (variant) {
@@ -1371,26 +1374,22 @@ std::string SoapyLiteXM2SDR::readSensor(
          /* FPGA Sensors */
 #ifdef CSR_XADC_BASE
         if (deviceStr == "fpga") {
+            struct m2sdr_fpga_sensors sensors;
+            if (m2sdr_get_fpga_sensors(_dev, &sensors) != 0) {
+                throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") failed");
+            }
             /* Temp. */
             if (sensorStr == "temp") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_dev, CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
-                );
+                sensorValue = std::to_string(sensors.temperature_c);
             /* VCCINT. */
             } else if (sensorStr == "vccint") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCINT_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccint_v);
             /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCAUX_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccaux_v);
             /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccbram_v);
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
