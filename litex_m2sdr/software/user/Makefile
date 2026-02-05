@@ -17,7 +17,8 @@ else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
 
-PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+LIBM2SDR_SONAME = libm2sdr.so.0
+PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 EXAMPLES = ../doc/libm2sdr/example_sync_rx ../doc/libm2sdr/example_sync_tx
 
 LIBM2SDR_OBJS = \
@@ -58,8 +59,11 @@ libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS)
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.so: $(LIBM2SDR_OBJS)
-	$(CC) -shared -o $@ $^
+libm2sdr/$(LIBM2SDR_SONAME): $(LIBM2SDR_OBJS)
+	$(CC) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -o $@ $^
+
+libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
+	ln -sf $(LIBM2SDR_SONAME) $@
 
 ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
 	$(AR) rcs $@ $+
@@ -148,11 +152,12 @@ install: $(BINARIES)
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
 
-install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 	install -d $(PREFIX)/lib
 	$(foreach lib,$^, \
 		install -D -m 755 $(lib) $(PREFIX)/lib; \
 	)
+	ln -sf $(LIBM2SDR_SONAME) $(PREFIX)/lib/libm2sdr.so
 	install -d $(PREFIX)/lib/pkgconfig
 	sed -e "s|^prefix=.*|prefix=$(PREFIX)|" libm2sdr/m2sdr.pc > $(PREFIX)/lib/pkgconfig/m2sdr.pc
 	chmod 644 $(PREFIX)/lib/pkgconfig/m2sdr.pc

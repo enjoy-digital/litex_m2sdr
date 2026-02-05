@@ -90,6 +90,15 @@ static int m2sdr_parse_identifier(const char *id, char *path_out, size_t path_le
     return 0;
 }
 
+void m2sdr_get_version(struct m2sdr_version *ver)
+{
+    if (!ver)
+        return;
+    ver->api = M2SDR_API_VERSION;
+    ver->abi = M2SDR_ABI_VERSION;
+    ver->version_str = M2SDR_VERSION_STRING;
+}
+
 int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 {
     if (!dev_out)

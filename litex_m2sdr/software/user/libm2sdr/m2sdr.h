@@ -31,7 +31,18 @@ enum m2sdr_error {
     M2SDR_ERR_UNSUPPORTED= -6,
 };
 
+#define M2SDR_API_VERSION 0x00020000
+#define M2SDR_ABI_VERSION 0x00020000
+#define M2SDR_VERSION_STRING "0.2.0"
+
+struct m2sdr_version {
+    uint32_t api;
+    uint32_t abi;
+    const char *version_str;
+};
+
 const char *m2sdr_strerror(int err);
+void m2sdr_get_version(struct m2sdr_version *ver);
 
 /* Direction/module */
 enum m2sdr_module {
