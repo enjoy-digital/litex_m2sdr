@@ -124,16 +124,17 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     }
 #elif USE_LITEETH
     auto attemptToAddDevice = [&](const std::string &path, const std::string &eth_ip) {
-        struct eb_connection *fd = eb_connect(eth_ip.c_str(), "1234", 1);
-        if (!fd) {
+        struct m2sdr_dev *dev = nullptr;
+        std::string dev_id = "eth:" + eth_ip + ":1234";
+        if (m2sdr_open(&dev, dev_id.c_str()) != 0) {
             std::cerr << "Can't connect to EtherBone!\n";
             return false;
         }
-        auto dev = createDeviceKwargs(fd, path, eth_ip);
-        eb_disconnect(&fd);
+        auto dev_args = createDeviceKwargs(dev, path, eth_ip);
+        m2sdr_close(dev);
 
-        if (dev["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
-            discovered.push_back(std::move(dev));
+        if (dev_args["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
+            discovered.push_back(std::move(dev_args));
             return true;
         }
         return false;

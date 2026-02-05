@@ -89,7 +89,7 @@ static struct m2sdr_dev *m2sdr_open_dev(void) {
 #elif USE_LITEETH
     char dev_id[128];
     size_t ip_len = strnlen(m2sdr_ip_address, 256);
-    size_t port_len = strnlen(m2sdr_port, 32);
+    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
     if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
         fprintf(stderr, "Device address too long\n");
         exit(1);
