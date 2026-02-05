@@ -115,7 +115,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 
     /* Print parameters */
     printf("Starting signal generation with parameters:\n");
-    printf("  Device: %s\n", device_name);
+    printf("  Device: %s\n", device_id);
     printf("  Sample Rate: %.0f Hz\n", sample_rate);
     printf("  Signal Type: %s\n", signal_type);
     if (strcmp(signal_type, "tone") == 0) {
