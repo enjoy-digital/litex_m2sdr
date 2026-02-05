@@ -36,9 +36,9 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
 #endif
 }
 
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
+static int spi_write_then_read(struct spi_device *spi,
+                               const unsigned char *txbuf, unsigned n_tx,
+                               unsigned char *rxbuf, unsigned n_rx)
 {
     (void)spi;
     void *conn = m2sdr_conn(g_rf_dev);
@@ -54,28 +54,28 @@ int spi_write_then_read(struct spi_device *spi,
     return 0;
 }
 
-void udelay(unsigned long usecs)
+static void udelay(unsigned long usecs)
 {
     usleep(usecs);
 }
 
-void mdelay(unsigned long msecs)
+static void mdelay(unsigned long msecs)
 {
     usleep(msecs * 1000);
 }
 
-unsigned long msleep_interruptible(unsigned int msecs)
+static unsigned long msleep_interruptible(unsigned int msecs)
 {
     usleep(msecs * 1000);
     return 0;
 }
 
-bool gpio_is_valid(int number)
+static bool gpio_is_valid(int number)
 {
     return number == AD9361_GPIO_RESET_PIN;
 }
 
-void gpio_set_value(unsigned gpio, int value)
+static void gpio_set_value(unsigned gpio, int value)
 {
     (void)gpio;
     (void)value;
