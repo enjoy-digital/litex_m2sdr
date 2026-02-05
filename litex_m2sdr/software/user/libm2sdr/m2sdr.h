@@ -42,6 +42,8 @@ enum m2sdr_module {
 enum m2sdr_format {
     /* 16-bit I/Q interleaved (SC16 Q11 style) */
     M2SDR_FORMAT_SC16_Q11 = 0,
+    /* 8-bit I/Q interleaved (SC8 Q7 style) */
+    M2SDR_FORMAT_SC8_Q7  = 1,
 };
 
 struct m2sdr_metadata {
@@ -145,3 +147,6 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
 #endif
 
 #endif /* M2SDR_H */
+size_t m2sdr_format_size(enum m2sdr_format format);
+void  *m2sdr_alloc_buffer(enum m2sdr_format format, unsigned num_samples);
+void   m2sdr_free_buffer(void *buf);

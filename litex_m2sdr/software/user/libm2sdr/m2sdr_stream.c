@@ -22,6 +22,8 @@ static unsigned m2sdr_sample_size(enum m2sdr_format format)
     switch (format) {
     case M2SDR_FORMAT_SC16_Q11:
         return 4;
+    case M2SDR_FORMAT_SC8_Q7:
+        return 2;
     default:
         return 0;
     }
