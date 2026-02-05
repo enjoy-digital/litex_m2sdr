@@ -29,6 +29,8 @@
 #include <getopt.h>
 #include <samplerate.h>
 
+#include "m2sdr.h"
+
 /* Constants */
 /*-----------*/
 
@@ -38,7 +40,7 @@
 /* FM Demodulation Functions */
 /*---------------------------*/
 
-static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode) {
+static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode, enum m2sdr_format format) {
     /* Demodulate interleaved 16-bit I/Q samples to audio in streaming fashion */
     int audio_channels = (strcmp(mode, "stereo") == 0) ? 2 : 1;
     const double max_val = 32767.0;
@@ -58,6 +60,15 @@ static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double
     if (!iq_chunk) {
         fprintf(stderr, "Error: Memory allocation failed for I/Q chunk\n");
         exit(1);
+    }
+    int8_t *iq8_chunk = NULL;
+    if (format == M2SDR_FORMAT_SC8_Q7) {
+        iq8_chunk = malloc(sizeof(int8_t) * CHUNK_SIZE * 2);
+        if (!iq8_chunk) {
+            fprintf(stderr, "Error: Memory allocation failed for I/Q chunk\n");
+            free(iq_chunk);
+            exit(1);
+        }
     }
     float *audio_chunk = malloc(sizeof(float) * CHUNK_SIZE);
     if (!audio_chunk) {
@@ -98,8 +109,17 @@ static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double
 
     /* Process in chunks */
     while (1) {
-        size_t bytes_read = fread(iq_chunk, sizeof(int16_t), CHUNK_SIZE * 2, infile);
-        size_t frames_read = bytes_read / 2;
+        size_t frames_read = 0;
+        if (format == M2SDR_FORMAT_SC8_Q7) {
+            size_t bytes_read = fread(iq8_chunk, sizeof(int8_t), CHUNK_SIZE * 2, infile);
+            frames_read = bytes_read / 2;
+            for (size_t k = 0; k < frames_read * 2; k++) {
+                iq_chunk[k] = (int16_t)iq8_chunk[k];
+            }
+        } else {
+            size_t bytes_read = fread(iq_chunk, sizeof(int16_t), CHUNK_SIZE * 2, infile);
+            frames_read = bytes_read / 2;
+        }
         if (frames_read == 0) break;
 
         for (size_t k = 0; k < frames_read; k++) {
@@ -194,6 +214,7 @@ static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double
 
     /* Cleanup */
     free(iq_chunk);
+    free(iq8_chunk);
     free(audio_chunk);
     if (resampling_needed) {
         free(resampled_chunk);
@@ -214,6 +235,7 @@ static void help(void) {
            "-s, --samplerate sps  Set I/Q sample rate in SPS (default: 500000).\n"
            "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "-8, --sc8             Input is 8-bit I/Q samples (SC8 Q7).\n"
            "-e, --emphasis type   Set de-emphasis to us, eu or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
            "\n"
@@ -235,6 +257,7 @@ static struct option options[] = {
     { "samplerate", required_argument, NULL, 's' },
     { "deviation",  required_argument, NULL, 'd' },
     { "bits",       required_argument, NULL, 'b' },
+    { "sc8",        no_argument,       NULL, '8' },
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
     { NULL,         0,                 NULL, 0 }
@@ -249,12 +272,14 @@ int main(int argc, char **argv) {
     double samplerate = 1000000.0;
     double deviation = 75000.0;
     int bits = 12;
+    bool bits_set = false;
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     char *emphasis_type = "eu";
     char *mode = "mono";
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:e:m:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:8e:m:", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -268,6 +293,11 @@ int main(int argc, char **argv) {
             break;
         case 'b':
             bits = atoi(optarg);
+            bits_set = true;
+            break;
+        case '8':
+            format = M2SDR_FORMAT_SC8_Q7;
+            if (!bits_set) bits = 8;
             break;
         case 'e':
             emphasis_type = optarg;
@@ -360,7 +390,7 @@ int main(int argc, char **argv) {
     }
 
     /* Perform FM demodulation */
-    demodulate_fm(infile, outfile, samplerate, deviation, bits, tau, mode);
+    demodulate_fm(infile, outfile, samplerate, deviation, bits, tau, mode, format);
 
     /* Update WAV header sizes if output is a file */
     if (outfile != stdout) {
