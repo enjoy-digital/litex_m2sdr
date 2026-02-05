@@ -292,6 +292,39 @@ int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *caps)
+{
+    if (!dev || !caps)
+        return M2SDR_ERR_INVAL;
+
+    uint32_t v = 0;
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_API_VERSION_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->api_version = v;
+
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_FEATURES_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->features = v;
+
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_BOARD_INFO_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->board_info = v;
+
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_PCIE_CONFIG_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->pcie_config = v;
+
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_ETH_CONFIG_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->eth_config = v;
+
+    if (m2sdr_reg_read(dev, CSR_CAPABILITY_SATA_CONFIG_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    caps->sata_config = v;
+
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 {
     if (!dev || !time_ns)

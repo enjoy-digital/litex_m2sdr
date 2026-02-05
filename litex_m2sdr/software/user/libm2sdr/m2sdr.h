@@ -61,6 +61,15 @@ struct m2sdr_devinfo {
     char transport[16];
 };
 
+struct m2sdr_capabilities {
+    uint32_t api_version;
+    uint32_t features;
+    uint32_t board_info;
+    uint32_t pcie_config;
+    uint32_t eth_config;
+    uint32_t sata_config;
+};
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     int64_t sample_rate;
@@ -91,6 +100,7 @@ void m2sdr_close(struct m2sdr_dev *dev);
 int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
 
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
+int  m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *caps);
 
 /* Register access */
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
