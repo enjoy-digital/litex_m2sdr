@@ -221,8 +221,8 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 }
 #endif
 
-std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
-std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
+std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
+std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
 
 #if USE_LITEPCIE
 void dma_set_loopback(int fd, bool loopback_enable) {
@@ -264,7 +264,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* Global file descriptor for AD9361 lib. */
     _spi_id = spi_register_fd(_fd);
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
+    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 #elif USE_LITEETH
     /* Prepare EtherBone / Ethernet streamer */
     std::string eth_ip;
@@ -281,7 +281,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
     _spi_id = spi_register_fd(_fd);
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
+    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 
     /* Ethernet FPGA streamer configuration */
 
