@@ -11,30 +11,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <getopt.h>
 #include <stdint.h>
 
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
-
+#include "m2sdr.h"
 #include "m2sdr_config.h"
 
-#include "liblitepcie.h"
-#include "libm2sdr.h"
-#include "etherbone.h"
-
-/* Variables */
-/*-----------*/
-
 #ifdef USE_LITEPCIE
-static char m2sdr_device[1024];
 static int m2sdr_device_num = 0;
 #elif defined(USE_LITEETH)
 static char m2sdr_ip_address[1024] = "192.168.1.50";
@@ -44,438 +31,8 @@ static char m2sdr_port[16] = "1234";
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
+    (void)dummy;
     keep_running = 0;
-}
-
-/* Connection Functions */
-/*----------------------*/
-
-static void *g_conn = NULL;
-
-static void * m2sdr_open(void) {
-    if (g_conn)
-        return g_conn;
-#ifdef USE_LITEPCIE
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not init driver\n");
-        exit(1);
-    }
-    g_conn = (void *)(intptr_t)fd;
-    return g_conn;
-#elif defined(USE_LITEETH)
-    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
-    if (!eb) {
-        fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
-        exit(1);
-    }
-    g_conn = eb;
-    return g_conn;
-#endif
-}
-
-static void m2sdr_close(void *conn) {
-    if (!conn)
-        return;
-#ifdef USE_LITEPCIE
-    close((int)(intptr_t)conn);
-#elif defined(USE_LITEETH)
-    eb_disconnect((struct eb_connection **)&conn);
-#endif
-    if (conn == g_conn)
-        g_conn = NULL;
-}
-
-static void m2sdr_close_global(void) {
-#ifdef USE_LITEPCIE
-    if (g_conn)
-        close((int)(intptr_t)g_conn);
-#elif defined(USE_LITEETH)
-    if (g_conn)
-        eb_disconnect((struct eb_connection **)&g_conn);
-#endif
-    g_conn = NULL;
-}
-
-/* AD9361 */
-/*--------*/
-
-#define AD9361_GPIO_RESET_PIN 0
-
-struct ad9361_rf_phy *ad9361_phy;
-
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
-{
-    void *conn = m2sdr_open();
-
-    if (n_tx == 2 && n_rx == 1) {
-        /* read */
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
-    } else if (n_tx == 3 && n_rx == 0) {
-        /* write */
-        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-                n_tx, n_rx);
-        m2sdr_close(conn);
-        exit(1);
-    }
-
-    return 0;
-}
-
-void udelay(unsigned long usecs)
-{
-    usleep(usecs);
-}
-
-void mdelay(unsigned long msecs)
-{
-    usleep(msecs * 1000);
-}
-
-unsigned long msleep_interruptible(unsigned int msecs)
-{
-    usleep(msecs * 1000);
-    return 0;
-}
-
-bool gpio_is_valid(int number)
-{
- switch(number) {
-    case AD9361_GPIO_RESET_PIN:
-        return true;
-    default:
-        return false;
-    }
-}
-
-void gpio_set_value(unsigned gpio, int value)
-{
-
-}
-
-/* M2SDR Init */
-/*------------*/
-
-static void m2sdr_init(
-    uint32_t samplerate,
-    int64_t  bandwidth,
-    int64_t  refclk_freq,
-    int64_t  tx_freq,
-    int64_t  rx_freq,
-    int64_t  tx_gain,
-    int64_t  rx_gain1,
-    int64_t  rx_gain2,
-    uint8_t  loopback,
-    bool     bist_tx_tone,
-    bool     bist_rx_tone,
-    bool     bist_prbs,
-    int32_t  bist_tone_freq,
-    bool     enable_8bit_mode,
-    bool     enable_oversample,
-    const char *chan_mode,
-    const char *sync_mode
-) {
-    void *conn = m2sdr_open();
-
-#ifdef CSR_SI5351_BASE
-    /* Initialize SI5351 Clocking */
-    printf("Initializing SI5351 Clocking...\n");
-
-    /* Internal Sync */
-    if (strcmp(sync_mode, "internal") == 0) {
-        /* Supported by SI5351B & C Versions */
-        printf("Using internal XO as SI5351 RefClk...\n");
-        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)); /* SI5351B Version. */
-
-        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
-        if (refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_xo_40m_config,
-                sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
-        } else { /* default to 38.4 MHz */
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_xo_38p4m_config,
-                sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
-        }
-
-    /* External Sync */
-    } else if (strcmp(sync_mode, "external") == 0) {
-        /* Only Supported by SI5351C Version */
-        printf("Using 10MHz input as SI5351 RefClk...\n");
-        m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
-              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* ClkIn from uFL.  */
-
-        /* Pick 38.4 MHz or 40 MHz table based on refclk_freq */
-        if (refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
-        } else { /* default to 38.4 MHz */
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
-        }
-
-    /* Invalid Sync */
-    } else {
-        fprintf(stderr, "Invalid synchronization mode: %s\n", sync_mode);
-        m2sdr_close(conn);
-        exit(1);
-    }
-#endif
-
-
-    /* Initialize AD9361 SPI */
-    printf("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init(conn, 1);
-
-    /* Initialize AD9361 RFIC */
-    printf("Initializing AD9361 RFIC...\n");
-    default_init_param.reference_clk_rate = refclk_freq;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
-
-    if (strcmp(chan_mode, "1t1r") == 0) {
-        printf("Setting Channel Mode to 1T1R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
-        default_init_param.two_t_two_r_timing_enable     = 0;
-        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 1);
-    }
-    if (strcmp(chan_mode, "2t2r") == 0) {
-        printf("Setting Channel Mode to 2T2R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 1;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
-        default_init_param.two_t_two_r_timing_enable     = 1;
-        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 0);
-    }
-    ad9361_init(&ad9361_phy, &default_init_param, 1);
-
-    /* Configure AD9361 Samplerate */
-    printf("Setting TX/RX Samplerate to %f MSPS.\n", samplerate/1e6);
-    uint32_t actual_samplerate = samplerate;
-    if (enable_oversample)
-        actual_samplerate /= 2; /* Oversampling disables FIR decimation by 2 */
-    if (actual_samplerate < 2500000) {
-        printf("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
-        ad9361_phy->rx_fir_dec    = 4;
-        ad9361_phy->tx_fir_int    = 4;
-        ad9361_phy->bypass_rx_fir = 0;
-        ad9361_phy->bypass_tx_fir = 0;
-        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
-        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
-        rx_fir_cfg.rx_dec = 4;
-        tx_fir_cfg.tx_int = 4;
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
-        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
-        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
-    }
-    ad9361_set_tx_sampling_freq(ad9361_phy, actual_samplerate);
-    ad9361_set_rx_sampling_freq(ad9361_phy, actual_samplerate);
-
-    /* Configure AD9361 TX/RX Bandwidth */
-    printf("Setting TX/RX Bandwidth to %f MHz.\n", bandwidth/1e6);
-    ad9361_set_rx_rf_bandwidth(ad9361_phy, bandwidth);
-    ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth);
-
-    /* Configure AD9361 TX/RX Frequencies */
-    printf("Setting TX LO Freq to %f MHz.\n", tx_freq/1e6);
-    printf("Setting RX LO Freq to %f MHz.\n", rx_freq/1e6);
-    ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
-    ad9361_set_rx_lo_freq(ad9361_phy, rx_freq);
-
-    /* Configure AD9361 TX/RX FIRs */
-    ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-    ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-
-    /* Configure AD9361 TX Attenuation */
-    printf("Setting TX Gain to %ld dB.\n", tx_gain);
-    ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
-
-    /* Configure AD9361 RX Gain */
-    printf("Setting RX Gain to %ld dB and %ld dB.\n", rx_gain1, rx_gain2);
-    ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain1);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain2);
-
-    /* Configure AD9361 RX->TX Loopback */
-    printf("Setting Loopback to %d\n", loopback);
-    ad9361_bist_loopback(ad9361_phy, loopback);
-
-    /* Configure 8-bit mode */
-    if (enable_8bit_mode) {
-        printf("Enabling 8-bit mode.\n");
-        m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 1);
-    } else {
-        printf("Enabling 16-bit mode.\n");
-        m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
-    }
-
-    /* Enable BIST TX Tone (Optional: For RF TX Tests) */
-    if (bist_tx_tone) {
-        printf("BIST_TX_TONE_TEST...\n");
-        ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, bist_tone_freq, 0, 0x0); /* tone / 0dB / RX1&2 */
-    }
-
-    /* Enable BIST RX Tone (Optional: For Software RX Tests) */
-    if (bist_rx_tone) {
-        printf("BIST_RX_TONE_TEST...\n");
-        ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, bist_tone_freq, 0, 0x0); /* tone / 0dB / RX1&2 */
-    }
-
-    /* Enable BIST PRBS Test (Optional: For FPGA <-> AD9361 interface calibration) */
-    if (bist_prbs) {
-        int rx_clk_delay, rx_dat_delay, tx_clk_delay, tx_dat_delay;
-        int rx_valid_delays[16][16] = {{0}};
-        int tx_valid_delays[16][16] = {{0}};
-
-        printf("BIST_PRBS TEST...\n");
-
-        /* Enable AD9361 RX-PRBS */
-        m2sdr_writel(conn, CSR_AD9361_PRBS_TX_ADDR, 0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-        ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX);
-
-        /* RX Clk/Dat delays scan */
-        printf("\n");
-        printf("RX Clk/Dat delays scan...\n");
-        printf("-------------------------\n");
-
-        /* Loop on RX Clk delay */
-        printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-        for (rx_clk_delay = 0; rx_clk_delay < 16; rx_clk_delay++) {
-            /* Loop on RX Dat delay */
-            printf(" %2d     |", rx_clk_delay);
-            for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
-                /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write(conn, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(rx_clk_delay) | RX_DATA_DELAY(rx_dat_delay));
-
-                /* Small sleep to let PRBS synchronize */
-                mdelay(10);
-
-                /* Check PRBS checker synchronization */
-                int prbs_sync = m2sdr_readl(conn, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
-                printf(" %2d", prbs_sync);
-
-                /* Record valid delay settings */
-                rx_valid_delays[rx_clk_delay][rx_dat_delay] = prbs_sync;
-            }
-            printf("\n");
-        }
-
-        /* Find optimal RX Clk/Dat delays */
-        int optimal_rx_clk_delay = -1, optimal_rx_dat_delay = -1;
-        int max_valid_delays = 0;
-
-        for (rx_clk_delay = 0; rx_clk_delay < 16; rx_clk_delay++) {
-            for (rx_dat_delay = 0; rx_dat_delay < 16; rx_dat_delay++) {
-                if (rx_valid_delays[rx_clk_delay][rx_dat_delay] == 1) {
-                    int valid_count = 0;
-                    for (int i = rx_dat_delay; i < 16 && rx_valid_delays[rx_clk_delay][i] == 1; i++) {
-                        valid_count++;
-                    }
-                    if (valid_count > max_valid_delays) {
-                        max_valid_delays = valid_count;
-                        optimal_rx_clk_delay = rx_clk_delay;
-                        optimal_rx_dat_delay = rx_dat_delay + valid_count / 2; // Center of the valid range
-                    }
-                }
-            }
-        }
-
-        /* Display optimal RX Clk/Dat delays */
-        if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
-            printf("Optimal RX Clk Delay: %d, Optimal RX Dat Delay: %d\n", optimal_rx_clk_delay, optimal_rx_dat_delay);
-        } else {
-            printf("No valid RX Clk/Dat delay settings found.\n");
-        }
-
-        /* Configure optimal RX Clk/Dat delays */
-        if (optimal_rx_clk_delay != -1 && optimal_rx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write(conn, REG_RX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_rx_clk_delay) | RX_DATA_DELAY(optimal_rx_dat_delay));
-        }
-
-        /* Enable RX->TX AD9361 loopback */
-        ad9361_bist_loopback(ad9361_phy, 1);
-
-        /* Enable FPGA TX-PRBS */
-        m2sdr_writel(conn, CSR_AD9361_PRBS_TX_ADDR, 1 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET));
-
-        /* TX Clk/Dat delays scan */
-        printf("\n");
-        printf("TX Clk/Dat delays scan...\n");
-        printf("-------------------------\n");
-
-        /* Loop on TX Clk delay */
-        printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
-        for (tx_clk_delay = 0; tx_clk_delay < 16; tx_clk_delay++) {
-            /* Loop on TX Dat delay */
-            printf(" %2d     |", tx_clk_delay);
-            for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
-                /* Configure Clk/Dat delays */
-                m2sdr_ad9361_spi_write(conn, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(tx_clk_delay) | RX_DATA_DELAY(tx_dat_delay));
-
-                /* Small sleep to let PRBS synchronize */
-                mdelay(10);
-
-                /* Check PRBS checker synchronization */
-                int prbs_sync = m2sdr_readl(conn, CSR_AD9361_PRBS_RX_ADDR) & 0x1;
-                printf(" %2d", prbs_sync);
-
-                /* Record valid delay settings */
-                tx_valid_delays[tx_clk_delay][tx_dat_delay] = prbs_sync;
-            }
-            printf("\n");
-        }
-
-        /* Find optimal TX Clk/Dat delays */
-        int optimal_tx_clk_delay = -1, optimal_tx_dat_delay = -1;
-        max_valid_delays = 0;
-
-        for (tx_clk_delay = 0; tx_clk_delay < 16; tx_clk_delay++) {
-            for (tx_dat_delay = 0; tx_dat_delay < 16; tx_dat_delay++) {
-                if (tx_valid_delays[tx_clk_delay][tx_dat_delay] == 1) {
-                    int valid_count = 0;
-                    for (int i = tx_dat_delay; i < 16 && tx_valid_delays[tx_clk_delay][i] == 1; i++) {
-                        valid_count++;
-                    }
-                    if (valid_count > max_valid_delays) {
-                        max_valid_delays = valid_count;
-                        optimal_tx_clk_delay = tx_clk_delay;
-                        optimal_tx_dat_delay = tx_dat_delay + valid_count / 2; // Center of the valid range
-                    }
-                }
-            }
-        }
-
-        /* Display optimal TX Clk/Dat delays */
-        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-            printf("Optimal TX Clk Delay: %d, Optimal TX Dat Delay: %d\n", optimal_tx_clk_delay, optimal_tx_dat_delay);
-        } else {
-            printf("No valid TX Clk/Dat delay settings found.\n");
-        }
-
-        /* Configure optimal TX Clk/Dat delays */
-        if (optimal_tx_clk_delay != -1 && optimal_tx_dat_delay != -1) {
-            m2sdr_ad9361_spi_write(conn, REG_TX_CLOCK_DATA_DELAY, DATA_CLK_DELAY(optimal_tx_clk_delay) | RX_DATA_DELAY(optimal_tx_dat_delay));
-        }
-    }
-
-    /* Configure oversample feature if enabled */
-    if (enable_oversample) {
-        ad9361_enable_oversampling(ad9361_phy);
-    }
-
-    m2sdr_close(conn);
 }
 
 /* Help */
@@ -496,7 +53,7 @@ static void help(void)
 #endif
            "  -8bit                  Enable 8-bit mode (default: disabled).\n"
            "  -oversample            Enable oversample mode (default: disabled).\n"
-           "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
+           "  -chan mode             Set channel mode: '1t1r' or '2t2r' (default: '2t2r').\n"
            "  -sync mode             Set synchronization mode ('internal' or 'external', default: internal).\n"
            "\n"
            "  -refclk_freq freq      Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
@@ -527,81 +84,34 @@ static void help(void)
     exit(1);
 }
 
-/* Options */
-/*---------*/
-
-static struct option options[] = {
-    { "help",             no_argument, NULL, 'h' },   /*  0 */
-    { "refclk_freq",      required_argument },        /*  1 */
-    { "samplerate",       required_argument },        /*  2 */
-    { "bandwidth",        required_argument },        /*  3 */
-    { "tx_freq",          required_argument },        /*  4 */
-    { "rx_freq",          required_argument },        /*  5 */
-    { "tx_gain",          required_argument },        /*  6 */
-    { "rx_gain",          required_argument },        /*  7 */
-    { "rx_gain1",         required_argument },        /*  8 */
-    { "rx_gain2",         required_argument },        /*  9 */
-    { "loopback",         required_argument },        /* 10 */
-    { "bist_tx_tone",     no_argument },              /* 11 */
-    { "bist_rx_tone",     no_argument },              /* 12 */
-    { "bist_prbs",        no_argument },              /* 13 */
-    { "bist_tone_freq",   required_argument },        /* 14 */
-    { "8bit",             no_argument, NULL, '8' },   /* 15 */
-    { "oversample",       no_argument },              /* 16 */
-    { "chan",             required_argument },        /* 17 */
-    { "sync",             required_argument },        /* 18 */
-    { NULL },
-};
-
 /* Main */
 /*------*/
 
 int main(int argc, char **argv)
 {
     int c;
-    int option_index;
+    struct m2sdr_config cfg;
+    m2sdr_config_init(&cfg);
 
-    int64_t  refclk_freq;
-    uint32_t samplerate;
-    int32_t  bandwidth;
-    int64_t  tx_freq, rx_freq;
-    int64_t  tx_gain, rx_gain1, rx_gain2;
-    uint8_t  loopback;
-    bool     bist_tx_tone = false;
-    bool     bist_rx_tone = false;
-    bool     bist_prbs    = false;
-    int32_t  bist_tone_freq;
-    bool     enable_8bit_mode = false;
-    bool     enable_oversample = false;
-    char     chan_mode[16] = "2t2r";
-    char     sync_mode[16] = "internal";
+    signal(SIGINT, intHandler);
 
-    refclk_freq    = DEFAULT_REFCLK_FREQ;
-    samplerate     = DEFAULT_SAMPLERATE;
-    bandwidth      = DEFAULT_BANDWIDTH;
-    tx_freq        = DEFAULT_TX_FREQ;
-    rx_freq        = DEFAULT_RX_FREQ;
-    tx_gain        = DEFAULT_TX_GAIN;
-    rx_gain1       = DEFAULT_RX_GAIN;
-    rx_gain2       = DEFAULT_RX_GAIN;
-    loopback       = DEFAULT_LOOPBACK;
-    bist_tone_freq = DEFAULT_BIST_TONE_FREQ;
-
-    /* Parse/Handle Parameters. */
     for (;;) {
-        #ifdef USE_LITEPCIE
-        c = getopt_long_only(argc, argv, "hc:8", options, &option_index);
-        #elif defined(USE_LITEETH)
-        c = getopt_long_only(argc, argv, "hi:p:8", options, &option_index);
-        #endif
+#if defined(USE_LITEPCIE)
+        c = getopt(argc, argv, "hc:8");
+#elif defined(USE_LITEETH)
+        c = getopt(argc, argv, "hi:p:8");
+#endif
         if (c == -1)
             break;
         switch(c) {
         case 'h':
             help();
-            exit(1);
             break;
-        #ifdef USE_LITEETH
+#if defined(USE_LITEPCIE)
+        case 'c':
+            m2sdr_device_num = atoi(optarg);
+            break;
+#elif defined(USE_LITEETH)
         case 'i':
             strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
             m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
@@ -610,121 +120,78 @@ int main(int argc, char **argv)
             strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
             m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
             break;
-        #endif
-        #ifdef USE_LITEPCIE
-        case 'c':
-            m2sdr_device_num = atoi(optarg);
-            break;
-        #endif
+#endif
         case '8':
-            enable_8bit_mode = true;
-            break;
-        case 0:
-            switch(option_index) {
-                case 1: /* refclk_freq */
-                    refclk_freq = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 2: /* samplerate */
-                    samplerate = (uint32_t)strtod(optarg, NULL);
-                    break;
-                case 3: /* bandwidth */
-                    bandwidth = (int32_t)strtod(optarg, NULL);
-                    break;
-                case 4: /* tx_freq */
-                    tx_freq = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 5: /* rx_freq */
-                    rx_freq = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 6: /* tx_gain */
-                    tx_gain = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 7: /* rx_gain both */
-                    rx_gain1 = (int64_t)strtod(optarg, NULL);
-                    rx_gain2 = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 8: /* rx_gain 1 */
-                    rx_gain1 = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 9: /* rx_gain 2 */
-                    rx_gain2 = (int64_t)strtod(optarg, NULL);
-                    break;
-                case 10: /* loopback */
-                    loopback = (uint8_t)strtod(optarg, NULL);
-                    break;
-                case 11: /* bist_tx_tone */
-                    bist_tx_tone = true;
-                    break;
-                case 12: /* bist_rx_tone */
-                    bist_rx_tone = true;
-                    break;
-                case 13: /* bist_prbs */
-                    bist_prbs = true;
-                    break;
-                case 14: /* bist_tone_freq */
-                    bist_tone_freq = (int32_t)strtod(optarg, NULL);
-                    break;
-                case 15: /* 8bit */
-                    enable_8bit_mode = true;
-                    break;
-                case 16: /* oversample */
-                    enable_oversample = true;
-                    break;
-                case 17: /* chan */
-                    strncpy(chan_mode, optarg, sizeof(chan_mode));
-                    chan_mode[sizeof(chan_mode) - 1] = '\0';
-                    break;
-                case 18: /* sync */
-                    strncpy(sync_mode, optarg, sizeof(sync_mode));
-                    sync_mode[sizeof(sync_mode) - 1] = '\0';
-                    break;
-                default:
-                    fprintf(stderr, "unknown option index: %d\n", option_index);
-                    exit(1);
-            }
+            cfg.enable_8bit_mode = true;
             break;
         default:
             exit(1);
         }
     }
 
-    /* Select device. */
-    #ifdef USE_LITEPCIE
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
-    #endif
+    while (optind < argc) {
+        if (strcmp(argv[optind], "-8bit") == 0) {
+            cfg.enable_8bit_mode = true;
+        } else if (strcmp(argv[optind], "-oversample") == 0) {
+            cfg.enable_oversample = true;
+        } else if (strcmp(argv[optind], "-chan") == 0 && optind + 1 < argc) {
+            cfg.chan_mode = argv[++optind];
+        } else if (strcmp(argv[optind], "-sync") == 0 && optind + 1 < argc) {
+            cfg.sync_mode = argv[++optind];
+        } else if (strcmp(argv[optind], "-refclk_freq") == 0 && optind + 1 < argc) {
+            cfg.refclk_freq = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-samplerate") == 0 && optind + 1 < argc) {
+            cfg.sample_rate = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-bandwidth") == 0 && optind + 1 < argc) {
+            cfg.bandwidth = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-tx_freq") == 0 && optind + 1 < argc) {
+            cfg.tx_freq = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-rx_freq") == 0 && optind + 1 < argc) {
+            cfg.rx_freq = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-tx_gain") == 0 && optind + 1 < argc) {
+            cfg.tx_gain = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-rx_gain") == 0 && optind + 1 < argc) {
+            cfg.rx_gain1 = strtoll(argv[++optind], NULL, 0);
+            cfg.rx_gain2 = cfg.rx_gain1;
+        } else if (strcmp(argv[optind], "-rx_gain1") == 0 && optind + 1 < argc) {
+            cfg.rx_gain1 = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-rx_gain2") == 0 && optind + 1 < argc) {
+            cfg.rx_gain2 = strtoll(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-loopback") == 0 && optind + 1 < argc) {
+            cfg.loopback = (uint8_t)strtoul(argv[++optind], NULL, 0);
+        } else if (strcmp(argv[optind], "-bist_tx_tone") == 0) {
+            cfg.bist_tx_tone = true;
+        } else if (strcmp(argv[optind], "-bist_rx_tone") == 0) {
+            cfg.bist_rx_tone = true;
+        } else if (strcmp(argv[optind], "-bist_prbs") == 0) {
+            cfg.bist_prbs = true;
+        } else if (strcmp(argv[optind], "-bist_tone_freq") == 0 && optind + 1 < argc) {
+            cfg.bist_tone_freq = (int32_t)strtoul(argv[++optind], NULL, 0);
+        } else {
+            help();
+        }
+        optind++;
+    }
 
-    /* Basic range checks (avoid invalid AD9361 configs). */
-    if (samplerate < 550000) {
-        fprintf(stderr, "Invalid samplerate: %u (must be >= 550000)\n", samplerate);
-        exit(1);
-    }
-    if (bandwidth < 200000 || bandwidth > 56000000) {
-        fprintf(stderr, "Invalid bandwidth: %d (must be 200k..56M)\n", bandwidth);
-        exit(1);
-    }
-    if (tx_freq < 47000000 || tx_freq > 6000000000LL) {
-        fprintf(stderr, "Invalid tx_freq: %" PRId64 " (must be 47M..6G)\n", tx_freq);
-        exit(1);
-    }
-    if (rx_freq < 70000000 || rx_freq > 6000000000LL) {
-        fprintf(stderr, "Invalid rx_freq: %" PRId64 " (must be 70M..6G)\n", rx_freq);
-        exit(1);
-    }
-    if (tx_gain < -89 || tx_gain > 0) {
-        fprintf(stderr, "Invalid tx_gain: %" PRId64 " (must be -89..0 dB)\n", tx_gain);
-        exit(1);
-    }
-    if (rx_gain1 < 0 || rx_gain1 > 73 || rx_gain2 < 0 || rx_gain2 > 73) {
-        fprintf(stderr, "Invalid rx_gain: %" PRId64 ", %" PRId64 " (must be 0..73 dB)\n",
-                rx_gain1, rx_gain2);
-        exit(1);
+    char dev_id[128];
+#ifdef USE_LITEPCIE
+    snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", m2sdr_device_num);
+#elif defined(USE_LITEETH)
+    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
+#endif
+
+    struct m2sdr_dev *dev = NULL;
+    if (m2sdr_open(&dev, dev_id) != 0) {
+        fprintf(stderr, "Could not open device: %s\n", dev_id);
+        return 1;
     }
 
-    /* Initialize RF. */
-    printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain1, rx_gain2, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
+    if (m2sdr_apply_config(dev, &cfg) != 0) {
+        fprintf(stderr, "m2sdr_apply_config failed\n");
+        m2sdr_close(dev);
+        return 1;
+    }
 
-    m2sdr_close_global();
-
+    m2sdr_close(dev);
     return 0;
 }
