@@ -726,14 +726,20 @@ void SoapyLiteXM2SDR::setGain(
                 channel, value);
         }
 
-        ad9361_set_tx_attenuation(ad9361_phy, channel, att_mdb);
+        int rc = m2sdr_set_gain(_dev, M2SDR_TX, -att_db);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+        }
     }
 
     /* RX */
     if (SOAPY_SDR_RX == direction) {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
-        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+        }
     }
 }
 
@@ -750,7 +756,10 @@ void SoapyLiteXM2SDR::setGain(
             _tx_stream.gain[channel] = -value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
             uint32_t atten = static_cast<uint32_t>(value * 1000.0);
-            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            int rc = m2sdr_set_gain(_dev, M2SDR_TX, -value);
+            if (rc != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+            }
             return;
         }
         if (name == "GAIN") {
@@ -758,8 +767,10 @@ void SoapyLiteXM2SDR::setGain(
             _tx_stream.gain[channel] = value;
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "TX ch%zu: GAIN is deprecated; use ATT with positive dB", channel);
-            uint32_t atten = static_cast<uint32_t>(-value * 1000.0);
-            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            int rc = m2sdr_set_gain(_dev, M2SDR_TX, value);
+            if (rc != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+            }
             return;
         }
     }
@@ -768,7 +779,10 @@ void SoapyLiteXM2SDR::setGain(
     if (name == "PGA" || name == "RF" || name == "GAIN") {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
-        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+        }
         return;
     }
 
@@ -906,11 +920,18 @@ void SoapyLiteXM2SDR::setFrequency(
 
     uint64_t lo_freq = static_cast<uint64_t>(frequency);
 
-    if (direction == SOAPY_SDR_TX)
-        ad9361_set_tx_lo_freq(ad9361_phy, lo_freq);
-
-    if (direction == SOAPY_SDR_RX)
-        ad9361_set_rx_lo_freq(ad9361_phy, lo_freq);
+    if (direction == SOAPY_SDR_TX) {
+        int rc = m2sdr_set_frequency(_dev, M2SDR_TX, lo_freq);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(TX) failed: %s", m2sdr_strerror(rc));
+        }
+    }
+    if (direction == SOAPY_SDR_RX) {
+        int rc = m2sdr_set_frequency(_dev, M2SDR_RX, lo_freq);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(RX) failed: %s", m2sdr_strerror(rc));
+        }
+    }
 }
 
 double SoapyLiteXM2SDR::getFrequency(
@@ -1093,13 +1114,15 @@ void SoapyLiteXM2SDR::setSampleRate(
     /* Set the sample rate for the TX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
-        ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
-
-    /* Set the sample rate for the RX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_RX) {
         _rx_stream.samplerate = rate;
-        ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
+    }
+    {
+        int rc = m2sdr_set_sample_rate(_dev, (int64_t)(sample_rate/_rateMult));
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_sample_rate failed: %s", m2sdr_strerror(rc));
+        }
     }
 
     /* If oversampling is enabled, enable oversampling on the hardware. */
@@ -1196,13 +1219,14 @@ void SoapyLiteXM2SDR::setBandwidth(
 
     uint32_t bwi = static_cast<uint32_t>(bw);
 
-    if (direction == SOAPY_SDR_TX) {
+    if (direction == SOAPY_SDR_TX)
         _tx_stream.bandwidth = bw;
-        ad9361_set_tx_rf_bandwidth(ad9361_phy, bwi);
-    }
-    if (direction == SOAPY_SDR_RX) {
+    if (direction == SOAPY_SDR_RX)
         _rx_stream.bandwidth = bw;
-        ad9361_set_rx_rf_bandwidth(ad9361_phy, bwi);
+
+    int rc = m2sdr_set_bandwidth(_dev, bwi);
+    if (rc != 0) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_bandwidth failed: %s", m2sdr_strerror(rc));
     }
 }
 
