@@ -296,34 +296,34 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     uint32_t ip_addr_val = ntohl(ip_addr_struct.s_addr);
 
     /* Write the PC's IP to the FPGA's ETH_STREAMER IP register */
-    litex_m2sdr_writel(_fd, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
+    litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
 #endif
 
     /* Configure Mode based on _bitMode */
     if (_bitMode == 8) {
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
+        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
     } else {
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
+        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
     }
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
     /* Enable Synchronizer */
-    litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+    litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 
     /* DMA RX Header */
     #if defined(_RX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
+        litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR,
            (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
            (1 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
         );
     #else
         /* Disable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
+        litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR,
            (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
            (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
         );
@@ -332,20 +332,20 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* DMA TX Header */
     #if defined(_TX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
+        litex_m2sdr_writel(_dev, CSR_HEADER_TX_CONTROL_ADDR,
            (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
            (1 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
         );
     #else
         /* Disable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
+        litex_m2sdr_writel(_dev, CSR_HEADER_TX_CONTROL_ADDR,
            (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
            (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
         );
     #endif
 
     /* Disable DMA Loopback. */
-    litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+    litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
 #endif
 
     bool do_init = true;
@@ -379,7 +379,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #ifdef CSR_SI5351_BASE
         if (clock_source == "internal") {
             /* SI5351B, XO reference */
-            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                 SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
             if (refclk_hz == 40000000) {
                 m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
@@ -392,7 +392,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             }
         } else {
             /* SI5351C, external 10 MHz CLKIN from u.FL */
-            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                   SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
                   SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
             if (refclk_hz == 40000000) {
@@ -408,7 +408,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
         /* Power-up AD9361 */
-        litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
+        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b11);
 
         /* Initialize AD9361 SPI. */
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
@@ -504,11 +504,11 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 #endif
 
     /* Crossbar Mux/Demux : Select PCIe streaming */
-    litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
-    litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
     /* Power-Down AD9361 */
-    litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);
+    litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
 
 #if USE_LITEETH
     if (_udp_inited) {
@@ -565,7 +565,7 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 
 #ifdef CSR_CAPABILITY_BOARD_INFO_ADDR
     {
-        const uint32_t board_info = litex_m2sdr_readl(_fd, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        const uint32_t board_info = litex_m2sdr_readl(_dev, CSR_CAPABILITY_BOARD_INFO_ADDR);
         const int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) &
                             ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
         switch (variant) {
@@ -998,13 +998,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 1);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 0);
     }
 }
 
@@ -1258,15 +1258,15 @@ long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const
     int64_t time_ns = 0;
 
     /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
-    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
     control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
 
     /* Debug log the hardware time in nanoseconds. */
     SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", (long long)time_ns);
@@ -1279,15 +1279,15 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
     uint32_t control_reg = 0;
 
     /* Write the 64-bit Time (ns). */
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
 
     /* Pulse the WRITE bit Control Register. */
-    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
     control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Optional debug log. */
     SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time set to (ns): %lld", (long long)timeNs);
@@ -1390,22 +1390,22 @@ std::string SoapyLiteXM2SDR::readSensor(
             /* Temp. */
             if (sensorStr == "temp") {
                 sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
+                    (double)litex_m2sdr_readl(_dev, CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
                 );
             /* VCCINT. */
             } else if (sensorStr == "vccint") {
                 sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCINT_ADDR) / 4096 * 3
                 );
             /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
                 sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCAUX_ADDR) / 4096 * 3
                 );
             /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
                 sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
+                    (double)litex_m2sdr_readl(_dev, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
                 );
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");

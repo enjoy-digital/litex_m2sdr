@@ -330,7 +330,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     }
 
     /* Configure 2T2R/1T1R mode (PHY) */
-    litex_m2sdr_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+    litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
 
     /* AD9361 Channel en/dis */
     ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
@@ -395,12 +395,12 @@ int SoapyLiteXM2SDR::activateStream(
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
 #if USE_LITEPCIE
         /* Crossbar Demux: Select PCIe streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
         /* Configure the DMA engine for RX, but don't enable it yet. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
         /* UDP helper is ready; nothing to start explicitly. */
 #endif
         _rx_stream.user_count = 0;
@@ -422,13 +422,13 @@ int SoapyLiteXM2SDR::activateStream(
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
 #if USE_LITEPCIE
         /* Crossbar Mux: Select PCIe streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
         /* Configure the DMA engine for TX, but don't enable it yet. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
 #elif USE_LITEETH
         /* Crossbar Mux: Select Ethernet streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
         /* No explicit start; pacing handled by client cadence if needed. */
         _tx_stream.user_count = 0;
 #endif

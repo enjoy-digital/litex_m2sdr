@@ -77,15 +77,23 @@ extern "C" {
 
 #if USE_LITEPCIE
 #define FD_INIT -1
-#define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
-#define litex_m2sdr_readl(_fd, _addr) litepcie_readl(_fd, _addr)
 typedef int litex_m2sdr_device_desc_t;
 #elif USE_LITEETH
 #define FD_INIT NULL
-#define litex_m2sdr_writel(_fd, _addr, _val) eb_write32(_fd, _val, _addr)
-#define litex_m2sdr_readl(_fd, _addr) eb_read32(_fd, _addr)
 typedef struct eb_connection *litex_m2sdr_device_desc_t;
 #endif
+
+static inline uint32_t litex_m2sdr_readl(struct m2sdr_dev *dev, uint32_t addr)
+{
+    uint32_t val = 0;
+    m2sdr_reg_read(dev, addr, &val);
+    return val;
+}
+
+static inline void litex_m2sdr_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    m2sdr_reg_write(dev, addr, val);
+}
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  /**************************************************************************************************
