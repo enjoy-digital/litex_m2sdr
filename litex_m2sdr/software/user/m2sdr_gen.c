@@ -33,6 +33,7 @@
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "config.h"
+#include "csr.h"
 
 /* Variables */
 /*-----------*/
@@ -55,7 +56,7 @@ static int get_prbs_bit(void) {
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
-static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type) {
+static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type, uint8_t enable_header, uint8_t use_8bit) {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
@@ -76,6 +77,20 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
         fprintf(stderr, "No PCIe fd available\n");
         m2sdr_close(dev);
         exit(1);
+    }
+
+    if (use_8bit) {
+        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
+    } else {
+        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 0);
+    }
+
+    if (enable_header) {
+        if (m2sdr_set_tx_header(dev, true) != 0) {
+            fprintf(stderr, "m2sdr_set_tx_header failed\n");
+            m2sdr_close(dev);
+            exit(1);
+        }
     }
 
 #ifdef CSR_GPIO_BASE
@@ -156,7 +171,17 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                 sw_underflows += (dma.reader_hw_count - dma.reader_sw_count);
 
             /* Generate tone and fill Write buffer */
-            int num_samples = DMA_BUFFER_SIZE / 8; // 8 bytes per sample: TX1_I, TX1_Q, TX2_I, TX2_Q
+            int bytes_per_sample = use_8bit ? 4 : 8;
+            int payload_bytes = DMA_BUFFER_SIZE - (enable_header ? 16 : 0);
+            int num_samples = payload_bytes / bytes_per_sample;
+            uint8_t *payload = (uint8_t *)buf_wr + (enable_header ? 16 : 0);
+
+            if (enable_header) {
+                uint64_t ts = 0;
+                m2sdr_get_time(dev, &ts);
+                ((uint64_t *)buf_wr)[0] = 0x5aa55aa55aa55aa5ULL;
+                ((uint64_t *)buf_wr)[1] = ts;
+            }
             for (int j = 0; j < num_samples; j++) {
                 float I = 0.0;
                 float Q = 0.0;
@@ -188,23 +213,32 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                     Q = ((float)(value_Q - 2048) / 2048.0f) * amplitude;
                 }
 
-                int16_t I_int = (int16_t)(I * 2047); // Scale to 12-bit range
-                int16_t Q_int = (int16_t)(Q * 2047); // Scale to 12-bit range
+                if (use_8bit) {
+                    int8_t I_int = (int8_t)(I * 127);
+                    int8_t Q_int = (int8_t)(Q * 127);
+                    ((int8_t *)payload)[4 * j + 0] = I_int;
+                    ((int8_t *)payload)[4 * j + 1] = Q_int;
+                    ((int8_t *)payload)[4 * j + 2] = I_int;
+                    ((int8_t *)payload)[4 * j + 3] = Q_int;
+                } else {
+                    int16_t I_int = (int16_t)(I * 2047); // Scale to 12-bit range
+                    int16_t Q_int = (int16_t)(Q * 2047); // Scale to 12-bit range
 
-                /* GPIO PPS/Toggle on selected bit */
-                uint16_t gpio1 = 0, gpio2 = 0;
-                if (pps_freq > 0) {
-                    double phase = fmod(sample_count, pps_period_samples);
-                    if (phase < pps_high_samples) {
-                        gpio1 = 1 << gpio_pin; // Selected bit high (first edge)
-                        gpio2 = 1 << gpio_pin; // Selected bit high (second edge)
+                    /* GPIO PPS/Toggle on selected bit */
+                    uint16_t gpio1 = 0, gpio2 = 0;
+                    if (pps_freq > 0) {
+                        double phase = fmod(sample_count, pps_period_samples);
+                        if (phase < pps_high_samples) {
+                            gpio1 = 1 << gpio_pin; // Selected bit high (first edge)
+                            gpio2 = 1 << gpio_pin; // Selected bit high (second edge)
+                        }
                     }
-                }
 
-                ((int16_t *)buf_wr)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12); // TX1_I (IA[15:12] = GPIO1)
-                ((int16_t *)buf_wr)[4 * j + 1] = (Q_int & 0xFFF) | (gpio1 << 12); // TX1_Q (QA[15:12] = GPIO1 OE)
-                ((int16_t *)buf_wr)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12); // TX2_I (IB[15:12] = GPIO2)
-                ((int16_t *)buf_wr)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12); // TX2_Q (QB[15:12] = GPIO2_OE)
+                    ((int16_t *)payload)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12); // TX1_I
+                    ((int16_t *)payload)[4 * j + 1] = (Q_int & 0xFFF) | (gpio1 << 12); // TX1_Q
+                    ((int16_t *)payload)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12); // TX2_I
+                    ((int16_t *)payload)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12); // TX2_Q
+                }
 
                 sample_count++;
             }
@@ -262,6 +296,8 @@ static void help(void) {
            "-z                               Enable zero-copy DMA mode.\n"
            "-p [pps_freq]                    Enable PPS/toggle on GPIO (default 1 Hz, 20%% high).\n"
            "-g gpio_pin                      Select GPIO pin for PPS (0-3, default 0).\n"
+           "-8                               Use 8-bit samples (SC8).\n"
+           "-H                               Enable TX DMA header.\n"
            );
     exit(1);
 }
@@ -279,13 +315,15 @@ int main(int argc, char **argv) {
     double amplitude = 1.0;
     double pps_freq = 0.0; /* Disabled by default */
     uint8_t gpio_pin = 0;  /* Default to GPIO bit 0 */
+    uint8_t enable_header = 0;
+    uint8_t use_8bit = 0;
     char signal_type[16] = "tone"; /* Default to tone */
 
     signal(SIGINT, intHandler);
 
     /* Parameters */
     for (;;) {
-        c = getopt(argc, argv, "hc:s:t:f:a:zp:g:");
+        c = getopt(argc, argv, "hc:s:t:f:a:zp:g:8H");
         if (c == -1)
             break;
         switch (c) {
@@ -347,6 +385,12 @@ int main(int argc, char **argv) {
                 exit(1);
             }
             break;
+        case '8':
+            use_8bit = 1;
+            break;
+        case 'H':
+            enable_header = 1;
+            break;
         default:
             exit(1);
         }
@@ -361,7 +405,7 @@ int main(int argc, char **argv) {
     snprintf(m2sdr_device, sizeof(m2sdr_device), "pcie:/dev/m2sdr%d", m2sdr_device_num);
 
     /* Generate and play tone with optional PPS */
-    m2sdr_gen(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type);
+    m2sdr_gen(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type, enable_header, use_8bit);
 
     return 0;
 }
