@@ -257,8 +257,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
     std::string path = args.at("path");
     std::string dev_id = "pcie:" + path;
-    if (m2sdr_open(&_dev, dev_id.c_str()) != 0) {
-        throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
+    int rc = m2sdr_open(&_dev, dev_id.c_str());
+    if (rc != 0) {
+        throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path + " (" + m2sdr_strerror(rc) + ")");
     }
     _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
     /* Global file descriptor for AD9361 lib. */
@@ -275,8 +276,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     /* EtherBone */
     std::string dev_id = "eth:" + eth_ip + ":1234";
-    if (m2sdr_open(&_dev, dev_id.c_str()) != 0) {
-        throw std::runtime_error("Can't connect to EtherBone!");
+    int rc = m2sdr_open(&_dev, dev_id.c_str());
+    if (rc != 0) {
+        throw std::runtime_error("Can't connect to EtherBone! (" + std::string(m2sdr_strerror(rc)) + ")");
     }
     _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
     _spi_id = spi_register_fd(_fd);
