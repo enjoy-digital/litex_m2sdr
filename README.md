@@ -260,6 +260,10 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ./tone_gen.py tone_tx.bin
    ./m2sdr_play tone_tx.bin 100000
    ```
+   - C API (libm2sdr) quick start:
+   ```
+   See doc/libm2sdr/README.md
+   ```
 
 2. **SoapySDR Detection/Probe:**
    - Detect the LiteX-M2SDR board:
