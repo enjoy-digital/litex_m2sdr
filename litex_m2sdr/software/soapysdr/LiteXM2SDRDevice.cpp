@@ -715,8 +715,6 @@ void SoapyLiteXM2SDR::setGain(
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.gain[channel] = value;
         double   att_db  = (value >= 0.0) ? value : -value;
-        uint32_t att_mdb = static_cast<uint32_t>(att_db * 1000.0);
-
         /* Clarify interpretation */
         if (value >= 0.0) {
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, att_db);
@@ -755,7 +753,6 @@ void SoapyLiteXM2SDR::setGain(
             /* Positive attenuation in dB. */
             _tx_stream.gain[channel] = -value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
-            uint32_t atten = static_cast<uint32_t>(value * 1000.0);
             int rc = m2sdr_set_gain(_dev, M2SDR_TX, -value);
             if (rc != 0) {
                 SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));

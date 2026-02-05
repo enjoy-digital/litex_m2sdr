@@ -67,6 +67,19 @@ struct m2sdr_metadata {
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
 
+struct m2sdr_sync_params {
+    enum m2sdr_module module;
+    enum m2sdr_format format;
+    unsigned num_buffers;
+    unsigned buffer_size;
+    unsigned num_transfers;
+    unsigned timeout_ms;
+    bool zero_copy;
+    bool rx_header_enable;
+    bool rx_strip_header;
+    bool tx_header_enable;
+};
+
 struct m2sdr_devinfo {
     char serial[M2SDR_SERIAL_MAX];
     char identification[M2SDR_IDENT_MAX];
@@ -279,15 +292,3 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
 size_t m2sdr_format_size(enum m2sdr_format format);
 void  *m2sdr_alloc_buffer(enum m2sdr_format format, unsigned num_samples);
 void   m2sdr_free_buffer(void *buf);
-struct m2sdr_sync_params {
-    enum m2sdr_module module;
-    enum m2sdr_format format;
-    unsigned num_buffers;
-    unsigned buffer_size;
-    unsigned num_transfers;
-    unsigned timeout_ms;
-    bool zero_copy;
-    bool rx_header_enable;
-    bool rx_strip_header;
-    bool tx_header_enable;
-};
