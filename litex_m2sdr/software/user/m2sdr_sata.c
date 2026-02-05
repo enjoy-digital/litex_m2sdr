@@ -26,6 +26,7 @@
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
+#include "m2sdr.h"
 #include "csr.h"
 
 /* Connection options -------------------------------------------------------- */
@@ -75,7 +76,7 @@ static int64_t get_time_ms(void)
 
 /* Connection functions ------------------------------------------------------ */
 
-static void *m2sdr_open(void)
+static void *m2sdr_open_dev(void)
 {
 #ifdef USE_LITEPCIE
     int fd = open(m2sdr_device, O_RDWR);
@@ -94,7 +95,7 @@ static void *m2sdr_open(void)
 #endif
 }
 
-static void m2sdr_close(void *conn)
+static void m2sdr_close_dev(void *conn)
 {
 #ifdef USE_LITEPCIE
     close((int)(intptr_t)conn);
@@ -285,7 +286,7 @@ static void wait_done(const char *name,
 
 static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
@@ -300,12 +301,12 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 
     wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* Normal path: SATA_TX_STREAMER -> mux -> TX. */
@@ -320,12 +321,12 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 
     wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     int rxdst = parse_rxdst(dst_s);
@@ -339,12 +340,12 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
 
     wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* SSD -> SSD:
@@ -364,7 +365,7 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
     wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 #endif /* CSR_SATA_PHY_BASE */
@@ -373,7 +374,7 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
 
 static void status(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
 
 #ifdef CSR_CROSSBAR_BASE
     uint32_t txsel = m2sdr_readl(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
@@ -420,14 +421,14 @@ static void status(void)
     printf("SATA: not present\n");
 #endif
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 /* Route (always available if crossbar exists) ------------------------------ */
 
 static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
 {
-    void *conn = m2sdr_open();
+    void *conn = m2sdr_open_dev();
 
     int txsrc = parse_txsrc(txsrc_s);
     int rxdst = parse_rxdst(rxdst_s);
@@ -451,7 +452,7 @@ static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
     }
 #endif
 
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 }
 
 /* Help --------------------------------------------------------------------- */
@@ -645,9 +646,9 @@ int main(int argc, char **argv)
         int enable        = (int)parse_u32(argv[optind++]);
         int header_enable = (int)parse_u32(argv[optind++]);
 
-        void *conn = m2sdr_open();
+        void *conn = m2sdr_open_dev();
         header_set_raw(conn, which, enable, header_enable);
-        m2sdr_close(conn);
+        m2sdr_close_dev(conn);
         return 0;
     }
 
