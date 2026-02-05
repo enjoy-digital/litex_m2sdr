@@ -47,6 +47,7 @@ static void help(void)
            "  -p PORT      Target port (default: 1234).\n"
 #endif
            "  -z           Zero-copy (accepted, ignored in sync API).\n"
+           "  -8           Use 8-bit samples (SC8).\n"
            "  -q           Quiet mode.\n"
            "  -t           Timed start (align to next second).\n"
            "\n"
@@ -56,7 +57,7 @@ static void help(void)
     exit(1);
 }
 
-static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet, uint8_t timed_start)
+static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet, uint8_t timed_start, enum m2sdr_format format)
 {
     struct m2sdr_dev *dev = NULL;
     if (m2sdr_open(&dev, device_id) != 0) {
@@ -64,8 +65,9 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         exit(1);
     }
 
-    unsigned samples_per_buf = DMA_BUFFER_SIZE / 4;
-    if (m2sdr_sync_config(dev, M2SDR_TX, M2SDR_FORMAT_SC16_Q11,
+    unsigned sample_size = m2sdr_format_size(format);
+    unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
+    if (m2sdr_sync_config(dev, M2SDR_TX, format,
                           0, samples_per_buf, 0, 1000) != 0) {
         fprintf(stderr, "m2sdr_sync_config failed\n");
         m2sdr_close(dev);
@@ -163,14 +165,15 @@ int main(int argc, char **argv)
     static int m2sdr_device_num = 0;
     static uint8_t quiet = 0;
     static uint8_t timed_start = 0;
+    static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
 
     signal(SIGINT, intHandler);
 
     for (;;) {
 #if defined(USE_LITEPCIE)
-        c = getopt(argc, argv, "hc:zqt");
+        c = getopt(argc, argv, "hc:zqt8");
 #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:zqt");
+        c = getopt(argc, argv, "hi:p:zqt8");
 #endif
         if (c == -1)
             break;
@@ -193,6 +196,9 @@ int main(int argc, char **argv)
             break;
 #endif
         case 'z':
+            break;
+        case '8':
+            format = M2SDR_FORMAT_SC8_Q7;
             break;
         case 'q':
             quiet = 1;
@@ -228,6 +234,6 @@ int main(int argc, char **argv)
     snprintf(device_id, sizeof(device_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
 #endif
 
-    m2sdr_play(device_id, filename, loops, quiet, timed_start);
+    m2sdr_play(device_id, filename, loops, quiet, timed_start, format);
     return 0;
 }

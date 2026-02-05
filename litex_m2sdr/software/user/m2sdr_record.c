@@ -47,8 +47,9 @@ static void help(void)
 #endif
            "  -z           Zero-copy (accepted, ignored in sync API).\n"
            "  -q           Quiet mode.\n"
-           "  -H           Enable header (not supported in sync API).\n"
-           "  -s           Strip header (ignored).\n"
+           "  -H           Enable DMA header.\n"
+           "  -s           Strip DMA header from output.\n"
+           "  -8           Use 8-bit samples (SC8).\n"
            "\n"
            "Arguments:\n"
            "  filename     Output file, or '-' for stdout.\n"
@@ -56,7 +57,7 @@ static void help(void)
     exit(1);
 }
 
-static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet, uint8_t header, uint8_t strip_header)
+static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet, uint8_t header, uint8_t strip_header, enum m2sdr_format format)
 {
     struct m2sdr_dev *dev = NULL;
     if (m2sdr_open(&dev, device_id) != 0) {
@@ -72,10 +73,11 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         }
     }
 
-    unsigned samples_per_buf = DMA_BUFFER_SIZE / 4;
+    unsigned sample_size = m2sdr_format_size(format);
+    unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
     if (header && strip_header)
-        samples_per_buf = (DMA_BUFFER_SIZE - 16) / 4;
-    if (m2sdr_sync_config(dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
+        samples_per_buf = (DMA_BUFFER_SIZE - 16) / sample_size;
+    if (m2sdr_sync_config(dev, M2SDR_RX, format,
                           0, samples_per_buf, 0, 1000) != 0) {
         fprintf(stderr, "m2sdr_sync_config failed\n");
         m2sdr_close(dev);
@@ -153,14 +155,15 @@ int main(int argc, char **argv)
     static uint8_t quiet = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
+    static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
 
     signal(SIGINT, intHandler);
 
     for (;;) {
 #if defined(USE_LITEPCIE)
-        c = getopt(argc, argv, "hc:zqHs");
+        c = getopt(argc, argv, "hc:zqHs8");
 #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:zqHs");
+        c = getopt(argc, argv, "hi:p:zqHs8");
 #endif
         if (c == -1)
             break;
@@ -193,6 +196,9 @@ int main(int argc, char **argv)
         case 's':
             strip_header = 1;
             break;
+        case '8':
+            format = M2SDR_FORMAT_SC8_Q7;
+            break;
         default:
             exit(1);
         }
@@ -215,6 +221,6 @@ int main(int argc, char **argv)
     snprintf(device_id, sizeof(device_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
 #endif
 
-    m2sdr_record(device_id, filename, size, quiet, header, strip_header);
+    m2sdr_record(device_id, filename, size, quiet, header, strip_header, format);
     return 0;
 }
