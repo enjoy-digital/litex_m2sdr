@@ -53,6 +53,10 @@ int main(void)
 }
 ```
 
+## Example program
+
+See `doc/libm2sdr/example_sync_rx.c` for a minimal SC16 RX capture example.
+
 ## Device identifiers
 
 - PCIe: `pcie:/dev/m2sdr0`
