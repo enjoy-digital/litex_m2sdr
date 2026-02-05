@@ -19,7 +19,8 @@ endif
 
 LIBM2SDR_SONAME = libm2sdr.so.0
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
-EXAMPLES = ../doc/libm2sdr/example_sync_rx ../doc/libm2sdr/example_sync_tx
+EXAMPLES = ../doc/libm2sdr/example_sync_rx ../doc/libm2sdr/example_sync_tx \
+           ../doc/libm2sdr/example_tone_tx ../doc/libm2sdr/example_rx_n
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -42,6 +43,12 @@ examples: libm2sdr/libm2sdr.a $(EXAMPLES)
 	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 ../doc/libm2sdr/example_sync_tx: ../doc/libm2sdr/example_sync_tx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../doc/libm2sdr/example_tone_tx: ../doc/libm2sdr/example_tone_tx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../doc/libm2sdr/example_rx_n: ../doc/libm2sdr/example_rx_n.c libm2sdr/libm2sdr.a
 	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 # --- Libraries ---
@@ -171,5 +178,7 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_S
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	install -m 644 ../doc/libm2sdr/example_sync_rx.c $(PREFIX)/share/litex_m2sdr/examples
 	install -m 644 ../doc/libm2sdr/example_sync_tx.c $(PREFIX)/share/litex_m2sdr/examples
+	install -m 644 ../doc/libm2sdr/example_tone_tx.c $(PREFIX)/share/litex_m2sdr/examples
+	install -m 644 ../doc/libm2sdr/example_rx_n.c $(PREFIX)/share/litex_m2sdr/examples
 
 -include $(wildcard *.d)

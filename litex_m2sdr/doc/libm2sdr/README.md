@@ -83,6 +83,8 @@ int main(void)
 
 See `doc/libm2sdr/example_sync_rx.c` for a minimal SC16 RX capture example.
 See `doc/libm2sdr/example_sync_tx.c` for a minimal SC16 TX example.
+See `doc/libm2sdr/example_tone_tx.c` for a tone TX example (SC16/SC8).
+See `doc/libm2sdr/example_rx_n.c` for RX N buffers with metadata.
 
 ## Device identifiers
 
