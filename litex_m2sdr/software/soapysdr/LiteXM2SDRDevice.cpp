@@ -407,7 +407,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
     default_init_param.id_no = _spi_id;
-    ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    if (ad9361_rc != 0 || ad9361_phy == nullptr) {
+        throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
+    }
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
