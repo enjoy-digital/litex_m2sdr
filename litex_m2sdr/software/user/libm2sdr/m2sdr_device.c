@@ -359,6 +359,77 @@ int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_AD9361_BITMODE_ADDR
+    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, enable_8bit ? 1 : 0) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR
+    if (m2sdr_reg_write(dev, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, enable ? 1 : 0) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna)
+{
+    if (!dev || !dna)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_DNA_BASE
+    uint32_t high = 0;
+    uint32_t low = 0;
+    if (m2sdr_reg_read(dev, CSR_DNA_ID_ADDR + 0, &high) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_DNA_ID_ADDR + 4, &low) != 0)
+        return M2SDR_ERR_IO;
+    *dna = ((uint64_t)high << 32) | (uint64_t)low;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors)
+{
+    if (!dev || !sensors)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_XADC_BASE
+    uint32_t temp = 0;
+    uint32_t vccint = 0;
+    uint32_t vccaux = 0;
+    uint32_t vccbram = 0;
+    if (m2sdr_reg_read(dev, CSR_XADC_TEMPERATURE_ADDR, &temp) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_XADC_VCCINT_ADDR, &vccint) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_XADC_VCCAUX_ADDR, &vccaux) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_XADC_VCCBRAM_ADDR, &vccbram) != 0)
+        return M2SDR_ERR_IO;
+    sensors->temperature_c = (double)temp * 503.975 / 4096.0 - 273.15;
+    sensors->vccint_v = (double)vccint / 4096.0 * 3.0;
+    sensors->vccaux_v = (double)vccaux / 4096.0 * 3.0;
+    sensors->vccbram_v = (double)vccbram / 4096.0 * 3.0;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
 int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
 {
     if (!dev)

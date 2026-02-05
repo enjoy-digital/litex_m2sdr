@@ -70,6 +70,13 @@ struct m2sdr_capabilities {
     uint32_t sata_config;
 };
 
+struct m2sdr_fpga_sensors {
+    double temperature_c;
+    double vccint_v;
+    double vccaux_v;
+    double vccbram_v;
+};
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     int64_t sample_rate;
@@ -122,6 +129,10 @@ int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 /* Time */
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
+int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
+int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
+int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 
 /* RF config */
 void m2sdr_config_init(struct m2sdr_config *cfg);
