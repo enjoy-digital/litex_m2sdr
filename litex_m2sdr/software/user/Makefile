@@ -162,5 +162,8 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so 
 		install -d $(PREFIX)/include/litex_m2sdr/$(inc); \
 		install -m 644 $(inc)/*.h $(PREFIX)/include/litex_m2sdr/$(inc); \
 	)
+	install -d $(PREFIX)/share/litex_m2sdr/examples
+	install -m 644 ../doc/libm2sdr/example_sync_rx.c $(PREFIX)/share/litex_m2sdr/examples
+	install -m 644 ../doc/libm2sdr/example_sync_tx.c $(PREFIX)/share/litex_m2sdr/examples
 
 -include $(wildcard *.d)
