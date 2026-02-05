@@ -302,11 +302,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
     /* Configure Mode based on _bitMode */
-    if (_bitMode == 8) {
-        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
-    } else {
-        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
-    }
+    m2sdr_set_bitmode(_dev, _bitMode == 8);
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
@@ -317,35 +313,23 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* DMA RX Header */
     #if defined(_RX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-           (1 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_rx_header(_dev, true, false);
     #else
         /* Disable */
-        litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-           (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_rx_header(_dev, false, false);
     #endif
 
     /* DMA TX Header */
     #if defined(_TX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_dev, CSR_HEADER_TX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-           (1 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_tx_header(_dev, true);
     #else
         /* Disable */
-        litex_m2sdr_writel(_dev, CSR_HEADER_TX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-           (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_tx_header(_dev, false);
     #endif
 
     /* Disable DMA Loopback. */
-    litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+    m2sdr_set_dma_loopback(_dev, false);
 #endif
 
     bool do_init = true;
@@ -998,13 +982,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 1);
+        m2sdr_set_bitmode(_dev, true);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_dev, CSR_AD9361_BITMODE_ADDR, 0);
+        m2sdr_set_bitmode(_dev, false);
     }
 }
 
