@@ -67,7 +67,7 @@ std::string generateDeviceLabel(
 }
 
 SoapySDR::Kwargs createDeviceKwargs(
-    struct m2sdr_dev *dev,
+    struct m2sdr_dev *m2sdr_dev,
     const std::string &path,
     const std::string &eth_ip) {
     SoapySDR::Kwargs dev = {
@@ -76,8 +76,8 @@ SoapySDR::Kwargs createDeviceKwargs(
         {"eth_ip",         eth_ip},
 #endif
         {"path",           path},
-        {"serial",         getLiteXM2SDRSerial(dev)},
-        {"identification", getLiteXM2SDRIdentification(dev)},
+        {"serial",         getLiteXM2SDRSerial(m2sdr_dev)},
+        {"identification", getLiteXM2SDRIdentification(m2sdr_dev)},
         {"version",        "1234"},
         {"label",          ""},
         {"oversampling",   "0"},
