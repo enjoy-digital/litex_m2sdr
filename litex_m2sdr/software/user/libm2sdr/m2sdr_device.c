@@ -62,6 +62,8 @@ static int m2sdr_parse_identifier(const char *id, char *path_out, size_t path_le
     }
 
     if (!strncmp(id, "pcie:", 5)) {
+        if (strnlen(id + 5, path_len) >= path_len)
+            return -1;
         snprintf(path_out, path_len, "%s", id + 5);
         return 0;
     }
@@ -70,11 +72,15 @@ static int m2sdr_parse_identifier(const char *id, char *path_out, size_t path_le
     }
 
     if (id[0] == '/') {
+        if (strnlen(id, path_len) >= path_len)
+            return -1;
         snprintf(path_out, path_len, "%s", id);
         return 0;
     }
 
     /* treat as ip[:port] */
+    if (strnlen(id, ip_len) >= ip_len)
+        return -1;
     snprintf(ip_out, ip_len, "%s", id);
     char *colon = strchr(ip_out, ':');
     if (colon) {
@@ -99,7 +105,10 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     char path[M2SDR_DEVICE_STR_MAX] = {0};
     char ip_dummy[64] = {0};
     uint16_t port_dummy = 1234;
-    m2sdr_parse_identifier(device_identifier, path, sizeof(path), ip_dummy, sizeof(ip_dummy), &port_dummy);
+    if (m2sdr_parse_identifier(device_identifier, path, sizeof(path), ip_dummy, sizeof(ip_dummy), &port_dummy) != 0) {
+        free(dev);
+        return M2SDR_ERR_INVAL;
+    }
 
     if (path[0] == '\0')
         m2sdr_default_device(path, sizeof(path));
@@ -116,7 +125,10 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     char path_dummy[M2SDR_DEVICE_STR_MAX] = {0};
     char ip[64] = {0};
     uint16_t port = 1234;
-    m2sdr_parse_identifier(device_identifier, path_dummy, sizeof(path_dummy), ip, sizeof(ip), &port);
+    if (m2sdr_parse_identifier(device_identifier, path_dummy, sizeof(path_dummy), ip, sizeof(ip), &port) != 0) {
+        free(dev);
+        return M2SDR_ERR_INVAL;
+    }
     if (ip[0] == '\0')
         snprintf(ip, sizeof(ip), "192.168.1.50");
 

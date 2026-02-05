@@ -39,6 +39,11 @@ static void * m2sdr_open_dev(void) {
         return m2sdr_get_handle(g_dev);
 #ifdef USE_LITEPCIE
     char dev_id[128];
+    size_t dev_max = sizeof(dev_id) - sizeof("pcie:");
+    if (strnlen(m2sdr_device, dev_max + 1) > dev_max) {
+        fprintf(stderr, "Device path too long\n");
+        exit(1);
+    }
     snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
     if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Could not init driver\n");
@@ -47,6 +52,12 @@ static void * m2sdr_open_dev(void) {
     return m2sdr_get_handle(g_dev);
 #elif defined(USE_LITEETH)
     char dev_id[128];
+    size_t ip_len = strnlen(m2sdr_ip_address, 256);
+    size_t port_len = strnlen(m2sdr_port, 32);
+    if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
+        fprintf(stderr, "Device address too long\n");
+        exit(1);
+    }
     snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
     if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
