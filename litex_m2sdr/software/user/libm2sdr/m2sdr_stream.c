@@ -319,3 +319,123 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
         memset(meta, 0, sizeof(*meta));
     return M2SDR_ERR_OK;
 }
+
+int m2sdr_get_buffer(struct m2sdr_dev *dev,
+                     enum m2sdr_module module,
+                     void **buffer,
+                     unsigned *num_samples,
+                     unsigned timeout_ms)
+{
+    if (!dev || !buffer || !num_samples)
+        return M2SDR_ERR_INVAL;
+
+    unsigned sample_sz = 0;
+    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
+    unsigned payload_off = 0;
+
+    if (module == M2SDR_RX) {
+        if (!dev->rx_configured)
+            return M2SDR_ERR_UNEXPECTED;
+        sample_sz = m2sdr_sample_size(dev->rx_format);
+        if (dev->rx_header_enable && dev->rx_strip_header) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        }
+    } else {
+        if (!dev->tx_configured)
+            return M2SDR_ERR_UNEXPECTED;
+        sample_sz = m2sdr_sample_size(dev->tx_format);
+        if (dev->tx_header_enable) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        }
+    }
+
+    if (!sample_sz)
+        return M2SDR_ERR_UNSUPPORTED;
+
+#ifdef USE_LITEPCIE
+    if (module == M2SDR_RX) {
+        char *buf = NULL;
+        int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        *buffer = buf + payload_off;
+    } else {
+        char *buf = NULL;
+        int rc = m2sdr_wait_tx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->tx_timeout_ms);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        *buffer = buf + payload_off;
+    }
+#elif defined(USE_LITEETH)
+    if (module == M2SDR_RX) {
+        liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
+        uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
+        if (!buf)
+            return M2SDR_ERR_TIMEOUT;
+        *buffer = buf + payload_off;
+    } else {
+        uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);
+        if (!buf)
+            return M2SDR_ERR_TIMEOUT;
+        *buffer = buf + payload_off;
+    }
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+
+    *num_samples = bytes_per_buffer / sample_sz;
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_submit_buffer(struct m2sdr_dev *dev,
+                        enum m2sdr_module module,
+                        void *buffer,
+                        unsigned num_samples,
+                        struct m2sdr_metadata *meta)
+{
+    if (!dev || !buffer)
+        return M2SDR_ERR_INVAL;
+
+    if (module != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    unsigned sample_sz = m2sdr_sample_size(dev->tx_format);
+    if (!sample_sz)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    if (dev->tx_header_enable) {
+        uint8_t *base = (uint8_t *)buffer - M2SDR_DMA_HEADER_SIZE;
+        uint64_t ts = 0;
+        if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
+            ts = meta->timestamp;
+        *(uint64_t *)base = M2SDR_DMA_HEADER_SYNC_WORD;
+        *(uint64_t *)(base + 8) = ts;
+    }
+
+    (void)num_samples;
+
+#ifdef USE_LITEPCIE
+    /* No explicit submit step required for zero-copy DMA buffers. */
+    return M2SDR_ERR_OK;
+#elif defined(USE_LITEETH)
+    if (liteeth_udp_write_submit(&dev->udp) < 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_release_buffer(struct m2sdr_dev *dev,
+                         enum m2sdr_module module,
+                         void *buffer)
+{
+    if (!dev || !buffer)
+        return M2SDR_ERR_INVAL;
+    if (module != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+    /* DMA/UDP ring advances on read; no explicit release required. */
+    return M2SDR_ERR_OK;
+}

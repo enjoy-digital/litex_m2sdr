@@ -142,6 +142,23 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                   struct m2sdr_metadata *meta,
                   unsigned timeout_ms);
 
+/* Zero-copy buffer API */
+int m2sdr_get_buffer(struct m2sdr_dev *dev,
+                     enum m2sdr_module module,
+                     void **buffer,
+                     unsigned *num_samples,
+                     unsigned timeout_ms);
+
+int m2sdr_submit_buffer(struct m2sdr_dev *dev,
+                        enum m2sdr_module module,
+                        void *buffer,
+                        unsigned num_samples,
+                        struct m2sdr_metadata *meta);
+
+int m2sdr_release_buffer(struct m2sdr_dev *dev,
+                         enum m2sdr_module module,
+                         void *buffer);
+
 #ifdef __cplusplus
 }
 #endif
