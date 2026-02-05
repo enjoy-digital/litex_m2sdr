@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
 
 #include "csr.h"
 
@@ -244,6 +245,41 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
+{
+    if (!list || !count)
+        return M2SDR_ERR_INVAL;
+
+    size_t found = 0;
+
+#ifdef USE_LITEPCIE
+    for (int i = 0; i < 8 && found < max; i++) {
+        char dev_id[64];
+        snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", i);
+        struct m2sdr_dev *dev = NULL;
+        if (m2sdr_open(&dev, dev_id) != 0)
+            continue;
+        if (m2sdr_get_device_info(dev, &list[found]) == 0)
+            found++;
+        m2sdr_close(dev);
+    }
+#elif defined(USE_LITEETH)
+    if (found < max) {
+        char dev_id[64];
+        snprintf(dev_id, sizeof(dev_id), "eth:192.168.1.50:1234");
+        struct m2sdr_dev *dev = NULL;
+        if (m2sdr_open(&dev, dev_id) == 0) {
+            if (m2sdr_get_device_info(dev, &list[found]) == 0)
+                found++;
+            m2sdr_close(dev);
+        }
+    }
+#endif
+
+    *count = found;
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 {
     if (!dev || !time_ns)
@@ -300,4 +336,65 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
         (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
         ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool source_csr)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_GPIO_BASE
+    uint32_t control = 0;
+    if (m2sdr_readl(dev, CSR_GPIO_CONTROL_ADDR, &control) != 0)
+        return M2SDR_ERR_IO;
+    if (enable) {
+        control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
+        if (loopback)
+            control |= (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET);
+        else
+            control &= ~(1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET);
+        if (source_csr)
+            control |= (1 << CSR_GPIO_CONTROL_SOURCE_OFFSET);
+        else
+            control &= ~(1 << CSR_GPIO_CONTROL_SOURCE_OFFSET);
+    } else {
+        control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
+    }
+    m2sdr_writel(dev, CSR_GPIO_CONTROL_ADDR, control);
+    return M2SDR_ERR_OK;
+#else
+    (void)enable;
+    (void)loopback;
+    (void)source_csr;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_GPIO_BASE
+    m2sdr_writel(dev, CSR_GPIO__O_ADDR, value & 0xF);
+    m2sdr_writel(dev, CSR_GPIO_OE_ADDR, oe & 0xF);
+    return M2SDR_ERR_OK;
+#else
+    (void)value;
+    (void)oe;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value)
+{
+    if (!dev || !value)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_GPIO_BASE
+    uint32_t v = 0;
+    if (m2sdr_readl(dev, CSR_GPIO__I_ADDR, &v) != 0)
+        return M2SDR_ERR_IO;
+    *value = v & 0xF;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
 }

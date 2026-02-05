@@ -85,6 +85,8 @@ struct m2sdr_dev;
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 
+int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
+
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
 
 /* Register access */
@@ -98,6 +100,11 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev);
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
 int  m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable);
+
+/* GPIO helper (4-bit) */
+int  m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool source_csr);
+int  m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe);
+int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 
 /* Time */
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
