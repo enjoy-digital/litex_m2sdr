@@ -67,7 +67,7 @@ static void msleep(unsigned ms)
     usleep(ms * 1000);
 }
 
-static int64_t get_time_ms(void)
+static int64_t m2sdr_sata_get_time_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -257,7 +257,7 @@ static void wait_done(const char *name,
                       uint64_t nsectors)
 {
     int elapsed = 0;
-    int64_t start = get_time_ms();
+    int64_t start = m2sdr_sata_get_time_ms();
     int64_t last  = start;
     for (;;) {
         uint32_t done = done_fn(conn);
@@ -271,7 +271,7 @@ static void wait_done(const char *name,
             fprintf(stderr, "%s: timeout\n", name);
             exit(1);
         }
-        int64_t now = get_time_ms();
+        int64_t now = m2sdr_sata_get_time_ms();
         if (now - last >= 500) {
             double mb = (double)nsectors * 512.0 / (1024.0 * 1024.0);
             double s  = (double)(now - start) / 1000.0;
