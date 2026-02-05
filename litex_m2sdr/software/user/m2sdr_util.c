@@ -72,7 +72,7 @@ static struct m2sdr_dev *g_dev = NULL;
 
 static struct m2sdr_dev *m2sdr_open_dev(void) {
     if (g_dev)
-        return m2sdr_get_handle(g_dev);
+        return g_dev;
 #ifdef USE_LITEPCIE
     char dev_id[128];
     size_t dev_max = sizeof(dev_id) - sizeof("pcie:");
@@ -85,7 +85,7 @@ static struct m2sdr_dev *m2sdr_open_dev(void) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return m2sdr_get_handle(g_dev);
+    return g_dev;
 #elif USE_LITEETH
     char dev_id[128];
     size_t ip_len = strnlen(m2sdr_ip_address, 256);
@@ -99,7 +99,7 @@ static struct m2sdr_dev *m2sdr_open_dev(void) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return m2sdr_get_handle(g_dev);
+    return g_dev;
 #endif
 }
 
