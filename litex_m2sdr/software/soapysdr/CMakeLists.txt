@@ -125,16 +125,15 @@ else()
     add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=0)
 endif()
 
+add_library(SoapyLiteXM2SDR_C OBJECT ${LITEXM2SDR_SOURCE})
+set_target_properties(SoapyLiteXM2SDR_C PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    ${LITEXM2SDR_SOURCE}
+    $<TARGET_OBJECTS:SoapyLiteXM2SDR_C>
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
-)
-
-set_source_files_properties(${LITEXM2SDR_SOURCE}
-    PROPERTIES COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:C>:-Wno-non-virtual-dtor>"
 )
 
 # Suppress specific warnings
