@@ -151,7 +151,9 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 int main(int argc, char **argv)
 {
     int c;
+    #if defined(USE_LITEPCIE)
     static int m2sdr_device_num = 0;
+    #endif
     static uint8_t quiet = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
@@ -218,6 +220,12 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
     snprintf(device_id, sizeof(device_id), "pcie:/dev/m2sdr%d", m2sdr_device_num);
 #elif defined(USE_LITEETH)
+    size_t ip_len = strnlen(m2sdr_ip_address, 256);
+    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
+    if (ip_len + port_len + sizeof("eth::") > sizeof(device_id)) {
+        fprintf(stderr, "Device address too long\n");
+        return 1;
+    }
     snprintf(device_id, sizeof(device_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
 #endif
 

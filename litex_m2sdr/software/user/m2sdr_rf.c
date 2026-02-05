@@ -177,6 +177,12 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
     snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", m2sdr_device_num);
 #elif defined(USE_LITEETH)
+    size_t ip_len = strnlen(m2sdr_ip_address, 256);
+    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
+    if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
+        fprintf(stderr, "Device address too long\n");
+        exit(1);
+    }
     snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
 #endif
 
