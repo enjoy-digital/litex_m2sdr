@@ -14,6 +14,9 @@
 #include "litepcie_helpers.h"
 #endif
 
+#define M2SDR_DMA_HEADER_SIZE 16
+#define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
+
 static unsigned m2sdr_sample_size(enum m2sdr_format format)
 {
     switch (format) {
@@ -24,14 +27,14 @@ static unsigned m2sdr_sample_size(enum m2sdr_format format)
     }
 }
 
-static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_per_buffer)
+static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_per_buffer, unsigned bytes_per_buffer)
 {
     unsigned sz = m2sdr_sample_size(format);
     if (!sz)
         return M2SDR_ERR_UNSUPPORTED;
     if (samples_per_buffer == 0)
         return M2SDR_ERR_INVAL;
-    if (samples_per_buffer * sz != DMA_BUFFER_SIZE)
+    if (samples_per_buffer * sz != bytes_per_buffer)
         return M2SDR_ERR_INVAL;
     return M2SDR_ERR_OK;
 }
@@ -48,7 +51,13 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     if (!dev)
         return M2SDR_ERR_INVAL;
 
-    int rc = m2sdr_check_buffer_size(format, buffer_size);
+    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
+    if (module == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
+        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+    if (module == M2SDR_TX && dev->tx_header_enable)
+        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+
+    int rc = m2sdr_check_buffer_size(format, buffer_size, bytes_per_buffer);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
@@ -75,10 +84,11 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dev->rx_buffer_size = buffer_size;
         dev->rx_timeout_ms = timeout_ms;
 
-        /* Disable headers by default and route RX to PCIe. */
-        m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
-            (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-            (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+        if (!dev->rx_header_enable) {
+            m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+                (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+        }
         m2sdr_writel(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
     } else {
         dev->tx_configured = 1;
@@ -110,10 +120,11 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dev->rx_buffer_size = buffer_size;
         dev->rx_timeout_ms = timeout_ms;
 
-        /* Route RX to Ethernet. */
-        m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
-            (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-            (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+        if (!dev->rx_header_enable) {
+            m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+                (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+        }
         m2sdr_writel(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
     } else {
         dev->tx_configured = 1;
@@ -186,9 +197,24 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         if (rc != M2SDR_ERR_OK)
             return rc;
         unsigned to_copy = DMA_BUFFER_SIZE;
+        unsigned payload_off = 0;
+        if (dev->rx_header_enable && dev->rx_strip_header) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
-        memcpy((uint8_t *)samples + copied, buf, to_copy);
+        if (dev->rx_header_enable) {
+            uint64_t header = *(uint64_t *)buf;
+            if (header == M2SDR_DMA_HEADER_SYNC_WORD) {
+                uint64_t ts = *(uint64_t *)(buf + 8);
+                if (meta) {
+                    meta->timestamp = ts;
+                    meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+                }
+            }
+        }
+        memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
         copied += to_copy;
 #elif defined(USE_LITEETH)
         liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
@@ -196,9 +222,24 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         if (!buf)
             return M2SDR_ERR_TIMEOUT;
         unsigned to_copy = dev->rx_buffer_size * sample_sz;
+        unsigned payload_off = 0;
+        if (dev->rx_header_enable && dev->rx_strip_header) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
-        memcpy((uint8_t *)samples + copied, buf, to_copy);
+        if (dev->rx_header_enable) {
+            uint64_t header = *(uint64_t *)buf;
+            if (header == M2SDR_DMA_HEADER_SYNC_WORD) {
+                uint64_t ts = *(uint64_t *)(buf + 8);
+                if (meta) {
+                    meta->timestamp = ts;
+                    meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+                }
+            }
+        }
+        memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
         copied += to_copy;
 #else
         return M2SDR_ERR_UNSUPPORTED;
@@ -232,18 +273,38 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
         if (rc != M2SDR_ERR_OK)
             return rc;
         unsigned to_copy = DMA_BUFFER_SIZE;
+        unsigned payload_off = 0;
+        if (dev->tx_header_enable) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+            uint64_t ts = 0;
+            if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
+                ts = meta->timestamp;
+            *(uint64_t *)buf = M2SDR_DMA_HEADER_SYNC_WORD;
+            *(uint64_t *)(buf + 8) = ts;
+        }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
-        memcpy(buf, (const uint8_t *)samples + copied, to_copy);
+        memcpy(buf + payload_off, (const uint8_t *)samples + copied, to_copy);
         copied += to_copy;
 #elif defined(USE_LITEETH)
         uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);
         if (!buf)
             return M2SDR_ERR_TIMEOUT;
         unsigned to_copy = dev->tx_buffer_size * sample_sz;
+        unsigned payload_off = 0;
+        if (dev->tx_header_enable) {
+            payload_off = M2SDR_DMA_HEADER_SIZE;
+            to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+            uint64_t ts = 0;
+            if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
+                ts = meta->timestamp;
+            *(uint64_t *)buf = M2SDR_DMA_HEADER_SYNC_WORD;
+            *(uint64_t *)(buf + 8) = ts;
+        }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
-        memcpy(buf, (const uint8_t *)samples + copied, to_copy);
+        memcpy(buf + payload_off, (const uint8_t *)samples + copied, to_copy);
         copied += to_copy;
         if (liteeth_udp_write_submit(&dev->udp) < 0)
             return M2SDR_ERR_IO;

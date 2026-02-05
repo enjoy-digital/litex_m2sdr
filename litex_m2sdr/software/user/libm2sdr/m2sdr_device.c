@@ -276,3 +276,28 @@ int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
     m2sdr_writel(dev, CSR_TIME_GEN_CONTROL_ADDR, 0x1); /* load */
     return M2SDR_ERR_OK;
 }
+
+int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    dev->rx_header_enable = enable ? 1 : 0;
+    dev->rx_strip_header = strip_header ? 1 : 0;
+
+    m2sdr_writel(dev, CSR_HEADER_RX_CONTROL_ADDR,
+        (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+        ((enable ? 1 : 0) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    dev->tx_header_enable = enable ? 1 : 0;
+
+    m2sdr_writel(dev, CSR_HEADER_TX_CONTROL_ADDR,
+        (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
+        ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
+    return M2SDR_ERR_OK;
+}

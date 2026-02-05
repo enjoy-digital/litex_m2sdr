@@ -44,6 +44,9 @@ struct m2sdr_dev {
 
     int rx_configured;
     int tx_configured;
+    int rx_header_enable;
+    int rx_strip_header;
+    int tx_header_enable;
     enum m2sdr_format rx_format;
     enum m2sdr_format tx_format;
     unsigned rx_buffer_size;

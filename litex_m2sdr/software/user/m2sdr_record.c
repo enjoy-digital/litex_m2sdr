@@ -58,16 +58,23 @@ static void help(void)
 
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet, uint8_t header, uint8_t strip_header)
 {
-    if (header || strip_header)
-        fprintf(stderr, "Header options are not supported in sync API; ignoring.\n");
-
     struct m2sdr_dev *dev = NULL;
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
     }
 
+    if (header) {
+        if (m2sdr_set_rx_header(dev, true, strip_header ? true : false) != 0) {
+            fprintf(stderr, "m2sdr_set_rx_header failed\n");
+            m2sdr_close(dev);
+            exit(1);
+        }
+    }
+
     unsigned samples_per_buf = DMA_BUFFER_SIZE / 4;
+    if (header && strip_header)
+        samples_per_buf = (DMA_BUFFER_SIZE - 16) / 4;
     if (m2sdr_sync_config(dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
                           0, samples_per_buf, 0, 1000) != 0) {
         fprintf(stderr, "m2sdr_sync_config failed\n");

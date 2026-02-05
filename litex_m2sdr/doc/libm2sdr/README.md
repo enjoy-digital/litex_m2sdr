@@ -71,3 +71,4 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 
 - Streaming currently supports SC16/Q11 only.
 - `m2sdr_sync_config` requires buffer size to match `DMA_BUFFER_SIZE / 4` samples (SC16).
+- RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.

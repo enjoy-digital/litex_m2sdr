@@ -95,6 +95,10 @@ int  m2sdr_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
+/* DMA header control */
+int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
+int  m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable);
+
 /* Time */
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
