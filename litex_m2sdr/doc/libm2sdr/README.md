@@ -53,6 +53,32 @@ int main(void)
 }
 ```
 
+## Quick Start (SC8)
+
+```c
+#include <stdint.h>
+#include "m2sdr.h"
+#include "config.h"
+
+int main(void)
+{
+    struct m2sdr_dev *dev = NULL;
+    if (m2sdr_open(&dev, "pcie:/dev/m2sdr0") != 0)
+        return 1;
+
+    unsigned samples_per_buf = DMA_BUFFER_SIZE / m2sdr_format_size(M2SDR_FORMAT_SC8_Q7);
+    if (m2sdr_sync_config(dev, M2SDR_TX, M2SDR_FORMAT_SC8_Q7,
+                          0, samples_per_buf, 0, 1000) != 0)
+        return 1;
+
+    int8_t buf[DMA_BUFFER_SIZE];
+    /* Fill buf with interleaved SC8 IQ data... */
+    m2sdr_sync_tx(dev, buf, samples_per_buf, NULL, 1000);
+    m2sdr_close(dev);
+    return 0;
+}
+```
+
 ## Example program
 
 See `doc/libm2sdr/example_sync_rx.c` for a minimal SC16 RX capture example.
@@ -67,12 +93,25 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 ## API overview
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
+- Capabilities: `m2sdr_get_capabilities`
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_gain`
 - Streaming: `m2sdr_sync_config`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
 
+## Capabilities example
+
+```c
+struct m2sdr_capabilities caps;
+if (m2sdr_get_capabilities(dev, &caps) == 0) {
+    int major = caps.api_version >> 16;
+    int minor = caps.api_version & 0xffff;
+    printf("API %d.%d, features=0x%08x\n", major, minor, caps.features);
+}
+```
+
 ## Notes
 
-- Streaming currently supports SC16/Q11 only.
-- `m2sdr_sync_config` requires buffer size to match `DMA_BUFFER_SIZE / 4` samples (SC16).
+- Streaming supports SC16/Q11 and SC8/Q7.
+- `m2sdr_sync_config` buffer size must match the DMA payload size for the chosen format.
 - RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
+- Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
