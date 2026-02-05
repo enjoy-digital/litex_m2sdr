@@ -76,7 +76,7 @@ static void * m2sdr_open_dev(void) {
 #ifdef USE_LITEPCIE
     char dev_id[128];
     snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
-    if (m2sdr_open_dev(&g_dev, dev_id) != 0) {
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
@@ -84,7 +84,7 @@ static void * m2sdr_open_dev(void) {
 #elif USE_LITEETH
     char dev_id[128];
     snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
-    if (m2sdr_open_dev(&g_dev, dev_id) != 0) {
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
@@ -95,7 +95,7 @@ static void * m2sdr_open_dev(void) {
 static void m2sdr_close_dev(void *conn) {
     (void)conn;
     if (g_dev) {
-        m2sdr_close_dev(g_dev);
+        m2sdr_close(g_dev);
         g_dev = NULL;
     }
 }
