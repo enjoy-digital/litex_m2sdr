@@ -476,6 +476,18 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         uint32_t len,
         size_t offset);
 
+    void interleaveCS8(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        size_t offset);
+
+    void deinterleaveCS8(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        size_t offset);
+
     void interleave(
         const void *src,
         void *dst,
