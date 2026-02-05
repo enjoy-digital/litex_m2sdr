@@ -82,6 +82,7 @@ int main(void)
 ## Example program
 
 See `doc/libm2sdr/example_sync_rx.c` for a minimal SC16 RX capture example.
+See `doc/libm2sdr/example_sync_tx.c` for a minimal SC16 TX example.
 
 ## Device identifiers
 
@@ -94,9 +95,11 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
 - Capabilities: `m2sdr_get_capabilities`
+- Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_gain`
 - Streaming: `m2sdr_sync_config`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
+- Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
 
 ## Capabilities example
 
@@ -115,3 +118,26 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 - `m2sdr_sync_config` buffer size must match the DMA payload size for the chosen format.
 - RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
 - Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
+
+## Migration (utilities to C API)
+
+Replace direct CSR access:
+
+```c
+/* Before */
+uint32_t v = m2sdr_readl(conn, CSR_XADC_TEMPERATURE_ADDR);
+
+/* After */
+struct m2sdr_fpga_sensors s;
+m2sdr_get_fpga_sensors(dev, &s);
+```
+
+Replace bitmode/loopback:
+
+```c
+/* Before */
+litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
+
+/* After */
+m2sdr_set_bitmode(dev, true);
+```
