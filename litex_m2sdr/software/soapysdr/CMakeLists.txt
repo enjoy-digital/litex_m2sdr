@@ -133,6 +133,10 @@ SOAPY_SDR_MODULE_UTIL(
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )
 
+set_source_files_properties(${LITEXM2SDR_SOURCE}
+    PROPERTIES COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:C>:-Wno-non-virtual-dtor>"
+)
+
 # Suppress specific warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(SoapyLiteXM2SDR PRIVATE
