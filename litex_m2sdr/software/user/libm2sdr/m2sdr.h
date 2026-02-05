@@ -12,6 +12,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "csr.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -81,6 +83,77 @@ struct m2sdr_capabilities {
     uint32_t sata_config;
 };
 
+struct m2sdr_clock_info {
+    uint64_t refclk_hz;
+    uint64_t sysclk_hz;
+};
+
+enum m2sdr_feature_flag {
+#ifdef CSR_CAPABILITY_FEATURES_PCIE_OFFSET
+    M2SDR_FEATURE_PCIE = 1u << CSR_CAPABILITY_FEATURES_PCIE_OFFSET,
+#else
+    M2SDR_FEATURE_PCIE = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_OFFSET
+    M2SDR_FEATURE_ETH  = 1u << CSR_CAPABILITY_FEATURES_ETH_OFFSET,
+#else
+    M2SDR_FEATURE_ETH  = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_SATA_OFFSET
+    M2SDR_FEATURE_SATA = 1u << CSR_CAPABILITY_FEATURES_SATA_OFFSET,
+#else
+    M2SDR_FEATURE_SATA = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_GPIO_OFFSET
+    M2SDR_FEATURE_GPIO = 1u << CSR_CAPABILITY_FEATURES_GPIO_OFFSET,
+#else
+    M2SDR_FEATURE_GPIO = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_WR_OFFSET
+    M2SDR_FEATURE_WR   = 1u << CSR_CAPABILITY_FEATURES_WR_OFFSET,
+#else
+    M2SDR_FEATURE_WR   = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET
+    M2SDR_FEATURE_JTAGBONE = 1u << CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET,
+#else
+    M2SDR_FEATURE_JTAGBONE = 0,
+#endif
+};
+
+enum m2sdr_feature_mask {
+#ifdef CSR_CAPABILITY_FEATURES_PCIE_SIZE
+    M2SDR_FEATURE_PCIE_MASK = ((1u << CSR_CAPABILITY_FEATURES_PCIE_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_PCIE_OFFSET,
+#else
+    M2SDR_FEATURE_PCIE_MASK = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_SIZE
+    M2SDR_FEATURE_ETH_MASK  = ((1u << CSR_CAPABILITY_FEATURES_ETH_SIZE)  - 1u) << CSR_CAPABILITY_FEATURES_ETH_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_MASK  = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_SATA_SIZE
+    M2SDR_FEATURE_SATA_MASK = ((1u << CSR_CAPABILITY_FEATURES_SATA_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_SATA_OFFSET,
+#else
+    M2SDR_FEATURE_SATA_MASK = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_GPIO_SIZE
+    M2SDR_FEATURE_GPIO_MASK = ((1u << CSR_CAPABILITY_FEATURES_GPIO_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_GPIO_OFFSET,
+#else
+    M2SDR_FEATURE_GPIO_MASK = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_WR_SIZE
+    M2SDR_FEATURE_WR_MASK   = ((1u << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1u) << CSR_CAPABILITY_FEATURES_WR_OFFSET,
+#else
+    M2SDR_FEATURE_WR_MASK   = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE
+    M2SDR_FEATURE_JTAGBONE_MASK = ((1u << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET,
+#else
+    M2SDR_FEATURE_JTAGBONE_MASK = 0,
+#endif
+};
+
 struct m2sdr_fpga_sensors {
     double temperature_c;
     double vccint_v;
@@ -119,6 +192,9 @@ int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count
 
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
 int  m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *caps);
+int  m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len);
+int  m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash);
+int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
 
 /* Register access */
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);

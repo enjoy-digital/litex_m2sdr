@@ -334,6 +334,47 @@ int m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *cap
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len)
+{
+    if (!dev || !buf || len == 0)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_IDENTIFIER_MEM_BASE
+    size_t i;
+    for (i = 0; i < len - 1; i++) {
+        uint32_t v = 0;
+        if (m2sdr_reg_read(dev, CSR_IDENTIFIER_MEM_BASE + 4 * i, &v) != 0)
+            return M2SDR_ERR_IO;
+        buf[i] = (char)(v & 0xff);
+        if (buf[i] == '\0')
+            break;
+    }
+    buf[len - 1] = '\0';
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash)
+{
+    if (!dev || !hash)
+        return M2SDR_ERR_INVAL;
+#ifdef CSR_GIT_BASE
+    if (m2sdr_reg_read(dev, CSR_GIT_BASE, hash) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info)
+{
+    if (!dev || !info)
+        return M2SDR_ERR_INVAL;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
 int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 {
     if (!dev || !time_ns)
