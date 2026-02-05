@@ -260,7 +260,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (m2sdr_open(&_dev, dev_id.c_str()) != 0) {
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
     }
-    _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
+    _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
     /* Global file descriptor for AD9361 lib. */
     _spi_id = spi_register_fd(_fd);
 
@@ -278,7 +278,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (m2sdr_open(&_dev, dev_id.c_str()) != 0) {
         throw std::runtime_error("Can't connect to EtherBone!");
     }
-    _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
+    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
     _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
@@ -510,10 +510,12 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     /* Power-Down AD9361 */
     litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);
 
+#if USE_LITEETH
     if (_udp_inited) {
         liteeth_udp_cleanup(&_udp);
         _udp_inited = false;
     }
+#endif
     if (_dev) {
         m2sdr_close(_dev);
         _dev = nullptr;
