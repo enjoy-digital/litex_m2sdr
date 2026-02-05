@@ -68,8 +68,7 @@ static void m2sdr_close_dev(void *conn) {
 /* GPIO Control Functions */
 /*-----------------------*/
 
-static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
-#ifdef CSR_GPIO_BASE
+static void configure_gpio(struct m2sdr_dev *dev, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
     if (gpio_enable && source_csr) {
         if (output_data & ~0xF) {
             fprintf(stderr, "GPIO output_data out of range (4-bit): 0x%x\n", output_data);
@@ -80,39 +79,25 @@ static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_ena
             return;
         }
     }
-    uint32_t control = 0;
 
-    /* Read current control register value */
-    control = m2sdr_readl(conn, CSR_GPIO_CONTROL_ADDR);
-
-    /* Modify control register */
-    if (gpio_enable) {
-        control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);  /* Enable GPIO */
-        if (loopback_enable) {
-            control |= (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET);  /* Enable loopback */
-        } else {
-            control &= ~(1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET); /* Disable loopback */
-        }
-        if (source_csr) {
-            control |= (1 << CSR_GPIO_CONTROL_SOURCE_OFFSET);  /* CSR mode */
-        } else {
-            control &= ~(1 << CSR_GPIO_CONTROL_SOURCE_OFFSET); /* Packer/Unpacker mode */
-        }
-    } else {
-        control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET); /* Disable GPIO */
+    if (m2sdr_gpio_config(dev, gpio_enable ? true : false, loopback_enable ? true : false, source_csr ? true : false) != 0) {
+        fprintf(stderr, "GPIO config failed\n");
+        return;
     }
-    m2sdr_writel(conn, CSR_GPIO_CONTROL_ADDR, control);
 
-    /* Set output data and enable if CSR mode is requested */
     if (gpio_enable && source_csr) {
-        m2sdr_writel(conn, CSR_GPIO__O_ADDR,  output_data  & 0xF); /* 4-bit output data */
-        m2sdr_writel(conn, CSR_GPIO_OE_ADDR,  output_enable & 0xF); /* 4-bit output enable */
+        if (m2sdr_gpio_write(dev, output_data & 0xF, output_enable & 0xF) != 0) {
+            fprintf(stderr, "GPIO write failed\n");
+            return;
+        }
     }
 
-    /* Read and display current GPIO input */
-    uint32_t input_data = m2sdr_readl(conn, CSR_GPIO__I_ADDR) & 0xF; /* 4-bit input data */
+    uint8_t input_data = 0;
+    if (m2sdr_gpio_read(dev, &input_data) != 0) {
+        fprintf(stderr, "GPIO read failed\n");
+        return;
+    }
 
-    /* Display configuration */
     printf("GPIO Control: %s, Source: %s, Loopback: %s\n",
            gpio_enable ? "Enabled" : "Disabled",
            gpio_enable && source_csr ? "CSR" : "DMA",
@@ -120,9 +105,7 @@ static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_ena
     printf("GPIO Output Data: 0x%01x, Output Enable: 0x%01x, Input Data: 0x%01x\n",
            gpio_enable && source_csr ? (output_data & 0xF) : 0,
            gpio_enable && source_csr ? (output_enable & 0xF) : 0,
-           input_data);
-
-#endif
+           input_data & 0xF);
 }
 
 /* Help */
@@ -233,7 +216,7 @@ int main(int argc, char **argv) {
     }
 
     /* Configure GPIO */
-    configure_gpio(conn, gpio_enable, loopback_enable, source_csr, output_data, output_enable);
+    configure_gpio(g_dev, gpio_enable, loopback_enable, source_csr, output_data, output_enable);
 
     /* Close connection */
     m2sdr_close_dev(conn);
