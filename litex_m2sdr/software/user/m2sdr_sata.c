@@ -25,7 +25,6 @@
 #include <time.h>
 
 #include "liblitepcie.h"
-#include "libm2sdr.h"
 #include "m2sdr.h"
 #include "csr.h"
 
@@ -76,47 +75,69 @@ static int64_t m2sdr_sata_get_time_ms(void)
 
 /* Connection functions ------------------------------------------------------ */
 
-static void *m2sdr_open_dev(void)
+static struct m2sdr_dev *m2sdr_open_dev(void)
 {
 #ifdef USE_LITEPCIE
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
+    struct m2sdr_dev *dev = NULL;
+    if (m2sdr_open(&dev, dev_id) != 0) {
         fprintf(stderr, "Could not open %s\n", m2sdr_device);
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    return dev;
 #elif defined(USE_LITEETH)
-    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
-    if (!eb) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
+    struct m2sdr_dev *dev = NULL;
+    if (m2sdr_open(&dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    return dev;
 #endif
 }
 
-static void m2sdr_close_dev(void *conn)
+static void m2sdr_close_dev(struct m2sdr_dev *dev)
 {
-#ifdef USE_LITEPCIE
-    close((int)(intptr_t)conn);
-#elif defined(USE_LITEETH)
-    eb_disconnect((struct eb_connection **)&conn);
-#endif
+    if (dev) {
+        m2sdr_close(dev);
+    }
 }
 
 /* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4) -------- */
 
-static void csr_write64(void *conn, uint32_t addr, uint64_t v)
+static void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
 {
-    m2sdr_writel(conn, addr + 0, (uint32_t)(v >> 32));
-    m2sdr_writel(conn, addr + 4, (uint32_t)(v >>  0));
+    m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
+    m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
 }
 
-static  __attribute__((unused))  uint64_t csr_read64(void *conn, uint32_t addr)
+static  __attribute__((unused))  uint64_t csr_read64(struct m2sdr_dev *dev, uint32_t addr)
 {
-    uint32_t upper = m2sdr_readl(conn, addr + 0);
-    uint32_t lower = m2sdr_readl(conn, addr + 4);
+    uint32_t upper = 0;
+    uint32_t lower = 0;
+    m2sdr_reg_read(dev, addr + 0, &upper);
+    m2sdr_reg_read(dev, addr + 4, &lower);
     return ((uint64_t)upper << 32) | (uint64_t)lower;
+}
+
+static uint32_t m2sdr_read32(struct m2sdr_dev *dev, uint32_t addr)
+{
+    uint32_t val = 0;
+    if (m2sdr_reg_read(dev, addr, &val) != 0) {
+        fprintf(stderr, "CSR read failed @0x%08x\n", addr);
+        exit(1);
+    }
+    return val;
+}
+
+static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    if (m2sdr_reg_write(dev, addr, val) != 0) {
+        fprintf(stderr, "CSR write failed @0x%08x\n", addr);
+        exit(1);
+    }
 }
 
 /* Crossbar routing ---------------------------------------------------------- */
@@ -154,8 +175,8 @@ static int parse_rxdst(const char *s)
 static void crossbar_set(void *conn, int txsrc, int rxdst)
 {
 #ifdef CSR_CROSSBAR_BASE
-    m2sdr_writel(conn, CSR_CROSSBAR_MUX_SEL_ADDR,   (uint32_t)txsrc);
-    m2sdr_writel(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR, (uint32_t)rxdst);
+    m2sdr_write32(conn, CSR_CROSSBAR_MUX_SEL_ADDR,   (uint32_t)txsrc);
+    m2sdr_write32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR, (uint32_t)rxdst);
 #else
     (void)conn; (void)txsrc; (void)rxdst;
     fprintf(stderr, "Crossbar CSR not present in this gateware.\n");
@@ -174,13 +195,13 @@ static void header_set_raw(void *conn, int which, int enable, int header_enable)
     v |= (enable        ? 1u : 0u) << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET;
     v |= (header_enable ? 1u : 0u) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET;
     if (which == 0 || which == 2)
-        m2sdr_writel(conn, CSR_HEADER_TX_CONTROL_ADDR, v);
+        m2sdr_write32(conn, CSR_HEADER_TX_CONTROL_ADDR, v);
 
     v  = 0;
     v |= (enable        ? 1u : 0u) << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET;
     v |= (header_enable ? 1u : 0u) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET;
     if (which == 1 || which == 2)
-        m2sdr_writel(conn, CSR_HEADER_RX_CONTROL_ADDR, v);
+        m2sdr_write32(conn, CSR_HEADER_RX_CONTROL_ADDR, v);
 #else
     (void)conn; (void)which; (void)enable; (void)header_enable;
     fprintf(stderr, "Header CSR not present.\n");
@@ -204,49 +225,49 @@ static void txrx_loopback_set(void *conn, int enable)
 {
     uint32_t v = 0;
     v |= (enable ? 1u : 0u) << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET;
-    m2sdr_writel(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR, v);
+    m2sdr_write32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR, v);
 }
 
 static void sata_rx_program(void *conn, uint64_t sector, uint32_t nsectors)
 {
     csr_write64(conn, CSR_SATA_RX_STREAMER_SECTOR_ADDR, sector);
-    m2sdr_writel(conn, CSR_SATA_RX_STREAMER_NSECTORS_ADDR, nsectors);
+    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
 static void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
 {
     csr_write64(conn, CSR_SATA_TX_STREAMER_SECTOR_ADDR, sector);
-    m2sdr_writel(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
+    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
 static void sata_rx_start(void *conn)
 {
-    m2sdr_writel(conn, CSR_SATA_RX_STREAMER_START_ADDR, 1);
+    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_START_ADDR, 1);
 }
 
 static void sata_tx_start(void *conn)
 {
-    m2sdr_writel(conn, CSR_SATA_TX_STREAMER_START_ADDR, 1);
+    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_START_ADDR, 1);
 }
 
 static uint32_t sata_rx_done(void *conn)
 {
-    return m2sdr_readl(conn, CSR_SATA_RX_STREAMER_DONE_ADDR);
+    return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR);
 }
 
 static uint32_t sata_tx_done(void *conn)
 {
-    return m2sdr_readl(conn, CSR_SATA_TX_STREAMER_DONE_ADDR);
+    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_DONE_ADDR);
 }
 
 static uint32_t sata_rx_error(void *conn)
 {
-    return m2sdr_readl(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR);
+    return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR);
 }
 
 static uint32_t sata_tx_error(void *conn)
 {
-    return m2sdr_readl(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
+    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
 }
 
 static void wait_done(const char *name,
@@ -286,13 +307,13 @@ static void wait_done(const char *name,
 
 static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
     txrx_loopback_set(conn, 0);
     crossbar_set(conn,
-        (int)m2sdr_readl(conn, CSR_CROSSBAR_MUX_SEL_ADDR),
+        (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR),
         RXDST_SATA
     );
 
@@ -306,14 +327,14 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 
 static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* Normal path: SATA_TX_STREAMER -> mux -> TX. */
     txrx_loopback_set(conn, 0);
     crossbar_set(conn,
         TXSRC_SATA,
-        (int)m2sdr_readl(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR)
+        (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR)
     );
 
     sata_tx_program(conn, src_sector, nsectors);
@@ -326,7 +347,7 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 
 static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     int rxdst = parse_rxdst(dst_s);
@@ -345,7 +366,7 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
 
 static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
     sata_require_csrs();
 
     /* SSD -> SSD:
@@ -374,11 +395,11 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
 
 static void status(void)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
 
 #ifdef CSR_CROSSBAR_BASE
-    uint32_t txsel = m2sdr_readl(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
-    uint32_t rxsel = m2sdr_readl(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
+    uint32_t txsel = m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
+    uint32_t rxsel = m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
     printf("Crossbar:\n");
     printf("  mux.sel   = %" PRIu32 " (0=pcie,1=eth,2=sata)\n", txsel);
     printf("  demux.sel = %" PRIu32 " (0=pcie,1=eth,2=sata)\n", rxsel);
@@ -388,9 +409,9 @@ static void status(void)
 
 #ifdef CSR_SATA_PHY_BASE
     printf("SATA:\n");
-    printf("  phy.enable = %" PRIu32 "\n", m2sdr_readl(conn, CSR_SATA_PHY_ENABLE_ADDR));
+    printf("  phy.enable = %" PRIu32 "\n", m2sdr_read32(conn, CSR_SATA_PHY_ENABLE_ADDR));
     {
-        uint32_t st = m2sdr_readl(conn, CSR_SATA_PHY_STATUS_ADDR);
+        uint32_t st = m2sdr_read32(conn, CSR_SATA_PHY_STATUS_ADDR);
         printf("  phy.status = 0x%08" PRIx32 "\n", st);
         printf("    ready      = %u\n", (st >> CSR_SATA_PHY_STATUS_READY_OFFSET)      & ((1u << CSR_SATA_PHY_STATUS_READY_SIZE)      - 1));
         printf("    tx_ready   = %u\n", (st >> CSR_SATA_PHY_STATUS_TX_READY_OFFSET)   & ((1u << CSR_SATA_PHY_STATUS_TX_READY_SIZE)   - 1));
@@ -400,7 +421,7 @@ static void status(void)
 
 #ifdef CSR_TXRX_LOOPBACK_BASE
     {
-        uint32_t v = m2sdr_readl(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR);
+        uint32_t v = m2sdr_read32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR);
         printf("  txrx_loopback.enable = %u\n",
             (v >> CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET) & ((1u << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_SIZE) - 1));
     }
@@ -408,13 +429,13 @@ static void status(void)
 
 #ifdef CSR_SATA_TX_STREAMER_BASE
     printf("  sata_tx_streamer: done=%" PRIu32 " error=%" PRIu32 "\n",
-        m2sdr_readl(conn, CSR_SATA_TX_STREAMER_DONE_ADDR),
-        m2sdr_readl(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR));
+        m2sdr_read32(conn, CSR_SATA_TX_STREAMER_DONE_ADDR),
+        m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR));
 #endif
 #ifdef CSR_SATA_RX_STREAMER_BASE
     printf("  sata_rx_streamer: done=%" PRIu32 " error=%" PRIu32 "\n",
-        m2sdr_readl(conn, CSR_SATA_RX_STREAMER_DONE_ADDR),
-        m2sdr_readl(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR));
+        m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR),
+        m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR));
 #endif
 
 #else
@@ -428,7 +449,7 @@ static void status(void)
 
 static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
 {
-    void *conn = m2sdr_open_dev();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
 
     int txsrc = parse_txsrc(txsrc_s);
     int rxdst = parse_rxdst(rxdst_s);
@@ -646,7 +667,7 @@ int main(int argc, char **argv)
         int enable        = (int)parse_u32(argv[optind++]);
         int header_enable = (int)parse_u32(argv[optind++]);
 
-        void *conn = m2sdr_open_dev();
+        struct m2sdr_dev *conn = m2sdr_open_dev();
         header_set_raw(conn, which, enable, header_enable);
         m2sdr_close_dev(conn);
         return 0;

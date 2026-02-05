@@ -53,6 +53,14 @@ static int get_prbs_bit(void) {
     return bit;
 }
 
+static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    if (m2sdr_reg_write(dev, addr, val) != 0) {
+        fprintf(stderr, "CSR write failed @0x%08x\n", addr);
+        exit(1);
+    }
+}
+
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
@@ -80,9 +88,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     }
 
     if (use_8bit) {
-        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 1);
+        m2sdr_write32(dev, CSR_AD9361_BITMODE_ADDR, 1);
     } else {
-        litepcie_writel(fd, CSR_AD9361_BITMODE_ADDR, 0);
+        m2sdr_write32(dev, CSR_AD9361_BITMODE_ADDR, 0);
     }
 
     if (enable_header) {
@@ -98,7 +106,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     /* Enable GPIO in Packer/Unpacker mode if PPS is requested */
     if (pps_freq > 0) {
         uint32_t control = (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET) | (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET); /* ENABLE=1, SOURCE=0 (DMA), LOOPBACK=1 */
-        litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, control);
+        m2sdr_write32(dev, CSR_GPIO_CONTROL_ADDR, control);
         double pps_period_s = 1.0 / pps_freq;
         double pps_high_s = pps_period_s * 0.2;
         printf("GPIO Enabled for PPS/Toggle at %.2f Hz (20%% high: %.3fs, 80%% low: %.3fs) on bit %d\n",
@@ -273,7 +281,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     /* Cleanup DMA and close device */
     litepcie_dma_cleanup(&dma);
 #ifdef CSR_GPIO_BASE
-    litepcie_writel(fd, CSR_GPIO_CONTROL_ADDR, 0);
+    m2sdr_write32(dev, CSR_GPIO_CONTROL_ADDR, 0);
 #endif
     close(fd);
     m2sdr_close(dev);
