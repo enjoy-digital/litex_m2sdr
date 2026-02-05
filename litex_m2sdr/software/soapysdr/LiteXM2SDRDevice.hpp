@@ -22,6 +22,7 @@
 #include "liblitepcie.h"
 #include "etherbone.h"
 #include "libm2sdr.h"
+#include "m2sdr.h"
 
 #include <SoapySDR/Constants.h>
 #include <SoapySDR/Device.hpp>
@@ -372,6 +373,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  **************************************************************************************************/
   private:
     SoapySDR::Kwargs _deviceArgs;
+    struct m2sdr_dev *_dev = nullptr;
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
 

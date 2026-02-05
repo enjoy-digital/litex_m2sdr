@@ -32,7 +32,10 @@ libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o libliteeth/etherbone.o
+libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o \
+	libm2sdr/m2sdr_device.o libm2sdr/m2sdr_stream.o libm2sdr/m2sdr_rf.o \
+	libm2sdr/m2sdr_hal_litepcie.o libm2sdr/m2sdr_hal_liteeth.o \
+	libliteeth/etherbone.o
 	$(AR) rcs $@ $+
 	ranlib $@
 
