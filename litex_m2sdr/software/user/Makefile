@@ -18,6 +18,7 @@ else
 endif
 
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+EXAMPLES = ../doc/libm2sdr/example_sync_rx ../doc/libm2sdr/example_sync_tx
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -32,6 +33,14 @@ LIBM2SDR_OBJS = \
 	libliteeth/etherbone.o
 
 all: $(PROGS)
+
+examples: libm2sdr/libm2sdr.a $(EXAMPLES)
+
+../doc/libm2sdr/example_sync_rx: ../doc/libm2sdr/example_sync_rx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../doc/libm2sdr/example_sync_tx: ../doc/libm2sdr/example_sync_tx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 # --- Libraries ---
 
@@ -112,6 +121,7 @@ endif
 
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~
+	rm -f $(EXAMPLES)
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
