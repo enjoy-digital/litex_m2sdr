@@ -26,6 +26,7 @@
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
+#include "m2sdr.h"
 
 #include "m2sdr_config.h"
 
@@ -67,30 +68,36 @@ static bool confirm_flash_write(void)
 /* Connection Functions */
 /*----------------------*/
 
-static void * m2sdr_open(void) {
+static struct m2sdr_dev *g_dev = NULL;
+
+static void * util_open(void) {
+    if (g_dev)
+        return m2sdr_get_handle(g_dev);
 #ifdef USE_LITEPCIE
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
+    if (util_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    return m2sdr_get_handle(g_dev);
 #elif USE_LITEETH
-    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
-    if (!eb) {
+    char dev_id[128];
+    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
+    if (util_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    return m2sdr_get_handle(g_dev);
 #endif
 }
 
-static void m2sdr_close(void *conn) {
-#ifdef USE_LITEPCIE
-    close((int)(intptr_t)conn);
-#elif USE_LITEETH
-    eb_disconnect((struct eb_connection **)&conn);
-#endif
+static void util_close(void *conn) {
+    (void)conn;
+    if (g_dev) {
+        util_close(g_dev);
+        g_dev = NULL;
+    }
 }
 
 /* SI5351 */
@@ -100,13 +107,13 @@ static void m2sdr_close(void *conn) {
 
 static void test_si5351_init(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     printf("\e[1m[> SI5351 Init...\e[0m\n");
     m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR, si5351_xo_38p4m_config, sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
     printf("Done.\n");
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_si5351_dump(void)
@@ -114,7 +121,7 @@ static void test_si5351_dump(void)
     uint8_t value;
     int i;
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     printf("\e[1m[> SI5351 Registers Dump:\e[0m\n");
     printf("--------------------------\n");
@@ -128,12 +135,12 @@ static void test_si5351_dump(void)
     }
 
     printf("\n");
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_si5351_write(uint8_t reg, uint8_t value)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     if (m2sdr_si5351_i2c_write(conn, SI5351_I2C_ADDR, reg, &value, 1)) {
         printf("Wrote 0x%02x to SI5351 reg 0x%02x\n", value, reg);
@@ -141,14 +148,14 @@ static void test_si5351_write(uint8_t reg, uint8_t value)
         fprintf(stderr, "Failed to write to SI5351 reg 0x%02x\n", reg);
     }
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_si5351_read(uint8_t reg)
 {
     uint8_t value;
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     if (m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, reg, &value, 1, true)) {
         printf("SI5351 reg 0x%02x: 0x%02x\n", reg, value);
@@ -156,7 +163,7 @@ static void test_si5351_read(uint8_t reg)
         fprintf(stderr, "Failed to read SI5351 reg 0x%02x\n", reg);
     }
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 #endif
@@ -168,7 +175,7 @@ static void test_ad9361_dump(void)
 {
     int i;
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(conn, 0);
@@ -179,12 +186,12 @@ static void test_ad9361_dump(void)
 
     printf("\n");
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_ad9361_write(uint16_t reg, uint16_t value)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(conn, 0);
@@ -192,14 +199,14 @@ static void test_ad9361_write(uint16_t reg, uint16_t value)
     m2sdr_ad9361_spi_write(conn, reg, value);
     printf("Wrote 0x%04x to AD9361 reg 0x%03x\n", value, reg);
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_ad9361_read(uint16_t reg)
 {
     uint16_t value;
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(conn, 0);
@@ -207,7 +214,7 @@ static void test_ad9361_read(uint16_t reg)
     value = m2sdr_ad9361_spi_read(conn, reg);
     printf("AD9361 reg 0x%03x: 0x%04x\n", reg, value);
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* AD9361 Dump Utilities */
@@ -228,7 +235,7 @@ static void print_separator(void)
 /*------------------*/
 static void test_ad9361_port_dump(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(conn, 0);
     uint8_t reg010 = m2sdr_ad9361_spi_read(conn, 0x010);
@@ -311,7 +318,7 @@ static void test_ad9361_port_dump(void)
     print_separator();
     printf("\n");
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* AD9361 ENSM Dump */
@@ -356,7 +363,7 @@ static const char* decode_ensm_state(uint8_t state)
 
 static void test_ad9361_ensm_dump(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
     /* AD9361 SPI Init */
     m2sdr_ad9361_spi_init(conn, 0);
     uint8_t reg013 = m2sdr_ad9361_spi_read(conn, 0x013);
@@ -458,7 +465,7 @@ static void test_ad9361_ensm_dump(void)
     print_separator();
     printf("\n");
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* Info */
@@ -479,7 +486,7 @@ static void info(void)
     int i;
     unsigned char soc_identifier[256];
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     printf("\e[1m[> SoC Info:\e[0m\n");
     printf("------------\n");
@@ -645,7 +652,7 @@ static void info(void)
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
     printf("Board Time : %s.%03u\n", time_str, ms);
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 
@@ -654,24 +661,24 @@ static void info(void)
 
 static void test_reg_write(uint32_t offset, uint32_t value)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     m2sdr_writel(conn, offset, value);
     printf("Wrote 0x%08x to reg 0x%08x\n", value, offset);
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void test_reg_read(uint32_t offset)
 {
     uint32_t value;
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     value = m2sdr_readl(conn, offset);
     printf("Reg 0x%08x: 0x%08x\n", offset, value);
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* Scratch */
@@ -682,7 +689,7 @@ void scratch_test(void)
     printf("\e[1m[> Scratch register test:\e[0m\n");
     printf("-------------------------\n");
 
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     /* Write to scratch register. */
     printf("Write 0x12345678 to Scratch register:\n");
@@ -694,7 +701,7 @@ void scratch_test(void)
     m2sdr_writel(conn, CSR_CTRL_SCRATCH_ADDR, 0xdeadbeef);
     printf("Read: 0x%08x\n", m2sdr_readl(conn, CSR_CTRL_SCRATCH_ADDR));
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* SPI Flash */
@@ -715,7 +722,7 @@ static void flash_progress(void *opaque, const char *fmt, ...)
 
 static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
     uint32_t size;
     uint8_t *buf;
     int sector_size;
@@ -745,7 +752,7 @@ static void flash_program(uint32_t base, const uint8_t *buf1, int size1)
 
     /* Free buffer and close connection. */
     free(buf);
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void flash_write(const char *filename, uint32_t offset)
@@ -787,7 +794,7 @@ static void flash_write(const char *filename, uint32_t offset)
 
 static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
     FILE * f;
     uint32_t base;
     uint32_t sector_size;
@@ -817,12 +824,12 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 
     /* Close destination file and connection. */
     fclose(f);
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 static void flash_reload(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     /* Reload FPGA through ICAP.*/
     m2sdr_writel(conn, CSR_ICAP_ADDR_ADDR, ICAP_CMD_REG);
@@ -834,7 +841,7 @@ static void flash_reload(void)
     printf("= PLEASE REBOOT YOUR HARDWARE OR RESCAN PCIe BUS TO USE NEW FPGA GATEWARE =\n");
     printf("===========================================================================\n");
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 #endif /* CSR_FLASH_BASE */
@@ -1116,7 +1123,7 @@ static void read_all_clocks(void *conn, uint64_t *values)
 
 static void clk_test(int num_measurements, int delay_between_tests)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     printf("\e[1m[> Clk Measurement Test:\e[0m\n");
     printf("-------------------------\n");
@@ -1161,7 +1168,7 @@ static void clk_test(int num_measurements, int delay_between_tests)
         printf("\n");
     }
 
-    m2sdr_close(conn);
+    util_close(conn);
 }
 
 /* VCXO Test */
@@ -1208,7 +1215,7 @@ static double measure_frequency(void *conn, int clk_index)
 
 static void vcxo_test(void)
 {
-    void *conn = m2sdr_open();
+    void *conn = util_open();
 
     printf("\e[1m[> VCXO Test:\e[0m\n");
     printf("-------------\n");
@@ -1223,7 +1230,7 @@ static void vcxo_test(void)
     }
     if (clk_index == -1) {
         fprintf(stderr, "Error: Clock 'AD9361 Ref Clk' not found in clk_names\n");
-        m2sdr_close(conn);
+        util_close(conn);
         exit(1);
     }
 
@@ -1255,7 +1262,7 @@ static void vcxo_test(void)
         printf("Detected SI5351C (no VCXO), exiting.\n");
         /* Set back PWM to nominal width. */
         m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
-        m2sdr_close(conn);
+        util_close(conn);
         return;
     }
 
@@ -1302,7 +1309,7 @@ static void vcxo_test(void)
     /* Set back PWM to nominal width. */
     m2sdr_writel(conn, CSR_SI5351_PWM_WIDTH_ADDR, VCXO_TEST_PWM_PERIOD / 2);
 
-    m2sdr_close(conn);
+    util_close(conn);
 
     /* Calculate PPM and Hz variation from nominal at 50% PWM. */
     double hz_variation_from_nominal_max = max_frequency - nominal_frequency_hz;
