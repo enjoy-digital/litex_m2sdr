@@ -81,7 +81,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	int32_t rev = 0;
 	int32_t i   = 0;
 
-	printf("%s: start (do_init=%d)\n", __func__, do_init);
+	fprintf(stderr, "%s: start (do_init=%d)\n", __func__, do_init);
+	fflush(stderr);
 	phy = (struct ad9361_rf_phy *)zmalloc(sizeof(*phy));
 	if (!phy) {
 		return -ENOMEM;
@@ -519,11 +520,13 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->bist_tone_mask = 0;
 
 	if (do_init) {
-		printf("%s: reset\n", __func__);
+		fprintf(stderr, "%s: reset\n", __func__);
+		fflush(stderr);
 		ad9361_reset(phy);
 	}
 
-	printf("%s: read product id\n", __func__);
+	fprintf(stderr, "%s: read product id\n", __func__);
+	fflush(stderr);
 	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
 		printf("%s : Unsupported PRODUCT_ID 0x%X", __func__, (unsigned int)ret);
@@ -537,7 +540,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->ad9361_rfpll_ext_set_rate = init_param->ad9361_rfpll_ext_set_rate;
 
 	if (do_init) {
-		printf("%s: register clocks\n", __func__);
+		fprintf(stderr, "%s: register clocks\n", __func__);
+		fflush(stderr);
 		ret = register_clocks(phy);
 		if (ret < 0)
 			goto out;
@@ -549,7 +553,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 #endif
 
 	if (do_init) {
-		printf("%s: setup\n", __func__);
+		fprintf(stderr, "%s: setup\n", __func__);
+		fflush(stderr);
 		ret = ad9361_setup(phy);
 		if (ret < 0)
 			goto out;
