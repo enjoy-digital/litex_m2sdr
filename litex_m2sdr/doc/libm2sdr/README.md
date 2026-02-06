@@ -118,6 +118,15 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 
 - Streaming supports SC16/Q11 and SC8/Q7.
 - `m2sdr_sync_config` buffer size must match the DMA payload size for the chosen format.
+
+## Troubleshooting
+
+### Symbol collisions with other SDR drivers
+
+If you use multiple SDR drivers that embed their own AD9361 stacks (for example, BladeRF),
+symbol collisions can cause crashes or misbehavior. This build links AD9361 into libm2sdr
+and binds symbols inside the Soapy module to avoid cross-driver resolution. If you build
+custom modules, ensure they do not export or override AD9361 symbols used by LiteX‑M2SDR.
 - RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
 - Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
 
