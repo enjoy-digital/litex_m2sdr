@@ -116,6 +116,51 @@ uint32_t clk_get_rate(struct ad9361_rf_phy *phy,
 }
 
 /***************************************************************************//**
+ * @brief AXI ADC stubs (LiteX M2SDR does not expose AXI ADC registers)
+*******************************************************************************/
+void axiadc_init(struct ad9361_rf_phy *phy)
+{
+	if (!phy || !phy->adc_state)
+		return;
+	phy->adc_state->phy = phy;
+}
+
+int axiadc_post_setup(struct ad9361_rf_phy *phy)
+{
+	(void)phy;
+	return 0;
+}
+
+unsigned int axiadc_read(struct axiadc_state *st, unsigned long reg)
+{
+	(void)st;
+	(void)reg;
+	return 0;
+}
+
+void axiadc_write(struct axiadc_state *st, unsigned reg, unsigned val)
+{
+	(void)st;
+	(void)reg;
+	(void)val;
+}
+
+int axiadc_set_pnsel(struct axiadc_state *st, int channel, enum adc_pn_sel sel)
+{
+	(void)st;
+	(void)channel;
+	(void)sel;
+	return 0;
+}
+
+void axiadc_idelay_set(struct axiadc_state *st, unsigned lane, unsigned val)
+{
+	(void)st;
+	(void)lane;
+	(void)val;
+}
+
+/***************************************************************************//**
  * @brief clk_set_rate
 *******************************************************************************/
 int32_t clk_set_rate(struct ad9361_rf_phy *phy,
