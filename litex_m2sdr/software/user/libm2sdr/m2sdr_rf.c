@@ -111,6 +111,15 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->sync_mode        = "internal";
 }
 
+int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
+{
+    g_rf_dev = dev;
+    ad9361_phy = (struct ad9361_rf_phy *)phy;
+    if (!dev || !phy)
+        return M2SDR_ERR_INVAL;
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 {
     if (!dev || !cfg)

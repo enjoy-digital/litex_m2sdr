@@ -417,6 +417,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (ad9361_rc != 0 || ad9361_phy == nullptr) {
         throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
     }
+    m2sdr_rf_bind(_dev, ad9361_phy);
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
@@ -516,6 +517,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
 #endif
     if (_dev) {
+        m2sdr_rf_bind(_dev, nullptr);
         m2sdr_close(_dev);
         _dev = nullptr;
     }

@@ -242,6 +242,7 @@ int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_module m, uint64_t fr
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_module m, int64_t gain);
+int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
 
 /* Streaming (BladeRF-like sync API) */
 int m2sdr_sync_config(struct m2sdr_dev *dev,
