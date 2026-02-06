@@ -10,9 +10,9 @@ INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata m2sdr_selftest
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_selftest
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
