@@ -13,6 +13,30 @@ make install_dev PREFIX=/usr/local
 
 This installs headers under `include/litex_m2sdr/` and the static library under `lib/`.
 
+## Getting started
+
+1) Build and install:
+
+```
+make
+sudo make install_dev PREFIX=/usr
+sudo ldconfig
+```
+
+2) Run a quick sanity check:
+
+```
+m2sdr_selftest
+```
+
+3) If you use SoapySDR, (re)install the module after updating libm2sdr:
+
+```
+cd ../soapysdr/build
+make
+sudo make install
+```
+
 ## Quick Start (SC16)
 
 ```c
