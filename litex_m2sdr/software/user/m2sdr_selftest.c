@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
+#include <unistd.h>
 
 #include "m2sdr.h"
 
@@ -24,19 +26,34 @@ static void print_status(const char *label, int rc, int *errors)
 
 static void usage(const char *prog)
 {
-    printf("Usage: %s [device]\n", prog);
+    printf("Usage: %s [options] [device]\n", prog);
+    printf("  options:\n");
+    printf("    --time       check board time is monotonic\n");
+    printf("    --loopback   toggle DMA loopback (PCIe only)\n");
+    printf("    -h, --help   show this help\n");
     printf("  device: optional device identifier (pcie:/dev/m2sdr0 or eth:ip:port)\n");
 }
 
 int main(int argc, char **argv)
 {
     const char *dev_id = NULL;
-    if (argc > 1) {
-        if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
+    bool do_time = false;
+    bool do_loopback = false;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             usage(argv[0]);
             return 0;
+        } else if (!strcmp(argv[i], "--time")) {
+            do_time = true;
+        } else if (!strcmp(argv[i], "--loopback")) {
+            do_loopback = true;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            usage(argv[0]);
+            return 1;
+        } else {
+            dev_id = argv[i];
         }
-        dev_id = argv[1];
     }
 
     struct m2sdr_dev *dev = NULL;
@@ -83,6 +100,29 @@ int main(int argc, char **argv)
         printf("       temp=%.1fC vccint=%.2fV vccaux=%.2fV vccbram=%.2fV\n",
                sensors.temperature_c, sensors.vccint_v,
                sensors.vccaux_v, sensors.vccbram_v);
+    }
+
+    if (do_time) {
+        uint64_t t0 = 0;
+        uint64_t t1 = 0;
+        rc = m2sdr_get_time(dev, &t0);
+        if (rc == M2SDR_ERR_OK) {
+            usleep(10000);
+            rc = m2sdr_get_time(dev, &t1);
+        }
+        print_status("Board time monotonic", rc, &errors);
+        if (rc == M2SDR_ERR_OK && t1 < t0) {
+            printf("[WARN] time moved backwards (%llu -> %llu)\n",
+                   (unsigned long long)t0, (unsigned long long)t1);
+        }
+    }
+
+    if (do_loopback) {
+        rc = m2sdr_set_dma_loopback(dev, true);
+        print_status("DMA loopback enable", rc, &errors);
+        if (rc == M2SDR_ERR_OK)
+            rc = m2sdr_set_dma_loopback(dev, false);
+        print_status("DMA loopback disable", rc, &errors);
     }
 
     m2sdr_close(dev);
