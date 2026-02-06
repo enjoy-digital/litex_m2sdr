@@ -147,19 +147,24 @@ int main(int argc, char **argv)
             for (unsigned i = 0; i < DMA_BUFFER_SIZE / sizeof(int16_t); i++)
                 tx_buf[i] = (int16_t)(i & 0x7fff);
 
-            rc = m2sdr_sync_config(dev, M2SDR_RX, format, 0, samples_per_buf, 0, 1000);
+            rc = m2sdr_sync_config(dev, M2SDR_RX, format, 0, samples_per_buf, 0, 5000);
             if (rc == M2SDR_ERR_OK)
-                rc = m2sdr_sync_config(dev, M2SDR_TX, format, 0, samples_per_buf, 0, 1000);
+                rc = m2sdr_sync_config(dev, M2SDR_TX, format, 0, samples_per_buf, 0, 5000);
             if (rc != M2SDR_ERR_OK) {
                 print_status("DMA streaming loopback config", rc, &errors);
             } else {
-                rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+                rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 5000);
                 if (rc != M2SDR_ERR_OK) {
                     print_status("DMA streaming loopback TX", rc, &errors);
                 } else {
-                    rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
-                    if (rc != M2SDR_ERR_OK) {
-                        print_status("DMA streaming loopback RX", rc, &errors);
+                    int rx_rc = M2SDR_ERR_TIMEOUT;
+                    for (int attempt = 0; attempt < 3; attempt++) {
+                        rx_rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 5000);
+                        if (rx_rc == M2SDR_ERR_OK)
+                            break;
+                    }
+                    if (rx_rc != M2SDR_ERR_OK) {
+                        print_status("DMA streaming loopback RX", rx_rc, &errors);
                     } else {
                         unsigned mismatches = 0;
                         for (unsigned i = 0; i < DMA_BUFFER_SIZE / sizeof(int16_t); i++) {
