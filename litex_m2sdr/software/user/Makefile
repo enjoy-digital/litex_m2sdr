@@ -175,14 +175,14 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_S
 		install -d $(PREFIX)/include/litex_m2sdr/$(inc); \
 		install -m 644 $(inc)/*.h $(PREFIX)/include/litex_m2sdr/$(inc); \
 	)
-install -d $(PREFIX)/share/litex_m2sdr/examples
-for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
-	if [ -f ../doc/libm2sdr/$$ex.c ]; then \
-		install -m 644 ../doc/libm2sdr/$$ex.c $(PREFIX)/share/litex_m2sdr/examples; \
-	else \
-		echo "Skipping missing example: $$ex.c"; \
-	fi; \
-done
+	install -d $(PREFIX)/share/litex_m2sdr/examples
+	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
+		if [ -f ../doc/libm2sdr/$$ex.c ]; then \
+			install -m 644 ../doc/libm2sdr/$$ex.c $(PREFIX)/share/litex_m2sdr/examples; \
+		else \
+			echo "Skipping missing example: $$ex.c"; \
+		fi; \
+	done
 
 check:
 	$(MAKE) clean all
