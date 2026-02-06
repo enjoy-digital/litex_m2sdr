@@ -153,6 +153,9 @@ int main(int argc, char **argv)
             if (rc != M2SDR_ERR_OK) {
                 print_status("DMA streaming loopback config", rc, &errors);
             } else {
+                /* warm-up RX to arm DMA */
+                (void)m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 100);
+                usleep(1000);
                 rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 5000);
                 if (rc != M2SDR_ERR_OK) {
                     print_status("DMA streaming loopback TX", rc, &errors);
@@ -162,6 +165,7 @@ int main(int argc, char **argv)
                         rx_rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 5000);
                         if (rx_rc == M2SDR_ERR_OK)
                             break;
+                        usleep(1000);
                     }
                     if (rx_rc != M2SDR_ERR_OK) {
                         print_status("DMA streaming loopback RX", rx_rc, &errors);
