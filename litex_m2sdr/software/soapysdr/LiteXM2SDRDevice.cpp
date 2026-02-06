@@ -15,8 +15,6 @@
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
-#include <signal.h>
-#include <execinfo.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -39,27 +37,6 @@
  **************************************************************************************************/
 
 /* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
-
-static void m2sdr_sigsegv_handler(int sig)
-{
-    void *trace[32];
-    int n = backtrace(trace, 32);
-    fprintf(stderr, "SoapyLiteXM2SDR: caught signal %d\n", sig);
-    backtrace_symbols_fd(trace, n, STDERR_FILENO);
-    _exit(128 + sig);
-}
-
-static void m2sdr_install_sigsegv_handler(void)
-{
-    static bool installed = false;
-    if (installed)
-        return;
-    installed = true;
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = m2sdr_sigsegv_handler;
-    sigaction(SIGSEGV, &sa, NULL);
-}
 
 /* AD9361 SPI */
 
@@ -262,7 +239,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
       _fd(FD_INIT), ad9361_phy(NULL) {
 
-    m2sdr_install_sigsegv_handler();
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
 
