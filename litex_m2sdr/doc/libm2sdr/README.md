@@ -34,6 +34,7 @@ Optional checks:
 ```
 m2sdr_selftest --time
 m2sdr_selftest --loopback
+m2sdr_selftest --stream-loopback
 ```
 
 3) If you use SoapySDR, (re)install the module after updating libm2sdr:
