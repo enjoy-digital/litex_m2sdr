@@ -9,6 +9,8 @@
 #include <stdbool.h>
 #include <unistd.h>
 
+#include "config.h"
+
 #include "m2sdr.h"
 
 static void print_status(const char *label, int rc, int *errors)
@@ -30,6 +32,7 @@ static void usage(const char *prog)
     printf("  options:\n");
     printf("    --time       check board time is monotonic\n");
     printf("    --loopback   toggle DMA loopback (PCIe only)\n");
+    printf("    --stream-loopback  run a DMA streaming loopback test (PCIe only)\n");
     printf("    -h, --help   show this help\n");
     printf("  device: optional device identifier (pcie:/dev/m2sdr0 or eth:ip:port)\n");
 }
@@ -39,6 +42,7 @@ int main(int argc, char **argv)
     const char *dev_id = NULL;
     bool do_time = false;
     bool do_loopback = false;
+    bool do_stream_loopback = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             usage(argv[0]);
@@ -47,6 +51,8 @@ int main(int argc, char **argv)
             do_time = true;
         } else if (!strcmp(argv[i], "--loopback")) {
             do_loopback = true;
+        } else if (!strcmp(argv[i], "--stream-loopback")) {
+            do_stream_loopback = true;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             usage(argv[0]);
@@ -123,6 +129,59 @@ int main(int argc, char **argv)
         if (rc == M2SDR_ERR_OK)
             rc = m2sdr_set_dma_loopback(dev, false);
         print_status("DMA loopback disable", rc, &errors);
+    }
+
+    if (do_stream_loopback) {
+        rc = m2sdr_set_dma_loopback(dev, true);
+        if (rc == M2SDR_ERR_UNSUPPORTED) {
+            print_status("DMA streaming loopback", rc, &errors);
+        } else if (rc != M2SDR_ERR_OK) {
+            print_status("DMA loopback enable", rc, &errors);
+        } else {
+            enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+            size_t sample_size = m2sdr_format_size(format);
+            unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
+            int16_t tx_buf[DMA_BUFFER_SIZE / 2];
+            int16_t rx_buf[DMA_BUFFER_SIZE / 2];
+
+            for (unsigned i = 0; i < DMA_BUFFER_SIZE / sizeof(int16_t); i++)
+                tx_buf[i] = (int16_t)(i & 0x7fff);
+
+            rc = m2sdr_sync_config(dev, M2SDR_RX, format, 0, samples_per_buf, 0, 1000);
+            if (rc == M2SDR_ERR_OK)
+                rc = m2sdr_sync_config(dev, M2SDR_TX, format, 0, samples_per_buf, 0, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                print_status("DMA streaming loopback config", rc, &errors);
+            } else {
+                rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+                if (rc != M2SDR_ERR_OK) {
+                    print_status("DMA streaming loopback TX", rc, &errors);
+                } else {
+                    rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+                    if (rc != M2SDR_ERR_OK) {
+                        print_status("DMA streaming loopback RX", rc, &errors);
+                    } else {
+                        unsigned mismatches = 0;
+                        for (unsigned i = 0; i < DMA_BUFFER_SIZE / sizeof(int16_t); i++) {
+                            if (rx_buf[i] != tx_buf[i]) {
+                                mismatches++;
+                                if (mismatches < 4)
+                                    printf("[WARN] mismatch @%u: tx=%d rx=%d\n",
+                                           i, tx_buf[i], rx_buf[i]);
+                            }
+                        }
+                        if (mismatches) {
+                            printf("[FAIL] DMA streaming loopback (mismatches=%u)\n", mismatches);
+                            errors++;
+                        } else {
+                            printf("[OK]   DMA streaming loopback\n");
+                        }
+                    }
+                }
+            }
+
+            m2sdr_set_dma_loopback(dev, false);
+        }
     }
 
     m2sdr_close(dev);
