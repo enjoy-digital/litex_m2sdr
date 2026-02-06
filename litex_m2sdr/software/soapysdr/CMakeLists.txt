@@ -136,6 +136,11 @@ SOAPY_SDR_MODULE_UTIL(
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )
 
+# Bind internal symbol references to this module to avoid conflicts
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,-Bsymbolic)
+endif()
+
 # Suppress specific warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(SoapyLiteXM2SDR PRIVATE
