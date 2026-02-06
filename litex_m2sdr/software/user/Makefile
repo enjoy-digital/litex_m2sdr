@@ -128,6 +128,9 @@ m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_record.o
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sata.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
+m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_selftest.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
+
 m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
 
