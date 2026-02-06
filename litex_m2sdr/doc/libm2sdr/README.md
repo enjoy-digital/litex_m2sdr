@@ -127,6 +127,16 @@ If you use multiple SDR drivers that embed their own AD9361 stacks (for example,
 symbol collisions can cause crashes or misbehavior. This build links AD9361 into libm2sdr
 and binds symbols inside the Soapy module to avoid cross-driver resolution. If you build
 custom modules, ensure they do not export or override AD9361 symbols used by LiteX‑M2SDR.
+
+### SoapyRemote socket buffer warnings
+
+When using SoapyRemote, you may see warnings about socket buffer size. Increase the system
+limits to improve streaming stability, for example:
+
+```
+sudo sysctl -w net.core.rmem_max=67108864
+sudo sysctl -w net.core.wmem_max=67108864
+```
 - RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
 - Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
 
