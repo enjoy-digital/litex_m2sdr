@@ -33,7 +33,11 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	libliteeth/etherbone.o \
-	libliteeth/liteeth_udp.o
+	libliteeth/liteeth_udp.o \
+	ad9361/ad9361.o \
+	ad9361/ad9361_api.o \
+	ad9361/ad9361_conv.o \
+	ad9361/util.o
 
 all: $(PROGS)
 
@@ -67,7 +71,7 @@ libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS)
 	ranlib $@
 
 libm2sdr/$(LIBM2SDR_SONAME): $(LIBM2SDR_OBJS)
-	$(CC) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -o $@ $^
+	$(CC) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $^
 
 libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
 	ln -sf $(LIBM2SDR_SONAME) $@
