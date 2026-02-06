@@ -1320,6 +1320,94 @@ static void vcxo_test(void)
 
 #endif
 
+#ifdef CSR_VCXO_BASE
+
+static void vcxo_lock(int argc, char **argv)
+{
+    void *conn = m2sdr_open();
+
+    if (argc == 0) {
+        uint32_t control = m2sdr_readl(conn, CSR_VCXO_CONTROL_ADDR);
+        uint32_t enable  = control & 0x1;
+        uint32_t mode    = (control >> 1) & 0x1;
+        uint32_t kp      = m2sdr_readl(conn, CSR_VCXO_KP_ADDR);
+        uint32_t ki      = m2sdr_readl(conn, CSR_VCXO_KI_ADDR);
+        uint32_t bias    = m2sdr_readl(conn, CSR_VCXO_BIAS_ADDR);
+        uint32_t update_shift     = m2sdr_readl(conn, CSR_VCXO_UPDATE_SHIFT_ADDR);
+        uint32_t phase_avg_shift  = m2sdr_readl(conn, CSR_VCXO_PHASE_AVG_SHIFT_ADDR);
+        uint32_t phase_target     = m2sdr_readl(conn, CSR_VCXO_PHASE_TARGET_ADDR);
+        uint32_t error_limit      = m2sdr_readl(conn, CSR_VCXO_ERROR_LIMIT_ADDR);
+        int32_t  error            = (int32_t)m2sdr_readl(conn, CSR_VCXO_ERROR_ADDR);
+        uint32_t ref_present      = m2sdr_readl(conn, CSR_VCXO_REF_PRESENT_ADDR);
+        uint32_t duty             = m2sdr_readl(conn, CSR_VCXO_DUTY_ADDR);
+
+        printf("\e[1m[> VCXO Lock Status:\e[0m\n");
+        printf("---------------------\n");
+        printf(" enable          : %u\n", enable);
+        printf(" mode            : %s\n", mode ? "phase" : "freq");
+        printf(" ref_present     : %u\n", ref_present);
+        printf(" error           : %d\n", error);
+        printf(" duty            : %u\n", duty);
+        printf(" kp              : %u\n", kp);
+        printf(" ki              : %u\n", ki);
+        printf(" bias            : %u\n", bias);
+        printf(" update_shift    : %u\n", update_shift);
+        printf(" phase_avg_shift : %u\n", phase_avg_shift);
+        printf(" phase_target    : %u\n", phase_target);
+        printf(" error_limit     : %u\n", error_limit);
+        printf("\n");
+
+        m2sdr_close(conn);
+        return;
+    }
+
+    uint32_t control = m2sdr_readl(conn, CSR_VCXO_CONTROL_ADDR);
+    for (int i = 0; i < argc; i++) {
+        char *kv = argv[i];
+        char *eq = strchr(kv, '=');
+        if (!eq) {
+            fprintf(stderr, "Invalid arg '%s' (expected key=value)\n", kv);
+            continue;
+        }
+        *eq = 0;
+        const char *key = kv;
+        const char *val = eq + 1;
+
+        if (!strcmp(key, "enable")) {
+            if (atoi(val))
+                control |= 0x1;
+            else
+                control &= ~0x1;
+        } else if (!strcmp(key, "mode")) {
+            if (!strcmp(val, "phase") || !strcmp(val, "1"))
+                control |= 0x2;
+            else
+                control &= ~0x2;
+        } else if (!strcmp(key, "kp")) {
+            m2sdr_writel(conn, CSR_VCXO_KP_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "ki")) {
+            m2sdr_writel(conn, CSR_VCXO_KI_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "bias")) {
+            m2sdr_writel(conn, CSR_VCXO_BIAS_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "update_shift")) {
+            m2sdr_writel(conn, CSR_VCXO_UPDATE_SHIFT_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "phase_avg_shift")) {
+            m2sdr_writel(conn, CSR_VCXO_PHASE_AVG_SHIFT_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "phase_target")) {
+            m2sdr_writel(conn, CSR_VCXO_PHASE_TARGET_ADDR, strtoul(val, NULL, 0));
+        } else if (!strcmp(key, "error_limit")) {
+            m2sdr_writel(conn, CSR_VCXO_ERROR_LIMIT_ADDR, strtoul(val, NULL, 0));
+        } else {
+            fprintf(stderr, "Unknown key '%s'\n", key);
+        }
+    }
+
+    m2sdr_writel(conn, CSR_VCXO_CONTROL_ADDR, control);
+    m2sdr_close(conn);
+}
+
+#endif
+
 /* Help */
 /*------*/
 
@@ -1354,6 +1442,11 @@ static void help(void)
            "clk_test                          Test Clks frequencies.\n"
 #ifdef  CSR_SI5351_BASE
            "vcxo_test                         Test VCXO frequency variation.\n"
+#endif
+#ifdef  CSR_VCXO_BASE
+           "vcxo_lock [key=val ...]            Configure/monitor VCXO lock (no args = status).\n"
+           "                                  keys: enable, mode(freq|phase), kp, ki, update_shift,\n"
+           "                                        phase_avg_shift, phase_target, bias, error_limit.\n"
 #endif
            "\n"
 #ifdef  CSR_SI5351_BASE
@@ -1492,6 +1585,11 @@ int main(int argc, char **argv)
     /* VCXO test cmd. */
     else if (!strcmp(cmd, "vcxo_test")) {
         vcxo_test();
+    }
+#endif
+#ifdef CSR_VCXO_BASE
+    else if (!strcmp(cmd, "vcxo_lock")) {
+        vcxo_lock(argc - optind - 1, argv + optind + 1);
     }
 #endif
 

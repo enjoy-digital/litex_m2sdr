@@ -30,6 +30,10 @@ m2sdr_util [options] cmd [args...]
   Measure on-board clock frequencies.
 - **vcxo_test**
   Test/characterize the VCXO output frequency.
+- **vcxo_lock**
+  Configure/monitor the VCXO lock loop (no args = status).
+  Example:
+  `./m2sdr_util vcxo_lock enable=1 mode=phase kp=4000 ki=20 phase_avg_shift=6`
 - **si5351_scan** / **si5351_init**
   Detect or initialize the SI5351 clock generator.
 - **ad9361_dump**
@@ -44,6 +48,7 @@ Example usage:
 ./m2sdr_util info
 ./m2sdr_util dma_test
 ./m2sdr_util scratch_test
+./m2sdr_util vcxo_lock
 ~~~~
 
 ---

@@ -48,6 +48,7 @@ from litex_m2sdr import Platform, _io_baseboard
 
 from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
+from litex_m2sdr.gateware.vcxo        import VCXORefDiscipliner
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator
@@ -188,6 +189,7 @@ class BaseSoC(SoCMini):
 
         # GPIO.
         "gpio"             : 21,
+        "vcxo"             : 22,
 
         # SDR.
         "si5351"           : 20,
@@ -288,12 +290,26 @@ class BaseSoC(SoCMini):
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
-        self.comb += self.si5351.clkin_ufl.eq(platform.request("sync_clk_in"))
+        sync_clk_in = platform.request("sync_clk_in")
+        self.comb += self.si5351.clkin_ufl.eq(sync_clk_in)
 
         # SI5351 ClkIn/Out.
         si5351_clk0   = platform.request("si5351_clk0")
         si5351_clk1   = platform.request("si5351_clk1")
         platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
+
+        # VCXO Discipliner (External 10MHz -> PWM).
+        self.vcxo = VCXORefDiscipliner(
+            ref_clk              = sync_clk_in,
+            vcxo_clk             = si5351_clk1,
+            sys_clk_freq         = sys_clk_freq,
+            vcxo_cycles_per_ref  = 10,
+            duty_bits            = 11,
+        )
+        self.comb += [
+            self.si5351.pwm_ext_en.eq(self.vcxo.enable),
+            self.si5351.pwm_ext.eq(self.vcxo.pwm),
+        ]
 
         # Time Generator ---------------------------------------------------------------------------
 

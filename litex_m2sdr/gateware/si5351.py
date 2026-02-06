@@ -289,6 +289,8 @@ class SI5351(LiteXModule):
 
         # VCXO PWM.
         # ---------
+        self.pwm_ext    = Signal()
+        self.pwm_ext_en = Signal()
         pwm_o = Signal()
         self.pwm = PWM(
             pwm            = pwm_o,
@@ -296,7 +298,7 @@ class SI5351(LiteXModule):
             default_width  = 1024,
             default_period = 2048,
         )
-        self.comb += pads.pwm.eq(Mux(self.version == SI5351_C_VERSION, 1, pwm_o))
+        self.comb += pads.pwm.eq(Mux(self.version == SI5351_C_VERSION, 1, Mux(self.pwm_ext_en, self.pwm_ext, pwm_o)))
 
         # Enable / Clkin.
         # ---------------
