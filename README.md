@@ -5,7 +5,7 @@
                                   LiteX based M2 SDR FPGA board.
                                Copyright (c) 2024-2026 Enjoy-Digital.
 
-![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
+![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/enjoy-digital/litex_m2sdr)
 
 [> TL;DR
 ---------
