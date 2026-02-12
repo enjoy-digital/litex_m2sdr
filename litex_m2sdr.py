@@ -364,9 +364,9 @@ class BaseSoC(SoCMini):
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
-                platform.toolchain.pre_placement_commands.append("reset_property LOC [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
-                platform.toolchain.pre_placement_commands.append("set_property LOC GTPE2_CHANNEL_X0Y4 [get_cells -hierarchical -filter {{NAME=~pcie_s7/*gtp_channel.gtpe2_channel_i}}]")
+                self.pcie_phy.add_gt_loc_constraints(["GTPE2_CHANNEL_X0Y4"], by_pipe_lane=False)
             self.pcie_phy.update_config({
+                "PCIe_Blk_Locn"            : "X0Y0",
                 "Base_Class_Menu"          : "Wireless_controller",
                 "Sub_Class_Interface_Menu" : "RF_controller",
                 "Class_Code_Base"          : "0D",
