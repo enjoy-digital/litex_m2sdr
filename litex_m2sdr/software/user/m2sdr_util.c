@@ -1144,6 +1144,13 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
             usleep(100);
     }
 
+#ifdef DMA_CHECK_DATA
+    if (auto_rx_delay && !run && keep_running) {
+        printf("DMA RX_DELAY calibration did not complete before timeout, exiting.\n");
+        status = 1;
+    }
+#endif
+
     /* Cleanup DMA. */
 #ifdef DMA_CHECK_DATA
 end:
