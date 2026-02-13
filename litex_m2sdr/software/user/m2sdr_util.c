@@ -1132,7 +1132,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
                    (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 * data_width / (get_next_pow2(data_width) * (double)duration_ms * 1e6),
                    dma.reader_sw_count,
                    dma.writer_sw_count,
-                   (uint64_t) abs(dma.reader_sw_count - dma.writer_sw_count),
+                   (uint64_t) llabs(dma.reader_sw_count - dma.writer_sw_count),
                    errors);
             /* Update errors/time/count. */
             errors = 0;
