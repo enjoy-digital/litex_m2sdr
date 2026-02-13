@@ -1004,6 +1004,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     uint32_t seed_rd = 0;
     const int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
     const uint32_t data_mask = get_data_mask(data_width);
+    uint64_t validated_buffers = 0;
     uint8_t  run = (auto_rx_delay == 0);
     const uint32_t rx_delay_errors_threshold = dma_word_count / 8;
     const int rx_delay_confirmations_needed = 3;
@@ -1071,6 +1072,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
             if (run) {
                 /* Check data in Read buffer. */
                 errors += check_pn_data((uint32_t *) buf_rd, dma_word_count, &seed_rd, data_mask, dma_word_count);
+                validated_buffers++;
             } else {
                 /* Find and confirm initial RX delay/seed over multiple buffers. */
                 uint32_t best_delay;
@@ -1145,6 +1147,11 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     }
 
 #ifdef DMA_CHECK_DATA
+    if (validated_buffers == 0 && keep_running) {
+        printf("DMA data validation did not run (warmup not completed before timeout), exiting.\n");
+        status = 1;
+    }
+
     if (auto_rx_delay && !run && keep_running) {
         printf("DMA RX_DELAY calibration did not complete before timeout, exiting.\n");
         status = 1;
