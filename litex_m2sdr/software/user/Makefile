@@ -1,5 +1,5 @@
 PREFIX ?= /usr/local
-CFLAGS  = -O2 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
+CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
