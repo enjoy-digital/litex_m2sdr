@@ -964,18 +964,42 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
     uint32_t seed_rd;
     uint32_t errors;
     int count = dma_word_count;
+    const int coarse_stride = 8;
+    const int refine_radius = 8;
+    int refine_start;
+    int refine_stop;
 
     *best_delay  = 0;
     *best_errors = UINT32_MAX;
 
-    for (int delay = 0; delay < count; delay++) {
+    /* Coarse sweep to quickly localize a good candidate. */
+    for (int delay = 0; delay < count; delay += coarse_stride) {
         seed_rd = delay;
         errors = check_pn_data(buf, count, &seed_rd, mask, dma_word_count);
         if (errors < *best_errors) {
             *best_errors = errors;
             *best_delay  = delay;
             if (errors == 0)
-                break;
+                return;
+        }
+    }
+
+    /* Local refinement around the best coarse candidate. */
+    refine_start = (int)*best_delay - refine_radius;
+    refine_stop  = (int)*best_delay + refine_radius;
+    if (refine_start < 0)
+        refine_start = 0;
+    if (refine_stop >= count)
+        refine_stop = count - 1;
+
+    for (int delay = refine_start; delay <= refine_stop; delay++) {
+        seed_rd = delay;
+        errors = check_pn_data(buf, count, &seed_rd, mask, dma_word_count);
+        if (errors < *best_errors) {
+            *best_errors = errors;
+            *best_delay  = delay;
+            if (errors == 0)
+                return;
         }
     }
 }
