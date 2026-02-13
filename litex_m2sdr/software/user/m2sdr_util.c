@@ -863,7 +863,7 @@ static inline int64_t add_mod_int(int64_t a, int64_t b, int64_t m)
 }
 #endif
 
-static int get_next_pow2(int data_width)
+static inline int get_next_pow2(int data_width)
 {
     int x = 1;
     while (x < data_width)
@@ -885,7 +885,7 @@ static inline uint32_t seed_to_data(uint32_t seed)
 #endif
 }
 
-static uint32_t get_data_mask(int data_width)
+static inline uint32_t get_data_mask(int data_width)
 {
     int i;
     uint32_t mask;
@@ -897,43 +897,41 @@ static uint32_t get_data_mask(int data_width)
     return mask;
 }
 
-static void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, int data_width)
+static inline void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i;
     uint32_t seed;
-    uint32_t mask = get_data_mask(data_width);
 
     seed = *pseed;
     for (i = 0; i + 4 <= count; i += 4) {
-        uint32_t d0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t d1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t d2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t d3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t d0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
         u32x4 vec = {d0, d1, d2, d3};
         memcpy(&buf[i], &vec, sizeof(vec));
     }
 
     for (; i < count; i++) {
         buf[i] = (seed_to_data(seed) & mask);
-        seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        seed = add_mod_int(seed, 1, dma_word_count);
     }
     *pseed = seed;
 }
 
-static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int data_width)
+static inline int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i, errors;
     uint32_t seed;
-    uint32_t mask = get_data_mask(data_width);
     u32x4 mask_vec = {mask, mask, mask, mask};
 
     errors = 0;
     seed = *pseed;
     for (i = 0; i + 4 <= count; i += 4) {
-        uint32_t e0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t e1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t e2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
-        uint32_t e3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t e0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
         u32x4 expected = {e0, e1, e2, e3};
         u32x4 actual;
         u32x4 diff;
@@ -947,24 +945,24 @@ static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int da
         if ((buf[i] & mask) != (seed_to_data(seed) & mask)) {
             errors ++;
         }
-        seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        seed = add_mod_int(seed, 1, dma_word_count);
     }
     *pseed = seed;
     return errors;
 }
 
-static void find_best_rx_delay(const uint32_t *buf, int data_width, uint32_t *best_delay, uint32_t *best_errors)
+static void find_best_rx_delay(const uint32_t *buf, uint32_t mask, int dma_word_count, uint32_t *best_delay, uint32_t *best_errors)
 {
     uint32_t seed_rd;
     uint32_t errors;
-    int count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+    int count = dma_word_count;
 
     *best_delay  = 0;
     *best_errors = UINT32_MAX;
 
     for (int delay = 0; delay < count; delay++) {
         seed_rd = delay;
-        errors = check_pn_data(buf, count, &seed_rd, data_width);
+        errors = check_pn_data(buf, count, &seed_rd, mask, dma_word_count);
         if (errors < *best_errors) {
             *best_errors = errors;
             *best_delay  = delay;
@@ -995,8 +993,10 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
+    const int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+    const uint32_t data_mask = get_data_mask(data_width);
     uint8_t  run = (auto_rx_delay == 0);
-    const uint32_t rx_delay_errors_threshold = (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 8;
+    const uint32_t rx_delay_errors_threshold = dma_word_count / 8;
     const int rx_delay_confirmations_needed = 3;
     const int rx_delay_max_attempts = 128;
     uint32_t rx_delay_candidate = UINT32_MAX;
@@ -1044,7 +1044,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                 break;
             work_done = 1;
             /* Write data to buffer. */
-            write_pn_data((uint32_t *) buf_wr, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_wr, data_width);
+            write_pn_data((uint32_t *) buf_wr, dma_word_count, &seed_wr, data_mask, dma_word_count);
         }
 
         /* DMA-RX Read/Check */
@@ -1061,13 +1061,13 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* When running... */
             if (run) {
                 /* Check data in Read buffer. */
-                errors += check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
+                errors += check_pn_data((uint32_t *) buf_rd, dma_word_count, &seed_rd, data_mask, dma_word_count);
             } else {
                 /* Find and confirm initial RX delay/seed over multiple buffers. */
                 uint32_t best_delay;
                 uint32_t best_errors;
 
-                find_best_rx_delay((const uint32_t *)buf_rd, data_width, &best_delay, &best_errors);
+                find_best_rx_delay((const uint32_t *)buf_rd, data_mask, dma_word_count, &best_delay, &best_errors);
                 rx_delay_attempts++;
 
                 if (best_errors < rx_delay_best_overall) {
@@ -1098,10 +1098,10 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                 }
 
                 if (!run && (rx_delay_attempts >= rx_delay_max_attempts)) {
-                    printf("Unable to find DMA RX_DELAY (best: delay=%d, errors=%d/%ld, attempts=%d), exiting.\n",
+                    printf("Unable to find DMA RX_DELAY (best: delay=%d, errors=%d/%d, attempts=%d), exiting.\n",
                         rx_delay_best_overall_delay,
                         rx_delay_best_overall,
-                        DMA_BUFFER_SIZE / sizeof(uint32_t),
+                        dma_word_count,
                         rx_delay_attempts);
                     goto end;
                 }
