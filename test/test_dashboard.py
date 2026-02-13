@@ -326,11 +326,6 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
             dpg.add_node_link(rfic_rf_rx,    dma_fpga_rx)
             dpg.add_node_link(dma_host_rx,   host_rx_data)
 
-    # Prepare RF AGC instances.
-    rf_agc_instances = ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]
-    agc_drivers = {inst: AGCDriver(bus, name=f"ad9361_agc_count_{inst}") for inst in rf_agc_instances}
-    agc_auto_clear = {inst: False for inst in rf_agc_instances}
-
     # GUI Timer Callback.
     writer_prev_loops = 0
     writer_prev_time = time.time()
