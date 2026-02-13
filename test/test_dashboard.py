@@ -9,6 +9,8 @@ import time
 import threading
 import argparse
 import copy
+import json
+import os
 
 from litex import RemoteClient
 
@@ -21,11 +23,43 @@ from test_agc    import AGCDriver
 # Constants ----------------------------------------------------------------------------------------
 
 XADC_WINDOW_DURATION = 10
+DASHBOARD_SETTINGS_PATH = os.path.expanduser("~/.litex_m2sdr_dashboard.json")
+
+
+def load_dashboard_settings():
+    default = {
+        "refresh": 0.1,
+        "freeze_plots": False,
+        "windows": {},
+    }
+    try:
+        with open(DASHBOARD_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return default
+        default.update({k: v for k, v in data.items() if k in default})
+        if not isinstance(default["windows"], dict):
+            default["windows"] = {}
+        return default
+    except Exception:
+        return default
+
+
+def save_dashboard_settings(settings):
+    try:
+        with open(DASHBOARD_SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, sort_keys=True)
+    except Exception as e:
+        print(f"Unable to save dashboard settings: {e}")
 
 # GUI ----------------------------------------------------------------------------------------------
 
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     import dearpygui.dearpygui as dpg
+
+    dashboard_settings = load_dashboard_settings()
+    refresh_default = max(0.02, float(dashboard_settings.get("refresh", 0.1)))
+    freeze_default = bool(dashboard_settings.get("freeze_plots", False))
 
     bus = RemoteClient(host=host, csr_csv=csr_csv, port=port)
     bus.open()
@@ -82,15 +116,74 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 if c == "\0":
                     break
             return identifier
+    else:
+        def get_identifier():
+            return "LiteX-M2SDR"
+
+    ui_state_lock = threading.Lock()
+    ui_state = {
+        "refresh": refresh_default,
+        "freeze_plots": freeze_default,
+    }
+    clear_counters_event = threading.Event()
+
+    def get_window_kwargs(tag, label, default_pos=None, default_size=None, autosize=False):
+        kwargs = {"label": label, "tag": tag}
+        win_cfg = dashboard_settings.get("windows", {}).get(tag, {})
+        pos = win_cfg.get("pos", default_pos)
+        if pos is not None:
+            kwargs["pos"] = tuple(pos)
+        if autosize:
+            kwargs["autosize"] = True
+        else:
+            size = win_cfg.get("size", default_size)
+            if size is not None:
+                kwargs["width"] = int(size[0])
+                kwargs["height"] = int(size[1])
+        return kwargs
 
     # Create Main Window.
-    main_title = f"LiteX M2SDR Dashboard on '{get_identifier()[:-1]}'"
+    board_name = get_identifier().rstrip("\0")
+    main_title = f"LiteX M2SDR Dashboard on '{board_name}'"
     dpg.create_context()
     dpg.create_viewport(title=main_title, width=1920, height=1080, always_on_top=True)
     dpg.setup_dearpygui()
 
+    def set_status_badge(tag, state, label):
+        colors = {
+            "green":  [80, 220, 120, 255],
+            "yellow": [235, 200, 80, 255],
+            "red":    [240, 90, 90, 255],
+        }
+        dpg.set_value(tag, f"{label}: {state.upper()}")
+        dpg.configure_item(tag, color=colors[state])
+
+    def on_refresh_changed(sender, app_data, user_data):
+        with ui_state_lock:
+            ui_state["refresh"] = max(0.02, float(app_data))
+
+    def on_freeze_plots_changed(sender, app_data, user_data):
+        with ui_state_lock:
+            ui_state["freeze_plots"] = bool(app_data)
+
+    def on_clear_counters(sender, app_data, user_data):
+        clear_counters_event.set()
+
+    with dpg.window(**get_window_kwargs("win_status", "LiteX M2SDR Status/Controls", default_pos=(625, 0), default_size=(300, 240))):
+        dpg.add_text("Status Badges")
+        dpg.add_text("DMA Enabled: --", tag="status_dma_enabled")
+        dpg.add_text("Loopback: --", tag="status_loopback")
+        dpg.add_text("Synchronizer: --", tag="status_sync")
+        dpg.add_text("AGC Saturation: --", tag="status_agc")
+        dpg.add_separator()
+        dpg.add_slider_float(label="Refresh (s)", min_value=0.02, max_value=1.0, default_value=refresh_default, callback=on_refresh_changed)
+        dpg.add_checkbox(label="Freeze XADC Plots", default_value=freeze_default, callback=on_freeze_plots_changed)
+        dpg.add_button(label="Clear Counters", callback=on_clear_counters)
+        dpg.add_button(label="Reboot FPGA", callback=lambda: reboot())
+        dpg.add_text("", tag="status_error_text")
+
     # Registers Window.
-    with dpg.window(label="LiteX M2SDR Registers", autosize=True, pos=(1230, 0)):
+    with dpg.window(**get_window_kwargs("win_registers", "LiteX M2SDR Registers", default_pos=(1230, 0), autosize=True)):
         dpg.add_text("Control/Status")
         def filter_callback(sender, filter_str):
             dpg.set_value("csr_filter", filter_str)
@@ -116,7 +209,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 )
 
     # Clks and Time Window.
-    with dpg.window(label="LiteX M2SDR Clks/Time", autosize=True, pos=(0, 0)):
+    with dpg.window(**get_window_kwargs("win_clks_time", "LiteX M2SDR Clks/Time", default_pos=(0, 0), autosize=True)):
         with dpg.collapsing_header(label="Clks", default_open=True):
             with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
                 dpg.add_table_column(label="Name")
@@ -132,7 +225,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
-        with dpg.window(label="LiteX M2SDR DMAs", autosize=True, pos=(0, 450)):
+        with dpg.window(**get_window_kwargs("win_dmas", "LiteX M2SDR DMAs", default_pos=(0, 450), autosize=True)):
             with dpg.collapsing_header(label="DMA Info", default_open=True):
                 with dpg.table(header_row=True, tag="dma_info_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=600):
                     dpg.add_table_column(label="Register", width=250)
@@ -201,7 +294,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # XADC Window.
     if with_xadc:
-        with dpg.window(label="LiteX M2SDR XADC", width=600, height=500, pos=(625, 510)):
+        with dpg.window(**get_window_kwargs("win_xadc", "LiteX M2SDR XADC", default_pos=(625, 510), default_size=(600, 500))):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
                 # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
@@ -229,7 +322,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
     # RF AGC Panel.
-    with dpg.window(label="LiteX M2SDR RF AGC", autosize=True, pos=(935, 0)):
+    with dpg.window(**get_window_kwargs("win_rf_agc", "LiteX M2SDR RF AGC", default_pos=(935, 0), autosize=True)):
         for inst in rf_agc_instances:
             with dpg.collapsing_header(label=f"AGC {inst.upper()}", default_open=True):
                 dpg.add_text("Saturation Count: --", tag=f"agc_{inst}_count")
@@ -272,7 +365,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.add_separator()
 
     # System Overview Window..
-    with dpg.window(label="LiteX M2SDR System Overview", width=600, height=400, pos=(260, 0)):
+    with dpg.window(**get_window_kwargs("win_overview", "LiteX M2SDR System Overview", default_pos=(260, 0), default_size=(600, 400))):
         with dpg.node_editor():
             # Host Node
             host_node = dpg.add_node(label="Host", draggable=True)
@@ -336,24 +429,35 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     snapshot_lock = threading.Lock()
     shared_snapshot = {"error": None}
 
-    def collect_snapshot(refresh):
+    def collect_snapshot():
         nonlocal writer_prev_loops, writer_prev_time
         nonlocal reader_prev_loops, reader_prev_time
 
+        last_refresh = None
         local_xadc = {}
-        if with_xadc and xadc_driver:
-            xadc_points = int(XADC_WINDOW_DURATION / refresh)
-            local_xadc = {
-                "temp":    xadc_driver.gen_data("temp", n=xadc_points),
-                "vccint":  xadc_driver.gen_data("vccint", n=xadc_points),
-                "vccaux":  xadc_driver.gen_data("vccaux", n=xadc_points),
-                "vccbram": xadc_driver.gen_data("vccbram", n=xadc_points),
-            }
 
         while not stop_event.is_set():
             try:
+                with ui_state_lock:
+                    refresh = ui_state["refresh"]
+
+                if with_xadc and xadc_driver and (last_refresh is None or abs(refresh - last_refresh) > 1e-9):
+                    xadc_points = max(2, int(XADC_WINDOW_DURATION / refresh))
+                    local_xadc = {
+                        "temp":    xadc_driver.gen_data("temp", n=xadc_points),
+                        "vccint":  xadc_driver.gen_data("vccint", n=xadc_points),
+                        "vccaux":  xadc_driver.gen_data("vccaux", n=xadc_points),
+                        "vccbram": xadc_driver.gen_data("vccbram", n=xadc_points),
+                    }
+                    last_refresh = refresh
+
                 now = time.time()
                 snap = {"error": None, "csr": {}, "xadc": {}, "clks": {}, "time": None, "headers": None, "dma": None, "agc": {}}
+
+                if clear_counters_event.is_set():
+                    for inst in rf_agc_instances:
+                        agc_drivers[inst].clear()
+                    clear_counters_event.clear()
 
                 # Snapshot CSR registers.
                 for name, reg in bus.regs.__dict__.items():
@@ -445,7 +549,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     }
 
                 # Snapshot AGC.
-                for inst in ["rx1_low", "rx1_high", "rx2_low", "rx2_high"]:
+                for inst in rf_agc_instances:
                     count = agc_drivers[inst].read_count()
                     snap["agc"][inst] = count
                     if agc_auto_clear.get(inst, False):
@@ -460,28 +564,34 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     shared_snapshot.update({"error": str(e)})
             time.sleep(refresh)
 
-    timer_thread = threading.Thread(target=collect_snapshot, args=(0.1,), daemon=True)
+    timer_thread = threading.Thread(target=collect_snapshot, daemon=True)
     timer_thread.start()
 
     dpg.show_viewport()
+    agc_prev_counts = {}
     try:
         while dpg.is_dearpygui_running():
             with snapshot_lock:
                 snap = copy.deepcopy(shared_snapshot)
+            with ui_state_lock:
+                freeze_plots = ui_state["freeze_plots"]
 
             if snap.get("error"):
+                dpg.set_value("status_error_text", f"Error: {snap['error']}")
                 print(f"Dashboard update error: {snap['error']}")
             else:
+                dpg.set_value("status_error_text", "")
                 # Update CSR Registers.
                 for name, value in snap.get("csr", {}).items():
                     dpg.set_value(item=name, value=f"0x{value:x}")
 
                 # Update XADC data.
-                for name, series in snap.get("xadc", {}).items():
-                    dpg.set_value(name, series)
-                    dpg.set_item_label(name, name)
-                    dpg.set_axis_limits_auto(f"{name}_x")
-                    dpg.fit_axis_data(f"{name}_x")
+                if not freeze_plots:
+                    for name, series in snap.get("xadc", {}).items():
+                        dpg.set_value(name, series)
+                        dpg.set_item_label(name, name)
+                        dpg.set_axis_limits_auto(f"{name}_x")
+                        dpg.fit_axis_data(f"{name}_x")
 
                 # Update Clock Frequencies and Sample Rate.
                 clks = snap.get("clks", {})
@@ -543,11 +653,27 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_value("dma_sync_enable", str(d["sync_enable"]))
                     dpg.set_value("node_dma_sync_enable", f"Sync Enable: {str(d['sync_enable']).rjust(1)}")
 
+                    dma_enabled_state = "green" if d["writer_enable"] and d["reader_enable"] else ("yellow" if (d["writer_enable"] or d["reader_enable"]) else "red")
+                    loopback_state = "green" if d["loopback_enable"] else "yellow"
+                    sync_state = "green" if (d["sync_enable"] and not d["sync_bypass"]) else ("yellow" if d["sync_enable"] else "red")
+                    set_status_badge("status_dma_enabled", dma_enabled_state, "DMA Enabled")
+                    set_status_badge("status_loopback", loopback_state, "Loopback")
+                    set_status_badge("status_sync", sync_state, "Synchronizer")
+
                 # Update RF AGC Panel and RFIC Node.
+                agc_increase = False
+                agc_nonzero = False
                 for inst, count in snap.get("agc", {}).items():
                     count_str = str(count).rjust(10)
                     dpg.set_value(f"agc_{inst}_count", f"Saturation Count: {count}")
                     dpg.set_value(f"agc_{inst}", f"{inst.upper()} AGC: {count_str}")
+                    agc_nonzero |= (count > 0)
+                    if count > agc_prev_counts.get(inst, count):
+                        agc_increase = True
+                    agc_prev_counts[inst] = count
+
+                agc_state = "red" if agc_increase else ("yellow" if agc_nonzero else "green")
+                set_status_badge("status_agc", agc_state, "AGC Saturation")
 
             dpg.render_dearpygui_frame()
     except KeyboardInterrupt:
@@ -555,6 +681,20 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     stop_event.set()
     timer_thread.join(timeout=1.0)
+    with ui_state_lock:
+        saved_settings = {
+            "refresh": ui_state["refresh"],
+            "freeze_plots": ui_state["freeze_plots"],
+            "windows": {},
+        }
+    for tag in ["win_status", "win_registers", "win_clks_time", "win_dmas", "win_xadc", "win_rf_agc", "win_overview"]:
+        if dpg.does_item_exist(tag):
+            pos = dpg.get_item_pos(tag)
+            saved_settings["windows"][tag] = {
+                "pos": [int(pos[0]), int(pos[1])],
+                "size": [int(dpg.get_item_width(tag)), int(dpg.get_item_height(tag))],
+            }
+    save_dashboard_settings(saved_settings)
     dpg.destroy_context()
     bus.close()
 
