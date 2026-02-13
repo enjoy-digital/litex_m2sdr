@@ -25,6 +25,24 @@ from test_agc    import AGCDriver
 XADC_WINDOW_DURATION = 10
 DASHBOARD_SETTINGS_PATH = os.path.expanduser("~/.litex_m2sdr_dashboard.json")
 
+PCIE_LTSSM = {
+    0x00: "Detect Quiet",
+    0x02: "Detect Active",
+    0x04: "Polling Active",
+    0x05: "Polling Config",
+    0x11: "Config Complete x1",
+    0x13: "Config Complete x4",
+    0x15: "Config Idle",
+    0x16: "L0",
+    0x17: "L1 Entry",
+    0x1A: "L1 Idle",
+    0x1B: "L1 Exit",
+    0x1C: "Recovery RcvrLock",
+    0x1D: "Recovery RcvrCfg",
+    0x20: "Recovery Idle",
+    0x21: "Hot Reset",
+}
+
 
 def load_dashboard_settings():
     default = {
@@ -60,21 +78,21 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Optimized defaults for a 1920x1080 screen.
     default_window_pos = {
         "win_status":    (10, 10),
-        "win_clks_time": (10, 100),
-        "win_rf_agc":    (10, 330),
-        "win_overview":  (380, 100),
-        "win_xadc":      (380, 540),
-        "win_dmas":      (1250, 100),
-        "win_registers": (1250, 540),
+        "win_clks_time": (10, 190),
+        "win_rf_agc":    (10, 430),
+        "win_overview":  (380, 190),
+        "win_xadc":      (380, 620),
+        "win_dmas":      (1250, 190),
+        "win_registers": (1250, 620),
     }
     default_window_size = {
-        "win_status":    (1900, 80),
+        "win_status":    (1900, 170),
         "win_clks_time": (360, 220),
-        "win_rf_agc":    (360, 530),
-        "win_overview":  (860, 430),
-        "win_xadc":      (860, 530),
+        "win_rf_agc":    (360, 460),
+        "win_overview":  (860, 420),
+        "win_xadc":      (860, 370),
         "win_dmas":      (660, 430),
-        "win_registers": (660, 530),
+        "win_registers": (660, 370),
     }
 
     dashboard_settings = load_dashboard_settings()
@@ -93,6 +111,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
     with_header_reg = hasattr(bus.regs, "header_last_tx_header")
     with_time       = hasattr(bus.regs, "time_gen_read_time")
+    with_ltssm      = hasattr(bus.regs, "pcie_phy_phy_ltssm_tracer_history")
 
     # Initialize ClkDriver if available.
     if with_clks:
@@ -204,17 +223,28 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         default_pos=default_window_pos["win_status"],
         default_size=default_window_size["win_status"],
     )):
-        dpg.add_text("Status Badges")
-        dpg.add_text("DMA Enabled: --", tag="status_dma_enabled")
-        dpg.add_text("Loopback: --", tag="status_loopback")
-        dpg.add_text("Synchronizer: --", tag="status_sync")
-        dpg.add_text("AGC Saturation: --", tag="status_agc")
-        dpg.add_separator()
-        dpg.add_slider_float(label="Refresh (s)", min_value=0.02, max_value=1.0, default_value=refresh_default, callback=on_refresh_changed)
-        dpg.add_checkbox(label="Freeze XADC Plots", default_value=freeze_default, callback=on_freeze_plots_changed)
-        dpg.add_button(label="Clear Counters", callback=on_clear_counters)
-        dpg.add_button(label="Reset Layout", callback=reset_layout)
-        dpg.add_button(label="Reboot FPGA", callback=lambda: reboot())
+        with dpg.group(horizontal=True):
+            with dpg.child_window(width=560, height=58, border=True):
+                dpg.add_text("Board: --", tag="kpi_board")
+                dpg.add_text("Uptime: --", tag="kpi_uptime")
+                dpg.add_text("Data Age: --", tag="kpi_data_age")
+                dpg.add_text("PCIe LTSSM: --", tag="kpi_ltssm")
+            with dpg.child_window(width=620, height=58, border=True):
+                dpg.add_text("DMA Enabled: --", tag="status_dma_enabled")
+                dpg.add_text("Loopback: --", tag="status_loopback")
+                dpg.add_text("Synchronizer: --", tag="status_sync")
+                dpg.add_text("AGC Saturation: --", tag="status_agc")
+            with dpg.child_window(width=700, height=58, border=True):
+                dpg.add_text("DMA TX Loops/s: --", tag="kpi_dma_tx")
+                dpg.add_text("DMA RX Loops/s: --", tag="kpi_dma_rx")
+                dpg.add_text("FPGA Temp: --", tag="kpi_temp")
+                dpg.add_text("VCCINT/VCCAUX/VCCBRAM: --", tag="kpi_vcc")
+        with dpg.group(horizontal=True):
+            dpg.add_slider_float(label="Refresh (s)", min_value=0.02, max_value=1.0, default_value=refresh_default, callback=on_refresh_changed, width=300)
+            dpg.add_checkbox(label="Freeze XADC Plots", default_value=freeze_default, callback=on_freeze_plots_changed)
+            dpg.add_button(label="Clear AGC Counters", callback=on_clear_counters)
+            dpg.add_button(label="Reset Layout", callback=reset_layout)
+            dpg.add_button(label="Reboot FPGA", callback=lambda: reboot())
         dpg.add_text("", tag="status_error_text")
 
     # Registers Window.
@@ -517,7 +547,20 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     last_refresh = refresh
 
                 now = time.time()
-                snap = {"error": None, "csr": {}, "xadc": {}, "clks": {}, "time": None, "headers": None, "dma": None, "agc": {}}
+                snap = {
+                    "error": None,
+                    "collected_at": now,
+                    "board_name": board_name,
+                    "csr": {},
+                    "xadc": {},
+                    "xadc_kpi": None,
+                    "clks": {},
+                    "time": None,
+                    "headers": None,
+                    "dma": None,
+                    "pcie": None,
+                    "agc": {},
+                }
 
                 if clear_counters_event.is_set():
                     for inst in rf_agc_instances:
@@ -536,6 +579,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         n_points = len(datay)
                         datax    = [relative_now - (n_points - 1 - i) * refresh for i in range(n_points)]
                         snap["xadc"][name] = [datax, datay[::-1]]
+                    snap["xadc_kpi"] = {
+                        "temp": xadc_driver.get_temp(),
+                        "vccint": xadc_driver.get_vccint(),
+                        "vccaux": xadc_driver.get_vccaux(),
+                        "vccbram": xadc_driver.get_vccbram(),
+                    }
 
                 # Snapshot clocks.
                 if with_clks and clk_drivers:
@@ -613,6 +662,20 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         "sync_enable": bus.regs.pcie_dma0_synchronizer_enable.read(),
                     }
 
+                if with_ltssm:
+                    ltssm = bus.regs.pcie_phy_phy_ltssm_tracer_history.read()
+                    ltssm_new = (ltssm >> 0) & 0x3F
+                    ltssm_old = (ltssm >> 6) & 0x3F
+                    overflow = (ltssm >> 30) & 0x1
+                    valid = (ltssm >> 31) & 0x1
+                    snap["pcie"] = {
+                        "state_new": ltssm_new,
+                        "state_old": ltssm_old,
+                        "overflow": overflow,
+                        "valid": valid,
+                        "state_name": PCIE_LTSSM.get(ltssm_new, "Unknown"),
+                    }
+
                 # Snapshot AGC.
                 for inst in rf_agc_instances:
                     count = agc_drivers[inst].read_count()
@@ -683,6 +746,20 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_value("time_ns", f"Time: {snap['time']['ns']} ns")
                     dpg.set_value("time_str", f"Date/Time: {snap['time']['str']}")
 
+                # Top KPI/telemetry bar.
+                dpg.set_value("kpi_board", f"Board: {snap.get('board_name', '--')}")
+                dpg.set_value("kpi_uptime", f"Uptime: {time.time() - start_time:8.1f} s")
+                age_ms = (time.time() - snap.get("collected_at", time.time())) * 1000.0
+                dpg.set_value("kpi_data_age", f"Data Age: {age_ms:5.1f} ms")
+
+                if snap.get("pcie"):
+                    p = snap["pcie"]
+                    overflow_note = " [Overflow]" if p["overflow"] else ""
+                    validity = "valid" if p["valid"] else "stale"
+                    dpg.set_value("kpi_ltssm", f"PCIe LTSSM: 0x{p['state_new']:02x} {p['state_name']} ({validity}){overflow_note}")
+                else:
+                    dpg.set_value("kpi_ltssm", "PCIe LTSSM: n/a")
+
                 # Update DMA Header & Timestamps.
                 if snap.get("headers"):
                     h = snap["headers"]
@@ -733,6 +810,11 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     set_status_badge("status_dma_enabled", dma_enabled_state, "DMA Enabled")
                     set_status_badge("status_loopback", loopback_state, "Loopback")
                     set_status_badge("status_sync", sync_state, "Synchronizer")
+                    dpg.set_value("kpi_dma_tx", f"DMA TX Loops/s: {d['writer_speed']:8.2f}")
+                    dpg.set_value("kpi_dma_rx", f"DMA RX Loops/s: {d['reader_speed']:8.2f}")
+                else:
+                    dpg.set_value("kpi_dma_tx", "DMA TX Loops/s: n/a")
+                    dpg.set_value("kpi_dma_rx", "DMA RX Loops/s: n/a")
 
                 # Update RF AGC Panel and RFIC Node.
                 agc_increase = False
@@ -748,6 +830,14 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
                 agc_state = "red" if agc_increase else ("yellow" if agc_nonzero else "green")
                 set_status_badge("status_agc", agc_state, "AGC Saturation")
+
+                if snap.get("xadc_kpi"):
+                    x = snap["xadc_kpi"]
+                    dpg.set_value("kpi_temp", f"FPGA Temp: {x['temp']:5.1f} C")
+                    dpg.set_value("kpi_vcc", f"VCCINT/VCCAUX/VCCBRAM: {x['vccint']:.2f} / {x['vccaux']:.2f} / {x['vccbram']:.2f} V")
+                else:
+                    dpg.set_value("kpi_temp", "FPGA Temp: n/a")
+                    dpg.set_value("kpi_vcc", "VCCINT/VCCAUX/VCCBRAM: n/a")
 
             dpg.render_dearpygui_frame()
     except KeyboardInterrupt:
