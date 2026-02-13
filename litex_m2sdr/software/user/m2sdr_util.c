@@ -996,6 +996,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     int64_t reader_sw_count_last = 0;
     int64_t last_time;
     uint32_t errors = 0;
+    uint64_t total_data_errors = 0;
     int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
     int status = 0;
 
@@ -1137,6 +1138,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
                    (uint64_t) llabs(dma.reader_sw_count - dma.writer_sw_count),
                    errors);
             /* Update errors/time/count. */
+            total_data_errors += errors;
             errors = 0;
             last_time = get_time_ms();
             reader_sw_count_last = dma.reader_sw_count;
@@ -1147,6 +1149,13 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     }
 
 #ifdef DMA_CHECK_DATA
+    total_data_errors += errors;
+
+    if (total_data_errors != 0 && keep_running) {
+        printf("DMA data validation errors detected: %" PRIu64 "\n", total_data_errors);
+        status = 1;
+    }
+
     if (validated_buffers == 0 && keep_running) {
         printf("DMA data validation did not run (warmup not completed before timeout), exiting.\n");
         status = 1;
