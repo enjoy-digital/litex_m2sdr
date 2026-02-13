@@ -673,6 +673,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                         "state_old": ltssm_old,
                         "overflow": overflow,
                         "valid": valid,
+                        "state_old_name": PCIE_LTSSM.get(ltssm_old, "Unknown"),
                         "state_name": PCIE_LTSSM.get(ltssm_new, "Unknown"),
                     }
 
@@ -755,8 +756,14 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 if snap.get("pcie"):
                     p = snap["pcie"]
                     overflow_note = " [Overflow]" if p["overflow"] else ""
-                    validity = "valid" if p["valid"] else "stale"
-                    dpg.set_value("kpi_ltssm", f"PCIe LTSSM: 0x{p['state_new']:02x} {p['state_name']} ({validity}){overflow_note}")
+                    if p["valid"]:
+                        dpg.set_value(
+                            "kpi_ltssm",
+                            f"PCIe LTSSM (last): 0x{p['state_old']:02x}->{p['state_new']:02x} "
+                            f"{p['state_old_name']} -> {p['state_name']}{overflow_note}"
+                        )
+                    else:
+                        dpg.set_value("kpi_ltssm", f"PCIe LTSSM (last): no new transition{overflow_note}")
                 else:
                     dpg.set_value("kpi_ltssm", "PCIe LTSSM: n/a")
 
@@ -784,8 +791,8 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_value("dma_writer_loops_speed", f"{d['writer_speed']:.2f}")
                     writer_speed_str = f"{d['writer_speed']:.2f}".rjust(8)
                     dpg.set_value("node_dma_writer_loops", f"Writer Loops/s: {writer_speed_str}")
-                    dpg.set_value("dma_writer_loops_count", f"Writer Loops: {str(loops_w).rjust(8)}")
-                    dpg.set_value("dma_writer_count", f"Writer Count: {str(count_w).rjust(8)}")
+                    dpg.set_value("dma_writer_loops_count", f"Writer Loops: {str(loops_ws).rjust(8)}")
+                    dpg.set_value("dma_writer_count", f"Writer Count: {str(count_ws).rjust(8)}")
 
                     dpg.set_value("dma_reader_enable", str(d["reader_enable"]))
                     dpg.set_value("node_dma_reader_enable", f"Reader Enable: {str(d['reader_enable']).rjust(1)}")
@@ -794,8 +801,8 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_value("dma_reader_loops_speed", f"{d['reader_speed']:.2f}")
                     reader_speed_str = f"{d['reader_speed']:.2f}".rjust(8)
                     dpg.set_value("node_dma_reader_loops", f"Reader Loops/s: {reader_speed_str}")
-                    dpg.set_value("dma_reader_loops_count", f"Reader Loops: {str(loops_r).rjust(8)}")
-                    dpg.set_value("dma_reader_count", f"Reader Count: {str(count_r).rjust(8)}")
+                    dpg.set_value("dma_reader_loops_count", f"Reader Loops: {str(loops_rs).rjust(8)}")
+                    dpg.set_value("dma_reader_count", f"Reader Count: {str(count_rs).rjust(8)}")
 
                     dpg.set_value("dma_loopback_enable", str(d["loopback_enable"]))
                     dpg.set_value("node_dma_loopback", f"Loopback: {str(d['loopback_enable']).rjust(1)}")
