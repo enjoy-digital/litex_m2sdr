@@ -927,6 +927,27 @@ static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int da
     *pseed = seed;
     return errors;
 }
+
+static void find_best_rx_delay(const uint32_t *buf, int data_width, uint32_t *best_delay, uint32_t *best_errors)
+{
+    uint32_t seed_rd;
+    uint32_t errors;
+    int count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+
+    *best_delay  = 0;
+    *best_errors = UINT32_MAX;
+
+    for (int delay = 0; delay < count; delay++) {
+        seed_rd = delay;
+        errors = check_pn_data(buf, count, &seed_rd, data_width);
+        if (errors < *best_errors) {
+            *best_errors = errors;
+            *best_delay  = delay;
+            if (errors == 0)
+                break;
+        }
+    }
+}
 #endif
 
 static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration)
@@ -950,6 +971,14 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
     uint8_t  run = (auto_rx_delay == 0);
+    const uint32_t rx_delay_errors_threshold = (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 8;
+    const int rx_delay_confirmations_needed = 3;
+    const int rx_delay_max_attempts = 128;
+    uint32_t rx_delay_candidate = UINT32_MAX;
+    int rx_delay_candidate_confirmations = 0;
+    int rx_delay_attempts = 0;
+    uint32_t rx_delay_best_overall = UINT32_MAX;
+    uint32_t rx_delay_best_overall_delay = 0;
 #else
     uint8_t run = 1;
 #endif
@@ -968,6 +997,8 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     /* Test loop. */
     last_time = get_time_ms();
     for (;;) {
+        int work_done = 0;
+
         /* Exit loop on CTRL+C or when the duration is over. */
         if (!keep_running || (duration > 0 && get_time_ms() >= end_time))
             break;
@@ -986,6 +1017,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Break when no buffer available for Write. */
             if (!buf_wr)
                 break;
+            work_done = 1;
             /* Write data to buffer. */
             write_pn_data((uint32_t *) buf_wr, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_wr, data_width);
         }
@@ -997,9 +1029,10 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Break when no buffer available for Read. */
             if (!buf_rd)
                 break;
+            work_done = 1;
             /* Skip the first 128 DMA loops. */
             if (dma.writer_hw_count < 128*DMA_BUFFER_COUNT)
-                break;
+                continue;
             /* When running... */
             if (run) {
                 /* Check data in Read buffer. */
@@ -1007,24 +1040,46 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                 /* Clear Read buffer */
                 memset(buf_rd, 0, DMA_BUFFER_SIZE);
             } else {
-                /* Find initial Delay/Seed (Useful when loopback is introducing delay). */
-                uint32_t errors_min = 0xffffffff;
-                for (int delay = 0; delay < DMA_BUFFER_SIZE / sizeof(uint32_t); delay++) {
-                    seed_rd = delay;
-                    errors = check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
-                    //printf("delay: %d / errors: %d\n", delay, errors);
-                    if (errors < errors_min)
-                        errors_min = errors;
-                    if (errors < (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 2) {
-                        printf("RX_DELAY: %d (errors: %d)\n", delay, errors);
-                        run = 1;
-                        break;
-                    }
+                /* Find and confirm initial RX delay/seed over multiple buffers. */
+                uint32_t best_delay;
+                uint32_t best_errors;
+
+                find_best_rx_delay((const uint32_t *)buf_rd, data_width, &best_delay, &best_errors);
+                rx_delay_attempts++;
+
+                if (best_errors < rx_delay_best_overall) {
+                    rx_delay_best_overall = best_errors;
+                    rx_delay_best_overall_delay = best_delay;
                 }
-                if (!run) {
-                    printf("Unable to find DMA RX_DELAY (min errors: %d/%ld), exiting.\n",
-                        errors_min,
-                        DMA_BUFFER_SIZE / sizeof(uint32_t));
+
+                if (best_errors <= rx_delay_errors_threshold) {
+                    if (best_delay == rx_delay_candidate) {
+                        rx_delay_candidate_confirmations++;
+                    } else {
+                        rx_delay_candidate = best_delay;
+                        rx_delay_candidate_confirmations = 1;
+                    }
+
+                    if (rx_delay_candidate_confirmations >= rx_delay_confirmations_needed) {
+                        seed_rd = best_delay;
+                        run = 1;
+                        errors = 0;
+                        printf("RX_DELAY: %d (errors: %d, confirmations: %d)\n",
+                            best_delay,
+                            best_errors,
+                            rx_delay_candidate_confirmations);
+                    }
+                } else {
+                    rx_delay_candidate = UINT32_MAX;
+                    rx_delay_candidate_confirmations = 0;
+                }
+
+                if (!run && (rx_delay_attempts >= rx_delay_max_attempts)) {
+                    printf("Unable to find DMA RX_DELAY (best: delay=%d, errors=%d/%ld, attempts=%d), exiting.\n",
+                        rx_delay_best_overall_delay,
+                        rx_delay_best_overall,
+                        DMA_BUFFER_SIZE / sizeof(uint32_t),
+                        rx_delay_attempts);
                     goto end;
                 }
             }
@@ -1051,6 +1106,9 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             last_time = get_time_ms();
             reader_sw_count_last = dma.reader_sw_count;
         }
+
+        if (!work_done)
+            usleep(100);
     }
 
     /* Cleanup DMA. */
