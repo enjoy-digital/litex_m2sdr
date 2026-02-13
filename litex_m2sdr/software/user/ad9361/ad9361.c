@@ -6821,7 +6821,7 @@ int32_t ad9361_rfpll_int_set_rate(struct refclk_scale *clk_priv, uint32_t rate,
 	uint64_t vco = 0;
 	uint8_t buf[5];
 	uint32_t reg, div_mask, lock_reg, fract = 0, integer = 0;
-	int32_t vco_div, ret, fixup_other;
+	int32_t vco_div = 0, ret, fixup_other;
 
 	dev_dbg(&clk_priv->spi->dev,
 		"%s: %s Rate %"PRIu32" Hz Parent Rate %"PRIu32" Hz",
