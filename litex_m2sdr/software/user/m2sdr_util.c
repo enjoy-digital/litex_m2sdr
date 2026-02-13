@@ -872,6 +872,7 @@ static int get_next_pow2(int data_width)
 }
 
 #ifdef DMA_CHECK_DATA
+typedef uint32_t u32x4 __attribute__((vector_size(16)));
 
 static inline uint32_t seed_to_data(uint32_t seed)
 {
@@ -903,7 +904,16 @@ static void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, int data_wi
     uint32_t mask = get_data_mask(data_width);
 
     seed = *pseed;
-    for(i = 0; i < count; i++) {
+    for (i = 0; i + 4 <= count; i += 4) {
+        uint32_t d0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t d1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t d2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t d3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        u32x4 vec = {d0, d1, d2, d3};
+        memcpy(&buf[i], &vec, sizeof(vec));
+    }
+
+    for (; i < count; i++) {
         buf[i] = (seed_to_data(seed) & mask);
         seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
     }
@@ -915,10 +925,25 @@ static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int da
     int i, errors;
     uint32_t seed;
     uint32_t mask = get_data_mask(data_width);
+    u32x4 mask_vec = {mask, mask, mask, mask};
 
     errors = 0;
     seed = *pseed;
-    for (i = 0; i < count; i++) {
+    for (i = 0; i + 4 <= count; i += 4) {
+        uint32_t e0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t e1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t e2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        uint32_t e3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        u32x4 expected = {e0, e1, e2, e3};
+        u32x4 actual;
+        u32x4 diff;
+
+        memcpy(&actual, &buf[i], sizeof(actual));
+        diff = (actual & mask_vec) ^ expected;
+        errors += (diff[0] != 0) + (diff[1] != 0) + (diff[2] != 0) + (diff[3] != 0);
+    }
+
+    for (; i < count; i++) {
         if ((buf[i] & mask) != (seed_to_data(seed) & mask)) {
             errors ++;
         }
