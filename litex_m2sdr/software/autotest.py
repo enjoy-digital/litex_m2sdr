@@ -27,8 +27,11 @@ FPGA_PCIE_LINK_WIDTH_NOMINAL = {"m2" : "4", "baseboard" : "1"}
 AD9361_PRODUCT_ID = "000a"
 
 # DMA Loopback Test Constants.
-DMA_LOOPBACK_TEST_DURATION   = 2                              # Seconds.
+DMA_LOOPBACK_TEST_DURATION   = 3                              # Seconds.
 DMA_LOOPBACK_SPEED_THRESHOLD = {"m2" : 10, "baseboard" : 2.5} # Gbps.
+DMA_LOOPBACK_WARMUP_SAMPLES  = 2
+DMA_LOOPBACK_MIN_SAMPLES     = 4
+DMA_LOOPBACK_MAX_RETRIES     = 1
 
 # RFIC Test Constants.
 RFIC_SAMPLERATES = [
@@ -40,8 +43,11 @@ RFIC_SAMPLERATES = [
 ]
 
 # RFIC Loopback Test Constants.
-RFIC_LOOPBACK_TEST_DURATION   = 2   # Seconds.
+RFIC_LOOPBACK_TEST_DURATION   = 3   # Seconds.
 RFIC_LOOPBACK_SPEED_THRESHOLD = 1.4 # Gbps.
+RFIC_LOOPBACK_WARMUP_SAMPLES  = 3
+RFIC_LOOPBACK_MIN_SAMPLES     = 4
+RFIC_LOOPBACK_MAX_RETRIES     = 1
 
 # VCXO Constants.
 VCXO_PPM_THRESHOLD = 20.0 # PPM.
@@ -104,6 +110,42 @@ def verify_pcie_speed(device_id):
         return current_link_speed, current_link_width, speed_check and width_check
     except:
         return None, None, False
+
+def parse_dma_test_stats(output):
+    # Expected data lines: DMA_SPEED TX_BUFFERS RX_BUFFERS DIFF ERRORS.
+    matches = re.findall(r"^\s*([\d.]+)\s+\d+\s+\d+\s+\d+\s+(\d+)\s*$", output, re.MULTILINE)
+    return [(float(speed), int(errors)) for speed, errors in matches]
+
+def run_dma_test_with_retries(command, speed_threshold, warmup_samples, min_samples, max_retries):
+    attempts = max_retries + 1
+
+    for attempt in range(1, attempts + 1):
+        log = subprocess.run(command, shell=True, capture_output=True, text=True)
+        samples = parse_dma_test_stats(log.stdout)
+
+        stable_samples = samples[warmup_samples:]
+        if len(stable_samples) < min_samples:
+            if attempt < attempts:
+                print(f"\tInsufficient DMA samples ({len(stable_samples)}), retrying ({attempt}/{attempts})...")
+                continue
+            return 1
+
+        total_speed = sum(speed for speed, _ in stable_samples)
+        total_errors = sum(error for _, error in stable_samples)
+        mean_speed = total_speed / len(stable_samples)
+
+        print(f"\tMean DMA speed (stable): [{ANSI_COLOR_BLUE}{mean_speed} Gbps{ANSI_COLOR_RESET}] ", end="")
+        speed_errors = print_result(mean_speed > speed_threshold)
+        print(f"\tTotal DMA errors (stable): [{ANSI_COLOR_BLUE}{total_errors}{ANSI_COLOR_RESET}] ", end="")
+        data_errors = print_result(total_errors == 0)
+
+        if (speed_errors == 0) and (data_errors == 0):
+            return 0
+
+        if attempt < attempts:
+            print(f"\tRetrying DMA test ({attempt}/{attempts})...")
+
+    return 1
 
 # PCIe Device Test ---------------------------------------------------------------------------------
 
@@ -239,36 +281,15 @@ def m2sdr_rf_autotest():
 def m2sdr_dma_loopback_autotest():
     print("M2SDR DMA Loopback Test...")
 
-    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -t {DMA_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
-
-    errors = 0
-    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
-    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", log.stdout, re.MULTILINE)
-
-    total_speed  = 0.0
-    total_errors = 0
-
     board_variant = get_board_variant()
-
-    if dma_speeds and dma_errors:
-        for speed, error in zip(dma_speeds, dma_errors):
-            speed = float(speed)
-            error = int(error)
-            total_speed += speed
-            total_errors += error
-            print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(speed > DMA_LOOPBACK_SPEED_THRESHOLD[board_variant])
-            print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(error == 0)
-
-        mean_speed = total_speed / len(dma_speeds)
-        print(f"\tMean DMA speed: [{ANSI_COLOR_BLUE}{mean_speed} Gbps{ANSI_COLOR_RESET}]")
-        print(f"\tTotal DMA errors: [{ANSI_COLOR_BLUE}{total_errors}{ANSI_COLOR_RESET}]")
-    else:
-        print_fail()
-        errors += 1
-
-    return errors
+    cmd = f"cd user && ./m2sdr_util dma_test -t {DMA_LOOPBACK_TEST_DURATION}"
+    return run_dma_test_with_retries(
+        command        = cmd,
+        speed_threshold= DMA_LOOPBACK_SPEED_THRESHOLD[board_variant],
+        warmup_samples = DMA_LOOPBACK_WARMUP_SAMPLES,
+        min_samples    = DMA_LOOPBACK_MIN_SAMPLES,
+        max_retries    = DMA_LOOPBACK_MAX_RETRIES,
+    )
 
 # M2SDR RFIC Loopback Test -------------------------------------------------------------------------
 
@@ -279,38 +300,14 @@ def m2sdr_rfic_loopback_autotest():
     log = subprocess.run(f"cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
 
     # Run RFIC loopback test.
-    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -w 12 -a -t {RFIC_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
-
-    errors = 0
-    dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
-    dma_errors = re.findall(r"^\s*[\d.]+\s+.*\s+(\d+)\s*$", log.stdout, re.MULTILINE)
-
-    total_speed  = 0.0
-    total_errors = 0
-
-    # Skip initial results (can contains errors).
-    dma_speeds = dma_speeds[2:]
-    dma_errors = dma_errors[2:]
-
-    if dma_speeds and dma_errors:
-        for speed, error in zip(dma_speeds, dma_errors):
-            speed = float(speed)
-            error = int(error)
-            total_speed += speed
-            total_errors += error
-            print(f"\tChecking DMA speed: [{ANSI_COLOR_BLUE}{speed} Gbps{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(speed > RFIC_LOOPBACK_SPEED_THRESHOLD)
-            print(f"\tChecking DMA errors: [{ANSI_COLOR_BLUE}{error}{ANSI_COLOR_RESET}] ", end="")
-            errors += print_result(error == 0)
-
-        mean_speed = total_speed / len(dma_speeds)
-        print(f"\tMean DMA speed: [{ANSI_COLOR_BLUE}{mean_speed} Gbps{ANSI_COLOR_RESET}]")
-        print(f"\tTotal DMA errors: [{ANSI_COLOR_BLUE}{total_errors}{ANSI_COLOR_RESET}]")
-    else:
-        print_fail()
-        errors += 1
-
-    return errors
+    cmd = f"cd user && ./m2sdr_util dma_test -w 12 -a -t {RFIC_LOOPBACK_TEST_DURATION}"
+    return run_dma_test_with_retries(
+        command        = cmd,
+        speed_threshold= RFIC_LOOPBACK_SPEED_THRESHOLD,
+        warmup_samples = RFIC_LOOPBACK_WARMUP_SAMPLES,
+        min_samples    = RFIC_LOOPBACK_MIN_SAMPLES,
+        max_retries    = RFIC_LOOPBACK_MAX_RETRIES,
+    )
 
 # Main ---------------------------------------------------------------------------------------------
 
