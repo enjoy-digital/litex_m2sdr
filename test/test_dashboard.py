@@ -57,6 +57,16 @@ def save_dashboard_settings(settings):
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     import dearpygui.dearpygui as dpg
 
+    default_window_pos = {
+        "win_status":    (625, 0),
+        "win_registers": (1230, 0),
+        "win_clks_time": (0, 0),
+        "win_dmas":      (0, 450),
+        "win_xadc":      (625, 510),
+        "win_rf_agc":    (935, 0),
+        "win_overview":  (260, 0),
+    }
+
     dashboard_settings = load_dashboard_settings()
     refresh_default = max(0.02, float(dashboard_settings.get("refresh", 0.1)))
     freeze_default = bool(dashboard_settings.get("freeze_plots", False))
@@ -169,6 +179,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     def on_clear_counters(sender, app_data, user_data):
         clear_counters_event.set()
 
+    def reset_layout(sender=None, app_data=None, user_data=None):
+        dashboard_settings["windows"] = {}
+        for tag, pos in default_window_pos.items():
+            if dpg.does_item_exist(tag):
+                dpg.set_item_pos(tag, list(pos))
+
     with dpg.window(**get_window_kwargs("win_status", "LiteX M2SDR Status/Controls", default_pos=(625, 0), default_size=(300, 240))):
         dpg.add_text("Status Badges")
         dpg.add_text("DMA Enabled: --", tag="status_dma_enabled")
@@ -179,6 +195,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         dpg.add_slider_float(label="Refresh (s)", min_value=0.02, max_value=1.0, default_value=refresh_default, callback=on_refresh_changed)
         dpg.add_checkbox(label="Freeze XADC Plots", default_value=freeze_default, callback=on_freeze_plots_changed)
         dpg.add_button(label="Clear Counters", callback=on_clear_counters)
+        dpg.add_button(label="Reset Layout", callback=reset_layout)
         dpg.add_button(label="Reboot FPGA", callback=lambda: reboot())
         dpg.add_text("", tag="status_error_text")
 
@@ -568,6 +585,15 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     timer_thread.start()
 
     dpg.show_viewport()
+
+    # Recover windows restored outside visible area (multi-screen/layout changes).
+    viewport_w, viewport_h = 1920, 1080
+    for tag, pos in default_window_pos.items():
+        if dpg.does_item_exist(tag):
+            x, y = dpg.get_item_pos(tag)
+            if (x < 0) or (y < 0) or (x > viewport_w - 80) or (y > viewport_h - 80):
+                dpg.set_item_pos(tag, list(pos))
+
     agc_prev_counts = {}
     try:
         while dpg.is_dearpygui_running():
