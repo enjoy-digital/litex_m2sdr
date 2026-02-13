@@ -985,6 +985,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
+    keep_running = 1;
 
     if (unlikely(data_width > 32 || data_width < 1)) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
