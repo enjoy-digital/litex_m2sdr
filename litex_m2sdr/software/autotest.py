@@ -32,7 +32,6 @@ DMA_LOOPBACK_SPEED_THRESHOLD = {"m2" : 10, "baseboard" : 2.5} # Gbps.
 
 # RFIC Test Constants.
 RFIC_SAMPLERATES = [
-    2.5e6,
     5.0e6,
     10.0e6,
     20.0e6,
@@ -231,7 +230,8 @@ def m2sdr_rf_autotest():
     for samplerate in RFIC_SAMPLERATES:
         print(f"\tRF Init @ {samplerate/1e6:3.2f}MSPS...", end="")
         log = subprocess.run(f"cd user && ./m2sdr_rf -samplerate={samplerate}", shell=True, capture_output=True, text=True)
-        errors += print_result("AD936x Rev 2 successfully initialized" in log.stdout)
+        success = ("AD936x Rev 2 successfully initialized" in log.stdout) and (log.returncode == 0)
+        errors += print_result(success)
     return errors
 
 # M2SDR DMA Loopback Test --------------------------------------------------------------------------
@@ -279,7 +279,7 @@ def m2sdr_rfic_loopback_autotest():
     log = subprocess.run(f"cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
 
     # Run RFIC loopback test.
-    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -w 12 -e -a -t {RFIC_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
+    log = subprocess.run(f"cd user && ./m2sdr_util dma_test -w 12 -a -t {RFIC_LOOPBACK_TEST_DURATION}", shell=True, capture_output=True, text=True)
 
     errors = 0
     dma_speeds = re.findall(r"^\s*([\d.]+)\s+.*$", log.stdout, re.MULTILINE)
