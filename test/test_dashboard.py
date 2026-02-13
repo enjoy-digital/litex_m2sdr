@@ -445,7 +445,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.set_value("dma_reader_table_level", f"Loops: {loops_r}, Count: {count_r}")
                 reader_loop_status = bus.regs.pcie_dma0_reader_table_loop_status.read()
                 loops_rs = (reader_loop_status >> 16) & 0xFFFF
-                count_rs = writer_loop_status & 0xFFFF
+                count_rs = reader_loop_status & 0xFFFF
                 dpg.set_value("dma_reader_table_loop_status", f"Loops: {loops_rs}, Count: {count_rs}")
 
                 # Compute Reader Loops/s and update node.
