@@ -23,7 +23,7 @@
  *   insert an IRQ arming delay, and early-poll window to catch fast DONE.
  *
  * Copyright (c) 2022 Gabriel Somlo <gsomlo@gmail.com>
- * Copyright (c) 2025 EnjoyDigital
+ * Copyright (c) 2025-2026 EnjoyDigital
  */
 
 #include <linux/bits.h>

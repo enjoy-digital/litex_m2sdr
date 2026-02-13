@@ -1,7 +1,7 @@
 /*
  * SoapySDR driver for the LiteX M2SDR.
  *
- * Copyright (c) 2021-2025 Enjoy Digital.
+ * Copyright (c) 2021-2026 Enjoy Digital.
  * SPDX-License-Identifier: Apache-2.0
  * http://www.apache.org/licenses/LICENSE-2.0
  */
