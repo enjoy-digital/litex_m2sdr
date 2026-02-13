@@ -192,6 +192,11 @@ def m2sdr_util_vcxo_autotest():
 
     log = subprocess.run(f"cd user && ./m2sdr_util vcxo_test", shell=True, capture_output=True, text=True)
 
+    # SI5351C variants do not have VCXO; treat this as a skipped/non-fatal test.
+    if "Detected SI5351C (no VCXO), exiting." in log.stdout:
+        print(f"\tNo VCXO detected (SI5351C): {ANSI_COLOR_YELLOW}[SKIP]{ANSI_COLOR_RESET}")
+        return 0
+
     # Parse the variation in Hz and PPM.
     hz_variation_match  = re.search(r"Hz Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*Hz\s*/\s*\+\s*([\d.]+)\s*Hz", log.stdout)
     ppm_variation_match = re.search(r"PPM Variation from Nominal \(50% PWM\): -?\s*([\d.]+)\s*PPM\s*/\s*\+\s*([\d.]+)\s*PPM", log.stdout)
