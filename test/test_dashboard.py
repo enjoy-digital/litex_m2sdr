@@ -58,13 +58,22 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     import dearpygui.dearpygui as dpg
 
     default_window_pos = {
-        "win_status":    (625, 0),
-        "win_registers": (1230, 0),
-        "win_clks_time": (0, 0),
-        "win_dmas":      (0, 450),
-        "win_xadc":      (625, 510),
-        "win_rf_agc":    (935, 0),
-        "win_overview":  (260, 0),
+        "win_status":    (0, 0),
+        "win_clks_time": (10, 110),
+        "win_rf_agc":    (10, 360),
+        "win_overview":  (430, 110),
+        "win_xadc":      (430, 560),
+        "win_dmas":      (1340, 110),
+        "win_registers": (1340, 560),
+    }
+    default_window_size = {
+        "win_status":    (1910, 95),
+        "win_clks_time": (400, 240),
+        "win_rf_agc":    (400, 500),
+        "win_overview":  (900, 440),
+        "win_xadc":      (900, 500),
+        "win_dmas":      (570, 440),
+        "win_registers": (570, 500),
     }
 
     dashboard_settings = load_dashboard_settings()
@@ -184,8 +193,16 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         for tag, pos in default_window_pos.items():
             if dpg.does_item_exist(tag):
                 dpg.set_item_pos(tag, list(pos))
+                if tag in default_window_size:
+                    dpg.set_item_width(tag, int(default_window_size[tag][0]))
+                    dpg.set_item_height(tag, int(default_window_size[tag][1]))
 
-    with dpg.window(**get_window_kwargs("win_status", "LiteX M2SDR Status/Controls", default_pos=(625, 0), default_size=(300, 240))):
+    with dpg.window(**get_window_kwargs(
+        "win_status",
+        "LiteX M2SDR Status/Controls",
+        default_pos=default_window_pos["win_status"],
+        default_size=default_window_size["win_status"],
+    )):
         dpg.add_text("Status Badges")
         dpg.add_text("DMA Enabled: --", tag="status_dma_enabled")
         dpg.add_text("Loopback: --", tag="status_loopback")
@@ -200,7 +217,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
         dpg.add_text("", tag="status_error_text")
 
     # Registers Window.
-    with dpg.window(**get_window_kwargs("win_registers", "LiteX M2SDR Registers", default_pos=(1230, 0), autosize=True)):
+    with dpg.window(**get_window_kwargs(
+        "win_registers",
+        "LiteX M2SDR Registers",
+        default_pos=default_window_pos["win_registers"],
+        default_size=default_window_size["win_registers"],
+    )):
         dpg.add_text("Control/Status")
         def filter_callback(sender, filter_str):
             dpg.set_value("csr_filter", filter_str)
@@ -226,7 +248,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 )
 
     # Clks and Time Window.
-    with dpg.window(**get_window_kwargs("win_clks_time", "LiteX M2SDR Clks/Time", default_pos=(0, 0), autosize=True)):
+    with dpg.window(**get_window_kwargs(
+        "win_clks_time",
+        "LiteX M2SDR Clks/Time",
+        default_pos=default_window_pos["win_clks_time"],
+        default_size=default_window_size["win_clks_time"],
+    )):
         with dpg.collapsing_header(label="Clks", default_open=True):
             with dpg.table(header_row=True, tag="clocks_table", resizable=False, policy=dpg.mvTable_SizingFixedFit):
                 dpg.add_table_column(label="Name")
@@ -242,7 +269,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # DMA Header & Timestamps Window.
     if with_header_reg:
-        with dpg.window(**get_window_kwargs("win_dmas", "LiteX M2SDR DMAs", default_pos=(0, 450), autosize=True)):
+        with dpg.window(**get_window_kwargs(
+            "win_dmas",
+            "LiteX M2SDR DMAs",
+            default_pos=default_window_pos["win_dmas"],
+            default_size=default_window_size["win_dmas"],
+        )):
             with dpg.collapsing_header(label="DMA Info", default_open=True):
                 with dpg.table(header_row=True, tag="dma_info_table", resizable=False, policy=dpg.mvTable_SizingFixedFit, width=600):
                     dpg.add_table_column(label="Register", width=250)
@@ -311,7 +343,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # XADC Window.
     if with_xadc:
-        with dpg.window(**get_window_kwargs("win_xadc", "LiteX M2SDR XADC", default_pos=(625, 510), default_size=(600, 500))):
+        with dpg.window(**get_window_kwargs(
+            "win_xadc",
+            "LiteX M2SDR XADC",
+            default_pos=default_window_pos["win_xadc"],
+            default_size=default_window_size["win_xadc"],
+        )):
             with dpg.subplots(2, 2, label="", width=-1, height=-1):
                 # Temperature Plot.
                 with dpg.plot(label="Temperature (°C)"):
@@ -339,7 +376,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     dpg.set_axis_limits("vccbram_y", 0, 1.8)
 
     # RF AGC Panel.
-    with dpg.window(**get_window_kwargs("win_rf_agc", "LiteX M2SDR RF AGC", default_pos=(935, 0), autosize=True)):
+    with dpg.window(**get_window_kwargs(
+        "win_rf_agc",
+        "LiteX M2SDR RF AGC",
+        default_pos=default_window_pos["win_rf_agc"],
+        default_size=default_window_size["win_rf_agc"],
+    )):
         for inst in rf_agc_instances:
             with dpg.collapsing_header(label=f"AGC {inst.upper()}", default_open=True):
                 dpg.add_text("Saturation Count: --", tag=f"agc_{inst}_count")
@@ -382,7 +424,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.add_separator()
 
     # System Overview Window..
-    with dpg.window(**get_window_kwargs("win_overview", "LiteX M2SDR System Overview", default_pos=(260, 0), default_size=(600, 400))):
+    with dpg.window(**get_window_kwargs(
+        "win_overview",
+        "LiteX M2SDR System Overview",
+        default_pos=default_window_pos["win_overview"],
+        default_size=default_window_size["win_overview"],
+    )):
         with dpg.node_editor():
             # Host Node
             host_node = dpg.add_node(label="Host", draggable=True)
