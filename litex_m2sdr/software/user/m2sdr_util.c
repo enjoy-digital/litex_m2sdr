@@ -1122,7 +1122,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 
         /* Statistics every 200ms. */
         int64_t duration_ms = get_time_ms() - last_time;
-        if (run & (duration_ms > 200)) {
+        if (run && (duration_ms > 200)) {
             /* Print banner every 10 lines. */
             if (i % 10 == 0)
                 printf("\e[1mDMA_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tDIFF\tERRORS\e[0m\n");
