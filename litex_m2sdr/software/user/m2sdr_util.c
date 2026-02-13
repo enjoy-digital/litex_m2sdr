@@ -29,6 +29,14 @@
 
 #include "m2sdr_config.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+#define likely(x)   (x)
+#define unlikely(x) (x)
+#endif
+
 /* Parameters */
 /*------------*/
 
@@ -897,7 +905,7 @@ static inline uint32_t get_data_mask(int data_width)
     return mask;
 }
 
-static inline void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
+static inline void write_pn_data(uint32_t * restrict buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i;
     uint32_t seed;
@@ -919,7 +927,7 @@ static inline void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, uint
     *pseed = seed;
 }
 
-static inline int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
+static inline int check_pn_data(const uint32_t * restrict buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i, errors;
     uint32_t seed;
@@ -942,7 +950,7 @@ static inline int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed,
     }
 
     for (; i < count; i++) {
-        if ((buf[i] & mask) != (seed_to_data(seed) & mask)) {
+        if (unlikely((buf[i] & mask) != (seed_to_data(seed) & mask))) {
             errors ++;
         }
         seed = add_mod_int(seed, 1, dma_word_count);
@@ -951,7 +959,7 @@ static inline int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed,
     return errors;
 }
 
-static void find_best_rx_delay(const uint32_t *buf, uint32_t mask, int dma_word_count, uint32_t *best_delay, uint32_t *best_errors)
+static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int dma_word_count, uint32_t *best_delay, uint32_t *best_errors)
 {
     uint32_t seed_rd;
     uint32_t errors;
@@ -978,7 +986,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
 
-    if (data_width > 32 || data_width < 1) {
+    if (unlikely(data_width > 32 || data_width < 1)) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
         exit(1);
     }
@@ -1013,7 +1021,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (litepcie_dma_init(&dma, m2sdr_device, zero_copy))
+    if (unlikely(litepcie_dma_init(&dma, m2sdr_device, zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;
@@ -1040,7 +1048,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Get Write buffer. */
             buf_wr = litepcie_dma_next_write_buffer(&dma);
             /* Break when no buffer available for Write. */
-            if (!buf_wr)
+            if (unlikely(!buf_wr))
                 break;
             work_done = 1;
             /* Write data to buffer. */
@@ -1052,7 +1060,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Get Read buffer. */
             buf_rd = litepcie_dma_next_read_buffer(&dma);
             /* Break when no buffer available for Read. */
-            if (!buf_rd)
+            if (unlikely(!buf_rd))
                 break;
             work_done = 1;
             /* Skip the first 128 DMA loops. */
@@ -1097,7 +1105,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                     rx_delay_candidate_confirmations = 0;
                 }
 
-                if (!run && (rx_delay_attempts >= rx_delay_max_attempts)) {
+                if (unlikely(!run && (rx_delay_attempts >= rx_delay_max_attempts))) {
                     printf("Unable to find DMA RX_DELAY (best: delay=%d, errors=%d/%d, attempts=%d), exiting.\n",
                         rx_delay_best_overall_delay,
                         rx_delay_best_overall,
