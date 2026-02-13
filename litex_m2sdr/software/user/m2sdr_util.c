@@ -981,7 +981,7 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
 }
 #endif
 
-static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration)
+static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration, int warmup_buffers)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
@@ -1068,7 +1068,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
                 break;
             work_done = 1;
             /* Skip the first 128 DMA loops. */
-            if (dma.writer_hw_count < 128*DMA_BUFFER_COUNT)
+            if (dma.writer_hw_count < warmup_buffers)
                 continue;
             /* When running... */
             if (run) {
@@ -1451,6 +1451,7 @@ static void help(void)
            "-z                                Enable zero-copy DMA mode.\n"
            "-e                                Use external loopback (default = internal).\n"
            "-w data_width                     Width of data bus (default = 32).\n"
+           "-W warmup_buffers                 Number of DMA buffers to skip before data validation (default = 2048).\n"
            "-a                                Automatic DMA RX-Delay calibration.\n"
            "-t duration                       Duration of the test in seconds (default = 0, infinite).\n"
 #elif USE_LITEETH
@@ -1507,6 +1508,7 @@ int main(int argc, char **argv)
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
     static int litepcie_data_width = 32;
+    static int litepcie_warmup_buffers = 128 * DMA_BUFFER_COUNT;
     static int litepcie_auto_rx_delay = 0;
     static int test_duration = 0; /* Default to 0 for infinite duration.*/
 #endif
@@ -1514,7 +1516,7 @@ int main(int argc, char **argv)
     /* Parameters. */
     for (;;) {
         #ifdef USE_LITEPCIE
-        c = getopt(argc, argv, "hc:w:zeat:");
+        c = getopt(argc, argv, "hc:w:W:zeat:");
         #elif USE_LITEETH
         c = getopt(argc, argv, "hi:p:");
         #endif
@@ -1540,6 +1542,11 @@ int main(int argc, char **argv)
             break;
         case 'w':
             litepcie_data_width = atoi(optarg);
+            break;
+        case 'W':
+            litepcie_warmup_buffers = atoi(optarg);
+            if (litepcie_warmup_buffers < 0)
+                litepcie_warmup_buffers = 0;
             break;
         case 'z':
             m2sdr_device_zero_copy = 1;
@@ -1691,7 +1698,8 @@ int main(int argc, char **argv)
             m2sdr_device_external_loopback,
             litepcie_data_width,
             litepcie_auto_rx_delay,
-            test_duration);
+            test_duration,
+            litepcie_warmup_buffers);
 #endif
 
     /* Show help otherwise. */
