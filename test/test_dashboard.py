@@ -57,23 +57,24 @@ def save_dashboard_settings(settings):
 def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     import dearpygui.dearpygui as dpg
 
+    # Optimized defaults for a 1920x1080 screen.
     default_window_pos = {
-        "win_status":    (0, 0),
-        "win_clks_time": (10, 110),
-        "win_rf_agc":    (10, 360),
-        "win_overview":  (430, 110),
-        "win_xadc":      (430, 560),
-        "win_dmas":      (1340, 110),
-        "win_registers": (1340, 560),
+        "win_status":    (10, 10),
+        "win_clks_time": (10, 100),
+        "win_rf_agc":    (10, 330),
+        "win_overview":  (380, 100),
+        "win_xadc":      (380, 540),
+        "win_dmas":      (1250, 100),
+        "win_registers": (1250, 540),
     }
     default_window_size = {
-        "win_status":    (1910, 95),
-        "win_clks_time": (400, 240),
-        "win_rf_agc":    (400, 500),
-        "win_overview":  (900, 440),
-        "win_xadc":      (900, 500),
-        "win_dmas":      (570, 440),
-        "win_registers": (570, 500),
+        "win_status":    (1900, 80),
+        "win_clks_time": (360, 220),
+        "win_rf_agc":    (360, 530),
+        "win_overview":  (860, 430),
+        "win_xadc":      (860, 530),
+        "win_dmas":      (660, 430),
+        "win_registers": (660, 530),
     }
 
     dashboard_settings = load_dashboard_settings()
