@@ -1037,8 +1037,6 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             if (run) {
                 /* Check data in Read buffer. */
                 errors += check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
-                /* Clear Read buffer */
-                memset(buf_rd, 0, DMA_BUFFER_SIZE);
             } else {
                 /* Find and confirm initial RX delay/seed over multiple buffers. */
                 uint32_t best_delay;
