@@ -59,10 +59,10 @@ m2sdr_record: liblitepcie/liblitepcie.a libliteeth/libliteeth.a m2sdr_record.o
 
 m2sdr_gpio: liblitepcie/liblitepcie.a m2sdr_gpio.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
-endif
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a m2sdr_sata.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -llitepcie -lm2sdr -lliteeth
+endif
 
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)
