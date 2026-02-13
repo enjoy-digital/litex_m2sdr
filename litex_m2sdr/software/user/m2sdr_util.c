@@ -1049,7 +1049,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
             /* Get Write buffer. */
             buf_wr = litepcie_dma_next_write_buffer(&dma);
             /* Break when no buffer available for Write. */
-            if (unlikely(!buf_wr))
+            if (!buf_wr)
                 break;
             work_done = 1;
             /* Write data to buffer. */
@@ -1061,7 +1061,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
             /* Get Read buffer. */
             buf_rd = litepcie_dma_next_read_buffer(&dma);
             /* Break when no buffer available for Read. */
-            if (unlikely(!buf_rd))
+            if (!buf_rd)
                 break;
             work_done = 1;
             /* Skip the first 128 DMA loops. */
