@@ -78,15 +78,15 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     # Optimized defaults for a 1920x1080 screen.
     default_window_pos = {
         "win_status":    (10, 10),
-        "win_clks_time": (10, 190),
-        "win_rf_agc":    (10, 430),
-        "win_overview":  (380, 190),
-        "win_xadc":      (380, 620),
-        "win_dmas":      (1250, 190),
-        "win_registers": (1250, 620),
+        "win_clks_time": (10, 185),
+        "win_rf_agc":    (10, 415),
+        "win_overview":  (380, 185),
+        "win_xadc":      (380, 615),
+        "win_dmas":      (1250, 185),
+        "win_registers": (1250, 625),
     }
     default_window_size = {
-        "win_status":    (1900, 170),
+        "win_status":    (1900, 165),
         "win_clks_time": (360, 220),
         "win_rf_agc":    (360, 460),
         "win_overview":  (860, 420),
