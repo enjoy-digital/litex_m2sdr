@@ -981,7 +981,7 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
 }
 #endif
 
-static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration)
+static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
@@ -997,6 +997,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     int64_t last_time;
     uint32_t errors = 0;
     int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
+    int status = 0;
 
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
@@ -1111,6 +1112,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                         rx_delay_best_overall,
                         dma_word_count,
                         rx_delay_attempts);
+                    status = 1;
                     goto end;
                 }
             }
@@ -1147,6 +1149,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
 end:
 #endif
     litepcie_dma_cleanup(&dma);
+    return status;
 }
 
 #endif
@@ -1659,7 +1662,7 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
-        dma_test(
+        return dma_test(
             m2sdr_device_zero_copy,
             m2sdr_device_external_loopback,
             litepcie_data_width,
