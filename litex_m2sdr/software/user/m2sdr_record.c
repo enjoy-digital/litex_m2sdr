@@ -2,9 +2,9 @@
  *
  * M2SDR I/Q Record Utility.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -51,7 +51,7 @@ static char m2sdr_port[16] = "1234";
 
 #if defined(USE_LITEPCIE)
 
-static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header)
+static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header, uint8_t strip_header)
 {
     static const uint64_t DMA_HEADER_SYNC_WORD = 0x5aa55aa55aa55aa5ULL;
     static struct litepcie_dma_ctrl dma = {.use_writer = 1};
@@ -126,10 +126,20 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
                     break;
                 }
                 size_t to_write = DMA_BUFFER_SIZE;
+                size_t data_off = 0;
+                if (header && strip_header && DMA_BUFFER_SIZE >= 16) {
+                    data_off = 16;
+                    to_write -= 16;
+                }
                 if (size > 0 && to_write > size - total_len) {
                     to_write = size - total_len;
                 }
-                len = fwrite(buf_rd, 1, to_write, fo);
+                len = fwrite(buf_rd + data_off, 1, to_write, fo);
+                if (len != to_write) {
+                    perror("fwrite");
+                    keep_running = 0;
+                    break;
+                }
                 total_len += len;
             }
         }
@@ -183,7 +193,7 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
 #elif defined(USE_LITEETH)
 
 /* UDP-based RX path with CLI-configurable IP/port (mirrors m2sdr_rf). */
-static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header)
+static void m2sdr_record(const char *device_name, const char *filename, size_t size, uint8_t zero_copy, uint8_t quiet, uint8_t header, uint8_t strip_header)
 {
     (void)device_name; (void)zero_copy;
 
@@ -274,10 +284,20 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
                     break;
                 }
                 size_t to_write = udp.buf_size;
+                size_t data_off = 0;
+                if (header && strip_header && udp.buf_size >= 16) {
+                    data_off = 16;
+                    to_write -= 16;
+                }
                 if (size > 0 && to_write > size - total_len)
                     to_write = size - total_len;
 
-                size_t n = fwrite(buf, 1, to_write, fo);
+                size_t n = fwrite(buf + data_off, 1, to_write, fo);
+                if (n != to_write) {
+                    perror("fwrite");
+                    keep_running = 0;
+                    break;
+                }
                 total_len += n;
             }
 
@@ -351,10 +371,11 @@ static void help(void)
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
            "-t                    Enable RX Header with timestamp.\n"
+           "-s                    Strip 16-byte RX header from output.\n"
            "\n"
            "Arguments:\n"
            "filename              File to record I/Q samples to (optional, omit to monitor stream).\n"
-           "size                  Number of samples to record (optional, 0 for infinite).\n");
+           "size                  Number of bytes to record (optional, 0 for infinite).\n");
     exit(1);
 }
 
@@ -369,6 +390,7 @@ int main(int argc, char **argv)
     static uint8_t m2sdr_device_zero_copy;
     static uint8_t quiet   = 0;
     static uint8_t header  = 0;
+    static uint8_t strip_header = 0;
     m2sdr_device_num       = 0;
     m2sdr_device_zero_copy = 0;
 
@@ -377,9 +399,9 @@ int main(int argc, char **argv)
     /* Parameters. */
     for (;;) {
 #if defined(USE_LITEPCIE)
-        c = getopt(argc, argv, "hc:zqt");
+        c = getopt(argc, argv, "hc:zqts");
 #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:zqt");
+        c = getopt(argc, argv, "hi:p:zqts");
 #endif
         if (c == -1)
             break;
@@ -410,6 +432,9 @@ int main(int argc, char **argv)
         case 't':
             header = 1;
             break;
+        case 's':
+            strip_header = 1;
+            break;
         default:
             exit(1);
         }
@@ -429,6 +454,6 @@ int main(int argc, char **argv)
             size = strtoul(argv[optind++], NULL, 0);
         }
     }
-    m2sdr_record(m2sdr_device, filename, size, m2sdr_device_zero_copy, quiet, header);
+    m2sdr_record(m2sdr_device, filename, size, m2sdr_device_zero_copy, quiet, header, strip_header);
     return 0;
 }

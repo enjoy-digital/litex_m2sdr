@@ -2,9 +2,9 @@
  *
  * M2SDR RF Utility.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -50,30 +50,51 @@ void intHandler(int dummy) {
 /* Connection Functions */
 /*----------------------*/
 
+static void *g_conn = NULL;
+
 static void * m2sdr_open(void) {
+    if (g_conn)
+        return g_conn;
 #ifdef USE_LITEPCIE
     int fd = open(m2sdr_device, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    g_conn = (void *)(intptr_t)fd;
+    return g_conn;
 #elif defined(USE_LITEETH)
     struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
     if (!eb) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    g_conn = eb;
+    return g_conn;
 #endif
 }
 
 static void m2sdr_close(void *conn) {
+    if (!conn)
+        return;
 #ifdef USE_LITEPCIE
     close((int)(intptr_t)conn);
 #elif defined(USE_LITEETH)
     eb_disconnect((struct eb_connection **)&conn);
 #endif
+    if (conn == g_conn)
+        g_conn = NULL;
+}
+
+static void m2sdr_close_global(void) {
+#ifdef USE_LITEPCIE
+    if (g_conn)
+        close((int)(intptr_t)g_conn);
+#elif defined(USE_LITEETH)
+    if (g_conn)
+        eb_disconnect((struct eb_connection **)&g_conn);
+#endif
+    g_conn = NULL;
 }
 
 /* AD9361 */
@@ -101,8 +122,6 @@ int spi_write_then_read(struct spi_device *spi,
         m2sdr_close(conn);
         exit(1);
     }
-
-    m2sdr_close(conn);
 
     return 0;
 }
@@ -148,7 +167,8 @@ static void m2sdr_init(
     int64_t  tx_freq,
     int64_t  rx_freq,
     int64_t  tx_gain,
-    int64_t  rx_gain,
+    int64_t  rx_gain1,
+    int64_t  rx_gain2,
     uint8_t  loopback,
     bool     bist_tx_tone,
     bool     bist_rx_tone,
@@ -284,9 +304,9 @@ static void m2sdr_init(
     ad9361_set_tx_atten(ad9361_phy, -tx_gain*1000, 1, 1, 1);
 
     /* Configure AD9361 RX Gain */
-    printf("Setting RX Gain to %ld dB.\n", rx_gain);
-    ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain);
+    printf("Setting RX Gain to %ld dB and %ld dB.\n", rx_gain1, rx_gain2);
+    ad9361_set_rx_rf_gain(ad9361_phy, 0, rx_gain1);
+    ad9361_set_rx_rf_gain(ad9361_phy, 1, rx_gain2);
 
     /* Configure AD9361 RX->TX Loopback */
     printf("Setting Loopback to %d\n", loopback);
@@ -485,7 +505,9 @@ static void help(void)
            "  -tx_freq freq          Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "  -rx_freq freq          Set the RX frequency in Hz (default: %" PRId64 ").\n"
            "  -tx_gain gain          Set the TX gain in dB (default: %d).\n"
-           "  -rx_gain gain          Set the RX gain in dB (default: %d).\n"
+           "  -rx_gain gain          Set the RX gain in dB for both channels (default: %d).\n"
+           "  -rx_gain1 gain         Set the RX gain in dB for channel 1 (default: %d).\n"
+           "  -rx_gain2 gain         Set the RX gain in dB for channel 2 (default: %d).\n"
            "  -loopback enable       Set the internal loopback (default: %d).\n"
            "  -bist_tx_tone          Run TX tone test.\n"
            "  -bist_rx_tone          Run RX tone test.\n"
@@ -497,6 +519,8 @@ static void help(void)
            DEFAULT_TX_FREQ,
            DEFAULT_RX_FREQ,
            DEFAULT_TX_GAIN,
+           DEFAULT_RX_GAIN,
+           DEFAULT_RX_GAIN,
            DEFAULT_RX_GAIN,
            DEFAULT_LOOPBACK,
            DEFAULT_BIST_TONE_FREQ);
@@ -515,15 +539,17 @@ static struct option options[] = {
     { "rx_freq",          required_argument },        /*  5 */
     { "tx_gain",          required_argument },        /*  6 */
     { "rx_gain",          required_argument },        /*  7 */
-    { "loopback",         required_argument },        /*  8 */
-    { "bist_tx_tone",     no_argument },              /*  9 */
-    { "bist_rx_tone",     no_argument },              /* 10 */
-    { "bist_prbs",        no_argument },              /* 11 */
-    { "bist_tone_freq",   required_argument },        /* 12 */
-    { "8bit",             no_argument, NULL, '8' },   /* 13 */
-    { "oversample",       no_argument },              /* 14 */
-    { "chan",             required_argument },        /* 15 */
-    { "sync",             required_argument },        /* 16 */
+    { "rx_gain1",         required_argument },        /*  8 */
+    { "rx_gain2",         required_argument },        /*  9 */
+    { "loopback",         required_argument },        /* 10 */
+    { "bist_tx_tone",     no_argument },              /* 11 */
+    { "bist_rx_tone",     no_argument },              /* 12 */
+    { "bist_prbs",        no_argument },              /* 13 */
+    { "bist_tone_freq",   required_argument },        /* 14 */
+    { "8bit",             no_argument, NULL, '8' },   /* 15 */
+    { "oversample",       no_argument },              /* 16 */
+    { "chan",             required_argument },        /* 17 */
+    { "sync",             required_argument },        /* 18 */
     { NULL },
 };
 
@@ -539,7 +565,7 @@ int main(int argc, char **argv)
     uint32_t samplerate;
     int32_t  bandwidth;
     int64_t  tx_freq, rx_freq;
-    int64_t  tx_gain, rx_gain;
+    int64_t  tx_gain, rx_gain1, rx_gain2;
     uint8_t  loopback;
     bool     bist_tx_tone = false;
     bool     bist_rx_tone = false;
@@ -556,7 +582,8 @@ int main(int argc, char **argv)
     tx_freq        = DEFAULT_TX_FREQ;
     rx_freq        = DEFAULT_RX_FREQ;
     tx_gain        = DEFAULT_TX_GAIN;
-    rx_gain        = DEFAULT_RX_GAIN;
+    rx_gain1       = DEFAULT_RX_GAIN;
+    rx_gain2       = DEFAULT_RX_GAIN;
     loopback       = DEFAULT_LOOPBACK;
     bist_tone_freq = DEFAULT_BIST_TONE_FREQ;
 
@@ -612,35 +639,42 @@ int main(int argc, char **argv)
                 case 6: /* tx_gain */
                     tx_gain = (int64_t)strtod(optarg, NULL);
                     break;
-                case 7: /* rx_gain */
-                    rx_gain = (int64_t)strtod(optarg, NULL);
+                case 7: /* rx_gain both */
+                    rx_gain1 = (int64_t)strtod(optarg, NULL);
+                    rx_gain2 = (int64_t)strtod(optarg, NULL);
                     break;
-                case 8: /* loopback */
+                case 8: /* rx_gain 1 */
+                    rx_gain1 = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 9: /* rx_gain 2 */
+                    rx_gain2 = (int64_t)strtod(optarg, NULL);
+                    break;
+                case 10: /* loopback */
                     loopback = (uint8_t)strtod(optarg, NULL);
                     break;
-                case 9: /* bist_tx_tone */
+                case 11: /* bist_tx_tone */
                     bist_tx_tone = true;
                     break;
-                case 10: /* bist_rx_tone */
+                case 12: /* bist_rx_tone */
                     bist_rx_tone = true;
                     break;
-                case 11: /* bist_prbs */
+                case 13: /* bist_prbs */
                     bist_prbs = true;
                     break;
-                case 12: /* bist_tone_freq */
+                case 14: /* bist_tone_freq */
                     bist_tone_freq = (int32_t)strtod(optarg, NULL);
                     break;
-                case 13: /* 8bit */
+                case 15: /* 8bit */
                     enable_8bit_mode = true;
                     break;
-                case 14: /* oversample */
+                case 16: /* oversample */
                     enable_oversample = true;
                     break;
-                case 15: /* chan */
+                case 17: /* chan */
                     strncpy(chan_mode, optarg, sizeof(chan_mode));
                     chan_mode[sizeof(chan_mode) - 1] = '\0';
                     break;
-                case 16: /* sync */
+                case 18: /* sync */
                     strncpy(sync_mode, optarg, sizeof(sync_mode));
                     sync_mode[sizeof(sync_mode) - 1] = '\0';
                     break;
@@ -659,9 +693,38 @@ int main(int argc, char **argv)
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
     #endif
 
+    /* Basic range checks (avoid invalid AD9361 configs). */
+    if (samplerate < 550000) {
+        fprintf(stderr, "Invalid samplerate: %u (must be >= 550000)\n", samplerate);
+        exit(1);
+    }
+    if (bandwidth < 200000 || bandwidth > 56000000) {
+        fprintf(stderr, "Invalid bandwidth: %d (must be 200k..56M)\n", bandwidth);
+        exit(1);
+    }
+    if (tx_freq < 47000000 || tx_freq > 6000000000LL) {
+        fprintf(stderr, "Invalid tx_freq: %" PRId64 " (must be 47M..6G)\n", tx_freq);
+        exit(1);
+    }
+    if (rx_freq < 70000000 || rx_freq > 6000000000LL) {
+        fprintf(stderr, "Invalid rx_freq: %" PRId64 " (must be 70M..6G)\n", rx_freq);
+        exit(1);
+    }
+    if (tx_gain < -89 || tx_gain > 0) {
+        fprintf(stderr, "Invalid tx_gain: %" PRId64 " (must be -89..0 dB)\n", tx_gain);
+        exit(1);
+    }
+    if (rx_gain1 < 0 || rx_gain1 > 73 || rx_gain2 < 0 || rx_gain2 > 73) {
+        fprintf(stderr, "Invalid rx_gain: %" PRId64 ", %" PRId64 " (must be 0..73 dB)\n",
+                rx_gain1, rx_gain2);
+        exit(1);
+    }
+
     /* Initialize RF. */
     printf("Selected RefClk: %" PRId64 " Hz\n", refclk_freq);
-    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
+    m2sdr_init(samplerate, bandwidth, refclk_freq, tx_freq, rx_freq, tx_gain, rx_gain1, rx_gain2, loopback, bist_tx_tone, bist_rx_tone, bist_prbs, bist_tone_freq, enable_8bit_mode, enable_oversample, chan_mode, sync_mode);
+
+    m2sdr_close_global();
 
     return 0;
 }

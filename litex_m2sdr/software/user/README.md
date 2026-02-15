@@ -153,6 +153,42 @@ Example usage:
 
 ---
 
+### m2sdr_sata
+Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, and supports replay through the TX/RX loopback.
+
+**Usage**:
+~~~~
+m2sdr_sata [options] cmd [args...]
+~~~~
+
+**Commands** include:
+- **status**
+  Show crossbar + SATA/loopback/streamer status.
+- **route `<txsrc> <rxdst> [loopback]`**
+  Set routing with optional loopback (0/1).
+- **record `<dst_sector> <nsectors>`**
+  RX stream → SSD (SATA_RX_STREAMER).
+- **play `<src_sector> <nsectors>`**
+  SSD → TX stream (SATA_TX_STREAMER).
+- **replay `<src_sector> <nsectors> <dst>`**
+  SSD → TX → loopback → RX destination (`pcie|eth|sata`).
+- **copy `<src_sector> <dst_sector> <nsectors>`**
+  SSD → SSD using loopback.
+- **header `<tx|rx|both> <enable> <header_enable>`**
+  Raw header control (writes HEADER CSR enable bits).
+
+Example usage:
+~~~~
+./m2sdr_sata status
+./m2sdr_sata route pcie sata 0
+./m2sdr_sata record 0x1000 8192
+./m2sdr_sata play 0x1000 8192
+./m2sdr_sata replay 0x1000 8192 pcie
+./m2sdr_sata copy 0x2000 0x4000 4096
+~~~~
+
+---
+
 ### tone_gen.py
 Python script that generates a pure-tone (sine wave) sample file.
 

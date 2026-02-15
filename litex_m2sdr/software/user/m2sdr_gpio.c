@@ -2,9 +2,9 @@
  *
  * M2SDR GPIO Utility.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -62,6 +62,16 @@ static void m2sdr_close(void *conn) {
 
 static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
 #ifdef CSR_GPIO_BASE
+    if (gpio_enable && source_csr) {
+        if (output_data & ~0xF) {
+            fprintf(stderr, "GPIO output_data out of range (4-bit): 0x%x\n", output_data);
+            return;
+        }
+        if (output_enable & ~0xF) {
+            fprintf(stderr, "GPIO output_enable out of range (4-bit): 0x%x\n", output_enable);
+            return;
+        }
+    }
     uint32_t control = 0;
 
     /* Read current control register value */

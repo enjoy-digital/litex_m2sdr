@@ -2,9 +2,9 @@
  *
  * LiteEth UDP helpers.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2025-2026 Enjoy-Digital <enjoy-digital.fr>
  */
 
 #define _GNU_SOURCE

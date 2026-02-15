@@ -2,9 +2,9 @@
  *
  * M2SDR Default Config.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 

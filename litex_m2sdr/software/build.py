@@ -2,7 +2,7 @@
 
 # This file is part of LiteX-M2SDR.
 #
-# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+# Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
@@ -48,6 +48,7 @@ def main():
     # Kernel compilation.
     if (args.interface == "litepcie"):
         run_command("cd kernel && make clean all")
+        run_command("cd kernel && sudo make install")
 
     # Utilities compilation.
     run_command(f"cd user   && make clean INTERFACE={interface} all")

@@ -3,9 +3,9 @@
                           / /__/ / __/ -_)>  </___/ /|_/ / __/_\ \/ // / , _/
                          /____/_/\__/\__/_/|_|   /_/  /_/____/___/____/_/|_|
                                   LiteX based M2 SDR FPGA board.
-                               Copyright (c) 2024-2025 Enjoy-Digital.
+                               Copyright (c) 2024-2026 Enjoy-Digital.
 
-![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg)
+![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/enjoy-digital/litex_m2sdr) [![Buy Hardware](https://img.shields.io/badge/Buy-Hardware-00A6B2)](https://enjoy-digital-shop.myshopify.com/)
 
 [> TL;DR
 ---------

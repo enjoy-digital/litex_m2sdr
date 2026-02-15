@@ -2,9 +2,9 @@
  *
  * M2SDR Board Utility.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -19,6 +19,7 @@
 #include <time.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -27,6 +28,14 @@
 #include "libm2sdr.h"
 
 #include "m2sdr_config.h"
+
+#if defined(__GNUC__) || defined(__clang__)
+#define likely(x)   __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#else
+#define likely(x)   (x)
+#define unlikely(x) (x)
+#endif
 
 /* Parameters */
 /*------------*/
@@ -51,6 +60,16 @@ sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     keep_running = 0;
+}
+
+static bool confirm_flash_write(void)
+{
+    char buf[8];
+    fprintf(stderr, "WARNING: flash_write can overwrite the FPGA image.\n");
+    fprintf(stderr, "Type 'YES' to continue: ");
+    if (!fgets(buf, sizeof(buf), stdin))
+        return false;
+    return (strncmp(buf, "YES", 3) == 0);
 }
 
 /* Connection Functions */
@@ -489,6 +508,16 @@ static void info(void)
     bool sata_enabled = (features >> CSR_CAPABILITY_FEATURES_SATA_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_SATA_SIZE) - 1);
     bool gpio_enabled = (features >> CSR_CAPABILITY_FEATURES_GPIO_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_GPIO_SIZE) - 1);
     bool wr_enabled   = (features >> CSR_CAPABILITY_FEATURES_WR_OFFSET)   & ((1 << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1);
+    bool jtagbone_enabled = (features >> CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1);
+
+    {
+        uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
+        const char *variant_str[] = {"M.2", "Baseboard", "Reserved", "Reserved"};
+        const char *variant_name  = (variant < 4) ? variant_str[variant] : "Unknown";
+        printf("Board:\n");
+        printf("  Variant        : %s\n", variant_name);
+    }
 
     printf("Features:\n");
     printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
@@ -496,6 +525,7 @@ static void info(void)
     printf("  SATA           : %s\n", sata_enabled ? "Yes" : "No");
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
+    printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
 
     if (pcie_enabled) {
         uint32_t pcie_config = m2sdr_readl(conn, CSR_CAPABILITY_PCIE_CONFIG_ADDR);
@@ -514,6 +544,11 @@ static void info(void)
         int eth_speed = (eth_config >> CSR_CAPABILITY_ETH_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_ETH_CONFIG_SPEED_SIZE) - 1);
         const char *eth_speed_str[] = {"1Gbps", "2.5Gbps"};
         printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed]);
+        {
+            uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+            int eth_sfp  = (board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
+            printf("  Ethernet SFP   : %d\n", eth_sfp);
+        }
     }
 
     if (sata_enabled) {
@@ -521,6 +556,16 @@ static void info(void)
         int sata_gen = (sata_config >> CSR_CAPABILITY_SATA_CONFIG_GEN_OFFSET) & ((1 << CSR_CAPABILITY_SATA_CONFIG_GEN_SIZE) - 1);
         const char *sata_gen_str[] = {"Gen1", "Gen2", "Gen3"};
         printf("  SATA Gen       : %s\n", sata_gen_str[sata_gen]);
+        int sata_mode = (sata_config >> CSR_CAPABILITY_SATA_CONFIG_MODE_OFFSET) & ((1 << CSR_CAPABILITY_SATA_CONFIG_MODE_SIZE) - 1);
+        const char *sata_mode_str[] = {"Read-only", "Write-only", "Read+Write", "Reserved"};
+        const char *sata_mode_name = (sata_mode < 4) ? sata_mode_str[sata_mode] : "Unknown";
+        printf("  SATA Mode      : %s\n", sata_mode_name);
+    }
+
+    if (wr_enabled) {
+        uint32_t board_info = m2sdr_readl(conn, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        int wr_sfp   = (board_info >> CSR_CAPABILITY_BOARD_INFO_WR_SFP_OFFSET)  & ((1 << CSR_CAPABILITY_BOARD_INFO_WR_SFP_SIZE)  - 1);
+        printf("  WR SFP         : %d\n", wr_sfp);
     }
 #endif
     printf("\n");
@@ -826,7 +871,7 @@ static inline int64_t add_mod_int(int64_t a, int64_t b, int64_t m)
 }
 #endif
 
-static int get_next_pow2(int data_width)
+static inline int get_next_pow2(int data_width)
 {
     int x = 1;
     while (x < data_width)
@@ -835,6 +880,7 @@ static int get_next_pow2(int data_width)
 }
 
 #ifdef DMA_CHECK_DATA
+typedef uint32_t u32x4 __attribute__((vector_size(16)));
 
 static inline uint32_t seed_to_data(uint32_t seed)
 {
@@ -847,7 +893,7 @@ static inline uint32_t seed_to_data(uint32_t seed)
 #endif
 }
 
-static uint32_t get_data_mask(int data_width)
+static inline uint32_t get_data_mask(int data_width)
 {
     int i;
     uint32_t mask;
@@ -859,45 +905,113 @@ static uint32_t get_data_mask(int data_width)
     return mask;
 }
 
-static void write_pn_data(uint32_t *buf, int count, uint32_t *pseed, int data_width)
+static inline void write_pn_data(uint32_t * restrict buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i;
     uint32_t seed;
-    uint32_t mask = get_data_mask(data_width);
 
     seed = *pseed;
-    for(i = 0; i < count; i++) {
+    for (i = 0; i + 4 <= count; i += 4) {
+        uint32_t d0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t d3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        u32x4 vec = {d0, d1, d2, d3};
+        memcpy(&buf[i], &vec, sizeof(vec));
+    }
+
+    for (; i < count; i++) {
         buf[i] = (seed_to_data(seed) & mask);
-        seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        seed = add_mod_int(seed, 1, dma_word_count);
     }
     *pseed = seed;
 }
 
-static int check_pn_data(const uint32_t *buf, int count, uint32_t *pseed, int data_width)
+static inline int check_pn_data(const uint32_t * restrict buf, int count, uint32_t *pseed, uint32_t mask, int dma_word_count)
 {
     int i, errors;
     uint32_t seed;
-    uint32_t mask = get_data_mask(data_width);
+    u32x4 mask_vec = {mask, mask, mask, mask};
 
     errors = 0;
     seed = *pseed;
-    for (i = 0; i < count; i++) {
-        if ((buf[i] & mask) != (seed_to_data(seed) & mask)) {
+    for (i = 0; i + 4 <= count; i += 4) {
+        uint32_t e0 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e1 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e2 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        uint32_t e3 = seed_to_data(seed) & mask; seed = add_mod_int(seed, 1, dma_word_count);
+        u32x4 expected = {e0, e1, e2, e3};
+        u32x4 actual;
+        u32x4 diff;
+
+        memcpy(&actual, &buf[i], sizeof(actual));
+        diff = (actual & mask_vec) ^ expected;
+        errors += (diff[0] != 0) + (diff[1] != 0) + (diff[2] != 0) + (diff[3] != 0);
+    }
+
+    for (; i < count; i++) {
+        if (unlikely((buf[i] & mask) != (seed_to_data(seed) & mask))) {
             errors ++;
         }
-        seed = add_mod_int(seed, 1, DMA_BUFFER_SIZE / sizeof(uint32_t));
+        seed = add_mod_int(seed, 1, dma_word_count);
     }
     *pseed = seed;
     return errors;
 }
+
+static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int dma_word_count, uint32_t *best_delay, uint32_t *best_errors)
+{
+    uint32_t seed_rd;
+    uint32_t errors;
+    int count = dma_word_count;
+    const int coarse_stride = 8;
+    const int refine_radius = 8;
+    int refine_start;
+    int refine_stop;
+
+    *best_delay  = 0;
+    *best_errors = UINT32_MAX;
+
+    /* Coarse sweep to quickly localize a good candidate. */
+    for (int delay = 0; delay < count; delay += coarse_stride) {
+        seed_rd = delay;
+        errors = check_pn_data(buf, count, &seed_rd, mask, dma_word_count);
+        if (errors < *best_errors) {
+            *best_errors = errors;
+            *best_delay  = delay;
+            if (errors == 0)
+                return;
+        }
+    }
+
+    /* Local refinement around the best coarse candidate. */
+    refine_start = (int)*best_delay - refine_radius;
+    refine_stop  = (int)*best_delay + refine_radius;
+    if (refine_start < 0)
+        refine_start = 0;
+    if (refine_stop >= count)
+        refine_stop = count - 1;
+
+    for (int delay = refine_start; delay <= refine_stop; delay++) {
+        seed_rd = delay;
+        errors = check_pn_data(buf, count, &seed_rd, mask, dma_word_count);
+        if (errors < *best_errors) {
+            *best_errors = errors;
+            *best_delay  = delay;
+            if (errors == 0)
+                return;
+        }
+    }
+}
 #endif
 
-static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration)
+static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration, int warmup_buffers)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
     dma.loopback = external_loopback ? 0 : 1;
+    keep_running = 1;
 
-    if (data_width > 32 || data_width < 1) {
+    if (unlikely(data_width > 32 || data_width < 1)) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
         exit(1);
     }
@@ -907,12 +1021,25 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     int64_t reader_sw_count_last = 0;
     int64_t last_time;
     uint32_t errors = 0;
+    uint64_t total_data_errors = 0;
     int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
+    int status = 0;
 
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
+    const int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+    const uint32_t data_mask = get_data_mask(data_width);
+    uint64_t validated_buffers = 0;
     uint8_t  run = (auto_rx_delay == 0);
+    const uint32_t rx_delay_errors_threshold = dma_word_count / 8;
+    const int rx_delay_confirmations_needed = 3;
+    const int rx_delay_max_attempts = 128;
+    uint32_t rx_delay_candidate = UINT32_MAX;
+    int rx_delay_candidate_confirmations = 0;
+    int rx_delay_attempts = 0;
+    uint32_t rx_delay_best_overall = UINT32_MAX;
+    uint32_t rx_delay_best_overall_delay = 0;
 #else
     uint8_t run = 1;
 #endif
@@ -922,7 +1049,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (litepcie_dma_init(&dma, m2sdr_device, zero_copy))
+    if (unlikely(litepcie_dma_init(&dma, m2sdr_device, zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;
@@ -931,6 +1058,8 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
     /* Test loop. */
     last_time = get_time_ms();
     for (;;) {
+        int work_done = 0;
+
         /* Exit loop on CTRL+C or when the duration is over. */
         if (!keep_running || (duration > 0 && get_time_ms() >= end_time))
             break;
@@ -949,8 +1078,9 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Break when no buffer available for Write. */
             if (!buf_wr)
                 break;
+            work_done = 1;
             /* Write data to buffer. */
-            write_pn_data((uint32_t *) buf_wr, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_wr, data_width);
+            write_pn_data((uint32_t *) buf_wr, dma_word_count, &seed_wr, data_mask, dma_word_count);
         }
 
         /* DMA-RX Read/Check */
@@ -960,34 +1090,57 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
             /* Break when no buffer available for Read. */
             if (!buf_rd)
                 break;
+            work_done = 1;
             /* Skip the first 128 DMA loops. */
-            if (dma.writer_hw_count < 128*DMA_BUFFER_COUNT)
-                break;
+            if (dma.writer_hw_count < warmup_buffers)
+                continue;
             /* When running... */
             if (run) {
                 /* Check data in Read buffer. */
-                errors += check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
-                /* Clear Read buffer */
-                memset(buf_rd, 0, DMA_BUFFER_SIZE);
+                errors += check_pn_data((uint32_t *) buf_rd, dma_word_count, &seed_rd, data_mask, dma_word_count);
+                validated_buffers++;
             } else {
-                /* Find initial Delay/Seed (Useful when loopback is introducing delay). */
-                uint32_t errors_min = 0xffffffff;
-                for (int delay = 0; delay < DMA_BUFFER_SIZE / sizeof(uint32_t); delay++) {
-                    seed_rd = delay;
-                    errors = check_pn_data((uint32_t *) buf_rd, DMA_BUFFER_SIZE / sizeof(uint32_t), &seed_rd, data_width);
-                    //printf("delay: %d / errors: %d\n", delay, errors);
-                    if (errors < errors_min)
-                        errors_min = errors;
-                    if (errors < (DMA_BUFFER_SIZE / sizeof(uint32_t)) / 2) {
-                        printf("RX_DELAY: %d (errors: %d)\n", delay, errors);
-                        run = 1;
-                        break;
-                    }
+                /* Find and confirm initial RX delay/seed over multiple buffers. */
+                uint32_t best_delay;
+                uint32_t best_errors;
+
+                find_best_rx_delay((const uint32_t *)buf_rd, data_mask, dma_word_count, &best_delay, &best_errors);
+                rx_delay_attempts++;
+
+                if (best_errors < rx_delay_best_overall) {
+                    rx_delay_best_overall = best_errors;
+                    rx_delay_best_overall_delay = best_delay;
                 }
-                if (!run) {
-                    printf("Unable to find DMA RX_DELAY (min errors: %d/%ld), exiting.\n",
-                        errors_min,
-                        DMA_BUFFER_SIZE / sizeof(uint32_t));
+
+                if (best_errors <= rx_delay_errors_threshold) {
+                    if (best_delay == rx_delay_candidate) {
+                        rx_delay_candidate_confirmations++;
+                    } else {
+                        rx_delay_candidate = best_delay;
+                        rx_delay_candidate_confirmations = 1;
+                    }
+
+                    if (rx_delay_candidate_confirmations >= rx_delay_confirmations_needed) {
+                        seed_rd = best_delay;
+                        run = 1;
+                        errors = 0;
+                        printf("RX_DELAY: %d (errors: %d, confirmations: %d)\n",
+                            best_delay,
+                            best_errors,
+                            rx_delay_candidate_confirmations);
+                    }
+                } else {
+                    rx_delay_candidate = UINT32_MAX;
+                    rx_delay_candidate_confirmations = 0;
+                }
+
+                if (unlikely(!run && (rx_delay_attempts >= rx_delay_max_attempts))) {
+                    printf("Unable to find DMA RX_DELAY (best: delay=%d, errors=%d/%d, attempts=%d), exiting.\n",
+                        rx_delay_best_overall_delay,
+                        rx_delay_best_overall,
+                        dma_word_count,
+                        rx_delay_attempts);
+                    status = 1;
                     goto end;
                 }
             }
@@ -997,7 +1150,7 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
 
         /* Statistics every 200ms. */
         int64_t duration_ms = get_time_ms() - last_time;
-        if (run & (duration_ms > 200)) {
+        if (run && (duration_ms > 200)) {
             /* Print banner every 10 lines. */
             if (i % 10 == 0)
                 printf("\e[1mDMA_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tDIFF\tERRORS\e[0m\n");
@@ -1007,20 +1160,44 @@ static void dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_widt
                    (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 * data_width / (get_next_pow2(data_width) * (double)duration_ms * 1e6),
                    dma.reader_sw_count,
                    dma.writer_sw_count,
-                   (uint64_t) abs(dma.reader_sw_count - dma.writer_sw_count),
+                   (uint64_t) llabs(dma.reader_sw_count - dma.writer_sw_count),
                    errors);
             /* Update errors/time/count. */
+            total_data_errors += errors;
             errors = 0;
             last_time = get_time_ms();
             reader_sw_count_last = dma.reader_sw_count;
         }
+
+        if (!work_done)
+            usleep(100);
     }
+
+#ifdef DMA_CHECK_DATA
+    total_data_errors += errors;
+
+    if (total_data_errors != 0 && keep_running) {
+        printf("DMA data validation errors detected: %" PRIu64 "\n", total_data_errors);
+        status = 1;
+    }
+
+    if (validated_buffers == 0 && keep_running) {
+        printf("DMA data validation did not run (warmup not completed before timeout), exiting.\n");
+        status = 1;
+    }
+
+    if (auto_rx_delay && !run && keep_running) {
+        printf("DMA RX_DELAY calibration did not complete before timeout, exiting.\n");
+        status = 1;
+    }
+#endif
 
     /* Cleanup DMA. */
 #ifdef DMA_CHECK_DATA
 end:
 #endif
     litepcie_dma_cleanup(&dma);
+    return status;
 }
 
 #endif
@@ -1298,6 +1475,7 @@ static void help(void)
            "-z                                Enable zero-copy DMA mode.\n"
            "-e                                Use external loopback (default = internal).\n"
            "-w data_width                     Width of data bus (default = 32).\n"
+           "-W warmup_buffers                 Number of DMA buffers to skip before data validation (default = 2048).\n"
            "-a                                Automatic DMA RX-Delay calibration.\n"
            "-t duration                       Duration of the test in seconds (default = 0, infinite).\n"
 #elif USE_LITEETH
@@ -1354,6 +1532,7 @@ int main(int argc, char **argv)
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
     static int litepcie_data_width = 32;
+    static int litepcie_warmup_buffers = 128 * DMA_BUFFER_COUNT;
     static int litepcie_auto_rx_delay = 0;
     static int test_duration = 0; /* Default to 0 for infinite duration.*/
 #endif
@@ -1361,7 +1540,7 @@ int main(int argc, char **argv)
     /* Parameters. */
     for (;;) {
         #ifdef USE_LITEPCIE
-        c = getopt(argc, argv, "hc:w:zeat:");
+        c = getopt(argc, argv, "hc:w:W:zeat:");
         #elif USE_LITEETH
         c = getopt(argc, argv, "hi:p:");
         #endif
@@ -1387,6 +1566,11 @@ int main(int argc, char **argv)
             break;
         case 'w':
             litepcie_data_width = atoi(optarg);
+            break;
+        case 'W':
+            litepcie_warmup_buffers = atoi(optarg);
+            if (litepcie_warmup_buffers < 0)
+                litepcie_warmup_buffers = 0;
             break;
         case 'z':
             m2sdr_device_zero_copy = 1;
@@ -1507,6 +1691,10 @@ int main(int argc, char **argv)
         filename = argv[optind++];
         if (optind < argc)
             offset = strtoul(argv[optind++], NULL, 0);
+        if (!confirm_flash_write()) {
+            fprintf(stderr, "Aborted.\n");
+            exit(1);
+        }
         flash_write(filename, offset);
     }
 #endif
@@ -1529,12 +1717,13 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
     /* DMA cmds. */
     else if (!strcmp(cmd, "dma_test"))
-        dma_test(
+        return dma_test(
             m2sdr_device_zero_copy,
             m2sdr_device_external_loopback,
             litepcie_data_width,
             litepcie_auto_rx_delay,
-            test_duration);
+            test_duration,
+            litepcie_warmup_buffers);
 #endif
 
     /* Show help otherwise. */

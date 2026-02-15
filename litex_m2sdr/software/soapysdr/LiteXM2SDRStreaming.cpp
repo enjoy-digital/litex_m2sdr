@@ -1,7 +1,7 @@
 /*
  * SoapySDR driver for the LiteX M2SDR.
  *
- * Copyright (c) 2021-2025 Enjoy Digital.
+ * Copyright (c) 2021-2026 Enjoy Digital.
  * Copyright (c) 2021 Julia Computing.
  * Copyright (c) 2015-2015 Fairwaves, Inc.
  * Copyright (c) 2015-2015 Rice University
@@ -14,6 +14,10 @@
 #include <thread>
 #include <sys/mman.h>
 #include <cstring>
+#include <sstream>
+#include <algorithm>
+#include <cstdlib>
+#include <cmath>
 
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
@@ -23,6 +27,43 @@
 #if USE_LITEETH
 #include "liteeth_udp.h"
 #endif
+
+/* Parse Soapy-style "channels" argument: "0", "1", "0,1", "[0,1]", "0 1". */
+static std::vector<size_t> parse_channel_list(const std::string &channels_str)
+{
+    std::string s = channels_str;
+    for (char &c : s) {
+        if (c == '[' || c == ']')
+            c = ' ';
+        if (c == ',')
+            c = ' ';
+    }
+
+    std::stringstream ss(s);
+    std::vector<size_t> chans;
+    std::string tok;
+    while (ss >> tok) {
+        char *end = nullptr;
+        long v = std::strtol(tok.c_str(), &end, 10);
+        if (!end || *end != '\0')
+            throw std::runtime_error("Invalid channel token: " + tok);
+        if (v < 0 || v > 1)
+            throw std::runtime_error("Invalid channel index: must be 0 or 1");
+        if (std::find(chans.begin(), chans.end(), static_cast<size_t>(v)) == chans.end())
+            chans.push_back(static_cast<size_t>(v));
+    }
+
+    if (chans.empty())
+        throw std::runtime_error("No channels parsed from: " + channels_str);
+    if (chans.size() > 2)
+        throw std::runtime_error("Invalid channel count: must be 1 or 2 channels");
+    if (chans.size() == 2) {
+        std::sort(chans.begin(), chans.end());
+        if (!(chans[0] == 0 && chans[1] == 1))
+            throw std::runtime_error("Dual channels must be 0 and 1");
+    }
+    return chans;
+}
 
 /* RX DMA Header */
 #if USE_LITEPCIE && defined(_RX_DMA_HEADER_TEST)
@@ -58,6 +99,34 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("RX stream already opened.");
         }
 
+        /* Determine channels: prioritize searchArgs over the provided vector */
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            selected_channels = parse_channel_list(it->second);
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no device argument overrides it */
+            selected_channels = channels;
+        } else {
+            /* Default to channel 0 if nothing provided */
+            selected_channels = {0};
+        }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid RX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid RX channel index: must be 0 (RX1) or 1 (RX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual RX channels must be {0, 1} for RX1+RX2");
+        }
+        if (_tx_stream.opened && selected_channels.size() != _tx_stream.channels.size()) {
+            throw std::runtime_error("RX/TX channel count mismatch; close TX or use matching channels");
+        }
+
         /* Configure the file descriptor watcher. */
 #if USE_LITEPCIE
         _rx_stream.fds.fd     = _fd;
@@ -89,14 +158,13 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
         const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
-                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 1234);
+                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
 
         const size_t buf_complex = searchArgs.count("udp_buf_complex")
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
                                    : 4096;
 
-        /* Use current (or default 1) channels for sizing; we’ll re-evaluate after channels selection. */
-        const size_t chs       = _nChannels ? _nChannels : 1;
+        const size_t chs       = selected_channels.size();
         const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
         const size_t buf_count = 2;
 
@@ -110,6 +178,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("UDP init failed.");
         }
         _udp_inited = true;
+        SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
+    } else {
+        if (_nChannels && selected_channels.size() != _nChannels) {
+            throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
+        }
     }
 
     _rx_buf_size  = _udp.buf_size;
@@ -123,42 +196,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _rx_stream.opened = true;
         _rx_stream.format = format;
-
-        /* Determine channels: prioritize searchArgs over the provided vector */
-        std::vector<size_t> selected_channels;
-        auto it = searchArgs.find("channels");
-        if (it != searchArgs.end()) {
-            /* Extract channel string from searchArgs and override */
-            std::string chan_str = it->second;
-            if (chan_str == "0") {
-                selected_channels = {0};
-            } else if (chan_str == "1") {
-                selected_channels = {1};
-            } else if (chan_str == "0,1" || chan_str == "0, 1") {
-                selected_channels = {0, 1};
-            } else {
-                throw std::runtime_error("Invalid channels in searchArgs: " + chan_str + "; use '0', '1', or '0,1'");
-            }
-        } else if (!channels.empty()) {
-            /* Use the provided channels vector if no device argument overrides it */
-            selected_channels = channels;
-        } else {
-            /* Default to channel 0 if nothing provided */
-            selected_channels = {0};
-        }
-
-        /* Validate selected channels */
-        if (selected_channels.size() > 2) {
-            throw std::runtime_error("Invalid RX channel count: must be 1 or 2 channels");
-        }
-        for (size_t chan : selected_channels) {
-            if (chan > 1) {
-                throw std::runtime_error("Invalid RX channel index: must be 0 (RX1) or 1 (RX2)");
-            }
-        }
-        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
-            throw std::runtime_error("Dual RX channels must be {0, 1} for RX1+RX2");
-        }
+        _rx_stream.remainderHandle = -1;
+        _rx_stream.remainderSamps  = 0;
+        _rx_stream.remainderOffset = 0;
 
         /* Log the selected RX channels for debugging */
         if (selected_channels.size() == 1) {
@@ -173,6 +213,34 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
+        }
+
+        /* Determine channels: override provided vector if searchArgs contains "channels" */
+        auto it = searchArgs.find("channels");
+        if (it != searchArgs.end()) {
+            selected_channels = parse_channel_list(it->second);
+        } else if (!channels.empty()) {
+            /* Use the provided channels vector if no override is present */
+            selected_channels = channels;
+        } else {
+            /* Default to TX1 if nothing is specified */
+            selected_channels = {0};
+        }
+
+        /* Validate selected channels */
+        if (selected_channels.size() > 2) {
+            throw std::runtime_error("Invalid TX channel count: must be 1 or 2 channels");
+        }
+        for (size_t chan : selected_channels) {
+            if (chan > 1) {
+                throw std::runtime_error("Invalid TX channel index: must be 0 (TX1) or 1 (TX2)");
+            }
+        }
+        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
+            throw std::runtime_error("Dual TX channels must be {0, 1} for TX1+TX2");
+        }
+        if (_rx_stream.opened && selected_channels.size() != _rx_stream.channels.size()) {
+            throw std::runtime_error("RX/TX channel count mismatch; close RX or use matching channels");
         }
 
         /* Configure the file descriptor watcher. */
@@ -205,13 +273,13 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
         const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
-                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 1234);
+                                : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
 
         const size_t buf_complex = searchArgs.count("udp_buf_complex")
                                    ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
                                    : 4096;
 
-        const size_t chs       = _nChannels ? _nChannels : 1;
+        const size_t chs       = selected_channels.size();
         const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
         const size_t buf_count = 2;
 
@@ -225,6 +293,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("UDP init failed.");
         }
         _udp_inited = true;
+        SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
+    } else {
+        if (_nChannels && selected_channels.size() != _nChannels) {
+            throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
+        }
     }
 
     _tx_buf_size  = _udp.buf_size;
@@ -238,42 +311,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _tx_stream.opened = true;
         _tx_stream.format = format;
-
-        /* Determine channels: override provided vector if searchArgs contains "channels" */
-        std::vector<size_t> selected_channels;
-        auto it = searchArgs.find("channels");
-        if (it != searchArgs.end()) {
-            /* Extract channel string from searchArgs */
-            std::string chan_str = it->second;
-            if (chan_str == "0") {
-                selected_channels = {0};
-            } else if (chan_str == "1") {
-                selected_channels = {1};
-            } else if (chan_str == "0,1" || chan_str == "0, 1") {
-                selected_channels = {0, 1};
-            } else {
-                throw std::runtime_error("Invalid channels in searchArgs: " + chan_str + "; use '0', '1', or '0,1'");
-            }
-        } else if (!channels.empty()) {
-            /* Use the provided channels vector if no override is present */
-            selected_channels = channels;
-        } else {
-            /* Default to TX1 if nothing is specified */
-            selected_channels = {0};
-        }
-
-        /* Validate selected channels */
-        if (selected_channels.size() > 2) {
-            throw std::runtime_error("Invalid TX channel count: must be 1 or 2 channels");
-        }
-        for (size_t chan : selected_channels) {
-            if (chan > 1) {
-                throw std::runtime_error("Invalid TX channel index: must be 0 (TX1) or 1 (TX2)");
-            }
-        }
-        if (selected_channels.size() == 2 && (selected_channels[0] != 0 || selected_channels[1] != 1)) {
-            throw std::runtime_error("Dual TX channels must be {0, 1} for TX1+TX2");
-        }
+        _tx_stream.remainderHandle = -1;
+        _tx_stream.remainderSamps  = 0;
+        _tx_stream.remainderOffset = 0;
 
         _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
@@ -319,6 +359,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _rx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_rx_stream.buf);
+        _rx_stream.buf = NULL;
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
@@ -327,15 +368,17 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _tx_stream.buf = NULL;
 #elif USE_LITEETH
         std::free(_tx_stream.buf);
+        _tx_stream.buf = NULL;
 #endif
+        _tx_stream.opened = false;
     }
 }
 
 /* Activate the specified stream (configure the DMA engines). */
 int SoapyLiteXM2SDR::activateStream(
     SoapySDR::Stream *stream,
-    const int /*flags*/,
-    const long long /*timeNs*/,
+    const int flags,
+    const long long timeNs,
     const size_t /*numElems*/) {
 
     /* RX */
@@ -354,6 +397,16 @@ int SoapyLiteXM2SDR::activateStream(
 #endif
         _rx_stream.user_count = 0;
         _rx_stream.burst_end = false;
+        _rx_stream.time0_ns = this->getHardwareTime("");
+        _rx_stream.time0_count = _rx_stream.user_count;
+        _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+        _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        _rx_stream.time_warned = false;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "RX timed activation requested for %lld ns; timing not supported, starting immediately",
+                (long long)timeNs);
+        }
 
     /* TX */
     } else if (stream == TX_STREAM) {
@@ -369,7 +422,15 @@ int SoapyLiteXM2SDR::activateStream(
         /* Crossbar Mux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
         /* No explicit start; pacing handled by client cadence if needed. */
+        _tx_stream.user_count = 0;
 #endif
+        _tx_stream.pendingWriteBufs.clear();
+        _tx_stream.burst_end = false;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_DEBUG,
+                "TX timed activation requested for %lld ns; timing is enforced on buffer submission",
+                (long long)timeNs);
+        }
     }
 
     return 0;
@@ -378,8 +439,8 @@ int SoapyLiteXM2SDR::activateStream(
 /* Deactivate the specified stream (disable DMA engine). */
 int SoapyLiteXM2SDR::deactivateStream(
     SoapySDR::Stream *stream,
-    const int /*flags*/,
-    const long long /*timeNs*/) {
+    const int flags,
+    const long long timeNs) {
     if (stream == RX_STREAM) {
         /* Disable the DMA engine for RX. */
 #if USE_LITEPCIE
@@ -391,6 +452,11 @@ int SoapyLiteXM2SDR::deactivateStream(
          * will be set
          */
         _rx_stream.burst_end = true;
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "RX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
+                (long long)timeNs);
+        }
     } else if (stream == TX_STREAM) {
 #if USE_LITEPCIE
         /* Disable the DMA engine for TX. */
@@ -398,6 +464,11 @@ int SoapyLiteXM2SDR::deactivateStream(
 #elif USE_LITEETH
         /* No-op for UDP helper. */
 #endif
+        if (flags & SOAPY_SDR_HAS_TIME) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "TX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
+                (long long)timeNs);
+        }
     }
     return 0;
 }
@@ -481,17 +552,22 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
 
 static constexpr uint64_t DMA_HEADER_SYNC_WORD = 0x5aa55aa55aa55aa5ULL;
 
+static inline long long samples_to_ns(double sample_rate, long long samples)
+{
+    if (sample_rate <= 0.0) {
+        return 0;
+    }
+    const double ns = (static_cast<double>(samples) * 1e9) / sample_rate;
+    return static_cast<long long>(std::llround(ns));
+}
+
 /* Acquire a buffer for reading. */
 int SoapyLiteXM2SDR::acquireReadBuffer(
     SoapySDR::Stream *stream,
     size_t &handle,
     const void **buffs,
     int &flags,
-#if USE_LITEPCIE && defined(_RX_DMA_HEADER_TEST)
      long long &timeNs,
-#else
-     long long &/*timeNs*/,
-#endif
     const long timeoutUs) {
     if (stream != RX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
@@ -503,6 +579,16 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 #if USE_LITEETH
     /* Pump UDP helper once with caller timeout (ms). */
     liteeth_udp_process(&_udp, static_cast<int>(timeoutUs / 1000));
+
+    int avail = liteeth_udp_buffers_available_read(&_udp);
+    if (avail <= 0) {
+        return SOAPY_SDR_TIMEOUT;
+    }
+    /* Drop older buffers under load to keep the most recent samples. */
+    while (avail > 1) {
+        (void)liteeth_udp_next_read_buffer(&_udp);
+        avail--;
+    }
 
     uint8_t *src = liteeth_udp_next_read_buffer(&_udp);
     if (!src) {
@@ -548,6 +634,9 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     /* Detect overflows of the underlying circular buffer. */
     if ((_rx_stream.hw_count - _rx_stream.sw_count) >
         ((int64_t)_dma_mmap_info.dma_rx_buf_count / 2)) {
+        /* Calculate the number of lost buffers before draining. */
+        int64_t lost_buffers = _rx_stream.hw_count - _rx_stream.sw_count;
+
         /* Drain all buffers to get out of the overflow quicker. */
         struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
         mmap_dma_update.sw_count = _rx_stream.hw_count;
@@ -556,7 +645,22 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         _rx_stream.sw_count = _rx_stream.hw_count;
         handle = -1;
 
+        _rx_stream.overflow = true;
         flags |= SOAPY_SDR_END_ABRUPT;
+        _rx_stream.time0_ns = this->getHardwareTime("");
+        _rx_stream.time0_count = _rx_stream.user_count;
+        _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+        _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        _rx_stream.time_warned = false;
+
+        /* Encode lost buffer count in flags for applications that want it. */
+        {
+            const int64_t max_count = (LITEX_OVERFLOW_COUNT_MASK >> LITEX_OVERFLOW_COUNT_SHIFT);
+            const int64_t clamped = (lost_buffers > max_count) ? max_count : lost_buffers;
+            flags |= LITEX_HAS_OVERFLOW_COUNT;
+            flags |= ((int)clamped << LITEX_OVERFLOW_COUNT_SHIFT) & LITEX_OVERFLOW_COUNT_MASK;
+        }
+
         return SOAPY_SDR_OVERFLOW;
     } else {
         /* Get the buffer. */
@@ -579,6 +683,12 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
             /* Assign the extracted timestamp to the provided timeNs reference. */
             timeNs = static_cast<long long>(timestamp);
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
 
             /* Track the previous timestamp */
             static uint64_t prevTimestamp = 0;
@@ -597,7 +707,35 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         handle = _rx_stream.user_count;
         _rx_stream.user_count++;
 
-        return getStreamMTU(stream);
+        const size_t samples_per_buffer = getStreamMTU(stream);
+        if (_rx_stream.time_valid && !(flags & SOAPY_SDR_HAS_TIME)) {
+            timeNs = _rx_stream.time0_ns +
+                     samples_to_ns(_rx_stream.samplerate,
+                                   static_cast<long long>(_rx_stream.user_count - _rx_stream.time0_count) *
+                                   static_cast<long long>(samples_per_buffer));
+            const long long now = this->getHardwareTime("");
+            if (now <= _rx_stream.last_time_ns) {
+                _rx_stream.time_valid = false;
+                if (!_rx_stream.time_warned) {
+                    SoapySDR::log(SOAPY_SDR_WARNING,
+                        "RX hardware time appears stuck; disabling SOAPY_SDR_HAS_TIME");
+                    _rx_stream.time_warned = true;
+                }
+            }
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
+        } else if (!_rx_stream.time_valid) {
+            if (_rx_stream.samplerate <= 0.0 && !_rx_stream.time_warned) {
+                SoapySDR::log(SOAPY_SDR_WARNING,
+                    "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
+                _rx_stream.time_warned = true;
+            }
+        }
+        return samples_per_buffer;
     }
 #endif
 }
@@ -705,7 +843,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         return SOAPY_SDR_TIMEOUT;
     }
     buffs[0] = dst;
-    handle   = 0; /* submission is done in releaseWriteBuffer() */
+    handle   = _tx_stream.user_count++;
+    _tx_stream.pendingWriteBufs[handle] = dst;
     (void)timeoutUs;
     return getStreamMTU(stream);
 #endif
@@ -713,12 +852,49 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
 
 /* Release a write buffer after use. */
 void SoapyLiteXM2SDR::releaseWriteBuffer(
-    SoapySDR::Stream */*stream*/,
+    SoapySDR::Stream *stream,
     size_t handle,
-    const size_t /*numElems*/,
-    int &/*flags*/,
-    const long long /*timeNs*/) {
-    /* XXX: Inspect user-provided numElems and flags, and act upon them? */
+    const size_t numElems,
+    int &flags,
+    const long long timeNs) {
+    if ((flags & SOAPY_SDR_HAS_TIME) && timeNs > 0) {
+        while (true) {
+            const long long now = this->getHardwareTime("");
+            if (now >= timeNs) {
+                break;
+            }
+            const long long delta = timeNs - now;
+            const long long sleep_us = std::min<long long>(1000, std::max<long long>(1, delta / 1000));
+            std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
+        }
+    }
+
+    if (flags & SOAPY_SDR_END_BURST) {
+        _tx_stream.burst_end = true;
+    }
+
+    const size_t mtu = this->getStreamMTU(stream);
+    if (numElems < mtu) {
+        uint8_t *buf = nullptr;
+#if USE_LITEPCIE
+        const size_t buf_offset = handle % _dma_mmap_info.dma_tx_buf_count;
+        buf = reinterpret_cast<uint8_t*>(_tx_stream.buf) +
+              (buf_offset * _dma_mmap_info.dma_tx_buf_size) + TX_DMA_HEADER_SIZE;
+#elif USE_LITEETH
+        auto it = _tx_stream.pendingWriteBufs.find(handle);
+        if (it != _tx_stream.pendingWriteBufs.end()) {
+            buf = it->second;
+            _tx_stream.pendingWriteBufs.erase(it);
+        } else {
+            buf = reinterpret_cast<uint8_t*>(_tx_stream.remainderBuff);
+        }
+#endif
+        if (buf) {
+            const size_t offset_bytes = numElems * _nChannels * _bytesPerComplex;
+            const size_t zero_bytes = (mtu - numElems) * _nChannels * _bytesPerComplex;
+            std::memset(buf + offset_bytes, 0, zero_bytes);
+        }
+    }
 
 #if USE_LITEPCIE
     /* Update the DMA counters so that the engine can submit this buffer. */
@@ -726,7 +902,12 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     mmap_dma_update.sw_count = handle + 1;
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &mmap_dma_update);
 #elif USE_LITEETH
-    (void)handle;
+    if (numElems >= mtu) {
+        auto it = _tx_stream.pendingWriteBufs.find(handle);
+        if (it != _tx_stream.pendingWriteBufs.end()) {
+            _tx_stream.pendingWriteBufs.erase(it);
+        }
+    }
     if (liteeth_udp_write_submit(&_udp) < 0) {
         _tx_stream.underflow = true;
         SoapySDR_logf(SOAPY_SDR_ERROR, "UDP write_submit failed.");
@@ -920,6 +1101,21 @@ int SoapyLiteXM2SDR::readStream(
             samp_avail = n;
         }
 
+        if (_rx_stream.time_valid) {
+            timeNs = _rx_stream.remainderTimeNs +
+                     samples_to_ns(_rx_stream.samplerate, _rx_stream.remainderOffset);
+            flags |= SOAPY_SDR_HAS_TIME;
+            if (timeNs < _rx_stream.last_time_ns) {
+                timeNs = _rx_stream.last_time_ns;
+            } else {
+                _rx_stream.last_time_ns = timeNs;
+            }
+        } else if (_rx_stream.samplerate <= 0.0 && !_rx_stream.time_warned) {
+            SoapySDR::log(SOAPY_SDR_WARNING,
+                "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
+            _rx_stream.time_warned = true;
+        }
+
         /* Read out channels from the remainder buffer. */
         for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
             const uint32_t chan = _rx_stream.channels[i];
@@ -964,8 +1160,24 @@ int SoapyLiteXM2SDR::readStream(
 
     _rx_stream.remainderHandle = handle;
     _rx_stream.remainderSamps = ret;
+    _rx_stream.remainderTimeNs = timeNs;
 
     const size_t n = std::min((returnedElems - samp_avail), _rx_stream.remainderSamps);
+
+    if (_rx_stream.time_valid) {
+        timeNs = _rx_stream.remainderTimeNs +
+                 samples_to_ns(_rx_stream.samplerate, _rx_stream.remainderOffset);
+        flags |= SOAPY_SDR_HAS_TIME;
+        if (timeNs < _rx_stream.last_time_ns) {
+            timeNs = _rx_stream.last_time_ns;
+        } else {
+            _rx_stream.last_time_ns = timeNs;
+        }
+    } else if (_rx_stream.samplerate <= 0.0 && !_rx_stream.time_warned) {
+        SoapySDR::log(SOAPY_SDR_WARNING,
+            "RX sample rate not set; not providing SOAPY_SDR_HAS_TIME");
+        _rx_stream.time_warned = true;
+    }
 
     /* Read out channels from the new buffer. */
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
@@ -1092,8 +1304,19 @@ int SoapyLiteXM2SDR::readStreamStatus(
     long long &/*timeNs*/,
     const long timeoutUs){
 
-    /* For now we only suport TX stream. */
-    if(stream != TX_STREAM){
+    if (stream == RX_STREAM) {
+        if (_rx_stream.overflow) {
+            _rx_stream.overflow = false;
+            SoapySDR::log(SOAPY_SDR_SSI, "O");
+            return SOAPY_SDR_OVERFLOW;
+        }
+    } else if (stream == TX_STREAM) {
+        if (_tx_stream.underflow) {
+            _tx_stream.underflow = false;
+            SoapySDR::log(SOAPY_SDR_SSI, "U");
+            return SOAPY_SDR_UNDERFLOW;
+        }
+    } else {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
@@ -1103,12 +1326,6 @@ int SoapyLiteXM2SDR::readStreamStatus(
 
     /* Poll for status events until the timeout expires. */
     while (true) {
-        if(_tx_stream.underflow){
-            _tx_stream.underflow=false;
-            SoapySDR::log(SOAPY_SDR_SSI, "U");
-            return SOAPY_SDR_UNDERFLOW;
-        }
-
         /* Sleep for a fraction of the total timeout. */
         const auto sleepTimeUs = std::min<long>(1000, timeoutUs/10);
         std::this_thread::sleep_for(std::chrono::microseconds(sleepTimeUs));

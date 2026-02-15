@@ -1,7 +1,7 @@
 #
 # This file is part of LiteX-M2SDR.
 #
-# Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+# Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
@@ -13,20 +13,20 @@ from litepcie.common import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.csr import *
 
-# Header Inserter/Extracter ------------------------------------------------------------------------
+# Header Inserter/Extractor ------------------------------------------------------------------------
 
-class HeaderInserterExtracter(LiteXModule):
+class HeaderInserterExtractor(LiteXModule):
     def __init__(self, mode="inserter", data_width=64, with_csr=True):
         assert data_width == 64
-        assert mode in ["inserter", "extracter"]
+        assert mode in ["inserter", "extractor"]
         self.sink   = sink   = stream.Endpoint(dma_layout(data_width)) # i
         self.source = source = stream.Endpoint(dma_layout(data_width)) # o
 
         self.reset         = Signal() # i
 
         self.update        = Signal()   # o
-        self.header        = Signal(64) # i (Inserter) / o (Extracter)
-        self.timestamp     = Signal(64) # i (Inserter) / o (Extracter)
+        self.header        = Signal(64) # i (Inserter) / o (Extractor)
+        self.timestamp     = Signal(64) # i (Inserter) / o (Extractor)
 
         self.enable        = Signal()   # i (CSR).
         self.header_enable = Signal()   # i (CSR).
@@ -86,8 +86,8 @@ class HeaderInserterExtracter(LiteXModule):
                 )
             )
 
-        # Extracter specific.
-        if mode == "extracter":
+        # Extractor specific.
+        if mode == "extractor":
             # Header.
             fsm.act("HEADER",
                 sink.ready.eq(1),
@@ -111,7 +111,7 @@ class HeaderInserterExtracter(LiteXModule):
             sink.connect(source, omit={"first"}),
             NextValue(self.update, 0),
             If(self.header_enable,
-                source.first.eq((cycles == 0) & (mode == "extracter")),
+                source.first.eq((cycles == 0) & (mode == "extractor")),
                 source.last.eq( cycles == (self.frame_cycles - 1)),
                 If(source.valid & source.ready,
                     NextValue(cycles, cycles + 1),
@@ -130,11 +130,11 @@ class HeaderInserterExtracter(LiteXModule):
                 ("``0b1``", "Module Enabled."),
             ], reset=default_enable),
             CSRField("header_enable", size=1, offset=1, values=[
-                ("``0b0``", "Header Inserter/Extracter Enabled."),
-                ("``0b1``", "Header Inserter/Extracter Disabled."),
+                ("``0b0``", "Header Inserter/Extractor Disabled."),
+                ("``0b1``", "Header Inserter/Extractor Enabled."),
             ], reset=default_header_enable),
         ])
-        self._frame_cycles = CSRStorage(32, description="Frame Cycles (64-bit word)", reset=int(default_frame_cycles))
+        self._frame_cycles = CSRStorage(32, description="Frame Cycles (64-bit words)", reset=int(default_frame_cycles))
 
         # # #
 
@@ -144,21 +144,21 @@ class HeaderInserterExtracter(LiteXModule):
             self.frame_cycles.eq(self._frame_cycles.storage),
         ]
 
-# TX Header Extracter ------------------------------------------------------------------------------
+# TX Header Extractor ------------------------------------------------------------------------------
 
-class TXHeaderExtracter(HeaderInserterExtracter):
+class TXHeaderExtractor(HeaderInserterExtractor):
     def __init__(self, data_width=128, with_csr=True):
-        HeaderInserterExtracter.__init__(self,
-            mode       = "extracter",
+        HeaderInserterExtractor.__init__(self,
+            mode       = "extractor",
             data_width = data_width,
             with_csr   = with_csr,
         )
 
 # RX Header Inserter -------------------------------------------------------------------------------
 
-class RXHeaderInserter(HeaderInserterExtracter):
+class RXHeaderInserter(HeaderInserterExtractor):
     def __init__(self, data_width=128, with_csr=True):
-        HeaderInserterExtracter.__init__(self,
+        HeaderInserterExtractor.__init__(self,
             mode       = "inserter",
             data_width = data_width,
             with_csr   = with_csr,
@@ -169,7 +169,7 @@ class RXHeaderInserter(HeaderInserterExtracter):
 class TXRXHeader(LiteXModule):
     def __init__(self, data_width, with_csr=True):
         # TX.
-        self.tx = TXHeaderExtracter(data_width, with_csr)
+        self.tx = TXHeaderExtractor(data_width, with_csr)
 
         # RX.
         self.rx = RXHeaderInserter(data_width, with_csr)

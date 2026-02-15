@@ -2,9 +2,9 @@
  *
  * M2SDR I/Q Player Utility.
  *
- * This file is part of LiteX-M2SDR project.
+ * This file is part of LiteX-M2SDR.
  *
- * Copyright (c) 2024-2025 Enjoy-Digital <enjoy-digital.fr>
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  */
 
@@ -153,6 +153,10 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
 
             /* Read data from File and fill Write buffer */
             len = fread(buf_wr, 1, DMA_BUFFER_SIZE, fi);
+            if (ferror(fi)) {
+                perror("fread");
+                keep_running = 0;
+            }
             if (feof(fi)) {
                 /* Rewind on end of file, but not for stdin */
                 current_loop += 1;
@@ -162,6 +166,9 @@ static void m2sdr_play(const char *device_name, const char *filename, uint32_t l
                     rewind(fi);
                     len += fread(buf_wr + len, 1, DMA_BUFFER_SIZE - len, fi);
                 }
+            }
+            if (len < DMA_BUFFER_SIZE) {
+                memset(buf_wr + len, 0, DMA_BUFFER_SIZE - len);
             }
         }
 
