@@ -8,6 +8,7 @@
 
 import os
 import argparse
+import subprocess
 
 from migen import *
 
@@ -205,7 +206,7 @@ class BaseSoC(SoCMini):
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen=2,
-        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16,
+        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16, wr_firmware=None,
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -625,6 +626,9 @@ class BaseSoC(SoCMini):
         # White Rabbit -----------------------------------------------------------------------------
 
         if with_white_rabbit:
+            if wr_firmware is None:
+                raise ValueError("White Rabbit enabled but no WR firmware provided. Use --wr-firmware or --wr-nic-dir.")
+            wr_firmware = os.path.abspath(wr_firmware)
 
             from litex.soc.cores.uart import UARTPHY, UART
 
@@ -666,7 +670,7 @@ class BaseSoC(SoCMini):
             sfp_i2c_pads = platform.request("sfp_i2c")
             LiteXWRNICSoC.add_wr_core(self,
                 # CPU.
-                cpu_firmware    = "../litex_wr_nic/litex_wr_nic/firmware/spec_a7_wrc.bram", # FIXME: Avoid hardcoded path.
+                cpu_firmware    = wr_firmware,
 
                 # Board name.
                 board_name       = "SAWR",
@@ -906,9 +910,12 @@ def main():
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
-    parser.add_argument("--with-white-rabbit", action="store_true",     help="Enable White-Rabbit Support.")
-    parser.add_argument("--wr-sfp",            default=1, type=int,     help="White Rabbit SFP.", choices=[0, 1])
-    parser.add_argument("--wr-dac-bits",       default=16, type=int,    help="White Rabbit MMCM phase-shift control word width (in bits).")
+    parser.add_argument("--with-white-rabbit",   action="store_true",                    help="Enable White-Rabbit Support.")
+    parser.add_argument("--wr-sfp",              default=1, type=int,                    help="White Rabbit SFP.", choices=[0, 1])
+    parser.add_argument("--wr-dac-bits",         default=16, type=int,                   help="White Rabbit MMCM phase-shift control word width (in bits).")
+    parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
+    parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
+    parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -921,11 +928,21 @@ def main():
 
     args = parser.parse_args()
 
+    # Resolve White Rabbit firmware paths.
+    wr_nic_dir  = args.wr_nic_dir
+    wr_firmware = args.wr_firmware
+    if wr_firmware is None and wr_nic_dir:
+        wr_firmware = os.path.join(wr_nic_dir, "firmware", "spec_a7_wrc.bram")
+
     # Build White Rabbit Firmware.
-    if args.with_white_rabbit & args.build:
-        print("Building White Rabbit firmware...")
-        r = os.system("cd ../litex_wr_nic/litex_wr_nic/firmware && ./build.py --target acorn") # FIXME: Avoid harcoded path/platform.
-        if r != 0:
+    if args.with_white_rabbit and args.build:
+        if wr_nic_dir is None and wr_firmware is None:
+            raise ValueError("White Rabbit build requested but no WR firmware path found. Use --wr-firmware or --wr-nic-dir.")
+        firmware_dir = os.path.dirname(os.path.abspath(wr_firmware)) if wr_firmware else os.path.join(wr_nic_dir, "firmware")
+        build_script = os.path.join(firmware_dir, "build.py")
+        print(f"Building White Rabbit firmware in {firmware_dir}...")
+        r = subprocess.run([build_script, "--target", args.wr_firmware_target], cwd=firmware_dir)
+        if r.returncode != 0:
             raise RuntimeError("White Rabbit Firmware build failed.")
 
     # Build SoC.
@@ -957,6 +974,7 @@ def main():
         with_white_rabbit = args.with_white_rabbit,
         wr_sfp            = args.wr_sfp,
         wr_dac_bits       = args.wr_dac_bits,
+        wr_firmware       = wr_firmware,
     )
 
     # LiteScope Analyzer Probes.
