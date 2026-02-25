@@ -85,32 +85,75 @@ int eb_fill_read32(uint8_t wb_buffer[20], uint32_t address) {
 }
 
 int eb_send(struct eb_connection *conn, const void *bytes, size_t len) {
-    if (conn->is_direct)
-        return sendto(conn->fd, bytes, len, 0, conn->addr->ai_addr, conn->addr->ai_addrlen);
-    return write(conn->fd, bytes, len);
+    if (conn->is_direct) {
+        int ret;
+        do {
+            ret = sendto(conn->fd, bytes, len, 0, conn->addr->ai_addr, conn->addr->ai_addrlen);
+        } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
+        if (ret < 0) {
+            fprintf(stderr, "socket send error: %s\n", strerror(errno));
+            return ret;
+        }
+        if ((size_t)ret != len) {
+            fprintf(stderr, "short UDP send: %d/%zu\n", ret, len);
+            return -1;
+        }
+        return ret;
+    }
+
+    size_t sent = 0;
+    while (sent < len) {
+        int ret = write(conn->fd, (const uint8_t *)bytes + sent, len - sent);
+        if (ret < 0) {
+            if (errno == EINTR || errno == EAGAIN)
+                continue;
+            fprintf(stderr, "socket send error: %s\n", strerror(errno));
+            return ret;
+        }
+        sent += (size_t)ret;
+    }
+    return (int)sent;
 }
 
 int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
-    if (conn->is_direct)
-        return recvfrom(conn->read_fd, bytes, max_len, 0, NULL, NULL);
-    return read(conn->fd, bytes, max_len);
+    int ret;
+    if (conn->is_direct) {
+        do {
+            ret = recvfrom(conn->read_fd, bytes, max_len, 0, NULL, NULL);
+        } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
+        if (ret < 0)
+            fprintf(stderr, "socket recv error: %s\n", strerror(errno));
+        return ret;
+    }
+
+    do {
+        ret = read(conn->fd, bytes, max_len);
+    } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
+    if (ret < 0)
+        fprintf(stderr, "socket recv error: %s\n", strerror(errno));
+    return ret;
 }
 
 void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr) {
     uint8_t raw_pkt[20];
     eb_fill_write32(raw_pkt, val, addr);
-    eb_send(conn, raw_pkt, sizeof(raw_pkt));
+    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0)
+        fprintf(stderr, "eb_write32: send failed\n");
 }
 
 uint32_t eb_read32(struct eb_connection *conn, uint32_t addr) {
     uint8_t raw_pkt[20];
     eb_fill_read32(raw_pkt, addr);
 
-    eb_send(conn, raw_pkt, sizeof(raw_pkt));
+    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
+        fprintf(stderr, "eb_read32: send failed\n");
+        return -1;
+    }
 
     if (conn->is_direct) {
         int count = eb_recv(conn, raw_pkt, sizeof(raw_pkt));
-
+        if (count < 0)
+            return -1;
         if (count != sizeof(raw_pkt)) {
             fprintf(stderr, "unexpected read length: %d\n", count);
             return -1;
@@ -148,13 +191,18 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     struct addrinfo hints;
     struct addrinfo* res = 0;
     int err;
-    int sock;
+    int sock = -1;
+    int rx_socket = -1;
+    int tx_socket = -1;
 
     struct eb_connection *conn = malloc(sizeof(struct eb_connection));
     if (!conn) {
         perror("couldn't allocate memory for eb_connection");
         return NULL;
     }
+    memset(conn, 0, sizeof(*conn));
+    conn->fd = -1;
+    conn->read_fd = -1;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -179,49 +227,31 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         si_me.sin_port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
         si_me.sin_addr.s_addr = htobe32(INADDR_ANY);
 
-        int rx_socket;
         if ((rx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
             fprintf(stderr, "Unable to create Rx socket: %s\n", strerror(errno));
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
+            goto error;
         }
-        /* Enable address reuse on RX Socket, FIXME: Close socket properly */
+        /* Enable address reuse on RX Socket */
         int opt = 1;
         if (setsockopt(rx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on rx_socket failed: %s\n", strerror(errno));
-            close(rx_socket);
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
+            goto error;
         }
         if (bind(rx_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
             fprintf(stderr, "Unable to bind Rx socket to port: %s\n", strerror(errno));
-            close(rx_socket);
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
+            goto error;
         }
 
         // Tx half
-        int tx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        tx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
         if (tx_socket == -1) {
             fprintf(stderr, "Unable to create socket: %s\n", strerror(errno));
-            close(rx_socket);
-            close(tx_socket);
-            freeaddrinfo(res);
-            fprintf(stderr, "unable to create socket: %s\n", strerror(errno));
-            free(conn);
-            return NULL;
+            goto error;
         }
-        /* Enable address reuse on TX Socket, FIXME: Close socket properly */
+        /* Enable address reuse on TX Socket */
         if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on tx_socket failed: %s\n", strerror(errno));
-            close(rx_socket);
-            close(tx_socket);
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
+            goto error;
         }
 
         conn->read_fd = rx_socket;
@@ -232,18 +262,13 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         sock = socket(AF_INET, SOCK_STREAM, 0);
         if (sock == -1) {
             fprintf(stderr, "failed to create socket: %s\n", strerror(errno));
-            freeaddrinfo(res);
-            free(conn);
-            return NULL;
+            goto error;
         }
 
         int connection = connect(sock, res->ai_addr, res->ai_addrlen);
         if (connection == -1) {
-            close(sock);
-            freeaddrinfo(res);
             fprintf(stderr, "unable to create socket: %s\n", strerror(errno));
-            free(conn);
-            return NULL;
+            goto error;
         }
 
         int ret;
@@ -251,11 +276,8 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
 
         ret = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val));
         if (ret < 0) {
-             close(sock);
-            freeaddrinfo(res);
             fprintf(stderr, "setsockopt error: %s\n", strerror(errno));
-            free(conn);
-            return NULL;
+            goto error;
         }
 
         conn->fd = sock;
@@ -263,15 +285,29 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     }
 
     return conn;
+
+error:
+    if (rx_socket >= 0)
+        close(rx_socket);
+    if (tx_socket >= 0)
+        close(tx_socket);
+    if (sock >= 0)
+        close(sock);
+    if (res)
+        freeaddrinfo(res);
+    free(conn);
+    return NULL;
 }
 
 void eb_disconnect(struct eb_connection **conn) {
     if (!conn || !*conn)
         return;
 
-    freeaddrinfo((*conn)->addr);
-    close((*conn)->fd);
-    if ((*conn)->read_fd)
+    if ((*conn)->addr)
+        freeaddrinfo((*conn)->addr);
+    if ((*conn)->fd >= 0)
+        close((*conn)->fd);
+    if ((*conn)->read_fd >= 0)
         close((*conn)->read_fd);
     free(*conn);
     *conn = NULL;
