@@ -207,6 +207,7 @@ class BaseSoC(SoCMini):
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16, wr_firmware=None,
+        wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
@@ -735,7 +736,11 @@ class BaseSoC(SoCMini):
 
             # Timings Constraints.
             # --------------------
-            platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-123]") # FIXME: Add 10MHz Ext Clk.
+            platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-123]")
+            if wr_ext_clk10_port is not None:
+                platform.add_platform_command(
+                    f"create_clock -name {wr_ext_clk10_name} -period {wr_ext_clk10_period:.3f} [get_ports {wr_ext_clk10_port}]"
+                )
             platform.add_platform_command("create_clock -name wr_txoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/TXOUTCLK]")
             platform.add_platform_command("create_clock -name wr_rxoutclk -period 16.000 [get_pins -hierarchical *gtpe2_i/RXOUTCLK]")
             platform.add_false_path_constraints(
@@ -916,6 +921,9 @@ def main():
     parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
     parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
     parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
+    parser.add_argument("--wr-ext-clk10-port",   default=None,                           help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
+    parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,              help="External 10MHz clock period in ns for constraint.")
+    parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                 help="External 10MHz clock name for constraint.")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -975,6 +983,9 @@ def main():
         wr_sfp            = args.wr_sfp,
         wr_dac_bits       = args.wr_dac_bits,
         wr_firmware       = wr_firmware,
+        wr_ext_clk10_port   = args.wr_ext_clk10_port,
+        wr_ext_clk10_period = args.wr_ext_clk10_period,
+        wr_ext_clk10_name   = args.wr_ext_clk10_name,
     )
 
     # LiteScope Analyzer Probes.
