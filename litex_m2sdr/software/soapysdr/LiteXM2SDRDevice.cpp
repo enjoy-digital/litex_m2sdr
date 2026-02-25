@@ -329,7 +329,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     /* EtherBone */
     _fd = eb_connect(eth_ip.c_str(), "1234", 1);
     if (!_fd)
-        throw std::runtime_error("Can't connect to EtherBone!");
+        throw std::runtime_error(
+            "Can't connect to EtherBone at " + eth_ip +
+            ":1234 (hint: set eth_ip=... for the board IP)");
     _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
