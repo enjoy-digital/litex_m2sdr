@@ -1085,7 +1085,9 @@ static void litepcie_free_chdev(struct litepcie_device *s)
 #define TIME_CONTROL_SYNC_ENABLE  (1 << CSR_TIME_GEN_CONTROL_SYNC_ENABLE_OFFSET)
 
 /* PTM Offset in Nanoseconds (Adjust based on calibration) */
-#define PTM_OFFSET_NS (-500) /* FIXME: Adjust based on calibration */
+static s64 ptm_offset_ns = -500;
+module_param(ptm_offset_ns, longlong, 0644);
+MODULE_PARM_DESC(ptm_offset_ns, "PTM offset in nanoseconds applied to time read/write");
 
 /* PTM Control Register Flags */
 #define PTM_CONTROL_ENABLE  (1 << CSR_PTM_REQUESTER_CONTROL_ENABLE_OFFSET)
@@ -1131,7 +1133,7 @@ static int litepcie_read_time(struct litepcie_device *dev, struct timespec64 *ts
 		(litepcie_readl(dev, TIME_CONTROL_READ_TIME_L) & 0xffffffff));
 
 	/* Adjust the value by subtracting PTM offset */
-	value = value - PTM_OFFSET_NS;
+	value = value - ptm_offset_ns;
 
 	/* Convert the value to timespec64 format */
 	rd_ts = ns_to_timespec64(value);
@@ -1147,7 +1149,7 @@ static int litepcie_write_time(struct litepcie_device *dev, const struct timespe
 	s64 value = timespec64_to_ns(ts);
 
 	/* Adjust the value by adding PTM offset */
-	value = value + PTM_OFFSET_NS;
+	value = value + ptm_offset_ns;
 
 	/* Write the low and high parts of the time value */
 	litepcie_writel(dev, TIME_CONTROL_WRITE_TIME_L, (value >>  0) & 0xffffffff);
