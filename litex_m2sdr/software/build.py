@@ -11,50 +11,55 @@ import subprocess
 
 # Build Utilities ----------------------------------------------------------------------------------
 
-def run_command(command):
-    try:
-        subprocess.run(command, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"run_command error: {e}")
+def run_command(command, cwd=None):
+    subprocess.run(command, cwd=cwd, check=True)
 
-def build_driver(path, cmake_options=""):
+def build_driver(path, cmake_options=None, prefix="/usr", do_install=False):
     base_dir   = os.path.dirname(os.path.abspath(__file__))
     build_path = os.path.join(base_dir, path, 'build')
     os.makedirs(build_path, exist_ok=True)
-    commands = [
-        f"cd {build_path} && cmake ../ {cmake_options}",
-        f"cd {build_path} && make clean all",
-        f"cd {build_path} && sudo make install"
-    ]
-    for command in commands:
-        run_command(command)
+    cmake_options = cmake_options or []
+    run_command(["cmake", "..", f"-DCMAKE_INSTALL_PREFIX={prefix}", *cmake_options], cwd=build_path)
+    run_command(["make", "clean", "all"], cwd=build_path)
+    if do_install:
+        run_command(["make", "install"], cwd=build_path)
 
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--interface", default="litepcie", help="Control/Data path interface", choices=["litepcie", "liteeth"])
+    parser.add_argument("--interface",   default="litepcie",  help="Control/Data path interface", choices=["litepcie", "liteeth"])
+    parser.add_argument("--prefix",      default="/usr",      help="Install prefix for SoapySDR driver.")
+    parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
+    parser.add_argument("--skip-kernel", action="store_true", help="Skip kernel driver build/install.")
 
     args = parser.parse_args()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Control/Data path flags.
     if args.interface == "litepcie":
-        flags     = "-DUSE_LITEETH=OFF"
+        flags     = ["-DUSE_LITEETH=OFF"]
         interface = "USE_LITEPCIE"
     else:
-        flags     = "-DUSE_LITEETH=ON"
+        flags     = ["-DUSE_LITEETH=ON"]
         interface = "USE_LITEETH"
 
+    is_root    = (os.geteuid() == 0)
+    do_install = is_root and (not args.no_sudo)
+    if not is_root:
+        print("Install steps skipped (run as root to install).")
+
     # Kernel compilation.
-    if (args.interface == "litepcie"):
-        run_command("cd kernel && make clean all")
-        run_command("cd kernel && sudo make install")
+    if (args.interface == "litepcie") and (not args.skip_kernel):
+        run_command(["make", "clean", "all"], cwd=os.path.join(base_dir, "kernel"))
+        if do_install:
+            run_command(["make", "install"], cwd=os.path.join(base_dir, "kernel"))
 
     # Utilities compilation.
-    run_command(f"cd user   && make clean INTERFACE={interface} all")
+    run_command(["make", "clean", f"INTERFACE={interface}", "all"], cwd=os.path.join(base_dir, "user"))
 
     # SoapySDR Driver compilation.
-    build_driver("soapysdr", f"-DCMAKE_INSTALL_PREFIX=/usr {flags}")
+    build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install)
 
 if __name__ == "__main__":
     main()
