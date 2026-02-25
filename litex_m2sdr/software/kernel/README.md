@@ -67,8 +67,8 @@ This removes:
 sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
 ```
   This helps diagnose data flow or interrupt issues. 🔎
-- **IOMMU**
-  If your system has an IOMMU, ensure it’s set to passthrough mode. Otherwise, DMA may be blocked or fail to work properly.
+- **Host Requirements**
+  For IOMMU/DMA settings and PCIe expectations, see the top-level README.
 
 ---
 

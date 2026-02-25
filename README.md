@@ -159,20 +159,17 @@ The Ethernet SoC design is RX capable only for now. TX support will come soon.
 If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
 
 1. **Install Prerequisite Packages:**
-   - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software. Run the following command in your terminal:
+   - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software:
    ```bash
-   sudo apt install build-essential cmake libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
+   sudo apt install build-essential cmake git \
+     libsoapysdr-dev soapysdr-tools libsoapysdr0.8 \
+     gnuradio gnuradio-dev libgnuradio-soapy3.10.9t64 gqrx-sdr \
+     libsndfile1-dev libsamplerate0-dev
    ```
    - **Note**: For non-Ubuntu Linux distributions (e.g., Fedora, Arch), install the equivalent packages using your distribution's package manager (e.g., `dnf` for Fedora or `pacman` for Arch).
 
 2. **Connect the Board:**
    - Insert the LiteX-M2SDR board into an available M2 slot on your Linux computer and connect your antennas.
-
-3. **Install Required Software:**
-   - Ensure you have the necessary software installed on your Linux system. You can do this by running the following command in your terminal:
-   ```
-   sudo apt install git cmake gnuradio gnuradio-dev soapysdr-tools libsoapysdr0.8 libsoapysdr-dev libgnuradio-soapy3.10.9t64 gqrx-sdr
-   ```
 
 > [!WARNING]
 >
@@ -205,6 +202,12 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 
 7. **Run Your SDR Software:**
    - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
+
+### Host Requirements & Expectations
+
+- **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
+- **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
+- **Ethernet / SATA (WIP)**: Ethernet SoC is RX-only for now; TX support is in development. SATA support is in development. Both require the LiteX Acorn Baseboard Mini.
 
 > [!TIP]
 > If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
