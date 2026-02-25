@@ -31,6 +31,7 @@ def main():
     parser.add_argument("--interface",   default="litepcie",  help="Control/Data path interface", choices=["litepcie", "liteeth"])
     parser.add_argument("--prefix",      default="/usr",      help="Install prefix for SoapySDR driver.")
     parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
+    parser.add_argument("--no-install",  action="store_true", help="Build only; do not run install steps.")
     parser.add_argument("--skip-kernel", action="store_true", help="Skip kernel driver build/install.")
 
     args = parser.parse_args()
@@ -45,8 +46,10 @@ def main():
         interface = "USE_LITEETH"
 
     is_root    = (os.geteuid() == 0)
-    do_install = is_root and (not args.no_sudo)
-    if not is_root:
+    do_install = (not args.no_install) and is_root and (not args.no_sudo)
+    if args.no_install:
+        print("Install steps skipped (--no-install).")
+    elif not is_root:
         print("Install steps skipped (run as root to install).")
 
     # Kernel compilation.
