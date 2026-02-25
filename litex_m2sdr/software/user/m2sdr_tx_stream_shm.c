@@ -386,11 +386,13 @@ static void m2sdr_rf_init(
         m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 1);  /* 1T1R */
     }
 
-    default_init_param.reference_clk_rate = 40000000;  /* 40 MHz */
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
+    default_init_param.reference_clk_rate          = 40000000;  /* 40 MHz */
+    default_init_param.gpio_resetb                 = AD9361_GPIO_RESET_PIN;
+    default_init_param.gpio_sync                   = -1;
+    default_init_param.gpio_cal_sw1                = -1;
+    default_init_param.gpio_cal_sw2                = -1;
+    default_init_param.tx_synthesizer_frequency_hz = tx_freq;
+    default_init_param.rf_tx_bandwidth_hz          = bandwidth;
 
     ad9361_init(&ad9361_phy, &default_init_param, 1);
 
