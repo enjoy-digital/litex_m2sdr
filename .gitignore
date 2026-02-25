@@ -1,4 +1,5 @@
 /build
+/*.zip
 *.d
 *.o
 *.a
