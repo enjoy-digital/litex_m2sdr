@@ -33,6 +33,23 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 
 ---
 
+## Configuration Knobs (SoapySDR Args)
+
+You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
+
+- **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
+- **Antenna lists**: `rx_antenna_list=A_BALANCED,B_BALANCED` and `tx_antenna_list=A,B`
+- **Per-channel antenna**: `rx_antenna0=...`, `rx_antenna1=...`, `tx_antenna0=...`, `tx_antenna1=...`
+- **Bit mode**: `bitmode=8|16`
+- **Oversampling**: `oversampling=0|1`
+
+Example:
+```bash
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,rx_antenna_list=A_BALANCED,tx_antenna_list=A,bitmode=8,oversampling=1"
+```
+
+---
+
 ## Test Utilities
 
 This repository includes several Python utilities to help test and demonstrate the capabilities of the LiteX-M2SDR SoapySDR driver:
