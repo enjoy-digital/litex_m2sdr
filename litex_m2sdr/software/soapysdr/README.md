@@ -73,13 +73,7 @@ This repository includes several Python utilities to help test and demonstrate t
   ```
 
 - **test_record.py**
-  Records I/Q samples and writes them as raw CF32 data to a file. Optionally, it can check and print timestamp information, including differences between consecutive timestamps.- **test_time.py**
-  Sets and reads the LiteXM2SDR hardware time (in nanoseconds). It can set the hardware time to the current time (or a specified value) and then repeatedly read and display the hardware time along with its local date/time representation.
-
-  *Usage Example:*
-  ```bash
-  ./test_time.py --set now --interval 0.2 --duration 5
-  ```
+  Records I/Q samples and writes them as raw CF32 data to a file. Optionally, it can check and print timestamp information, including differences between consecutive timestamps.
 
   *Usage Example:*
   ```bash
