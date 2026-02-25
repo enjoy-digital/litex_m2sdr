@@ -449,6 +449,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     RXStream _rx_stream;
     TXStream _tx_stream;
+    std::vector<std::string> _rx_antennas;
+    std::vector<std::string> _tx_antennas;
+    int _rx_agc_mode = 0;
 
     void interleaveCF32(
         const void *src,

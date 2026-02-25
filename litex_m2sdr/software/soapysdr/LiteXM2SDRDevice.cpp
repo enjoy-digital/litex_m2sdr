@@ -15,6 +15,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
+#include <algorithm>
+#include <cctype>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -108,6 +110,59 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
 #endif
     }
     return it->second;
+}
+
+std::vector<std::string> split_list(const std::string &value)
+{
+    std::vector<std::string> out;
+    std::string token;
+    auto trim_token = [](const std::string &s) {
+        size_t start = 0;
+        size_t end = s.size();
+        while (start < end && std::isspace(static_cast<unsigned char>(s[start])))
+            start++;
+        while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1])))
+            end--;
+        return s.substr(start, end - start);
+    };
+    for (char ch : value) {
+        if (ch == ',') {
+            if (!token.empty()) {
+                std::string trimmed = trim_token(token);
+                if (!trimmed.empty())
+                    out.push_back(trimmed);
+            }
+            token.clear();
+            continue;
+        }
+        token.push_back(ch);
+    }
+    if (!token.empty()) {
+        std::string trimmed = trim_token(token);
+        if (!trimmed.empty())
+            out.push_back(trimmed);
+    }
+    return out;
+}
+
+uint8_t parse_agc_mode(const std::string &mode)
+{
+    if (mode == "slow" || mode == "slowattack")
+        return RF_GAIN_SLOWATTACK_AGC;
+    if (mode == "fast" || mode == "fastattack")
+        return RF_GAIN_FASTATTACK_AGC;
+    if (mode == "hybrid")
+        return RF_GAIN_HYBRID_AGC;
+    if (mode == "manual" || mode == "mgc")
+        return RF_GAIN_MGC;
+    throw std::runtime_error("Invalid rx_agc_mode: " + mode);
+}
+
+bool antenna_allowed(const std::vector<std::string> &ants, const std::string &name)
+{
+    if (ants.empty())
+        return true;
+    return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
 } // namespace
 
@@ -360,6 +415,17 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _oversampling = std::stoi(args.at("oversampling"));
     }
 
+    _rx_antennas = {"A_BALANCED"};
+    _tx_antennas = {"A"};
+    if (args.count("rx_antenna_list") > 0)
+        _rx_antennas = split_list(args.at("rx_antenna_list"));
+    if (args.count("tx_antenna_list") > 0)
+        _tx_antennas = split_list(args.at("tx_antenna_list"));
+
+    _rx_agc_mode = RF_GAIN_SLOWATTACK_AGC;
+    if (args.count("rx_agc_mode") > 0)
+        _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
+
     /* RefClk Selection */
     int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
     std::string clock_source = "internal"; /* Default XO. */
@@ -437,8 +503,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.bandwidth    = 30.72e6;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = "A_BALANCED";
-        _tx_stream.antenna[0]   = "A";
+        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[0]  = false;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -448,8 +514,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = "A_BALANCED";
-        _tx_stream.antenna[1]   = "A";
+        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[1]  = false;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
@@ -457,6 +523,24 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.iqbalance[1] = 1.0;
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);
+    }
+
+    if (args.count("rx_antenna0") > 0)
+        _rx_stream.antenna[0] = args.at("rx_antenna0");
+    if (args.count("rx_antenna1") > 0)
+        _rx_stream.antenna[1] = args.at("rx_antenna1");
+    if (args.count("tx_antenna0") > 0)
+        _tx_stream.antenna[0] = args.at("tx_antenna0");
+    if (args.count("tx_antenna1") > 0)
+        _tx_stream.antenna[1] = args.at("tx_antenna1");
+
+    if (!antenna_allowed(_rx_antennas, _rx_stream.antenna[0]) ||
+        !antenna_allowed(_rx_antennas, _rx_stream.antenna[1])) {
+        throw std::runtime_error("Invalid RX antenna selection");
+    }
+    if (!antenna_allowed(_tx_antennas, _tx_stream.antenna[0]) ||
+        !antenna_allowed(_tx_antennas, _tx_stream.antenna[1])) {
+        throw std::runtime_error("Invalid TX antenna selection");
     }
 
 #if USE_LITEPCIE
@@ -600,15 +684,20 @@ bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
  *                                     Antenna API
  **************************************************************************************************/
 
-/* FIXME: Correctly handle A/B Antennas. */
-
 std::vector<std::string> SoapyLiteXM2SDR::listAntennas(
     const int direction,
     const size_t) const {
-    std::vector<std::string> ants;
-    if(direction == SOAPY_SDR_RX) ants.push_back( "A_BALANCED" );
-    if(direction == SOAPY_SDR_TX) ants.push_back( "A" );
-    return ants;
+    if (direction == SOAPY_SDR_RX) {
+        if (!_rx_antennas.empty())
+            return _rx_antennas;
+        return {"A_BALANCED"};
+    }
+    if (direction == SOAPY_SDR_TX) {
+        if (!_tx_antennas.empty())
+            return _tx_antennas;
+        return {"A"};
+    }
+    return {};
 }
 
 void SoapyLiteXM2SDR::setAntenna(
@@ -616,10 +705,16 @@ void SoapyLiteXM2SDR::setAntenna(
     const size_t channel,
     const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
-    if (direction == SOAPY_SDR_RX)
+    if (direction == SOAPY_SDR_RX) {
+        if (!antenna_allowed(_rx_antennas, name))
+            throw std::runtime_error("Unsupported RX antenna: " + name);
         _rx_stream.antenna[channel] = name;
-    if (direction == SOAPY_SDR_TX)
+    }
+    if (direction == SOAPY_SDR_TX) {
+        if (!antenna_allowed(_tx_antennas, name))
+            throw std::runtime_error("Unsupported TX antenna: " + name);
         _tx_stream.antenna[channel] = name;
+    }
 }
 
 std::string SoapyLiteXM2SDR::getAntenna(
@@ -685,10 +780,9 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     if (direction == SOAPY_SDR_TX)
         return;
 
-    /* FIXME: AGC gain mode. */
     _rx_stream.gainMode[channel] = automatic;
     ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
-        (automatic ? RF_GAIN_SLOWATTACK_AGC : RF_GAIN_MGC));
+        (automatic ? _rx_agc_mode : RF_GAIN_MGC));
 }
 
 bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) const
