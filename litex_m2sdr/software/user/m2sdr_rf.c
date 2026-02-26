@@ -77,13 +77,13 @@ static void * m2sdr_open(void) {
 static void m2sdr_close(void *conn) {
     if (!conn)
         return;
+    if (conn == g_conn)
+        g_conn = NULL;
 #ifdef USE_LITEPCIE
     close((int)(intptr_t)conn);
 #elif defined(USE_LITEETH)
     eb_disconnect((struct eb_connection **)&conn);
 #endif
-    if (conn == g_conn)
-        g_conn = NULL;
 }
 
 static void m2sdr_close_global(void) {
