@@ -392,7 +392,7 @@ static void help(void)
 #elif defined(USE_LITEETH)
            "-i ip_address         Target IP address for Etherbone/UDP (default: 192.168.1.50).\n"
            "-p port               Port number (default = 1234).\n"
-           "-d host_ip_address    Host IP address for FPGA RX stream destination (default: 192.168.1.1).\n"
+           "-d host_ip_address    Host IP address for FPGA RX stream destination (optional).\n"
 #endif
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
