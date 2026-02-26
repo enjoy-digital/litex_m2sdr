@@ -1086,7 +1086,30 @@ static void litepcie_free_chdev(struct litepcie_device *s)
 
 /* PTM Offset in Nanoseconds (Adjust based on calibration) */
 static s64 ptm_offset_ns = -500;
-module_param(ptm_offset_ns, longlong, 0644);
+
+static int param_set_s64(const char *val, const struct kernel_param *kp)
+{
+	s64 tmp;
+	int ret = kstrtos64(val, 0, &tmp);
+
+	if (ret)
+		return ret;
+
+	*(s64 *)kp->arg = tmp;
+	return 0;
+}
+
+static int param_get_s64(char *buffer, const struct kernel_param *kp)
+{
+	return scnprintf(buffer, PAGE_SIZE, "%lld\n", (long long)*(s64 *)kp->arg);
+}
+
+static const struct kernel_param_ops param_ops_s64 = {
+	.set = param_set_s64,
+	.get = param_get_s64,
+};
+
+module_param_cb(ptm_offset_ns, &param_ops_s64, &ptm_offset_ns, 0644);
 MODULE_PARM_DESC(ptm_offset_ns, "PTM offset in nanoseconds applied to time read/write");
 
 /* PTM Control Register Flags */
