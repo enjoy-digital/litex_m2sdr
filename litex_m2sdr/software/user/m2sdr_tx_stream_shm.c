@@ -11,22 +11,6 @@
  *   - Samples are Complex{Int16} (4 bytes per sample per channel)
  *   - Multi-channel data is interleaved: I0,Q0,I1,Q1,I0,Q0,I1,Q1,...
  *
- * Shared Memory Header Layout (64 bytes):
- *   Bytes 0-7:   write_index (uint64_t) - next slot to write (Julia producer)
- *   Bytes 8-15:  read_index (uint64_t) - next slot to read (C consumer)
- *   Bytes 16-23: chunks_written (uint64_t) - total chunks written by producer
- *   Bytes 24-31: chunks_read (uint64_t) - total chunks read by consumer
- *   Bytes 32-35: chunk_size (uint32_t) - samples per chunk (per channel)
- *   Bytes 36-39: sample_size (uint32_t) - bytes per sample (4 for Complex{Int16})
- *   Bytes 40-43: num_slots (uint32_t) - number of slots in buffer
- *   Bytes 44-45: num_channels (uint16_t) - number of channels (1 or 2)
- *   Bytes 46-47: flags (uint16_t) - bit 0 = writer_done
- *   Bytes 48-55: underflow_count (uint64_t) - number of TX underflows
- *   Bytes 56-63: padding
- *
- * Slot Layout (no per-chunk header for TX - simpler than RX):
- *   [sample data...]
- *
  * This file is part of LiteX-M2SDR project.
  *
  * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
@@ -35,362 +19,32 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <stdbool.h>
 #include <getopt.h>
 #include <stdint.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <time.h>
+#include <poll.h>
 
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
+#include "m2sdr_shm.h"
+#include "m2sdr_common.h"
 
-#include "m2sdr_config.h"
+/*
+ * Global state
+ */
+static char g_device_path[256];
+static int g_device_num = 0;
 
-#include "liblitepcie.h"
-#include "libm2sdr.h"
-#include "csr.h"
-
-/* Shared memory header offsets (0-indexed for C) */
-#define SHM_HEADER_SIZE         64
-#define OFFSET_WRITE_INDEX      0
-#define OFFSET_READ_INDEX       8
-#define OFFSET_CHUNKS_WRITTEN   16
-#define OFFSET_CHUNKS_READ      24
-#define OFFSET_CHUNK_SIZE       32
-#define OFFSET_SAMPLE_SIZE      36
-#define OFFSET_NUM_SLOTS        40
-#define OFFSET_NUM_CHANNELS     44
-#define OFFSET_FLAGS            46
-#define OFFSET_UNDERFLOW_COUNT  48
-#define OFFSET_BUFFER_EMPTY_COUNT 56  /* TX: count of times SHM buffer was empty */
-
-/* Flag bits */
-#define FLAG_WRITER_DONE        1
-
-/* Sample size for Complex{Int16} (real + imag, each int16) */
-#define SAMPLE_SIZE_COMPLEX_INT16 4
-
-/* Variables */
-/*-----------*/
-
-static char m2sdr_device[1024];
-static int m2sdr_device_num = 0;
-
-sig_atomic_t keep_running = 1;
-
-void intHandler(int dummy) {
-    (void)dummy;
-    keep_running = 0;
-}
-
-/* forward (provided in tree elsewhere; used here) */
-extern int64_t get_time_ms(void);
-
-/* AD9361 */
-/*--------*/
-
-#define AD9361_GPIO_RESET_PIN 0
-
-struct ad9361_rf_phy *ad9361_phy;
-
-static void * m2sdr_open(void) {
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not open device %s\n", m2sdr_device);
-        exit(1);
-    }
-    return (void *)(intptr_t)fd;
-}
-
-static void m2sdr_close(void *conn) {
-    close((int)(intptr_t)conn);
-}
-
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
+/*
+ * RF Initialization (TX-specific)
+ */
+static void rf_init(int fd, uint32_t samplerate, int64_t bandwidth,
+                    int64_t tx_freq, int64_t tx_gain, uint8_t num_channels)
 {
-    void *conn = m2sdr_open();
+    /* Common AD9361 setup (SI5351, power-up, SPI, mode, bitmode, sync, loopback) */
+    m2sdr_rf_common_init(fd, num_channels);
 
-    if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
-    } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n", n_tx, n_rx);
-        m2sdr_close(conn);
-        exit(1);
-    }
-
-    m2sdr_close(conn);
-    return 0;
-}
-
-void udelay(unsigned long usecs) { usleep(usecs); }
-void mdelay(unsigned long msecs) { usleep(msecs * 1000); }
-unsigned long msleep_interruptible(unsigned int msecs) { usleep(msecs * 1000); return 0; }
-
-bool gpio_is_valid(int number) {
-    return (number == AD9361_GPIO_RESET_PIN);
-}
-
-void gpio_set_value(unsigned gpio, int value) {
-    (void)gpio; (void)value;
-}
-
-/* Shared Memory Ring Buffer */
-/*---------------------------*/
-
-typedef struct {
-    uint8_t *data;
-    size_t   total_size;
-    uint32_t num_slots;
-    uint32_t chunk_size;      /* samples per chunk (per channel) */
-    uint32_t chunk_bytes;     /* bytes per chunk (all channels) */
-    uint16_t num_channels;
-} shm_ring_buffer_t;
-
-static inline uint64_t shm_get_write_index(shm_ring_buffer_t *shm) {
-    /* Use atomic load with acquire semantics to ensure we see all data written
-     * by the Julia producer before the write_index was updated.
-     * The producer issues a release fence before updating write_index. */
-    return __atomic_load_n((volatile uint64_t *)(shm->data + OFFSET_WRITE_INDEX), __ATOMIC_ACQUIRE);
-}
-
-static inline uint64_t shm_get_read_index(shm_ring_buffer_t *shm) {
-    return __atomic_load_n((volatile uint64_t *)(shm->data + OFFSET_READ_INDEX), __ATOMIC_RELAXED);
-}
-
-static inline void shm_set_read_index(shm_ring_buffer_t *shm, uint64_t val) {
-    /* Use atomic store with release semantics to ensure our memcpy from the slot
-     * is complete before the Julia producer sees the updated read_index and
-     * potentially overwrites the slot. */
-    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_READ_INDEX), val, __ATOMIC_RELEASE);
-}
-
-static inline void shm_set_chunks_read(shm_ring_buffer_t *shm, uint64_t val) {
-    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_CHUNKS_READ), val, __ATOMIC_RELAXED);
-}
-
-static inline void shm_set_underflow_count(shm_ring_buffer_t *shm, uint64_t val) {
-    /* Use atomic store so Julia can safely read this counter */
-    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_UNDERFLOW_COUNT), val, __ATOMIC_RELAXED);
-}
-
-static inline void shm_set_buffer_empty_count(shm_ring_buffer_t *shm, uint64_t val) {
-    /* Use atomic store so Julia can safely read this counter */
-    __atomic_store_n((volatile uint64_t *)(shm->data + OFFSET_BUFFER_EMPTY_COUNT), val, __ATOMIC_RELAXED);
-}
-
-static inline uint16_t shm_get_flags(shm_ring_buffer_t *shm) {
-    return *(volatile uint16_t *)(shm->data + OFFSET_FLAGS);
-}
-
-static inline bool shm_is_writer_done(shm_ring_buffer_t *shm) {
-    return (shm_get_flags(shm) & FLAG_WRITER_DONE) != 0;
-}
-
-static inline bool shm_can_read(shm_ring_buffer_t *shm) {
-    uint64_t write_idx = shm_get_write_index(shm);
-    uint64_t read_idx = shm_get_read_index(shm);
-    return read_idx < write_idx;
-}
-
-/* Get pointer to sample data for a slot */
-static inline uint8_t *shm_slot_ptr(shm_ring_buffer_t *shm, uint64_t slot) {
-    size_t offset = SHM_HEADER_SIZE + (slot % shm->num_slots) * shm->chunk_bytes;
-    return shm->data + offset;
-}
-
-/* Open existing shared memory ring buffer created by Julia producer */
-static shm_ring_buffer_t *shm_ringbuf_open(const char *path)
-{
-    shm_ring_buffer_t *shm = calloc(1, sizeof(shm_ring_buffer_t));
-    if (!shm) {
-        perror("calloc");
-        return NULL;
-    }
-
-    /* Open existing shared memory file */
-    int fd = open(path, O_RDWR);
-    if (fd < 0) {
-        perror(path);
-        free(shm);
-        return NULL;
-    }
-
-    /* Get file size */
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-        perror("fstat");
-        close(fd);
-        free(shm);
-        return NULL;
-    }
-    shm->total_size = st.st_size;
-
-    /* Memory map the file */
-    shm->data = mmap(NULL, shm->total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    close(fd);
-
-    if (shm->data == MAP_FAILED) {
-        perror("mmap");
-        free(shm);
-        return NULL;
-    }
-
-    /* Read header metadata */
-    shm->chunk_size = *(uint32_t *)(shm->data + OFFSET_CHUNK_SIZE);
-    uint32_t sample_size = *(uint32_t *)(shm->data + OFFSET_SAMPLE_SIZE);
-    shm->num_slots = *(uint32_t *)(shm->data + OFFSET_NUM_SLOTS);
-    shm->num_channels = *(uint16_t *)(shm->data + OFFSET_NUM_CHANNELS);
-    shm->chunk_bytes = shm->chunk_size * sample_size * shm->num_channels;
-
-    printf("Opened shared memory ring buffer:\n");
-    printf("  Path: %s\n", path);
-    printf("  Chunk size: %u samples/channel (%u bytes)\n", shm->chunk_size, shm->chunk_bytes);
-    printf("  Num channels: %u\n", shm->num_channels);
-    printf("  Num slots: %u\n", shm->num_slots);
-    printf("  Sample size: %u bytes\n", sample_size);
-    printf("  Total size: %.1f MB\n", shm->total_size / 1024.0 / 1024.0);
-
-    return shm;
-}
-
-/* Create shared memory ring buffer (for when Julia hasn't created it yet) */
-static shm_ring_buffer_t *shm_ringbuf_create(const char *path, uint32_t chunk_size,
-                                      uint16_t num_channels, double buffer_seconds,
-                                      uint32_t sample_rate)
-{
-    shm_ring_buffer_t *shm = calloc(1, sizeof(shm_ring_buffer_t));
-    if (!shm) {
-        perror("calloc");
-        return NULL;
-    }
-
-    shm->num_channels = num_channels;
-    shm->chunk_size = chunk_size;
-    shm->chunk_bytes = chunk_size * SAMPLE_SIZE_COMPLEX_INT16 * num_channels;
-
-    /* Calculate number of slots for requested buffer time */
-    uint64_t bytes_per_second = (uint64_t)sample_rate * SAMPLE_SIZE_COMPLEX_INT16 * num_channels;
-    uint64_t total_buffer_bytes = (uint64_t)(bytes_per_second * buffer_seconds);
-    shm->num_slots = (total_buffer_bytes + shm->chunk_bytes - 1) / shm->chunk_bytes;
-    if (shm->num_slots < 16) shm->num_slots = 16;  /* minimum slots */
-
-    shm->total_size = SHM_HEADER_SIZE + (size_t)shm->num_slots * shm->chunk_bytes;
-
-    /* Create shared memory file */
-    int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0) {
-        perror(path);
-        free(shm);
-        return NULL;
-    }
-
-    if (ftruncate(fd, shm->total_size) < 0) {
-        perror("ftruncate");
-        close(fd);
-        free(shm);
-        return NULL;
-    }
-
-    shm->data = mmap(NULL, shm->total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    close(fd);
-
-    if (shm->data == MAP_FAILED) {
-        perror("mmap");
-        free(shm);
-        return NULL;
-    }
-
-    /* Initialize header */
-    memset(shm->data, 0, SHM_HEADER_SIZE);
-    *(uint32_t *)(shm->data + OFFSET_CHUNK_SIZE) = shm->chunk_size;
-    *(uint32_t *)(shm->data + OFFSET_SAMPLE_SIZE) = SAMPLE_SIZE_COMPLEX_INT16;
-    *(uint32_t *)(shm->data + OFFSET_NUM_SLOTS) = shm->num_slots;
-    *(uint16_t *)(shm->data + OFFSET_NUM_CHANNELS) = num_channels;
-
-    printf("Created shared memory ring buffer:\n");
-    printf("  Path: %s\n", path);
-    printf("  Chunk size: %u samples/channel (%u bytes)\n", chunk_size, shm->chunk_bytes);
-    printf("  Num channels: %u\n", num_channels);
-    printf("  Num slots: %u\n", shm->num_slots);
-    printf("  Buffer size: %.1f MB\n", shm->total_size / 1024.0 / 1024.0);
-    printf("  Buffer time: %.2f seconds\n",
-           (double)shm->num_slots * shm->chunk_size / sample_rate);
-
-    return shm;
-}
-
-static void shm_ringbuf_destroy(shm_ring_buffer_t *shm) {
-    if (shm) {
-        if (shm->data && shm->data != MAP_FAILED) {
-            munmap(shm->data, shm->total_size);
-        }
-        free(shm);
-    }
-}
-
-/* RF Initialization */
-/*-------------------*/
-
-static void m2sdr_rf_init(
-    uint32_t samplerate,
-    int64_t  bandwidth,
-    int64_t  tx_freq,
-    int64_t  tx_gain,
-    uint8_t  num_channels
-) {
-    void *conn = m2sdr_open();
-
-#ifdef CSR_SI5351_BASE
-    /* Initialize SI5351 Clocking with internal XO */
-    printf("Initializing SI5351 Clocking...\n");
-    m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-        SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-    m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
-        si5351_xo_40m_config,
-        sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
-#endif
-
-    /* Power-up AD9361 */
-    printf("Powering up AD9361...\n");
-    m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b11);
-
-    /* Initialize AD9361 SPI */
-    printf("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init(conn, 1);
-
-    /* Initialize AD9361 RFIC */
-    if (num_channels == 2) {
-        printf("Initializing AD9361 RFIC (2T2R mode)...\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 1;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
-        default_init_param.two_t_two_r_timing_enable     = 1;
-        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 0);  /* 2T2R */
-    } else {
-        printf("Initializing AD9361 RFIC (1T1R mode)...\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
-        default_init_param.two_t_two_r_timing_enable     = 0;
-        m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 1);  /* 1T1R */
-    }
-
-    default_init_param.reference_clk_rate          = 40000000;  /* 40 MHz */
-    default_init_param.gpio_resetb                 = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync                   = -1;
-    default_init_param.gpio_cal_sw1                = -1;
-    default_init_param.gpio_cal_sw2                = -1;
+    /* Set synthesizer frequency hint before init */
     default_init_param.tx_synthesizer_frequency_hz = tx_freq;
     default_init_param.rf_tx_bandwidth_hz          = bandwidth;
 
@@ -402,8 +56,7 @@ static void m2sdr_rf_init(
      * Without this, TX signal quality may be degraded. */
     printf("Configuring AD9361 channel mode...\n");
 
-    /* PHY control register must be set right before ad9361_set_no_ch_mode() */
-    m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, num_channels == 1 ? 1 : 0);
+    m2sdr_writel((void *)(intptr_t)fd, CSR_AD9361_PHY_CONTROL_ADDR, num_channels == 1 ? 1 : 0);
 
     ad9361_phy->pdata->rx2tx2 = (num_channels == 2);
     if (num_channels == 1) {
@@ -421,11 +74,8 @@ static void m2sdr_rf_init(
     /* Configure AD9361 Samplerate with proper FIR interpolation for low rates.
      * This matches SoapySDR's setSampleRate() behavior which is critical for
      * signal quality at low sample rates. */
-    printf("Setting TX Samplerate to %.2f MSPS.\n", samplerate/1e6);
+    printf("Setting TX Samplerate to %.2f MSPS.\n", samplerate / 1e6);
 
-    /* For sample rates below 2.5 Msps, enable FIR interpolation.
-     * SoapySDR uses interpolation=2 for rates 1.25-2.5 Msps and
-     * interpolation=4 for rates < 1.25 Msps. */
     if (samplerate < 1250000) {
         printf("Setting TX FIR Interpolation to 4 (< 1.25 Msps Samplerate).\n");
         ad9361_phy->tx_fir_int    = 4;
@@ -443,57 +93,35 @@ static void m2sdr_rf_init(
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     } else {
-        /* For higher sample rates, just set the default FIR config */
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
     }
 
     ad9361_set_tx_sampling_freq(ad9361_phy, samplerate);
 
-    /* Configure AD9361 TX Bandwidth */
-    printf("Setting TX Bandwidth to %.2f MHz.\n", bandwidth/1e6);
+    printf("Setting TX Bandwidth to %.2f MHz.\n", bandwidth / 1e6);
     ad9361_set_tx_rf_bandwidth(ad9361_phy, bandwidth);
 
-    /* Configure AD9361 TX Frequency */
-    printf("Setting TX LO Freq to %.2f MHz.\n", tx_freq/1e6);
+    printf("Setting TX LO Freq to %.2f MHz.\n", tx_freq / 1e6);
     ad9361_set_tx_lo_freq(ad9361_phy, tx_freq);
 
-    /* Configure AD9361 TX Attenuation (same for both channels)
-     * Note: tx_gain is negative dB attenuation (e.g., -10 means 10dB attenuation)
-     */
-    int32_t attenuation_mdb = (int32_t)(-tx_gain * 1000);  /* Convert to milli-dB */
+    /* Configure TX Attenuation (tx_gain is negative dB attenuation) */
+    int32_t attenuation_mdb = (int32_t)(-tx_gain * 1000);
     printf("Setting TX Attenuation to %ld dB (%" PRId32 " mdB).\n", -tx_gain, attenuation_mdb);
     ad9361_set_tx_attenuation(ad9361_phy, 0, attenuation_mdb);
-    if (num_channels == 2) {
+    if (num_channels == 2)
         ad9361_set_tx_attenuation(ad9361_phy, 1, attenuation_mdb);
-    }
 
-    /* 16-bit mode (samples in 16-bit words) */
-    m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
-
-    /* Enable Synchronizer (disable bypass) - matches SoapySDR */
-    m2sdr_writel(conn, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
-
-    /* Configure TX DMA header control - matches SoapySDR setupStream() behavior:
-     * Enable TX control but disable header insertion */
-    m2sdr_writel(conn, CSR_HEADER_TX_CONTROL_ADDR,
+    /* Configure TX DMA header control - matches SoapySDR setupStream() behavior */
+    m2sdr_writel((void *)(intptr_t)fd, CSR_HEADER_TX_CONTROL_ADDR,
         (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
         (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
-
-    /* Disable DMA loopback - matches SoapySDR */
-    m2sdr_writel(conn, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
-
-    m2sdr_close(conn);
 }
 
-/* Play from Shared Memory */
-/*-------------------------*/
-
-static void m2sdr_play_from_shm(
-    const char *device_name,
-    shm_ring_buffer_t *shm,
-    size_t num_samples,  /* 0 for infinite */
-    uint8_t quiet
-) {
+/*
+ * DMA TX Streaming from Shared Memory
+ */
+static void play_from_shm(shm_buffer_t *shm, size_t num_samples, uint8_t quiet)
+{
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
@@ -505,46 +133,43 @@ static void m2sdr_play_from_shm(
     uint64_t buffer_empty_count = 0;
 
     /* Samples per DMA buffer (accounting for all channels) */
-    size_t samples_per_dma = DMA_BUFFER_SIZE / (SAMPLE_SIZE_COMPLEX_INT16 * shm->num_channels);
+    size_t samples_per_dma = DMA_BUFFER_SIZE / (SHM_BYTES_PER_COMPLEX * shm->num_channels);
 
-    /* Initialize DMA in zero-copy mode for proper per-buffer tracking.
-     * This fixes a race condition where copy mode would send stale data
-     * because the bulk write() sends all 256 buffers at once. */
-    if (litepcie_dma_init(&dma, device_name, 1)) {  /* zero_copy = 1 */
+    /* Initialize DMA in zero-copy mode */
+    if (litepcie_dma_init(&dma, g_device_path, 1)) {
         fprintf(stderr, "litepcie_dma_init failed\n");
-        exit(1);
+        return;
     }
     dma.reader_enable = 1;
 
-    /* Get DMA buffer info for zero-copy mode */
+    /* Get DMA buffer info */
     uint32_t dma_buf_size = dma.mmap_dma_info.dma_tx_buf_size;
     uint32_t dma_buf_count = dma.mmap_dma_info.dma_tx_buf_count;
 
     if (dma.buf_wr == NULL || dma.buf_wr == MAP_FAILED) {
         fprintf(stderr, "DMA TX buffer not mapped correctly\n");
-        exit(1);
+        litepcie_dma_cleanup(&dma);
+        return;
     }
 
     if (dma_buf_count == 0 || dma_buf_size == 0) {
         fprintf(stderr, "DMA buffer info not populated (buf_count=%u, buf_size=%u)\n",
                 dma_buf_count, dma_buf_size);
-        fprintf(stderr, "This may indicate the driver doesn't support zero-copy mode.\n");
-        exit(1);
+        litepcie_dma_cleanup(&dma);
+        return;
     }
 
-    /* User-side buffer tracking for zero-copy mode */
-    int64_t user_count = 0;  /* Next buffer to fill */
-    int64_t hw_count = 0;    /* Last buffer consumed by HW */
+    /* User-side buffer tracking */
+    int64_t user_count = 0;
+    int64_t hw_count = 0;
 
     /* Crossbar Mux: select PCIe streaming for TX */
     m2sdr_writel(dma.fds.fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
 
-    /* Reset DMA counters to ensure clean state (matches SoapySDR behavior).
-     * This prevents stale counter values from previous runs causing underflows.
-     * Call with enable=0 first to reset, then enable=1 will be used in the loop. */
+    /* Reset DMA counters */
     int64_t sw_count_init = 0;
     litepcie_dma_reader(dma.fds.fd, 0, &hw_count, &sw_count_init);
-    user_count = hw_count;  /* Sync user_count with actual HW state */
+    user_count = hw_count;
 
     printf("Starting DMA play from shared memory (zero-copy mode)...\n");
     printf("  DMA buffer size: %u bytes (%zu samples/channel)\n",
@@ -561,30 +186,29 @@ static void m2sdr_play_from_shm(
     }
 
     last_time = get_time_ms();
-    int64_t sw_count_tmp = 0;  /* Used for litepcie_dma_reader calls */
+    int64_t sw_count_tmp = 0;
 
     for (;;) {
-        if (!keep_running)
+        if (!g_keep_running)
             break;
 
         if (num_samples > 0 && samples_transmitted >= num_samples)
             break;
 
-        /* Get current HW count to know how many buffers are available */
+        /* Get current HW count */
         litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
 
-        /* Detect DMA underflow: HW has consumed more than we've submitted */
+        /* Detect DMA underflow */
         if (hw_count > user_count) {
             underflow_count++;
-            shm_set_underflow_count(shm, underflow_count);
+            shm_store_error_count(shm, underflow_count);
             if (!quiet) {
                 fprintf(stderr, "\rUNDERFLOW #%" PRIu64 "\n", underflow_count);
             }
-            /* Resync: HW is ahead, so we need to catch up */
             user_count = hw_count;
         }
 
-        /* Calculate how many buffers we can fill */
+        /* Calculate available buffers */
         int64_t buffers_pending = user_count - hw_count;
         int64_t buffers_available = (int64_t)dma_buf_count - buffers_pending;
 
@@ -595,39 +219,30 @@ static void m2sdr_play_from_shm(
                 perror("poll");
                 break;
             } else if (ret == 0) {
-                /* Timeout - check for termination conditions */
                 continue;
             }
-            /* Re-check after poll */
             litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
             buffers_pending = user_count - hw_count;
             buffers_available = (int64_t)dma_buf_count - buffers_pending;
         }
 
-        /* Fill available DMA buffers from shared memory.
-         * Only submit buffers when we have real data from SHM.
-         * If SHM is empty, break out and wait - we have DMA buffer headroom.
-         * This avoids sending zeros which cause CN0 drops. */
+        /* Fill available DMA buffers from shared memory */
         while (buffers_available > 0) {
-            /* Check if data available in shared memory */
             if (!shm_can_read(shm)) {
                 /* Check if producer is done */
                 if (shm_is_writer_done(shm)) {
                     printf("Producer signaled done.\n");
-                    keep_running = 0;
+                    g_keep_running = 0;
                     break;
                 }
-                /* No data yet. Check how many buffers are still queued in DMA.
-                 * If we have enough headroom, wait for Julia. If running low,
-                 * send zeros to prevent underflow. */
+                /* No data yet. If we have enough headroom, wait */
                 int64_t current_pending = user_count - hw_count;
                 if (current_pending >= 8) {
-                    /* We have at least 8 buffers queued - safe to wait */
                     break;
                 }
-                /* Running low on queued buffers - send zeros to prevent underflow */
+                /* Running low - send zeros to prevent underflow */
                 buffer_empty_count++;
-                shm_set_buffer_empty_count(shm, buffer_empty_count);
+                shm_store_buffer_stall(shm, buffer_empty_count);
                 if (!quiet) {
                     fprintf(stderr, "\rBUF_EMPTY #%" PRIu64 " (pending=%" PRId64 ")\n",
                             buffer_empty_count, current_pending);
@@ -639,29 +254,23 @@ static void m2sdr_play_from_shm(
                 /* Copy data from shared memory to DMA buffer */
                 int buf_offset = user_count % dma_buf_count;
                 char *buf_wr = dma.buf_wr + buf_offset * dma_buf_size;
-                uint64_t read_idx = shm_get_read_index(shm);
+                uint64_t read_idx = shm_load_read_index(shm);
                 uint8_t *src = shm_slot_ptr(shm, read_idx);
 
-                /* Handle size mismatch: copy min of both sizes */
                 size_t copy_size = (shm->chunk_bytes < dma_buf_size) ?
                                     shm->chunk_bytes : dma_buf_size;
                 memcpy(buf_wr, src, copy_size);
 
-                /* Zero-pad if SHM chunk is smaller than DMA buffer */
                 if (copy_size < dma_buf_size) {
                     memset(buf_wr + copy_size, 0, dma_buf_size - copy_size);
                 }
 
-                /* Update read index */
                 chunks_read++;
                 samples_transmitted += shm->chunk_size;
-                shm_set_read_index(shm, read_idx + 1);
-                shm_set_chunks_read(shm, chunks_read);
+                shm_store_read_index(shm, read_idx + 1);
             }
 
-            /* Memory barrier to ensure the DMA buffer write is visible before
-             * we tell the kernel the buffer is ready. This prevents a race
-             * where DMA might read stale/partial data. */
+            /* Memory barrier before submitting to kernel */
             __sync_synchronize();
 
             /* Advance user count and tell kernel this buffer is ready */
@@ -678,7 +287,7 @@ static void m2sdr_play_from_shm(
         if (!quiet && duration > 200) {
             litepcie_dma_reader(dma.fds.fd, 1, &hw_count, &sw_count_tmp);
             double speed = (double)(hw_count - reader_hw_count_last) * dma_buf_size * 8 / ((double)duration * 1e6);
-            uint64_t size_mb = (samples_transmitted * SAMPLE_SIZE_COMPLEX_INT16 * shm->num_channels) / 1024 / 1024;
+            uint64_t size_mb = (samples_transmitted * SHM_BYTES_PER_COMPLEX * shm->num_channels) / 1024 / 1024;
 
             if (i % 10 == 0) {
                 fprintf(stderr, "\e[1m%10s %12s %9s %10s %12s\e[0m\n",
@@ -703,13 +312,13 @@ static void m2sdr_play_from_shm(
     printf("  Buffer empty events: %" PRIu64 "\n", buffer_empty_count);
 }
 
-/* Help */
-/*------*/
-
+/*
+ * Help
+ */
 static void help(void)
 {
     printf("M2SDR Play from Shared Memory Utility\n"
-           "usage: m2sdr_play_shm [options]\n"
+           "usage: m2sdr_tx_stream_shm [options]\n"
            "\n"
            "Options:\n"
            "  -h                     Show this help message and exit.\n"
@@ -735,10 +344,7 @@ static void help(void)
     exit(1);
 }
 
-/* Options */
-/*---------*/
-
-static struct option options[] = {
+static struct option long_options[] = {
     { "help",        no_argument,       NULL, 'h' },
     { "samplerate",  required_argument, NULL, 's' },
     { "bandwidth",   required_argument, NULL, 'b' },
@@ -751,13 +357,8 @@ static struct option options[] = {
     { NULL },
 };
 
-/* Main */
-/*------*/
-
 int main(int argc, char **argv)
 {
-    int c;
-
     /* Defaults */
     uint32_t samplerate  = DEFAULT_SAMPLERATE;
     int64_t  bandwidth   = DEFAULT_BANDWIDTH;
@@ -769,13 +370,13 @@ int main(int argc, char **argv)
 
     const char *shm_path = "/dev/shm/sdr_tx_ringbuffer";
     double   buffer_time = 3.0;
-    size_t   num_samples = 0;  /* 0 = infinite */
+    size_t   num_samples = 0;
 
-    signal(SIGINT, intHandler);
+    m2sdr_install_signal_handlers();
 
-    /* Parse options */
+    int c;
     for (;;) {
-        c = getopt_long_only(argc, argv, "hc:qw", options, NULL);
+        c = getopt_long_only(argc, argv, "hc:qw", long_options, NULL);
         if (c == -1)
             break;
 
@@ -784,7 +385,7 @@ int main(int argc, char **argv)
             help();
             break;
         case 'c':
-            m2sdr_device_num = atoi(optarg);
+            g_device_num = atoi(optarg);
             break;
         case 'q':
             quiet = 1;
@@ -825,12 +426,11 @@ int main(int argc, char **argv)
         }
     }
 
-    /* Select device */
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
+    snprintf(g_device_path, sizeof(g_device_path), "/dev/m2sdr%d", g_device_num);
 
     printf("M2SDR Play from Shared Memory\n");
     printf("=============================\n");
-    printf("Device: %s\n", m2sdr_device);
+    printf("Device: %s\n", g_device_path);
     printf("Sample rate: %.2f MHz\n", samplerate / 1e6);
     printf("TX frequency: %.2f MHz\n", tx_freq / 1e6);
     printf("TX gain: %ld dB\n", tx_gain);
@@ -843,32 +443,39 @@ int main(int argc, char **argv)
         printf("Num samples: infinite (Ctrl+C to stop)\n");
     printf("\n");
 
+    /* Open device for RF init */
+    int fd = open(g_device_path, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "Could not open %s\n", g_device_path);
+        return 1;
+    }
+
     /* Initialize RF */
-    m2sdr_rf_init(samplerate, bandwidth, tx_freq, tx_gain, num_channels);
+    rf_init(fd, samplerate, bandwidth, tx_freq, tx_gain, num_channels);
+    close(fd);
 
     /* Open or create shared memory */
-    shm_ring_buffer_t *shm = NULL;
+    shm_buffer_t *shm = NULL;
 
     if (wait_for_shm) {
         printf("Waiting for shared memory at %s...\n", shm_path);
-        while (!shm && keep_running) {
-            shm = shm_ringbuf_open(shm_path);
+        while (!shm && g_keep_running) {
+            shm = shm_open_existing(shm_path);
             if (!shm) {
                 sleep(1);
             }
         }
-        if (!keep_running) {
+        if (!g_keep_running) {
             printf("Interrupted while waiting.\n");
             return 1;
         }
     } else {
         /* Try to open existing, otherwise create new */
-        shm = shm_ringbuf_open(shm_path);
+        shm = shm_open_existing(shm_path);
         if (!shm) {
             printf("Creating new shared memory...\n");
-            /* Use DMA buffer size as chunk size for simplicity */
-            uint32_t chunk_size = DMA_BUFFER_SIZE / (SAMPLE_SIZE_COMPLEX_INT16 * num_channels);
-            shm = shm_ringbuf_create(shm_path, chunk_size, num_channels, buffer_time, samplerate);
+            shm = shm_create(shm_path, DMA_BUFFER_SIZE, num_channels,
+                             buffer_time, samplerate);
         }
     }
 
@@ -878,10 +485,10 @@ int main(int argc, char **argv)
     }
 
     /* Play from shared memory */
-    m2sdr_play_from_shm(m2sdr_device, shm, num_samples, quiet);
+    play_from_shm(shm, num_samples, quiet);
 
     /* Cleanup */
-    shm_ringbuf_destroy(shm);
+    shm_destroy(shm);
 
     return 0;
 }
