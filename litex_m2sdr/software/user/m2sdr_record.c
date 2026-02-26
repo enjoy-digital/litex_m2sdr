@@ -23,6 +23,7 @@
 #include "libm2sdr.h"
 
 #if defined(USE_LITEETH)
+#include <arpa/inet.h>
 #include "etherbone.h"
 #include "liteeth_udp.h"
 #endif
@@ -42,8 +43,10 @@ extern int64_t get_time_ms(void);
 
 #if defined(USE_LITEETH)
 /* Ethernet configuration (mirrors m2sdr_rf defaults & flags) */
-static char m2sdr_ip_address[1024] = "192.168.1.50";
-static char m2sdr_port[16] = "1234";
+static char m2sdr_ip_address[1024]      = "192.168.1.50";
+static char m2sdr_port[16]              = "1234";
+static char m2sdr_host_ip_address[1024] = "";
+static int  m2sdr_host_ip_set           = 0;
 #endif
 
 /* Record (DMA RX / UDP RX) */
@@ -211,14 +214,26 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
         exit(1);
     }
 
+    /* Program the FPGA's RX streamer destination IP when -d was given. */
+    if (m2sdr_host_ip_set) {
+        struct in_addr host_addr;
+        if (inet_pton(AF_INET, m2sdr_host_ip_address, &host_addr) != 1) {
+            fprintf(stderr, "Invalid host IP address: %s\n", m2sdr_host_ip_address);
+            eb_disconnect(&eb);
+            exit(1);
+        }
+        uint32_t host_ip = ntohl(host_addr.s_addr);
+        m2sdr_writel(eb, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, host_ip);
+    }
+
+    /* Crossbar Demux: route RFIC RX to Ethernet (RX-only path, mux not needed). */
+    m2sdr_writel(eb, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+
     /* Configure RX Header (match PCIe path behavior). */
     m2sdr_writel(eb, CSR_HEADER_RX_CONTROL_ADDR,
        (1      << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
        (header << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
     );
-
-    /* Crossbar Demux: select Ethernet streaming for RX */
-    m2sdr_writel(eb, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
 
     /* UDP helper (RX only). Buffer sizing: library defaults. */
     struct liteeth_udp_ctrl udp;
@@ -377,6 +392,7 @@ static void help(void)
 #elif defined(USE_LITEETH)
            "-i ip_address         Target IP address for Etherbone/UDP (default: 192.168.1.50).\n"
            "-p port               Port number (default = 1234).\n"
+           "-d host_ip_address    Host IP address for FPGA RX stream destination (default: 192.168.1.1).\n"
 #endif
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
@@ -411,7 +427,7 @@ int main(int argc, char **argv)
 #if defined(USE_LITEPCIE)
         c = getopt(argc, argv, "hc:zqts");
 #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:zqts");
+        c = getopt(argc, argv, "hi:p:d:zqts");
 #endif
         if (c == -1)
             break;
@@ -431,6 +447,11 @@ int main(int argc, char **argv)
         case 'p':
             strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
             m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
+            break;
+        case 'd':
+            strncpy(m2sdr_host_ip_address, optarg, sizeof(m2sdr_host_ip_address) - 1);
+            m2sdr_host_ip_address[sizeof(m2sdr_host_ip_address) - 1] = '\0';
+            m2sdr_host_ip_set = 1;
             break;
 #endif
         case 'z':
