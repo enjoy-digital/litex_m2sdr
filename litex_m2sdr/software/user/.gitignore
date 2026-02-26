@@ -6,4 +6,6 @@
 /m2sdr_record
 /m2sdr_rf
 /m2sdr_sata
+/m2sdr_rx_stream_shm
+/m2sdr_tx_stream_shm
 /m2sdr_util
