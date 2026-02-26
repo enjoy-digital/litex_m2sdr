@@ -153,6 +153,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 
 #elif USE_LITEETH
+    if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
+        throw std::runtime_error(
+            "Soapy RX streaming is not supported in eth_mode=vrt (control-plane only). "
+            "Use an external VRT UDP receiver.");
+    }
     /* Lazy-init UDP helper (enable RX+TX to mirror DMA symmetry). */
     if (!_udp_inited) {
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
@@ -393,6 +398,9 @@ int SoapyLiteXM2SDR::activateStream(
 #elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+#ifdef CSR_ETH_RX_MODE_ADDR
+        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR, 1); /* Ethernet RX branch -> raw UDP */
+#endif
         /* UDP helper is ready; nothing to start explicitly. */
 #endif
         _rx_stream.user_count = 0;
@@ -446,7 +454,10 @@ int SoapyLiteXM2SDR::deactivateStream(
 #if USE_LITEPCIE
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
-        /* No-op for UDP helper. */
+        /* Flush/disable Ethernet RX branch when available. */
+#ifdef CSR_ETH_RX_MODE_ADDR
+        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR, 0);
+#endif
 #endif
         /* set burst_end: if readStream is called after this point SOAPY_SDR_END_BURST
          * will be set

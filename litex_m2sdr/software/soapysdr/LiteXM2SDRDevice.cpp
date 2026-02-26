@@ -434,6 +434,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
 
+    std::string eth_mode = "udp";
+    if (args.count("eth_mode") > 0)
+        eth_mode = args.at("eth_mode");
+    if (eth_mode == "udp")
+        _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
+    else if (eth_mode == "vrt")
+        _eth_mode = SoapyLiteXM2SDREthernetMode::VRT;
+    else
+        throw std::runtime_error("Invalid eth_mode: " + eth_mode + " (supported: udp, vrt)");
+
     /* Ethernet FPGA streamer configuration */
 
     /* Determine the local IP that the board sees */
@@ -450,6 +460,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     litex_m2sdr_writel(_fd, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
+
+    if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
+        /* Route RX to Ethernet on the main crossbar. */
+        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+#ifdef CSR_ETH_RX_MODE_ADDR
+        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR, 2); /* Ethernet RX branch -> VRT */
+#else
+        throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks eth_rx_mode CSR (rebuild with --with-eth-vrt)");
+#endif
+#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
+        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
+        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
+        if (args.count("vrt_port") > 0) {
+            litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR,
+                static_cast<uint32_t>(std::stoul(args.at("vrt_port"))));
+        }
+        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 1);
+#else
+        throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks vrt_streamer CSR (rebuild with --with-eth-vrt)");
+#endif
+        SoapySDR::logf(SOAPY_SDR_INFO, "Enabled FPGA VRT RX streaming (control-plane only)");
+    }
 #endif
 
     /* Configure Mode based on _bitMode */
@@ -713,6 +745,11 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         liteeth_udp_cleanup(&_udp);
         _udp_inited = false;
     }
+#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
+    if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
+        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
+    }
+#endif
     if (_fd) {
         eb_disconnect(&_fd);
         _fd = NULL;

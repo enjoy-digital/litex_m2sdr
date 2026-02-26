@@ -34,6 +34,11 @@
 extern "C" {
 #include "liteeth_udp.h"
 }
+
+enum class SoapyLiteXM2SDREthernetMode {
+    UDP = 0,
+    VRT = 1,
+};
 #endif
 
 #define DEBUG
@@ -386,6 +391,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 #if USE_LITEETH
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
+    SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
 #endif
 
     struct Stream {
