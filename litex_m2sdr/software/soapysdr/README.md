@@ -130,6 +130,8 @@ This repository includes several Python utilities to help test and demonstrate t
 
 - **test_play.py, test_record.py, test_time.py**
   Python scripts to test and demonstrate transmission, recording, and hardware time functionality using the LiteXM2SDR SoapySDR driver.
+- **test_vrt_rx.py**
+  Python script to validate Soapy RX over Ethernet `eth_mode=vrt` (timestamp monotonicity and continuity proxy checks).
 
 ---
 
