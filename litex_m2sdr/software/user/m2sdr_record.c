@@ -272,9 +272,19 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
             if (!buf) break;
 
             if (header) {
-                uint64_t sync = *(uint64_t*)buf;
-                if (sync == HDR_SYNC_WORD) {
-                    last_timestamp = *(uint64_t*)(buf + 8);
+                /* Scan the entire buffer at 8-byte granularity for the sync word.
+                 * The header may not be at offset 0 due to UDP stream misalignment:
+                 * rx_fill_slot() assembles fixed-size chunks from the continuous UDP
+                 * stream with no regard for frame boundaries, so headers can land
+                 * anywhere in the assembled buffer. */
+                for (size_t scan_off = 0; scan_off + 16 <= udp.buf_size; scan_off += 8)
+                {
+                    uint64_t sync;
+                    memcpy(&sync, buf + scan_off, 8);
+                    if (sync == HDR_SYNC_WORD)
+                    {
+                        memcpy(&last_timestamp, buf + scan_off + 8, 8);
+                    }
                 }
             }
 
