@@ -46,7 +46,19 @@ extern int64_t get_time_ms(void);
 static char m2sdr_ip_address[1024]      = "192.168.1.50";
 static char m2sdr_port[16]              = "1234";
 static char m2sdr_host_ip_address[1024] = "";
+static char m2sdr_host_udp_port[16]     = "2345";
 static int  m2sdr_host_ip_set           = 0;
+
+static uint16_t parse_udp_port_or_die(const char *label, const char *value)
+{
+    char *endptr = NULL;
+    unsigned long port = strtoul(value, &endptr, 0);
+    if (value[0] == '\0' || endptr == value || *endptr != '\0' || port == 0 || port > 65535) {
+        fprintf(stderr, "Invalid %s: %s\n", label, value);
+        exit(1);
+    }
+    return (uint16_t)port;
+}
 #endif
 
 /* Record (DMA RX / UDP RX) */
@@ -205,7 +217,8 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
     /* Use CLI-provided IP/port */
     const char *ip   = m2sdr_ip_address;
     const char *port = m2sdr_port;
-    uint16_t udp_port = (uint16_t)strtoul(port, NULL, 0);
+    uint16_t udp_port      = parse_udp_port_or_die("target port", port);
+    uint16_t host_udp_port = parse_udp_port_or_die("host UDP port", m2sdr_host_udp_port);
 
     /* Etherbone for CSR access (header enable) */
     struct eb_connection *eb = eb_connect(ip, port, 1);
@@ -225,6 +238,7 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
         uint32_t host_ip = ntohl(host_addr.s_addr);
         m2sdr_writel(eb, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, host_ip);
     }
+    m2sdr_writel(eb, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, host_udp_port);
 
     /* Crossbar Demux: route RFIC RX to Ethernet (RX-only path, mux not needed). */
     m2sdr_writel(eb, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
@@ -238,7 +252,7 @@ static void m2sdr_record(const char *device_name, const char *filename, size_t s
     /* UDP helper (RX only). Buffer sizing: library defaults. */
     struct liteeth_udp_ctrl udp;
     if (liteeth_udp_init(&udp,
-                         /*listen_ip*/ NULL, /*listen_port*/ 2345,
+                         /*listen_ip*/ NULL, /*listen_port*/ host_udp_port,
                          /*remote_ip*/ ip,   /*remote_port*/ udp_port,
                          /*rx_enable*/ 1,    /*tx_enable*/ 0,
                          /*buffer_size*/ 0,  /*buffer_count*/ 0,
@@ -393,6 +407,7 @@ static void help(void)
            "-i ip_address         Target IP address for Etherbone/UDP (default: 192.168.1.50).\n"
            "-p port               Port number (default = 1234).\n"
            "-d host_ip_address    Host IP address for FPGA RX stream destination (optional).\n"
+           "-u host_udp_port      Host UDP port for RX stream (default = 2345).\n"
 #endif
            "-z                    Enable zero-copy DMA mode.\n"
            "-q                    Quiet mode (suppress statistics).\n"
@@ -427,7 +442,7 @@ int main(int argc, char **argv)
 #if defined(USE_LITEPCIE)
         c = getopt(argc, argv, "hc:zqts");
 #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:d:zqts");
+        c = getopt(argc, argv, "hi:p:d:u:zqts");
 #endif
         if (c == -1)
             break;
@@ -452,6 +467,10 @@ int main(int argc, char **argv)
             strncpy(m2sdr_host_ip_address, optarg, sizeof(m2sdr_host_ip_address) - 1);
             m2sdr_host_ip_address[sizeof(m2sdr_host_ip_address) - 1] = '\0';
             m2sdr_host_ip_set = 1;
+            break;
+        case 'u':
+            strncpy(m2sdr_host_udp_port, optarg, sizeof(m2sdr_host_udp_port) - 1);
+            m2sdr_host_udp_port[sizeof(m2sdr_host_udp_port) - 1] = '\0';
             break;
 #endif
         case 'z':
