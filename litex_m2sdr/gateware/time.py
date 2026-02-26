@@ -145,3 +145,24 @@ class TimeGenerator(LiteXModule):
         )
         self.time        = time
         self.time_change = time_change
+
+
+class TimeNsToPS(LiteXModule):
+    """Convert nanoseconds timestamp to (seconds, picosecond-fraction) fields for VRT TSF=REAL_TIME."""
+    def __init__(self, time_ns, time_s, time_ps):
+        assert len(time_ns) == 64
+        assert len(time_s) == 32
+        assert len(time_ps) == 64
+
+        time_ns_reg = Signal(64)
+        product_s1e9 = Signal(64)
+        remainder_ns = Signal(32)
+        fraction_ps = Signal(64)
+
+        self.sync += [
+            time_ns_reg.eq(time_ns),
+            product_s1e9.eq(time_s * 1_000_000_000),
+            remainder_ns.eq(time_ns_reg - product_s1e9),
+            fraction_ps.eq(remainder_ns * 1000),
+        ]
+        self.comb += time_ps.eq(fraction_ps)
