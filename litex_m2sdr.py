@@ -51,12 +51,14 @@ from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
-from litex_m2sdr.gateware.time        import TimeGenerator
+from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
+from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
+from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -200,11 +202,14 @@ class BaseSoC(SoCMini):
         # Measurements/Analyzer.
         "clk_measurement"  : 30,
         "analyzer"         : 31,
+        "eth_rx_mode"      : 35,
+        "vrt_streamer"     : 36,
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
+        with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16, wr_firmware=None,
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
@@ -313,6 +318,14 @@ class BaseSoC(SoCMini):
             time     = self.time_gen.time,
             reset    = self.time_gen.time_change,
         )
+        self.time_s_vrt  = Signal(32)
+        self.time_ps_vrt = Signal(64)
+        self.time_ns_to_ps = TimeNsToPS(
+            time_ns = self.time_gen.time,
+            time_s  = self.time_s_vrt,
+            time_ps = self.time_ps_vrt,
+        )
+        self.comb += self.time_s_vrt.eq(self.pps_gen.count)
 
         # JTAGBone ---------------------------------------------------------------------------------
 
@@ -502,6 +515,37 @@ class BaseSoC(SoCMini):
             )
             self.comb += eth_streamer_port.source.connect(self.eth_tx_streamer.sink)
 
+            if with_eth_vrt:
+                self.eth_rx_mode = CSRStorage(fields=[
+                    CSRField("sel", size=2, offset=0, reset=1, values=[
+                        ("``0b00``", "Disable/flush Ethernet RX output."),
+                        ("``0b01``", "Route Ethernet RX to raw UDP streamer."),
+                        ("``0b10``", "Route Ethernet RX to VRT UDP streamer."),
+                    ])
+                ])
+
+                self.eth_rx_demux = stream.Demultiplexer(layout=dma_layout(64), n=3, with_csr=False)
+                self.comb += self.eth_rx_demux.sel.eq(self.eth_rx_mode.fields.sel)
+                self.comb += self.eth_rx_demux.source0.ready.eq(1)  # Flush path.
+
+                self.vrt_rx_conv = stream.Converter(64, 32)
+                self.vrt_rx_packetizer = RFICDataPacketizer(data_width=32, data_words=256)
+                self.vrt_streamer = VRTSignalPacketStreamer(
+                    udp_crossbar = self.ethcore_etherbone.udp.crossbar,
+                    ip_address   = vrt_dst_ip,
+                    udp_port     = vrt_dst_port,
+                    data_width   = 32,
+                    with_csr     = True,
+                )
+                self.comb += [
+                    self.eth_rx_demux.source2.connect(self.vrt_rx_conv.sink, omit={"error"}),
+                    self.vrt_rx_conv.source.connect(self.vrt_rx_packetizer.sink),
+                    self.vrt_rx_packetizer.source.connect(self.vrt_streamer.sink),
+                    self.vrt_streamer.sink.stream_id.eq(0xdeadbeef),
+                    self.vrt_streamer.sink.timestamp_int.eq(self.time_s_vrt),
+                    self.vrt_streamer.sink.timestamp_fra.eq(self.time_ps_vrt),
+                ]
+
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
@@ -611,7 +655,13 @@ class BaseSoC(SoCMini):
                 )
             ]
         if with_eth:
-            self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
+            if with_eth_vrt:
+                self.comb += [
+                    self.crossbar.demux.source1.connect(self.eth_rx_demux.sink, omit={"error"}),
+                    self.eth_rx_demux.source1.connect(self.eth_rx_streamer.sink),
+                ]
+            else:
+                self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
 
@@ -906,6 +956,9 @@ def main():
     parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
+    parser.add_argument("--with-eth-vrt",    action="store_true",     help="Enable Ethernet RX VRT UDP streamer path.")
+    parser.add_argument("--vrt-dst-ip",      default="239.168.1.100", help="VRT destination IP address (when --with-eth-vrt).")
+    parser.add_argument("--vrt-dst-port",    default=4991, type=int,  help="VRT destination UDP port (when --with-eth-vrt).")
 
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
@@ -970,6 +1023,9 @@ def main():
         eth_phy       = args.eth_phy,
         eth_local_ip  = args.eth_local_ip,
         eth_udp_port  = args.eth_udp_port,
+        with_eth_vrt  = args.with_eth_vrt,
+        vrt_dst_ip    = args.vrt_dst_ip,
+        vrt_dst_port  = args.vrt_dst_port,
 
         # SATA.
         with_sata     = args.with_sata,
@@ -1009,6 +1065,8 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+            if args.with_eth_vrt:
+                r += "_vrt"
         if args.with_sata:
             r += f"_sata"
         if args.with_white_rabbit:

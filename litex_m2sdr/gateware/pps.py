@@ -25,6 +25,7 @@ class PPSGenerator(LiteXModule):
         # IOs.
         self.pps       = pps       = Signal() # PPS output.
         self.pps_pulse = pps_pulse = Signal() # PPS pulse output.
+        self.count     = Signal(32)          # PPS pulse count / coarse seconds counter.
 
         # # #
 
@@ -66,4 +67,11 @@ class PPSGenerator(LiteXModule):
             self.timer.wait.eq(~start),
             pps.eq(~self.timer.done),
             pps_pulse.eq(start),
+        ]
+        self.sync += [
+            If(reset,
+                self.count.eq(0)
+            ).Elif(start,
+                self.count.eq(self.count + 1)
+            )
         ]
