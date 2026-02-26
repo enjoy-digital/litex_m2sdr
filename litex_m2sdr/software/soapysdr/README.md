@@ -42,10 +42,17 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Per-channel antenna**: `rx_antenna0=...`, `rx_antenna1=...`, `tx_antenna0=...`, `tx_antenna1=...`
 - **Bit mode**: `bitmode=8|16`
 - **Oversampling**: `oversampling=0|1`
+- **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
+  - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
 
 Example:
 ```bash
 SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,rx_antenna_list=A_BALANCED,tx_antenna_list=A,bitmode=8,oversampling=1"
+```
+
+Example (122.88 MSPS edge-flatness A/B test):
+```bash
+SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
 ```
 
 ---

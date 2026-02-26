@@ -164,6 +164,104 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
         return true;
     return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
+
+void fir_set_64_taps(int16_t *dst, const int16_t *src)
+{
+    std::memset(dst, 0, 128 * sizeof(int16_t));
+    std::memcpy(dst, src, 64 * sizeof(int16_t));
+}
+
+AD9361_RXFIRConfig make_rx_fir_from_64(const int16_t *taps)
+{
+    AD9361_RXFIRConfig cfg = rx_fir_config;
+    cfg.rx      = 3;
+    cfg.rx_gain = -6;
+    cfg.rx_dec  = 1;
+    fir_set_64_taps(cfg.rx_coef, taps);
+    cfg.rx_coef_size = 64;
+    return cfg;
+}
+
+AD9361_TXFIRConfig make_tx_fir_from_64(const int16_t *taps, int tx_gain_db = -6)
+{
+    AD9361_TXFIRConfig cfg = tx_fir_config;
+    cfg.tx      = 3;
+    cfg.tx_gain = tx_gain_db;
+    cfg.tx_int  = 1;
+    fir_set_64_taps(cfg.tx_coef, taps);
+    cfg.tx_coef_size = 64;
+    return cfg;
+}
+
+AD9361_RXFIRConfig make_rx_fir_bypass()
+{
+    AD9361_RXFIRConfig cfg = rx_fir_config;
+    cfg.rx      = 3;
+    cfg.rx_gain = -6;
+    cfg.rx_dec  = 1;
+    std::memset(cfg.rx_coef, 0, sizeof(cfg.rx_coef));
+    cfg.rx_coef[0] = 32767;
+    cfg.rx_coef_size = 64;
+    return cfg;
+}
+
+AD9361_TXFIRConfig make_tx_fir_bypass()
+{
+    AD9361_TXFIRConfig cfg = tx_fir_config;
+    cfg.tx      = 3;
+    cfg.tx_gain = 0;
+    cfg.tx_int  = 1;
+    std::memset(cfg.tx_coef, 0, sizeof(cfg.tx_coef));
+    cfg.tx_coef[0] = 32767;
+    cfg.tx_coef_size = 64;
+    return cfg;
+}
+
+/* Experimental 1x FIR candidates for the 122.88 MSPS oversampling mode.
+ * These widen the FIR passband versus the legacy BladeRF-derived RX filter.
+ * They are symmetric 64-tap LPFs and should be treated as A/B test profiles. */
+static const int16_t fir_1x_wide_taps[64] = {
+     -65,     15,    109,    -15,   -166,      9,    240,      4,
+    -331,    -30,    442,     72,   -577,   -135,    739,    228,
+    -934,   -359,   1173,    544,  -1473,   -811,   1867,   1208,
+   -2425,  -1847,   3323,   3033,  -5141,  -6052,  11568,  32767,
+   32767,  11568,  -6052,  -5141,   3033,   3323,  -1847,  -2425,
+    1208,   1867,   -811,  -1473,    544,   1173,   -359,   -934,
+     228,    739,   -135,   -577,     72,    442,    -30,   -331,
+       4,    240,      9,   -166,    -15,    109,     15,    -65,
+};
+
+bool select_ad9361_fir_profile_1x(const std::string &name,
+                                  AD9361_RXFIRConfig &rx_cfg,
+                                  AD9361_TXFIRConfig &tx_cfg,
+                                  std::string &canonical_name)
+{
+    if (name.empty() || name == "legacy") {
+        rx_cfg = rx_fir_config;
+        tx_cfg = tx_fir_config;
+        canonical_name = "legacy";
+        return true;
+    }
+    if (name == "bypass") {
+        rx_cfg = make_rx_fir_bypass();
+        tx_cfg = make_tx_fir_bypass();
+        canonical_name = "bypass";
+        return true;
+    }
+    if (name == "match") {
+        rx_cfg = rx_fir_config;
+        tx_cfg = make_tx_fir_from_64(rx_fir_config.rx_coef, -6);
+        canonical_name = "match";
+        return true;
+    }
+    if (name == "wide") {
+        rx_cfg = make_rx_fir_from_64(fir_1x_wide_taps);
+        tx_cfg = make_tx_fir_from_64(fir_1x_wide_taps, -6);
+        canonical_name = "wide";
+        return true;
+    }
+    return false;
+}
 } // namespace
 
 //#define AD9361_SPI_WRITE_DEBUG
@@ -416,6 +514,22 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("oversampling") > 0) {
         _oversampling = std::stoi(args.at("oversampling"));
     }
+    if (args.count("ad9361_fir_profile") > 0) {
+        _ad9361_fir_profile = args.at("ad9361_fir_profile");
+    } else if (args.count("fir_profile") > 0) {
+        _ad9361_fir_profile = args.at("fir_profile");
+    }
+
+    AD9361_RXFIRConfig rx_fir_cfg_base;
+    AD9361_TXFIRConfig tx_fir_cfg_base;
+    std::string fir_profile_canonical;
+    if (!select_ad9361_fir_profile_1x(_ad9361_fir_profile, rx_fir_cfg_base, tx_fir_cfg_base, fir_profile_canonical)) {
+        throw std::runtime_error(
+            "Invalid ad9361_fir_profile '" + _ad9361_fir_profile +
+            "' (supported: legacy, bypass, match, wide)");
+    }
+    _ad9361_fir_profile = fir_profile_canonical;
+    SoapySDR::logf(SOAPY_SDR_INFO, "AD9361 1x FIR profile: %s", _ad9361_fir_profile.c_str());
 
     _rx_antennas = {"A_BALANCED"};
     _tx_antennas = {"A"};
@@ -489,8 +603,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg_base);
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg_base);
 
         /* Some defaults to avoid throwing. */
 
@@ -1184,8 +1298,14 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_phy->tx_fir_int    = 1;
         ad9361_phy->bypass_rx_fir = 0;
         ad9361_phy->bypass_tx_fir = 0;
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config);
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config);
+        AD9361_RXFIRConfig rx_fir_cfg;
+        AD9361_TXFIRConfig tx_fir_cfg;
+        std::string canonical;
+        if (!select_ad9361_fir_profile_1x(_ad9361_fir_profile, rx_fir_cfg, tx_fir_cfg, canonical)) {
+            throw std::runtime_error("Invalid cached ad9361_fir_profile: " + _ad9361_fir_profile);
+        }
+        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
+        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
         ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
