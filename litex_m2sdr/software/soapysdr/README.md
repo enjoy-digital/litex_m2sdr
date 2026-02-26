@@ -45,7 +45,8 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
-  - `vrt` is currently **control-plane only** in Soapy: it configures FPGA VRT streaming and EtherBone control, but Soapy RX sample streaming is not used.
+  - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
+  - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
 - **VRT UDP port override** (Etherbone + `eth_mode=vrt`): `vrt_port=4991`
 
 Example:
@@ -58,7 +59,7 @@ Example (122.88 MSPS edge-flatness A/B test):
 SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
 ```
 
-Example (Etherbone control + FPGA VRT RX to local host):
+Example (Etherbone control + Soapy RX over FPGA VRT):
 ```bash
 SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50,eth_mode=vrt,vrt_port=4991"
 ```

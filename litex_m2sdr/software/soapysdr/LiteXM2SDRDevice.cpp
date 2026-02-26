@@ -480,7 +480,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #else
         throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks vrt_streamer CSR (rebuild with --with-eth-vrt)");
 #endif
-        SoapySDR::logf(SOAPY_SDR_INFO, "Enabled FPGA VRT RX streaming (control-plane only)");
+        SoapySDR::logf(SOAPY_SDR_INFO, "Enabled FPGA VRT RX streaming");
     }
 #endif
 
