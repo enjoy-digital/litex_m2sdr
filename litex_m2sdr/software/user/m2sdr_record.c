@@ -493,6 +493,13 @@ int main(int argc, char **argv)
     /* Select device. */
 #if defined(USE_LITEPCIE)
     snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
+#elif defined(USE_LITEETH)
+    if (header && strip_header) {
+        fprintf(stderr,
+                "Error: -s is not supported with -t in LiteEth mode "
+                "(UDP buffer assembly can misalign headers).\n");
+        exit(1);
+    }
 #endif
 
     /* Interpret cmd and record. */
