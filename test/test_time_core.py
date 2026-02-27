@@ -75,3 +75,27 @@ def test_time_ns_to_ps_conversion():
 
     run_simulation(dut, gen())
     assert out["ps"] == 345_678_901_000
+
+
+def test_time_generator_reenable_restarts_from_init():
+    dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, init=77, with_csr=False)
+    samples = {}
+
+    def gen():
+        yield dut.enable.eq(1)
+        for _ in range(8):
+            yield
+        samples["running"] = (yield dut.time)
+        yield dut.enable.eq(0)
+        for _ in range(3):
+            yield
+        samples["disabled"] = (yield dut.time)
+        yield dut.enable.eq(1)
+        for _ in range(2):
+            yield
+        samples["reenabled"] = (yield dut.time)
+
+    run_simulation(dut, gen(), clocks={"sys": 10, "time": 10})
+    assert samples["running"] > 77
+    assert samples["disabled"] <= samples["running"]
+    assert samples["reenabled"] >= 77

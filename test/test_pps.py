@@ -32,3 +32,21 @@ def test_pps_generator_pulse_and_count():
 
     assert any(pulses)
     assert counts[-1] >= 1
+
+
+def test_pps_generator_stays_idle_when_time_zero():
+    time = Signal(64)
+    dut = PPSGenerator(clk_freq=100e6, time=time, offset=0, reset=0)
+    pulses = []
+    counts = []
+
+    def gen():
+        for _ in range(32):
+            yield time.eq(0)
+            pulses.append((yield dut.pps_pulse))
+            counts.append((yield dut.count))
+            yield
+
+    run_simulation(dut, gen())
+    assert not any(pulses)
+    assert counts[-1] == 0

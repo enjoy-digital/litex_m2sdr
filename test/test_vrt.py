@@ -171,6 +171,59 @@ def test_vrt_packet_count_wrap_with_backpressure():
     assert packet_counts == [pkt & 0xF for pkt in range(npackets)]
 
 
+def test_vrt_packet_size_matches_data_words_field():
+    dut = VRTSignalPacketInserter(data_width=32)
+    captured = []
+    data_words_per_packet = [1, 3, 5]
+
+    def gen():
+        yield dut.source.ready.eq(1)
+        for pkt, nwords in enumerate(data_words_per_packet):
+            yield dut.sink.stream_id.eq(0x01020304)
+            yield dut.sink.timestamp_int.eq(0x2000 + pkt)
+            yield dut.sink.timestamp_fra.eq(0x3000 + pkt)
+            yield dut.sink.data_words.eq(nwords)
+            for i in range(nwords):
+                yield dut.sink.valid.eq(1)
+                yield dut.sink.first.eq(i == 0)
+                yield dut.sink.last.eq(i == nwords - 1)
+                yield dut.sink.data.eq(0x40000000 | (pkt << 8) | i)
+                while True:
+                    if (yield dut.sink.ready):
+                        break
+                    yield
+                yield
+                yield dut.sink.valid.eq(0)
+                yield dut.sink.first.eq(0)
+                yield dut.sink.last.eq(0)
+                yield
+        for _ in range(16):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    header_sizes = []
+    for word in captured:
+        common = _be32(word)
+        packet_type = (common >> 28) & 0xF
+        c = (common >> 27) & 0x1
+        t = (common >> 26) & 0x1
+        r = (common >> 24) & 0x3
+        tsi = (common >> 22) & 0x3
+        tsf = (common >> 20) & 0x3
+        if packet_type == 0x1 and c == 0 and t == 0 and r == 0 and tsi == 0x1 and tsf == 0x2:
+            header_sizes.append(common & 0xFFFF)
+
+    assert header_sizes[:len(data_words_per_packet)] == [5 + n for n in data_words_per_packet]
+
+
 if __name__ == "__main__":
     test_vrt_signal_packet_inserter()
     test_rfic_data_packetizer()

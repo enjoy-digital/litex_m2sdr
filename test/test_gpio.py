@@ -109,3 +109,26 @@ def test_gpio_rx_packer_disable_passthrough():
 
     run_simulation(dut, [gen(), mon()], clocks={"sys": 10, "rfic": 10})
     assert out == [data_in]
+
+
+def test_gpio_tx_unpacker_disable_forces_zero_outputs():
+    dut = GPIOTXUnpacker()
+    observed = {}
+
+    def gen():
+        yield dut.enable.eq(0)
+        for _ in range(3):
+            yield
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq((0xF << 60) | (0xE << 44) | (0xD << 28) | (0xC << 12))
+        yield
+        yield
+        observed["o1"] = (yield dut.o1)
+        observed["oe1"] = (yield dut.oe1)
+        observed["o2"] = (yield dut.o2)
+        observed["oe2"] = (yield dut.oe2)
+
+    run_simulation(dut, gen(), clocks={"sys": 10, "rfic": 10})
+    assert observed == {"o1": 0, "oe1": 0, "o2": 0, "oe2": 0}

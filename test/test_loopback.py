@@ -83,3 +83,25 @@ def test_txrx_loopback_drains_rx_when_enabled():
 
     run_simulation(dut, gen())
     assert all(v == 1 for v in rx_ready_trace)
+
+
+def test_txrx_loopback_disables_tx_source_when_enabled():
+    dut = TXRXLoopback(data_width=64, with_csr=False)
+    tx_valid = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.tx_source.ready.eq(1)
+        yield
+        for _ in range(3):
+            yield dut.tx_sink.valid.eq(1)
+            yield dut.tx_sink.first.eq(1)
+            yield dut.tx_sink.last.eq(1)
+            yield dut.tx_sink.data.eq(0xFACE)
+            yield
+            tx_valid.append((yield dut.tx_source.valid))
+        yield dut.tx_sink.valid.eq(0)
+        yield
+
+    run_simulation(dut, gen())
+    assert all(v == 0 for v in tx_valid)
