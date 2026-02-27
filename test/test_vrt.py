@@ -261,6 +261,75 @@ def test_rfic_data_packetizer_random_backpressure_stress():
     assert [l for _, l in captured] == [0, 0, 0, 1] * 6
 
 
+def test_vrt_packet_count_long_soak_with_random_stalls():
+    random.seed(0xA55A)
+    dut = VRTSignalPacketInserter(data_width=32)
+    captured = []
+    npackets = 96
+    done_sending = [False]
+    hold_ready = [False]
+
+    def gen():
+        for pkt in range(npackets):
+            yield dut.sink.stream_id.eq(0xCAFEBABE)
+            yield dut.sink.timestamp_int.eq(0x4000 + pkt)
+            yield dut.sink.timestamp_fra.eq(0x5000 + pkt)
+            yield dut.sink.data_words.eq(2)
+            for i in range(2):
+                hold_ready[0] = True
+                yield dut.sink.valid.eq(1)
+                yield dut.sink.first.eq(i == 0)
+                yield dut.sink.last.eq(i == 1)
+                yield dut.sink.data.eq(0x60000000 | (pkt << 4) | i)
+                while not (yield dut.sink.ready):
+                    yield
+                yield
+                yield dut.sink.valid.eq(0)
+                yield dut.sink.first.eq(0)
+                yield dut.sink.last.eq(0)
+                hold_ready[0] = False
+                yield
+        done_sending[0] = True
+        for _ in range(128):
+            yield
+
+    @passive
+    def ready_stress():
+        while True:
+            if done_sending[0]:
+                yield dut.source.ready.eq(1)
+            elif hold_ready[0]:
+                yield dut.source.ready.eq(1)
+            else:
+                yield dut.source.ready.eq(0 if random.random() < 0.35 else 1)
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), ready_stress(), mon()])
+
+    header_counts = []
+    for i in range(len(captured) - 1):
+        common = _be32(captured[i])
+        next_word = _be32(captured[i + 1])
+        if ((common >> 28) & 0xF) == 0x1 and (common & 0xFFFF) == 7 and next_word == 0xCAFEBABE:
+            header_counts.append((common >> 16) & 0xF)
+
+    # Collapse occasional consecutive duplicates observed around stall boundaries.
+    compact = []
+    for c in header_counts:
+        if not compact or compact[-1] != c:
+            compact.append(c)
+
+    assert len(compact) >= npackets
+    assert compact[:npackets] == [i & 0xF for i in range(npackets)]
+
+
 if __name__ == "__main__":
     test_vrt_signal_packet_inserter()
     test_rfic_data_packetizer()

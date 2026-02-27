@@ -210,3 +210,33 @@ def test_ad9361_tx_bitmode_mode_switch_mid_stream():
     assert 0x0123456789ABCDEF in out
     assert 0x0110022003300440 in out
     assert 0xF80007F00000FFF0 in out
+
+
+def test_ad9361_prbs_checker_stays_unsynced_after_error_burst():
+    gen = AD9361PRBSGenerator(seed=0x0A54)
+    chk = AD9361PRBSChecker(seed=0x0A54)
+    dut = Module()
+    dut.submodules += gen, chk
+    synced = []
+
+    def stimulus():
+        # Initial lock.
+        for _ in range(1200):
+            yield chk.i.eq((yield gen.o) & 0xFFF)
+            synced.append((yield chk.synced))
+            yield
+        # Error burst.
+        for _ in range(12):
+            yield chk.i.eq(0x000)
+            synced.append((yield chk.synced))
+            yield
+        # Keep feeding generator output after error burst.
+        for _ in range(1300):
+            yield chk.i.eq((yield gen.o) & 0xFFF)
+            synced.append((yield chk.synced))
+            yield
+
+    run_simulation(dut, stimulus())
+    assert any(synced[1100:1200])  # initially locked
+    assert synced[1210] == 0        # lost lock after error burst
+    assert not any(synced[-200:])   # remains out-of-lock with free-running source

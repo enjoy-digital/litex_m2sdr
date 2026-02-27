@@ -154,3 +154,53 @@ def test_txrx_loopback_mode_toggle_mid_stream():
     assert any((0x2000 <= w < 0x2010) for w in rx_out)
     # In loopback windows, RX path should include tx_sink words.
     assert any((0x1000 <= w < 0x1010) for w in rx_out)
+
+
+def test_txrx_loopback_mode_toggle_reference_mapping():
+    dut = TXRXLoopback(data_width=64, with_csr=False)
+    tx_out = []
+    rx_out = []
+    expected_tx = []
+    expected_rx = []
+
+    def gen():
+        yield dut.tx_source.ready.eq(1)
+        yield dut.rx_source.ready.eq(1)
+        for i in range(24):
+            mode = 1 if (i % 3 == 0) else 0
+            tx_word = 0x3000 + i
+            rx_word = 0x4000 + i
+            yield dut.enable.eq(mode)
+            yield dut.tx_sink.valid.eq(1)
+            yield dut.tx_sink.first.eq(1)
+            yield dut.tx_sink.last.eq(1)
+            yield dut.tx_sink.data.eq(tx_word)
+            yield dut.rx_sink.valid.eq(1)
+            yield dut.rx_sink.first.eq(1)
+            yield dut.rx_sink.last.eq(1)
+            yield dut.rx_sink.data.eq(rx_word)
+            yield
+            # With always-ready sinks and one-cycle pulses, routing is cycle-exact.
+            if mode == 0:
+                expected_tx.append(tx_word)
+                expected_rx.append(rx_word)
+            else:
+                expected_rx.append(tx_word)
+            yield dut.tx_sink.valid.eq(0)
+            yield dut.rx_sink.valid.eq(0)
+            yield
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.tx_source.valid) and (yield dut.tx_source.ready):
+                tx_out.append((yield dut.tx_source.data))
+            if (yield dut.rx_source.valid) and (yield dut.rx_source.ready):
+                rx_out.append((yield dut.rx_source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert tx_out == expected_tx
+    assert rx_out == expected_rx
