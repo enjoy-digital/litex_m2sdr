@@ -64,3 +64,22 @@ def test_txrx_loopback_normal_and_loopback():
 
     assert tx_out == [0xAAAA]
     assert rx_out == [0xBBBB, 0xCCCC]
+
+
+def test_txrx_loopback_drains_rx_when_enabled():
+    dut = TXRXLoopback(data_width=64, with_csr=False)
+    rx_ready_trace = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield
+        for _ in range(4):
+            yield dut.rx_sink.valid.eq(1)
+            yield dut.rx_sink.data.eq(0x1234)
+            yield
+            rx_ready_trace.append((yield dut.rx_sink.ready))
+        yield dut.rx_sink.valid.eq(0)
+        yield
+
+    run_simulation(dut, gen())
+    assert all(v == 1 for v in rx_ready_trace)

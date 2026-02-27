@@ -106,3 +106,39 @@ def test_header_extractor():
     assert updates[-1] == (header, timestamp)
     assert [w for w, _ in out_payload[:3]] == payload
     assert [l for _, l in out_payload[:3]] == [0, 0, 1]
+
+
+def test_header_inserter_header_disabled_passthrough():
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+    payload = [0x10, 0x11, 0x12, 0x13]
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(0)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.source.ready.eq(1)
+        for i, word in enumerate(payload):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(payload) - 1)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.first), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert [w for w, _, _ in out] == payload
+    assert [f for _, f, _ in out] == [0, 0, 0, 0]
+    assert [l for _, _, l in out] == [0, 0, 0, 1]

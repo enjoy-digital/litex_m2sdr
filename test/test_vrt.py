@@ -49,7 +49,7 @@ def test_vrt_signal_packet_inserter():
             yield dut.sink.first.eq(0)
             yield dut.sink.last.eq(0)
             yield
-        for _ in range(16):
+        for _ in range(64):
             yield
 
     @passive
@@ -119,6 +119,56 @@ def test_rfic_data_packetizer():
     assert [w for w, _, _ in captured] == list(range(8))
     assert [l for _, l, _ in captured] == [0, 0, 0, 1, 0, 0, 0, 1]
     assert all(dw == 4 for _, _, dw in captured)
+
+
+def test_vrt_packet_count_wrap_with_backpressure():
+    dut = VRTSignalPacketInserter(data_width=32)
+    captured = []
+    npackets = 18
+
+    def gen():
+        for pkt in range(npackets):
+            # Apply bounded source backpressure before each packet.
+            yield dut.source.ready.eq(0 if (pkt % 3 == 0) else 1)
+            yield
+            yield dut.source.ready.eq(1)
+            yield dut.sink.stream_id.eq(0x12345678)
+            yield dut.sink.timestamp_int.eq(0x1000 + pkt)
+            yield dut.sink.timestamp_fra.eq(0x2000 + pkt)
+            yield dut.sink.data_words.eq(1)
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(1)
+            yield dut.sink.last.eq(1)
+            yield dut.sink.data.eq(0xA0000000 + pkt)
+            while not (yield dut.sink.ready):
+                yield
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield dut.source.ready.eq(1)
+            yield
+        for _ in range(64):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    # With source backpressure, validate per-packet headers and packet_count wrap behavior.
+    packet_counts = []
+    for word, _ in captured:
+        common = _be32(word)
+        if ((common >> 28) & 0xF) == 0x1 and (common & 0xFFFF) == 6:
+            packet_counts.append((common >> 16) & 0xF)
+
+    assert len(packet_counts) == npackets
+    assert packet_counts == [pkt & 0xF for pkt in range(npackets)]
 
 
 if __name__ == "__main__":

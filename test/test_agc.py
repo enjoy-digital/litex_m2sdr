@@ -52,3 +52,27 @@ def test_agc_saturation_counter():
     assert max(counts[:4]) == 0
     assert counts[8] >= 3
     assert counts[-1] == 0
+
+
+def test_agc_disable_clears_count():
+    i = Signal(12)
+    q = Signal(12)
+    dut = AGCSaturationCount(ce=1, iqs=[i, q], inc=1)
+    observed = {}
+
+    def gen():
+        yield dut.control.fields.enable.eq(1)
+        yield dut.control.fields.threshold.eq(2)
+        for _ in range(6):
+            yield i.eq(5)
+            yield q.eq(0)
+            yield
+        observed["count_enabled"] = (yield dut.status.fields.count)
+        yield dut.control.fields.enable.eq(0)
+        yield
+        yield
+        observed["count_disabled"] = (yield dut.status.fields.count)
+
+    run_simulation(dut, gen())
+    assert observed["count_enabled"] > 0
+    assert observed["count_disabled"] == 0

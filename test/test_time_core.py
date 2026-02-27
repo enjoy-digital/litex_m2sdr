@@ -35,6 +35,29 @@ def test_time_generator_basic_increment_and_write():
     assert samples["t2"] >= 123456789
 
 
+def test_time_generator_adjust_and_disable_reset():
+    dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, init=42, with_csr=False)
+    samples = {}
+
+    def gen():
+        yield dut.enable.eq(1)
+        for _ in range(8):
+            yield
+        yield dut.time_adjustment.eq(1000)
+        for _ in range(3):
+            yield
+        samples["with_adjust"] = (yield dut.time)
+        yield dut.enable.eq(0)
+        yield dut.time_adjustment.eq(0)
+        for _ in range(2):
+            yield
+        samples["after_disable"] = (yield dut.time)
+
+    run_simulation(dut, gen(), clocks={"sys": 10, "time": 10})
+    assert samples["with_adjust"] >= 1000
+    assert samples["after_disable"] < samples["with_adjust"]
+
+
 def test_time_ns_to_ps_conversion():
     time_ns = Signal(64)
     time_s = Signal(32)

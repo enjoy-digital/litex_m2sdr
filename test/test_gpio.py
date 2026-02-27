@@ -78,3 +78,34 @@ def test_gpio_tx_unpacker():
     assert captured["oe1"] == 0x2
     assert captured["o2"] == 0x3
     assert captured["oe2"] == 0x4
+
+
+def test_gpio_rx_packer_disable_passthrough():
+    dut = GPIORXPacker()
+    out = []
+    data_in = 0xFEDCBA9876543210
+
+    def gen():
+        yield dut.enable.eq(0)
+        yield dut.i1.eq(0xF)
+        yield dut.i2.eq(0xF)
+        for _ in range(3):
+            yield
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(data_in)
+        yield
+        yield dut.sink.valid.eq(0)
+        yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()], clocks={"sys": 10, "rfic": 10})
+    assert out == [data_in]
