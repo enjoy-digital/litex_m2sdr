@@ -11,6 +11,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.time import TimeGenerator, TimeNsToPS
 
+# Time Core Tests ---------------------------------------------------------------------------------
+
 
 def test_time_generator_basic_increment_and_write():
     dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, with_csr=False)

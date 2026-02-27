@@ -15,9 +15,13 @@ from litex.gen.sim import run_simulation
 from litex_m2sdr.gateware.rfic import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt import VRTSignalPacketInserter
 
+# Helpers -----------------------------------------------------------------------------------------
+
 
 def _be32(word):
     return int.from_bytes(int(word & 0xffffffff).to_bytes(4, "little"), "big")
+
+# VRT / RFIC Packetizer Tests ---------------------------------------------------------------------
 
 
 def test_vrt_signal_packet_inserter():

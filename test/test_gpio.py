@@ -12,6 +12,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.gpio import GPIORXPacker, GPIOTXUnpacker
 
+# GPIO RX/TX Tests --------------------------------------------------------------------------------
+
 
 def test_gpio_rx_packer():
     dut = GPIORXPacker()

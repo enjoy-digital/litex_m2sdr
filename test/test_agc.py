@@ -11,6 +11,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.ad9361.agc import AGCSaturationCount
 
+# AGC Tests ---------------------------------------------------------------------------------------
+
 
 def test_agc_saturation_counter():
     i = Signal(12)

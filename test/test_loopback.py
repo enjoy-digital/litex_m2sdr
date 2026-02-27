@@ -13,6 +13,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.loopback import TXRXLoopback
 
+# TX/RX Loopback Tests ----------------------------------------------------------------------------
+
 
 def test_txrx_loopback_normal_and_loopback():
     dut = TXRXLoopback(data_width=64, with_csr=False)

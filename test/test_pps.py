@@ -11,6 +11,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.pps import PPSGenerator
 
+# PPS Tests ---------------------------------------------------------------------------------------
+
 
 def test_pps_generator_pulse_and_count():
     time = Signal(64)

@@ -13,6 +13,8 @@ from litex.gen.sim import run_simulation
 
 from litex_m2sdr.gateware.header import HeaderInserterExtractor
 
+# Header Inserter/Extractor Tests -----------------------------------------------------------------
+
 
 def test_header_inserter():
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)

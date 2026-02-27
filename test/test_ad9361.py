@@ -14,6 +14,8 @@ from litex.gen.sim import run_simulation
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361RXBitMode, AD9361TXBitMode
 from litex_m2sdr.gateware.ad9361.prbs import AD9361PRBSChecker, AD9361PRBSGenerator
 
+# AD9361 BitMode Tests ----------------------------------------------------------------------------
+
 
 def test_ad9361_tx_bitmode_16bit_passthrough():
     dut = AD9361TXBitMode()
@@ -127,6 +129,8 @@ def test_ad9361_rx_bitmode_8bit_packing():
 
     run_simulation(dut, [gen(), mon()])
     assert out == [0x0B0A09080F0E0D0C]
+
+# AD9361 PRBS Tests -------------------------------------------------------------------------------
 
 
 def test_ad9361_prbs_checker_sync_and_loss():

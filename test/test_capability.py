@@ -7,6 +7,8 @@
 
 from litex_m2sdr.gateware.capability import Capability
 
+# Capability Tests --------------------------------------------------------------------------------
+
 
 def test_capability_builds_with_valid_configuration():
     dut = Capability(
