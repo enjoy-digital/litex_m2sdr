@@ -5,7 +5,7 @@
 
 ## Overview
 
-By loading the **litepcie** kernel module, you gain access to:
+By loading the **m2sdr** kernel module, you gain access to:
 - **DMA channels (TX/RX)** for high-speed data transfer.
 - **Control/status registers** to configure and monitor hardware.
 - **Interrupt handling** for a responsive data flow.

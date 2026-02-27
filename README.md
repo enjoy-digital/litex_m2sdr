@@ -5,7 +5,7 @@
                                   LiteX based M2 SDR FPGA board.
                                Copyright (c) 2024-2026 Enjoy-Digital.
 
-[![](https://github.com/enjoy-digital/litex_m2sdr/workflows/ci/badge.svg)](https://github.com/enjoy-digital/litex_m2sdr/actions) ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/enjoy-digital/litex_m2sdr) [![Buy Hardware](https://img.shields.io/badge/Buy-Hardware-00A6B2)](https://enjoy-digital-shop.myshopify.com/)
+[![](https://github.com/enjoy-digital/litex_m2sdr/actions/workflows/ci.yml/badge.svg)](https://github.com/enjoy-digital/litex_m2sdr/actions/workflows/ci.yml) ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/enjoy-digital/litex_m2sdr) [![Buy Hardware](https://img.shields.io/badge/Buy-Hardware-00A6B2)](https://enjoy-digital-shop.myshopify.com/)
 
 [> TL;DR
 ---------
@@ -257,8 +257,9 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    python3 scripts/test_xadc.py
    python3 scripts/test_dashboard.py
    ```
-   - CI runs the simulation suite with:
+   - CI runs both software build checks and simulation tests with:
    ```
+   # Software build checks (kernel/user/SoapySDR) are run in CI.
    python3 -m pytest -v test
    ```
 
@@ -289,13 +290,13 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
 4. **Run GNU Radio FM Test:**
    - Open and run the GNU Radio FM test:
    ```
-   gnuradio-companion ../gnuradio/test_fm_rx.grc
+   gnuradio-companion litex_m2sdr/software/gnuradio/test_fm_rx.grc
    ```
 
 5. **Enable Debugging in Kernel:**
     - Enable debugging:
     ```
-    sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
+    sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
     ```
 
 ### For Software & FPGA Developers
