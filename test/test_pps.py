@@ -15,6 +15,7 @@ from litex_m2sdr.gateware.pps import PPSGenerator
 
 
 def test_pps_generator_pulse_and_count():
+    """Check PPS pulse generation and coarse counter increment when time advances."""
     time = Signal(64)
     dut = PPSGenerator(clk_freq=100e6, time=time, offset=0, reset=0)
     pulses = []
@@ -37,6 +38,7 @@ def test_pps_generator_pulse_and_count():
 
 
 def test_pps_generator_stays_idle_when_time_zero():
+    """Check PPS remains idle and count stays zero when time input is stuck at zero."""
     time = Signal(64)
     dut = PPSGenerator(clk_freq=100e6, time=time, offset=0, reset=0)
     pulses = []

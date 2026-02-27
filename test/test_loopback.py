@@ -17,6 +17,7 @@ from litex_m2sdr.gateware.loopback import TXRXLoopback
 
 
 def test_txrx_loopback_normal_and_loopback():
+    """Verify normal routing and loopback routing select the expected data path."""
     dut = TXRXLoopback(data_width=64, with_csr=False)
     tx_out = []
     rx_out = []
@@ -70,6 +71,7 @@ def test_txrx_loopback_normal_and_loopback():
 
 
 def test_txrx_loopback_drains_rx_when_enabled():
+    """Verify loopback mode keeps RX sink ready high to drain ignored external RX data."""
     dut = TXRXLoopback(data_width=64, with_csr=False)
     rx_ready_trace = []
 
@@ -89,6 +91,7 @@ def test_txrx_loopback_drains_rx_when_enabled():
 
 
 def test_txrx_loopback_disables_tx_source_when_enabled():
+    """Verify loopback mode suppresses TX source output toward the RFIC path."""
     dut = TXRXLoopback(data_width=64, with_csr=False)
     tx_valid = []
 
@@ -111,6 +114,7 @@ def test_txrx_loopback_disables_tx_source_when_enabled():
 
 
 def test_txrx_loopback_mode_toggle_mid_stream():
+    """Stress mode toggles with stalls and confirm both normal and loopback data appear."""
     random.seed(0x1234)
     dut = TXRXLoopback(data_width=64, with_csr=False)
     tx_out = []
@@ -159,6 +163,7 @@ def test_txrx_loopback_mode_toggle_mid_stream():
 
 
 def test_txrx_loopback_mode_toggle_reference_mapping():
+    """Check per-cycle expected TX/RX mapping across repeated mode transitions."""
     dut = TXRXLoopback(data_width=64, with_csr=False)
     tx_out = []
     rx_out = []

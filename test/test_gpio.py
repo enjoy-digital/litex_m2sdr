@@ -16,6 +16,7 @@ from litex_m2sdr.gateware.gpio import GPIORXPacker, GPIOTXUnpacker
 
 
 def test_gpio_rx_packer():
+    """Verify RX packer inserts GPIO nibble fields into expected word positions."""
     dut = GPIORXPacker()
     out = []
 
@@ -52,6 +53,7 @@ def test_gpio_rx_packer():
 
 
 def test_gpio_tx_unpacker():
+    """Verify TX unpacker extracts GPIO/tristate nibbles from packed stream data."""
     dut = GPIOTXUnpacker()
     captured = {}
 
@@ -83,6 +85,7 @@ def test_gpio_tx_unpacker():
 
 
 def test_gpio_rx_packer_disable_passthrough():
+    """Verify RX packer behaves as transparent passthrough when disabled."""
     dut = GPIORXPacker()
     out = []
     data_in = 0xFEDCBA9876543210
@@ -114,6 +117,7 @@ def test_gpio_rx_packer_disable_passthrough():
 
 
 def test_gpio_tx_unpacker_disable_forces_zero_outputs():
+    """Verify TX unpacker drives zeroed GPIO outputs when feature is disabled."""
     dut = GPIOTXUnpacker()
     observed = {}
 

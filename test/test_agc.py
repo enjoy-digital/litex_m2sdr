@@ -15,6 +15,7 @@ from litex_m2sdr.gateware.ad9361.agc import AGCSaturationCount
 
 
 def test_agc_saturation_counter():
+    """Verify threshold counting and explicit clear behavior on the AGC counter."""
     i = Signal(12)
     q = Signal(12)
     dut = AGCSaturationCount(ce=1, iqs=[i, q], inc=1)
@@ -57,6 +58,7 @@ def test_agc_saturation_counter():
 
 
 def test_agc_disable_clears_count():
+    """Verify disabling AGC forces the saturation count back to zero."""
     i = Signal(12)
     q = Signal(12)
     dut = AGCSaturationCount(ce=1, iqs=[i, q], inc=1)

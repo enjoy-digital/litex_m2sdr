@@ -25,6 +25,7 @@ def _be32(word):
 
 
 def test_vrt_signal_packet_inserter():
+    """Verify VRT inserter emits compliant headers/timestamps and payload ordering."""
     dut = VRTSignalPacketInserter(data_width=32)
 
     payload_words = 4
@@ -97,6 +98,7 @@ def test_vrt_signal_packet_inserter():
 
 
 def test_rfic_data_packetizer():
+    """Verify RFIC packetizer asserts last every configured frame length."""
     dut = RFICDataPacketizer(data_width=32, data_words=4)
     captured = []
 
@@ -127,6 +129,7 @@ def test_rfic_data_packetizer():
 
 
 def test_vrt_packet_count_wrap_with_backpressure():
+    """Verify VRT packet_count increments and wraps modulo-16 under backpressure."""
     dut = VRTSignalPacketInserter(data_width=32)
     captured = []
     npackets = 18
@@ -177,6 +180,7 @@ def test_vrt_packet_count_wrap_with_backpressure():
 
 
 def test_vrt_packet_size_matches_data_words_field():
+    """Verify VRT packet_size field tracks runtime data_words value."""
     dut = VRTSignalPacketInserter(data_width=32)
     captured = []
     data_words_per_packet = [1, 3, 5]
@@ -230,6 +234,7 @@ def test_vrt_packet_size_matches_data_words_field():
 
 
 def test_rfic_data_packetizer_random_backpressure_stress():
+    """Stress RFIC packetizer with random ready stalls while preserving order/last."""
     random.seed(0xBEEF)
     dut = RFICDataPacketizer(data_width=32, data_words=4)
     captured = []
@@ -266,6 +271,7 @@ def test_rfic_data_packetizer_random_backpressure_stress():
 
 
 def test_vrt_packet_count_long_soak_with_random_stalls():
+    """Soak-test packet_count progression across long randomized stall sequences."""
     random.seed(0xA55A)
     dut = VRTSignalPacketInserter(data_width=32)
     captured = []
@@ -335,6 +341,7 @@ def test_vrt_packet_count_long_soak_with_random_stalls():
 
 
 def test_vrt_packet_structural_invariants_under_stalls():
+    """Verify VRT header structural invariants remain detectable under stalls."""
     random.seed(0x4242)
     dut = VRTSignalPacketInserter(data_width=32)
     captured = []

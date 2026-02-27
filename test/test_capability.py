@@ -11,6 +11,7 @@ from litex_m2sdr.gateware.capability import Capability
 
 
 def test_capability_builds_with_valid_configuration():
+    """Check Capability CSR block instantiates with a representative valid config."""
     dut = Capability(
         api_version_str="1.2",
         pcie_enabled=True,

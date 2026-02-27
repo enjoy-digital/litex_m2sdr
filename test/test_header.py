@@ -17,6 +17,7 @@ from litex_m2sdr.gateware.header import HeaderInserterExtractor
 
 
 def test_header_inserter():
+    """Verify inserter emits header/timestamp then payload with correct framing flags."""
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
 
     payload = [0x100, 0x101, 0x102]
@@ -63,6 +64,7 @@ def test_header_inserter():
 
 
 def test_header_extractor():
+    """Verify extractor captures header/timestamp and forwards payload framing correctly."""
     dut = HeaderInserterExtractor(mode="extractor", data_width=64, with_csr=False)
 
     header = 0xA1A2A3A4A5A6A7A8
@@ -112,6 +114,7 @@ def test_header_extractor():
 
 
 def test_header_inserter_header_disabled_passthrough():
+    """Verify inserter is payload passthrough when header insertion is disabled."""
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
     payload = [0x10, 0x11, 0x12, 0x13]
     out = []
@@ -148,6 +151,7 @@ def test_header_inserter_header_disabled_passthrough():
 
 
 def test_header_inserter_random_backpressure_stress():
+    """Stress inserter under random output backpressure and check frame boundaries."""
     random.seed(0xC0DE)
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
     payload = [0x100 + i for i in range(12)]
@@ -216,6 +220,7 @@ def test_header_inserter_random_backpressure_stress():
 
 
 def test_header_inserter_frame_invariants_per_cycle():
+    """Check per-cycle invariants for first frame: header, timestamp, payload, last."""
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
     payload = [0xAA, 0xBB, 0xCC, 0xDD]
     accepted = []
@@ -266,6 +271,7 @@ def test_header_inserter_frame_invariants_per_cycle():
 
 
 def test_header_inserter_zero_frame_cycles_behaves_as_single_word_frames():
+    """Verify frame_cycles=0 corner case behaves as one-word payload frames."""
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
     out = []
 

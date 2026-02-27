@@ -18,6 +18,7 @@ from litex_m2sdr.gateware.ad9361.prbs import AD9361PRBSChecker, AD9361PRBSGenera
 
 
 def test_ad9361_tx_bitmode_16bit_passthrough():
+    """Verify TX bitmode forwards 64-bit samples unchanged in 16-bit mode."""
     dut = AD9361TXBitMode()
     out = []
 
@@ -44,6 +45,7 @@ def test_ad9361_tx_bitmode_16bit_passthrough():
 
 
 def test_ad9361_rx_bitmode_16bit_passthrough():
+    """Verify RX bitmode forwards 64-bit samples unchanged in 16-bit mode."""
     dut = AD9361RXBitMode()
     out = []
 
@@ -70,6 +72,7 @@ def test_ad9361_rx_bitmode_16bit_passthrough():
 
 
 def test_ad9361_tx_bitmode_8bit_sign_extension():
+    """Verify TX 8-bit mode repacks and sign-extends lane samples as expected."""
     dut = AD9361TXBitMode()
     out = []
 
@@ -100,6 +103,7 @@ def test_ad9361_tx_bitmode_8bit_sign_extension():
 
 
 def test_ad9361_rx_bitmode_8bit_packing():
+    """Verify RX 8-bit mode compacts two 64-bit beats into one packed output beat."""
     dut = AD9361RXBitMode()
     out = []
 
@@ -134,6 +138,7 @@ def test_ad9361_rx_bitmode_8bit_packing():
 
 
 def test_ad9361_prbs_checker_sync_and_loss():
+    """Verify PRBS checker reaches sync then drops sync on injected bad samples."""
     gen = AD9361PRBSGenerator(seed=0x0A54)
     chk = AD9361PRBSChecker(seed=0x0A54)
     dut = Module()
@@ -157,6 +162,7 @@ def test_ad9361_prbs_checker_sync_and_loss():
 
 
 def test_ad9361_prbs_generator_ce_hold():
+    """Verify PRBS generator output holds constant when clock-enable is deasserted."""
     dut = AD9361PRBSGenerator(seed=0x0A54)
     values = []
 
@@ -174,6 +180,7 @@ def test_ad9361_prbs_generator_ce_hold():
 
 
 def test_ad9361_tx_bitmode_mode_switch_mid_stream():
+    """Verify TX bitmode mode switch mid-stream preserves valid converted outputs."""
     random.seed(0x55AA)
     dut = AD9361TXBitMode()
     out = []
@@ -217,6 +224,7 @@ def test_ad9361_tx_bitmode_mode_switch_mid_stream():
 
 
 def test_ad9361_prbs_checker_stays_unsynced_after_error_burst():
+    """Verify checker remains unsynced after burst error with free-running source."""
     gen = AD9361PRBSGenerator(seed=0x0A54)
     chk = AD9361PRBSChecker(seed=0x0A54)
     dut = Module()

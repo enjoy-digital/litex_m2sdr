@@ -15,6 +15,7 @@ from litex_m2sdr.gateware.time import TimeGenerator, TimeNsToPS
 
 
 def test_time_generator_basic_increment_and_write():
+    """Validate free-running increment and software write path of TimeGenerator."""
     dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, with_csr=False)
     samples = {}
 
@@ -38,6 +39,7 @@ def test_time_generator_basic_increment_and_write():
 
 
 def test_time_generator_adjust_and_disable_reset():
+    """Validate time adjustment effect and value drop after disable/reset path."""
     dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, init=42, with_csr=False)
     samples = {}
 
@@ -61,6 +63,7 @@ def test_time_generator_adjust_and_disable_reset():
 
 
 def test_time_ns_to_ps_conversion():
+    """Validate TimeNsToPS converts ns remainder into picosecond fraction correctly."""
     time_ns = Signal(64)
     time_s = Signal(32)
     time_ps = Signal(64)
@@ -80,6 +83,7 @@ def test_time_ns_to_ps_conversion():
 
 
 def test_time_generator_reenable_restarts_from_init():
+    """Validate disabling then re-enabling restarts TimeGenerator from init baseline."""
     dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, init=77, with_csr=False)
     samples = {}
 
