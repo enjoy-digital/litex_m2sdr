@@ -3,6 +3,66 @@ name: ci
 on: [push, pull_request]
 
 jobs:
+  software-build:
+    runs-on: ubuntu-22.04
+    steps:
+      # Checkout Repository
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Install Tools
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            make \
+            wget \
+            cmake \
+            pkg-config \
+            libsoapysdr-dev \
+            libsndfile1-dev \
+            libsamplerate0-dev
+
+      - name: Build Kernel Module
+        run: |
+          cd litex_m2sdr/software/kernel
+          if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+            sudo apt-get install -y "linux-headers-$(uname -r)"
+          fi
+          make clean all
+          test -f m2sdr.ko
+
+      - name: Build User Utilities
+        run: |
+          cd litex_m2sdr/software/user
+          make clean all
+          test -x m2sdr_util
+          test -x m2sdr_rf
+          test -x m2sdr_gen
+          test -x m2sdr_play
+          test -x m2sdr_record
+          test -x m2sdr_gpio
+          test -x m2sdr_fm_tx
+          test -x m2sdr_fm_rx
+          test -x m2sdr_sata
+          for bin in m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata; do
+            ldd "$bin" | tee "/tmp/ldd_${bin}.txt"
+            ! grep -q "not found" "/tmp/ldd_${bin}.txt"
+          done
+
+      - name: Build SoapySDR Module
+        run: |
+          cd litex_m2sdr/software/soapysdr
+          cmake -S . -B build
+          cmake --build build -j"$(nproc)"
+          test -f build/libSoapyLiteXM2SDR.so
+          ldd build/libSoapyLiteXM2SDR.so | tee /tmp/ldd_soapylitexm2sdr.txt
+          ! grep -q "not found" /tmp/ldd_soapylitexm2sdr.txt
+
   build:
     runs-on: ubuntu-22.04
     steps:
