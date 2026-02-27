@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 
 from litex import RemoteClient
 
@@ -63,8 +64,9 @@ class XADCDriver:
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
+    default_csr_csv = os.path.join(os.path.dirname(__file__), "csr.csv")
     parser = argparse.ArgumentParser(description="LiteX M2SDR XADC Test Script")
-    parser.add_argument("--csr-csv", default="csr.csv", help="CSR definition file (default: csr.csv)")
+    parser.add_argument("--csr-csv", default=default_csr_csv, help="CSR definition file")
     parser.add_argument("--host",    default="localhost", help="Remote host (default: localhost)")
     parser.add_argument("--port",    default=1234, type=int, help="Remote port (default: 1234)")
     args = parser.parse_args()

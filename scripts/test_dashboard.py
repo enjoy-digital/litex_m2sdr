@@ -871,11 +871,12 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
 # Run ----------------------------------------------------------------------------------------------
 def main():
+    default_csr_csv = os.path.join(os.path.dirname(__file__), "csr.csv")
     parser = argparse.ArgumentParser(
         description="LiteX M2SDR Dashboard",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--csr-csv", default="csr.csv", help="CSR configuration file")
+    parser.add_argument("--csr-csv", default=default_csr_csv, help="CSR configuration file")
     parser.add_argument("--host", default="localhost", help="Host IP address")
     parser.add_argument("--port", default="1234", help="Host bind port")
     args = parser.parse_args()

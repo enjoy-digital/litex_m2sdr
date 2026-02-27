@@ -9,6 +9,7 @@
 import time
 import argparse
 import datetime
+import os
 
 from litex import RemoteClient
 
@@ -73,11 +74,12 @@ def unix_to_datetime(unix_timestamp_ns: int) -> str:
 
 # Main ---------------------------------------------------------------------------------------------
 def main():
+    default_csr_csv = os.path.join(os.path.dirname(__file__), "csr.csv")
     parser = argparse.ArgumentParser(
         description="Set/read LiteX M2SDR hardware time (ns).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--csr-csv",  default="csr.csv",         help="CSR definition file (default: csr.csv)")
+    parser.add_argument("--csr-csv",  default=default_csr_csv,   help="CSR definition file")
     parser.add_argument("--host",     default="localhost",       help="Remote host (default: localhost)")
     parser.add_argument("--port",     default=1234, type=int,    help="Remote port (default: 1234)")
     parser.add_argument("--set",      default=None,              help="Set time to 'now' or a numeric value (e.g. 10e12).")
