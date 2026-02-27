@@ -8,7 +8,6 @@
 from migen import *
 from migen.sim import passive
 import random
-import pytest
 
 from litex.gen.sim import run_simulation
 
@@ -146,7 +145,6 @@ def test_header_inserter_header_disabled_passthrough():
     assert [l for _, _, l in out] == [0, 0, 0, 1]
 
 
-@pytest.mark.soak
 def test_header_inserter_random_backpressure_stress():
     random.seed(0xC0DE)
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)

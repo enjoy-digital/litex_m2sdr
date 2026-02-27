@@ -1,73 +1,9 @@
 name: ci
 
-on:
-  push:
-  pull_request:
-  schedule:
-    - cron: "0 3 * * *"
-  workflow_dispatch:
+on: [push, pull_request]
 
 jobs:
-  sim-tests:
-    if: |
-      (matrix.suite == 'quick' && github.event_name != 'schedule') ||
-      (matrix.suite == 'soak'  && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suite: quick
-            pytest_args: "-m 'not soak'"
-          - suite: soak
-            pytest_args: "-m soak"
-    steps:
-      # Checkout Repository
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      # Install Tools
-      - name: Install Tools
-        run: |
-          sudo apt-get install make wget
-
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
-          cache: "pip"
-          cache-dependency-path: "setup.py"
-
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pytest
-
-      - name: Run LiteX installation
-        run: |
-          mkdir repos
-          pushd repos
-            wget https://raw.githubusercontent.com/enjoy-digital/litex/refs/heads/master/litex_setup.py
-            python3 litex_setup.py --config=standard --init --install --user
-          popd
-
-      - name: Tag build with version information
-        run: |
-          rm -rf build
-          mkdir -p build
-          git describe --tags --always > build/VERSION
-          git rev-parse HEAD > build/COMMIT
-
-      - name: Run gateware simulation tests (${{ matrix.suite }})
-        run: |
-          python3 -m pytest -v test ${{ matrix.pytest_args }}
-
-  build-release:
-    if: github.event_name != 'schedule'
-    needs: sim-tests
+  build:
     runs-on: ubuntu-22.04
     steps:
       # Checkout Repository
@@ -76,9 +12,6 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Setup CCache
-        uses: hendrikmuhs/ccache-action@v1.2
 
       # Install Tools
       - name: Install Tools
@@ -115,6 +48,10 @@ jobs:
       - name: Build LiteX M.2 SDR HDL framework releases
         run: |
           ./release.py --nobuild
+
+      - name: Run gateware simulation tests
+        run: |
+          python3 -m pytest -v test
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
