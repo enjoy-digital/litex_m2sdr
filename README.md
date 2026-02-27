@@ -247,7 +247,22 @@ For some platforms we created detailed tutorials. For everything else, please fo
 
 For those who want to dive deeper into development with the LiteX-M2SDR board, follow these additional steps after completing the SDR enthusiast steps:
 
-1. **Run Software Tests:**
+1. **Test Structure (CI-safe vs hardware scripts):**
+   - Gateware simulation/unit tests live in `test/` and are CI-safe (no hardware needed):
+   ```
+   pytest -v test
+   ```
+   - Board control/debug scripts live in `scripts/` and require a running board/server:
+   ```
+   python3 scripts/test_xadc.py
+   python3 scripts/test_dashboard.py
+   ```
+   - CI runs the simulation suite with:
+   ```
+   python3 -m pytest -v test
+   ```
+
+2. **Run Software Tests:**
    - Test the kernel:
    ```
    cd litex_m2sdr/software/kernel
@@ -265,19 +280,19 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ./m2sdr_play tone_tx.bin 100000
    ```
 
-2. **SoapySDR Detection/Probe:**
+3. **SoapySDR Detection/Probe:**
    - Detect the LiteX-M2SDR board:
    ```
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
 
-3. **Run GNU Radio FM Test:**
+4. **Run GNU Radio FM Test:**
    - Open and run the GNU Radio FM test:
    ```
    gnuradio-companion ../gnuradio/test_fm_rx.grc
    ```
 
-4. **Enable Debugging in Kernel:**
+5. **Enable Debugging in Kernel:**
     - Enable debugging:
     ```
     sudo sh -c "echo 'module litepcie +p' > /sys/kernel/debug/dynamic_debug/control"
