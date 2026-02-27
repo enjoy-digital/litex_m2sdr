@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
+import random
 
 from litex.gen import *
 from litex.gen.sim import run_simulation
@@ -222,6 +223,42 @@ def test_vrt_packet_size_matches_data_words_field():
             header_sizes.append(common & 0xFFFF)
 
     assert header_sizes[:len(data_words_per_packet)] == [5 + n for n in data_words_per_packet]
+
+
+def test_rfic_data_packetizer_random_backpressure_stress():
+    random.seed(0xBEEF)
+    dut = RFICDataPacketizer(data_width=32, data_words=4)
+    captured = []
+
+    def gen():
+        for i in range(24):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.data.eq(0x5000 + i)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield
+        for _ in range(32):
+            yield
+
+    @passive
+    def ready_stress():
+        while True:
+            yield dut.source.ready.eq(0 if random.random() < 0.5 else 1)
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), ready_stress(), mon()])
+
+    assert [w for w, _ in captured] == [0x5000 + i for i in range(24)]
+    assert [l for _, l in captured] == [0, 0, 0, 1] * 6
 
 
 if __name__ == "__main__":

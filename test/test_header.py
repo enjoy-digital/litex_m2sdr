@@ -7,6 +7,7 @@
 
 from migen import *
 from migen.sim import passive
+import random
 
 from litex.gen.sim import run_simulation
 
@@ -142,3 +143,71 @@ def test_header_inserter_header_disabled_passthrough():
     assert [w for w, _, _ in out] == payload
     assert [f for _, f, _ in out] == [0, 0, 0, 0]
     assert [l for _, _, l in out] == [0, 0, 0, 1]
+
+
+def test_header_inserter_random_backpressure_stress():
+    random.seed(0xC0DE)
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+    payload = [0x100 + i for i in range(12)]
+    out = []
+    done_sending = [False]
+    hold_ready = [False]
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.header.eq(0x1234567890ABCDEF)
+        yield dut.timestamp.eq(0x0BADF00DCAFEBABE)
+
+        for i, word in enumerate(payload):
+            while not (yield dut.sink.ready):
+                yield
+            hold_ready[0] = True
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(payload) - 1)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            hold_ready[0] = False
+            yield
+
+        done_sending[0] = True
+        for _ in range(128):
+            yield
+
+    @passive
+    def ready_stress():
+        while True:
+            if done_sending[0]:
+                yield dut.source.ready.eq(1)
+            elif hold_ready[0]:
+                yield dut.source.ready.eq(1)
+            else:
+                yield dut.source.ready.eq(0 if random.random() < 0.25 else 1)
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), ready_stress(), mon()])
+
+    # Detect frame boundaries from source.last and validate each frame structure.
+    frames = []
+    cur = []
+    for w, l in out:
+        cur.append(w)
+        if l:
+            frames.append(cur)
+            cur = []
+    assert frames
+    first = frames[0]
+    assert first[:2] == [0x1234567890ABCDEF, 0x0BADF00DCAFEBABE]
+    assert first[2:2 + len(payload)] == payload

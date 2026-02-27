@@ -7,6 +7,7 @@
 
 from migen import *
 from migen.sim import passive
+import random
 
 from litex.gen.sim import run_simulation
 
@@ -105,3 +106,51 @@ def test_txrx_loopback_disables_tx_source_when_enabled():
 
     run_simulation(dut, gen())
     assert all(v == 0 for v in tx_valid)
+
+
+def test_txrx_loopback_mode_toggle_mid_stream():
+    random.seed(0x1234)
+    dut = TXRXLoopback(data_width=64, with_csr=False)
+    tx_out = []
+    rx_out = []
+
+    def gen():
+        yield dut.tx_source.ready.eq(1)
+        yield dut.rx_source.ready.eq(1)
+        for i in range(16):
+            # Toggle loopback mode every 4 beats.
+            yield dut.enable.eq(1 if ((i // 4) % 2) else 0)
+            yield dut.tx_sink.valid.eq(1)
+            yield dut.tx_sink.first.eq(1)
+            yield dut.tx_sink.last.eq(1)
+            yield dut.tx_sink.data.eq(0x1000 + i)
+            yield dut.rx_sink.valid.eq(1)
+            yield dut.rx_sink.first.eq(1)
+            yield dut.rx_sink.last.eq(1)
+            yield dut.rx_sink.data.eq(0x2000 + i)
+            # Random consumer stalls.
+            yield dut.tx_source.ready.eq(0 if random.random() < 0.25 else 1)
+            yield dut.rx_source.ready.eq(0 if random.random() < 0.25 else 1)
+            yield
+        yield dut.tx_sink.valid.eq(0)
+        yield dut.rx_sink.valid.eq(0)
+        yield dut.tx_source.ready.eq(1)
+        yield dut.rx_source.ready.eq(1)
+        for _ in range(16):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.tx_source.valid) and (yield dut.tx_source.ready):
+                tx_out.append((yield dut.tx_source.data))
+            if (yield dut.rx_source.valid) and (yield dut.rx_source.ready):
+                rx_out.append((yield dut.rx_source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    # In normal windows, RX path should expose incoming rx_sink words.
+    assert any((0x2000 <= w < 0x2010) for w in rx_out)
+    # In loopback windows, RX path should include tx_sink words.
+    assert any((0x1000 <= w < 0x1010) for w in rx_out)

@@ -7,6 +7,7 @@
 
 from migen import *
 from migen.sim import passive
+import random
 
 from litex.gen.sim import run_simulation
 
@@ -166,3 +167,46 @@ def test_ad9361_prbs_generator_ce_hold():
 
     run_simulation(dut, gen())
     assert len(set(values[-3:])) == 1
+
+
+def test_ad9361_tx_bitmode_mode_switch_mid_stream():
+    random.seed(0x55AA)
+    dut = AD9361TXBitMode()
+    out = []
+
+    def gen():
+        yield dut.source.ready.eq(1)
+        # Start in 16-bit mode.
+        yield dut.mode.eq(0)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(0x0123456789ABCDEF)
+        yield
+        # Switch to 8-bit mode and keep valid for two cycles to emit both halves.
+        yield dut.mode.eq(1)
+        yield dut.sink.data.eq(0x807F00FF11223344)
+        yield
+        yield
+        # Random ready stalls while data is idle.
+        yield dut.sink.valid.eq(0)
+        for _ in range(8):
+            yield dut.source.ready.eq(0 if random.random() < 0.3 else 1)
+            yield
+        yield dut.source.ready.eq(1)
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    # Must contain one 16-bit passthrough beat and 8-bit converted beats.
+    assert 0x0123456789ABCDEF in out
+    assert 0x0110022003300440 in out
+    assert 0xF80007F00000FFF0 in out
