@@ -53,6 +53,7 @@ from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.pps         import PPSGenerator
+from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
@@ -207,7 +208,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1,
+        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
@@ -392,6 +393,14 @@ class BaseSoC(SoCMini):
                 "Trgt_Link_Speed"          : {1: "4'h1",     2: "4'h2"}[pcie_gen],
                 }
             )
+
+            # Optional workaround for hosts requiring repeated link training attempts.
+            if with_pcie_reset_workaround:
+                self.pcie_link_reset_workaround = PCIeLinkResetWorkaround(
+                    link_up     = self.pcie_phy._link_status.fields.status,
+                    sys_clk_freq= sys_clk_freq,
+                )
+                self.comb += self.pcie_phy.pcie_rst_n.eq(self.pcie_link_reset_workaround.rst_n)
 
             # MSIs
             # ----
@@ -947,6 +956,7 @@ def main():
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
     parser.add_argument("--with-pcie-ptm",   action="store_true", help="Enable PCIe PTM.")
+    parser.add_argument("--with-pcie-reset-workaround", action="store_true", help="Toggle PCIe reset periodically until link-up.")
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
 
@@ -1014,6 +1024,7 @@ def main():
         # PCIe.
         with_pcie     = args.with_pcie,
         with_pcie_ptm = args.with_pcie_ptm,
+        with_pcie_reset_workaround = args.with_pcie_reset_workaround,
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
 
