@@ -8,6 +8,7 @@
 
 from migen import *
 import random
+import pytest
 
 from litex.gen import *
 from litex.gen.sim import run_simulation
@@ -225,6 +226,7 @@ def test_vrt_packet_size_matches_data_words_field():
     assert header_sizes[:len(data_words_per_packet)] == [5 + n for n in data_words_per_packet]
 
 
+@pytest.mark.soak
 def test_rfic_data_packetizer_random_backpressure_stress():
     random.seed(0xBEEF)
     dut = RFICDataPacketizer(data_width=32, data_words=4)
@@ -261,6 +263,7 @@ def test_rfic_data_packetizer_random_backpressure_stress():
     assert [l for _, l in captured] == [0, 0, 0, 1] * 6
 
 
+@pytest.mark.soak
 def test_vrt_packet_count_long_soak_with_random_stalls():
     random.seed(0xA55A)
     dut = VRTSignalPacketInserter(data_width=32)
