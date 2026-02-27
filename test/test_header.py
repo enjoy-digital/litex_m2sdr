@@ -211,3 +211,53 @@ def test_header_inserter_random_backpressure_stress():
     first = frames[0]
     assert first[:2] == [0x1234567890ABCDEF, 0x0BADF00DCAFEBABE]
     assert first[2:2 + len(payload)] == payload
+
+
+def test_header_inserter_frame_invariants_per_cycle():
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+    payload = [0xAA, 0xBB, 0xCC, 0xDD]
+    accepted = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.header.eq(0x1111111122222222)
+        yield dut.timestamp.eq(0x3333333344444444)
+        yield dut.source.ready.eq(1)
+        for i, w in enumerate(payload):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(payload) - 1)
+            yield dut.sink.data.eq(w)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+        for _ in range(16):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                accepted.append({
+                    "data":  (yield dut.source.data),
+                    "first": (yield dut.source.first),
+                    "last":  (yield dut.source.last),
+                })
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    # First frame structure invariant: [header, timestamp, payload...last]
+    frame = accepted[:2 + len(payload)]
+    assert len(frame) == 2 + len(payload)
+    assert frame[0]["data"] == 0x1111111122222222 and frame[0]["first"] == 1 and frame[0]["last"] == 0
+    assert frame[1]["data"] == 0x3333333344444444 and frame[1]["first"] == 0 and frame[1]["last"] == 0
+    assert [x["data"] for x in frame[2:]] == payload
+    assert [x["first"] for x in frame[2:]] == [0] * len(payload)
+    assert [x["last"] for x in frame[2:]] == [0, 0, 0, 1]

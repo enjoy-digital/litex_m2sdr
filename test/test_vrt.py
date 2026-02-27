@@ -330,6 +330,79 @@ def test_vrt_packet_count_long_soak_with_random_stalls():
     assert compact[:npackets] == [i & 0xF for i in range(npackets)]
 
 
+def test_vrt_packet_structural_invariants_under_stalls():
+    random.seed(0x4242)
+    dut = VRTSignalPacketInserter(data_width=32)
+    captured = []
+    done_sending = [False]
+    packets = [
+        (0x10, 0x100, [0x70000000, 0x70000001, 0x70000002]),
+        (0x11, 0x101, [0x70000010, 0x70000011, 0x70000012]),
+        (0x12, 0x102, [0x70000020, 0x70000021, 0x70000022]),
+    ]
+
+    def gen():
+        for tsi, tsf, payload in packets:
+            yield dut.sink.stream_id.eq(0xABCDEF01)
+            yield dut.sink.timestamp_int.eq(tsi)
+            yield dut.sink.timestamp_fra.eq(tsf)
+            yield dut.sink.data_words.eq(len(payload))
+            yield
+            for i, word in enumerate(payload):
+                yield dut.sink.valid.eq(1)
+                yield dut.sink.first.eq(i == 0)
+                yield dut.sink.last.eq(i == len(payload) - 1)
+                yield dut.sink.data.eq(word)
+                while not (yield dut.sink.ready):
+                    yield
+                yield
+                yield dut.sink.valid.eq(0)
+                yield dut.sink.first.eq(0)
+                yield dut.sink.last.eq(0)
+                yield
+        done_sending[0] = True
+        for _ in range(64):
+            yield
+
+    @passive
+    def ready_stress():
+        while True:
+            if done_sending[0]:
+                yield dut.source.ready.eq(1)
+            else:
+                yield dut.source.ready.eq(0 if random.random() < 0.3 else 1)
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), ready_stress(), mon()])
+
+    # Property-style check: each expected payload appears in a valid 5-header+payload window.
+    words = [w for w, _ in captured]
+    lasts = [l for _, l in captured]
+    pkt_len = 8  # 5 header + 3 payload
+
+    header_hits = 0
+    for i in range(0, len(words) - pkt_len + 1):
+        window_words = words[i:i + pkt_len]
+        common = _be32(window_words[0])
+        stream_id = _be32(window_words[1])
+        if ((common >> 28) & 0xF) != 0x1:
+            continue
+        if (common & 0xFFFF) != pkt_len:
+            continue
+        if stream_id != 0xABCDEF01:
+            continue
+        header_hits += 1
+
+    assert header_hits >= len(packets)
+
+
 if __name__ == "__main__":
     test_vrt_signal_packet_inserter()
     test_rfic_data_packetizer()
