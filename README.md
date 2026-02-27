@@ -87,6 +87,13 @@ SoapySDRUtil --probe="driver=LiteXM2SDR"
 6. [Architecture Notes](#architecture)
 7. [Contact](#contact)
 
+[> Choose Your Path
+-------------------
+
+- New user, first RF signal: [SDR Users](#1-sdr-users-fastest-path)
+- Software integration/testing: [Software Developers](#2-software-developers)
+- FPGA/gateware customization: [Gateware / FPGA Developers](#3-gateware--fpga-developers)
+
 [> Hardware Availability
 ------------------------
 <a id="hardware-availability"></a>
@@ -165,7 +172,8 @@ SoapySDRUtil --probe="driver=LiteXM2SDR"
 
 5. Launch GNU Radio test flowgraph:
 ```bash
-gnuradio-companion ../gnuradio/test_fm_rx.grc
+cd ../gnuradio
+gnuradio-companion test_fm_rx.grc
 ```
 
 ### 2) Software Developers
