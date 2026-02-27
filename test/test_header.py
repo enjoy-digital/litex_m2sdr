@@ -263,3 +263,48 @@ def test_header_inserter_frame_invariants_per_cycle():
     assert [x["data"] for x in frame[2:]] == payload
     assert [x["first"] for x in frame[2:]] == [0] * len(payload)
     assert [x["last"] for x in frame[2:]] == [0, 0, 0, 1]
+
+
+def test_header_inserter_zero_frame_cycles_behaves_as_single_word_frames():
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(0)  # Corner case under test.
+        yield dut.header.eq(0xAAAA0000AAAA0000)
+        yield dut.timestamp.eq(0xBBBB0000BBBB0000)
+        yield dut.source.ready.eq(1)
+
+        for i, w in enumerate([0x10, 0x11]):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(1)
+            yield dut.sink.data.eq(w)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+        for _ in range(16):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    # Expect: header/timestamp before each payload beat, and payload beat marked last.
+    first_frame = out[:3]
+    second_frame = out[3:6]
+    assert [w for w, _ in first_frame] == [0xAAAA0000AAAA0000, 0xBBBB0000BBBB0000, 0x10]
+    assert [l for _, l in first_frame] == [0, 0, 1]
+    assert [w for w, _ in second_frame] == [0xAAAA0000AAAA0000, 0xBBBB0000BBBB0000, 0x11]
+    assert [l for _, l in second_frame] == [0, 0, 1]

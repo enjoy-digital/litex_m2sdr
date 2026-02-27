@@ -40,6 +40,8 @@ class HeaderInserterExtractor(LiteXModule):
         # Signals.
         # --------
         cycles = Signal(32)
+        frame_cycles_eff = Signal(32)
+        self.comb += frame_cycles_eff.eq(Mux(self.frame_cycles == 0, 1, self.frame_cycles))
 
         # FSM.
         # ----
@@ -112,7 +114,7 @@ class HeaderInserterExtractor(LiteXModule):
             NextValue(self.update, 0),
             If(self.header_enable,
                 source.first.eq((cycles == 0) & (mode == "extractor")),
-                source.last.eq( cycles == (self.frame_cycles - 1)),
+                source.last.eq( cycles == (frame_cycles_eff - 1)),
                 If(source.valid & source.ready,
                     NextValue(cycles, cycles + 1),
                     If(source.last,
