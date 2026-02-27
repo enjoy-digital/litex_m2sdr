@@ -237,6 +237,23 @@ cd litex_m2sdr/software
   - [OrangePi 5 Max guide](doc/hosts/orangepi-5-max.md)
   - [Raspberry Pi 5 guide](doc/hosts/raspberry-pi-5.md)
 
+### Platform Notes
+
+| Platform Family | Notes |
+|----------------|-------|
+| x86 Linux hosts | Main PCIe deployment target. |
+| Raspberry Pi 5 | Dedicated setup guide available (see link above). |
+| OrangePi 5 Max | Dedicated setup guide available (see link above). |
+| LattePanda-class mini PCs | Supported in practice; PCIe re-training workaround logic is available in gateware for difficult link bring-up cases. |
+
+### What CI Validates
+
+Each push/pull request currently validates:
+- Gateware simulation suite: `pytest -v test`
+- Linux kernel driver compilation: `litex_m2sdr/software/kernel`
+- User-space utilities compilation: `litex_m2sdr/software/user`
+- SoapySDR module compilation: `litex_m2sdr/software/soapysdr`
+
 [> Troubleshooting
 ------------------
 <a id="troubleshooting"></a>
