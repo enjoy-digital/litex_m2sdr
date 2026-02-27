@@ -29,7 +29,7 @@ We know what you'll first ask when discovering this new SDR project: what's the 
 Why yet another SDR based on this RFIC? Because we've been designing FPGA-based projects for clients with this chip for almost 10 years now and still think this RFIC has incredible capabilities and possibilities that haven't been fully tapped by open-source projects. We believe it can provide a fantastic and simple solution when paired with the [LiteX](https://github.com/enjoy-digital/litex) framework we're developing. 🚀
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/1a3f2d76-b406-4928-b3ed-2767d317757e" width="100%">
+  <img src="https://github.com/user-attachments/assets/dec9bbd6-532d-4596-805b-94078df426a2" width="100%">
 </div>
 
 Imagine a minimalist AD9361-based SDR with:
@@ -54,7 +54,7 @@ Ideal for SDR enthusiasts, this versatile board fits directly into an M2 slot or
 For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/6ad09754-7aaf-4257-ba12-afbd93ebe75d" width="100%">
+  <img src="https://github.com/user-attachments/assets/fb75aeeb-4e99-45b5-9582-0c4dbd079af6" width="100%">
 </div>
 
 Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
@@ -355,5 +355,5 @@ E-mail: florent@enjoy-digital.fr
 Website: http://enjoy-digital.fr/
 
 <div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/0034fac5-d760-47ed-b93a-6ceaae47e978" width="100%">
+  <img src="https://github.com/user-attachments/assets/1cf8a5fd-a9bb-4efe-9e50-24eb944bd971" width="100%">
 </div>
