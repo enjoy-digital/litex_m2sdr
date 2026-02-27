@@ -12,7 +12,7 @@ INTERFACE ?= USE_LITEPCIE
 ifeq ($(INTERFACE),USE_LITEETH)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_rx_stream_shm m2sdr_tx_stream_shm m2sdr_stream_shm
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
@@ -93,6 +93,18 @@ m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 
 m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
+
+m2sdr_rx_stream_shm: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rx_stream_shm.o \
+	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
+
+m2sdr_tx_stream_shm: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_tx_stream_shm.o \
+	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
+
+m2sdr_stream_shm: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_stream_shm.o \
+	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
 endif
 
 clean:
