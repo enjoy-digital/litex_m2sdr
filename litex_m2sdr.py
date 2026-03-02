@@ -1037,6 +1037,15 @@ def main():
         if r.returncode != 0:
             raise RuntimeError("White Rabbit Firmware build failed.")
 
+    # Preflight WR cores tree when WR is enabled.
+    if args.with_white_rabbit:
+        wr_subsystem_vhd = os.path.join("wr-cores", "modules", "wrc_core", "xwr_subsystem.vhd")
+        if os.path.isdir("wr-cores") and not os.path.isfile(wr_subsystem_vhd):
+            msg = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
+            msg += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
+            msg += "Rename/remove it (for example: 'mv wr-cores wr-cores.old') and rerun so the expected WR-cores can be initialized."
+            raise ValueError(msg)
+
     # Build SoC.
     soc = BaseSoC(
         # Generic.
