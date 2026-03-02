@@ -1002,8 +1002,26 @@ def main():
     # Resolve White Rabbit firmware paths.
     wr_nic_dir  = args.wr_nic_dir
     wr_firmware = args.wr_firmware
+
+    # Auto-discover local/sibling litex_wr_nic checkout when not explicitly provided.
+    if wr_nic_dir is None:
+        this_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(this_dir)
+        wr_nic_candidates = [
+            os.path.join(this_dir,   "litex_wr_nic"),
+            os.path.join(parent_dir, "litex_wr_nic"),
+            os.path.join(this_dir,   "litex_wr_nic", "litex_wr_nic"),
+            os.path.join(parent_dir, "litex_wr_nic", "litex_wr_nic"),
+        ]
+        for candidate in wr_nic_candidates:
+            if os.path.isfile(os.path.join(candidate, "firmware", "build.py")):
+                wr_nic_dir = candidate
+                break
+
     if wr_firmware is None and wr_nic_dir:
-        wr_firmware = os.path.join(wr_nic_dir, "firmware", "spec_a7_wrc.bram")
+        candidate = os.path.join(wr_nic_dir, "firmware", "spec_a7_wrc.bram")
+        if os.path.isfile(candidate):
+            wr_firmware = candidate
 
     # Build White Rabbit Firmware.
     if args.with_white_rabbit and args.build:
