@@ -130,6 +130,29 @@ jobs:
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=1
 
+          # WR stale local wr-cores checkout smoke test.
+          rm -rf wr-cores
+          mkdir -p wr-cores
+          if ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard 2> /tmp/wr_stale.err; then
+            echo "Expected stale wr-cores layout check to fail, but command succeeded."
+            exit 1
+          fi
+          grep -q "Incompatible local 'wr-cores' tree detected" /tmp/wr_stale.err
+
+          # WR SHA mismatch smoke test.
+          rm -rf wr-cores
+          mkdir -p wr-cores/modules/wrc_core
+          printf '%s\n' 'mux_class_i(1) => x"ff");' > wr-cores/modules/wrc_core/xwr_subsystem.vhd
+          git -C wr-cores init -q
+          git -C wr-cores add modules/wrc_core/xwr_subsystem.vhd
+          git -C wr-cores -c user.name=ci -c user.email=ci@example.com commit -q -m "init wr-cores"
+          if ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard 2> /tmp/wr_sha.err; then
+            echo "Expected wr-cores SHA mismatch check to fail, but command succeeded."
+            exit 1
+          fi
+          grep -q "Local wr-cores SHA mismatch" /tmp/wr_sha.err
+          rm -rf wr-cores
+
       - name: Run gateware simulation tests
         run: |
           python3 -m pytest -v test
