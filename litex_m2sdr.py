@@ -262,6 +262,7 @@ class BaseSoC(SoCMini):
 
         # Capability -------------------------------------------------------------------------------
 
+        capability_wr_sfp = 0 if wr_sfp is None else wr_sfp
         self.capability = Capability(
             # API Version.
             api_version_str = "1.0",
@@ -291,7 +292,7 @@ class BaseSoC(SoCMini):
             variant        = variant,
             jtagbone       = with_jtagbone,
             eth_sfp        = eth_sfp,
-            wr_sfp         = wr_sfp,
+            wr_sfp         = capability_wr_sfp,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
