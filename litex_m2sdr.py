@@ -9,6 +9,7 @@
 import os
 import argparse
 import subprocess
+from pathlib import Path
 
 from migen import *
 
@@ -1053,12 +1054,47 @@ def main():
 
     # Preflight WR cores tree when WR is enabled.
     if args.with_white_rabbit:
+        import re
+
         wr_subsystem_vhd = os.path.join("wr-cores", "modules", "wrc_core", "xwr_subsystem.vhd")
-        if os.path.isdir("wr-cores") and not os.path.isfile(wr_subsystem_vhd):
-            msg = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
-            msg += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
-            msg += "Rename/remove it (for example: 'mv wr-cores wr-cores.old') and rerun so the expected WR-cores can be initialized."
-            raise ValueError(msg)
+        wr_patch_file    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "patches", "wr-cores", "0001-xwr_subsystem-mux-class.patch")
+
+        if os.path.isdir("wr-cores"):
+            if not os.path.isfile(wr_subsystem_vhd):
+                msg = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
+                msg += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
+                msg += "Rename/remove it (for example: 'mv wr-cores wr-cores.old') and rerun so the expected WR-cores can be initialized."
+                raise ValueError(msg)
+
+            # Guard against silently using an unexpected wr-cores revision.
+            expected_wr_cores_sha = None
+            if wr_nic_dir is not None:
+                wr_common = os.path.join(wr_nic_dir, "gateware", "wr_common.py")
+                if os.path.isfile(wr_common):
+                    wr_common_txt = Path(wr_common).read_text()
+                    m = re.search(r'WR_CORES_SHA1\s*=\s*"([0-9a-fA-F]+)"', wr_common_txt)
+                    if m:
+                        expected_wr_cores_sha = m.group(1).lower()
+
+            if expected_wr_cores_sha is not None:
+                r = subprocess.run(["git", "-C", "wr-cores", "rev-parse", "HEAD"], capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise RuntimeError("Failed to query local wr-cores revision with git rev-parse.")
+                local_wr_cores_sha = r.stdout.strip().lower()
+                if local_wr_cores_sha != expected_wr_cores_sha:
+                    msg = f"Local wr-cores SHA mismatch: found {local_wr_cores_sha}, expected {expected_wr_cores_sha}. "
+                    msg += "Rename/remove local wr-cores (for example: 'mv wr-cores wr-cores.old') and rerun."
+                    raise ValueError(msg)
+
+            # Apply explicit tracked patch when needed.
+            wr_subsystem_txt = Path(wr_subsystem_vhd).read_text()
+            if 'mux_class_i(1) => x"ff");' not in wr_subsystem_txt:
+                if not os.path.isfile(wr_patch_file):
+                    raise RuntimeError(f"Required WR patch file not found: {wr_patch_file}")
+                r = subprocess.run(["git", "-C", "wr-cores", "apply", wr_patch_file], capture_output=True, text=True)
+                if r.returncode != 0:
+                    raise RuntimeError(f"Failed to apply WR patch file {wr_patch_file}: {r.stderr.strip()}")
+                print(f"Applied WR patch: {wr_patch_file}")
 
     # Build SoC.
     soc = BaseSoC(
