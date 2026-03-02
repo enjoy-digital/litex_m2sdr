@@ -124,8 +124,11 @@ jobs:
           fi
           grep -q "only supported with --variant=baseboard" /tmp/wr_variant.err
 
-          # WR baseboard smoke test (elaboration-only, no P&R).
-          ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=0
+          # WR baseboard smoke tests (elaboration-only, no P&R):
+          # - auto SFP selection from board resources
+          # - explicit SFP index selection
+          ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard
+          ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=1
 
       - name: Run gateware simulation tests
         run: |
