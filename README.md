@@ -325,6 +325,23 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    lspci
    ```
 
+3. **White Rabbit (Baseboard):**
+   - White Rabbit is supported on the baseboard variant only:
+   ```
+   ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
+   ```
+   - `--wr-sfp` is optional; when omitted, the first available `sfp` index is auto-selected.
+   - Firmware path lookup order:
+     1. `--wr-firmware`
+     2. `--wr-nic-dir`
+     3. `LITEX_WR_NIC_DIR`
+     4. auto-discovery of `../litex_wr_nic` and `../../litex_wr_nic`
+   - If a stale local `wr-cores/` checkout is detected, refresh it:
+   ```
+   mv wr-cores wr-cores.old
+   ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
+   ```
+
 4. **Use JTAGBone/PCIeBone:**
     - Start the LiteX server for JTAG or PCIe:
     ```
