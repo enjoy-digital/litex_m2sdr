@@ -228,6 +228,9 @@ class BaseSoC(SoCMini):
             msg += "Available here: https://enjoy-digital-shop.myshopify.com/products/litex-acorn-baseboard-mini"
             raise ValueError(msg)
 
+        if with_white_rabbit and (variant != "baseboard"):
+            raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
+
         # SoCMini ----------------------------------------------------------------------------------
 
         SoCMini.__init__(self, platform, sys_clk_freq,
