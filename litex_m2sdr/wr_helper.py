@@ -8,9 +8,9 @@ import hashlib
 import os
 import re
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+
+# Constants ----------------------------------------------------------------------------------------
 
 WR_NIC_DIR_CANDIDATE_PATTERNS = (
     ("root",   "litex_wr_nic"),
@@ -23,52 +23,51 @@ WR_FIRMWARE_BUILD_SCRIPT_REL = os.path.join("firmware", "build.py")
 WR_FIRMWARE_IMAGE_REL        = os.path.join("firmware", "spec_a7_wrc.bram")
 WR_COMMON_REL                = os.path.join("gateware", "wr_common.py")
 
-WR_CORES_DIRNAME          = "wr-cores"
-WR_SUBSYSTEM_VHD_REL      = os.path.join("modules", "wrc_core", "xwr_subsystem.vhd")
-WR_PATCH_FILE_REL         = os.path.join("patches", "wr-cores", "0001-xwr_subsystem-mux-class.patch")
-WR_PATCHED_SIGNATURE      = 'mux_class_i(1) => x"ff");'
-WR_PATCH_MODE_VALUES      = ("auto", "check", "off")
+WR_CORES_DIRNAME        = "wr-cores"
+WR_SUBSYSTEM_VHD_REL    = os.path.join("modules", "wrc_core", "xwr_subsystem.vhd")
+WR_PATCH_FILE_REL       = os.path.join("patches", "wr-cores", "0001-xwr_subsystem-mux-class.patch")
+WR_PATCHED_SIGNATURE    = 'mux_class_i(1) => x"ff");'
+WR_PATCH_MODE_VALUES    = ("auto", "check", "off")
 
 WR_CORES_RENAME_HINT      = "Rename/remove local wr-cores (for example: 'mv wr-cores wr-cores.old') and rerun."
 WR_CORES_INIT_RENAME_HINT = "Rename/remove it (for example: 'mv wr-cores wr-cores.old') and rerun so the expected WR-cores can be initialized."
 
-ERR_NO_WR_FIRMWARE_PATH   = "White Rabbit build requested but no WR firmware path found. Use --wr-firmware or --wr-nic-dir."
-ERR_WR_FIRMWARE_BUILD_FAILED = "White Rabbit Firmware build failed."
-ERR_WR_CORES_STALE_TREE = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
-ERR_WR_CORES_STALE_TREE += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
-ERR_GIT_REV_PARSE_FAILED = "Failed to query local wr-cores revision with git rev-parse."
-ERR_WR_PATCH_MODE = f"Invalid WR patch mode '{{patch_mode}}'. Expected one of: {', '.join(WR_PATCH_MODE_VALUES)}."
+ERR_NO_WR_FIRMWARE_PATH    = "White Rabbit build requested but no WR firmware path found. Use --wr-firmware or --wr-nic-dir."
+ERR_WR_FIRMWARE_BUILD_FAIL = "White Rabbit Firmware build failed."
+ERR_WR_CORES_STALE_TREE    = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
+ERR_WR_CORES_STALE_TREE   += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
+ERR_GIT_REV_PARSE_FAILED   = "Failed to query local wr-cores revision with git rev-parse."
+ERR_WR_PATCH_MODE          = f"Invalid WR patch mode '{{patch_mode}}'. Expected one of: {', '.join(WR_PATCH_MODE_VALUES)}."
 ERR_WR_PATCH_MISSING_CHECK = "WR patch not applied in xwr_subsystem.vhd. Re-run with --wr-patch-mode=auto to apply it automatically."
 
-
-@dataclass
-class FileFingerprint:
-    exists: bool
-    mtime_ns: Optional[int]
-    sha256: Optional[str]
+# Internal Helpers ---------------------------------------------------------------------------------
 
 
 def _fingerprint_file(path):
     if not os.path.isfile(path):
-        return FileFingerprint(exists=False, mtime_ns=None, sha256=None)
+        return {
+            "exists"   : False,
+            "mtime_ns" : None,
+            "sha256"   : None,
+        }
 
     sha = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             sha.update(chunk)
 
-    return FileFingerprint(
-        exists=True,
-        mtime_ns=os.stat(path).st_mtime_ns,
-        sha256=sha.hexdigest(),
-    )
+    return {
+        "exists"   : True,
+        "mtime_ns" : os.stat(path).st_mtime_ns,
+        "sha256"   : sha.hexdigest(),
+    }
 
 
 def _iter_wr_nic_candidates(root_dir):
     parent_dir = os.path.dirname(root_dir)
     bases = {
-        "root": root_dir,
-        "parent": parent_dir,
+        "root"   : root_dir,
+        "parent" : parent_dir,
     }
     for pattern in WR_NIC_DIR_CANDIDATE_PATTERNS:
         yield os.path.join(bases[pattern[0]], *pattern[1:])
@@ -83,58 +82,12 @@ def _get_available_sfps_for_variant(variant, baseboard_io):
     })
 
 
-def resolve_wr_paths(root_dir, wr_nic_dir=None, wr_firmware=None):
-    if wr_nic_dir is None:
-        for candidate in _iter_wr_nic_candidates(root_dir):
-            if os.path.isfile(os.path.join(candidate, WR_FIRMWARE_BUILD_SCRIPT_REL)):
-                wr_nic_dir = candidate
-                break
-
-    if wr_firmware is None and wr_nic_dir:
-        candidate = os.path.join(wr_nic_dir, WR_FIRMWARE_IMAGE_REL)
-        if os.path.isfile(candidate):
-            wr_firmware = candidate
-
-    return wr_nic_dir, wr_firmware
-
-
 def _resolve_firmware_output_path(wr_nic_dir, wr_firmware):
     if wr_firmware:
         return os.path.abspath(wr_firmware)
     if wr_nic_dir:
         return os.path.join(wr_nic_dir, WR_FIRMWARE_IMAGE_REL)
     return None
-
-
-def build_wr_firmware(wr_nic_dir, wr_firmware, wr_firmware_target, enforce_fresh=True):
-    if wr_nic_dir is None and wr_firmware is None:
-        raise ValueError(ERR_NO_WR_FIRMWARE_PATH)
-
-    firmware_dir = os.path.dirname(os.path.abspath(wr_firmware)) if wr_firmware else os.path.join(wr_nic_dir, "firmware")
-    build_script = os.path.join(firmware_dir, os.path.basename(WR_FIRMWARE_BUILD_SCRIPT_REL))
-    firmware_out = _resolve_firmware_output_path(wr_nic_dir, wr_firmware)
-    before = _fingerprint_file(firmware_out) if firmware_out else FileFingerprint(False, None, None)
-
-    print(f"Building White Rabbit firmware in {firmware_dir}...")
-    r = subprocess.run([build_script, "--target", wr_firmware_target], cwd=firmware_dir)
-    if r.returncode != 0:
-        raise RuntimeError(ERR_WR_FIRMWARE_BUILD_FAILED)
-
-    if firmware_out is None:
-        return
-
-    after = _fingerprint_file(firmware_out)
-    if not after.exists:
-        raise RuntimeError(f"White Rabbit firmware output not found after build: {firmware_out}")
-
-    if enforce_fresh and before.exists:
-        unchanged_mtime = (before.mtime_ns == after.mtime_ns)
-        unchanged_hash = (before.sha256 == after.sha256)
-        if unchanged_mtime and unchanged_hash:
-            raise RuntimeError(
-                f"White Rabbit firmware output did not change after build: {firmware_out}. "
-                "This usually indicates a stale/no-op firmware build."
-            )
 
 
 def _get_expected_wr_cores_sha(wr_nic_dir):
@@ -146,25 +99,74 @@ def _get_expected_wr_cores_sha(wr_nic_dir):
         return None
 
     wr_common_txt = Path(wr_common).read_text()
-    m = re.search(r'WR_CORES_SHA1\s*=\s*"([0-9a-fA-F]+)"', wr_common_txt)
-    return m.group(1).lower() if m else None
+    match = re.search(r'WR_CORES_SHA1\s*=\s*"([0-9a-fA-F]+)"', wr_common_txt)
+    return match.group(1).lower() if match else None
+
+# Public API ---------------------------------------------------------------------------------------
+
+
+def resolve_wr_paths(root_dir, wr_nic_dir=None, wr_firmware=None):
+    if wr_nic_dir is None:
+        for candidate in _iter_wr_nic_candidates(root_dir):
+            build_script = os.path.join(candidate, WR_FIRMWARE_BUILD_SCRIPT_REL)
+            if os.path.isfile(build_script):
+                wr_nic_dir = candidate
+                break
+
+    if wr_firmware is None and wr_nic_dir:
+        candidate = os.path.join(wr_nic_dir, WR_FIRMWARE_IMAGE_REL)
+        if os.path.isfile(candidate):
+            wr_firmware = candidate
+
+    return wr_nic_dir, wr_firmware
+
+
+def build_wr_firmware(wr_nic_dir, wr_firmware, wr_firmware_target, enforce_fresh=True):
+    if wr_nic_dir is None and wr_firmware is None:
+        raise ValueError(ERR_NO_WR_FIRMWARE_PATH)
+
+    firmware_dir = os.path.dirname(os.path.abspath(wr_firmware)) if wr_firmware else os.path.join(wr_nic_dir, "firmware")
+    build_script = os.path.join(firmware_dir, os.path.basename(WR_FIRMWARE_BUILD_SCRIPT_REL))
+    firmware_out = _resolve_firmware_output_path(wr_nic_dir, wr_firmware)
+
+    before = _fingerprint_file(firmware_out) if firmware_out else _fingerprint_file("")
+
+    print(f"Building White Rabbit firmware in {firmware_dir}...")
+    result = subprocess.run([build_script, "--target", wr_firmware_target], cwd=firmware_dir)
+    if result.returncode != 0:
+        raise RuntimeError(ERR_WR_FIRMWARE_BUILD_FAIL)
+
+    if firmware_out is None:
+        return
+
+    after = _fingerprint_file(firmware_out)
+    if not after["exists"]:
+        raise RuntimeError(f"White Rabbit firmware output not found after build: {firmware_out}")
+
+    if enforce_fresh and before["exists"]:
+        unchanged_mtime = (before["mtime_ns"] == after["mtime_ns"])
+        unchanged_hash  = (before["sha256"]   == after["sha256"])
+        if unchanged_mtime and unchanged_hash:
+            msg  = f"White Rabbit firmware output did not change after build: {firmware_out}. "
+            msg += "This usually indicates a stale/no-op firmware build."
+            raise RuntimeError(msg)
 
 
 def inspect_wr_cores(root_dir, wr_nic_dir):
-    wr_cores_dir = os.path.join(root_dir, WR_CORES_DIRNAME)
+    wr_cores_dir     = os.path.join(root_dir, WR_CORES_DIRNAME)
     wr_subsystem_vhd = os.path.join(wr_cores_dir, WR_SUBSYSTEM_VHD_REL)
-    wr_patch_file = os.path.join(root_dir, WR_PATCH_FILE_REL)
+    wr_patch_file    = os.path.join(root_dir, WR_PATCH_FILE_REL)
 
     state = {
-        "wr_cores_dir": wr_cores_dir,
-        "wr_subsystem_vhd": wr_subsystem_vhd,
-        "wr_patch_file": wr_patch_file,
-        "exists": os.path.isdir(wr_cores_dir),
-        "valid_layout": False,
-        "expected_sha": _get_expected_wr_cores_sha(wr_nic_dir),
-        "local_sha": None,
-        "sha_match": None,
-        "patched": None,
+        "wr_cores_dir"     : wr_cores_dir,
+        "wr_subsystem_vhd" : wr_subsystem_vhd,
+        "wr_patch_file"    : wr_patch_file,
+        "exists"           : os.path.isdir(wr_cores_dir),
+        "valid_layout"     : False,
+        "expected_sha"     : _get_expected_wr_cores_sha(wr_nic_dir),
+        "local_sha"        : None,
+        "sha_match"        : None,
+        "patched"          : None,
     }
 
     if not state["exists"]:
@@ -175,9 +177,9 @@ def inspect_wr_cores(root_dir, wr_nic_dir):
         return state
 
     if state["expected_sha"] is not None:
-        r = subprocess.run(["git", "-C", wr_cores_dir, "rev-parse", "HEAD"], capture_output=True, text=True)
-        if r.returncode == 0:
-            state["local_sha"] = r.stdout.strip().lower()
+        result = subprocess.run(["git", "-C", wr_cores_dir, "rev-parse", "HEAD"], capture_output=True, text=True)
+        if result.returncode == 0:
+            state["local_sha"] = result.stdout.strip().lower()
             state["sha_match"] = (state["local_sha"] == state["expected_sha"])
         else:
             state["local_sha"] = "<rev-parse failed>"
@@ -198,14 +200,13 @@ def preflight_wr_cores(root_dir, wr_nic_dir, patch_mode="auto"):
         return state
 
     if not state["valid_layout"]:
-        msg = ERR_WR_CORES_STALE_TREE + WR_CORES_INIT_RENAME_HINT
-        raise ValueError(msg)
+        raise ValueError(ERR_WR_CORES_STALE_TREE + WR_CORES_INIT_RENAME_HINT)
 
     if state["expected_sha"] is not None:
         if state["local_sha"] is None:
             raise RuntimeError(ERR_GIT_REV_PARSE_FAILED)
         if state["sha_match"] is False:
-            msg = f"Local wr-cores SHA mismatch: found {state['local_sha']}, expected {state['expected_sha']}. "
+            msg  = f"Local wr-cores SHA mismatch: found {state['local_sha']}, expected {state['expected_sha']}. "
             msg += WR_CORES_RENAME_HINT
             raise ValueError(msg)
 
@@ -222,11 +223,11 @@ def preflight_wr_cores(root_dir, wr_nic_dir, patch_mode="auto"):
     if not os.path.isfile(wr_patch_file):
         raise RuntimeError(f"Required WR patch file not found: {wr_patch_file}")
 
-    r = subprocess.run(["git", "-C", state["wr_cores_dir"], "apply", wr_patch_file], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"Failed to apply WR patch file {wr_patch_file}: {r.stderr.strip()}")
-    print(f"Applied WR patch: {wr_patch_file}")
+    result = subprocess.run(["git", "-C", state["wr_cores_dir"], "apply", wr_patch_file], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to apply WR patch file {wr_patch_file}: {result.stderr.strip()}")
 
+    print(f"Applied WR patch: {wr_patch_file}")
     state["patched"] = True
     return state
 
@@ -249,7 +250,9 @@ def validate_wr_platform(variant, wr_sfp, baseboard_io):
             resolved_wr_sfp = available_sfps[0]
             auto_selected = True
         elif resolved_wr_sfp not in available_sfps:
-            errors.append(f"White Rabbit SFP sfp:{resolved_wr_sfp} not available on this variant. Available SFPs: {available_sfps}")
+            msg = f"White Rabbit SFP sfp:{resolved_wr_sfp} not available on this variant. "
+            msg += f"Available SFPs: {available_sfps}"
+            errors.append(msg)
 
     if errors:
         msg = "White Rabbit platform validation failed:\n"
@@ -257,9 +260,9 @@ def validate_wr_platform(variant, wr_sfp, baseboard_io):
         raise ValueError(msg)
 
     return {
-        "wr_sfp": resolved_wr_sfp,
+        "wr_sfp"        : resolved_wr_sfp,
         "available_sfps": available_sfps,
-        "auto_selected": auto_selected,
+        "auto_selected" : auto_selected,
     }
 
 
@@ -312,12 +315,13 @@ def prepare_wr_environment(*,
 
     if with_white_rabbit:
         validation = validate_wr_platform(
-            variant     = variant,
-            wr_sfp      = wr_sfp,
-            baseboard_io= baseboard_io,
+            variant      = variant,
+            wr_sfp       = wr_sfp,
+            baseboard_io = baseboard_io,
         )
         resolved_wr_sfp = validation["wr_sfp"]
-        available_sfps = validation["available_sfps"]
+        available_sfps  = validation["available_sfps"]
+
         if validation["auto_selected"]:
             print(f"White Rabbit SFP auto-selected: sfp:{resolved_wr_sfp} (available: {available_sfps})")
 
@@ -351,19 +355,19 @@ def prepare_wr_environment(*,
 
     if status:
         print_wr_status(
-            variant       = variant,
-            wr_sfp        = resolved_wr_sfp,
-            available_sfps= available_sfps,
-            wr_nic_dir    = wr_nic_dir,
-            wr_firmware   = wr_firmware,
-            wr_cores_state= wr_cores_state,
-            patch_mode    = patch_mode,
+            variant        = variant,
+            wr_sfp         = resolved_wr_sfp,
+            available_sfps = available_sfps,
+            wr_nic_dir     = wr_nic_dir,
+            wr_firmware    = wr_firmware,
+            wr_cores_state = wr_cores_state,
+            patch_mode     = patch_mode,
         )
 
     return {
-        "wr_nic_dir": wr_nic_dir,
-        "wr_firmware": wr_firmware,
-        "wr_sfp": resolved_wr_sfp,
-        "available_sfps": available_sfps,
-        "wr_cores_state": wr_cores_state,
+        "wr_nic_dir"     : wr_nic_dir,
+        "wr_firmware"    : wr_firmware,
+        "wr_sfp"         : resolved_wr_sfp,
+        "available_sfps" : available_sfps,
+        "wr_cores_state" : wr_cores_state,
     }
