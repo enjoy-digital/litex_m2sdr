@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 import os
+import sys
 import argparse
 import subprocess
 
@@ -214,6 +215,7 @@ class BaseSoC(SoCMini):
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
+        wr_nic_dir             = None,
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
@@ -697,6 +699,13 @@ class BaseSoC(SoCMini):
                 raise ValueError("White Rabbit enabled but no WR firmware provided. Use --wr-firmware or --wr-nic-dir.")
             wr_firmware = os.path.abspath(wr_firmware)
 
+            # Ensure local/sibling litex_wr_nic checkout is importable in CI and local runs.
+            if wr_nic_dir is not None:
+                wr_import_paths = [os.path.abspath(wr_nic_dir), os.path.abspath(os.path.dirname(wr_nic_dir))]
+                for path in wr_import_paths:
+                    if path not in sys.path:
+                        sys.path.insert(0, path)
+
             from litex.soc.cores.uart import UARTPHY, UART
 
             from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
@@ -1063,6 +1072,7 @@ def main():
         wr_sfp            = wr_sfp,
         wr_dac_bits       = args.wr_dac_bits,
         wr_firmware       = wr_firmware,
+        wr_nic_dir        = wr_env["wr_nic_dir"],
         wr_ext_clk10_port   = args.wr_ext_clk10_port,
         wr_ext_clk10_period = args.wr_ext_clk10_period,
         wr_ext_clk10_name   = args.wr_ext_clk10_name,
