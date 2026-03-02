@@ -109,6 +109,24 @@ jobs:
         run: |
           ./release.py --nobuild
 
+      - name: Checkout LiteX-WR-NIC (for WR smoke tests)
+        run: |
+          git clone --depth=1 https://github.com/enjoy-digital/litex_wr_nic.git /tmp/litex_wr_nic
+
+      - name: Run White Rabbit integration smoke tests
+        env:
+          LITEX_WR_NIC_DIR: /tmp/litex_wr_nic/litex_wr_nic
+        run: |
+          # WR must fail on M.2-only variant (no baseboard SFP resources).
+          if ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=m2 2> /tmp/wr_variant.err; then
+            echo "Expected WR+m2 variant check to fail, but command succeeded."
+            exit 1
+          fi
+          grep -q "only supported with --variant=baseboard" /tmp/wr_variant.err
+
+          # WR baseboard smoke test (elaboration-only, no P&R).
+          ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=0
+
       - name: Run gateware simulation tests
         run: |
           python3 -m pytest -v test
