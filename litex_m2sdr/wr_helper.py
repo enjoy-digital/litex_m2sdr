@@ -325,6 +325,21 @@ def prepare_wr_environment(*,
         if validation["auto_selected"]:
             print(f"White Rabbit SFP auto-selected: sfp:{resolved_wr_sfp} (available: {available_sfps})")
 
+        # WR integration needs a BRAM image even for elaboration-only runs.
+        # If not available yet, build it once from wr_nic_dir.
+        if wr_firmware is None and wr_nic_dir is not None:
+            build_wr_firmware(
+                wr_nic_dir         = wr_nic_dir,
+                wr_firmware        = wr_firmware,
+                wr_firmware_target = wr_firmware_target,
+                enforce_fresh      = False,
+            )
+            _, wr_firmware = resolve_wr_paths(
+                root_dir    = root_dir,
+                wr_nic_dir  = wr_nic_dir,
+                wr_firmware = wr_firmware,
+            )
+
         if build:
             build_wr_firmware(
                 wr_nic_dir         = wr_nic_dir,
@@ -332,6 +347,9 @@ def prepare_wr_environment(*,
                 wr_firmware_target = wr_firmware_target,
                 enforce_fresh      = True,
             )
+
+        if wr_firmware is None:
+            raise ValueError(ERR_NO_WR_FIRMWARE_PATH)
 
         preflight_wr_cores(
             root_dir   = root_dir,
