@@ -46,7 +46,7 @@ from litesata.frontend.stream import LiteSATAStream2Sectors, LiteSATASectors2Str
 from litescope import LiteScopeAnalyzer
 
 from litex_m2sdr import Platform, _io_baseboard
-from litex_m2sdr.wr_helper import resolve_wr_paths, build_wr_firmware, preflight_wr_cores
+from litex_m2sdr.wr_helper import prepare_wr_environment
 
 from litex_m2sdr.gateware.capability  import Capability
 from litex_m2sdr.gateware.si5351      import SI5351
@@ -231,20 +231,8 @@ class BaseSoC(SoCMini):
 
         if with_white_rabbit and (variant != "baseboard"):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
-
-        # Resolve White Rabbit SFP index from available board resources.
-        if with_white_rabbit:
-            wr_available_sfps = sorted({
-                number for (name, number, *_rest) in platform.constraint_manager.available
-                if name == "sfp"
-            })
-            if wr_sfp is None:
-                if not wr_available_sfps:
-                    raise ValueError("No SFP resources available for White Rabbit on this variant.")
-                wr_sfp = wr_available_sfps[0]
-                print(f"White Rabbit SFP auto-selected: sfp:{wr_sfp} (available: {wr_available_sfps})")
-            elif wr_sfp not in wr_available_sfps:
-                raise ValueError(f"White Rabbit SFP sfp:{wr_sfp} not available on this variant. Available SFPs: {wr_available_sfps}")
+        if with_white_rabbit and (wr_sfp is None):
+            raise ValueError("White Rabbit SFP must be resolved before BaseSoC initialization.")
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -1002,6 +990,8 @@ def main():
     parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
     parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
     parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
+    parser.add_argument("--wr-status",           action="store_true",                    help="Print resolved WR environment status.")
+    parser.add_argument("--wr-patch-mode",       default="auto",                         help="WR patch behavior for xwr_subsystem (auto/check/off).", choices=["auto", "check", "off"])
     parser.add_argument("--wr-ext-clk10-port",   default=None,                           help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
     parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,              help="External 10MHz clock period in ns for constraint.")
     parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                 help="External 10MHz clock name for constraint.")
@@ -1019,27 +1009,24 @@ def main():
 
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Resolve White Rabbit firmware paths.
-    wr_nic_dir, wr_firmware = resolve_wr_paths(
-        root_dir    = this_dir,
-        wr_nic_dir  = args.wr_nic_dir,
-        wr_firmware = args.wr_firmware,
+    wr_env = prepare_wr_environment(
+        root_dir          = this_dir,
+        variant           = args.variant,
+        baseboard_io      = _io_baseboard,
+        with_white_rabbit = args.with_white_rabbit,
+        wr_sfp            = args.wr_sfp,
+        wr_nic_dir        = args.wr_nic_dir,
+        wr_firmware       = args.wr_firmware,
+        wr_firmware_target= args.wr_firmware_target,
+        build             = args.build,
+        patch_mode        = args.wr_patch_mode,
+        status            = args.wr_status,
     )
+    wr_firmware = wr_env["wr_firmware"]
+    wr_sfp      = wr_env["wr_sfp"]
 
-    # Build White Rabbit Firmware.
-    if args.with_white_rabbit and args.build:
-        build_wr_firmware(
-            wr_nic_dir         = wr_nic_dir,
-            wr_firmware        = wr_firmware,
-            wr_firmware_target = args.wr_firmware_target,
-        )
-
-    # Preflight WR cores tree when WR is enabled.
-    if args.with_white_rabbit:
-        preflight_wr_cores(
-            root_dir   = this_dir,
-            wr_nic_dir = wr_nic_dir,
-        )
+    if args.wr_status and not args.with_white_rabbit:
+        return
 
     # Build SoC.
     soc = BaseSoC(
@@ -1072,7 +1059,7 @@ def main():
 
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
-        wr_sfp            = args.wr_sfp,
+        wr_sfp            = wr_sfp,
         wr_dac_bits       = args.wr_dac_bits,
         wr_firmware       = wr_firmware,
         wr_ext_clk10_port   = args.wr_ext_clk10_port,
