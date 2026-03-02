@@ -212,7 +212,7 @@ class BaseSoC(SoCMini):
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
-        with_white_rabbit      = False, wr_sfp=1, wr_dac_bits=16, wr_firmware=None,
+        with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
@@ -230,6 +230,20 @@ class BaseSoC(SoCMini):
 
         if with_white_rabbit and (variant != "baseboard"):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
+
+        # Resolve White Rabbit SFP index from available board resources.
+        if with_white_rabbit:
+            wr_available_sfps = sorted({
+                number for (name, number, *_rest) in platform.constraint_manager.available
+                if name == "sfp"
+            })
+            if wr_sfp is None:
+                if not wr_available_sfps:
+                    raise ValueError("No SFP resources available for White Rabbit on this variant.")
+                wr_sfp = wr_available_sfps[0]
+                print(f"White Rabbit SFP auto-selected: sfp:{wr_sfp} (available: {wr_available_sfps})")
+            elif wr_sfp not in wr_available_sfps:
+                raise ValueError(f"White Rabbit SFP sfp:{wr_sfp} not available on this variant. Available SFPs: {wr_available_sfps}")
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -982,7 +996,7 @@ def main():
 
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit",   action="store_true",                    help="Enable White-Rabbit Support.")
-    parser.add_argument("--wr-sfp",              default=1, type=int,                    help="White Rabbit SFP.", choices=[0, 1])
+    parser.add_argument("--wr-sfp",              default=None, type=int,                 help="White Rabbit SFP (default: auto-select first available).", choices=[0, 1])
     parser.add_argument("--wr-dac-bits",         default=16, type=int,                   help="White Rabbit MMCM phase-shift control word width (in bits).")
     parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
     parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
