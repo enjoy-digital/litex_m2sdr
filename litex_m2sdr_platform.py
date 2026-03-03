@@ -248,8 +248,8 @@ class Platform(Xilinx7SeriesPlatform):
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
-        self.add_period_constraint(self.lookup_request("clk100",               0, loose=True), 1e9/100e6)
-        self.add_period_constraint(self.lookup_request("si5351_clk0",          0, loose=True), 1e9/38.4e6)
-        self.add_period_constraint(self.lookup_request("si5351_clk1",          0, loose=True), 1e9/100e6)
-        self.add_period_constraint(self.lookup_request("ad9361_rfic:rx_clk_p", 0, loose=True), 1e9/self.rfic_clk_freq)
-        self.add_period_constraint(self.lookup_request("sync_clk_in",          0, loose=True), 1e9/10e6)
+        self.add_period_constraint(self.lookup_request("clk100",               0, loose=True), 1e9/100e6)          # Board 100MHz oscillator.
+        self.add_period_constraint(self.lookup_request("si5351_clk0",          0, loose=True), 1e9/38.4e6)         # Local VCTCXO.
+        self.add_period_constraint(self.lookup_request("si5351_clk1",          0, loose=True), 1e9/100e6)          # Time/PPS reference.
+        self.add_period_constraint(self.lookup_request("ad9361_rfic:rx_clk_p", 0, loose=True), 1e9/self.rfic_clk_freq) # RF sample clock.
+        self.add_period_constraint(self.lookup_request("sync_clk_in",          0, loose=True), 1e9/10e6)           # External sync/debug clock.
