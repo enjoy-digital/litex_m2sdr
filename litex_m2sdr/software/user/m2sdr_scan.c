@@ -146,6 +146,7 @@ struct scan_state {
     float db_min;
     float db_max;
     bool run;
+    int display_rows;
 
     int segments;
     int waterfall_width;
@@ -523,6 +524,14 @@ static bool is_power_of_two_int(int n)
     return (n > 0) && ((n & (n - 1)) == 0);
 }
 
+static int ilog2_int(int n)
+{
+    int e = 0;
+    while ((1 << e) < n)
+        e++;
+    return e;
+}
+
 static bool apply_runtime_config(struct scan_state *s,
                                  int64_t start_hz,
                                  int64_t stop_hz,
@@ -575,7 +584,7 @@ int main(int argc, char **argv)
     const char *glsl_version = "#version 130";
     float ui_start_mhz;
     float ui_stop_mhz;
-    int ui_fft_len;
+    int ui_fft_exp;
     int ui_lines;
     int ui_rx_gain;
 
@@ -600,6 +609,7 @@ int main(int argc, char **argv)
     s.db_min = DEFAULT_DB_MIN;
     s.db_max = DEFAULT_DB_MAX;
     s.run = true;
+    s.display_rows = 1;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
@@ -700,7 +710,7 @@ int main(int argc, char **argv)
 
     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
-    ui_fft_len = s.fft_len;
+    ui_fft_exp = ilog2_int(s.fft_len);
     ui_lines = s.lines;
     ui_rx_gain = s.rx_gain;
 
@@ -738,8 +748,10 @@ int main(int argc, char **argv)
 
         igDragFloat("Scan Start (MHz)", &ui_start_mhz, 1.0f, 70.0f, 6000.0f, "%.3f", 0);
         igDragFloat("Scan Stop (MHz)", &ui_stop_mhz, 1.0f, 70.0f, 6000.0f, "%.3f", 0);
-        igSliderInt("FFT Length", &ui_fft_len, 128, 16384, "%d", 0);
+        igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
+        igText("FFT Length: %d", 1 << ui_fft_exp);
         igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
+        igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
         igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
         igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
         igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
@@ -750,11 +762,12 @@ int main(int argc, char **argv)
         if (igButton("Apply", (ImVec2){120, 0})) {
             int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
             int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
+            int new_fft_len = 1 << ui_fft_exp;
             s.run = false;
-            if (apply_runtime_config(&s, new_start, new_stop, ui_fft_len, ui_lines, ui_rx_gain)) {
+            if (apply_runtime_config(&s, new_start, new_stop, new_fft_len, ui_lines, ui_rx_gain)) {
                 ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                 ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
-                ui_fft_len = s.fft_len;
+                ui_fft_exp = ilog2_int(s.fft_len);
                 ui_lines = s.lines;
                 ui_rx_gain = s.rx_gain;
             }
@@ -774,18 +787,35 @@ int main(int argc, char **argv)
         ImVec2 avail;
         igGetContentRegionAvail(&avail);
         if (avail.x > 10.0f && avail.y > 10.0f) {
-            float aspect = (float)s.lines / (float)s.waterfall_width;
-            float img_w = avail.x;
-            float img_h = img_w * aspect;
-            if (img_h > avail.y) {
-                img_h = avail.y;
-                img_w = img_h / aspect;
-            }
+            int row;
+            int rows = s.display_rows;
+            float row_height;
+            const float row_spacing = 4.0f;
+            const float label_h = igGetTextLineHeightWithSpacing();
+            float reserved = rows * (label_h + row_spacing);
+            float images_h = avail.y - reserved;
+
+            if (rows < 1)
+                rows = 1;
+            if (images_h < 8.0f)
+                images_h = 8.0f;
+
+            row_height = images_h / rows;
 
             ImTextureRef tex_ref;
             tex_ref._TexData = NULL;
             tex_ref._TexID = (ImTextureID)(uintptr_t)s.waterfall_tex;
-            igImage(tex_ref, (ImVec2){img_w, img_h}, (ImVec2){0, 1}, (ImVec2){1, 0});
+
+            for (row = 0; row < rows; row++) {
+                double total_hz = (double)(s.scan_stop_hz - s.scan_start_hz);
+                double f0_hz = (double)s.scan_start_hz + total_hz * (double)row / (double)rows;
+                double f1_hz = (double)s.scan_start_hz + total_hz * (double)(row + 1) / (double)rows;
+                float u0 = (float)row / (float)rows;
+                float u1 = (float)(row + 1) / (float)rows;
+
+                igText("Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
+                igImage(tex_ref, (ImVec2){avail.x, row_height}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
+            }
         }
 
         igEnd();
