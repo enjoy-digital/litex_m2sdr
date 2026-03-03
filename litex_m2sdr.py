@@ -222,6 +222,10 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
+        platform.rfic_clk_freq = {
+            False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
+            True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
+        }[with_rfic_oversampling]
         if variant == "baseboard":
             platform.add_extension(_io_baseboard)
         if (with_eth or with_sata) and (variant != "baseboard"):
@@ -585,11 +589,6 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
-        rfic_clk_freq = {
-            False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
-            True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
-        }[with_rfic_oversampling]
-        self.rfic_clk_freq = rfic_clk_freq
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -801,12 +800,7 @@ class BaseSoC(SoCMini):
             )
 
         # Timing Constraints -----------------------------------------------------------------------
-        # Explicit Root/Board Clock Constraints.
-        platform.add_period_constraint(platform.lookup_request("clk100",                0, loose=True), 1e9/100e6)            # Board 100MHz oscillator.
-        platform.add_period_constraint(platform.lookup_request("si5351_clk0",           0, loose=True), 1e9/38.4e6)           # Local VCTCXO.
-        platform.add_period_constraint(platform.lookup_request("si5351_clk1",           0, loose=True), 1e9/100e6)            # Time/PPS reference.
-        platform.add_period_constraint(platform.lookup_request("ad9361_rfic:rx_clk_p",  0, loose=True), 1e9/self.rfic_clk_freq) # RF sample clock.
-        platform.add_period_constraint(platform.lookup_request("sync_clk_in",           0, loose=True), 1e9/10e6)             # External sync/debug clock.
+        # Explicit root/board clock constraints are handled in Platform.do_finalize().
 
         # JTAG TCK and Async Crossing to sys.
         if with_jtagbone:
@@ -872,7 +866,7 @@ class BaseSoC(SoCMini):
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
 
         # RFIC clock domain.
-        platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/self.rfic_clk_freq)
+        platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
 
         # Clk Measurements -------------------------------------------------------------------------
 

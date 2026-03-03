@@ -197,6 +197,7 @@ class Platform(Xilinx7SeriesPlatform):
         device = "xc7a200t"
         Xilinx7SeriesPlatform.__init__(self, f"{device}sbg484-3", _io, _connectors, toolchain="vivado")
         self.image_size = {"xc7a200t" : 0x00800000}[device]
+        self.rfic_clk_freq = 245.76e6
 
         self.toolchain.bitstream_commands = [
             "set_property BITSTREAM.CONFIG.UNUSEDPIN Pulldown [current_design]",
@@ -247,3 +248,8 @@ class Platform(Xilinx7SeriesPlatform):
 
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
+        self.add_period_constraint(self.lookup_request("clk100",               0, loose=True), 1e9/100e6)
+        self.add_period_constraint(self.lookup_request("si5351_clk0",          0, loose=True), 1e9/38.4e6)
+        self.add_period_constraint(self.lookup_request("si5351_clk1",          0, loose=True), 1e9/100e6)
+        self.add_period_constraint(self.lookup_request("ad9361_rfic:rx_clk_p", 0, loose=True), 1e9/self.rfic_clk_freq)
+        self.add_period_constraint(self.lookup_request("sync_clk_in",          0, loose=True), 1e9/10e6)
