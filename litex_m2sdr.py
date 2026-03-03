@@ -73,7 +73,7 @@ class CRG(LiteXModule):
         self.cd_sys           = ClockDomain()
         self.cd_clk10         = ClockDomain()
 
-        self.cd_clk100        = ClockDomain()
+        self.cd_clk100        = ClockDomain(reset_less=True)
         self.cd_clk200        = ClockDomain()
         self.cd_idelay        = ClockDomain()
 
@@ -107,8 +107,6 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
-        platform.add_false_path_constraints(self.cd_sys.clk, self.cd_clk10.clk, pll.clkin)
-
         # IDelayCtrl.
         # -----------
         self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
@@ -310,7 +308,6 @@ class BaseSoC(SoCMini):
         # SI5351 ClkIn/Out.
         si5351_clk0   = platform.request("si5351_clk0")
         si5351_clk1   = platform.request("si5351_clk1")
-        platform.add_false_path_constraints(si5351_clk0, si5351_clk1, self.crg.cd_sys.clk)
 
         # Time Generator ---------------------------------------------------------------------------
 
@@ -341,8 +338,6 @@ class BaseSoC(SoCMini):
 
         if with_jtagbone:
             self.add_jtagbone()
-            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
-            platform.add_false_path_constraints(self.jtagbone.phy.cd_jtag.clk, self.crg.cd_sys.clk)
 
         # Leds -------------------------------------------------------------------------------------
 
@@ -354,8 +349,6 @@ class BaseSoC(SoCMini):
 
         self.icap = ICAP()
         self.icap.add_reload()
-        self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
-        platform.add_false_path_constraints(self.icap.cd_icap.clk, self.crg.cd_sys.clk)
 
         # XADC -------------------------------------------------------------------------------------
 
@@ -364,8 +357,6 @@ class BaseSoC(SoCMini):
         # DNA --------------------------------------------------------------------------------------
 
         self.dna = DNA()
-        self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
-        platform.add_false_path_constraints(self.dna.cd_dna.clk, self.crg.cd_sys.clk)
 
         # SPI Flash --------------------------------------------------------------------------------
 
@@ -473,18 +464,6 @@ class BaseSoC(SoCMini):
                     self.ptm_requester.time.eq(self.time_gen.time)
                 ]
 
-            # Timings False Paths.
-            # --------------------
-            false_paths = [
-                ("{{*s7pciephy_clkout0}}", "{{*crg_*clkout0}}"),
-                ("{{*s7pciephy_clkout1}}", "{{*crg_*clkout0}}"),
-                ("{{*s7pciephy_clkout3}}", "{{*crg_*clkout0}}"),
-                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}")
-            ]
-            for clk0, clk1 in false_paths:
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
-
         # Ethernet ---------------------------------------------------------------------------------
 
         if with_eth:
@@ -501,9 +480,6 @@ class BaseSoC(SoCMini):
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
             )
-            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
 
             # Core + MMAP (Etherbone).
             # ------------------------
@@ -613,8 +589,7 @@ class BaseSoC(SoCMini):
             False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
         }[with_rfic_oversampling]
-        self.platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/rfic_clk_freq)
-        self.platform.add_false_path_constraints(self.ad9361.cd_rfic.clk, self.crg.cd_sys.clk)
+        self.rfic_clk_freq = rfic_clk_freq
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -824,6 +799,80 @@ class BaseSoC(SoCMini):
                 "{{*crg_s7mmcm0_clkout}}",
                 "{{*crg_s7mmcm1_clkout}}",
             )
+
+        # Timing Constraints -----------------------------------------------------------------------
+        # Explicit Root/Board Clock Constraints.
+        platform.add_period_constraint(platform.lookup_request("clk100",                0, loose=True), 1e9/100e6)            # Board 100MHz oscillator.
+        platform.add_period_constraint(platform.lookup_request("si5351_clk0",           0, loose=True), 1e9/38.4e6)           # Local VCTCXO.
+        platform.add_period_constraint(platform.lookup_request("si5351_clk1",           0, loose=True), 1e9/100e6)            # Time/PPS reference.
+        platform.add_period_constraint(platform.lookup_request("ad9361_rfic:rx_clk_p",  0, loose=True), 1e9/self.rfic_clk_freq) # RF sample clock.
+        platform.add_period_constraint(platform.lookup_request("sync_clk_in",           0, loose=True), 1e9/10e6)             # External sync/debug clock.
+
+        # JTAG TCK and Async Crossing to sys.
+        if with_jtagbone:
+            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+            platform.toolchain.pre_placement_commands += [
+                "set _sys_clk  [get_clocks -quiet *crg_clkout0]",
+                "set _jtag_clk [get_clocks -quiet jtag_clk]",
+                "if {{[llength $_sys_clk] && [llength $_jtag_clk]}} {{",
+                "    set_clock_groups -asynchronous -group $_sys_clk -group $_jtag_clk",
+                "}}",
+            ]
+
+        # Async Crossings to External RF/PPS Clocks (CDC-only paths).
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "clk100")
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk0")
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk1")
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "sync_clk_in")
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "rfic_clk")
+        platform.add_false_path_constraints_by_name("*crg_clkout0", "ad9361_rfic_rx_clk_p")
+
+        # External Async Inputs (CDC/UART/reset/status paths only).
+        platform.add_platform_command(
+            "set_false_path -from [get_ports -quiet {{"
+            "ad9361_rfic_stat* pcie_x1_baseboard_rst_n pcie_x1_m2_rst_n sync_clk_in"
+            "}}]"
+        )
+
+        # Low-Speed Peripheral Return Inputs (SPI MISO/status, board timing intentionally not modeled).
+        platform.add_platform_command(
+            "set_false_path -from [get_ports -quiet {{"
+            "ad9361_spi_miso flash_miso"
+            "}}]"
+        )
+
+        # Low-Speed Peripheral Control Outputs (registered/static outputs, no external timing budget modeled).
+        platform.add_platform_command(
+            "set_false_path -to [get_ports -quiet {{"
+            "ad9361_rfic_ctrl* ad9361_rfic_en_agc ad9361_rfic_enable ad9361_rfic_rst_n ad9361_rfic_txnrx "
+            "ad9361_spi_clk ad9361_spi_cs_n ad9361_spi_mosi "
+            "flash_cs_n flash_mosi "
+            "si5351_scl si5351_sda si5351_pwm"
+            "}}]"
+        )
+
+        # ICAP / DNA utility domains (generated from sys_clk).
+        self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+
+        # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
+        if with_pcie:
+            false_paths = [
+                ("{{*crg_clkout0}}",      "{{*s7pciephy_clkout3}}"),
+                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}"),
+            ]
+            for clk0, clk1 in false_paths:
+                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
+                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
+
+        # Ethernet transceiver clocks.
+        if with_eth:
+            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
+
+        # RFIC clock domain.
+        platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/self.rfic_clk_freq)
 
         # Clk Measurements -------------------------------------------------------------------------
 
