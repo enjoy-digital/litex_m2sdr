@@ -65,6 +65,43 @@ from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
 from litex_m2sdr.software import generate_litepcie_software
 
+# Helpers ------------------------------------------------------------------------------------------
+
+def _guard_pcie_loc_reset_constraints(platform):
+    cmds = platform.toolchain.pre_placement_commands
+    original_resolve = cmds.resolve
+
+    def _resolved_with_guards(vns):
+        resolved = original_resolve(vns)
+        guarded  = []
+        for c in resolved:
+            if "reset_property LOC [get_cells -hierarchical -filter" in c and "gtp_common.gtpe2_common_i" in c:
+                guarded += [
+                    "set _pcie_gt_common_cells [get_cells -quiet -hierarchical -filter {{NAME=~*pcie_s7/*gtp_common.gtpe2_common_i}}]",
+                    "if {{[llength $_pcie_gt_common_cells]}} {{",
+                    "    reset_property LOC $_pcie_gt_common_cells",
+                    "}}",
+                ]
+            elif "reset_property LOC [get_cells -hierarchical -filter" in c and "gtx_common.gtxe2_common_i" in c:
+                guarded += [
+                    "set _pcie_gt_common_cells [get_cells -quiet -hierarchical -filter {{NAME=~*pcie_s7/*gtx_common.gtxe2_common_i}}]",
+                    "if {{[llength $_pcie_gt_common_cells]}} {{",
+                    "    reset_property LOC $_pcie_gt_common_cells",
+                    "}}",
+                ]
+            elif "reset_property LOC [get_cells -hierarchical -filter" in c and "genblk*.bram36_tdp_bl.bram36_tdp_bl" in c:
+                guarded += [
+                    "set _pcie_bram_cells [get_cells -quiet -hierarchical -filter {{NAME=~*pcie_s7/*genblk*.bram36_tdp_bl.bram36_tdp_bl}}]",
+                    "if {{[llength $_pcie_bram_cells]}} {{",
+                    "    reset_property LOC $_pcie_bram_cells",
+                    "}}",
+                ]
+            else:
+                guarded.append(c)
+        return guarded
+
+    cmds.resolve = _resolved_with_guards
+
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
@@ -95,7 +132,7 @@ class CRG(LiteXModule):
 
         # PLL.
         # ----
-        self.pll = pll = S7PLL(speedgrade=-3)
+        self.pll = pll = S7PLL(speedgrade=-3, instance_name="crg_pll")
         self.comb += self.pll.reset.eq(self.rst)
         pll.register_clkin(clk100, 100e6)
         pll.create_clkout(self.cd_sys,    sys_clk_freq)
@@ -129,7 +166,7 @@ class CRG(LiteXModule):
         # -------------------
         if with_white_rabbit:
             # RefClk MMCM (125MHz).
-            self.refclk_mmcm = S7MMCM(speedgrade=-3)
+            self.refclk_mmcm = S7MMCM(speedgrade=-3, instance_name="crg_refclk_mmcm")
             self.comb += self.refclk_mmcm.reset.eq(self.rst)
             self.refclk_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.refclk_mmcm.expose_dps("clk200", with_csr=False)
@@ -141,7 +178,7 @@ class CRG(LiteXModule):
             self.refclk_mmcm.params.update(p_CLKOUT1_USE_FINE_PS="TRUE")
 
             # DMTD MMCM (62.5MHz).
-            self.dmtd_mmcm = S7MMCM(speedgrade=-3)
+            self.dmtd_mmcm = S7MMCM(speedgrade=-3, instance_name="crg_dmtd_mmcm")
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
             self.dmtd_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.dmtd_mmcm.create_clkout(self.cd_clk_62m5_dmtd, 62.5e6, margin=0)
@@ -222,6 +259,7 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
+        _guard_pcie_loc_reset_constraints(platform)
         platform.rfic_clk_freq = {
             False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
             True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
@@ -384,7 +422,14 @@ class BaseSoC(SoCMini):
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
-                self.pcie_phy.add_gt_loc_constraints(["GTPE2_CHANNEL_X0Y4"], by_pipe_lane=False)
+                # Keep GT LOC constraint robust across flat/hierarchical netlist naming.
+                platform.toolchain.pre_placement_commands += [
+                    "set _pcie_gt_cells [get_cells -quiet -hierarchical -filter {{NAME=~*pcie_s7/*gtp_channel.gtpe2_channel_i}}]",
+                    "if {{[llength $_pcie_gt_cells]}} {{",
+                    "    reset_property LOC $_pcie_gt_cells",
+                    "    set_property LOC GTPE2_CHANNEL_X0Y4 $_pcie_gt_cells",
+                    "}}",
+                ]
             self.pcie_phy.update_config({
                 "PCIe_Blk_Locn"            : "X0Y0",
                 "Base_Class_Menu"          : "Wireless_controller",
@@ -802,24 +847,63 @@ class BaseSoC(SoCMini):
         # Timing Constraints -----------------------------------------------------------------------
         # Explicit root/board clock constraints are handled in Platform.do_finalize().
 
+        # Rename auto-derived clocks to stable semantic names (hierarchical-friendly reports).
+        for clk_glob, clk_name in [
+            ("*crg*clkout0",      "sys_clk"),
+            ("*crg*clkout1",      "clk10"),
+            ("*s7pciephy*clkout3", "pcie_clk"),
+            ("*s7pciephy*clkout0", "pcie_clk125"),
+            ("*s7pciephy*clkout1", "pcie_clk250"),
+        ]:
+            platform.toolchain.pre_placement_commands += [
+                f"set _clk [get_clocks -quiet {clk_glob}]",
+                f"if {{{{[llength $_clk] && ![llength [get_clocks -quiet {clk_name}]]}}}} {{{{",
+                f"    set_property NAME {clk_name} [lindex $_clk 0]",
+                "}}",
+            ]
+
+        # Internal generated clocks (hierarchical-safe, avoid create_clock on non-port signals).
+        platform.toolchain.pre_placement_commands += [
+            "set _sys_clk [get_clocks -quiet -of_objects [get_nets -quiet sys_clk]]",
+            "set _dna_src [lindex [get_pins -quiet -hierarchical -filter {{NAME=~*dna_clk_reg/C}}] 0]",
+            "set _dna_dst [lindex [get_pins -quiet -hierarchical -filter {{NAME=~*dna_clk_reg/Q}}] 0]",
+            "if {{[llength $_sys_clk] && [llength $_dna_src] && [llength $_dna_dst] && ![llength [get_clocks -quiet dna_clk]]}} {{",
+            "    create_generated_clock -name dna_clk -source $_dna_src -divide_by 2 $_dna_dst",
+            "}}",
+            "set _icap_src [lindex [get_pins -quiet -hierarchical -filter {{NAME=~*icap_clk_reg/C}}] 0]",
+            "set _icap_dst [lindex [get_pins -quiet -hierarchical -filter {{NAME=~*icap_clk_reg/Q}}] 0]",
+            "if {{[llength $_sys_clk] && [llength $_icap_src] && [llength $_icap_dst] && ![llength [get_clocks -quiet icap_clk]]}} {{",
+            "    create_generated_clock -name icap_clk -source $_icap_src -divide_by 16 $_icap_dst",
+            "}}",
+        ]
+
         # JTAG TCK and Async Crossing to sys.
         if with_jtagbone:
-            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
             platform.toolchain.pre_placement_commands += [
-                "set _sys_clk  [get_clocks -quiet *crg_clkout0]",
-                "set _jtag_clk [get_clocks -quiet jtag_clk]",
+                "set _jtag_tck_pin [lindex [get_pins -quiet -hierarchical -filter {{REF_NAME=~BSCANE2 && REF_PIN_NAME==TCK}}] 0]",
+                "if {{[llength $_jtag_tck_pin] && ![llength [get_clocks -quiet jtag_tck]]}} {{",
+                "    create_clock -name jtag_tck -period 50.0 $_jtag_tck_pin",
+                "}}",
+                "set _jtag_net [get_nets -quiet jtag_clk]",
+                "if {{[llength $_jtag_net] && ![llength [get_clocks -quiet jtag_clk]]}} {{",
+                "    create_clock -name jtag_clk -period 50.0 $_jtag_net",
+                "}}",
+                "set _sys_clk  [get_clocks -quiet -of_objects [get_nets -quiet sys_clk]]",
+                "set _jtag_clk [get_clocks -quiet {{jtag_clk jtag_tck}}]",
                 "if {{[llength $_sys_clk] && [llength $_jtag_clk]}} {{",
                 "    set_clock_groups -asynchronous -group $_sys_clk -group $_jtag_clk",
                 "}}",
             ]
 
         # Async Crossings to External RF/PPS Clocks (CDC-only paths).
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "clk100")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk0")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk1")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "sync_clk_in")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "rfic_clk")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "ad9361_rfic_rx_clk_p")
+        for ext_clk in ["si5351_clk0", "si5351_clk1", "sync_clk_in", "rfic_clk", "ad9361_rfic_rx_clk_p"]:
+            platform.toolchain.pre_placement_commands += [
+                "set _sys_clk [get_clocks -quiet -of_objects [get_nets -quiet sys_clk]]",
+                f"set _ext_clk [get_clocks -quiet {ext_clk}]",
+                "if {{[llength $_sys_clk] && [llength $_ext_clk]}} {{",
+                    "    set_clock_groups -asynchronous -group $_sys_clk -group $_ext_clk",
+                "}}",
+            ]
 
         # External Async Inputs (CDC/UART/reset/status paths only).
         platform.add_platform_command(
@@ -845,19 +929,37 @@ class BaseSoC(SoCMini):
             "}}]"
         )
 
-        # ICAP / DNA utility domains (generated from sys_clk).
-        self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
-        self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+        # ICAP / DNA utility domains are generated from sys_clk and handled above.
+        platform.toolchain.pre_placement_commands += [
+            "set _sys_clk  [get_clocks -quiet -of_objects [get_nets -quiet sys_clk]]",
+            "set _clk100   [get_clocks -quiet clk100]",
+            "if {{[llength $_sys_clk] && [llength $_clk100]}} {{",
+            "    set_clock_groups -asynchronous -group $_sys_clk -group $_clk100",
+            "}}",
+            "set _icap_clk [get_clocks -quiet icap_clk]",
+            "if {{[llength $_sys_clk] && [llength $_icap_clk]}} {{",
+            "    set_clock_groups -asynchronous -group $_sys_clk -group $_icap_clk",
+            "}}",
+            "set _dna_clk [get_clocks -quiet dna_clk]",
+            "if {{[llength $_sys_clk] && [llength $_dna_clk]}} {{",
+            "    set_clock_groups -asynchronous -group $_sys_clk -group $_dna_clk",
+            "}}",
+        ]
 
         # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
         if with_pcie:
-            false_paths = [
-                ("{{*crg_clkout0}}",      "{{*s7pciephy_clkout3}}"),
-                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}"),
+            platform.toolchain.pre_placement_commands += [
+                "set _sys_clk      [concat [get_clocks -quiet -of_objects [get_nets -quiet sys_clk]] [get_clocks -quiet {{sys_clk crg_pll_n_1}}]]",
+                "set _pcie_main    [get_clocks -quiet {{pcie_clk s7pciephy_mmcm_n_10}}]",
+                "set _pcie_clk125  [get_clocks -quiet {{pcie_clk125 s7pciephy_mmcm_n_4}}]",
+                "set _pcie_clk250  [get_clocks -quiet {{pcie_clk250 s7pciephy_mmcm_n_6}}]",
+                "if {{[llength $_sys_clk] && [llength $_pcie_main]}} {{",
+                "    set_clock_groups -asynchronous -group $_sys_clk -group $_pcie_main",
+                "}}",
+                "if {{[llength $_pcie_clk125] && [llength $_pcie_clk250]}} {{",
+                "    set_clock_groups -asynchronous -group $_pcie_clk125 -group $_pcie_clk250",
+                "}}",
             ]
-            for clk0, clk1 in false_paths:
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
 
         # Ethernet transceiver clocks.
         if with_eth:
@@ -1150,7 +1252,7 @@ def main():
             r += f"_white_rabbit"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv", hierarchical=True)
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
