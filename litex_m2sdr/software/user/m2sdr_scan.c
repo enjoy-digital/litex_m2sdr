@@ -175,7 +175,7 @@ struct scan_state {
     int rx_gain_mode;
     int rx_gain_applied;
     int rx_gain_last_ret;
-    int stitch_mode;
+    int stitch_pct;
     bool run;
     int display_rows;
     int waterfall_palette;
@@ -1343,10 +1343,19 @@ static bool resize_buffers(struct scan_state *s)
         s->scan_stop_hz = s->scan_start_hz + s->sample_rate_hz;
 
     range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
-    if (s->stitch_mode == 1) {
-        stride_ratio = 1.0; /* Fast mode: no overlap between adjacent captures. */
-    } else {
-        stride_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
+    {
+        double quality_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
+        double blend = (double)s->stitch_pct / 100.0;
+        if (quality_ratio < 0.5)
+            quality_ratio = 0.5;
+        if (quality_ratio > 1.0)
+            quality_ratio = 1.0;
+        if (blend < 0.0)
+            blend = 0.0;
+        if (blend > 1.6)
+            blend = 1.6;
+        /* 0% -> fast/no-overlap, 100% -> baseline quality, >100% -> extra overlap. */
+        stride_ratio = 1.0 - blend * (1.0 - quality_ratio);
         if (stride_ratio < 0.5)
             stride_ratio = 0.5;
         if (stride_ratio > 1.0)
@@ -1557,7 +1566,7 @@ static bool apply_runtime_config(struct scan_state *s,
                                  int lines,
                                  int rx_gain,
                                  int rx_settle_us,
-                                 int stitch_mode)
+                                 int stitch_pct)
 {
     if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 2048) {
         fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 2048).\n", fft_len);
@@ -1589,8 +1598,8 @@ static bool apply_runtime_config(struct scan_state *s,
         fprintf(stderr, "Invalid settle time %d us (must be 0..100000).\n", rx_settle_us);
         return false;
     }
-    if (stitch_mode < 0 || stitch_mode > 1) {
-        fprintf(stderr, "Invalid stitch mode %d.\n", stitch_mode);
+    if (stitch_pct < 0 || stitch_pct > 160) {
+        fprintf(stderr, "Invalid stitch %d%% (must be 0..160).\n", stitch_pct);
         return false;
     }
 
@@ -1602,7 +1611,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->lines = lines;
     s->rx_gain = rx_gain;
     s->rx_settle_us = rx_settle_us;
-    s->stitch_mode = stitch_mode;
+    s->stitch_pct = stitch_pct;
     s->lo_valid = false;
     fastlock_reset(s);
 
@@ -1627,7 +1636,7 @@ struct ui_state {
     int fft_idx;
     int rx_gain;
     int settle_us;
-    int stitch_mode;
+    int stitch_pct;
 };
 
 static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
@@ -1638,7 +1647,7 @@ static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
     ui->fft_idx = fft_len_index_from_value(s->fft_len);
     ui->rx_gain = s->rx_gain;
     ui->settle_us = s->rx_settle_us;
-    ui->stitch_mode = s->stitch_mode;
+    ui->stitch_pct = s->stitch_pct;
 }
 
 static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
@@ -1660,17 +1669,13 @@ static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
     new_fft_len = k_fft_lengths[ui->fft_idx];
 
     ok = apply_runtime_config(s, new_start, new_stop, new_samplerate, new_fft_len, s->lines,
-                              ui->rx_gain, ui->settle_us, ui->stitch_mode);
+                              ui->rx_gain, ui->settle_us, ui->stitch_pct);
     ui_state_from_scan(s, ui);
     return ok;
 }
 
 static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float controls_h)
 {
-    static const char *stitch_mode_items[] = {
-        "Quality (Overlap)",
-        "Fast (No Overlap)"
-    };
     static const char *palette_items[] = {
         "Google Turbo",
         "Plasma",
@@ -1729,9 +1734,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
                                5);
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(170.0f);
-    if (ui->stitch_mode < 0 || ui->stitch_mode > 1)
-        ui->stitch_mode = 0;
-    changed |= igCombo_Str_arr("Stitch Mode", &ui->stitch_mode, stitch_mode_items, 2, 2);
+    changed |= igSliderInt("Stitch (%)", &ui->stitch_pct, 0, 160, "%d", 0);
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(120.0f);
     if (igSliderInt("RX Gain (dB)", &ui->rx_gain, 0, 73, "%d", 0))
@@ -1999,7 +2002,7 @@ static void draw_stats_panel(struct scan_state *s)
 
             igTableNextRow(0, 0.0f);
             igTableSetColumnIndex(0); igText("Stitch");
-            igTableSetColumnIndex(1); igText("%s", s->stitch_mode == 1 ? "Fast" : "Quality");
+            igTableSetColumnIndex(1); igText("%d%%", s->stitch_pct);
             igTableSetColumnIndex(2); igText("Segments");
             igTableSetColumnIndex(3); igText("%d", s->segments);
 
@@ -2067,7 +2070,7 @@ int main(int argc, char **argv)
     s.rx_settle_us = DEFAULT_RX_SETTLE_US;
     s.fastlock_enable = true;
     s.fastlock_curr_slot = -1;
-    s.stitch_mode = 0;
+    s.stitch_pct = 100;
     s.run = true;
     s.lo_valid = false;
     s.lo_hz = 0;
