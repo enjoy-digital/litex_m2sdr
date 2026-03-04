@@ -272,11 +272,13 @@ struct scan_state {
         uint64_t lines_total, captures_total, retunes_total;
         uint64_t fastlock_recall_total, fastlock_load_total;
         uint64_t fastlock_store_total, fastlock_cold_tune_total;
+        uint64_t dma_wait_total, dma_wait_at_prev_rate;
         uint64_t lines_at_prev_rate, captures_at_prev_rate, retunes_at_prev_rate;
         uint64_t fastlock_recall_at_prev_rate, fastlock_load_at_prev_rate;
         uint64_t fastlock_store_at_prev_rate, fastlock_cold_tune_at_prev_rate;
         double fastlock_recall_per_sec, fastlock_load_per_sec;
         double fastlock_store_per_sec, fastlock_cold_tune_per_sec;
+        double dma_wait_per_sec;
         double prev_rate_t;
     } perf;
 };
@@ -861,8 +863,10 @@ static bool capture_iq_block(struct scan_state *s)
 
         while (got < s->fft_len) {
             char *buf = litepcie_dma_next_read_buffer(&s->dma);
-            if (!buf)
+            if (!buf) {
+                s->perf.dma_wait_total++;
                 break;
+            }
 
             const int16_t *iq = (const int16_t *)buf;
             int iq_count = (int)(DMA_BUFFER_SIZE / (int)sizeof(int16_t));
@@ -1477,6 +1481,7 @@ static bool scan_line(struct scan_state *s)
         double d_fl_load = (double)(s->perf.fastlock_load_total - s->perf.fastlock_load_at_prev_rate);
         double d_fl_store = (double)(s->perf.fastlock_store_total - s->perf.fastlock_store_at_prev_rate);
         double d_fl_cold = (double)(s->perf.fastlock_cold_tune_total - s->perf.fastlock_cold_tune_at_prev_rate);
+        double d_dma_wait = (double)(s->perf.dma_wait_total - s->perf.dma_wait_at_prev_rate);
 
         s->perf.lines_per_sec = d_lines / dt;
         s->perf.captures_per_sec = d_caps / dt;
@@ -1485,6 +1490,7 @@ static bool scan_line(struct scan_state *s)
         s->perf.fastlock_load_per_sec = d_fl_load / dt;
         s->perf.fastlock_store_per_sec = d_fl_store / dt;
         s->perf.fastlock_cold_tune_per_sec = d_fl_cold / dt;
+        s->perf.dma_wait_per_sec = d_dma_wait / dt;
         s->perf.iq_msps = (s->perf.captures_per_sec * (double)s->fft_len) / 1e6;
         s->perf.sweep_mhz_per_sec = s->perf.lines_per_sec *
             ((double)(s->scan_stop_hz - s->scan_start_hz) / 1e6);
@@ -1496,6 +1502,7 @@ static bool scan_line(struct scan_state *s)
         s->perf.fastlock_load_at_prev_rate = s->perf.fastlock_load_total;
         s->perf.fastlock_store_at_prev_rate = s->perf.fastlock_store_total;
         s->perf.fastlock_cold_tune_at_prev_rate = s->perf.fastlock_cold_tune_total;
+        s->perf.dma_wait_at_prev_rate = s->perf.dma_wait_total;
         s->perf.prev_rate_t = t_line1;
     }
 
@@ -1848,6 +1855,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->perf.lines_at_prev_rate = s->perf.lines_total;
     s->perf.captures_at_prev_rate = s->perf.captures_total;
     s->perf.retunes_at_prev_rate = s->perf.retunes_total;
+    s->perf.dma_wait_at_prev_rate = s->perf.dma_wait_total;
 
     ad9361_set_tx_sampling_freq(ad9361_phy, s->sample_rate_hz);
     ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
@@ -1997,6 +2005,9 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igText("Device %s", m2sdr_device);
     igSameLine(0.0f, 10.0f);
     igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
+    igSameLine(0.0f, 12.0f);
+    igText("LO %.3f MHz | retune %.2f/s | dma waits %.1f/s | stitch %d%%",
+           (double)s->lo_hz / 1e6, s->perf.retunes_per_sec, s->perf.dma_wait_per_sec, s->stitch_pct);
 
     igSetNextItemWidth(160.0f);
     changed_start = igDragFloat("Scan Start (MHz)", &ui->start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
