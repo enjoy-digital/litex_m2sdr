@@ -1772,6 +1772,13 @@ static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
     ui->marker_b_mhz = (float)(s->marker_b_hz / 1e6);
 }
 
+static void ui_apply_preset(struct ui_state *ui, int stitch_pct, int fft_len, int settle_us)
+{
+    ui->stitch_pct = stitch_pct;
+    ui->fft_idx = fft_len_index_from_value(fft_len);
+    ui->settle_us = settle_us;
+}
+
 static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
 {
     int64_t new_start = (int64_t)(ui->start_mhz * 1e6f);
@@ -1825,6 +1832,21 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     } else {
         if (igButton("Resume Scan", (ImVec2){120.0f, 0.0f}))
             s->run = true;
+    }
+    igSameLine(0.0f, 10.0f);
+    if (igButton("Fast", (ImVec2){60.0f, 0.0f})) {
+        ui_apply_preset(ui, 0, 512, 5);
+        changed = true;
+    }
+    igSameLine(0.0f, 6.0f);
+    if (igButton("Balanced", (ImVec2){80.0f, 0.0f})) {
+        ui_apply_preset(ui, 100, 1024, 20);
+        changed = true;
+    }
+    igSameLine(0.0f, 6.0f);
+    if (igButton("Clean", (ImVec2){65.0f, 0.0f})) {
+        ui_apply_preset(ui, 145, 2048, 40);
+        changed = true;
     }
     igSameLine(0.0f, 10.0f);
     igText("Device %s", m2sdr_device);
