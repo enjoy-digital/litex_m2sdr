@@ -1177,75 +1177,26 @@ int main(int argc, char **argv)
                 ImGuiWindowFlags_NoMove |
                 ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
-        igText("Device: %s", m2sdr_device);
-        igText("Samplerate: %.2f MSPS | RF BW: %.2f MHz",
-               (double)s.sample_rate_hz / 1e6,
-               (double)s.rf_bandwidth_hz / 1e6);
-        igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
-               s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
-        igText("Stitch: %s | settle %d us | step %.3f MHz | stride %d bins | overlap %d bins",
-               s.stitch_mode == 1 ? "Fast" : "Quality",
-               s.rx_settle_us, s.step_hz / 1e6, s.stride_bins, s.overlap_bins);
-
-        igSeparator();
-        igText("Performance (Benchmark)");
-        igText("Throughput: %.2f lines/s | line avg %.3f ms",
-               s.perf.lines_per_sec,
-               s.perf.ema_line_ms);
-        igText("Split avg (ms): tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
-               s.perf.ema_tune_ms,
-               s.perf.ema_capture_ms,
-               s.perf.ema_fft_ms,
-               s.perf.ema_waterfall_ms);
-        if (s.perf.ema_line_ms > 0.0) {
-            igText("Split avg (%%): tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
-                   100.0 * s.perf.ema_tune_ms / s.perf.ema_line_ms,
-                   100.0 * s.perf.ema_capture_ms / s.perf.ema_line_ms,
-                   100.0 * s.perf.ema_fft_ms / s.perf.ema_line_ms,
-                   100.0 * s.perf.ema_waterfall_ms / s.perf.ema_line_ms);
-        }
-
-        igSeparator();
-
         {
             bool changed = false;
             bool changed_start = false;
             bool changed_stop = false;
             const float min_span_mhz = 1.0f;
+            ImVec2 avail_root;
+            float controls_h = 168.0f;
+            float stats_h = 88.0f;
 
-            changed_start = igSliderFloat("Scan Start (MHz)", &ui_start_mhz, 70.0f, 6000.0f, "%.3f", 0);
-            changed_stop  = igSliderFloat("Scan Stop (MHz)",  &ui_stop_mhz,  70.0f, 6000.0f, "%.3f", 0);
-            changed = changed_start || changed_stop;
+            igGetContentRegionAvail(&avail_root);
+            if (avail_root.y < controls_h + stats_h + 120.0f) {
+                controls_h = 132.0f;
+                stats_h = 76.0f;
+            }
 
-            if (changed_start && ui_start_mhz > ui_stop_mhz - min_span_mhz)
-                ui_stop_mhz = ui_start_mhz + min_span_mhz;
-            if (changed_stop && ui_stop_mhz < ui_start_mhz + min_span_mhz)
-                ui_start_mhz = ui_stop_mhz - min_span_mhz;
-
-            changed |= igCombo_Str_arr("Sample Rate", &ui_samplerate_idx,
-                                        k_scan_samplerate_labels,
-                                        (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
-                                        4);
-            {
+            if (igBeginChild_Str("##controls_panel", (ImVec2){0.0f, controls_h}, 0, 0)) {
                 static const char *stitch_mode_items[] = {
                     "Quality (Overlap)",
                     "Fast (No Overlap)"
                 };
-                if (ui_stitch_mode < 0 || ui_stitch_mode > 1)
-                    ui_stitch_mode = 0;
-                changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
-            }
-            changed |= igCombo_Str_arr("FFT Points", &ui_fft_idx,
-                                       k_fft_length_labels,
-                                       (int)(sizeof(k_fft_length_labels) / sizeof(k_fft_length_labels[0])),
-                                       5);
-            changed |= igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
-            changed |= igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
-            changed |= igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
-            changed |= igSliderInt("Settle (us)", &ui_settle_us, 0, 5000, "%d", 0);
-            changed |= igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
-            changed |= igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
-            {
                 static const char *palette_items[] = {
                     "Google Turbo",
                     "Plasma",
@@ -1255,57 +1206,130 @@ int main(int argc, char **argv)
                     "Black Hot"
                 };
                 int p = s.waterfall_palette;
+                int rows_tmp = s.display_rows;
+
+                igSeparatorText("Controls");
+
+                if (s.run) {
+                    if (igButton("Pause Scan", (ImVec2){120.0f, 0.0f}))
+                        s.run = false;
+                } else {
+                    if (igButton("Resume Scan", (ImVec2){120.0f, 0.0f}))
+                        s.run = true;
+                }
+                igSameLine(0.0f, 10.0f);
+                igText("Device %s", m2sdr_device);
+                igSameLine(0.0f, 10.0f);
+                igText("SR %.2f MSPS / BW %.2f MHz", (double)s.sample_rate_hz / 1e6, (double)s.rf_bandwidth_hz / 1e6);
+
+                igSetNextItemWidth(160.0f);
+                changed_start = igDragFloat("Scan Start (MHz)", &ui_start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(160.0f);
+                changed_stop = igDragFloat("Scan Stop (MHz)", &ui_stop_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
+                changed = changed_start || changed_stop;
+
+                if (changed_start && ui_start_mhz > ui_stop_mhz - min_span_mhz)
+                    ui_stop_mhz = ui_start_mhz + min_span_mhz;
+                if (changed_stop && ui_stop_mhz < ui_start_mhz + min_span_mhz)
+                    ui_start_mhz = ui_stop_mhz - min_span_mhz;
+
+                igSetNextItemWidth(160.0f);
+                changed |= igCombo_Str_arr("Sample Rate", &ui_samplerate_idx,
+                                           k_scan_samplerate_labels,
+                                           (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
+                                           4);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(170.0f);
+                if (ui_stitch_mode < 0 || ui_stitch_mode > 1)
+                    ui_stitch_mode = 0;
+                changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(130.0f);
+                changed |= igCombo_Str_arr("FFT Points", &ui_fft_idx,
+                                           k_fft_length_labels,
+                                           (int)(sizeof(k_fft_length_labels) / sizeof(k_fft_length_labels[0])),
+                                           5);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(170.0f);
                 if (p < 0 || p > 5)
                     p = 0;
                 if (igCombo_Str_arr("Waterfall Palette", &p, palette_items, 6, 6)) {
                     s.waterfall_palette = p;
                     changed = true;
                 }
-            }
-            if (s.db_max <= s.db_min + 1.0f) {
-                s.db_max = s.db_min + 1.0f;
-                changed = true;
-            }
 
-            if (changed) {
-                int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
-                int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
-                if (ui_samplerate_idx < 0 ||
-                    ui_samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
-                    ui_samplerate_idx = 0;
-                if (ui_fft_idx < 0 ||
-                    ui_fft_idx >= (int)(sizeof(k_fft_lengths) / sizeof(k_fft_lengths[0])))
-                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
-                uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
-                int new_fft_len = k_fft_lengths[ui_fft_idx];
-                if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain,
-                                         ui_settle_us, ui_stitch_mode)) {
-                    ui_start_mhz = (float)s.scan_start_hz / 1e6f;
-                    ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
-                    ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
-                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
-                    ui_lines = s.lines;
-                    ui_rx_gain = s.rx_gain;
-                    ui_settle_us = s.rx_settle_us;
-                    ui_stitch_mode = s.stitch_mode;
-                } else {
-                    ui_start_mhz = (float)s.scan_start_hz / 1e6f;
-                    ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
-                    ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
-                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
-                    ui_lines = s.lines;
-                    ui_rx_gain = s.rx_gain;
-                    ui_settle_us = s.rx_settle_us;
-                    ui_stitch_mode = s.stitch_mode;
+                igSetNextItemWidth(120.0f);
+                changed |= igDragInt("Lines", &ui_lines, 1.0f, 32, 2048, "%d", 0);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(120.0f);
+                if (igDragInt("Rows", &rows_tmp, 0.2f, 1, 8, "%d", 0)) {
+                    if (rows_tmp < 1) rows_tmp = 1;
+                    if (rows_tmp > 8) rows_tmp = 8;
+                    s.display_rows = rows_tmp;
+                }
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(120.0f);
+                changed |= igDragInt("RX Gain (dB)", &ui_rx_gain, 0.2f, 0, 73, "%d", 0);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(120.0f);
+                changed |= igDragInt("Settle (us)", &ui_settle_us, 5.0f, 0, 5000, "%d", 0);
+                igSameLine(0.0f, 10.0f);
+                changed |= igDragFloatRange2("Display dB", &s.db_min, &s.db_max, 0.2f, -160.0f, 40.0f,
+                                             "Min %.1f", "Max %.1f", 0);
+
+                if (s.db_max <= s.db_min + 1.0f) {
+                    s.db_max = s.db_min + 1.0f;
+                    changed = true;
+                }
+
+                if (changed) {
+                    int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
+                    int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
+                    if (ui_samplerate_idx < 0 ||
+                        ui_samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
+                        ui_samplerate_idx = 0;
+                    if (ui_fft_idx < 0 ||
+                        ui_fft_idx >= (int)(sizeof(k_fft_lengths) / sizeof(k_fft_lengths[0])))
+                        ui_fft_idx = fft_len_index_from_value(s.fft_len);
+                    uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
+                    int new_fft_len = k_fft_lengths[ui_fft_idx];
+                    if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain,
+                                             ui_settle_us, ui_stitch_mode)) {
+                        ui_start_mhz = (float)s.scan_start_hz / 1e6f;
+                        ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                        ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
+                        ui_fft_idx = fft_len_index_from_value(s.fft_len);
+                        ui_lines = s.lines;
+                        ui_rx_gain = s.rx_gain;
+                        ui_settle_us = s.rx_settle_us;
+                        ui_stitch_mode = s.stitch_mode;
+                    } else {
+                        ui_start_mhz = (float)s.scan_start_hz / 1e6f;
+                        ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                        ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
+                        ui_fft_idx = fft_len_index_from_value(s.fft_len);
+                        ui_lines = s.lines;
+                        ui_rx_gain = s.rx_gain;
+                        ui_settle_us = s.rx_settle_us;
+                        ui_stitch_mode = s.stitch_mode;
+                    }
                 }
             }
-        }
+            igEndChild();
 
-        igSeparator();
+            {
+                ImVec2 avail_mid;
+                float mid_h;
+                igGetContentRegionAvail(&avail_mid);
+                mid_h = avail_mid.y - stats_h - 6.0f;
+                if (mid_h < 100.0f)
+                    mid_h = 100.0f;
 
-        ImVec2 avail;
-        igGetContentRegionAvail(&avail);
-        if (avail.x > 10.0f && avail.y > 10.0f) {
+                if (igBeginChild_Str("##view_panel", (ImVec2){0.0f, mid_h}, 0, 0)) {
+                    ImVec2 avail;
+                    igGetContentRegionAvail(&avail);
+                    if (avail.x > 10.0f && avail.y > 10.0f) {
             int row;
             int rows = s.display_rows;
             const float row_spacing = 4.0f;
@@ -1336,14 +1360,11 @@ int main(int argc, char **argv)
                 int bin0 = (int)((int64_t)row * s.waterfall_width / rows);
                 int bin1 = (int)((int64_t)(row + 1) * s.waterfall_width / rows);
                 int plot_count = build_plot_slice(&s, bin0, bin1);
-                char overlay[128];
                 char plot_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
 
-                snprintf(overlay, sizeof(overlay), "Row %d", row + 1);
                 snprintf(plot_id, sizeof(plot_id), "##spectrum_row_%d", row);
-                (void)overlay;
                 draw_spectrum_with_grid(&s, plot_id, avail.x, spectrum_row_h, plot_count, f0_hz, f1_hz);
 
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
@@ -1351,6 +1372,30 @@ int main(int argc, char **argv)
                 if (row != rows - 1)
                     igSeparator();
             }
+                    }
+                }
+                igEndChild();
+            }
+
+            if (igBeginChild_Str("##stats_panel", (ImVec2){0.0f, 0.0f}, 0, 0)) {
+                igSeparatorText("Performance");
+                igText("Throughput: %.2f lines/s | line avg %.3f ms",
+                       s.perf.lines_per_sec, s.perf.ema_line_ms);
+                igText("Split avg (ms): tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
+                       s.perf.ema_tune_ms, s.perf.ema_capture_ms, s.perf.ema_fft_ms, s.perf.ema_waterfall_ms);
+                if (s.perf.ema_line_ms > 0.0) {
+                    igText("Split avg (%%): tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
+                           100.0 * s.perf.ema_tune_ms / s.perf.ema_line_ms,
+                           100.0 * s.perf.ema_capture_ms / s.perf.ema_line_ms,
+                           100.0 * s.perf.ema_fft_ms / s.perf.ema_line_ms,
+                           100.0 * s.perf.ema_waterfall_ms / s.perf.ema_line_ms);
+                }
+                igText("Segments %d | Width %d bins (tex %d px) | Stitch %s | step %.3f MHz | overlap %d bins",
+                       s.segments, s.waterfall_width, s.waterfall_tex_width,
+                       s.stitch_mode == 1 ? "Fast" : "Quality",
+                       s.step_hz / 1e6, s.overlap_bins);
+            }
+            igEndChild();
         }
 
         igEnd();
