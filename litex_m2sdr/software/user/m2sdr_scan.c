@@ -203,6 +203,9 @@ struct scan_state {
     struct {
         double last_line_ms, ema_line_ms;
         double last_tune_ms, ema_tune_ms;
+        double last_tune_lo_ms, ema_tune_lo_ms;
+        double last_tune_settle_ms, ema_tune_settle_ms;
+        double last_tune_discard_ms, ema_tune_discard_ms;
         double last_capture_ms, ema_capture_ms;
         double last_fft_ms, ema_fft_ms;
         double last_waterfall_ms, ema_waterfall_ms;
@@ -435,10 +438,16 @@ static bool retune_rx(int64_t freq_hz)
 }
 
 static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
-                         double *t_tune_s, double *t_capture_s, double *t_fft_s)
+                         double *t_tune_s,
+                         double *t_tune_lo_s,
+                         double *t_tune_settle_s,
+                         double *t_tune_discard_s,
+                         double *t_capture_s,
+                         double *t_fft_s)
 {
     int i;
     double t0, t1;
+    double t_lo_s = 0.0, t_settle_s = 0.0, t_discard_s = 0.0;
 
     if (!s->lo_valid || s->lo_hz != center_hz) {
         t0 = now_s();
@@ -446,12 +455,25 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
             fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
             return false;
         }
+        t1 = now_s();
+        t_lo_s = t1 - t0;
+
+        t0 = now_s();
         usleep((useconds_t)s->rx_settle_us);
+        t1 = now_s();
+        t_settle_s = t1 - t0;
+
         /* Drop stale pre-retune DMA samples before taking the FFT capture block. */
+        t0 = now_s();
         if (!discard_iq_samples(s, s->fft_len / 2))
             return false;
         t1 = now_s();
-        *t_tune_s += (t1 - t0);
+        t_discard_s = t1 - t0;
+
+        *t_tune_lo_s += t_lo_s;
+        *t_tune_settle_s += t_settle_s;
+        *t_tune_discard_s += t_discard_s;
+        *t_tune_s += t_lo_s + t_settle_s + t_discard_s;
         s->lo_hz = center_hz;
         s->lo_valid = true;
     }
@@ -648,6 +670,7 @@ static bool scan_line(struct scan_state *s)
     double start = (double)s->scan_start_hz;
     double t_line0, t_line1, t_wf0, t_wf1;
     double t_tune_s = 0.0, t_capture_s = 0.0, t_fft_s = 0.0;
+    double t_tune_lo_s = 0.0, t_tune_settle_s = 0.0, t_tune_discard_s = 0.0;
     double dt;
     int seg;
 
@@ -658,7 +681,8 @@ static bool scan_line(struct scan_state *s)
     for (seg = 0; seg < s->segments; seg++) {
         double seg_start = start + (double)seg * s->step_hz;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
-        if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_capture_s, &t_fft_s))
+        if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_tune_lo_s, &t_tune_settle_s,
+                          &t_tune_discard_s, &t_capture_s, &t_fft_s))
             return false;
     }
 
@@ -680,12 +704,18 @@ static bool scan_line(struct scan_state *s)
     s->perf.retunes_total += (uint64_t)s->segments;
 
     s->perf.last_tune_ms = t_tune_s * 1e3;
+    s->perf.last_tune_lo_ms = t_tune_lo_s * 1e3;
+    s->perf.last_tune_settle_ms = t_tune_settle_s * 1e3;
+    s->perf.last_tune_discard_ms = t_tune_discard_s * 1e3;
     s->perf.last_capture_ms = t_capture_s * 1e3;
     s->perf.last_fft_ms = t_fft_s * 1e3;
     s->perf.last_waterfall_ms = (t_wf1 - t_wf0) * 1e3;
     s->perf.last_line_ms = (t_line1 - t_line0) * 1e3;
 
     s->perf.ema_tune_ms = ema_update(s->perf.ema_tune_ms, s->perf.last_tune_ms, 0.2);
+    s->perf.ema_tune_lo_ms = ema_update(s->perf.ema_tune_lo_ms, s->perf.last_tune_lo_ms, 0.2);
+    s->perf.ema_tune_settle_ms = ema_update(s->perf.ema_tune_settle_ms, s->perf.last_tune_settle_ms, 0.2);
+    s->perf.ema_tune_discard_ms = ema_update(s->perf.ema_tune_discard_ms, s->perf.last_tune_discard_ms, 0.2);
     s->perf.ema_capture_ms = ema_update(s->perf.ema_capture_ms, s->perf.last_capture_ms, 0.2);
     s->perf.ema_fft_ms = ema_update(s->perf.ema_fft_ms, s->perf.last_fft_ms, 0.2);
     s->perf.ema_waterfall_ms = ema_update(s->perf.ema_waterfall_ms, s->perf.last_waterfall_ms, 0.2);
@@ -1282,6 +1312,17 @@ static void draw_stats_panel(struct scan_state *s)
         igEndTable();
     }
 
+    igText("Tune split Avg (ms): LO %.3f | settle %.3f | discard %.3f",
+           s->perf.ema_tune_lo_ms, s->perf.ema_tune_settle_ms, s->perf.ema_tune_discard_ms);
+    if (s->perf.ema_line_ms > 0.0) {
+        igText("Tune split Avg (%%): LO %.1f | settle %.1f | discard %.1f",
+               100.0 * s->perf.ema_tune_lo_ms / s->perf.ema_line_ms,
+               100.0 * s->perf.ema_tune_settle_ms / s->perf.ema_line_ms,
+               100.0 * s->perf.ema_tune_discard_ms / s->perf.ema_line_ms);
+    } else {
+        igText("Tune split Avg (%%): LO - | settle - | discard -");
+    }
+
     igText("Scan Geometry: segments %d | width %d bins (tex %d px)",
            s->segments, s->waterfall_width, s->waterfall_tex_width);
     igText("Stitch: %s | step %.3f MHz | overlap %d bins",
@@ -1476,12 +1517,12 @@ int main(int argc, char **argv)
         {
             ImVec2 avail_root;
             float controls_h = 168.0f;
-            float stats_h = 132.0f;
+            float stats_h = 170.0f;
 
             igGetContentRegionAvail(&avail_root);
             if (avail_root.y < controls_h + stats_h + 120.0f) {
                 controls_h = 132.0f;
-                stats_h = 108.0f;
+                stats_h = 140.0f;
             }
 
             draw_controls_panel(&s, &ui, controls_h);
