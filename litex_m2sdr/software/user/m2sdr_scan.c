@@ -2097,12 +2097,13 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         const char *name;
         float f0_mhz;
         float f1_mhz;
+        uint32_t sr_hz;
     } band_presets[] = {
-        { "FM", 88.0f, 108.0f },
-        { "Air", 118.0f, 137.0f },
-        { "ADS-B", 1087.0f, 1093.0f },
-        { "2.4G", 2400.0f, 2483.5f },
-        { "WiFi5G", 5150.0f, 5850.0f }
+        { "FM", 88.0f, 108.0f, 15360000U },
+        { "Air", 118.0f, 137.0f, 15360000U },
+        { "ADS-B", 1087.0f, 1093.0f, 15360000U },
+        { "2.4G", 2400.0f, 2483.5f, 61440000U },
+        { "WiFi5G", 5150.0f, 5850.0f, 61440000U }
     };
 
     if (!igBeginChild_Str("##controls_panel", (ImVec2){0.0f, controls_h}, 0, 0)) {
@@ -2174,6 +2175,8 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (band_clicked >= 0) {
         ui->start_mhz = band_presets[band_clicked].f0_mhz;
         ui->stop_mhz = band_presets[band_clicked].f1_mhz;
+        ui->samplerate_idx = samplerate_index_from_hz(band_presets[band_clicked].sr_hz);
+        ui->auto_samplerate = false;
         changed = true;
     }
 
