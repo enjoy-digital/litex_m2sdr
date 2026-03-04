@@ -52,6 +52,7 @@
 
 #define RX_SETTLE_US 2000
 #define MAX_WATERFALL_WIDTH 262144
+#define MAX_PLOT_POINTS 4096
 
 static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
@@ -160,6 +161,7 @@ struct scan_state {
     float *out_im;
     float *window;
     float *line_db;
+    float *plot_db;
     uint32_t *waterfall_rgba;
 
     GLuint waterfall_tex;
@@ -330,6 +332,36 @@ static void waterfall_push_line(struct scan_state *s)
                     s->waterfall_rgba);
 }
 
+static int build_plot_slice(struct scan_state *s, int bin0, int bin1)
+{
+    int i;
+    int bins = bin1 - bin0;
+
+    if (bins <= 0)
+        return 0;
+
+    if (bins <= MAX_PLOT_POINTS) {
+        for (i = 0; i < bins; i++)
+            s->plot_db[i] = s->line_db[bin0 + i];
+        return bins;
+    }
+
+    for (i = 0; i < MAX_PLOT_POINTS; i++) {
+        int start = bin0 + (int)((int64_t)i * bins / MAX_PLOT_POINTS);
+        int stop  = bin0 + (int)((int64_t)(i + 1) * bins / MAX_PLOT_POINTS);
+        int j;
+        float acc = 0.0f;
+        int n = stop - start;
+        if (n < 1)
+            n = 1;
+        for (j = start; j < stop; j++)
+            acc += s->line_db[j];
+        s->plot_db[i] = acc / (float)n;
+    }
+
+    return MAX_PLOT_POINTS;
+}
+
 static bool scan_line(struct scan_state *s)
 {
     double fs = (double)SCAN_SAMPLERATE_HZ;
@@ -361,6 +393,7 @@ static bool resize_buffers(struct scan_state *s)
     free(s->out_im);
     free(s->window);
     free(s->line_db);
+    free(s->plot_db);
     free(s->waterfall_rgba);
 
     s->in_re = NULL;
@@ -369,6 +402,7 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = NULL;
     s->window = NULL;
     s->line_db = NULL;
+    s->plot_db = NULL;
     s->waterfall_rgba = NULL;
 
     if (s->scan_stop_hz <= s->scan_start_hz)
@@ -393,10 +427,11 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)new_width, sizeof(float));
+    s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)new_width * (size_t)s->lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->out_re || !s->out_im ||
-        !s->window || !s->line_db || !s->waterfall_rgba) {
+        !s->window || !s->line_db || !s->plot_db || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
         return false;
     }
@@ -803,32 +838,57 @@ int main(int argc, char **argv)
         if (avail.x > 10.0f && avail.y > 10.0f) {
             int row;
             int rows = s.display_rows;
-            float row_height;
             const float row_spacing = 4.0f;
             const float label_h = igGetTextLineHeightWithSpacing();
-            float reserved = rows * (label_h + row_spacing);
-            float images_h = avail.y - reserved;
+            const float spectrum_row_h = 56.0f;
+            float waterfall_avail_h;
+            float waterfall_row_h;
+            ImTextureRef tex_ref;
 
             if (rows < 1)
                 rows = 1;
-            if (images_h < 8.0f)
-                images_h = 8.0f;
 
-            row_height = images_h / rows;
+            waterfall_avail_h = avail.y - rows * (label_h + spectrum_row_h + row_spacing) - row_spacing;
+            if (waterfall_avail_h < rows * (label_h + 8.0f))
+                waterfall_avail_h = rows * (label_h + 8.0f);
+            waterfall_row_h = (waterfall_avail_h - rows * (label_h + row_spacing)) / rows;
+            if (waterfall_row_h < 8.0f)
+                waterfall_row_h = 8.0f;
 
-            ImTextureRef tex_ref;
             tex_ref._TexData = NULL;
             tex_ref._TexID = (ImTextureID)(uintptr_t)s.waterfall_tex;
 
+            /* Alternate Spectrum/Waterfall per row for direct temporal continuity. */
             for (row = 0; row < rows; row++) {
                 double total_hz = (double)(s.scan_stop_hz - s.scan_start_hz);
                 double f0_hz = (double)s.scan_start_hz + total_hz * (double)row / (double)rows;
                 double f1_hz = (double)s.scan_start_hz + total_hz * (double)(row + 1) / (double)rows;
+                int bin0 = (int)((int64_t)row * s.waterfall_width / rows);
+                int bin1 = (int)((int64_t)(row + 1) * s.waterfall_width / rows);
+                int plot_count = build_plot_slice(&s, bin0, bin1);
+                char overlay[128];
+                char plot_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
 
-                igText("Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
-                igImage(tex_ref, (ImVec2){avail.x, row_height}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
+                igText("Spectrum Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
+                snprintf(overlay, sizeof(overlay), "Row %d", row + 1);
+                snprintf(plot_id, sizeof(plot_id), "##spectrum_row_%d", row);
+                igPlotLines_FloatPtr(plot_id,
+                                     s.plot_db,
+                                     plot_count,
+                                     0,
+                                     overlay,
+                                     s.db_min,
+                                     s.db_max,
+                                     (ImVec2){avail.x, spectrum_row_h},
+                                     sizeof(float));
+
+                igText("Waterfall Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
+                igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
+
+                if (row != rows - 1)
+                    igSeparator();
             }
         }
 
@@ -858,6 +918,7 @@ int main(int argc, char **argv)
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.plot_db);
     free(s.waterfall_rgba);
 
     if (gl_context)
@@ -889,6 +950,7 @@ fail:
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.plot_db);
     free(s.waterfall_rgba);
 
     m2sdr_close_global();
