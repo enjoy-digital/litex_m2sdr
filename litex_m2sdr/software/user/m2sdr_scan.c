@@ -195,6 +195,8 @@ struct scan_state {
     bool marker_b_enable;
     double marker_a_hz;
     double marker_b_hz;
+    bool export_csv_request;
+    bool export_snapshot_request;
     bool lo_valid;
     int64_t lo_hz;
     bool fastlock_enable;
@@ -296,6 +298,76 @@ static double ema_update(double prev, double sample, double alpha)
 static bool retune_rx(int64_t freq_hz);
 static bool fft_worker_start(struct scan_state *s);
 static void fft_worker_stop(struct scan_state *s);
+
+static void make_timestamp(char *buf, size_t buflen)
+{
+    time_t t = time(NULL);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    strftime(buf, buflen, "%Y%m%d_%H%M%S", &tmv);
+}
+
+static void export_current_csv(struct scan_state *s)
+{
+    char ts[32], path[128];
+    FILE *f;
+    int i;
+    double range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
+
+    make_timestamp(ts, sizeof(ts));
+    snprintf(path, sizeof(path), "m2sdr_scan_%s.csv", ts);
+    f = fopen(path, "w");
+    if (!f) {
+        fprintf(stderr, "Failed to write %s\n", path);
+        return;
+    }
+    fprintf(f, "# start_hz,%" PRId64 "\n", s->scan_start_hz);
+    fprintf(f, "# stop_hz,%" PRId64 "\n", s->scan_stop_hz);
+    fprintf(f, "# sample_rate_hz,%u\n", s->sample_rate_hz);
+    fprintf(f, "# fft_len,%d\n", s->fft_len);
+    fprintf(f, "freq_hz,power_db\n");
+    for (i = 0; i < s->waterfall_width; i++) {
+        double frac = (s->waterfall_width > 1) ?
+                      ((double)i / (double)(s->waterfall_width - 1)) : 0.0;
+        double fhz = (double)s->scan_start_hz + frac * range_hz;
+        fprintf(f, "%.3f,%.4f\n", fhz, s->line_db[i]);
+    }
+    fclose(f);
+    fprintf(stderr, "Saved %s\n", path);
+}
+
+static void export_snapshot_ppm(int width, int height)
+{
+    char ts[32], path[128];
+    FILE *f;
+    unsigned char *pix;
+    int y;
+
+    if (width <= 0 || height <= 0)
+        return;
+
+    pix = (unsigned char *)malloc((size_t)width * (size_t)height * 3);
+    if (!pix)
+        return;
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pix);
+
+    make_timestamp(ts, sizeof(ts));
+    snprintf(path, sizeof(path), "m2sdr_scan_%s.ppm", ts);
+    f = fopen(path, "wb");
+    if (!f) {
+        free(pix);
+        return;
+    }
+    fprintf(f, "P6\n%d %d\n255\n", width, height);
+    for (y = height - 1; y >= 0; y--) {
+        fwrite(pix + (size_t)y * (size_t)width * 3, 1, (size_t)width * 3, f);
+    }
+    fclose(f);
+    free(pix);
+    fprintf(stderr, "Saved %s\n", path);
+}
 
 static void refresh_rx_gain_status(struct scan_state *s)
 {
@@ -1916,6 +1988,12 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         changed = true;
     }
     igSameLine(0.0f, 10.0f);
+    if (igButton("Export CSV", (ImVec2){90.0f, 0.0f}))
+        s->export_csv_request = true;
+    igSameLine(0.0f, 6.0f);
+    if (igButton("Snapshot", (ImVec2){85.0f, 0.0f}))
+        s->export_snapshot_request = true;
+    igSameLine(0.0f, 10.0f);
     igText("Device %s", m2sdr_device);
     igSameLine(0.0f, 10.0f);
     igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
@@ -2571,6 +2649,15 @@ int main(int argc, char **argv)
         glClearColor(0.08f, 0.08f, 0.09f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         m2sdr_imgui_opengl3_render_draw_data(igGetDrawData());
+
+        if (s.export_csv_request) {
+            export_current_csv(&s);
+            s.export_csv_request = false;
+        }
+        if (s.export_snapshot_request) {
+            export_snapshot_ppm((int)io->DisplaySize.x, (int)io->DisplaySize.y);
+            s.export_snapshot_request = false;
+        }
 
         SDL_GL_SwapWindow(window);
     }
