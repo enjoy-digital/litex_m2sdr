@@ -182,6 +182,11 @@ struct scan_state {
     bool spectrum_show_peak;
     bool spectrum_show_avg;
     float spectrum_avg_alpha;
+    bool spectrum_peak_marker;
+    bool marker_a_enable;
+    bool marker_b_enable;
+    double marker_a_hz;
+    double marker_b_hz;
     bool lo_valid;
     int64_t lo_hz;
     bool fastlock_enable;
@@ -1127,6 +1132,11 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                                     const float *plot_peak,
                                     bool show_avg,
                                     bool show_peak,
+                                    bool show_peak_marker,
+                                    bool marker_a_enable,
+                                    bool marker_b_enable,
+                                    double marker_a_hz,
+                                    double marker_b_hz,
                                     double f0_hz,
                                     double f1_hz)
 {
@@ -1144,6 +1154,9 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImU32 col_trace = 0xFF66D9FFu;
     ImU32 col_avg = 0xFF63E2A7u;
     ImU32 col_peak = 0xFFFFD166u;
+    ImU32 col_marker_peak = 0xFFFFA500u;
+    ImU32 col_marker_a = 0xFF8AC926u;
+    ImU32 col_marker_b = 0xFFFF595Eu;
     ImU32 col_text = 0xFFAFAFAFu;
 
     if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
@@ -1201,6 +1214,35 @@ static void draw_spectrum_with_grid(struct scan_state *s,
             s->plot_points[i] = (ImVec2){x, y};
         }
         ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_peak, 0, 1.1f);
+    }
+
+    if (show_peak_marker && plot_count > 1) {
+        int idx_max = 0;
+        double freq;
+        char txt[48];
+        float tx;
+        float x;
+        for (i = 1; i < plot_count; i++) {
+            if (plot_main[i] > plot_main[idx_max])
+                idx_max = i;
+        }
+        x = pmin.x + (pmax.x - pmin.x) * (float)idx_max / (float)(plot_count - 1);
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.2f);
+        freq = f0_hz + (f1_hz - f0_hz) * (double)idx_max / (double)(plot_count - 1);
+        format_freq_label(freq, txt, sizeof(txt));
+        tx = x + 4.0f;
+        if (tx > pmax.x - 40.0f)
+            tx = pmax.x - 40.0f;
+        ImDrawList_AddText_Vec2(dl, (ImVec2){tx, pmin.y + 2.0f}, col_marker_peak, txt, NULL);
+    }
+
+    if (marker_a_enable && marker_a_hz >= f0_hz && marker_a_hz <= f1_hz) {
+        float xa = pmin.x + (float)((marker_a_hz - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+        ImDrawList_AddLine(dl, (ImVec2){xa, pmin.y}, (ImVec2){xa, pmax.y}, col_marker_a, 1.2f);
+    }
+    if (marker_b_enable && marker_b_hz >= f0_hz && marker_b_hz <= f1_hz) {
+        float xb = pmin.x + (float)((marker_b_hz - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+        ImDrawList_AddLine(dl, (ImVec2){xb, pmin.y}, (ImVec2){xb, pmax.y}, col_marker_b, 1.2f);
     }
 
     for (i = 0; i <= v_ticks; i++) {
@@ -1705,6 +1747,11 @@ struct ui_state {
     int stitch_pct;
     bool show_peak;
     bool show_avg;
+    bool show_peak_marker;
+    bool marker_a_enable;
+    bool marker_b_enable;
+    float marker_a_mhz;
+    float marker_b_mhz;
 };
 
 static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
@@ -1718,6 +1765,11 @@ static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
     ui->stitch_pct = s->stitch_pct;
     ui->show_peak = s->spectrum_show_peak;
     ui->show_avg = s->spectrum_show_avg;
+    ui->show_peak_marker = s->spectrum_peak_marker;
+    ui->marker_a_enable = s->marker_a_enable;
+    ui->marker_b_enable = s->marker_b_enable;
+    ui->marker_a_mhz = (float)(s->marker_a_hz / 1e6);
+    ui->marker_b_mhz = (float)(s->marker_b_hz / 1e6);
 }
 
 static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
@@ -1836,6 +1888,31 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 10.0f);
     if (igCheckbox("Avg Trace", &ui->show_avg))
         s->spectrum_show_avg = ui->show_avg;
+    igSameLine(0.0f, 10.0f);
+    if (igCheckbox("Peak Marker", &ui->show_peak_marker))
+        s->spectrum_peak_marker = ui->show_peak_marker;
+
+    igSetNextItemWidth(80.0f);
+    if (igCheckbox("A", &ui->marker_a_enable))
+        s->marker_a_enable = ui->marker_a_enable;
+    igSameLine(0.0f, 6.0f);
+    igSetNextItemWidth(110.0f);
+    if (igDragFloat("Marker A (MHz)", &ui->marker_a_mhz, 0.1f, 70.0f, 6000.0f, "%.3f", 0))
+        s->marker_a_hz = (double)ui->marker_a_mhz * 1e6;
+
+    igSameLine(0.0f, 10.0f);
+    if (igCheckbox("B", &ui->marker_b_enable))
+        s->marker_b_enable = ui->marker_b_enable;
+    igSameLine(0.0f, 6.0f);
+    igSetNextItemWidth(110.0f);
+    if (igDragFloat("Marker B (MHz)", &ui->marker_b_mhz, 0.1f, 70.0f, 6000.0f, "%.3f", 0))
+        s->marker_b_hz = (double)ui->marker_b_mhz * 1e6;
+
+    if (s->marker_a_enable && s->marker_b_enable) {
+        double d_mhz = fabs(s->marker_b_hz - s->marker_a_hz) / 1e6;
+        igSameLine(0.0f, 10.0f);
+        igText("Delta %.3f MHz", d_mhz);
+    }
 
     if (s->db_max <= s->db_min + 1.0f) {
         s->db_max = s->db_min + 1.0f;
@@ -1903,6 +1980,9 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                         s->spectrum_show_avg ? s->plot_avg : NULL,
                                         s->spectrum_show_peak ? s->plot_peak : NULL,
                                         s->spectrum_show_avg, s->spectrum_show_peak,
+                                        s->spectrum_peak_marker,
+                                        s->marker_a_enable, s->marker_b_enable,
+                                        s->marker_a_hz, s->marker_b_hz,
                                         f0_hz, f1_hz);
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
 
@@ -2165,6 +2245,11 @@ int main(int argc, char **argv)
     s.spectrum_show_peak = false;
     s.spectrum_show_avg = false;
     s.spectrum_avg_alpha = 0.10f;
+    s.spectrum_peak_marker = true;
+    s.marker_a_enable = false;
+    s.marker_b_enable = false;
+    s.marker_a_hz = (double)s.scan_start_hz;
+    s.marker_b_hz = (double)s.scan_stop_hz;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
