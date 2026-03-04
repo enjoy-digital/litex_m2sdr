@@ -1196,9 +1196,6 @@ int main(int argc, char **argv)
                     "Quality (Overlap)",
                     "Fast (No Overlap)"
                 };
-                static const char *rows_items[] = {
-                    "1", "2", "3", "4", "5", "6", "7", "8"
-                };
                 static const char *palette_items[] = {
                     "Google Turbo",
                     "Plasma",
@@ -1208,7 +1205,6 @@ int main(int argc, char **argv)
                     "Black Hot"
                 };
                 int p = s.waterfall_palette;
-                int rows_tmp = s.display_rows;
 
                 igSeparatorText("Scan Controls");
 
@@ -1257,12 +1253,8 @@ int main(int argc, char **argv)
                 changed |= igDragInt("RX Gain (dB)", &ui_rx_gain, 0.2f, 0, 73, "%d", 0);
 
                 igSeparatorText("Spectrum / Waterfall");
-                igSetNextItemWidth(90.0f);
-                rows_tmp = s.display_rows - 1;
-                if (rows_tmp < 0) rows_tmp = 0;
-                if (rows_tmp > 7) rows_tmp = 7;
-                if (igCombo_Str_arr("Rows", &rows_tmp, rows_items, 8, 8))
-                    s.display_rows = rows_tmp + 1;
+                igSetNextItemWidth(120.0f);
+                igSliderInt("Rows", &s.display_rows, 1, 8, "%d", 0);
                 igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(170.0f);
                 if (p < 0 || p > 5)
@@ -1380,21 +1372,46 @@ int main(int argc, char **argv)
 
             if (igBeginChild_Str("##stats_panel", (ImVec2){0.0f, 0.0f}, 0, 0)) {
                 igSeparatorText("Performance");
-                igText("Throughput: %.2f lines/s | line avg %.3f ms",
-                       s.perf.lines_per_sec, s.perf.ema_line_ms);
-                igText("Split avg (ms): tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
-                       s.perf.ema_tune_ms, s.perf.ema_capture_ms, s.perf.ema_fft_ms, s.perf.ema_waterfall_ms);
-                if (s.perf.ema_line_ms > 0.0) {
-                    igText("Split avg (%%): tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
-                           100.0 * s.perf.ema_tune_ms / s.perf.ema_line_ms,
-                           100.0 * s.perf.ema_capture_ms / s.perf.ema_line_ms,
-                           100.0 * s.perf.ema_fft_ms / s.perf.ema_line_ms,
-                           100.0 * s.perf.ema_waterfall_ms / s.perf.ema_line_ms);
+                if (igBeginTable("##perf_table", 2,
+                                 ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX,
+                                 (ImVec2){0.0f, 0.0f}, 0.0f)) {
+                    igTableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 230.0f, 0);
+                    igTableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+
+                    igTableNextRow(0, 0.0f);
+                    igTableSetColumnIndex(0); igText("Throughput");
+                    igTableSetColumnIndex(1); igText("%.2f lines/s | line avg %.3f ms",
+                                                     s.perf.lines_per_sec, s.perf.ema_line_ms);
+
+                    igTableNextRow(0, 0.0f);
+                    igTableSetColumnIndex(0); igText("Split Avg (ms)");
+                    igTableSetColumnIndex(1); igText("tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
+                                                     s.perf.ema_tune_ms, s.perf.ema_capture_ms,
+                                                     s.perf.ema_fft_ms, s.perf.ema_waterfall_ms);
+
+                    if (s.perf.ema_line_ms > 0.0) {
+                        igTableNextRow(0, 0.0f);
+                        igTableSetColumnIndex(0); igText("Split Avg (%%)");
+                        igTableSetColumnIndex(1); igText("tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
+                                                         100.0 * s.perf.ema_tune_ms / s.perf.ema_line_ms,
+                                                         100.0 * s.perf.ema_capture_ms / s.perf.ema_line_ms,
+                                                         100.0 * s.perf.ema_fft_ms / s.perf.ema_line_ms,
+                                                         100.0 * s.perf.ema_waterfall_ms / s.perf.ema_line_ms);
+                    }
+
+                    igTableNextRow(0, 0.0f);
+                    igTableSetColumnIndex(0); igText("Scan Geometry");
+                    igTableSetColumnIndex(1); igText("segments %d | width %d bins (tex %d px)",
+                                                     s.segments, s.waterfall_width, s.waterfall_tex_width);
+
+                    igTableNextRow(0, 0.0f);
+                    igTableSetColumnIndex(0); igText("Stitch");
+                    igTableSetColumnIndex(1); igText("%s | step %.3f MHz | overlap %d bins",
+                                                     s.stitch_mode == 1 ? "Fast" : "Quality",
+                                                     s.step_hz / 1e6, s.overlap_bins);
+
+                    igEndTable();
                 }
-                igText("Segments %d | Width %d bins (tex %d px) | Stitch %s | step %.3f MHz | overlap %d bins",
-                       s.segments, s.waterfall_width, s.waterfall_tex_width,
-                       s.stitch_mode == 1 ? "Fast" : "Quality",
-                       s.step_hz / 1e6, s.overlap_bins);
             }
             igEndChild();
         }
