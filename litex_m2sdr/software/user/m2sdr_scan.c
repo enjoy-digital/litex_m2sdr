@@ -506,7 +506,7 @@ static void help(void)
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), FFT length, line count, RX gain and dB scale.\n"
-           "  - Start/Pause scanning and Apply configuration changes.\n"
+           "  - Parameters are applied live while moving sliders.\n"
            "\n"
            "Notes:\n"
            "  - Scan sampling rate is fixed to 61.44 MSPS.\n"
@@ -728,8 +728,10 @@ int main(int argc, char **argv)
         }
 
         if (s.run) {
-            if (!scan_line(&s))
-                s.run = false;
+            if (!scan_line(&s)) {
+                fprintf(stderr, "Scan failed, stopping.\n");
+                quit = true;
+            }
         }
 
         m2sdr_imgui_opengl3_new_frame();
@@ -746,40 +748,52 @@ int main(int argc, char **argv)
 
         igSeparator();
 
-        igDragFloat("Scan Start (MHz)", &ui_start_mhz, 1.0f, 70.0f, 6000.0f, "%.3f", 0);
-        igDragFloat("Scan Stop (MHz)", &ui_stop_mhz, 1.0f, 70.0f, 6000.0f, "%.3f", 0);
-        igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
-        igText("FFT Length: %d", 1 << ui_fft_exp);
-        igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
-        igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
-        igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
-        igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
-        igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
+        {
+            bool changed = false;
+            bool changed_start = false;
+            bool changed_stop = false;
+            const float min_span_mhz = 1.0f;
 
-        if (s.db_max <= s.db_min + 1.0f)
-            s.db_max = s.db_min + 1.0f;
+            changed_start = igSliderFloat("Scan Start (MHz)", &ui_start_mhz, 70.0f, 6000.0f, "%.3f", 0);
+            changed_stop  = igSliderFloat("Scan Stop (MHz)",  &ui_stop_mhz,  70.0f, 6000.0f, "%.3f", 0);
+            changed = changed_start || changed_stop;
 
-        if (igButton("Apply", (ImVec2){120, 0})) {
-            int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
-            int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
-            int new_fft_len = 1 << ui_fft_exp;
-            s.run = false;
-            if (apply_runtime_config(&s, new_start, new_stop, new_fft_len, ui_lines, ui_rx_gain)) {
-                ui_start_mhz = (float)s.scan_start_hz / 1e6f;
-                ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
-                ui_fft_exp = ilog2_int(s.fft_len);
-                ui_lines = s.lines;
-                ui_rx_gain = s.rx_gain;
+            if (changed_start && ui_start_mhz > ui_stop_mhz - min_span_mhz)
+                ui_stop_mhz = ui_start_mhz + min_span_mhz;
+            if (changed_stop && ui_stop_mhz < ui_start_mhz + min_span_mhz)
+                ui_start_mhz = ui_stop_mhz - min_span_mhz;
+
+            changed |= igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
+            igText("FFT Length: %d", 1 << ui_fft_exp);
+            changed |= igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
+            changed |= igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
+            changed |= igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
+            changed |= igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
+            changed |= igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
+
+            if (s.db_max <= s.db_min + 1.0f) {
+                s.db_max = s.db_min + 1.0f;
+                changed = true;
             }
-        }
 
-        igSameLine(0.0f, 8.0f);
-        if (s.run) {
-            if (igButton("Pause", (ImVec2){120, 0}))
-                s.run = false;
-        } else {
-            if (igButton("Start", (ImVec2){120, 0}))
-                s.run = true;
+            if (changed) {
+                int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
+                int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
+                int new_fft_len = 1 << ui_fft_exp;
+                if (apply_runtime_config(&s, new_start, new_stop, new_fft_len, ui_lines, ui_rx_gain)) {
+                    ui_start_mhz = (float)s.scan_start_hz / 1e6f;
+                    ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                    ui_fft_exp = ilog2_int(s.fft_len);
+                    ui_lines = s.lines;
+                    ui_rx_gain = s.rx_gain;
+                } else {
+                    ui_start_mhz = (float)s.scan_start_hz / 1e6f;
+                    ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                    ui_fft_exp = ilog2_int(s.fft_len);
+                    ui_lines = s.lines;
+                    ui_rx_gain = s.rx_gain;
+                }
+            }
         }
 
         igSeparator();
