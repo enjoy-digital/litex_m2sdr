@@ -1209,7 +1209,7 @@ int main(int argc, char **argv)
                 int p = s.waterfall_palette;
                 int rows_tmp = s.display_rows;
 
-                igSeparatorText("Controls");
+                igSeparatorText("Scan Controls");
 
                 if (s.run) {
                     if (igButton("Pause Scan", (ImVec2){120.0f, 0.0f}))
@@ -1223,7 +1223,6 @@ int main(int argc, char **argv)
                 igSameLine(0.0f, 10.0f);
                 igText("SR %.2f MSPS / BW %.2f MHz", (double)s.sample_rate_hz / 1e6, (double)s.rf_bandwidth_hz / 1e6);
 
-                igSeparatorText("Scan");
                 igSetNextItemWidth(160.0f);
                 changed_start = igDragFloat("Scan Start (MHz)", &ui_start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
                 igSameLine(0.0f, 10.0f);
@@ -1242,16 +1241,27 @@ int main(int argc, char **argv)
                                            (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
                                            4);
                 igSameLine(0.0f, 10.0f);
-                igSetNextItemWidth(170.0f);
-                if (ui_stitch_mode < 0 || ui_stitch_mode > 1)
-                    ui_stitch_mode = 0;
-                changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
-                igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(130.0f);
                 changed |= igCombo_Str_arr("FFT Points", &ui_fft_idx,
                                            k_fft_length_labels,
                                            (int)(sizeof(k_fft_length_labels) / sizeof(k_fft_length_labels[0])),
                                            5);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(170.0f);
+                if (ui_stitch_mode < 0 || ui_stitch_mode > 1)
+                    ui_stitch_mode = 0;
+                changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(120.0f);
+                changed |= igDragInt("RX Gain (dB)", &ui_rx_gain, 0.2f, 0, 73, "%d", 0);
+
+                igSeparatorText("Spectrum / Waterfall");
+                igSetNextItemWidth(90.0f);
+                rows_tmp = s.display_rows - 1;
+                if (rows_tmp < 0) rows_tmp = 0;
+                if (rows_tmp > 7) rows_tmp = 7;
+                if (igCombo_Str_arr("Rows", &rows_tmp, rows_items, 8, 8))
+                    s.display_rows = rows_tmp + 1;
                 igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(170.0f);
                 if (p < 0 || p > 5)
@@ -1260,17 +1270,6 @@ int main(int argc, char **argv)
                     s.waterfall_palette = p;
                     changed = true;
                 }
-
-                igSeparatorText("Display");
-                rows_tmp = s.display_rows - 1;
-                if (rows_tmp < 0) rows_tmp = 0;
-                if (rows_tmp > 7) rows_tmp = 7;
-                igSetNextItemWidth(120.0f);
-                if (igCombo_Str_arr("Rows", &rows_tmp, rows_items, 8, 8))
-                    s.display_rows = rows_tmp + 1;
-                igSameLine(0.0f, 10.0f);
-                igSetNextItemWidth(120.0f);
-                changed |= igDragInt("RX Gain (dB)", &ui_rx_gain, 0.2f, 0, 73, "%d", 0);
                 igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(120.0f);
                 changed |= igDragInt("Settle (us)", &ui_settle_us, 1.0f, 0, 5000, "%d", 0);
