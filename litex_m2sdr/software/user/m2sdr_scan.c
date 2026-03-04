@@ -41,8 +41,8 @@
 
 #define igGetIO igGetIO_Nil
 
-#define SCAN_SAMPLERATE_HZ 61440000U
-#define SCAN_BANDWIDTH_HZ  56000000
+#define DEFAULT_SCAN_SAMPLERATE_HZ 61440000U
+#define DEFAULT_SCAN_BANDWIDTH_HZ  56000000U
 #define SCAN_TX_GAIN_DB    -30
 #define DEFAULT_START_FREQ_HZ 2300000000LL
 #define DEFAULT_STOP_FREQ_HZ  2500000000LL
@@ -55,6 +55,20 @@
 #define RX_SETTLE_US 2000
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
+
+static const uint32_t k_scan_samplerates_hz[] = {
+    61440000U,
+    30720000U,
+    15360000U,
+    7680000U
+};
+
+static const char *k_scan_samplerate_labels[] = {
+    "61.44 MSPS",
+    "30.72 MSPS",
+    "15.36 MSPS",
+    "7.68 MSPS"
+};
 
 static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
@@ -140,6 +154,8 @@ void gpio_set_value(unsigned gpio, int value)
 }
 
 struct scan_state {
+    uint32_t sample_rate_hz;
+    uint32_t rf_bandwidth_hz;
     int fft_len;
     int lines;
     int rx_gain;
@@ -204,6 +220,37 @@ static double ema_update(double prev, double sample, double alpha)
     if (prev <= 0.0)
         return sample;
     return (1.0 - alpha) * prev + alpha * sample;
+}
+
+static uint32_t scan_bandwidth_from_samplerate(uint32_t sample_rate_hz)
+{
+    uint64_t bw = (uint64_t)sample_rate_hz * (uint64_t)DEFAULT_SCAN_BANDWIDTH_HZ;
+    bw /= (uint64_t)DEFAULT_SCAN_SAMPLERATE_HZ;
+    if (bw < 2000000ULL)
+        bw = 2000000ULL;
+    if (bw > sample_rate_hz)
+        bw = sample_rate_hz;
+    return (uint32_t)bw;
+}
+
+static int samplerate_index_from_hz(uint32_t sample_rate_hz)
+{
+    int i;
+    for (i = 0; i < (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])); i++) {
+        if (k_scan_samplerates_hz[i] == sample_rate_hz)
+            return i;
+    }
+    return 0;
+}
+
+static bool is_supported_samplerate(uint32_t sample_rate_hz)
+{
+    int i;
+    for (i = 0; i < (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])); i++) {
+        if (k_scan_samplerates_hz[i] == sample_rate_hz)
+            return true;
+    }
+    return false;
 }
 
 static void make_window(float *dst, int n)
@@ -589,7 +636,7 @@ static void draw_waterfall_freq_overlay(double f0_hz, double f1_hz)
 
 static bool scan_line(struct scan_state *s)
 {
-    double fs = (double)SCAN_SAMPLERATE_HZ;
+    double fs = (double)s->sample_rate_hz;
     double start = (double)s->scan_start_hz;
     double t_line0, t_line1, t_wf0, t_wf1;
     double t_tune_s = 0.0, t_capture_s = 0.0, t_fft_s = 0.0;
@@ -699,10 +746,10 @@ static bool resize_buffers(struct scan_state *s)
     s->waterfall_rgba = NULL;
 
     if (s->scan_stop_hz <= s->scan_start_hz)
-        s->scan_stop_hz = s->scan_start_hz + SCAN_SAMPLERATE_HZ;
+        s->scan_stop_hz = s->scan_start_hz + s->sample_rate_hz;
 
     range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
-    stride_ratio = (double)SCAN_BANDWIDTH_HZ / (double)SCAN_SAMPLERATE_HZ;
+    stride_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
     if (stride_ratio < 0.5)
         stride_ratio = 0.5;
     if (stride_ratio > 1.0)
@@ -714,12 +761,12 @@ static bool resize_buffers(struct scan_state *s)
     if (stride_bins > s->fft_len)
         stride_bins = s->fft_len;
     overlap_bins = s->fft_len - stride_bins;
-    step_hz = (double)SCAN_SAMPLERATE_HZ * (double)stride_bins / (double)s->fft_len;
+    step_hz = (double)s->sample_rate_hz * (double)stride_bins / (double)s->fft_len;
 
-    if (range_hz <= (double)SCAN_SAMPLERATE_HZ) {
+    if (range_hz <= (double)s->sample_rate_hz) {
         new_segments = 1;
     } else {
-        new_segments = 1 + (int)ceil((range_hz - (double)SCAN_SAMPLERATE_HZ) / step_hz);
+        new_segments = 1 + (int)ceil((range_hz - (double)s->sample_rate_hz) / step_hz);
     }
     if (new_segments < 1)
         new_segments = 1;
@@ -838,10 +885,10 @@ static bool m2sdr_rfic_init(struct scan_state *s)
         return false;
     }
 
-    ad9361_set_tx_sampling_freq(ad9361_phy, SCAN_SAMPLERATE_HZ);
-    ad9361_set_rx_sampling_freq(ad9361_phy, SCAN_SAMPLERATE_HZ);
-    ad9361_set_rx_rf_bandwidth(ad9361_phy, SCAN_BANDWIDTH_HZ);
-    ad9361_set_tx_rf_bandwidth(ad9361_phy, SCAN_BANDWIDTH_HZ);
+    ad9361_set_tx_sampling_freq(ad9361_phy, s->sample_rate_hz);
+    ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
+    ad9361_set_rx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
+    ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
 
     ad9361_set_tx_atten(ad9361_phy, -SCAN_TX_GAIN_DB * 1000, 1, 1, 1);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
@@ -867,20 +914,22 @@ static void help(void)
            "  -start_freq hz         Scan start frequency in Hz (default: %" PRId64 ").\n"
            "  -stop_freq hz          Scan stop frequency in Hz (default: %" PRId64 ").\n"
            "  -rx_gain db            RX gain in dB [0..73] (default: %d).\n"
+           "  -sample_rate hz        Scan sample rate in Hz (default: %u).\n"
            "  -fft_len n             FFT length (power of two, default: %d).\n"
            "  -lines n               Waterfall lines (default: %d).\n"
            "\n"
            "Runtime controls in UI:\n"
-           "  - Scan start/stop (MHz), FFT length, line count, RX gain and dB scale.\n"
+           "  - Scan start/stop (MHz), sample rate, FFT length, line count, RX gain and dB scale.\n"
            "  - Parameters are applied live while moving sliders.\n"
            "\n"
            "Notes:\n"
-           "  - Scan sampling rate is fixed to 61.44 MSPS.\n"
+           "  - Supported samplerates are submultiples of 61.44 MSPS.\n"
            "  - Full-spectrum scans are possible but slower because they retune LO per segment.\n",
            DEFAULT_REFCLK_FREQ,
            (int64_t)DEFAULT_START_FREQ_HZ,
            (int64_t)DEFAULT_STOP_FREQ_HZ,
            DEFAULT_RX_GAIN_DB,
+           DEFAULT_SCAN_SAMPLERATE_HZ,
            DEFAULT_FFT_LEN,
            DEFAULT_LINES);
 }
@@ -901,6 +950,7 @@ static int ilog2_int(int n)
 static bool apply_runtime_config(struct scan_state *s,
                                  int64_t start_hz,
                                  int64_t stop_hz,
+                                 uint32_t sample_rate_hz,
                                  int fft_len,
                                  int lines,
                                  int rx_gain)
@@ -926,9 +976,16 @@ static bool apply_runtime_config(struct scan_state *s,
         fprintf(stderr, "Invalid rx_gain %d (must be %d..%d).\n", rx_gain, RX_GAIN_MIN, RX_GAIN_MAX);
         return false;
     }
+    if (!is_supported_samplerate(sample_rate_hz)) {
+        fprintf(stderr, "Invalid sample rate %u Hz (supported: 61440000, 30720000, 15360000, 7680000).\n",
+                sample_rate_hz);
+        return false;
+    }
 
     s->scan_start_hz = start_hz;
     s->scan_stop_hz = stop_hz;
+    s->sample_rate_hz = sample_rate_hz;
+    s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(sample_rate_hz);
     s->fft_len = fft_len;
     s->lines = lines;
     s->rx_gain = rx_gain;
@@ -938,6 +995,10 @@ static bool apply_runtime_config(struct scan_state *s,
     s->perf.captures_at_prev_rate = s->perf.captures_total;
     s->perf.retunes_at_prev_rate = s->perf.retunes_total;
 
+    ad9361_set_tx_sampling_freq(ad9361_phy, s->sample_rate_hz);
+    ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
+    ad9361_set_rx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
+    ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
     ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
     ad9361_set_rx_rf_gain(ad9361_phy, 1, s->rx_gain);
 
@@ -955,6 +1016,7 @@ int main(int argc, char **argv)
     const char *glsl_version = "#version 130";
     float ui_start_mhz;
     float ui_stop_mhz;
+    int ui_samplerate_idx;
     int ui_fft_exp;
     int ui_lines;
     int ui_rx_gain;
@@ -967,11 +1029,14 @@ int main(int argc, char **argv)
         { "rx_gain", required_argument, NULL, 4 },
         { "fft_len", required_argument, NULL, 5 },
         { "lines", required_argument, NULL, 6 },
+        { "sample_rate", required_argument, NULL, 7 },
         { NULL, 0, NULL, 0 }
     };
 
     memset(&s, 0, sizeof(s));
     s.refclk_hz = DEFAULT_REFCLK_FREQ;
+    s.sample_rate_hz = DEFAULT_SCAN_SAMPLERATE_HZ;
+    s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
     s.scan_start_hz = DEFAULT_START_FREQ_HZ;
     s.scan_stop_hz = DEFAULT_STOP_FREQ_HZ;
     s.rx_gain = DEFAULT_RX_GAIN_DB;
@@ -1015,6 +1080,14 @@ int main(int argc, char **argv)
             break;
         case 6:
             s.lines = atoi(optarg);
+            break;
+        case 7:
+            s.sample_rate_hz = (uint32_t)strtoul(optarg, NULL, 10);
+            if (!is_supported_samplerate(s.sample_rate_hz)) {
+                fprintf(stderr, "Unsupported sample rate %u Hz.\n", s.sample_rate_hz);
+                return 1;
+            }
+            s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
             break;
         default:
             return 1;
@@ -1083,6 +1156,7 @@ int main(int argc, char **argv)
 
     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+    ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
     ui_fft_exp = ilog2_int(s.fft_len);
     ui_lines = s.lines;
     ui_rx_gain = s.rx_gain;
@@ -1116,7 +1190,9 @@ int main(int argc, char **argv)
 
         igBegin("RF Scan", NULL, 0);
         igText("Device: %s", m2sdr_device);
-        igText("Samplerate: %.2f MSPS", SCAN_SAMPLERATE_HZ / 1e6);
+        igText("Samplerate: %.2f MSPS | RF BW: %.2f MHz",
+               (double)s.sample_rate_hz / 1e6,
+               (double)s.rf_bandwidth_hz / 1e6);
         igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
                s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
         igText("Stitch: step %.3f MHz | stride %d bins | overlap %d bins",
@@ -1157,6 +1233,10 @@ int main(int argc, char **argv)
             if (changed_stop && ui_stop_mhz < ui_start_mhz + min_span_mhz)
                 ui_start_mhz = ui_stop_mhz - min_span_mhz;
 
+            changed |= igCombo_Str_arr("Sample Rate", &ui_samplerate_idx,
+                                        k_scan_samplerate_labels,
+                                        (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
+                                        4);
             changed |= igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
             igText("FFT Length: %d", 1 << ui_fft_exp);
             changed |= igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
@@ -1191,16 +1271,22 @@ int main(int argc, char **argv)
             if (changed) {
                 int64_t new_start = (int64_t)(ui_start_mhz * 1e6f);
                 int64_t new_stop = (int64_t)(ui_stop_mhz * 1e6f);
+                if (ui_samplerate_idx < 0 ||
+                    ui_samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
+                    ui_samplerate_idx = 0;
+                uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
                 int new_fft_len = 1 << ui_fft_exp;
-                if (apply_runtime_config(&s, new_start, new_stop, new_fft_len, ui_lines, ui_rx_gain)) {
+                if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain)) {
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                    ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
                     ui_fft_exp = ilog2_int(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
                 } else {
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
+                    ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
                     ui_fft_exp = ilog2_int(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
