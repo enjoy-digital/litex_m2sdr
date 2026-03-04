@@ -55,6 +55,9 @@
 #define DEFAULT_RX_SETTLE_US 20
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
+#define FASTLOCK_HW_SLOTS 8
+#define FASTLOCK_PROFILE_BYTES 16
+#define FASTLOCK_MAX_SW_CACHE 4096
 
 static const uint32_t k_scan_samplerates_hz[] = {
     61440000U,
@@ -174,6 +177,24 @@ struct scan_state {
     int waterfall_palette;
     bool lo_valid;
     int64_t lo_hz;
+    bool fastlock_enable;
+    int fastlock_curr_slot;
+    uint64_t fastlock_lru_tick;
+
+    struct {
+        bool valid;
+        int64_t lo_hz;
+        uint8_t values[FASTLOCK_PROFILE_BYTES];
+    } *fastlock_sw;
+    int fastlock_sw_count;
+    int fastlock_sw_cap;
+
+    struct {
+        bool valid;
+        int64_t lo_hz;
+        int sw_index;
+        uint64_t lru;
+    } fastlock_slots[FASTLOCK_HW_SLOTS];
 
     int segments;
     int stride_bins;
@@ -212,7 +233,13 @@ struct scan_state {
         double lines_per_sec, captures_per_sec, retunes_per_sec;
         double iq_msps, sweep_mhz_per_sec;
         uint64_t lines_total, captures_total, retunes_total;
+        uint64_t fastlock_recall_total, fastlock_load_total;
+        uint64_t fastlock_store_total, fastlock_cold_tune_total;
         uint64_t lines_at_prev_rate, captures_at_prev_rate, retunes_at_prev_rate;
+        uint64_t fastlock_recall_at_prev_rate, fastlock_load_at_prev_rate;
+        uint64_t fastlock_store_at_prev_rate, fastlock_cold_tune_at_prev_rate;
+        double fastlock_recall_per_sec, fastlock_load_per_sec;
+        double fastlock_store_per_sec, fastlock_cold_tune_per_sec;
         double prev_rate_t;
     } perf;
 };
@@ -229,6 +256,231 @@ static double ema_update(double prev, double sample, double alpha)
     if (prev <= 0.0)
         return sample;
     return (1.0 - alpha) * prev + alpha * sample;
+}
+
+static bool retune_rx(int64_t freq_hz);
+
+static void fastlock_reset(struct scan_state *s)
+{
+    int i;
+
+    s->fastlock_curr_slot = -1;
+    s->fastlock_lru_tick = 1;
+    s->fastlock_sw_count = 0;
+    for (i = 0; i < FASTLOCK_HW_SLOTS; i++) {
+        s->fastlock_slots[i].valid = false;
+        s->fastlock_slots[i].lo_hz = 0;
+        s->fastlock_slots[i].sw_index = -1;
+        s->fastlock_slots[i].lru = 0;
+    }
+}
+
+static bool fastlock_cache_ensure(struct scan_state *s, int need_entries)
+{
+    void *p;
+    int new_cap;
+
+    if (need_entries <= s->fastlock_sw_cap)
+        return true;
+
+    new_cap = s->fastlock_sw_cap > 0 ? s->fastlock_sw_cap : 64;
+    while (new_cap < need_entries && new_cap < FASTLOCK_MAX_SW_CACHE)
+        new_cap *= 2;
+    if (new_cap > FASTLOCK_MAX_SW_CACHE)
+        new_cap = FASTLOCK_MAX_SW_CACHE;
+    if (new_cap < need_entries)
+        return false;
+
+    p = realloc(s->fastlock_sw, (size_t)new_cap * sizeof(*s->fastlock_sw));
+    if (!p)
+        return false;
+    s->fastlock_sw = p;
+    s->fastlock_sw_cap = new_cap;
+    return true;
+}
+
+static int fastlock_find_sw_by_freq(const struct scan_state *s, int64_t lo_hz)
+{
+    int i;
+    for (i = 0; i < s->fastlock_sw_count; i++) {
+        if (s->fastlock_sw[i].valid && s->fastlock_sw[i].lo_hz == lo_hz)
+            return i;
+    }
+    return -1;
+}
+
+static int fastlock_find_slot_by_freq(const struct scan_state *s, int64_t lo_hz)
+{
+    int i;
+    for (i = 0; i < FASTLOCK_HW_SLOTS; i++) {
+        if (s->fastlock_slots[i].valid && s->fastlock_slots[i].lo_hz == lo_hz)
+            return i;
+    }
+    return -1;
+}
+
+static int fastlock_select_slot(struct scan_state *s)
+{
+    int i;
+    int best = -1;
+    uint64_t best_lru = UINT64_MAX;
+
+    for (i = 0; i < FASTLOCK_HW_SLOTS; i++) {
+        if (!s->fastlock_slots[i].valid)
+            return i;
+    }
+
+    for (i = 0; i < FASTLOCK_HW_SLOTS; i++) {
+        if (i == s->fastlock_curr_slot)
+            continue;
+        if (s->fastlock_slots[i].lru < best_lru) {
+            best_lru = s->fastlock_slots[i].lru;
+            best = i;
+        }
+    }
+
+    if (best < 0)
+        best = 0;
+    return best;
+}
+
+static void fastlock_touch_slot(struct scan_state *s, int slot)
+{
+    if (slot < 0 || slot >= FASTLOCK_HW_SLOTS)
+        return;
+    s->fastlock_slots[slot].lru = s->fastlock_lru_tick++;
+}
+
+static bool fastlock_recall_slot(int slot)
+{
+    return ad9361_rx_fastlock_recall(ad9361_phy, (uint32_t)slot) == 0;
+}
+
+static bool fastlock_load_slot(int slot, uint8_t values[FASTLOCK_PROFILE_BYTES])
+{
+    return ad9361_rx_fastlock_load(ad9361_phy, (uint32_t)slot, values) == 0;
+}
+
+static bool fastlock_store_slot(int slot)
+{
+    return ad9361_rx_fastlock_store(ad9361_phy, (uint32_t)slot) == 0;
+}
+
+static bool fastlock_save_slot(int slot, uint8_t values[FASTLOCK_PROFILE_BYTES])
+{
+    return ad9361_rx_fastlock_save(ad9361_phy, (uint32_t)slot, values) == 0;
+}
+
+static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
+                           double *t_lo_s,
+                           int *retuned_count,
+                           int *fastlock_recall_count,
+                           int *fastlock_load_count,
+                           int *fastlock_store_count,
+                           int *fastlock_cold_tune_count)
+{
+    double t0, t1;
+    int slot, sw_idx;
+    int target_slot;
+
+    if (!s->fastlock_enable) {
+        t0 = now_s();
+        if (!retune_rx(center_hz))
+            return false;
+        t1 = now_s();
+        *t_lo_s += t1 - t0;
+        s->lo_valid = true;
+        s->lo_hz = center_hz;
+        if (retuned_count)
+            (*retuned_count)++;
+        return true;
+    }
+
+    slot = fastlock_find_slot_by_freq(s, center_hz);
+    if (slot >= 0) {
+        t0 = now_s();
+        if (!fastlock_recall_slot(slot))
+            return false;
+        t1 = now_s();
+        *t_lo_s += t1 - t0;
+        fastlock_touch_slot(s, slot);
+        s->fastlock_curr_slot = slot;
+        s->lo_valid = true;
+        s->lo_hz = center_hz;
+        if (fastlock_recall_count)
+            (*fastlock_recall_count)++;
+        return true;
+    }
+
+    sw_idx = fastlock_find_sw_by_freq(s, center_hz);
+    if (sw_idx >= 0) {
+        target_slot = fastlock_select_slot(s);
+        t0 = now_s();
+        if (!fastlock_load_slot(target_slot, s->fastlock_sw[sw_idx].values))
+            return false;
+        t1 = now_s();
+        *t_lo_s += t1 - t0;
+        if (fastlock_load_count)
+            (*fastlock_load_count)++;
+
+        s->fastlock_slots[target_slot].valid = true;
+        s->fastlock_slots[target_slot].lo_hz = center_hz;
+        s->fastlock_slots[target_slot].sw_index = sw_idx;
+
+        t0 = now_s();
+        if (!fastlock_recall_slot(target_slot))
+            return false;
+        t1 = now_s();
+        *t_lo_s += t1 - t0;
+        if (fastlock_recall_count)
+            (*fastlock_recall_count)++;
+
+        fastlock_touch_slot(s, target_slot);
+        s->fastlock_curr_slot = target_slot;
+        s->lo_valid = true;
+        s->lo_hz = center_hz;
+        return true;
+    }
+
+    t0 = now_s();
+    if (!retune_rx(center_hz))
+        return false;
+    t1 = now_s();
+    *t_lo_s += t1 - t0;
+    if (retuned_count)
+        (*retuned_count)++;
+    if (fastlock_cold_tune_count)
+        (*fastlock_cold_tune_count)++;
+
+    target_slot = fastlock_select_slot(s);
+    t0 = now_s();
+    if (!fastlock_store_slot(target_slot))
+        return false;
+    t1 = now_s();
+    *t_lo_s += t1 - t0;
+    if (fastlock_store_count)
+        (*fastlock_store_count)++;
+
+    if (!fastlock_cache_ensure(s, s->fastlock_sw_count + 1))
+        return false;
+    sw_idx = s->fastlock_sw_count++;
+    s->fastlock_sw[sw_idx].valid = true;
+    s->fastlock_sw[sw_idx].lo_hz = center_hz;
+
+    t0 = now_s();
+    if (!fastlock_save_slot(target_slot, s->fastlock_sw[sw_idx].values))
+        return false;
+    t1 = now_s();
+    *t_lo_s += t1 - t0;
+
+    s->fastlock_slots[target_slot].valid = true;
+    s->fastlock_slots[target_slot].lo_hz = center_hz;
+    s->fastlock_slots[target_slot].sw_index = sw_idx;
+    fastlock_touch_slot(s, target_slot);
+    s->fastlock_curr_slot = target_slot;
+    s->lo_valid = true;
+    s->lo_hz = center_hz;
+    return true;
 }
 
 static uint32_t scan_bandwidth_from_samplerate(uint32_t sample_rate_hz)
@@ -442,6 +694,11 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
                          double *t_tune_lo_s,
                          double *t_tune_settle_s,
                          double *t_tune_discard_s,
+                         int *retuned_count,
+                         int *fastlock_recall_count,
+                         int *fastlock_load_count,
+                         int *fastlock_store_count,
+                         int *fastlock_cold_tune_count,
                          double *t_capture_s,
                          double *t_fft_s)
 {
@@ -450,13 +707,12 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
     double t_lo_s = 0.0, t_settle_s = 0.0, t_discard_s = 0.0;
 
     if (!s->lo_valid || s->lo_hz != center_hz) {
-        t0 = now_s();
-        if (!retune_rx(center_hz)) {
+        if (!tune_rx_target(s, center_hz, &t_lo_s, retuned_count,
+                            fastlock_recall_count, fastlock_load_count,
+                            fastlock_store_count, fastlock_cold_tune_count)) {
             fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
             return false;
         }
-        t1 = now_s();
-        t_lo_s = t1 - t0;
 
         t0 = now_s();
         usleep((useconds_t)s->rx_settle_us);
@@ -672,6 +928,11 @@ static bool scan_line(struct scan_state *s)
     double t_tune_s = 0.0, t_capture_s = 0.0, t_fft_s = 0.0;
     double t_tune_lo_s = 0.0, t_tune_settle_s = 0.0, t_tune_discard_s = 0.0;
     double dt;
+    int retunes_this_line = 0;
+    int fastlock_recall_this_line = 0;
+    int fastlock_load_this_line = 0;
+    int fastlock_store_this_line = 0;
+    int fastlock_cold_tune_this_line = 0;
     int seg;
 
     memset(s->line_pow_accum, 0, (size_t)s->waterfall_width * sizeof(float));
@@ -682,7 +943,10 @@ static bool scan_line(struct scan_state *s)
         double seg_start = start + (double)seg * s->step_hz;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
         if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_tune_lo_s, &t_tune_settle_s,
-                          &t_tune_discard_s, &t_capture_s, &t_fft_s))
+                          &t_tune_discard_s, &retunes_this_line,
+                          &fastlock_recall_this_line, &fastlock_load_this_line,
+                          &fastlock_store_this_line, &fastlock_cold_tune_this_line,
+                          &t_capture_s, &t_fft_s))
             return false;
     }
 
@@ -701,7 +965,11 @@ static bool scan_line(struct scan_state *s)
 
     s->perf.lines_total++;
     s->perf.captures_total += (uint64_t)s->segments;
-    s->perf.retunes_total += (uint64_t)s->segments;
+    s->perf.retunes_total += (uint64_t)retunes_this_line;
+    s->perf.fastlock_recall_total += (uint64_t)fastlock_recall_this_line;
+    s->perf.fastlock_load_total += (uint64_t)fastlock_load_this_line;
+    s->perf.fastlock_store_total += (uint64_t)fastlock_store_this_line;
+    s->perf.fastlock_cold_tune_total += (uint64_t)fastlock_cold_tune_this_line;
 
     s->perf.last_tune_ms = t_tune_s * 1e3;
     s->perf.last_tune_lo_ms = t_tune_lo_s * 1e3;
@@ -729,10 +997,18 @@ static bool scan_line(struct scan_state *s)
         double d_lines = (double)(s->perf.lines_total - s->perf.lines_at_prev_rate);
         double d_caps = (double)(s->perf.captures_total - s->perf.captures_at_prev_rate);
         double d_retunes = (double)(s->perf.retunes_total - s->perf.retunes_at_prev_rate);
+        double d_fl_recall = (double)(s->perf.fastlock_recall_total - s->perf.fastlock_recall_at_prev_rate);
+        double d_fl_load = (double)(s->perf.fastlock_load_total - s->perf.fastlock_load_at_prev_rate);
+        double d_fl_store = (double)(s->perf.fastlock_store_total - s->perf.fastlock_store_at_prev_rate);
+        double d_fl_cold = (double)(s->perf.fastlock_cold_tune_total - s->perf.fastlock_cold_tune_at_prev_rate);
 
         s->perf.lines_per_sec = d_lines / dt;
         s->perf.captures_per_sec = d_caps / dt;
         s->perf.retunes_per_sec = d_retunes / dt;
+        s->perf.fastlock_recall_per_sec = d_fl_recall / dt;
+        s->perf.fastlock_load_per_sec = d_fl_load / dt;
+        s->perf.fastlock_store_per_sec = d_fl_store / dt;
+        s->perf.fastlock_cold_tune_per_sec = d_fl_cold / dt;
         s->perf.iq_msps = (s->perf.captures_per_sec * (double)s->fft_len) / 1e6;
         s->perf.sweep_mhz_per_sec = s->perf.lines_per_sec *
             ((double)(s->scan_stop_hz - s->scan_start_hz) / 1e6);
@@ -740,6 +1016,10 @@ static bool scan_line(struct scan_state *s)
         s->perf.lines_at_prev_rate = s->perf.lines_total;
         s->perf.captures_at_prev_rate = s->perf.captures_total;
         s->perf.retunes_at_prev_rate = s->perf.retunes_total;
+        s->perf.fastlock_recall_at_prev_rate = s->perf.fastlock_recall_total;
+        s->perf.fastlock_load_at_prev_rate = s->perf.fastlock_load_total;
+        s->perf.fastlock_store_at_prev_rate = s->perf.fastlock_store_total;
+        s->perf.fastlock_cold_tune_at_prev_rate = s->perf.fastlock_cold_tune_total;
         s->perf.prev_rate_t = t_line1;
     }
 
@@ -1045,6 +1325,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->rx_settle_us = rx_settle_us;
     s->stitch_mode = stitch_mode;
     s->lo_valid = false;
+    fastlock_reset(s);
 
     s->perf.prev_rate_t = now_s();
     s->perf.lines_at_prev_rate = s->perf.lines_total;
@@ -1322,6 +1603,9 @@ static void draw_stats_panel(struct scan_state *s)
     } else {
         igText("Tune split Avg (%%): LO - | settle - | discard -");
     }
+    igText("Tune Path (/s): cold %.2f | recall %.2f | load %.2f | store %.2f",
+           s->perf.fastlock_cold_tune_per_sec, s->perf.fastlock_recall_per_sec,
+           s->perf.fastlock_load_per_sec, s->perf.fastlock_store_per_sec);
 
     igText("Scan Geometry: segments %d | width %d bins (tex %d px)",
            s->segments, s->waterfall_width, s->waterfall_tex_width);
@@ -1367,6 +1651,8 @@ int main(int argc, char **argv)
     s.db_min = DEFAULT_DB_MIN;
     s.db_max = DEFAULT_DB_MAX;
     s.rx_settle_us = DEFAULT_RX_SETTLE_US;
+    s.fastlock_enable = true;
+    s.fastlock_curr_slot = -1;
     s.stitch_mode = 0;
     s.run = true;
     s.lo_valid = false;
@@ -1571,6 +1857,7 @@ int main(int argc, char **argv)
     free(s.plot_db);
     free(s.plot_points);
     free(s.waterfall_rgba);
+    free(s.fastlock_sw);
 
     if (gl_context)
         SDL_GL_DeleteContext(gl_context);
@@ -1606,6 +1893,7 @@ fail:
     free(s.plot_db);
     free(s.plot_points);
     free(s.waterfall_rgba);
+    free(s.fastlock_sw);
 
     m2sdr_close_global();
     return 1;
