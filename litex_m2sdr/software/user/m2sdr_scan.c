@@ -46,8 +46,8 @@
 #define SCAN_TX_GAIN_DB    -30
 #define DEFAULT_START_FREQ_HZ 2300000000LL
 #define DEFAULT_STOP_FREQ_HZ  2500000000LL
-#define DEFAULT_RX_GAIN_DB    35
-#define DEFAULT_FFT_LEN       1024
+#define DEFAULT_RX_GAIN_DB    50
+#define DEFAULT_FFT_LEN       2048
 #define DEFAULT_LINES         300
 #define DEFAULT_DB_MIN        -120.0f
 #define DEFAULT_DB_MAX        10.0f
@@ -1204,47 +1204,50 @@ static void draw_stats_panel(struct scan_state *s)
         return;
     }
 
-    igSeparatorText("Performance");
-    if (igBeginTable("##perf_table", 2,
+    igText("Performance:");
+    igText("Throughput: %.2f lines/s | line avg %.3f ms",
+           s->perf.lines_per_sec, s->perf.ema_line_ms);
+
+    if (igBeginTable("##perf_split_table", 5,
                      ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX,
                      (ImVec2){0.0f, 0.0f}, 0.0f)) {
-        igTableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 230.0f, 0);
-        igTableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+        igTableSetupColumn("Split", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
+        igTableSetupColumn("Tune", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
+        igTableSetupColumn("Capture", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
+        igTableSetupColumn("FFT", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
+        igTableSetupColumn("Waterfall", ImGuiTableColumnFlags_WidthFixed, 110.0f, 0);
+
+        igTableHeadersRow();
 
         igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Throughput");
-        igTableSetColumnIndex(1); igText("%.2f lines/s | line avg %.3f ms",
-                                         s->perf.lines_per_sec, s->perf.ema_line_ms);
+        igTableSetColumnIndex(0); igText("Avg (ms):");
+        igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_ms);
+        igTableSetColumnIndex(2); igText("%.3f", s->perf.ema_capture_ms);
+        igTableSetColumnIndex(3); igText("%.3f", s->perf.ema_fft_ms);
+        igTableSetColumnIndex(4); igText("%.3f", s->perf.ema_waterfall_ms);
 
         igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Split Avg (ms)");
-        igTableSetColumnIndex(1); igText("tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
-                                         s->perf.ema_tune_ms, s->perf.ema_capture_ms,
-                                         s->perf.ema_fft_ms, s->perf.ema_waterfall_ms);
-
+        igTableSetColumnIndex(0); igText("Avg (%%):");
         if (s->perf.ema_line_ms > 0.0) {
-            igTableNextRow(0, 0.0f);
-            igTableSetColumnIndex(0); igText("Split Avg (%%)");
-            igTableSetColumnIndex(1); igText("tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
-                                             100.0 * s->perf.ema_tune_ms / s->perf.ema_line_ms,
-                                             100.0 * s->perf.ema_capture_ms / s->perf.ema_line_ms,
-                                             100.0 * s->perf.ema_fft_ms / s->perf.ema_line_ms,
-                                             100.0 * s->perf.ema_waterfall_ms / s->perf.ema_line_ms);
+            igTableSetColumnIndex(1); igText("%.1f", 100.0 * s->perf.ema_tune_ms / s->perf.ema_line_ms);
+            igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_capture_ms / s->perf.ema_line_ms);
+            igTableSetColumnIndex(3); igText("%.1f", 100.0 * s->perf.ema_fft_ms / s->perf.ema_line_ms);
+            igTableSetColumnIndex(4); igText("%.1f", 100.0 * s->perf.ema_waterfall_ms / s->perf.ema_line_ms);
+        } else {
+            igTableSetColumnIndex(1); igText("-");
+            igTableSetColumnIndex(2); igText("-");
+            igTableSetColumnIndex(3); igText("-");
+            igTableSetColumnIndex(4); igText("-");
         }
-
-        igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Scan Geometry");
-        igTableSetColumnIndex(1); igText("segments %d | width %d bins (tex %d px)",
-                                         s->segments, s->waterfall_width, s->waterfall_tex_width);
-
-        igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Stitch");
-        igTableSetColumnIndex(1); igText("%s | step %.3f MHz | overlap %d bins",
-                                         s->stitch_mode == 1 ? "Fast" : "Quality",
-                                         s->step_hz / 1e6, s->overlap_bins);
 
         igEndTable();
     }
+
+    igText("Scan Geometry: segments %d | width %d bins (tex %d px)",
+           s->segments, s->waterfall_width, s->waterfall_tex_width);
+    igText("Stitch: %s | step %.3f MHz | overlap %d bins",
+           s->stitch_mode == 1 ? "Fast" : "Quality",
+           s->step_hz / 1e6, s->overlap_bins);
 
     igEndChild();
 }
