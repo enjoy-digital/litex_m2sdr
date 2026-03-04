@@ -52,7 +52,7 @@
 #define DEFAULT_DB_MIN        -120.0f
 #define DEFAULT_DB_MAX        10.0f
 
-#define RX_SETTLE_US 2000
+#define DEFAULT_RX_SETTLE_US 2000
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
 
@@ -164,6 +164,8 @@ struct scan_state {
     int64_t scan_stop_hz;
     float db_min;
     float db_max;
+    int rx_settle_us;
+    int stitch_mode;
     bool run;
     int display_rows;
     int waterfall_palette;
@@ -400,7 +402,7 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
         fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
         return false;
     }
-    usleep(RX_SETTLE_US);
+    usleep((useconds_t)s->rx_settle_us);
     t1 = now_s();
     *t_tune_s += (t1 - t0);
 
@@ -718,11 +720,15 @@ static bool resize_buffers(struct scan_state *s)
         s->scan_stop_hz = s->scan_start_hz + s->sample_rate_hz;
 
     range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
-    stride_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
-    if (stride_ratio < 0.5)
-        stride_ratio = 0.5;
-    if (stride_ratio > 1.0)
-        stride_ratio = 1.0;
+    if (s->stitch_mode == 1) {
+        stride_ratio = 1.0; /* Fast mode: no overlap between adjacent captures. */
+    } else {
+        stride_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
+        if (stride_ratio < 0.5)
+            stride_ratio = 0.5;
+        if (stride_ratio > 1.0)
+            stride_ratio = 1.0;
+    }
 
     stride_bins = (int)llround((double)s->fft_len * stride_ratio);
     if (stride_bins < 1)
@@ -888,7 +894,8 @@ static void help(void)
            "  -lines n               Waterfall lines (default: %d).\n"
            "\n"
            "Runtime controls in UI:\n"
-           "  - Scan start/stop (MHz), sample rate, FFT length, line count, RX gain and dB scale.\n"
+           "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
+           "    RX gain and dB scale.\n"
            "  - Parameters are applied live while moving sliders.\n"
            "\n"
            "Notes:\n"
@@ -922,7 +929,9 @@ static bool apply_runtime_config(struct scan_state *s,
                                  uint32_t sample_rate_hz,
                                  int fft_len,
                                  int lines,
-                                 int rx_gain)
+                                 int rx_gain,
+                                 int rx_settle_us,
+                                 int stitch_mode)
 {
     if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 16384) {
         fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 16384).\n", fft_len);
@@ -950,6 +959,14 @@ static bool apply_runtime_config(struct scan_state *s,
                 sample_rate_hz);
         return false;
     }
+    if (rx_settle_us < 0 || rx_settle_us > 100000) {
+        fprintf(stderr, "Invalid settle time %d us (must be 0..100000).\n", rx_settle_us);
+        return false;
+    }
+    if (stitch_mode < 0 || stitch_mode > 1) {
+        fprintf(stderr, "Invalid stitch mode %d.\n", stitch_mode);
+        return false;
+    }
 
     s->scan_start_hz = start_hz;
     s->scan_stop_hz = stop_hz;
@@ -958,6 +975,8 @@ static bool apply_runtime_config(struct scan_state *s,
     s->fft_len = fft_len;
     s->lines = lines;
     s->rx_gain = rx_gain;
+    s->rx_settle_us = rx_settle_us;
+    s->stitch_mode = stitch_mode;
 
     s->perf.prev_rate_t = now_s();
     s->perf.lines_at_prev_rate = s->perf.lines_total;
@@ -989,6 +1008,8 @@ int main(int argc, char **argv)
     int ui_fft_exp;
     int ui_lines;
     int ui_rx_gain;
+    int ui_settle_us;
+    int ui_stitch_mode;
 
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -1013,6 +1034,8 @@ int main(int argc, char **argv)
     s.lines = DEFAULT_LINES;
     s.db_min = DEFAULT_DB_MIN;
     s.db_max = DEFAULT_DB_MAX;
+    s.rx_settle_us = DEFAULT_RX_SETTLE_US;
+    s.stitch_mode = 0;
     s.run = true;
     s.display_rows = 1;
     s.waterfall_palette = 0;
@@ -1130,6 +1153,8 @@ int main(int argc, char **argv)
     ui_fft_exp = ilog2_int(s.fft_len);
     ui_lines = s.lines;
     ui_rx_gain = s.rx_gain;
+    ui_settle_us = s.rx_settle_us;
+    ui_stitch_mode = s.stitch_mode;
 
     while (!quit && g_keep_running) {
         SDL_Event e;
@@ -1168,8 +1193,9 @@ int main(int argc, char **argv)
                (double)s.rf_bandwidth_hz / 1e6);
         igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
                s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
-        igText("Stitch: step %.3f MHz | stride %d bins | overlap %d bins",
-               s.step_hz / 1e6, s.stride_bins, s.overlap_bins);
+        igText("Stitch: %s | settle %d us | step %.3f MHz | stride %d bins | overlap %d bins",
+               s.stitch_mode == 1 ? "Fast" : "Quality",
+               s.rx_settle_us, s.step_hz / 1e6, s.stride_bins, s.overlap_bins);
 
         igSeparator();
         igText("Performance (Benchmark)");
@@ -1210,11 +1236,21 @@ int main(int argc, char **argv)
                                         k_scan_samplerate_labels,
                                         (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
                                         4);
+            {
+                static const char *stitch_mode_items[] = {
+                    "Quality (Overlap)",
+                    "Fast (No Overlap)"
+                };
+                if (ui_stitch_mode < 0 || ui_stitch_mode > 1)
+                    ui_stitch_mode = 0;
+                changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
+            }
             changed |= igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
             igText("FFT Length: %d", 1 << ui_fft_exp);
             changed |= igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
             changed |= igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
             changed |= igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
+            changed |= igSliderInt("Settle (us)", &ui_settle_us, 0, 5000, "%d", 0);
             changed |= igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
             changed |= igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
             {
@@ -1249,13 +1285,16 @@ int main(int argc, char **argv)
                     ui_samplerate_idx = 0;
                 uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
                 int new_fft_len = 1 << ui_fft_exp;
-                if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain)) {
+                if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain,
+                                         ui_settle_us, ui_stitch_mode)) {
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
                     ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
                     ui_fft_exp = ilog2_int(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
+                    ui_settle_us = s.rx_settle_us;
+                    ui_stitch_mode = s.stitch_mode;
                 } else {
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
@@ -1263,6 +1302,8 @@ int main(int argc, char **argv)
                     ui_fft_exp = ilog2_int(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
+                    ui_settle_us = s.rx_settle_us;
+                    ui_stitch_mode = s.stitch_mode;
                 }
             }
         }
