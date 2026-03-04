@@ -997,7 +997,6 @@ int main(int argc, char **argv)
     float ui_stop_mhz;
     int ui_samplerate_idx;
     int ui_fft_idx;
-    int ui_lines;
     int ui_rx_gain;
     int ui_settle_us;
     int ui_stitch_mode;
@@ -1141,7 +1140,6 @@ int main(int argc, char **argv)
     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
     ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
     ui_fft_idx = fft_len_index_from_value(s.fft_len);
-    ui_lines = s.lines;
     ui_rx_gain = s.rx_gain;
     ui_settle_us = s.rx_settle_us;
     ui_stitch_mode = s.stitch_mode;
@@ -1260,9 +1258,6 @@ int main(int argc, char **argv)
                 }
 
                 igSetNextItemWidth(120.0f);
-                changed |= igDragInt("Lines", &ui_lines, 1.0f, 32, 2048, "%d", 0);
-                igSameLine(0.0f, 10.0f);
-                igSetNextItemWidth(120.0f);
                 if (igDragInt("Rows", &rows_tmp, 0.2f, 1, 8, "%d", 0)) {
                     if (rows_tmp < 1) rows_tmp = 1;
                     if (rows_tmp > 8) rows_tmp = 8;
@@ -1294,13 +1289,12 @@ int main(int argc, char **argv)
                         ui_fft_idx = fft_len_index_from_value(s.fft_len);
                     uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
                     int new_fft_len = k_fft_lengths[ui_fft_idx];
-                    if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain,
+                    if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, s.lines, ui_rx_gain,
                                              ui_settle_us, ui_stitch_mode)) {
                         ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                         ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
                         ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
                         ui_fft_idx = fft_len_index_from_value(s.fft_len);
-                        ui_lines = s.lines;
                         ui_rx_gain = s.rx_gain;
                         ui_settle_us = s.rx_settle_us;
                         ui_stitch_mode = s.stitch_mode;
@@ -1309,7 +1303,6 @@ int main(int argc, char **argv)
                         ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
                         ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
                         ui_fft_idx = fft_len_index_from_value(s.fft_len);
-                        ui_lines = s.lines;
                         ui_rx_gain = s.rx_gain;
                         ui_settle_us = s.rx_settle_us;
                         ui_stitch_mode = s.stitch_mode;
