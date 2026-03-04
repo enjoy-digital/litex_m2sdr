@@ -172,6 +172,9 @@ struct scan_state {
     float db_min;
     float db_max;
     int rx_settle_us;
+    int rx_gain_mode;
+    int rx_gain_applied;
+    int rx_gain_last_ret;
     int stitch_mode;
     bool run;
     int display_rows;
@@ -273,6 +276,35 @@ static double ema_update(double prev, double sample, double alpha)
 static bool retune_rx(int64_t freq_hz);
 static bool fft_worker_start(struct scan_state *s);
 static void fft_worker_stop(struct scan_state *s);
+
+static void refresh_rx_gain_status(struct scan_state *s)
+{
+    int32_t gain_db = s->rx_gain;
+    uint8_t gc_mode = 0;
+
+    s->rx_gain_last_ret = ad9361_get_rx_rf_gain(ad9361_phy, 0, &gain_db);
+    if (s->rx_gain_last_ret == 0)
+        s->rx_gain_applied = gain_db;
+    else
+        s->rx_gain_applied = s->rx_gain;
+
+    if (ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &gc_mode) == 0)
+        s->rx_gain_mode = (int)gc_mode;
+}
+
+static void apply_rx_gain_request(struct scan_state *s, int gain_db)
+{
+    uint8_t gc_mode = 0;
+
+    s->rx_gain = gain_db;
+    if (ad9361_get_rx_gain_control_mode(ad9361_phy, 0, &gc_mode) == 0 &&
+        gc_mode != RF_GAIN_MGC) {
+        (void)ad9361_set_rx_gain_control_mode(ad9361_phy, 0, RF_GAIN_MGC);
+    }
+
+    s->rx_gain_last_ret = ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
+    refresh_rx_gain_status(s);
+}
 
 static void fastlock_reset(struct scan_state *s)
 {
@@ -1469,8 +1501,7 @@ static bool m2sdr_rfic_init(struct scan_state *s)
     ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
 
     ad9361_set_tx_atten(ad9361_phy, -SCAN_TX_GAIN_DB * 1000, 1, 1, 1);
-    ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, s->rx_gain);
+    apply_rx_gain_request(s, s->rx_gain);
 
     ad9361_set_tx_lo_freq(ad9361_phy, (s->scan_start_hz + s->scan_stop_hz) / 2);
     ad9361_set_rx_lo_freq(ad9361_phy, (s->scan_start_hz + s->scan_stop_hz) / 2);
@@ -1584,8 +1615,7 @@ static bool apply_runtime_config(struct scan_state *s,
     ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
     ad9361_set_rx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
     ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
-    ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
-    ad9361_set_rx_rf_gain(ad9361_phy, 1, s->rx_gain);
+    apply_rx_gain_request(s, s->rx_gain);
 
     return resize_buffers(s);
 }
@@ -1704,7 +1734,8 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     changed |= igCombo_Str_arr("Stitch Mode", &ui->stitch_mode, stitch_mode_items, 2, 2);
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(120.0f);
-    changed |= igDragInt("RX Gain (dB)", &ui->rx_gain, 0.2f, 0, 73, "%d", 0);
+    if (igSliderInt("RX Gain (dB)", &ui->rx_gain, 0, 73, "%d", 0))
+        apply_rx_gain_request(s, ui->rx_gain);
 
     igSeparatorText("Spectrum / Waterfall");
     igSetNextItemWidth(120.0f);
