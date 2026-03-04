@@ -683,8 +683,10 @@ static bool resize_buffers(struct scan_state *s)
     double range_hz;
     double stride_ratio;
     double step_hz;
+    double bin_hz;
     int new_segments;
-    int new_width;
+    int stitched_width;
+    int active_width;
     int stride_bins;
     int overlap_bins;
     int tex_width;
@@ -745,13 +747,19 @@ static bool resize_buffers(struct scan_state *s)
     if (new_segments < 1)
         new_segments = 1;
 
-    new_width = (new_segments - 1) * stride_bins + s->fft_len;
-    if (new_width <= 0 || new_width > MAX_WATERFALL_WIDTH) {
+    stitched_width = (new_segments - 1) * stride_bins + s->fft_len;
+    if (stitched_width <= 0 || stitched_width > MAX_WATERFALL_WIDTH) {
         fprintf(stderr,
             "Waterfall width %d is invalid (range too wide or FFT too large).\n",
-            new_width);
+            stitched_width);
         return false;
     }
+    bin_hz = (double)s->sample_rate_hz / (double)s->fft_len;
+    active_width = (int)ceil(range_hz / bin_hz);
+    if (active_width < 1)
+        active_width = 1;
+    if (active_width > stitched_width)
+        active_width = stitched_width;
 
     if (s->gl_max_texture_size <= 0) {
         GLint max_tex = 0;
@@ -761,7 +769,7 @@ static bool resize_buffers(struct scan_state *s)
         s->gl_max_texture_size = (int)max_tex;
     }
 
-    tex_width = new_width;
+    tex_width = active_width;
     if (tex_width > s->gl_max_texture_size)
         tex_width = s->gl_max_texture_size;
 
@@ -770,9 +778,9 @@ static bool resize_buffers(struct scan_state *s)
     s->out_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
-    s->line_db = (float *)calloc((size_t)new_width, sizeof(float));
-    s->line_pow_accum = (float *)calloc((size_t)new_width, sizeof(float));
-    s->line_w_accum = (float *)calloc((size_t)new_width, sizeof(float));
+    s->line_db = (float *)calloc((size_t)active_width, sizeof(float));
+    s->line_pow_accum = (float *)calloc((size_t)active_width, sizeof(float));
+    s->line_w_accum = (float *)calloc((size_t)active_width, sizeof(float));
     s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
@@ -795,7 +803,7 @@ static bool resize_buffers(struct scan_state *s)
     s->stride_bins = stride_bins;
     s->overlap_bins = overlap_bins;
     s->step_hz = step_hz;
-    s->waterfall_width = new_width;
+    s->waterfall_width = active_width;
     s->waterfall_tex_width = tex_width;
 
     if (!s->waterfall_tex)
