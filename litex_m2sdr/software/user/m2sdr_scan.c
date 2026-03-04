@@ -1797,69 +1797,204 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
 
 static void draw_stats_panel(struct scan_state *s)
 {
+    double line_ms = s->perf.ema_line_ms;
+
     if (!igBeginChild_Str("##stats_panel", (ImVec2){0.0f, 0.0f}, 0, 0)) {
         igEndChild();
         return;
     }
 
     igSeparatorText("Performance");
-    igText("Throughput: %.2f lines/s | line avg %.3f ms",
-           s->perf.lines_per_sec, s->perf.ema_line_ms);
-
-    if (igBeginTable("##perf_split_table", 5,
-                     ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX,
+    if (igBeginTable("##perf_hsplit", 2,
+                     ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV,
                      (ImVec2){0.0f, 0.0f}, 0.0f)) {
-        igTableSetupColumn("Split", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
-        igTableSetupColumn("Tune", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
-        igTableSetupColumn("Capture", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
-        igTableSetupColumn("FFT", ImGuiTableColumnFlags_WidthFixed, 100.0f, 0);
-        igTableSetupColumn("Waterfall", ImGuiTableColumnFlags_WidthFixed, 110.0f, 0);
-
-        igTableHeadersRow();
-
+        igTableSetupColumn("Left", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+        igTableSetupColumn("Right", ImGuiTableColumnFlags_WidthStretch, 0.0f, 1);
         igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Avg (ms):");
-        igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_ms);
-        igTableSetColumnIndex(2); igText("%.3f", s->perf.ema_capture_ms);
-        igTableSetColumnIndex(3); igText("%.3f", s->perf.ema_fft_ms);
-        igTableSetColumnIndex(4); igText("%.3f", s->perf.ema_waterfall_ms);
 
-        igTableNextRow(0, 0.0f);
-        igTableSetColumnIndex(0); igText("Avg (%%):");
-        if (s->perf.ema_line_ms > 0.0) {
-            igTableSetColumnIndex(1); igText("%.1f", 100.0 * s->perf.ema_tune_ms / s->perf.ema_line_ms);
-            igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_capture_ms / s->perf.ema_line_ms);
-            igTableSetColumnIndex(3); igText("%.1f", 100.0 * s->perf.ema_fft_ms / s->perf.ema_line_ms);
-            igTableSetColumnIndex(4); igText("%.1f", 100.0 * s->perf.ema_waterfall_ms / s->perf.ema_line_ms);
-        } else {
-            igTableSetColumnIndex(1); igText("-");
-            igTableSetColumnIndex(2); igText("-");
-            igTableSetColumnIndex(3); igText("-");
-            igTableSetColumnIndex(4); igText("-");
+        igTableSetColumnIndex(0);
+        if (igBeginTable("##perf_timing_table", 4,
+                         ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV,
+                         (ImVec2){0.0f, 0.0f}, 0.0f)) {
+            igTableSetupColumn("Timing", ImGuiTableColumnFlags_WidthFixed, 120.0f, 0);
+            igTableSetupColumn("Avg (ms)", ImGuiTableColumnFlags_WidthFixed, 90.0f, 0);
+            igTableSetupColumn("Avg (%)", ImGuiTableColumnFlags_WidthFixed, 80.0f, 0);
+            igTableSetupColumn("Notes", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            igTableHeadersRow();
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Line");
+            igTableSetColumnIndex(1); igText("%.3f", line_ms);
+            igTableSetColumnIndex(2); igText("100.0");
+            igTableSetColumnIndex(3); igText("Full sweep line time");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Tune");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_tune_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("LO + settle + discard");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Capture");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_capture_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_capture_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("DMA IQ fetch");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("FFT");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_fft_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_fft_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("Window + FFT + stitch");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Waterfall");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_waterfall_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_waterfall_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("Texture update");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Tune: LO");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_lo_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_tune_lo_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("Retune/recall/load/store");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Tune: settle");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_settle_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_tune_settle_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("Post-tune wait");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Tune: discard");
+            igTableSetColumnIndex(1); igText("%.3f", s->perf.ema_tune_discard_ms);
+            if (line_ms > 0.0) {
+                igTableSetColumnIndex(2); igText("%.1f", 100.0 * s->perf.ema_tune_discard_ms / line_ms);
+            } else {
+                igTableSetColumnIndex(2); igText("-");
+            }
+            igTableSetColumnIndex(3); igText("DMA flush");
+
+            igEndTable();
+        }
+
+        igTableSetColumnIndex(1);
+        if (igBeginTable("##perf_rate_table", 5,
+                         ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV,
+                         (ImVec2){0.0f, 0.0f}, 0.0f)) {
+            igTableSetupColumn("Rates", ImGuiTableColumnFlags_WidthFixed, 120.0f, 0);
+            igTableSetupColumn("/s", ImGuiTableColumnFlags_WidthFixed, 90.0f, 0);
+            igTableSetupColumn("Total", ImGuiTableColumnFlags_WidthFixed, 110.0f, 0);
+            igTableSetupColumn("Unit", ImGuiTableColumnFlags_WidthFixed, 80.0f, 0);
+            igTableSetupColumn("Details", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            igTableHeadersRow();
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Line");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.lines_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.lines_total);
+            igTableSetColumnIndex(3); igText("lines");
+            igTableSetColumnIndex(4); igText("Sweep updates");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Capture");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.captures_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.captures_total);
+            igTableSetColumnIndex(3); igText("captures");
+            igTableSetColumnIndex(4); igText("Segment captures");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Retune");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.retunes_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.retunes_total);
+            igTableSetColumnIndex(3); igText("retunes");
+            igTableSetColumnIndex(4); igText("Cold retunes only");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Fastlock recall");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.fastlock_recall_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.fastlock_recall_total);
+            igTableSetColumnIndex(3); igText("ops");
+            igTableSetColumnIndex(4); igText("Profile recalls");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Fastlock load");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.fastlock_load_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.fastlock_load_total);
+            igTableSetColumnIndex(3); igText("ops");
+            igTableSetColumnIndex(4); igText("SW->HW profile loads");
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Fastlock store");
+            igTableSetColumnIndex(1); igText("%.2f", s->perf.fastlock_store_per_sec);
+            igTableSetColumnIndex(2); igText("%" PRIu64, s->perf.fastlock_store_total);
+            igTableSetColumnIndex(3); igText("ops");
+            igTableSetColumnIndex(4); igText("Cold profile stores");
+
+            igEndTable();
+        }
+
+        if (igBeginTable("##perf_scan_cfg_table", 4,
+                         ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV,
+                         (ImVec2){0.0f, 0.0f}, 0.0f)) {
+            igTableSetupColumn("Scan", ImGuiTableColumnFlags_WidthFixed, 120.0f, 0);
+            igTableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 150.0f, 0);
+            igTableSetupColumn("Scan", ImGuiTableColumnFlags_WidthFixed, 120.0f, 0);
+            igTableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.0f, 0);
+            igTableHeadersRow();
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Stitch");
+            igTableSetColumnIndex(1); igText("%s", s->stitch_mode == 1 ? "Fast" : "Quality");
+            igTableSetColumnIndex(2); igText("Segments");
+            igTableSetColumnIndex(3); igText("%d", s->segments);
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Step");
+            igTableSetColumnIndex(1); igText("%.3f MHz", s->step_hz / 1e6);
+            igTableSetColumnIndex(2); igText("Overlap");
+            igTableSetColumnIndex(3); igText("%d bins", s->overlap_bins);
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Sweep speed");
+            igTableSetColumnIndex(1); igText("%.2f MHz/s", s->perf.sweep_mhz_per_sec);
+            igTableSetColumnIndex(2); igText("IQ rate");
+            igTableSetColumnIndex(3); igText("%.2f MSPS", s->perf.iq_msps);
+
+            igTableNextRow(0, 0.0f);
+            igTableSetColumnIndex(0); igText("Width");
+            igTableSetColumnIndex(1); igText("%d bins", s->waterfall_width);
+            igTableSetColumnIndex(2); igText("Texture");
+            igTableSetColumnIndex(3); igText("%d px", s->waterfall_tex_width);
+
+            igEndTable();
         }
 
         igEndTable();
     }
-
-    igText("Tune split Avg (ms): LO %.3f | settle %.3f | discard %.3f",
-           s->perf.ema_tune_lo_ms, s->perf.ema_tune_settle_ms, s->perf.ema_tune_discard_ms);
-    if (s->perf.ema_line_ms > 0.0) {
-        igText("Tune split Avg (%%): LO %.1f | settle %.1f | discard %.1f",
-               100.0 * s->perf.ema_tune_lo_ms / s->perf.ema_line_ms,
-               100.0 * s->perf.ema_tune_settle_ms / s->perf.ema_line_ms,
-               100.0 * s->perf.ema_tune_discard_ms / s->perf.ema_line_ms);
-    } else {
-        igText("Tune split Avg (%%): LO - | settle - | discard -");
-    }
-    igText("Tune Path (/s): cold %.2f | recall %.2f | load %.2f | store %.2f",
-           s->perf.fastlock_cold_tune_per_sec, s->perf.fastlock_recall_per_sec,
-           s->perf.fastlock_load_per_sec, s->perf.fastlock_store_per_sec);
-
-    igText("Scan Geometry: segments %d | width %d bins (tex %d px)",
-           s->segments, s->waterfall_width, s->waterfall_tex_width);
-    igText("Stitch: %s | step %.3f MHz | overlap %d bins",
-           s->stitch_mode == 1 ? "Fast" : "Quality",
-           s->step_hz / 1e6, s->overlap_bins);
 
     igEndChild();
 }
@@ -2050,13 +2185,13 @@ int main(int argc, char **argv)
                 ImGuiWindowFlags_NoTitleBar);
         {
             ImVec2 avail_root;
-            float controls_h = 168.0f;
-            float stats_h = 170.0f;
+            float controls_h = 160.0f;
+            float stats_h = 245.0f;
 
             igGetContentRegionAvail(&avail_root);
             if (avail_root.y < controls_h + stats_h + 120.0f) {
                 controls_h = 132.0f;
-                stats_h = 140.0f;
+                stats_h = 200.0f;
             }
 
             draw_controls_panel(&s, &ui, controls_h);
