@@ -20,6 +20,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -206,9 +207,20 @@ struct scan_state {
 
     struct litepcie_dma_ctrl dma;
     struct simple_fft_plan fft;
+    pthread_t fft_worker_thread;
+    pthread_mutex_t fft_lock;
+    pthread_cond_t fft_cond;
+    bool fft_worker_alive;
+    bool fft_worker_stop;
+    bool fft_job_pending;
+    bool fft_job_done;
+    int fft_job_seg;
+    double fft_job_time_s;
 
     float *in_re;
     float *in_im;
+    float *fft_job_re;
+    float *fft_job_im;
     float *out_re;
     float *out_im;
     float *window;
@@ -259,6 +271,8 @@ static double ema_update(double prev, double sample, double alpha)
 }
 
 static bool retune_rx(int64_t freq_hz);
+static bool fft_worker_start(struct scan_state *s);
+static void fft_worker_stop(struct scan_state *s);
 
 static void fastlock_reset(struct scan_state *s)
 {
@@ -777,6 +791,150 @@ static bool retune_rx(int64_t freq_hz)
     return ret == 0;
 }
 
+static void accumulate_fft_segment(struct scan_state *s, int seg_index)
+{
+    int i;
+    for (i = 0; i < s->fft_len; i++) {
+        int shifted = (i + s->fft_len / 2) % s->fft_len;
+        float re = s->out_re[shifted];
+        float im = s->out_im[shifted];
+        float pwr_lin = re * re + im * im + 1e-20f;
+        float w = 1.0f;
+        int dst = seg_index * s->stride_bins + i;
+
+        if (s->overlap_bins > 0) {
+            if (seg_index > 0 && i < s->overlap_bins) {
+                float t = (float)(i + 1) / (float)(s->overlap_bins + 1);
+                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-in */
+            }
+            if (seg_index < s->segments - 1 && i >= s->fft_len - s->overlap_bins) {
+                float t = (float)(s->fft_len - i) / (float)(s->overlap_bins + 1);
+                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-out */
+            }
+        }
+
+        if (dst >= 0 && dst < s->waterfall_width) {
+            s->line_pow_accum[dst] += pwr_lin * w;
+            s->line_w_accum[dst] += w;
+        }
+    }
+}
+
+static void *fft_worker_main(void *arg)
+{
+    struct scan_state *s = (struct scan_state *)arg;
+
+    for (;;) {
+        int i;
+        int seg;
+        double t0, t1;
+
+        pthread_mutex_lock(&s->fft_lock);
+        while (!s->fft_worker_stop && !s->fft_job_pending)
+            pthread_cond_wait(&s->fft_cond, &s->fft_lock);
+        if (s->fft_worker_stop) {
+            pthread_mutex_unlock(&s->fft_lock);
+            break;
+        }
+        seg = s->fft_job_seg;
+        s->fft_job_pending = false;
+        pthread_mutex_unlock(&s->fft_lock);
+
+        t0 = now_s();
+        for (i = 0; i < s->fft_len; i++) {
+            s->fft_job_re[i] *= s->window[i];
+            s->fft_job_im[i] *= s->window[i];
+        }
+        simple_fft_run(&s->fft, s->fft_job_re, s->fft_job_im, s->out_re, s->out_im);
+        accumulate_fft_segment(s, seg);
+        t1 = now_s();
+
+        pthread_mutex_lock(&s->fft_lock);
+        s->fft_job_time_s = t1 - t0;
+        s->fft_job_done = true;
+        pthread_cond_broadcast(&s->fft_cond);
+        pthread_mutex_unlock(&s->fft_lock);
+    }
+
+    return NULL;
+}
+
+static bool fft_worker_start(struct scan_state *s)
+{
+    if (s->fft_worker_alive)
+        return true;
+
+    if (pthread_mutex_init(&s->fft_lock, NULL) != 0)
+        return false;
+    if (pthread_cond_init(&s->fft_cond, NULL) != 0) {
+        pthread_mutex_destroy(&s->fft_lock);
+        return false;
+    }
+
+    s->fft_worker_stop = false;
+    s->fft_job_pending = false;
+    s->fft_job_done = false;
+    s->fft_job_seg = -1;
+    s->fft_job_time_s = 0.0;
+
+    if (pthread_create(&s->fft_worker_thread, NULL, fft_worker_main, s) != 0) {
+        pthread_cond_destroy(&s->fft_cond);
+        pthread_mutex_destroy(&s->fft_lock);
+        return false;
+    }
+
+    s->fft_worker_alive = true;
+    return true;
+}
+
+static void fft_worker_stop(struct scan_state *s)
+{
+    if (!s->fft_worker_alive)
+        return;
+
+    pthread_mutex_lock(&s->fft_lock);
+    s->fft_worker_stop = true;
+    pthread_cond_broadcast(&s->fft_cond);
+    pthread_mutex_unlock(&s->fft_lock);
+
+    pthread_join(s->fft_worker_thread, NULL);
+    pthread_cond_destroy(&s->fft_cond);
+    pthread_mutex_destroy(&s->fft_lock);
+    s->fft_worker_alive = false;
+}
+
+static bool fft_wait_and_account(struct scan_state *s, double *t_fft_s)
+{
+    pthread_mutex_lock(&s->fft_lock);
+    while (!s->fft_job_done && !s->fft_worker_stop)
+        pthread_cond_wait(&s->fft_cond, &s->fft_lock);
+    if (s->fft_job_done) {
+        *t_fft_s += s->fft_job_time_s;
+        s->fft_job_done = false;
+    }
+    pthread_mutex_unlock(&s->fft_lock);
+    return !s->fft_worker_stop;
+}
+
+static bool fft_submit_segment(struct scan_state *s, int seg_index)
+{
+    memcpy(s->fft_job_re, s->in_re, (size_t)s->fft_len * sizeof(float));
+    memcpy(s->fft_job_im, s->in_im, (size_t)s->fft_len * sizeof(float));
+
+    pthread_mutex_lock(&s->fft_lock);
+    while (s->fft_job_pending && !s->fft_worker_stop)
+        pthread_cond_wait(&s->fft_cond, &s->fft_lock);
+    if (s->fft_worker_stop) {
+        pthread_mutex_unlock(&s->fft_lock);
+        return false;
+    }
+    s->fft_job_seg = seg_index;
+    s->fft_job_pending = true;
+    pthread_cond_broadcast(&s->fft_cond);
+    pthread_mutex_unlock(&s->fft_lock);
+    return true;
+}
+
 static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
                          double *t_tune_s,
                          double *t_tune_lo_s,
@@ -790,7 +948,6 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
                          double *t_capture_s,
                          double *t_fft_s)
 {
-    int i;
     double t0, t1;
     double t_lo_s = 0.0, t_settle_s = 0.0, t_discard_s = 0.0;
     enum tune_mode mode = TUNE_MODE_NONE;
@@ -834,41 +991,8 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
         return false;
     t1 = now_s();
     *t_capture_s += (t1 - t0);
-
-    t0 = now_s();
-    for (i = 0; i < s->fft_len; i++) {
-        s->in_re[i] *= s->window[i];
-        s->in_im[i] *= s->window[i];
-    }
-
-    simple_fft_run(&s->fft, s->in_re, s->in_im, s->out_re, s->out_im);
-
-    for (i = 0; i < s->fft_len; i++) {
-        int shifted = (i + s->fft_len / 2) % s->fft_len;
-        float re = s->out_re[shifted];
-        float im = s->out_im[shifted];
-        float pwr_lin = re * re + im * im + 1e-20f;
-        float w = 1.0f;
-        int dst = seg_index * s->stride_bins + i;
-
-        if (s->overlap_bins > 0) {
-            if (seg_index > 0 && i < s->overlap_bins) {
-                float t = (float)(i + 1) / (float)(s->overlap_bins + 1);
-                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-in */
-            }
-            if (seg_index < s->segments - 1 && i >= s->fft_len - s->overlap_bins) {
-                float t = (float)(s->fft_len - i) / (float)(s->overlap_bins + 1);
-                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-out */
-            }
-        }
-
-        if (dst >= 0 && dst < s->waterfall_width) {
-            s->line_pow_accum[dst] += pwr_lin * w;
-            s->line_w_accum[dst] += w;
-        }
-    }
-    t1 = now_s();
-    *t_fft_s += (t1 - t0);
+    (void)seg_index;
+    (void)t_fft_s;
 
     return true;
 }
@@ -1038,11 +1162,17 @@ static bool scan_line(struct scan_state *s)
         double seg_start = start + (double)seg * s->step_hz;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
         int64_t next_center_hz = center_hz;
+        if (seg > 0) {
+            if (!fft_wait_and_account(s, &t_fft_s))
+                return false;
+        }
         if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_tune_lo_s, &t_tune_settle_s,
                           &t_tune_discard_s, &retunes_this_line,
                           &fastlock_recall_this_line, &fastlock_load_this_line,
                           &fastlock_store_this_line, &fastlock_cold_tune_this_line,
                           &t_capture_s, &t_fft_s))
+            return false;
+        if (!fft_submit_segment(s, seg))
             return false;
 
         if (seg + 1 < s->segments) {
@@ -1051,6 +1181,10 @@ static bool scan_line(struct scan_state *s)
             if (!fastlock_prefetch_freq(s, next_center_hz, &t_tune_lo_s, &fastlock_load_this_line))
                 return false;
         }
+    }
+    if (s->segments > 0) {
+        if (!fft_wait_and_account(s, &t_fft_s))
+            return false;
     }
 
     for (seg = 0; seg < s->waterfall_width; seg++) {
@@ -1142,10 +1276,13 @@ static bool resize_buffers(struct scan_state *s)
     int overlap_bins;
     int tex_width;
 
+    fft_worker_stop(s);
     simple_fft_destroy(&s->fft);
 
     free(s->in_re);
     free(s->in_im);
+    free(s->fft_job_re);
+    free(s->fft_job_im);
     free(s->out_re);
     free(s->out_im);
     free(s->window);
@@ -1158,6 +1295,8 @@ static bool resize_buffers(struct scan_state *s)
 
     s->in_re = NULL;
     s->in_im = NULL;
+    s->fft_job_re = NULL;
+    s->fft_job_im = NULL;
     s->out_re = NULL;
     s->out_im = NULL;
     s->window = NULL;
@@ -1226,6 +1365,8 @@ static bool resize_buffers(struct scan_state *s)
 
     s->in_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->in_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
+    s->fft_job_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
+    s->fft_job_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->out_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
@@ -1236,7 +1377,7 @@ static bool resize_buffers(struct scan_state *s)
     s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
-    if (!s->in_re || !s->in_im || !s->out_re || !s->out_im ||
+    if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->out_re || !s->out_im ||
         !s->window || !s->line_db || !s->line_pow_accum || !s->line_w_accum ||
         !s->plot_db || !s->plot_points || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
@@ -1245,6 +1386,10 @@ static bool resize_buffers(struct scan_state *s)
 
     if (simple_fft_init(&s->fft, s->fft_len) < 0) {
         fprintf(stderr, "Failed to initialize FFT plan for length %d.\n", s->fft_len);
+        return false;
+    }
+    if (!fft_worker_start(s)) {
+        fprintf(stderr, "Failed to start FFT worker thread.\n");
         return false;
     }
 
@@ -1948,9 +2093,12 @@ int main(int argc, char **argv)
     if (s.waterfall_tex)
         glDeleteTextures(1, &s.waterfall_tex);
     scan_dma_cleanup(&s);
+    fft_worker_stop(&s);
     simple_fft_destroy(&s.fft);
     free(s.in_re);
     free(s.in_im);
+    free(s.fft_job_re);
+    free(s.fft_job_im);
     free(s.out_re);
     free(s.out_im);
     free(s.window);
@@ -1984,9 +2132,12 @@ fail:
     if (s.dma.fds.fd > 0)
         scan_dma_cleanup(&s);
 
+    fft_worker_stop(&s);
     simple_fft_destroy(&s.fft);
     free(s.in_re);
     free(s.in_im);
+    free(s.fft_job_re);
+    free(s.fft_job_im);
     free(s.out_re);
     free(s.out_im);
     free(s.window);
