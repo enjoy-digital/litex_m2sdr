@@ -545,7 +545,8 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImDrawList *dl;
     ImU32 col_bg = 0xFF131415u;
     ImU32 col_border = 0xFF3A3A3Au;
-    ImU32 col_grid = 0xFF2A2A2Au;
+    ImU32 col_grid_v = 0xFF4A4A4Au;
+    ImU32 col_grid_h = 0xFF2A2A2Au;
     ImU32 col_trace = 0xFF66D9FFu;
     ImU32 col_text = 0xFFAFAFAFu;
 
@@ -575,11 +576,11 @@ static void draw_spectrum_with_grid(struct scan_state *s,
 
     for (i = 0; i <= v_ticks; i++) {
         float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
-        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid, 1.0f);
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid_v, 1.2f);
     }
     for (i = 0; i <= h_ticks; i++) {
         float y = pmin.y + (pmax.y - pmin.y) * (float)i / (float)h_ticks;
-        ImDrawList_AddLine(dl, (ImVec2){pmin.x, y}, (ImVec2){pmax.x, y}, col_grid, 1.0f);
+        ImDrawList_AddLine(dl, (ImVec2){pmin.x, y}, (ImVec2){pmax.x, y}, col_grid_h, 1.0f);
     }
 
     for (i = 0; i < plot_count; i++) {
@@ -599,33 +600,6 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         format_freq_label(f, txt, sizeof(txt));
         ImDrawList_AddText_Vec2(dl, (ImVec2){pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks + 2.0f, pmax.y - 16.0f},
                                 col_text, txt, NULL);
-    }
-}
-
-static void draw_waterfall_freq_overlay(double f0_hz, double f1_hz)
-{
-    int i;
-    const int v_ticks = 10;
-    ImVec2 pmin, pmax;
-    ImDrawList *dl;
-    ImU32 col_border = 0xFF3A3A3Au;
-    ImU32 col_text = 0xFFAFAFAFu;
-
-    igGetItemRectMin(&pmin);
-    igGetItemRectMax(&pmax);
-    if (pmax.x <= pmin.x || pmax.y <= pmin.y)
-        return;
-
-    dl = igGetWindowDrawList();
-    ImDrawList_AddRect(dl, pmin, pmax, col_border, 0.0f, 0, 1.0f);
-
-    for (i = 0; i <= v_ticks; i++) {
-        float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
-        char txt[32];
-        double f = f0_hz + (f1_hz - f0_hz) * (double)i / (double)v_ticks;
-
-        format_freq_label(f, txt, sizeof(txt));
-        ImDrawList_AddText_Vec2(dl, (ImVec2){x + 2.0f, pmax.y - 16.0f}, col_text, txt, NULL);
     }
 }
 
@@ -1335,7 +1309,6 @@ int main(int argc, char **argv)
                 draw_spectrum_with_grid(&s, plot_id, avail.x, spectrum_row_h, plot_count, f0_hz, f1_hz);
 
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
-                draw_waterfall_freq_overlay(f0_hz, f1_hz);
 
                 if (row != rows - 1)
                     igSeparator();
