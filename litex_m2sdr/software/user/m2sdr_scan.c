@@ -56,6 +56,7 @@
 #define DEFAULT_RX_SETTLE_US 20
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
+#define MAX_PEAK_MARKERS 8
 #define FASTLOCK_HW_SLOTS 8
 #define FASTLOCK_PROFILE_BYTES 16
 #define FASTLOCK_MAX_SW_CACHE 4096
@@ -176,6 +177,7 @@ struct scan_state {
     int rx_gain_applied;
     int rx_gain_last_ret;
     int stitch_pct;
+    bool auto_samplerate;
     bool run;
     int display_rows;
     int waterfall_palette;
@@ -190,7 +192,9 @@ struct scan_state {
     bool spectrum_show_peak;
     bool spectrum_show_avg;
     float spectrum_avg_alpha;
+    float spectrum_peak_hold_s;
     bool spectrum_peak_marker;
+    int spectrum_peak_markers;
     bool marker_a_enable;
     bool marker_b_enable;
     double marker_a_hz;
@@ -247,6 +251,7 @@ struct scan_state {
     float *window;
     float *line_db;
     float *line_peak_db;
+    double *line_peak_seen_s;
     float *line_avg_db;
     float *line_pow_accum;
     float *line_w_accum;
@@ -763,6 +768,27 @@ static bool is_supported_samplerate(uint32_t sample_rate_hz)
     return false;
 }
 
+static uint32_t recommended_samplerate_for_span(double span_hz)
+{
+    int i;
+    double need_hz;
+    uint32_t best = k_scan_samplerates_hz[0];
+
+    if (span_hz < 0.0)
+        span_hz = 0.0;
+    need_hz = span_hz * 1.10; /* headroom to avoid edge clipping */
+
+    for (i = (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])) - 1; i >= 0; i--) {
+        uint32_t sr = k_scan_samplerates_hz[i];
+        if ((double)sr >= need_hz) {
+            best = sr;
+            break;
+        }
+    }
+
+    return best;
+}
+
 static int fft_len_index_from_value(int fft_len)
 {
     int i;
@@ -1244,6 +1270,7 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                                     bool show_avg,
                                     bool show_peak,
                                     bool show_peak_marker,
+                                    int peak_marker_count,
                                     bool marker_a_enable,
                                     bool marker_b_enable,
                                     double marker_a_hz,
@@ -1327,24 +1354,84 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_peak, 0, 1.1f);
     }
 
-    if (show_peak_marker && plot_count > 1) {
-        int idx_max = 0;
-        double freq;
-        char txt[48];
-        float tx;
-        float x;
-        for (i = 1; i < plot_count; i++) {
-            if (plot_main[i] > plot_main[idx_max])
-                idx_max = i;
+    if (show_peak_marker && plot_count > 2) {
+        int top_idx[MAX_PEAK_MARKERS];
+        float top_val[MAX_PEAK_MARKERS];
+        int picked = 0;
+        int pm = peak_marker_count;
+        int min_sep;
+        if (pm < 1)
+            pm = 1;
+        if (pm > MAX_PEAK_MARKERS)
+            pm = MAX_PEAK_MARKERS;
+        for (i = 0; i < pm; i++) {
+            top_idx[i] = -1;
+            top_val[i] = -1e30f;
         }
-        x = pmin.x + (pmax.x - pmin.x) * (float)idx_max / (float)(plot_count - 1);
-        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.2f);
-        freq = f0_hz + (f1_hz - f0_hz) * (double)idx_max / (double)(plot_count - 1);
-        format_freq_label(freq, txt, sizeof(txt));
-        tx = x + 4.0f;
-        if (tx > pmax.x - 40.0f)
-            tx = pmax.x - 40.0f;
-        ImDrawList_AddText_Vec2(dl, (ImVec2){tx, pmin.y + 2.0f}, col_marker_peak, txt, NULL);
+        min_sep = plot_count / 40;
+        if (min_sep < 2)
+            min_sep = 2;
+
+        for (i = 1; i < plot_count - 1; i++) {
+            int j, k;
+            bool is_local_max = (plot_main[i] >= plot_main[i - 1] && plot_main[i] >= plot_main[i + 1]);
+            if (!is_local_max)
+                continue;
+            for (j = 0; j < picked; j++) {
+                if (abs(i - top_idx[j]) < min_sep && plot_main[i] <= top_val[j]) {
+                    is_local_max = false;
+                    break;
+                }
+            }
+            if (!is_local_max)
+                continue;
+            for (j = 0; j < pm; j++) {
+                if (plot_main[i] > top_val[j]) {
+                    for (k = pm - 1; k > j; k--) {
+                        top_val[k] = top_val[k - 1];
+                        top_idx[k] = top_idx[k - 1];
+                    }
+                    top_val[j] = plot_main[i];
+                    top_idx[j] = i;
+                    if (picked < pm)
+                        picked++;
+                    break;
+                }
+            }
+        }
+
+        if (picked == 0) {
+            int idx_max = 0;
+            top_idx[0] = 0;
+            top_val[0] = plot_main[0];
+            for (i = 1; i < plot_count; i++) {
+                if (plot_main[i] > top_val[0]) {
+                    top_val[0] = plot_main[i];
+                    top_idx[0] = i;
+                    idx_max = i;
+                }
+            }
+            (void)idx_max;
+            picked = 1;
+        }
+
+        for (i = 0; i < picked; i++) {
+            double freq;
+            char txt[48];
+            float tx;
+            float x;
+            int idx = top_idx[i];
+            if (idx < 0)
+                continue;
+            x = pmin.x + (pmax.x - pmin.x) * (float)idx / (float)(plot_count - 1);
+            ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.1f);
+            freq = f0_hz + (f1_hz - f0_hz) * (double)idx / (double)(plot_count - 1);
+            format_freq_label(freq, txt, sizeof(txt));
+            tx = x + 3.0f;
+            if (tx > pmax.x - 54.0f)
+                tx = pmax.x - 54.0f;
+            ImDrawList_AddText_Vec2(dl, (ImVec2){tx, pmin.y + 2.0f + i * 11.0f}, col_marker_peak, txt, NULL);
+        }
     }
 
     if (marker_a_enable && marker_a_hz >= f0_hz && marker_a_hz <= f1_hz) {
@@ -1438,15 +1525,30 @@ static bool scan_line(struct scan_state *s)
         s->db_max = (1.0f - alpha) * s->db_max + alpha * mx;
     }
 
-    for (seg = 0; seg < s->waterfall_width; seg++) {
-        if (s->perf.lines_total == 0) {
-            s->line_peak_db[seg] = s->line_db[seg];
-            s->line_avg_db[seg] = s->line_db[seg];
-        } else {
-            if (s->line_db[seg] > s->line_peak_db[seg])
-                s->line_peak_db[seg] = s->line_db[seg];
-            s->line_avg_db[seg] = (1.0f - s->spectrum_avg_alpha) * s->line_avg_db[seg] +
-                                  s->spectrum_avg_alpha * s->line_db[seg];
+    {
+        double peak_now_s = now_s();
+        double peak_hold_s = (double)s->spectrum_peak_hold_s;
+        if (peak_hold_s < 0.05)
+            peak_hold_s = 0.05;
+        for (seg = 0; seg < s->waterfall_width; seg++) {
+            float cur = s->line_db[seg];
+            double seen = s->line_peak_seen_s[seg];
+
+            if (s->perf.lines_total == 0 || seen <= 0.0 || cur >= s->line_peak_db[seg]) {
+                s->line_peak_db[seg] = cur;
+                s->line_peak_seen_s[seg] = peak_now_s;
+            } else if ((peak_now_s - seen) >= peak_hold_s) {
+                /* Peak-hold timeout reached: drop stale peak to current level. */
+                s->line_peak_db[seg] = cur;
+                s->line_peak_seen_s[seg] = peak_now_s;
+            }
+
+            if (s->perf.lines_total == 0) {
+                s->line_avg_db[seg] = cur;
+            } else {
+                s->line_avg_db[seg] = (1.0f - s->spectrum_avg_alpha) * s->line_avg_db[seg] +
+                                      s->spectrum_avg_alpha * cur;
+            }
         }
     }
 
@@ -1556,6 +1658,7 @@ static bool resize_buffers(struct scan_state *s)
     free(s->window);
     free(s->line_db);
     free(s->line_peak_db);
+    free(s->line_peak_seen_s);
     free(s->line_avg_db);
     free(s->line_pow_accum);
     free(s->line_w_accum);
@@ -1574,6 +1677,7 @@ static bool resize_buffers(struct scan_state *s)
     s->window = NULL;
     s->line_db = NULL;
     s->line_peak_db = NULL;
+    s->line_peak_seen_s = NULL;
     s->line_avg_db = NULL;
     s->line_pow_accum = NULL;
     s->line_w_accum = NULL;
@@ -1657,6 +1761,7 @@ static bool resize_buffers(struct scan_state *s)
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)active_width, sizeof(float));
     s->line_peak_db = (float *)calloc((size_t)active_width, sizeof(float));
+    s->line_peak_seen_s = (double *)calloc((size_t)active_width, sizeof(double));
     s->line_avg_db = (float *)calloc((size_t)active_width, sizeof(float));
     s->line_pow_accum = (float *)calloc((size_t)active_width, sizeof(float));
     s->line_w_accum = (float *)calloc((size_t)active_width, sizeof(float));
@@ -1672,7 +1777,7 @@ static bool resize_buffers(struct scan_state *s)
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)hist_lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->out_re || !s->out_im ||
-        !s->window || !s->line_db || !s->line_peak_db || !s->line_avg_db ||
+        !s->window || !s->line_db || !s->line_peak_db || !s->line_peak_seen_s || !s->line_avg_db ||
         !s->line_pow_accum || !s->line_w_accum ||
         !s->plot_db || !s->plot_avg || !s->plot_peak || !s->plot_points || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
@@ -1822,7 +1927,8 @@ static bool apply_runtime_config(struct scan_state *s,
                                  int lines,
                                  int rx_gain,
                                  int rx_settle_us,
-                                 int stitch_pct)
+                                 int stitch_pct,
+                                 bool auto_samplerate)
 {
     if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 2048) {
         fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 2048).\n", fft_len);
@@ -1868,6 +1974,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->rx_gain = rx_gain;
     s->rx_settle_us = rx_settle_us;
     s->stitch_pct = stitch_pct;
+    s->auto_samplerate = auto_samplerate;
     s->lo_valid = false;
     s->waterfall_speed_ctr = 0;
     fastlock_reset(s);
@@ -1895,9 +2002,12 @@ struct ui_state {
     int rx_gain;
     int settle_us;
     int stitch_pct;
+    bool auto_samplerate;
     bool show_peak;
     bool show_avg;
+    float peak_hold_s;
     bool show_peak_marker;
+    int peak_markers;
     bool marker_a_enable;
     bool marker_b_enable;
     float marker_a_mhz;
@@ -1913,9 +2023,12 @@ static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
     ui->rx_gain = s->rx_gain;
     ui->settle_us = s->rx_settle_us;
     ui->stitch_pct = s->stitch_pct;
+    ui->auto_samplerate = s->auto_samplerate;
     ui->show_peak = s->spectrum_show_peak;
     ui->show_avg = s->spectrum_show_avg;
+    ui->peak_hold_s = s->spectrum_peak_hold_s;
     ui->show_peak_marker = s->spectrum_peak_marker;
+    ui->peak_markers = s->spectrum_peak_markers;
     ui->marker_a_enable = s->marker_a_enable;
     ui->marker_b_enable = s->marker_b_enable;
     ui->marker_a_mhz = (float)(s->marker_a_hz / 1e6);
@@ -1945,10 +2058,15 @@ static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
         ui->fft_idx = fft_len_index_from_value(s->fft_len);
 
     new_samplerate = k_scan_samplerates_hz[ui->samplerate_idx];
+    if (ui->auto_samplerate) {
+        double span_hz = (double)(new_stop - new_start);
+        new_samplerate = recommended_samplerate_for_span(span_hz);
+        ui->samplerate_idx = samplerate_index_from_hz(new_samplerate);
+    }
     new_fft_len = k_fft_lengths[ui->fft_idx];
 
     ok = apply_runtime_config(s, new_start, new_stop, new_samplerate, new_fft_len, s->lines,
-                              ui->rx_gain, ui->settle_us, ui->stitch_pct);
+                              ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate);
     ui_state_from_scan(s, ui);
     return ok;
 }
@@ -1994,7 +2112,9 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
 
     ui->show_peak = s->spectrum_show_peak;
     ui->show_avg = s->spectrum_show_avg;
+    ui->peak_hold_s = s->spectrum_peak_hold_s;
     ui->show_peak_marker = s->spectrum_peak_marker;
+    ui->peak_markers = s->spectrum_peak_markers;
     ui->marker_a_enable = s->marker_a_enable;
     ui->marker_b_enable = s->marker_b_enable;
 
@@ -2028,14 +2148,15 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 6.0f);
     if (igButton("Snapshot", (ImVec2){85.0f, 0.0f}))
         s->export_snapshot_request = true;
-    igSameLine(0.0f, 10.0f);
+    igSameLine(0.0f, 12.0f);
     igText("Device %s", m2sdr_device);
-    igSameLine(0.0f, 10.0f);
-    igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
     igSameLine(0.0f, 12.0f);
     igText("LO %.3f MHz | retune %.2f/s | dma waits %.1f/s | stitch %d%%",
            (double)s->lo_hz / 1e6, s->perf.retunes_per_sec, s->perf.dma_wait_per_sec, s->stitch_pct);
+    igSameLine(0.0f, 12.0f);
+    igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
 
+    igSeparatorText("Scan Range");
     igSetNextItemWidth(160.0f);
     changed_start = igDragFloat("Scan Start (MHz)", &ui->start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
     igSameLine(0.0f, 10.0f);
@@ -2061,11 +2182,14 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (changed_stop && ui->stop_mhz < ui->start_mhz + min_span_mhz)
         ui->start_mhz = ui->stop_mhz - min_span_mhz;
 
+    igSeparatorText("Acquisition");
     igSetNextItemWidth(160.0f);
     changed |= igCombo_Str_arr("Sample Rate", &ui->samplerate_idx,
                                k_scan_samplerate_labels,
                                (int)(sizeof(k_scan_samplerate_labels) / sizeof(k_scan_samplerate_labels[0])),
                                4);
+    igSameLine(0.0f, 8.0f);
+    changed |= igCheckbox("Auto SR", &ui->auto_samplerate);
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(130.0f);
     changed |= igCombo_Str_arr("FFT Points", &ui->fft_idx,
@@ -2082,7 +2206,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (igSliderInt("RX Gain (dB)", &ui->rx_gain, 0, 73, "%d", 0))
         apply_rx_gain_request(s, ui->rx_gain);
 
-    igSeparatorText("Spectrum / Waterfall");
+    igSeparatorText("Display");
     igSetNextItemWidth(120.0f);
     igSliderInt("Rows", &s->display_rows, 1, 8, "%d", 0);
     igSameLine(0.0f, 10.0f);
@@ -2112,11 +2236,19 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (igCheckbox("Peak Hold", &ui->show_peak))
         s->spectrum_show_peak = ui->show_peak;
     igSameLine(0.0f, 10.0f);
+    igSetNextItemWidth(95.0f);
+    if (igDragFloat("Hold (s)", &ui->peak_hold_s, 0.1f, 0.1f, 30.0f, "%.1f", 0))
+        s->spectrum_peak_hold_s = ui->peak_hold_s;
+    igSameLine(0.0f, 10.0f);
     if (igCheckbox("Avg Trace", &ui->show_avg))
         s->spectrum_show_avg = ui->show_avg;
     igSameLine(0.0f, 10.0f);
     if (igCheckbox("Peak Marker", &ui->show_peak_marker))
         s->spectrum_peak_marker = ui->show_peak_marker;
+    igSameLine(0.0f, 8.0f);
+    igSetNextItemWidth(95.0f);
+    if (igSliderInt("Peaks", &ui->peak_markers, 1, MAX_PEAK_MARKERS, "%d", 0))
+        s->spectrum_peak_markers = ui->peak_markers;
     igSameLine(0.0f, 10.0f);
     igCheckbox("WF Pause", &s->waterfall_pause);
     igSameLine(0.0f, 8.0f);
@@ -2137,6 +2269,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         igSliderInt("WF Scroll", &s->waterfall_scroll, 0, max_scroll, "%d", 0);
     }
 
+    igSeparatorText("Markers");
     igSetNextItemWidth(80.0f);
     if (igCheckbox("A", &ui->marker_a_enable))
         s->marker_a_enable = ui->marker_a_enable;
@@ -2238,6 +2371,7 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                         s->spectrum_show_peak ? s->plot_peak : NULL,
                                         s->spectrum_show_avg, s->spectrum_show_peak,
                                         s->spectrum_peak_marker,
+                                        s->spectrum_peak_markers,
                                         s->marker_a_enable, s->marker_b_enable,
                                         s->marker_a_hz, s->marker_b_hz,
                                         f0_hz, f1_hz);
@@ -2510,7 +2644,10 @@ int main(int argc, char **argv)
     s.spectrum_show_peak = false;
     s.spectrum_show_avg = false;
     s.spectrum_avg_alpha = 0.10f;
+    s.spectrum_peak_hold_s = 2.0f;
     s.spectrum_peak_marker = true;
+    s.spectrum_peak_markers = 3;
+    s.auto_samplerate = false;
     s.marker_a_enable = false;
     s.marker_b_enable = false;
     s.marker_a_hz = (double)s.scan_start_hz;
@@ -2733,6 +2870,7 @@ int main(int argc, char **argv)
     free(s.window);
     free(s.line_db);
     free(s.line_peak_db);
+    free(s.line_peak_seen_s);
     free(s.line_avg_db);
     free(s.line_pow_accum);
     free(s.line_w_accum);
@@ -2776,6 +2914,7 @@ fail:
     free(s.window);
     free(s.line_db);
     free(s.line_peak_db);
+    free(s.line_peak_seen_s);
     free(s.line_avg_db);
     free(s.line_pow_accum);
     free(s.line_w_accum);
