@@ -36,6 +36,7 @@
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 #include "m2sdr_config.h"
+#include "m2sdr_colormaps_gqrx.h"
 #include "simple_fft.h"
 
 #define igGetIO igGetIO_Nil
@@ -149,6 +150,8 @@ struct scan_state {
     float db_max;
     bool run;
     int display_rows;
+    int waterfall_palette;
+    bool spectrum_auto_scale;
 
     int segments;
     int waterfall_width;
@@ -165,6 +168,7 @@ struct scan_state {
     float *window;
     float *line_db;
     float *plot_db;
+    ImVec2 *plot_points;
     uint32_t *waterfall_rgba;
 
     GLuint waterfall_tex;
@@ -206,40 +210,73 @@ static void make_window(float *dst, int n)
         dst[i] = 0.5f - 0.5f * cosf((2.0f * (float)M_PI * i) / (float)(n - 1));
 }
 
-static uint32_t colormap_jet(float x)
+static uint32_t pack_rgba_u8(int r, int g, int b)
 {
-    float r, g, b;
-    float four_x = 4.0f * x;
-
-    if (four_x <= 1.0f) {
-        r = 0.0f;
-        g = four_x;
-        b = 1.0f;
-    } else if (four_x <= 2.0f) {
-        r = 0.0f;
-        g = 1.0f;
-        b = 2.0f - four_x;
-    } else if (four_x <= 3.0f) {
-        r = four_x - 2.0f;
-        g = 1.0f;
-        b = 0.0f;
-    } else {
-        r = 1.0f;
-        g = 4.0f - four_x;
-        b = 0.0f;
-    }
-
-    if (r < 0.0f) r = 0.0f;
-    if (r > 1.0f) r = 1.0f;
-    if (g < 0.0f) g = 0.0f;
-    if (g > 1.0f) g = 1.0f;
-    if (b < 0.0f) b = 0.0f;
-    if (b > 1.0f) b = 1.0f;
-
+    if (r < 0) r = 0;
+    if (r > 255) r = 255;
+    if (g < 0) g = 0;
+    if (g > 255) g = 255;
+    if (b < 0) b = 0;
+    if (b > 255) b = 255;
     return (0xFFu << 24) |
-           ((uint32_t)(b * 255.0f) << 16) |
-           ((uint32_t)(g * 255.0f) << 8) |
-           ((uint32_t)(r * 255.0f));
+           ((uint32_t)b << 16) |
+           ((uint32_t)g << 8) |
+           (uint32_t)r;
+}
+
+static uint32_t colormap_turbo_idx(int i)
+{
+    return pack_rgba_u8(gqrx_turbo[i][0], gqrx_turbo[i][1], gqrx_turbo[i][2]);
+}
+
+static uint32_t colormap_plasma_idx(int i)
+{
+    return pack_rgba_u8(gqrx_plasma[i][0], gqrx_plasma[i][1], gqrx_plasma[i][2]);
+}
+
+static uint32_t colormap_viridis_idx(int i)
+{
+    return pack_rgba_u8((int)(gqrx_viridis[i][0] * 256.0f),
+                        (int)(gqrx_viridis[i][1] * 256.0f),
+                        (int)(gqrx_viridis[i][2] * 256.0f));
+}
+
+static uint32_t colormap_white_hot_compressed_idx(int i)
+{
+    if (i < 64)
+        return pack_rgba_u8(i * 4, i * 4, i * 4);
+    return pack_rgba_u8(255, 255, 255);
+}
+
+static uint32_t colormap_white_hot_idx(int i)
+{
+    return pack_rgba_u8(i, i, i);
+}
+
+static uint32_t colormap_black_hot_idx(int i)
+{
+    return pack_rgba_u8(255 - i, 255 - i, 255 - i);
+}
+
+static uint32_t colormap_apply(int palette, float x)
+{
+    int idx;
+    if (x < 0.0f) x = 0.0f;
+    if (x > 1.0f) x = 1.0f;
+    idx = (int)(x * 255.0f + 0.5f);
+    if (idx < 0) idx = 0;
+    if (idx > 255) idx = 255;
+
+    switch (palette) {
+    case 0: return colormap_turbo_idx(idx);
+    case 1: return colormap_plasma_idx(idx);
+    case 2: return colormap_viridis_idx(idx);
+    case 3: return colormap_white_hot_compressed_idx(idx);
+    case 4: return colormap_white_hot_idx(idx);
+    case 5: return colormap_black_hot_idx(idx);
+    default:
+        return colormap_turbo_idx(idx);
+    }
 }
 
 static bool scan_dma_init(struct scan_state *s)
@@ -369,7 +406,7 @@ static void waterfall_push_line(struct scan_state *s)
         float t = (pwr - s->db_min) / (s->db_max - s->db_min + 1e-6f);
         if (t < 0.0f) t = 0.0f;
         if (t > 1.0f) t = 1.0f;
-        dst_last[x] = colormap_jet(t);
+        dst_last[x] = colormap_apply(s->waterfall_palette, t);
     }
 
     glBindTexture(GL_TEXTURE_2D, s->waterfall_tex);
@@ -379,7 +416,7 @@ static void waterfall_push_line(struct scan_state *s)
                     0,
                     s->waterfall_tex_width,
                     s->lines,
-                    GL_RGBA,
+                    GL_BGRA,
                     GL_UNSIGNED_BYTE,
                     s->waterfall_rgba);
 }
@@ -412,6 +449,88 @@ static int build_plot_slice(struct scan_state *s, int bin0, int bin1)
     }
 
     return MAX_PLOT_POINTS;
+}
+
+static void format_freq_label(double hz, char *buf, size_t buflen)
+{
+    if (hz >= 1e9)
+        snprintf(buf, buflen, "%.3fG", hz / 1e9);
+    else
+        snprintf(buf, buflen, "%.1fM", hz / 1e6);
+}
+
+static void draw_spectrum_with_grid(struct scan_state *s,
+                                    const char *id,
+                                    float width,
+                                    float height,
+                                    int plot_count,
+                                    double f0_hz,
+                                    double f1_hz)
+{
+    int i;
+    int v_ticks = 10;
+    int h_ticks = 4;
+    float y_min = s->db_min;
+    float y_max = s->db_max;
+    ImVec2 pmin, pmax;
+    ImDrawList *dl;
+    ImU32 col_bg = 0xFF131415u;
+    ImU32 col_border = 0xFF3A3A3Au;
+    ImU32 col_grid = 0xFF2A2A2Au;
+    ImU32 col_trace = 0xFF66D9FFu;
+    ImU32 col_text = 0xFFAFAFAFu;
+
+    if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
+        return;
+
+    if (s->spectrum_auto_scale) {
+        float vmin = s->plot_db[0];
+        float vmax = s->plot_db[0];
+        float pad;
+        for (i = 1; i < plot_count; i++) {
+            if (s->plot_db[i] < vmin) vmin = s->plot_db[i];
+            if (s->plot_db[i] > vmax) vmax = s->plot_db[i];
+        }
+        pad = (vmax - vmin) * 0.15f + 1.0f;
+        y_min = vmin - pad;
+        y_max = vmax + pad;
+    }
+
+    igInvisibleButton(id, (ImVec2){width, height}, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, col_bg, 2.0f, 0);
+    ImDrawList_AddRect(dl, pmin, pmax, col_border, 2.0f, 0, 1.0f);
+
+    for (i = 0; i <= v_ticks; i++) {
+        float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid, 1.0f);
+    }
+    for (i = 0; i <= h_ticks; i++) {
+        float y = pmin.y + (pmax.y - pmin.y) * (float)i / (float)h_ticks;
+        ImDrawList_AddLine(dl, (ImVec2){pmin.x, y}, (ImVec2){pmax.x, y}, col_grid, 1.0f);
+    }
+
+    for (i = 0; i < plot_count; i++) {
+        float t = (float)i / (float)(plot_count - 1);
+        float x = pmin.x + t * (pmax.x - pmin.x);
+        float yn = (s->plot_db[i] - y_min) / (y_max - y_min + 1e-6f);
+        float y = pmax.y - yn * (pmax.y - pmin.y);
+        if (y < pmin.y) y = pmin.y;
+        if (y > pmax.y) y = pmax.y;
+        s->plot_points[i] = (ImVec2){x, y};
+    }
+    ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_trace, 0, 1.6f);
+
+    for (i = 0; i <= v_ticks; i++) {
+        char txt[32];
+        double f = f0_hz + (f1_hz - f0_hz) * (double)i / (double)v_ticks;
+        format_freq_label(f, txt, sizeof(txt));
+        ImDrawList_AddText_Vec2(dl, (ImVec2){pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks + 2.0f, pmax.y - 16.0f},
+                                col_text, txt, NULL);
+    }
 }
 
 static bool scan_line(struct scan_state *s)
@@ -493,6 +612,7 @@ static bool resize_buffers(struct scan_state *s)
     free(s->window);
     free(s->line_db);
     free(s->plot_db);
+    free(s->plot_points);
     free(s->waterfall_rgba);
 
     s->in_re = NULL;
@@ -502,6 +622,7 @@ static bool resize_buffers(struct scan_state *s)
     s->window = NULL;
     s->line_db = NULL;
     s->plot_db = NULL;
+    s->plot_points = NULL;
     s->waterfall_rgba = NULL;
 
     if (s->scan_stop_hz <= s->scan_start_hz)
@@ -539,10 +660,11 @@ static bool resize_buffers(struct scan_state *s)
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)new_width, sizeof(float));
     s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
+    s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->out_re || !s->out_im ||
-        !s->window || !s->line_db || !s->plot_db || !s->waterfall_rgba) {
+        !s->window || !s->line_db || !s->plot_db || !s->plot_points || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
         return false;
     }
@@ -572,7 +694,7 @@ static bool resize_buffers(struct scan_state *s)
                  s->waterfall_tex_width,
                  s->lines,
                  0,
-                 GL_RGBA,
+                 GL_BGRA,
                  GL_UNSIGNED_BYTE,
                  s->waterfall_rgba);
 
@@ -762,6 +884,8 @@ int main(int argc, char **argv)
     s.db_max = DEFAULT_DB_MAX;
     s.run = true;
     s.display_rows = 1;
+    s.waterfall_palette = 0;
+    s.spectrum_auto_scale = true;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
@@ -941,6 +1065,24 @@ int main(int argc, char **argv)
             changed |= igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
             changed |= igSliderFloat("Min dB", &s.db_min, -160.0f, 20.0f, "%.1f", 0);
             changed |= igSliderFloat("Max dB", &s.db_max, -160.0f, 40.0f, "%.1f", 0);
+            {
+                static const char *palette_items[] = {
+                    "Google Turbo",
+                    "Plasma",
+                    "Viridis",
+                    "White Hot Compressed",
+                    "White Hot",
+                    "Black Hot"
+                };
+                int p = s.waterfall_palette;
+                if (p < 0 || p > 5)
+                    p = 0;
+                if (igCombo_Str_arr("Waterfall Palette", &p, palette_items, 6, 6)) {
+                    s.waterfall_palette = p;
+                    changed = true;
+                }
+            }
+            igCheckbox("Spectrum Auto Scale", &s.spectrum_auto_scale);
 
             if (s.db_max <= s.db_min + 1.0f) {
                 s.db_max = s.db_min + 1.0f;
@@ -1010,15 +1152,8 @@ int main(int argc, char **argv)
                 igText("Spectrum Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
                 snprintf(overlay, sizeof(overlay), "Row %d", row + 1);
                 snprintf(plot_id, sizeof(plot_id), "##spectrum_row_%d", row);
-                igPlotLines_FloatPtr(plot_id,
-                                     s.plot_db,
-                                     plot_count,
-                                     0,
-                                     overlay,
-                                     s.db_min,
-                                     s.db_max,
-                                     (ImVec2){avail.x, spectrum_row_h},
-                                     sizeof(float));
+                (void)overlay;
+                draw_spectrum_with_grid(&s, plot_id, avail.x, spectrum_row_h, plot_count, f0_hz, f1_hz);
 
                 igText("Waterfall Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
@@ -1055,6 +1190,7 @@ int main(int argc, char **argv)
     free(s.window);
     free(s.line_db);
     free(s.plot_db);
+    free(s.plot_points);
     free(s.waterfall_rgba);
 
     if (gl_context)
@@ -1087,6 +1223,7 @@ fail:
     free(s.window);
     free(s.line_db);
     free(s.plot_db);
+    free(s.plot_points);
     free(s.waterfall_rgba);
 
     m2sdr_close_global();
