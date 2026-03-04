@@ -499,6 +499,43 @@ static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
     return true;
 }
 
+static bool fastlock_prefetch_freq(struct scan_state *s, int64_t lo_hz,
+                                   double *t_lo_s,
+                                   int *fastlock_load_count)
+{
+    double t0, t1;
+    int sw_idx;
+    int slot;
+
+    if (!s->fastlock_enable)
+        return true;
+
+    if (fastlock_find_slot_by_freq(s, lo_hz) >= 0)
+        return true;
+
+    sw_idx = fastlock_find_sw_by_freq(s, lo_hz);
+    if (sw_idx < 0)
+        return true;
+
+    slot = fastlock_select_slot(s);
+    if (slot == s->fastlock_curr_slot)
+        return true;
+
+    t0 = now_s();
+    if (!fastlock_load_slot(slot, s->fastlock_sw[sw_idx].values))
+        return false;
+    t1 = now_s();
+    *t_lo_s += t1 - t0;
+    if (fastlock_load_count)
+        (*fastlock_load_count)++;
+
+    s->fastlock_slots[slot].valid = true;
+    s->fastlock_slots[slot].lo_hz = lo_hz;
+    s->fastlock_slots[slot].sw_index = sw_idx;
+    fastlock_touch_slot(s, slot);
+    return true;
+}
+
 static int settle_us_for_tune_mode(const struct scan_state *s, enum tune_mode mode)
 {
     switch (mode) {
@@ -1000,12 +1037,20 @@ static bool scan_line(struct scan_state *s)
     for (seg = 0; seg < s->segments; seg++) {
         double seg_start = start + (double)seg * s->step_hz;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
+        int64_t next_center_hz = center_hz;
         if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_tune_lo_s, &t_tune_settle_s,
                           &t_tune_discard_s, &retunes_this_line,
                           &fastlock_recall_this_line, &fastlock_load_this_line,
                           &fastlock_store_this_line, &fastlock_cold_tune_this_line,
                           &t_capture_s, &t_fft_s))
             return false;
+
+        if (seg + 1 < s->segments) {
+            double next_seg_start = start + (double)(seg + 1) * s->step_hz;
+            next_center_hz = (int64_t)(next_seg_start + fs * 0.5);
+            if (!fastlock_prefetch_freq(s, next_center_hz, &t_tune_lo_s, &fastlock_load_this_line))
+                return false;
+        }
     }
 
     for (seg = 0; seg < s->waterfall_width; seg++) {
