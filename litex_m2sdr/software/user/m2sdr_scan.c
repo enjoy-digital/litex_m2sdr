@@ -878,7 +878,7 @@ static bool m2sdr_rfic_init(struct scan_state *s)
 
 static void help(void)
 {
-    printf("M2SDR RF Scan Utility (Dear ImGui)\n"
+    printf("M2SDR Scan (Dear ImGui)\n"
            "usage: m2sdr_scan [options]\n"
            "\n"
            "Options:\n"
@@ -1098,7 +1098,7 @@ int main(int argc, char **argv)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    window = SDL_CreateWindow("M2SDR RF Scan",
+    window = SDL_CreateWindow("M2SDR Scan - Wideband Spectrum and Waterfall",
                               SDL_WINDOWPOS_CENTERED,
                               SDL_WINDOWPOS_CENTERED,
                               1400,
@@ -1171,10 +1171,11 @@ int main(int argc, char **argv)
         igSetNextWindowPos((ImVec2){0, 0}, ImGuiCond_Always, (ImVec2){0, 0});
         igSetNextWindowSize(io->DisplaySize, ImGuiCond_Always);
 
-        igBegin("RF Scan", NULL,
+        igBegin("##M2SDRScanMain", NULL,
                 ImGuiWindowFlags_NoMove |
                 ImGuiWindowFlags_NoResize |
-                ImGuiWindowFlags_NoCollapse);
+                ImGuiWindowFlags_NoCollapse |
+                ImGuiWindowFlags_NoTitleBar);
         {
             bool changed = false;
             bool changed_start = false;
