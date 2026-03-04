@@ -179,6 +179,9 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
+    bool spectrum_show_peak;
+    bool spectrum_show_avg;
+    float spectrum_avg_alpha;
     bool lo_valid;
     int64_t lo_hz;
     bool fastlock_enable;
@@ -228,9 +231,13 @@ struct scan_state {
     float *out_im;
     float *window;
     float *line_db;
+    float *line_peak_db;
+    float *line_avg_db;
     float *line_pow_accum;
     float *line_w_accum;
     float *plot_db;
+    float *plot_avg;
+    float *plot_peak;
     ImVec2 *plot_points;
     uint32_t *waterfall_rgba;
 
@@ -1071,7 +1078,8 @@ static void waterfall_push_line(struct scan_state *s)
                     s->waterfall_rgba);
 }
 
-static int build_plot_slice(struct scan_state *s, int bin0, int bin1)
+static int build_plot_slice_from(const struct scan_state *s, const float *src,
+                                 float *dst, int bin0, int bin1)
 {
     int i;
     int bins = bin1 - bin0;
@@ -1081,7 +1089,7 @@ static int build_plot_slice(struct scan_state *s, int bin0, int bin1)
 
     if (bins <= MAX_PLOT_POINTS) {
         for (i = 0; i < bins; i++)
-            s->plot_db[i] = s->line_db[bin0 + i];
+            dst[i] = src[bin0 + i];
         return bins;
     }
 
@@ -1094,8 +1102,8 @@ static int build_plot_slice(struct scan_state *s, int bin0, int bin1)
         if (n < 1)
             n = 1;
         for (j = start; j < stop; j++)
-            acc += s->line_db[j];
-        s->plot_db[i] = acc / (float)n;
+            acc += src[j];
+        dst[i] = acc / (float)n;
     }
 
     return MAX_PLOT_POINTS;
@@ -1114,6 +1122,11 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                                     float width,
                                     float height,
                                     int plot_count,
+                                    const float *plot_main,
+                                    const float *plot_avg,
+                                    const float *plot_peak,
+                                    bool show_avg,
+                                    bool show_peak,
                                     double f0_hz,
                                     double f1_hz)
 {
@@ -1129,6 +1142,8 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImU32 col_grid_v = 0xFF4A4A4Au;
     ImU32 col_grid_h = 0xFF2A2A2Au;
     ImU32 col_trace = 0xFF66D9FFu;
+    ImU32 col_avg = 0xFF63E2A7u;
+    ImU32 col_peak = 0xFFFFD166u;
     ImU32 col_text = 0xFFAFAFAFu;
 
     if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
@@ -1154,13 +1169,39 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     for (i = 0; i < plot_count; i++) {
         float t = (float)i / (float)(plot_count - 1);
         float x = pmin.x + t * (pmax.x - pmin.x);
-        float yn = (s->plot_db[i] - y_min) / (y_max - y_min + 1e-6f);
+        float yn = (plot_main[i] - y_min) / (y_max - y_min + 1e-6f);
         float y = pmax.y - yn * (pmax.y - pmin.y);
         if (y < pmin.y) y = pmin.y;
         if (y > pmax.y) y = pmax.y;
         s->plot_points[i] = (ImVec2){x, y};
     }
     ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_trace, 0, 1.6f);
+
+    if (show_avg && plot_avg) {
+        for (i = 0; i < plot_count; i++) {
+            float t = (float)i / (float)(plot_count - 1);
+            float x = pmin.x + t * (pmax.x - pmin.x);
+            float yn = (plot_avg[i] - y_min) / (y_max - y_min + 1e-6f);
+            float y = pmax.y - yn * (pmax.y - pmin.y);
+            if (y < pmin.y) y = pmin.y;
+            if (y > pmax.y) y = pmax.y;
+            s->plot_points[i] = (ImVec2){x, y};
+        }
+        ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_avg, 0, 1.2f);
+    }
+
+    if (show_peak && plot_peak) {
+        for (i = 0; i < plot_count; i++) {
+            float t = (float)i / (float)(plot_count - 1);
+            float x = pmin.x + t * (pmax.x - pmin.x);
+            float yn = (plot_peak[i] - y_min) / (y_max - y_min + 1e-6f);
+            float y = pmax.y - yn * (pmax.y - pmin.y);
+            if (y < pmin.y) y = pmin.y;
+            if (y > pmax.y) y = pmax.y;
+            s->plot_points[i] = (ImVec2){x, y};
+        }
+        ImDrawList_AddPolyline(dl, s->plot_points, plot_count, col_peak, 0, 1.1f);
+    }
 
     for (i = 0; i <= v_ticks; i++) {
         char txt[32];
@@ -1225,6 +1266,18 @@ static bool scan_line(struct scan_state *s)
             s->line_db[seg] = 10.0f * log10f(s->line_pow_accum[seg] / w + 1e-20f);
         else
             s->line_db[seg] = s->db_min;
+    }
+
+    for (seg = 0; seg < s->waterfall_width; seg++) {
+        if (s->perf.lines_total == 0) {
+            s->line_peak_db[seg] = s->line_db[seg];
+            s->line_avg_db[seg] = s->line_db[seg];
+        } else {
+            if (s->line_db[seg] > s->line_peak_db[seg])
+                s->line_peak_db[seg] = s->line_db[seg];
+            s->line_avg_db[seg] = (1.0f - s->spectrum_avg_alpha) * s->line_avg_db[seg] +
+                                  s->spectrum_avg_alpha * s->line_db[seg];
+        }
     }
 
     t_wf0 = now_s();
@@ -1319,9 +1372,13 @@ static bool resize_buffers(struct scan_state *s)
     free(s->out_im);
     free(s->window);
     free(s->line_db);
+    free(s->line_peak_db);
+    free(s->line_avg_db);
     free(s->line_pow_accum);
     free(s->line_w_accum);
     free(s->plot_db);
+    free(s->plot_avg);
+    free(s->plot_peak);
     free(s->plot_points);
     free(s->waterfall_rgba);
 
@@ -1333,9 +1390,13 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = NULL;
     s->window = NULL;
     s->line_db = NULL;
+    s->line_peak_db = NULL;
+    s->line_avg_db = NULL;
     s->line_pow_accum = NULL;
     s->line_w_accum = NULL;
     s->plot_db = NULL;
+    s->plot_avg = NULL;
+    s->plot_peak = NULL;
     s->plot_points = NULL;
     s->waterfall_rgba = NULL;
 
@@ -1412,15 +1473,20 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)active_width, sizeof(float));
+    s->line_peak_db = (float *)calloc((size_t)active_width, sizeof(float));
+    s->line_avg_db = (float *)calloc((size_t)active_width, sizeof(float));
     s->line_pow_accum = (float *)calloc((size_t)active_width, sizeof(float));
     s->line_w_accum = (float *)calloc((size_t)active_width, sizeof(float));
     s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
+    s->plot_avg = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
+    s->plot_peak = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->out_re || !s->out_im ||
-        !s->window || !s->line_db || !s->line_pow_accum || !s->line_w_accum ||
-        !s->plot_db || !s->plot_points || !s->waterfall_rgba) {
+        !s->window || !s->line_db || !s->line_peak_db || !s->line_avg_db ||
+        !s->line_pow_accum || !s->line_w_accum ||
+        !s->plot_db || !s->plot_avg || !s->plot_peak || !s->plot_points || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
         return false;
     }
@@ -1637,6 +1703,8 @@ struct ui_state {
     int rx_gain;
     int settle_us;
     int stitch_pct;
+    bool show_peak;
+    bool show_avg;
 };
 
 static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
@@ -1648,6 +1716,8 @@ static void ui_state_from_scan(const struct scan_state *s, struct ui_state *ui)
     ui->rx_gain = s->rx_gain;
     ui->settle_us = s->rx_settle_us;
     ui->stitch_pct = s->stitch_pct;
+    ui->show_peak = s->spectrum_show_peak;
+    ui->show_avg = s->spectrum_show_avg;
 }
 
 static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
@@ -1760,6 +1830,12 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(95.0f);
     changed |= igDragFloat("Max dB", &s->db_max, 0.2f, -160.0f, 40.0f, "%.1f", 0);
+    igSameLine(0.0f, 10.0f);
+    if (igCheckbox("Peak Hold", &ui->show_peak))
+        s->spectrum_show_peak = ui->show_peak;
+    igSameLine(0.0f, 10.0f);
+    if (igCheckbox("Avg Trace", &ui->show_avg))
+        s->spectrum_show_avg = ui->show_avg;
 
     if (s->db_max <= s->db_min + 1.0f) {
         s->db_max = s->db_min + 1.0f;
@@ -1811,13 +1887,23 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                 double f1_hz = (double)s->scan_start_hz + total_hz * (double)(row + 1) / (double)rows;
                 int bin0 = (int)((int64_t)row * s->waterfall_width / rows);
                 int bin1 = (int)((int64_t)(row + 1) * s->waterfall_width / rows);
-                int plot_count = build_plot_slice(s, bin0, bin1);
+                int plot_count = build_plot_slice_from(s, s->line_db, s->plot_db, bin0, bin1);
                 char plot_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
 
+                if (s->spectrum_show_avg)
+                    (void)build_plot_slice_from(s, s->line_avg_db, s->plot_avg, bin0, bin1);
+                if (s->spectrum_show_peak)
+                    (void)build_plot_slice_from(s, s->line_peak_db, s->plot_peak, bin0, bin1);
+
                 snprintf(plot_id, sizeof(plot_id), "##spectrum_row_%d", row);
-                draw_spectrum_with_grid(s, plot_id, avail.x, spectrum_row_h, plot_count, f0_hz, f1_hz);
+                draw_spectrum_with_grid(s, plot_id, avail.x, spectrum_row_h, plot_count,
+                                        s->plot_db,
+                                        s->spectrum_show_avg ? s->plot_avg : NULL,
+                                        s->spectrum_show_peak ? s->plot_peak : NULL,
+                                        s->spectrum_show_avg, s->spectrum_show_peak,
+                                        f0_hz, f1_hz);
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
 
                 if (row != rows - 1)
@@ -2076,6 +2162,9 @@ int main(int argc, char **argv)
     s.lo_hz = 0;
     s.display_rows = 1;
     s.waterfall_palette = 0;
+    s.spectrum_show_peak = false;
+    s.spectrum_show_avg = false;
+    s.spectrum_avg_alpha = 0.10f;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
@@ -2272,9 +2361,13 @@ int main(int argc, char **argv)
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.line_peak_db);
+    free(s.line_avg_db);
     free(s.line_pow_accum);
     free(s.line_w_accum);
     free(s.plot_db);
+    free(s.plot_avg);
+    free(s.plot_peak);
     free(s.plot_points);
     free(s.waterfall_rgba);
     free(s.fastlock_sw);
@@ -2311,9 +2404,13 @@ fail:
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.line_peak_db);
+    free(s.line_avg_db);
     free(s.line_pow_accum);
     free(s.line_w_accum);
     free(s.plot_db);
+    free(s.plot_avg);
+    free(s.plot_peak);
     free(s.plot_points);
     free(s.waterfall_rgba);
     free(s.fastlock_sw);
