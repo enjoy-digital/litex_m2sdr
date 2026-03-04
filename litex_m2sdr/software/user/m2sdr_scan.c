@@ -52,7 +52,7 @@
 #define DEFAULT_DB_MIN        -120.0f
 #define DEFAULT_DB_MAX        10.0f
 
-#define DEFAULT_RX_SETTLE_US 2000
+#define DEFAULT_RX_SETTLE_US 20
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
 
@@ -1195,6 +1195,9 @@ int main(int argc, char **argv)
                     "Quality (Overlap)",
                     "Fast (No Overlap)"
                 };
+                static const char *rows_items[] = {
+                    "1", "2", "3", "4", "5", "6", "7", "8"
+                };
                 static const char *palette_items[] = {
                     "Google Turbo",
                     "Plasma",
@@ -1220,6 +1223,7 @@ int main(int argc, char **argv)
                 igSameLine(0.0f, 10.0f);
                 igText("SR %.2f MSPS / BW %.2f MHz", (double)s.sample_rate_hz / 1e6, (double)s.rf_bandwidth_hz / 1e6);
 
+                igSeparatorText("Scan");
                 igSetNextItemWidth(160.0f);
                 changed_start = igDragFloat("Scan Start (MHz)", &ui_start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
                 igSameLine(0.0f, 10.0f);
@@ -1257,21 +1261,25 @@ int main(int argc, char **argv)
                     changed = true;
                 }
 
+                igSeparatorText("Display");
+                rows_tmp = s.display_rows - 1;
+                if (rows_tmp < 0) rows_tmp = 0;
+                if (rows_tmp > 7) rows_tmp = 7;
                 igSetNextItemWidth(120.0f);
-                if (igDragInt("Rows", &rows_tmp, 0.2f, 1, 8, "%d", 0)) {
-                    if (rows_tmp < 1) rows_tmp = 1;
-                    if (rows_tmp > 8) rows_tmp = 8;
-                    s.display_rows = rows_tmp;
-                }
+                if (igCombo_Str_arr("Rows", &rows_tmp, rows_items, 8, 8))
+                    s.display_rows = rows_tmp + 1;
                 igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(120.0f);
                 changed |= igDragInt("RX Gain (dB)", &ui_rx_gain, 0.2f, 0, 73, "%d", 0);
                 igSameLine(0.0f, 10.0f);
                 igSetNextItemWidth(120.0f);
-                changed |= igDragInt("Settle (us)", &ui_settle_us, 5.0f, 0, 5000, "%d", 0);
+                changed |= igDragInt("Settle (us)", &ui_settle_us, 1.0f, 0, 5000, "%d", 0);
                 igSameLine(0.0f, 10.0f);
-                changed |= igDragFloatRange2("Display dB", &s.db_min, &s.db_max, 0.2f, -160.0f, 40.0f,
-                                             "Min %.1f", "Max %.1f", 0);
+                igSetNextItemWidth(95.0f);
+                changed |= igDragFloat("Min dB", &s.db_min, 0.2f, -160.0f, 20.0f, "%.1f", 0);
+                igSameLine(0.0f, 10.0f);
+                igSetNextItemWidth(95.0f);
+                changed |= igDragFloat("Max dB", &s.db_max, 0.2f, -160.0f, 40.0f, "%.1f", 0);
 
                 if (s.db_max <= s.db_min + 1.0f) {
                     s.db_max = s.db_min + 1.0f;
