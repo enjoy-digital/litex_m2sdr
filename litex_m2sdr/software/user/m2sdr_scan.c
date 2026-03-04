@@ -1818,6 +1818,19 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     bool changed = false;
     bool changed_start = false;
     bool changed_stop = false;
+    int bi;
+    int band_clicked = -1;
+    static const struct {
+        const char *name;
+        float f0_mhz;
+        float f1_mhz;
+    } band_presets[] = {
+        { "FM", 88.0f, 108.0f },
+        { "Air", 118.0f, 137.0f },
+        { "ADS-B", 1087.0f, 1093.0f },
+        { "2.4G", 2400.0f, 2483.5f },
+        { "WiFi5G", 5150.0f, 5850.0f }
+    };
 
     if (!igBeginChild_Str("##controls_panel", (ImVec2){0.0f, controls_h}, 0, 0)) {
         igEndChild();
@@ -1859,6 +1872,19 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSetNextItemWidth(160.0f);
     changed_stop = igDragFloat("Scan Stop (MHz)", &ui->stop_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
     changed = changed_start || changed_stop;
+    igSameLine(0.0f, 10.0f);
+    igText("Bands:");
+    for (bi = 0; bi < (int)(sizeof(band_presets) / sizeof(band_presets[0])); bi++) {
+        igSameLine(0.0f, 4.0f);
+        if (igSmallButton(band_presets[bi].name))
+            band_clicked = bi;
+    }
+
+    if (band_clicked >= 0) {
+        ui->start_mhz = band_presets[band_clicked].f0_mhz;
+        ui->stop_mhz = band_presets[band_clicked].f1_mhz;
+        changed = true;
+    }
 
     if (changed_start && ui->start_mhz > ui->stop_mhz - min_span_mhz)
         ui->stop_mhz = ui->start_mhz + min_span_mhz;
