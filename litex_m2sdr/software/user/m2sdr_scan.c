@@ -179,6 +179,13 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
+    bool waterfall_pause;
+    int waterfall_speed_div;
+    int waterfall_speed_ctr;
+    float waterfall_contrast;
+    float waterfall_gamma;
+    int waterfall_history_lines;
+    int waterfall_scroll;
     bool spectrum_show_peak;
     bool spectrum_show_avg;
     float spectrum_avg_alpha;
@@ -1045,14 +1052,17 @@ static void waterfall_push_line(struct scan_state *s)
 {
     int x;
     uint32_t *dst_last;
+    int hist_lines = s->waterfall_history_lines;
+    float contrast = s->waterfall_contrast;
+    float gamma = s->waterfall_gamma;
 
-    if (s->lines > 1) {
+    if (hist_lines > 1) {
         memmove(s->waterfall_rgba,
                 s->waterfall_rgba + s->waterfall_tex_width,
-                (size_t)(s->lines - 1) * (size_t)s->waterfall_tex_width * sizeof(uint32_t));
+                (size_t)(hist_lines - 1) * (size_t)s->waterfall_tex_width * sizeof(uint32_t));
     }
 
-    dst_last = s->waterfall_rgba + (size_t)(s->lines - 1) * (size_t)s->waterfall_tex_width;
+    dst_last = s->waterfall_rgba + (size_t)(hist_lines - 1) * (size_t)s->waterfall_tex_width;
     for (x = 0; x < s->waterfall_tex_width; x++) {
         int start = (int)((int64_t)x * s->waterfall_width / s->waterfall_tex_width);
         int stop  = (int)((int64_t)(x + 1) * s->waterfall_width / s->waterfall_tex_width);
@@ -1066,8 +1076,11 @@ static void waterfall_push_line(struct scan_state *s)
         pwr /= (float)n;
 
         float t = (pwr - s->db_min) / (s->db_max - s->db_min + 1e-6f);
+        t = (t - 0.5f) * contrast + 0.5f;
         if (t < 0.0f) t = 0.0f;
         if (t > 1.0f) t = 1.0f;
+        if (gamma > 0.01f)
+            t = powf(t, gamma);
         dst_last[x] = colormap_apply(s->waterfall_palette, t);
     }
 
@@ -1077,7 +1090,7 @@ static void waterfall_push_line(struct scan_state *s)
                     0,
                     0,
                     s->waterfall_tex_width,
-                    s->lines,
+                    hist_lines,
                     GL_BGRA,
                     GL_UNSIGNED_BYTE,
                     s->waterfall_rgba);
@@ -1323,7 +1336,16 @@ static bool scan_line(struct scan_state *s)
     }
 
     t_wf0 = now_s();
-    waterfall_push_line(s);
+    if (!s->waterfall_pause) {
+        if (s->waterfall_speed_div < 1)
+            s->waterfall_speed_div = 1;
+        s->waterfall_speed_ctr++;
+        if (s->waterfall_speed_ctr >= s->waterfall_speed_div) {
+            waterfall_push_line(s);
+            s->waterfall_speed_ctr = 0;
+            s->waterfall_scroll = 0;
+        }
+    }
     t_wf1 = now_s();
     t_line1 = now_s();
 
@@ -1401,6 +1423,7 @@ static bool resize_buffers(struct scan_state *s)
     int active_width;
     int stride_bins;
     int overlap_bins;
+    int hist_lines;
     int tex_width;
 
     fft_worker_stop(s);
@@ -1523,7 +1546,12 @@ static bool resize_buffers(struct scan_state *s)
     s->plot_avg = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->plot_peak = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
-    s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
+    hist_lines = s->lines * 4;
+    if (hist_lines < s->lines)
+        hist_lines = s->lines;
+    if (hist_lines > 4096)
+        hist_lines = 4096;
+    s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)hist_lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->out_re || !s->out_im ||
         !s->window || !s->line_db || !s->line_peak_db || !s->line_avg_db ||
@@ -1550,6 +1578,8 @@ static bool resize_buffers(struct scan_state *s)
     s->step_hz = step_hz;
     s->waterfall_width = active_width;
     s->waterfall_tex_width = tex_width;
+    s->waterfall_history_lines = hist_lines;
+    s->waterfall_scroll = 0;
 
     if (!s->waterfall_tex)
         glGenTextures(1, &s->waterfall_tex);
@@ -1563,7 +1593,7 @@ static bool resize_buffers(struct scan_state *s)
                  0,
                  GL_RGBA8,
                  s->waterfall_tex_width,
-                 s->lines,
+                 s->waterfall_history_lines,
                  0,
                  GL_BGRA,
                  GL_UNSIGNED_BYTE,
@@ -1721,6 +1751,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->rx_settle_us = rx_settle_us;
     s->stitch_pct = stitch_pct;
     s->lo_valid = false;
+    s->waterfall_speed_ctr = 0;
     fastlock_reset(s);
 
     s->perf.prev_rate_t = now_s();
@@ -1939,6 +1970,25 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 10.0f);
     if (igCheckbox("Peak Marker", &ui->show_peak_marker))
         s->spectrum_peak_marker = ui->show_peak_marker;
+    igSameLine(0.0f, 10.0f);
+    igCheckbox("WF Pause", &s->waterfall_pause);
+    igSameLine(0.0f, 8.0f);
+    igSetNextItemWidth(90.0f);
+    igSliderInt("WF Speed", &s->waterfall_speed_div, 1, 8, "%dx", 0);
+    igSameLine(0.0f, 8.0f);
+    igSetNextItemWidth(90.0f);
+    igDragFloat("WF Ctr", &s->waterfall_contrast, 0.02f, 0.5f, 2.5f, "%.2f", 0);
+    igSameLine(0.0f, 8.0f);
+    igSetNextItemWidth(90.0f);
+    igDragFloat("WF Gamma", &s->waterfall_gamma, 0.02f, 0.4f, 2.5f, "%.2f", 0);
+    if (s->waterfall_pause) {
+        int max_scroll = s->waterfall_history_lines - s->lines;
+        if (max_scroll < 0)
+            max_scroll = 0;
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(130.0f);
+        igSliderInt("WF Scroll", &s->waterfall_scroll, 0, max_scroll, "%d", 0);
+    }
 
     igSetNextItemWidth(80.0f);
     if (igCheckbox("A", &ui->marker_a_enable))
@@ -2016,6 +2066,18 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                 char plot_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
+                float v0, v1;
+                int max_scroll = s->waterfall_history_lines - s->lines;
+                if (max_scroll < 0)
+                    max_scroll = 0;
+                if (s->waterfall_scroll < 0)
+                    s->waterfall_scroll = 0;
+                if (s->waterfall_scroll > max_scroll)
+                    s->waterfall_scroll = max_scroll;
+                v1 = 1.0f - (float)s->waterfall_scroll / (float)s->waterfall_history_lines;
+                v0 = v1 - (float)s->lines / (float)s->waterfall_history_lines;
+                if (v0 < 0.0f)
+                    v0 = 0.0f;
 
                 if (s->spectrum_show_avg)
                     (void)build_plot_slice_from(s, s->line_avg_db, s->plot_avg, bin0, bin1);
@@ -2032,7 +2094,7 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                         s->marker_a_enable, s->marker_b_enable,
                                         s->marker_a_hz, s->marker_b_hz,
                                         f0_hz, f1_hz);
-                igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
+                igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, v1}, (ImVec2){u1, v0});
 
                 if (row != rows - 1)
                     igSeparator();
@@ -2290,6 +2352,13 @@ int main(int argc, char **argv)
     s.lo_hz = 0;
     s.display_rows = 1;
     s.waterfall_palette = 0;
+    s.waterfall_pause = false;
+    s.waterfall_speed_div = 1;
+    s.waterfall_speed_ctr = 0;
+    s.waterfall_contrast = 1.0f;
+    s.waterfall_gamma = 1.0f;
+    s.waterfall_history_lines = s.lines;
+    s.waterfall_scroll = 0;
     s.spectrum_show_peak = false;
     s.spectrum_show_avg = false;
     s.spectrum_avg_alpha = 0.10f;
