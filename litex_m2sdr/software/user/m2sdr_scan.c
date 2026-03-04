@@ -70,6 +70,9 @@ static const char *k_scan_samplerate_labels[] = {
     "7.68 MSPS"
 };
 
+static const int k_fft_lengths[] = { 128, 256, 512, 1024, 2048 };
+static const char *k_fft_length_labels[] = { "128", "256", "512", "1024", "2048" };
+
 static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
 
@@ -169,7 +172,6 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
-    bool spectrum_auto_scale;
 
     int segments;
     int stride_bins;
@@ -253,6 +255,16 @@ static bool is_supported_samplerate(uint32_t sample_rate_hz)
             return true;
     }
     return false;
+}
+
+static int fft_len_index_from_value(int fft_len)
+{
+    int i;
+    for (i = 0; i < (int)(sizeof(k_fft_lengths) / sizeof(k_fft_lengths[0])); i++) {
+        if (k_fft_lengths[i] == fft_len)
+            return i;
+    }
+    return 3; /* 1024 default */
 }
 
 static void make_window(float *dst, int n)
@@ -554,19 +566,6 @@ static void draw_spectrum_with_grid(struct scan_state *s,
 
     if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
         return;
-
-    if (s->spectrum_auto_scale) {
-        float vmin = s->plot_db[0];
-        float vmax = s->plot_db[0];
-        float pad;
-        for (i = 1; i < plot_count; i++) {
-            if (s->plot_db[i] < vmin) vmin = s->plot_db[i];
-            if (s->plot_db[i] > vmax) vmax = s->plot_db[i];
-        }
-        pad = (vmax - vmin) * 0.15f + 1.0f;
-        y_min = vmin - pad;
-        y_max = vmax + pad;
-    }
 
     igInvisibleButton(id, (ImVec2){width, height}, 0);
     igGetItemRectMin(&pmin);
@@ -915,14 +914,6 @@ static bool is_power_of_two_int(int n)
     return (n > 0) && ((n & (n - 1)) == 0);
 }
 
-static int ilog2_int(int n)
-{
-    int e = 0;
-    while ((1 << e) < n)
-        e++;
-    return e;
-}
-
 static bool apply_runtime_config(struct scan_state *s,
                                  int64_t start_hz,
                                  int64_t stop_hz,
@@ -933,8 +924,8 @@ static bool apply_runtime_config(struct scan_state *s,
                                  int rx_settle_us,
                                  int stitch_mode)
 {
-    if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 16384) {
-        fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 16384).\n", fft_len);
+    if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 2048) {
+        fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 2048).\n", fft_len);
         return false;
     }
     if (lines < 32 || lines > 2048) {
@@ -1005,7 +996,7 @@ int main(int argc, char **argv)
     float ui_start_mhz;
     float ui_stop_mhz;
     int ui_samplerate_idx;
-    int ui_fft_exp;
+    int ui_fft_idx;
     int ui_lines;
     int ui_rx_gain;
     int ui_settle_us;
@@ -1039,7 +1030,6 @@ int main(int argc, char **argv)
     s.run = true;
     s.display_rows = 1;
     s.waterfall_palette = 0;
-    s.spectrum_auto_scale = true;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
@@ -1150,7 +1140,7 @@ int main(int argc, char **argv)
     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
     ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
-    ui_fft_exp = ilog2_int(s.fft_len);
+    ui_fft_idx = fft_len_index_from_value(s.fft_len);
     ui_lines = s.lines;
     ui_rx_gain = s.rx_gain;
     ui_settle_us = s.rx_settle_us;
@@ -1245,8 +1235,10 @@ int main(int argc, char **argv)
                     ui_stitch_mode = 0;
                 changed |= igCombo_Str_arr("Stitch Mode", &ui_stitch_mode, stitch_mode_items, 2, 2);
             }
-            changed |= igSliderInt("FFT log2", &ui_fft_exp, 7, 14, "%d", 0);
-            igText("FFT Length: %d", 1 << ui_fft_exp);
+            changed |= igCombo_Str_arr("FFT Points", &ui_fft_idx,
+                                       k_fft_length_labels,
+                                       (int)(sizeof(k_fft_length_labels) / sizeof(k_fft_length_labels[0])),
+                                       5);
             changed |= igSliderInt("Lines", &ui_lines, 32, 2048, "%d", 0);
             changed |= igSliderInt("Display Rows", &s.display_rows, 1, 8, "%d", 0);
             changed |= igSliderInt("RX Gain (dB)", &ui_rx_gain, 0, 73, "%d", 0);
@@ -1270,8 +1262,6 @@ int main(int argc, char **argv)
                     changed = true;
                 }
             }
-            igCheckbox("Spectrum Auto Scale", &s.spectrum_auto_scale);
-
             if (s.db_max <= s.db_min + 1.0f) {
                 s.db_max = s.db_min + 1.0f;
                 changed = true;
@@ -1283,14 +1273,17 @@ int main(int argc, char **argv)
                 if (ui_samplerate_idx < 0 ||
                     ui_samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
                     ui_samplerate_idx = 0;
+                if (ui_fft_idx < 0 ||
+                    ui_fft_idx >= (int)(sizeof(k_fft_lengths) / sizeof(k_fft_lengths[0])))
+                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
                 uint32_t new_samplerate = k_scan_samplerates_hz[ui_samplerate_idx];
-                int new_fft_len = 1 << ui_fft_exp;
+                int new_fft_len = k_fft_lengths[ui_fft_idx];
                 if (apply_runtime_config(&s, new_start, new_stop, new_samplerate, new_fft_len, ui_lines, ui_rx_gain,
                                          ui_settle_us, ui_stitch_mode)) {
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
                     ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
-                    ui_fft_exp = ilog2_int(s.fft_len);
+                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
                     ui_settle_us = s.rx_settle_us;
@@ -1299,7 +1292,7 @@ int main(int argc, char **argv)
                     ui_start_mhz = (float)s.scan_start_hz / 1e6f;
                     ui_stop_mhz = (float)s.scan_stop_hz / 1e6f;
                     ui_samplerate_idx = samplerate_index_from_hz(s.sample_rate_hz);
-                    ui_fft_exp = ilog2_int(s.fft_len);
+                    ui_fft_idx = fft_len_index_from_value(s.fft_len);
                     ui_lines = s.lines;
                     ui_rx_gain = s.rx_gain;
                     ui_settle_us = s.rx_settle_us;
