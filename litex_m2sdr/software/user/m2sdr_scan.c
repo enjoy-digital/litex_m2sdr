@@ -50,7 +50,7 @@
 #define DEFAULT_FFT_LEN       1024
 #define DEFAULT_LINES         300
 #define DEFAULT_DB_MIN        -120.0f
-#define DEFAULT_DB_MAX        -20.0f
+#define DEFAULT_DB_MAX        10.0f
 
 #define RX_SETTLE_US 2000
 #define MAX_WATERFALL_WIDTH 262144
@@ -530,6 +530,38 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         format_freq_label(f, txt, sizeof(txt));
         ImDrawList_AddText_Vec2(dl, (ImVec2){pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks + 2.0f, pmax.y - 16.0f},
                                 col_text, txt, NULL);
+    }
+}
+
+static void draw_waterfall_freq_overlay(double f0_hz, double f1_hz)
+{
+    int i;
+    const int v_ticks = 10;
+    ImVec2 pmin, pmax;
+    ImDrawList *dl;
+    ImU32 col_grid = 0x55D0D0D0u;
+    ImU32 col_border = 0x80A0A0A0u;
+    ImU32 col_text = 0xFFD0D0D0u;
+
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    if (pmax.x <= pmin.x || pmax.y <= pmin.y)
+        return;
+
+    dl = igGetWindowDrawList();
+    ImDrawList_AddRect(dl, pmin, pmax, col_border, 0.0f, 0, 1.0f);
+
+    for (i = 0; i <= v_ticks; i++) {
+        float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
+        char txt[32];
+        double f = f0_hz + (f1_hz - f0_hz) * (double)i / (double)v_ticks;
+
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid, 1.0f);
+
+        if ((i % 2) == 0) {
+            format_freq_label(f, txt, sizeof(txt));
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x + 2.0f, pmax.y - 16.0f}, col_text, txt, NULL);
+        }
     }
 }
 
@@ -1157,6 +1189,7 @@ int main(int argc, char **argv)
 
                 igText("Waterfall Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
+                draw_waterfall_freq_overlay(f0_hz, f1_hz);
 
                 if (row != rows - 1)
                     igSeparator();
