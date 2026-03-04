@@ -608,9 +608,8 @@ static void draw_waterfall_freq_overlay(double f0_hz, double f1_hz)
     const int v_ticks = 10;
     ImVec2 pmin, pmax;
     ImDrawList *dl;
-    ImU32 col_grid = 0x55D0D0D0u;
-    ImU32 col_border = 0x80A0A0A0u;
-    ImU32 col_text = 0xFFD0D0D0u;
+    ImU32 col_border = 0xFF3A3A3Au;
+    ImU32 col_text = 0xFFAFAFAFu;
 
     igGetItemRectMin(&pmin);
     igGetItemRectMax(&pmax);
@@ -625,12 +624,8 @@ static void draw_waterfall_freq_overlay(double f0_hz, double f1_hz)
         char txt[32];
         double f = f0_hz + (f1_hz - f0_hz) * (double)i / (double)v_ticks;
 
-        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid, 1.0f);
-
-        if ((i % 2) == 0) {
-            format_freq_label(f, txt, sizeof(txt));
-            ImDrawList_AddText_Vec2(dl, (ImVec2){x + 2.0f, pmax.y - 16.0f}, col_text, txt, NULL);
-        }
+        format_freq_label(f, txt, sizeof(txt));
+        ImDrawList_AddText_Vec2(dl, (ImVec2){x + 2.0f, pmax.y - 16.0f}, col_text, txt, NULL);
     }
 }
 
@@ -1334,13 +1329,11 @@ int main(int argc, char **argv)
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
 
-                igText("Spectrum Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
                 snprintf(overlay, sizeof(overlay), "Row %d", row + 1);
                 snprintf(plot_id, sizeof(plot_id), "##spectrum_row_%d", row);
                 (void)overlay;
                 draw_spectrum_with_grid(&s, plot_id, avail.x, spectrum_row_h, plot_count, f0_hz, f1_hz);
 
-                igText("Waterfall Row %d: %.3f MHz -> %.3f MHz", row + 1, f0_hz / 1e6, f1_hz / 1e6);
                 igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1}, (ImVec2){u1, 0});
                 draw_waterfall_freq_overlay(f0_hz, f1_hz);
 
