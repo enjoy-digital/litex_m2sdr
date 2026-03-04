@@ -371,13 +371,21 @@ static bool fastlock_save_slot(int slot, uint8_t values[FASTLOCK_PROFILE_BYTES])
     return ad9361_rx_fastlock_save(ad9361_phy, (uint32_t)slot, values) == 0;
 }
 
+enum tune_mode {
+    TUNE_MODE_NONE = 0,
+    TUNE_MODE_COLD,
+    TUNE_MODE_RECALL,
+    TUNE_MODE_LOAD_RECALL
+};
+
 static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
                            double *t_lo_s,
                            int *retuned_count,
                            int *fastlock_recall_count,
                            int *fastlock_load_count,
                            int *fastlock_store_count,
-                           int *fastlock_cold_tune_count)
+                           int *fastlock_cold_tune_count,
+                           enum tune_mode *mode_out)
 {
     double t0, t1;
     int slot, sw_idx;
@@ -393,6 +401,8 @@ static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
         s->lo_hz = center_hz;
         if (retuned_count)
             (*retuned_count)++;
+        if (mode_out)
+            *mode_out = TUNE_MODE_COLD;
         return true;
     }
 
@@ -409,6 +419,8 @@ static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
         s->lo_hz = center_hz;
         if (fastlock_recall_count)
             (*fastlock_recall_count)++;
+        if (mode_out)
+            *mode_out = TUNE_MODE_RECALL;
         return true;
     }
 
@@ -439,6 +451,8 @@ static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
         s->fastlock_curr_slot = target_slot;
         s->lo_valid = true;
         s->lo_hz = center_hz;
+        if (mode_out)
+            *mode_out = TUNE_MODE_LOAD_RECALL;
         return true;
     }
 
@@ -480,7 +494,44 @@ static bool tune_rx_target(struct scan_state *s, int64_t center_hz,
     s->fastlock_curr_slot = target_slot;
     s->lo_valid = true;
     s->lo_hz = center_hz;
+    if (mode_out)
+        *mode_out = TUNE_MODE_COLD;
     return true;
+}
+
+static int settle_us_for_tune_mode(const struct scan_state *s, enum tune_mode mode)
+{
+    switch (mode) {
+    case TUNE_MODE_RECALL:
+        return s->rx_settle_us < 5 ? s->rx_settle_us : 5;
+    case TUNE_MODE_LOAD_RECALL:
+        return s->rx_settle_us < 8 ? s->rx_settle_us : 8;
+    case TUNE_MODE_COLD:
+    case TUNE_MODE_NONE:
+    default:
+        return s->rx_settle_us;
+    }
+}
+
+static int discard_samples_for_tune_mode(const struct scan_state *s, enum tune_mode mode)
+{
+    int n = s->fft_len / 2;
+    switch (mode) {
+    case TUNE_MODE_RECALL:
+        n = s->fft_len / 8;
+        break;
+    case TUNE_MODE_LOAD_RECALL:
+        n = s->fft_len / 6;
+        break;
+    case TUNE_MODE_COLD:
+    case TUNE_MODE_NONE:
+    default:
+        n = s->fft_len / 2;
+        break;
+    }
+    if (n < 0)
+        n = 0;
+    return n;
 }
 
 static uint32_t scan_bandwidth_from_samplerate(uint32_t sample_rate_hz)
@@ -705,23 +756,30 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
     int i;
     double t0, t1;
     double t_lo_s = 0.0, t_settle_s = 0.0, t_discard_s = 0.0;
+    enum tune_mode mode = TUNE_MODE_NONE;
+    int settle_us = 0;
+    int discard_samples = 0;
 
     if (!s->lo_valid || s->lo_hz != center_hz) {
         if (!tune_rx_target(s, center_hz, &t_lo_s, retuned_count,
                             fastlock_recall_count, fastlock_load_count,
-                            fastlock_store_count, fastlock_cold_tune_count)) {
+                            fastlock_store_count, fastlock_cold_tune_count, &mode)) {
             fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
             return false;
         }
 
+        settle_us = settle_us_for_tune_mode(s, mode);
+        discard_samples = discard_samples_for_tune_mode(s, mode);
+
         t0 = now_s();
-        usleep((useconds_t)s->rx_settle_us);
+        if (settle_us > 0)
+            usleep((useconds_t)settle_us);
         t1 = now_s();
         t_settle_s = t1 - t0;
 
         /* Drop stale pre-retune DMA samples before taking the FFT capture block. */
         t0 = now_s();
-        if (!discard_iq_samples(s, s->fft_len / 2))
+        if (!discard_iq_samples(s, discard_samples))
             return false;
         t1 = now_s();
         t_discard_s = t1 - t0;
