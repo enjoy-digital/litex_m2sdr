@@ -415,6 +415,12 @@ static void reset_spectrum_view(struct scan_state *s)
     }
 }
 
+static void show_help_tooltip(const char *text)
+{
+    if (igIsItemHovered(ImGuiHoveredFlags_DelayShort) && text)
+        igSetTooltip("%s", text);
+}
+
 static void fastlock_reset(struct scan_state *s)
 {
     int i;
@@ -2066,9 +2072,11 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
                                k_fft_length_labels,
                                (int)(sizeof(k_fft_length_labels) / sizeof(k_fft_length_labels[0])),
                                5);
+    show_help_tooltip("Higher FFT points improve frequency resolution but increase compute cost.");
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(170.0f);
     changed |= igSliderInt("Stitch (%)", &ui->stitch_pct, 0, 160, "%d", 0);
+    show_help_tooltip("0% favors speed; 100% is baseline quality; >100% increases overlap to hide seams.");
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(120.0f);
     if (igSliderInt("RX Gain (dB)", &ui->rx_gain, 0, 73, "%d", 0))
@@ -2088,6 +2096,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(120.0f);
     changed |= igDragInt("Settle (us)", &ui->settle_us, 1.0f, 0, 5000, "%d", 0);
+    show_help_tooltip("Post-tune wait before capture. Lower is faster, higher can improve spectral cleanliness.");
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(95.0f);
     changed |= igDragFloat("Min dB", &s->db_min, 0.2f, -160.0f, 20.0f, "%.1f", 0);
