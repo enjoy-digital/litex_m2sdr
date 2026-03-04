@@ -400,6 +400,21 @@ static void apply_rx_gain_request(struct scan_state *s, int gain_db)
     refresh_rx_gain_status(s);
 }
 
+static void reset_spectrum_view(struct scan_state *s)
+{
+    int i;
+    if (!s)
+        return;
+    s->db_min = DEFAULT_DB_MIN;
+    s->db_max = DEFAULT_DB_MAX;
+    if (s->line_peak_db && s->line_avg_db && s->line_db) {
+        for (i = 0; i < s->waterfall_width; i++) {
+            s->line_peak_db[i] = s->line_db[i];
+            s->line_avg_db[i] = s->line_db[i];
+        }
+    }
+}
+
 static void fastlock_reset(struct scan_state *s)
 {
     int i;
@@ -1971,6 +1986,12 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         return;
     }
 
+    ui->show_peak = s->spectrum_show_peak;
+    ui->show_avg = s->spectrum_show_avg;
+    ui->show_peak_marker = s->spectrum_peak_marker;
+    ui->marker_a_enable = s->marker_a_enable;
+    ui->marker_b_enable = s->marker_b_enable;
+
     igSeparatorText("Scan Controls");
 
     if (s->run) {
@@ -2605,6 +2626,18 @@ int main(int argc, char **argv)
                 e.window.event == SDL_WINDOWEVENT_CLOSE &&
                 e.window.windowID == SDL_GetWindowID(window))
                 quit = true;
+            if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
+                SDL_Keycode kc = e.key.keysym.sym;
+                if (kc == SDLK_SPACE) {
+                    s.run = !s.run;
+                } else if (kc == SDLK_p) {
+                    s.spectrum_show_peak = !s.spectrum_show_peak;
+                } else if (kc == SDLK_m) {
+                    s.spectrum_peak_marker = !s.spectrum_peak_marker;
+                } else if (kc == SDLK_r) {
+                    reset_spectrum_view(&s);
+                }
+            }
         }
 
         if (s.run) {
