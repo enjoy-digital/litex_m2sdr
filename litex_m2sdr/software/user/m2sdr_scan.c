@@ -179,6 +179,7 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
+    int spectrum_autoscale_mode;
     bool waterfall_pause;
     int waterfall_speed_div;
     int waterfall_speed_ctr;
@@ -1323,6 +1324,23 @@ static bool scan_line(struct scan_state *s)
             s->line_db[seg] = s->db_min;
     }
 
+    if (s->spectrum_autoscale_mode > 0 && s->waterfall_width > 0) {
+        float mn = s->line_db[0], mx = s->line_db[0];
+        float alpha = (s->spectrum_autoscale_mode == 1) ? 0.05f : 0.20f;
+        for (seg = 1; seg < s->waterfall_width; seg++) {
+            if (s->line_db[seg] < mn)
+                mn = s->line_db[seg];
+            if (s->line_db[seg] > mx)
+                mx = s->line_db[seg];
+        }
+        mn -= 5.0f;
+        mx += 10.0f;
+        if (mx < mn + 20.0f)
+            mx = mn + 20.0f;
+        s->db_min = (1.0f - alpha) * s->db_min + alpha * mn;
+        s->db_max = (1.0f - alpha) * s->db_max + alpha * mx;
+    }
+
     for (seg = 0; seg < s->waterfall_width; seg++) {
         if (s->perf.lines_total == 0) {
             s->line_peak_db[seg] = s->line_db[seg];
@@ -1844,6 +1862,11 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         "White Hot",
         "Black Hot"
     };
+    static const char *autoscale_items[] = {
+        "Off",
+        "Slow",
+        "Fast"
+    };
     const float min_span_mhz = 1.0f;
     int p = s->waterfall_palette;
     bool changed = false;
@@ -1961,6 +1984,11 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(95.0f);
     changed |= igDragFloat("Max dB", &s->db_max, 0.2f, -160.0f, 40.0f, "%.1f", 0);
+    igSameLine(0.0f, 10.0f);
+    igSetNextItemWidth(110.0f);
+    if (s->spectrum_autoscale_mode < 0 || s->spectrum_autoscale_mode > 2)
+        s->spectrum_autoscale_mode = 0;
+    igCombo_Str_arr("Auto dB", &s->spectrum_autoscale_mode, autoscale_items, 3, 3);
     igSameLine(0.0f, 10.0f);
     if (igCheckbox("Peak Hold", &ui->show_peak))
         s->spectrum_show_peak = ui->show_peak;
@@ -2352,6 +2380,7 @@ int main(int argc, char **argv)
     s.lo_hz = 0;
     s.display_rows = 1;
     s.waterfall_palette = 0;
+    s.spectrum_autoscale_mode = 0;
     s.waterfall_pause = false;
     s.waterfall_speed_div = 1;
     s.waterfall_speed_ctr = 0;
