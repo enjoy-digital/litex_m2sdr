@@ -1091,7 +1091,8 @@ int main(int argc, char **argv)
                               SDL_WINDOWPOS_CENTERED,
                               1400,
                               850,
-                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                              SDL_WINDOW_MAXIMIZED);
     if (!window) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         goto fail;
@@ -1154,10 +1155,13 @@ int main(int argc, char **argv)
         m2sdr_imgui_sdl2_new_frame();
         igNewFrame();
 
-        igSetNextWindowPos((ImVec2){10, 10}, ImGuiCond_FirstUseEver, (ImVec2){0, 0});
-        igSetNextWindowSize((ImVec2){1370, 830}, ImGuiCond_FirstUseEver);
+        igSetNextWindowPos((ImVec2){0, 0}, ImGuiCond_Always, (ImVec2){0, 0});
+        igSetNextWindowSize(io->DisplaySize, ImGuiCond_Always);
 
-        igBegin("RF Scan", NULL, 0);
+        igBegin("RF Scan", NULL,
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoCollapse);
         igText("Device: %s", m2sdr_device);
         igText("Samplerate: %.2f MSPS | RF BW: %.2f MHz",
                (double)s.sample_rate_hz / 1e6,
