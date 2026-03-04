@@ -1154,7 +1154,6 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
             int row;
             int rows = s->display_rows;
             const float row_spacing = 4.0f;
-            const float label_h = igGetTextLineHeightWithSpacing();
             const float spectrum_row_h = 56.0f;
             float waterfall_avail_h;
             float waterfall_row_h;
@@ -1163,10 +1162,11 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
             if (rows < 1)
                 rows = 1;
 
-            waterfall_avail_h = avail.y - rows * (label_h + spectrum_row_h + row_spacing) - row_spacing;
-            if (waterfall_avail_h < rows * (label_h + 8.0f))
-                waterfall_avail_h = rows * (label_h + 8.0f);
-            waterfall_row_h = (waterfall_avail_h - rows * (label_h + row_spacing)) / rows;
+            /* No per-row text labels anymore: reserve only spectrum + spacing + waterfall area. */
+            waterfall_avail_h = avail.y - rows * (spectrum_row_h + row_spacing);
+            if (waterfall_avail_h < rows * 8.0f)
+                waterfall_avail_h = rows * 8.0f;
+            waterfall_row_h = (waterfall_avail_h - rows * row_spacing) / rows;
             if (waterfall_row_h < 8.0f)
                 waterfall_row_h = 8.0f;
 
@@ -1204,7 +1204,7 @@ static void draw_stats_panel(struct scan_state *s)
         return;
     }
 
-    igText("Performance:");
+    igSeparatorText("Performance");
     igText("Throughput: %.2f lines/s | line avg %.3f ms",
            s->perf.lines_per_sec, s->perf.ema_line_ms);
 
@@ -1435,12 +1435,12 @@ int main(int argc, char **argv)
         {
             ImVec2 avail_root;
             float controls_h = 168.0f;
-            float stats_h = 88.0f;
+            float stats_h = 132.0f;
 
             igGetContentRegionAvail(&avail_root);
             if (avail_root.y < controls_h + stats_h + 120.0f) {
                 controls_h = 132.0f;
-                stats_h = 76.0f;
+                stats_h = 108.0f;
             }
 
             draw_controls_panel(&s, &ui, controls_h);
@@ -1449,7 +1449,7 @@ int main(int argc, char **argv)
                 ImVec2 avail_mid;
                 float mid_h;
                 igGetContentRegionAvail(&avail_mid);
-                mid_h = avail_mid.y - stats_h - 6.0f;
+                mid_h = avail_mid.y - stats_h;
                 if (mid_h < 100.0f)
                     mid_h = 100.0f;
                 draw_view_panel(&s, mid_h);
