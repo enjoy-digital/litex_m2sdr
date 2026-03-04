@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define SDL_MAIN_HANDLED
@@ -167,7 +168,34 @@ struct scan_state {
     uint32_t *waterfall_rgba;
 
     GLuint waterfall_tex;
+
+    struct {
+        double last_line_ms, ema_line_ms;
+        double last_tune_ms, ema_tune_ms;
+        double last_capture_ms, ema_capture_ms;
+        double last_fft_ms, ema_fft_ms;
+        double last_waterfall_ms, ema_waterfall_ms;
+        double lines_per_sec, captures_per_sec, retunes_per_sec;
+        double iq_msps, sweep_mhz_per_sec;
+        uint64_t lines_total, captures_total, retunes_total;
+        uint64_t lines_at_prev_rate, captures_at_prev_rate, retunes_at_prev_rate;
+        double prev_rate_t;
+    } perf;
 };
+
+static double now_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static double ema_update(double prev, double sample, double alpha)
+{
+    if (prev <= 0.0)
+        return sample;
+    return (1.0 - alpha) * prev + alpha * sample;
+}
 
 static void make_window(float *dst, int n)
 {
@@ -272,19 +300,28 @@ static bool retune_rx(int64_t freq_hz)
     return ret == 0;
 }
 
-static bool scan_segment(struct scan_state *s, int64_t center_hz, int bin_offset)
+static bool scan_segment(struct scan_state *s, int64_t center_hz, int bin_offset,
+                         double *t_tune_s, double *t_capture_s, double *t_fft_s)
 {
     int i;
+    double t0, t1;
 
+    t0 = now_s();
     if (!retune_rx(center_hz)) {
         fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
         return false;
     }
     usleep(RX_SETTLE_US);
+    t1 = now_s();
+    *t_tune_s += (t1 - t0);
 
+    t0 = now_s();
     if (!capture_iq_block(s))
         return false;
+    t1 = now_s();
+    *t_capture_s += (t1 - t0);
 
+    t0 = now_s();
     for (i = 0; i < s->fft_len; i++) {
         s->in_re[i] *= s->window[i];
         s->in_im[i] *= s->window[i];
@@ -299,6 +336,8 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int bin_offset
         float pwr = 10.0f * log10f(re * re + im * im + 1e-20f);
         s->line_db[bin_offset + i] = pwr;
     }
+    t1 = now_s();
+    *t_fft_s += (t1 - t0);
 
     return true;
 }
@@ -379,16 +418,62 @@ static bool scan_line(struct scan_state *s)
 {
     double fs = (double)SCAN_SAMPLERATE_HZ;
     double start = (double)s->scan_start_hz;
+    double t_line0, t_line1, t_wf0, t_wf1;
+    double t_tune_s = 0.0, t_capture_s = 0.0, t_fft_s = 0.0;
+    double dt;
     int seg;
 
+    t_line0 = now_s();
     for (seg = 0; seg < s->segments; seg++) {
         double seg_start = start + (double)seg * fs;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
-        if (!scan_segment(s, center_hz, seg * s->fft_len))
+        if (!scan_segment(s, center_hz, seg * s->fft_len, &t_tune_s, &t_capture_s, &t_fft_s))
             return false;
     }
 
+    t_wf0 = now_s();
     waterfall_push_line(s);
+    t_wf1 = now_s();
+    t_line1 = now_s();
+
+    s->perf.lines_total++;
+    s->perf.captures_total += (uint64_t)s->segments;
+    s->perf.retunes_total += (uint64_t)s->segments;
+
+    s->perf.last_tune_ms = t_tune_s * 1e3;
+    s->perf.last_capture_ms = t_capture_s * 1e3;
+    s->perf.last_fft_ms = t_fft_s * 1e3;
+    s->perf.last_waterfall_ms = (t_wf1 - t_wf0) * 1e3;
+    s->perf.last_line_ms = (t_line1 - t_line0) * 1e3;
+
+    s->perf.ema_tune_ms = ema_update(s->perf.ema_tune_ms, s->perf.last_tune_ms, 0.2);
+    s->perf.ema_capture_ms = ema_update(s->perf.ema_capture_ms, s->perf.last_capture_ms, 0.2);
+    s->perf.ema_fft_ms = ema_update(s->perf.ema_fft_ms, s->perf.last_fft_ms, 0.2);
+    s->perf.ema_waterfall_ms = ema_update(s->perf.ema_waterfall_ms, s->perf.last_waterfall_ms, 0.2);
+    s->perf.ema_line_ms = ema_update(s->perf.ema_line_ms, s->perf.last_line_ms, 0.2);
+
+    if (s->perf.prev_rate_t <= 0.0)
+        s->perf.prev_rate_t = t_line1;
+
+    dt = t_line1 - s->perf.prev_rate_t;
+    if (dt >= 0.25) {
+        double d_lines = (double)(s->perf.lines_total - s->perf.lines_at_prev_rate);
+        double d_caps = (double)(s->perf.captures_total - s->perf.captures_at_prev_rate);
+        double d_retunes = (double)(s->perf.retunes_total - s->perf.retunes_at_prev_rate);
+
+        s->perf.lines_per_sec = d_lines / dt;
+        s->perf.captures_per_sec = d_caps / dt;
+        s->perf.retunes_per_sec = d_retunes / dt;
+        s->perf.iq_msps = (s->perf.captures_per_sec * (double)s->fft_len) / 1e6;
+        s->perf.sweep_mhz_per_sec = s->perf.lines_per_sec *
+            ((double)(s->scan_stop_hz - s->scan_start_hz) / 1e6);
+
+        s->perf.lines_at_prev_rate = s->perf.lines_total;
+        s->perf.captures_at_prev_rate = s->perf.captures_total;
+        s->perf.retunes_at_prev_rate = s->perf.retunes_total;
+        s->perf.prev_rate_t = t_line1;
+    }
+
     return true;
 }
 
@@ -629,6 +714,11 @@ static bool apply_runtime_config(struct scan_state *s,
     s->lines = lines;
     s->rx_gain = rx_gain;
 
+    s->perf.prev_rate_t = now_s();
+    s->perf.lines_at_prev_rate = s->perf.lines_total;
+    s->perf.captures_at_prev_rate = s->perf.captures_total;
+    s->perf.retunes_at_prev_rate = s->perf.retunes_total;
+
     ad9361_set_rx_rf_gain(ad9361_phy, 0, s->rx_gain);
     ad9361_set_rx_rf_gain(ad9361_phy, 1, s->rx_gain);
 
@@ -808,6 +898,24 @@ int main(int argc, char **argv)
         igText("Samplerate: %.2f MSPS", SCAN_SAMPLERATE_HZ / 1e6);
         igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
                s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
+
+        igSeparator();
+        igText("Performance (Benchmark)");
+        igText("Throughput: %.2f lines/s | line avg %.3f ms",
+               s.perf.lines_per_sec,
+               s.perf.ema_line_ms);
+        igText("Split avg (ms): tune %.3f | capture %.3f | FFT %.3f | waterfall %.3f",
+               s.perf.ema_tune_ms,
+               s.perf.ema_capture_ms,
+               s.perf.ema_fft_ms,
+               s.perf.ema_waterfall_ms);
+        if (s.perf.ema_line_ms > 0.0) {
+            igText("Split avg (%%): tune %.1f | capture %.1f | FFT %.1f | waterfall %.1f",
+                   100.0 * s.perf.ema_tune_ms / s.perf.ema_line_ms,
+                   100.0 * s.perf.ema_capture_ms / s.perf.ema_line_ms,
+                   100.0 * s.perf.ema_fft_ms / s.perf.ema_line_ms,
+                   100.0 * s.perf.ema_waterfall_ms / s.perf.ema_line_ms);
+        }
 
         igSeparator();
 
