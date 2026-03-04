@@ -151,6 +151,8 @@ struct scan_state {
 
     int segments;
     int waterfall_width;
+    int waterfall_tex_width;
+    int gl_max_texture_size;
 
     struct litepcie_dma_ctrl dma;
     struct simple_fft_plan fft;
@@ -308,13 +310,24 @@ static void waterfall_push_line(struct scan_state *s)
 
     if (s->lines > 1) {
         memmove(s->waterfall_rgba,
-                s->waterfall_rgba + s->waterfall_width,
-                (size_t)(s->lines - 1) * (size_t)s->waterfall_width * sizeof(uint32_t));
+                s->waterfall_rgba + s->waterfall_tex_width,
+                (size_t)(s->lines - 1) * (size_t)s->waterfall_tex_width * sizeof(uint32_t));
     }
 
-    dst_last = s->waterfall_rgba + (size_t)(s->lines - 1) * (size_t)s->waterfall_width;
-    for (x = 0; x < s->waterfall_width; x++) {
-        float t = (s->line_db[x] - s->db_min) / (s->db_max - s->db_min + 1e-6f);
+    dst_last = s->waterfall_rgba + (size_t)(s->lines - 1) * (size_t)s->waterfall_tex_width;
+    for (x = 0; x < s->waterfall_tex_width; x++) {
+        int start = (int)((int64_t)x * s->waterfall_width / s->waterfall_tex_width);
+        int stop  = (int)((int64_t)(x + 1) * s->waterfall_width / s->waterfall_tex_width);
+        int j;
+        float pwr = 0.0f;
+        int n = stop - start;
+        if (n < 1)
+            n = 1;
+        for (j = start; j < stop; j++)
+            pwr += s->line_db[j];
+        pwr /= (float)n;
+
+        float t = (pwr - s->db_min) / (s->db_max - s->db_min + 1e-6f);
         if (t < 0.0f) t = 0.0f;
         if (t > 1.0f) t = 1.0f;
         dst_last[x] = colormap_jet(t);
@@ -325,7 +338,7 @@ static void waterfall_push_line(struct scan_state *s)
                     0,
                     0,
                     0,
-                    s->waterfall_width,
+                    s->waterfall_tex_width,
                     s->lines,
                     GL_RGBA,
                     GL_UNSIGNED_BYTE,
@@ -384,6 +397,7 @@ static bool resize_buffers(struct scan_state *s)
     double range_hz;
     int new_segments;
     int new_width;
+    int tex_width;
 
     simple_fft_destroy(&s->fft);
 
@@ -421,6 +435,18 @@ static bool resize_buffers(struct scan_state *s)
         return false;
     }
 
+    if (s->gl_max_texture_size <= 0) {
+        GLint max_tex = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex);
+        if (max_tex <= 0)
+            max_tex = 4096;
+        s->gl_max_texture_size = (int)max_tex;
+    }
+
+    tex_width = new_width;
+    if (tex_width > s->gl_max_texture_size)
+        tex_width = s->gl_max_texture_size;
+
     s->in_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->in_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->out_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
@@ -428,7 +454,7 @@ static bool resize_buffers(struct scan_state *s)
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)new_width, sizeof(float));
     s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
-    s->waterfall_rgba = (uint32_t *)calloc((size_t)new_width * (size_t)s->lines, sizeof(uint32_t));
+    s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->out_re || !s->out_im ||
         !s->window || !s->line_db || !s->plot_db || !s->waterfall_rgba) {
@@ -445,6 +471,7 @@ static bool resize_buffers(struct scan_state *s)
 
     s->segments = new_segments;
     s->waterfall_width = new_width;
+    s->waterfall_tex_width = tex_width;
 
     if (!s->waterfall_tex)
         glGenTextures(1, &s->waterfall_tex);
@@ -457,7 +484,7 @@ static bool resize_buffers(struct scan_state *s)
     glTexImage2D(GL_TEXTURE_2D,
                  0,
                  GL_RGBA8,
-                 s->waterfall_width,
+                 s->waterfall_tex_width,
                  s->lines,
                  0,
                  GL_RGBA,
@@ -779,7 +806,8 @@ int main(int argc, char **argv)
         igBegin("RF Scan", NULL, 0);
         igText("Device: %s", m2sdr_device);
         igText("Samplerate: %.2f MSPS", SCAN_SAMPLERATE_HZ / 1e6);
-        igText("Segments: %d | Width: %d bins", s.segments, s.waterfall_width);
+        igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
+               s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
 
         igSeparator();
 
