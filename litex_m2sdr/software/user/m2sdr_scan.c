@@ -154,6 +154,9 @@ struct scan_state {
     bool spectrum_auto_scale;
 
     int segments;
+    int stride_bins;
+    int overlap_bins;
+    double step_hz;
     int waterfall_width;
     int waterfall_tex_width;
     int gl_max_texture_size;
@@ -167,6 +170,8 @@ struct scan_state {
     float *out_im;
     float *window;
     float *line_db;
+    float *line_pow_accum;
+    float *line_w_accum;
     float *plot_db;
     ImVec2 *plot_points;
     uint32_t *waterfall_rgba;
@@ -337,7 +342,7 @@ static bool retune_rx(int64_t freq_hz)
     return ret == 0;
 }
 
-static bool scan_segment(struct scan_state *s, int64_t center_hz, int bin_offset,
+static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
                          double *t_tune_s, double *t_capture_s, double *t_fft_s)
 {
     int i;
@@ -370,8 +375,25 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int bin_offset
         int shifted = (i + s->fft_len / 2) % s->fft_len;
         float re = s->out_re[shifted];
         float im = s->out_im[shifted];
-        float pwr = 10.0f * log10f(re * re + im * im + 1e-20f);
-        s->line_db[bin_offset + i] = pwr;
+        float pwr_lin = re * re + im * im + 1e-20f;
+        float w = 1.0f;
+        int dst = seg_index * s->stride_bins + i;
+
+        if (s->overlap_bins > 0) {
+            if (seg_index > 0 && i < s->overlap_bins) {
+                float t = (float)(i + 1) / (float)(s->overlap_bins + 1);
+                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-in */
+            }
+            if (seg_index < s->segments - 1 && i >= s->fft_len - s->overlap_bins) {
+                float t = (float)(s->fft_len - i) / (float)(s->overlap_bins + 1);
+                w *= t * t * (3.0f - 2.0f * t); /* smoothstep fade-out */
+            }
+        }
+
+        if (dst >= 0 && dst < s->waterfall_width) {
+            s->line_pow_accum[dst] += pwr_lin * w;
+            s->line_w_accum[dst] += w;
+        }
     }
     t1 = now_s();
     *t_fft_s += (t1 - t0);
@@ -574,12 +596,23 @@ static bool scan_line(struct scan_state *s)
     double dt;
     int seg;
 
+    memset(s->line_pow_accum, 0, (size_t)s->waterfall_width * sizeof(float));
+    memset(s->line_w_accum, 0, (size_t)s->waterfall_width * sizeof(float));
+
     t_line0 = now_s();
     for (seg = 0; seg < s->segments; seg++) {
-        double seg_start = start + (double)seg * fs;
+        double seg_start = start + (double)seg * s->step_hz;
         int64_t center_hz = (int64_t)(seg_start + fs * 0.5);
-        if (!scan_segment(s, center_hz, seg * s->fft_len, &t_tune_s, &t_capture_s, &t_fft_s))
+        if (!scan_segment(s, center_hz, seg, &t_tune_s, &t_capture_s, &t_fft_s))
             return false;
+    }
+
+    for (seg = 0; seg < s->waterfall_width; seg++) {
+        float w = s->line_w_accum[seg];
+        if (w > 1e-12f)
+            s->line_db[seg] = 10.0f * log10f(s->line_pow_accum[seg] / w + 1e-20f);
+        else
+            s->line_db[seg] = s->db_min;
     }
 
     t_wf0 = now_s();
@@ -631,8 +664,12 @@ static bool scan_line(struct scan_state *s)
 static bool resize_buffers(struct scan_state *s)
 {
     double range_hz;
+    double stride_ratio;
+    double step_hz;
     int new_segments;
     int new_width;
+    int stride_bins;
+    int overlap_bins;
     int tex_width;
 
     simple_fft_destroy(&s->fft);
@@ -643,6 +680,8 @@ static bool resize_buffers(struct scan_state *s)
     free(s->out_im);
     free(s->window);
     free(s->line_db);
+    free(s->line_pow_accum);
+    free(s->line_w_accum);
     free(s->plot_db);
     free(s->plot_points);
     free(s->waterfall_rgba);
@@ -653,6 +692,8 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = NULL;
     s->window = NULL;
     s->line_db = NULL;
+    s->line_pow_accum = NULL;
+    s->line_w_accum = NULL;
     s->plot_db = NULL;
     s->plot_points = NULL;
     s->waterfall_rgba = NULL;
@@ -661,11 +702,29 @@ static bool resize_buffers(struct scan_state *s)
         s->scan_stop_hz = s->scan_start_hz + SCAN_SAMPLERATE_HZ;
 
     range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
-    new_segments = (int)ceil(range_hz / (double)SCAN_SAMPLERATE_HZ);
+    stride_ratio = (double)SCAN_BANDWIDTH_HZ / (double)SCAN_SAMPLERATE_HZ;
+    if (stride_ratio < 0.5)
+        stride_ratio = 0.5;
+    if (stride_ratio > 1.0)
+        stride_ratio = 1.0;
+
+    stride_bins = (int)llround((double)s->fft_len * stride_ratio);
+    if (stride_bins < 1)
+        stride_bins = 1;
+    if (stride_bins > s->fft_len)
+        stride_bins = s->fft_len;
+    overlap_bins = s->fft_len - stride_bins;
+    step_hz = (double)SCAN_SAMPLERATE_HZ * (double)stride_bins / (double)s->fft_len;
+
+    if (range_hz <= (double)SCAN_SAMPLERATE_HZ) {
+        new_segments = 1;
+    } else {
+        new_segments = 1 + (int)ceil((range_hz - (double)SCAN_SAMPLERATE_HZ) / step_hz);
+    }
     if (new_segments < 1)
         new_segments = 1;
 
-    new_width = new_segments * s->fft_len;
+    new_width = (new_segments - 1) * stride_bins + s->fft_len;
     if (new_width <= 0 || new_width > MAX_WATERFALL_WIDTH) {
         fprintf(stderr,
             "Waterfall width %d is invalid (range too wide or FFT too large).\n",
@@ -691,12 +750,15 @@ static bool resize_buffers(struct scan_state *s)
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->line_db = (float *)calloc((size_t)new_width, sizeof(float));
+    s->line_pow_accum = (float *)calloc((size_t)new_width, sizeof(float));
+    s->line_w_accum = (float *)calloc((size_t)new_width, sizeof(float));
     s->plot_db = (float *)calloc((size_t)MAX_PLOT_POINTS, sizeof(float));
     s->plot_points = (ImVec2 *)calloc((size_t)MAX_PLOT_POINTS, sizeof(ImVec2));
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
     if (!s->in_re || !s->in_im || !s->out_re || !s->out_im ||
-        !s->window || !s->line_db || !s->plot_db || !s->plot_points || !s->waterfall_rgba) {
+        !s->window || !s->line_db || !s->line_pow_accum || !s->line_w_accum ||
+        !s->plot_db || !s->plot_points || !s->waterfall_rgba) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
         return false;
     }
@@ -709,6 +771,9 @@ static bool resize_buffers(struct scan_state *s)
     make_window(s->window, s->fft_len);
 
     s->segments = new_segments;
+    s->stride_bins = stride_bins;
+    s->overlap_bins = overlap_bins;
+    s->step_hz = step_hz;
     s->waterfall_width = new_width;
     s->waterfall_tex_width = tex_width;
 
@@ -1054,6 +1119,8 @@ int main(int argc, char **argv)
         igText("Samplerate: %.2f MSPS", SCAN_SAMPLERATE_HZ / 1e6);
         igText("Segments: %d | FFT Width: %d bins | Waterfall Tex Width: %d px (GL max: %d)",
                s.segments, s.waterfall_width, s.waterfall_tex_width, s.gl_max_texture_size);
+        igText("Stitch: step %.3f MHz | stride %d bins | overlap %d bins",
+               s.step_hz / 1e6, s.stride_bins, s.overlap_bins);
 
         igSeparator();
         igText("Performance (Benchmark)");
@@ -1222,6 +1289,8 @@ int main(int argc, char **argv)
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.line_pow_accum);
+    free(s.line_w_accum);
     free(s.plot_db);
     free(s.plot_points);
     free(s.waterfall_rgba);
@@ -1255,6 +1324,8 @@ fail:
     free(s.out_im);
     free(s.window);
     free(s.line_db);
+    free(s.line_pow_accum);
+    free(s.line_w_accum);
     free(s.plot_db);
     free(s.plot_points);
     free(s.waterfall_rgba);
