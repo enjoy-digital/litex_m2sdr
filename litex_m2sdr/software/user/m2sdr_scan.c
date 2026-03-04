@@ -172,6 +172,8 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
+    bool lo_valid;
+    int64_t lo_hz;
 
     int segments;
     int stride_bins;
@@ -397,6 +399,35 @@ static bool capture_iq_block(struct scan_state *s)
     return got == s->fft_len;
 }
 
+static bool discard_iq_samples(struct scan_state *s, int nsamples)
+{
+    int got = 0;
+
+    if (nsamples <= 0)
+        return true;
+
+    while (g_keep_running && got < nsamples) {
+        litepcie_dma_process(&s->dma);
+
+        while (got < nsamples) {
+            char *buf = litepcie_dma_next_read_buffer(&s->dma);
+            if (!buf)
+                break;
+
+            const int16_t *iq = (const int16_t *)buf;
+            int iq_count = (int)(DMA_BUFFER_SIZE / (int)sizeof(int16_t));
+            int pairs = iq_count / 2;
+            int p;
+
+            (void)iq;
+            for (p = 0; p < pairs && got < nsamples; p++)
+                got++;
+        }
+    }
+
+    return got == nsamples;
+}
+
 static bool retune_rx(int64_t freq_hz)
 {
     int ret = ad9361_set_rx_lo_freq(ad9361_phy, freq_hz);
@@ -409,14 +440,21 @@ static bool scan_segment(struct scan_state *s, int64_t center_hz, int seg_index,
     int i;
     double t0, t1;
 
-    t0 = now_s();
-    if (!retune_rx(center_hz)) {
-        fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
-        return false;
+    if (!s->lo_valid || s->lo_hz != center_hz) {
+        t0 = now_s();
+        if (!retune_rx(center_hz)) {
+            fprintf(stderr, "Failed to tune RX LO to %" PRId64 " Hz\n", center_hz);
+            return false;
+        }
+        usleep((useconds_t)s->rx_settle_us);
+        /* Drop stale pre-retune DMA samples before taking the FFT capture block. */
+        if (!discard_iq_samples(s, s->fft_len / 2))
+            return false;
+        t1 = now_s();
+        *t_tune_s += (t1 - t0);
+        s->lo_hz = center_hz;
+        s->lo_valid = true;
     }
-    usleep((useconds_t)s->rx_settle_us);
-    t1 = now_s();
-    *t_tune_s += (t1 - t0);
 
     t0 = now_s();
     if (!capture_iq_block(s))
@@ -976,6 +1014,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->rx_gain = rx_gain;
     s->rx_settle_us = rx_settle_us;
     s->stitch_mode = stitch_mode;
+    s->lo_valid = false;
 
     s->perf.prev_rate_t = now_s();
     s->perf.lines_at_prev_rate = s->perf.lines_total;
@@ -1289,6 +1328,8 @@ int main(int argc, char **argv)
     s.rx_settle_us = DEFAULT_RX_SETTLE_US;
     s.stitch_mode = 0;
     s.run = true;
+    s.lo_valid = false;
+    s.lo_hz = 0;
     s.display_rows = 1;
     s.waterfall_palette = 0;
 
