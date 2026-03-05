@@ -130,7 +130,9 @@ jobs:
           # WR baseboard smoke tests (elaboration-only, no P&R):
           # - auto SFP selection from board resources
           # - explicit SFP index selection
+          rm -rf wr-cores
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard
+          rm -rf wr-cores
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=1
 
           # WR stale local wr-cores checkout smoke test.
