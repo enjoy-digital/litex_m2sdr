@@ -188,7 +188,7 @@ static void m2sdr_init(
     /* Internal Sync */
     if (strcmp(sync_mode, "internal") == 0) {
         /* Supported by SI5351B & C Versions */
-        printf("Using internal XO as SI5351 RefClk...\n");
+        printf("Using internal XO as SI5351 CLKIN source...\n");
         m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)); /* SI5351B Version. */
 
@@ -206,7 +206,7 @@ static void m2sdr_init(
     /* External Sync */
     } else if (strcmp(sync_mode, "external") == 0) {
         /* Only Supported by SI5351C Version */
-        printf("Using 10MHz input as SI5351 RefClk...\n");
+        printf("Using external 10MHz as SI5351 CLKIN source...\n");
         m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |   /* SI5351C Version. */
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)); /* ClkIn from uFL.  */
@@ -499,7 +499,8 @@ static void help(void)
            "  -chan mode             Set channel mode: '1t1r' (1 Transmit/1 Receive) or '2t2r' (2 Transmit/2 Receive) (default: '2t2r').\n"
            "  -sync mode             Set synchronization mode ('internal' or 'external', default: internal).\n"
            "\n"
-           "  -refclk_freq freq      Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
+           "  -refclk_freq freq      Set AD9361 RefClk in Hz (SI5351 output: 38.4MHz/40MHz, default: %" PRId64 ").\n"
+           "                         In '-sync external', SI5351 input is fixed to external 10MHz CLKIN.\n"
            "  -samplerate sps        Set RF samplerate in SPS (default: %d).\n"
            "  -bandwidth bw          Set the RF bandwidth in Hz (default: %d).\n"
            "  -tx_freq freq          Set the TX frequency in Hz (default: %" PRId64 ").\n"
