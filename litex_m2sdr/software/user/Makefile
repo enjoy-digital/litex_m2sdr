@@ -4,6 +4,7 @@ CFLAGS += -D$(INTERFACE)
 CXXFLAGS = $(CFLAGS) -Icimgui -Icimgui/imgui -Icimgui/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
+HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
 LDFLAGS = -g
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
@@ -16,7 +17,12 @@ INTERFACE ?= USE_LITEPCIE
 ifeq ($(INTERFACE),USE_LITEETH)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_scan
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  ifeq ($(HAVE_SDL2),1)
+    BINARIES += m2sdr_scan
+  else
+    $(warning SDL2 not found; skipping m2sdr_scan build)
+  endif
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
