@@ -194,6 +194,7 @@ struct scan_state {
     bool waterfall_view_dirty;
     bool spectrum_show_peak;
     bool spectrum_show_avg;
+    bool spectrum_show_bands;
     float spectrum_avg_alpha;
     float spectrum_peak_hold_s;
     bool spectrum_peak_marker;
@@ -295,6 +296,26 @@ struct scan_state {
         double dma_wait_per_sec;
         double prev_rate_t;
     } perf;
+};
+
+struct spectrum_band {
+    const char *name;
+    double f0_hz;
+    double f1_hz;
+    ImU32 color;
+};
+
+static const struct spectrum_band k_spectrum_bands[] = {
+    { "FM BC",   88.0e6,   108.0e6,  0x3329B6F6u },
+    { "AIR COM", 118.0e6,  137.0e6,  0x3348CAE4u },
+    { "NOAA WX", 162.4e6,  162.55e6, 0x3344D17Au },
+    { "2m HAM",  144.0e6,  148.0e6,  0x3379C15Du },
+    { "70cm",    420.0e6,  450.0e6,  0x336DBB8Du },
+    { "ISM 915", 902.0e6,  928.0e6,  0x3375B9FFu },
+    { "ADS-B",   1087.0e6, 1093.0e6, 0x33FFB703u },
+    { "GPS L1",  1575.42e6,1575.42e6,0x33FFD166u },
+    { "ISM 2.4", 2400.0e6, 2483.5e6, 0x33FF9F1Cu },
+    { "WiFi 5G", 5150.0e6, 5850.0e6, 0x33FF595Eu }
 };
 
 static double now_s(void)
@@ -1375,6 +1396,10 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImU32 col_marker_a = 0xFF8AC926u;
     ImU32 col_marker_b = 0xFFFF595Eu;
     ImU32 col_text = 0xFFAFAFAFu;
+    ImU32 col_band_text = 0xFFF5F7FAu;
+    ImU32 col_band_text_shadow = 0xCC000000u;
+    float band_label_font_size = 11.0f;
+    int b;
 
     if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
         return;
@@ -1386,6 +1411,78 @@ static void draw_spectrum_with_grid(struct scan_state *s,
 
     ImDrawList_AddRectFilled(dl, pmin, pmax, col_bg, 2.0f, 0);
     ImDrawList_AddRect(dl, pmin, pmax, col_border, 2.0f, 0, 1.0f);
+
+    if (s->spectrum_show_bands && f1_hz > f0_hz) {
+        for (b = 0; b < (int)(sizeof(k_spectrum_bands) / sizeof(k_spectrum_bands[0])); b++) {
+            double bf0 = k_spectrum_bands[b].f0_hz;
+            double bf1 = k_spectrum_bands[b].f1_hz;
+            if (bf1 < bf0) {
+                double t = bf0;
+                bf0 = bf1;
+                bf1 = t;
+            }
+            double ov0 = bf0 > f0_hz ? bf0 : f0_hz;
+            double ov1 = bf1 < f1_hz ? bf1 : f1_hz;
+            if (ov1 < ov0)
+                continue;
+
+            if (bf0 == bf1) {
+                float x = pmin.x + (float)((bf0 - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+                ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y},
+                                   0x66FFE08Au, 1.2f);
+                if (x > pmin.x + 6.0f && x < pmax.x - 60.0f) {
+                    ImVec2 txt_sz;
+                    float chip_w;
+                    float chip_x;
+                    ImVec2 c0;
+                    igCalcTextSize(&txt_sz, k_spectrum_bands[b].name, NULL, false, 0.0f);
+                    chip_w = txt_sz.x + 8.0f;
+                    chip_x = x - 0.5f * chip_w;
+                    if (chip_x < pmin.x + 2.0f)
+                        chip_x = pmin.x + 2.0f;
+                    if (chip_x + chip_w > pmax.x - 2.0f)
+                        chip_x = pmax.x - chip_w - 2.0f;
+                    c0 = (ImVec2){ chip_x, pmin.y + 4.0f };
+                    ImDrawList_AddText_FontPtr(dl, NULL, band_label_font_size,
+                                               (ImVec2){c0.x + 4.0f + 1.0f, c0.y + 2.0f + 1.0f},
+                                               col_band_text_shadow, k_spectrum_bands[b].name, NULL, 0.0f, NULL);
+                    ImDrawList_AddText_FontPtr(dl, NULL, band_label_font_size,
+                                               (ImVec2){c0.x + 4.0f, c0.y + 2.0f},
+                                               col_band_text, k_spectrum_bands[b].name, NULL, 0.0f, NULL);
+                }
+            } else {
+                float x0 = pmin.x + (float)((ov0 - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+                float x1 = pmin.x + (float)((ov1 - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+                float w = x1 - x0;
+                if (w < 1.0f)
+                    continue;
+                ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y}, (ImVec2){x1, pmax.y},
+                                         k_spectrum_bands[b].color, 0.0f, 0);
+                ImDrawList_AddLine(dl, (ImVec2){x0, pmin.y}, (ImVec2){x0, pmax.y}, 0x55FFFFFFu, 1.0f);
+                ImDrawList_AddLine(dl, (ImVec2){x1, pmin.y}, (ImVec2){x1, pmax.y}, 0x55FFFFFFu, 1.0f);
+                if (w > 36.0f) {
+                    ImVec2 txt_sz;
+                    float chip_w = txt_sz.x + 8.0f;
+                    float chip_x;
+                    ImVec2 c0;
+                    igCalcTextSize(&txt_sz, k_spectrum_bands[b].name, NULL, false, 0.0f);
+                    chip_w = txt_sz.x + 8.0f;
+                    chip_x = 0.5f * (x0 + x1) - 0.5f * chip_w;
+                    if (chip_x < x0 + 2.0f)
+                        chip_x = x0 + 2.0f;
+                    if (chip_x + chip_w > x1 - 2.0f)
+                        chip_x = x1 - chip_w - 2.0f;
+                    c0 = (ImVec2){chip_x, pmin.y + 4.0f};
+                    ImDrawList_AddText_FontPtr(dl, NULL, band_label_font_size,
+                                               (ImVec2){c0.x + 4.0f + 1.0f, c0.y + 2.0f + 1.0f},
+                                               col_band_text_shadow, k_spectrum_bands[b].name, NULL, 0.0f, NULL);
+                    ImDrawList_AddText_FontPtr(dl, NULL, band_label_font_size,
+                                               (ImVec2){c0.x + 4.0f, c0.y + 2.0f},
+                                               col_band_text, k_spectrum_bands[b].name, NULL, 0.0f, NULL);
+                }
+            }
+        }
+    }
 
     for (i = 0; i <= v_ticks; i++) {
         float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
@@ -2493,6 +2590,8 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         s->spectrum_autoscale_mode = 0;
     igCombo_Str_arr("Auto", &s->spectrum_autoscale_mode, autoscale_items, 3, 3);
     igSameLine(0.0f, 10.0f);
+    igCheckbox("Bands", &s->spectrum_show_bands);
+    igSameLine(0.0f, 10.0f);
     if (igCheckbox("Peak", &ui->show_peak))
         s->spectrum_show_peak = ui->show_peak;
     igSameLine(0.0f, 10.0f);
@@ -2868,6 +2967,7 @@ int main(int argc, char **argv)
     s.waterfall_view_dirty = true;
     s.spectrum_show_peak = true;
     s.spectrum_show_avg = false;
+    s.spectrum_show_bands = true;
     s.spectrum_avg_alpha = 0.10f;
     s.spectrum_peak_hold_s = 2.0f;
     s.spectrum_peak_marker = true;
