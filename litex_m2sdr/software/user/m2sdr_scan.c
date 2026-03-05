@@ -2476,7 +2476,6 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         p = 0;
     if (igCombo_Str_arr("Palette", &p, palette_items, 6, 6)) {
         s->waterfall_palette = p;
-        changed = true;
     }
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(95.0f);
