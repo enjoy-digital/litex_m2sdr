@@ -110,8 +110,8 @@ M2SDR_SCAN_IMGUI_SRCS := \
 	imgui_sdl_gl3_bridge.cpp
 M2SDR_SCAN_IMGUI_OBJS := $(M2SDR_SCAN_IMGUI_SRCS:.cpp=.o)
 
-m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a m2sdr_scan.o simple_fft.o $(M2SDR_SCAN_IMGUI_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ m2sdr_scan.o simple_fft.o $(M2SDR_SCAN_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a m2sdr_scan.o simple_fft.o kissfft/kiss_fft.o $(M2SDR_SCAN_IMGUI_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ m2sdr_scan.o simple_fft.o kissfft/kiss_fft.o $(M2SDR_SCAN_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 clean:
@@ -120,6 +120,7 @@ clean:
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
+	rm -f kissfft/*.o kissfft/*.d
 
 # --- Compile rules ---
 

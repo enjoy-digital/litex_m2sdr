@@ -4,6 +4,7 @@
 #define SIMPLE_FFT_H
 
 #include <stddef.h>
+#include "kissfft/kiss_fft.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,10 +12,9 @@ extern "C" {
 
 struct simple_fft_plan {
     int n;
-    int stages;
-    int *bitrev;
-    float *tw_re;
-    float *tw_im;
+    kiss_fft_cfg cfg;
+    kiss_fft_cpx *tmp_in;
+    kiss_fft_cpx *tmp_out;
 };
 
 int simple_fft_init(struct simple_fft_plan *plan, int n);
