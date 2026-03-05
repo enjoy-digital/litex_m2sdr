@@ -342,7 +342,14 @@ static void export_current_csv(struct scan_state *s)
     char ts[32], path[128];
     FILE *f;
     int i;
-    double range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
+    double bin_hz;
+    double range_hz;
+
+    if (s->fft_len <= 0 || s->sample_rate_hz == 0)
+        return;
+
+    bin_hz = (double)s->sample_rate_hz / (double)s->fft_len;
+    range_hz = bin_hz * (double)(s->waterfall_width - 1);
 
     make_timestamp(ts, sizeof(ts));
     snprintf(path, sizeof(path), "m2sdr_scan_%s.csv", ts);
@@ -2347,12 +2354,13 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         float f0_mhz;
         float f1_mhz;
         uint32_t sr_hz;
+        int fft_len;
     } band_presets[] = {
-        { "FM", 88.0f, 108.0f, 15360000U },
-        { "Air", 118.0f, 137.0f, 15360000U },
-        { "ADS-B", 1087.0f, 1093.0f, 15360000U },
-        { "2.4G", 2400.0f, 2483.5f, 61440000U },
-        { "WiFi5G", 5150.0f, 5850.0f, 61440000U }
+        { "FM", 88.0f, 108.0f, 15360000U, 16384 },
+        { "Air", 118.0f, 137.0f, 15360000U, 16384 },
+        { "ADS-B", 1087.0f, 1093.0f, 15360000U, 16384 },
+        { "2.4G", 2400.0f, 2483.5f, 61440000U, 8192 },
+        { "WiFi5G", 5150.0f, 5850.0f, 61440000U, 8192 }
     };
 
     if (!igBeginChild_Str("##controls_panel", (ImVec2){0.0f, controls_h}, 0, 0)) {
@@ -2425,6 +2433,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         ui->start_mhz = band_presets[band_clicked].f0_mhz;
         ui->stop_mhz = band_presets[band_clicked].f1_mhz;
         ui->samplerate_idx = samplerate_index_from_hz(band_presets[band_clicked].sr_hz);
+        ui->fft_idx = fft_len_index_from_value(band_presets[band_clicked].fft_len);
         ui->auto_samplerate = false;
         changed = true;
     }
@@ -2562,12 +2571,13 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
             waterfall_update_view_texture(s);
 
             for (row = 0; row < rows; row++) {
-                double total_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
-                double f0_hz = (double)s->scan_start_hz + total_hz * (double)row / (double)rows;
-                double f1_hz = (double)s->scan_start_hz + total_hz * (double)(row + 1) / (double)rows;
+                double bin_hz = (s->fft_len > 0) ?
+                    ((double)s->sample_rate_hz / (double)s->fft_len) : 0.0;
                 int bin0 = (int)((int64_t)row * s->waterfall_width / rows);
                 int bin1 = (int)((int64_t)(row + 1) * s->waterfall_width / rows);
                 int plot_count = build_plot_slice_from(s, s->line_db, s->plot_db, bin0, bin1);
+                double f0_hz = (double)s->scan_start_hz + (double)bin0 * bin_hz;
+                double f1_hz = (double)s->scan_start_hz + (double)(bin1 - 1) * bin_hz;
                 char plot_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
