@@ -2251,7 +2251,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
                                5);
     show_help_tooltip("Higher FFT points improve frequency resolution but increase compute cost.");
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(170.0f);
+    igSetNextItemWidth(120.0f);
     changed |= igSliderInt("Stitch (%)", &ui->stitch_pct, 0, 160, "%d", 0);
     show_help_tooltip("0% favors speed; 100% is baseline quality; >100% increases overlap to hide seams.");
     igSameLine(0.0f, 10.0f);
@@ -2266,89 +2266,60 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSetNextItemWidth(170.0f);
     if (p < 0 || p > 5)
         p = 0;
-    if (igCombo_Str_arr("Waterfall Palette", &p, palette_items, 6, 6)) {
+    if (igCombo_Str_arr("Palette", &p, palette_items, 6, 6)) {
         s->waterfall_palette = p;
         changed = true;
     }
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(120.0f);
+    igSetNextItemWidth(95.0f);
     changed |= igDragInt("Settle (us)", &ui->settle_us, 1.0f, 0, 5000, "%d", 0);
     show_help_tooltip("Post-tune wait before capture. Lower is faster, higher can improve spectral cleanliness.");
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(95.0f);
-    changed |= igDragFloat("Min dB", &s->db_min, 0.2f, -160.0f, 20.0f, "%.1f", 0);
+    igSetNextItemWidth(80.0f);
+    igDragFloat("Min dB", &s->db_min, 0.2f, -160.0f, 20.0f, "%.1f", 0);
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(95.0f);
-    changed |= igDragFloat("Max dB", &s->db_max, 0.2f, -160.0f, 40.0f, "%.1f", 0);
+    igSetNextItemWidth(80.0f);
+    igDragFloat("Max dB", &s->db_max, 0.2f, -160.0f, 40.0f, "%.1f", 0);
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(110.0f);
+    igSetNextItemWidth(80.0f);
     if (s->spectrum_autoscale_mode < 0 || s->spectrum_autoscale_mode > 2)
         s->spectrum_autoscale_mode = 0;
-    igCombo_Str_arr("Auto dB", &s->spectrum_autoscale_mode, autoscale_items, 3, 3);
+    igCombo_Str_arr("Auto", &s->spectrum_autoscale_mode, autoscale_items, 3, 3);
     igSameLine(0.0f, 10.0f);
-    if (igCheckbox("Peak Hold", &ui->show_peak))
+    if (igCheckbox("Peak", &ui->show_peak))
         s->spectrum_show_peak = ui->show_peak;
     igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(95.0f);
-    if (igDragFloat("Hold (s)", &ui->peak_hold_s, 0.1f, 0.1f, 30.0f, "%.1f", 0))
+    igSetNextItemWidth(80.0f);
+    if (igDragFloat("PHold (s)", &ui->peak_hold_s, 0.1f, 0.1f, 30.0f, "%.1f", 0))
         s->spectrum_peak_hold_s = ui->peak_hold_s;
+
     igSameLine(0.0f, 10.0f);
-    if (igCheckbox("Avg Trace", &ui->show_avg))
+    if (igCheckbox("Avg", &ui->show_avg))
         s->spectrum_show_avg = ui->show_avg;
     igSameLine(0.0f, 10.0f);
-    if (igCheckbox("Peak Marker", &ui->show_peak_marker))
+    if (igCheckbox("Marker", &ui->show_peak_marker))
         s->spectrum_peak_marker = ui->show_peak_marker;
     igSameLine(0.0f, 8.0f);
-    igSetNextItemWidth(95.0f);
+    igSetNextItemWidth(80.0f);
     if (igSliderInt("Peaks", &ui->peak_markers, 1, MAX_PEAK_MARKERS, "%d", 0))
         s->spectrum_peak_markers = ui->peak_markers;
     igSameLine(0.0f, 10.0f);
-    igCheckbox("WF Pause", &s->waterfall_pause);
+    igCheckbox("Pause", &s->waterfall_pause);
     igSameLine(0.0f, 8.0f);
-    igSetNextItemWidth(90.0f);
-    igSliderInt("WF Speed", &s->waterfall_speed_div, 1, 8, "%dx", 0);
-    igSameLine(0.0f, 8.0f);
-    igSetNextItemWidth(90.0f);
-    igDragFloat("WF Ctr", &s->waterfall_contrast, 0.02f, 0.5f, 2.5f, "%.2f", 0);
-    igSameLine(0.0f, 8.0f);
-    igSetNextItemWidth(90.0f);
-    igDragFloat("WF Gamma", &s->waterfall_gamma, 0.02f, 0.4f, 2.5f, "%.2f", 0);
+    igSetNextItemWidth(80.0f);
+    igSliderInt("Speed", &s->waterfall_speed_div, 1, 8, "%dx", 0);
     if (s->waterfall_pause) {
         int max_scroll = s->waterfall_history_lines - s->lines;
         if (max_scroll < 0)
             max_scroll = 0;
         igSameLine(0.0f, 8.0f);
-        igSetNextItemWidth(130.0f);
-        if (igSliderInt("WF Scroll", &s->waterfall_scroll, 0, max_scroll, "%d", 0))
+        igSetNextItemWidth(110.0f);
+        if (igSliderInt("Scroll", &s->waterfall_scroll, 0, max_scroll, "%d", 0))
             s->waterfall_view_dirty = true;
-    }
-
-    igSeparatorText("Markers");
-    igSetNextItemWidth(80.0f);
-    if (igCheckbox("A", &ui->marker_a_enable))
-        s->marker_a_enable = ui->marker_a_enable;
-    igSameLine(0.0f, 6.0f);
-    igSetNextItemWidth(110.0f);
-    if (igDragFloat("Marker A (MHz)", &ui->marker_a_mhz, 0.1f, 70.0f, 6000.0f, "%.3f", 0))
-        s->marker_a_hz = (double)ui->marker_a_mhz * 1e6;
-
-    igSameLine(0.0f, 10.0f);
-    if (igCheckbox("B", &ui->marker_b_enable))
-        s->marker_b_enable = ui->marker_b_enable;
-    igSameLine(0.0f, 6.0f);
-    igSetNextItemWidth(110.0f);
-    if (igDragFloat("Marker B (MHz)", &ui->marker_b_mhz, 0.1f, 70.0f, 6000.0f, "%.3f", 0))
-        s->marker_b_hz = (double)ui->marker_b_mhz * 1e6;
-
-    if (s->marker_a_enable && s->marker_b_enable) {
-        double d_mhz = fabs(s->marker_b_hz - s->marker_a_hz) / 1e6;
-        igSameLine(0.0f, 10.0f);
-        igText("Delta %.3f MHz", d_mhz);
     }
 
     if (s->db_max <= s->db_min + 1.0f) {
         s->db_max = s->db_min + 1.0f;
-        changed = true;
     }
 
     if (changed)
@@ -2852,12 +2823,12 @@ int main(int argc, char **argv)
                 ImGuiWindowFlags_NoTitleBar);
         {
             ImVec2 avail_root;
-            float controls_h = 160.0f;
+            float controls_h = 210.0f;
             float stats_h = 245.0f;
 
             igGetContentRegionAvail(&avail_root);
             if (avail_root.y < controls_h + stats_h + 120.0f) {
-                controls_h = 132.0f;
+                controls_h = 172.0f;
                 stats_h = 200.0f;
             }
 
