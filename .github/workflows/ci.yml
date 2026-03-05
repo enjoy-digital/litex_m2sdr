@@ -117,6 +117,9 @@ jobs:
         env:
           LITEX_WR_NIC_DIR: /tmp/litex_wr_nic/litex_wr_nic
         run: |
+          # Ensure deterministic WR smoke tests: remove any local wr-cores left by prior steps.
+          rm -rf wr-cores
+
           # WR must fail on M.2-only variant (no baseboard SFP resources).
           if ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=m2 2> /tmp/wr_variant.err; then
             echo "Expected WR+m2 variant check to fail, but command succeeded."
