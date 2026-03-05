@@ -11,6 +11,22 @@
 
 ## Overview of utilities
 
+## Build dependencies
+
+Core user tools build with standard C/C++ toolchains and the RF/audio dependencies already used by this project.
+
+`m2sdr_scan` additionally requires:
+- `pkg-config`
+- SDL2 development headers/libraries (`libsdl2-dev`)
+- OpenGL development headers/libraries (`libgl1-mesa-dev`)
+
+On Debian/Ubuntu:
+~~~~
+sudo apt install pkg-config libsdl2-dev libgl1-mesa-dev
+~~~~
+
+When SDL2 is not available, `m2sdr_scan` is skipped by the `Makefile` and other user tools still build.
+
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
 
@@ -309,6 +325,35 @@ Example:
 ~~~~
 ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -e eu -m stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
 ~~~~
+
+---
+
+### m2sdr_scan
+Interactive wideband RF scanner with real-time spectrum + waterfall display (Dear ImGui UI).
+
+**Usage**:
+~~~~
+m2sdr_scan [options]
+~~~~
+
+**Key options**:
+- `-c device_num`
+- `-refclk_freq hz`
+- `-start_freq hz`
+- `-stop_freq hz`
+- `-sample_rate hz`
+- `-fft_len n`
+- `-lines n`
+- `-rx_gain db`
+
+Example:
+~~~~
+./m2sdr_scan -start_freq 88000000 -stop_freq 108000000 -sample_rate 15360000 -fft_len 16384
+~~~~
+
+Notes:
+- Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
+- In headless/non-GUI build environments without SDL2, this binary is not built.
 
 ---
 

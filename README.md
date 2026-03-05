@@ -162,6 +162,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software:
    ```bash
    sudo apt install build-essential cmake git \
+     pkg-config libsdl2-dev libgl1-mesa-dev \
      libsoapysdr-dev soapysdr-tools libsoapysdr0.8 \
      gnuradio gnuradio-dev libgnuradio-soapy3.10.9t64 gqrx-sdr \
      libsndfile1-dev libsamplerate0-dev
