@@ -1658,6 +1658,13 @@ static bool scan_line(struct scan_state *s)
     int fastlock_cold_tune_this_line = 0;
     int seg;
 
+    if (!s->line_pow_accum || !s->line_w_accum || !s->line_db || !s->window ||
+        !s->fft_job_re || !s->fft_job_im || !s->fft_in || !s->fft_out ||
+        !s->out_re || !s->out_im) {
+        fprintf(stderr, "Scan buffers are not initialized.\n");
+        return false;
+    }
+
     memset(s->line_pow_accum, 0, (size_t)s->waterfall_width * sizeof(float));
     memset(s->line_w_accum, 0, (size_t)s->waterfall_width * sizeof(float));
 
@@ -1829,6 +1836,7 @@ static bool resize_buffers(struct scan_state *s)
     double stride_ratio;
     double step_hz;
     double bin_hz;
+    int64_t scan_stop_hz;
     int new_segments;
     int stitched_width;
     int active_width;
@@ -1837,60 +1845,11 @@ static bool resize_buffers(struct scan_state *s)
     int hist_lines;
     int tex_width;
 
-    fft_worker_stop(s);
-    if (s->fft_cfg) {
-        kiss_fft_free(s->fft_cfg);
-        s->fft_cfg = NULL;
-    }
+    scan_stop_hz = s->scan_stop_hz;
+    if (scan_stop_hz <= s->scan_start_hz)
+        scan_stop_hz = s->scan_start_hz + s->sample_rate_hz;
 
-    free(s->in_re);
-    free(s->in_im);
-    free(s->fft_job_re);
-    free(s->fft_job_im);
-    free(s->fft_in);
-    free(s->fft_out);
-    free(s->out_re);
-    free(s->out_im);
-    free(s->window);
-    free(s->line_db);
-    free(s->line_peak_db);
-    free(s->line_peak_seen_s);
-    free(s->line_avg_db);
-    free(s->line_pow_accum);
-    free(s->line_w_accum);
-    free(s->plot_db);
-    free(s->plot_avg);
-    free(s->plot_peak);
-    free(s->plot_points);
-    free(s->waterfall_rgba);
-    free(s->waterfall_view_rgba);
-
-    s->in_re = NULL;
-    s->in_im = NULL;
-    s->fft_job_re = NULL;
-    s->fft_job_im = NULL;
-    s->fft_in = NULL;
-    s->fft_out = NULL;
-    s->out_re = NULL;
-    s->out_im = NULL;
-    s->window = NULL;
-    s->line_db = NULL;
-    s->line_peak_db = NULL;
-    s->line_peak_seen_s = NULL;
-    s->line_avg_db = NULL;
-    s->line_pow_accum = NULL;
-    s->line_w_accum = NULL;
-    s->plot_db = NULL;
-    s->plot_avg = NULL;
-    s->plot_peak = NULL;
-    s->plot_points = NULL;
-    s->waterfall_rgba = NULL;
-    s->waterfall_view_rgba = NULL;
-
-    if (s->scan_stop_hz <= s->scan_start_hz)
-        s->scan_stop_hz = s->scan_start_hz + s->sample_rate_hz;
-
-    range_hz = (double)(s->scan_stop_hz - s->scan_start_hz);
+    range_hz = (double)(scan_stop_hz - s->scan_start_hz);
     {
         double quality_ratio = (double)s->rf_bandwidth_hz / (double)s->sample_rate_hz;
         double blend = (double)s->stitch_pct / 100.0;
@@ -1952,6 +1911,56 @@ static bool resize_buffers(struct scan_state *s)
     if (tex_width > s->gl_max_texture_size)
         tex_width = s->gl_max_texture_size;
 
+    fft_worker_stop(s);
+    if (s->fft_cfg) {
+        kiss_fft_free(s->fft_cfg);
+        s->fft_cfg = NULL;
+    }
+
+    free(s->in_re);
+    free(s->in_im);
+    free(s->fft_job_re);
+    free(s->fft_job_im);
+    free(s->fft_in);
+    free(s->fft_out);
+    free(s->out_re);
+    free(s->out_im);
+    free(s->window);
+    free(s->line_db);
+    free(s->line_peak_db);
+    free(s->line_peak_seen_s);
+    free(s->line_avg_db);
+    free(s->line_pow_accum);
+    free(s->line_w_accum);
+    free(s->plot_db);
+    free(s->plot_avg);
+    free(s->plot_peak);
+    free(s->plot_points);
+    free(s->waterfall_rgba);
+    free(s->waterfall_view_rgba);
+
+    s->in_re = NULL;
+    s->in_im = NULL;
+    s->fft_job_re = NULL;
+    s->fft_job_im = NULL;
+    s->fft_in = NULL;
+    s->fft_out = NULL;
+    s->out_re = NULL;
+    s->out_im = NULL;
+    s->window = NULL;
+    s->line_db = NULL;
+    s->line_peak_db = NULL;
+    s->line_peak_seen_s = NULL;
+    s->line_avg_db = NULL;
+    s->line_pow_accum = NULL;
+    s->line_w_accum = NULL;
+    s->plot_db = NULL;
+    s->plot_avg = NULL;
+    s->plot_peak = NULL;
+    s->plot_points = NULL;
+    s->waterfall_rgba = NULL;
+    s->waterfall_view_rgba = NULL;
+
     s->in_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->in_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->fft_job_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
@@ -2006,6 +2015,7 @@ static bool resize_buffers(struct scan_state *s)
     s->overlap_bins = overlap_bins;
     s->step_hz = step_hz;
     s->waterfall_width = active_width;
+    s->scan_stop_hz = scan_stop_hz;
     s->waterfall_tex_width = tex_width;
     s->waterfall_history_lines = hist_lines;
     s->waterfall_scroll = 0;
@@ -2138,6 +2148,11 @@ static bool apply_runtime_config(struct scan_state *s,
                                  int stitch_pct,
                                  bool auto_samplerate)
 {
+    int64_t old_start_hz, old_stop_hz;
+    uint32_t old_sample_rate_hz, old_rf_bandwidth_hz;
+    int old_fft_len, old_lines, old_rx_gain, old_rx_settle_us, old_stitch_pct;
+    bool old_auto_samplerate;
+
     if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 16384) {
         fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 16384).\n", fft_len);
         return false;
@@ -2173,6 +2188,17 @@ static bool apply_runtime_config(struct scan_state *s,
         return false;
     }
 
+    old_start_hz = s->scan_start_hz;
+    old_stop_hz = s->scan_stop_hz;
+    old_sample_rate_hz = s->sample_rate_hz;
+    old_rf_bandwidth_hz = s->rf_bandwidth_hz;
+    old_fft_len = s->fft_len;
+    old_lines = s->lines;
+    old_rx_gain = s->rx_gain;
+    old_rx_settle_us = s->rx_settle_us;
+    old_stitch_pct = s->stitch_pct;
+    old_auto_samplerate = s->auto_samplerate;
+
     s->scan_start_hz = start_hz;
     s->scan_stop_hz = stop_hz;
     s->sample_rate_hz = sample_rate_hz;
@@ -2183,6 +2209,20 @@ static bool apply_runtime_config(struct scan_state *s,
     s->rx_settle_us = rx_settle_us;
     s->stitch_pct = stitch_pct;
     s->auto_samplerate = auto_samplerate;
+    if (!resize_buffers(s)) {
+        s->scan_start_hz = old_start_hz;
+        s->scan_stop_hz = old_stop_hz;
+        s->sample_rate_hz = old_sample_rate_hz;
+        s->rf_bandwidth_hz = old_rf_bandwidth_hz;
+        s->fft_len = old_fft_len;
+        s->lines = old_lines;
+        s->rx_gain = old_rx_gain;
+        s->rx_settle_us = old_rx_settle_us;
+        s->stitch_pct = old_stitch_pct;
+        s->auto_samplerate = old_auto_samplerate;
+        return false;
+    }
+
     s->lo_valid = false;
     reset_peak_marker_tracking(s);
     s->waterfall_speed_ctr = 0;
@@ -2200,7 +2240,7 @@ static bool apply_runtime_config(struct scan_state *s,
     ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
     apply_rx_gain_request(s, s->rx_gain);
 
-    return resize_buffers(s);
+    return true;
 }
 
 struct ui_state {
