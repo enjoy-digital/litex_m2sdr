@@ -75,8 +75,8 @@ static const char *k_scan_samplerate_labels[] = {
     "7.68 MSPS"
 };
 
-static const int k_fft_lengths[] = { 128, 256, 512, 1024, 2048 };
-static const char *k_fft_length_labels[] = { "128", "256", "512", "1024", "2048" };
+static const int k_fft_lengths[] = { 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+static const char *k_fft_length_labels[] = { "128", "256", "512", "1024", "2048", "4096", "8192", "16384" };
 
 static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
@@ -1980,8 +1980,8 @@ static bool apply_runtime_config(struct scan_state *s,
                                  int stitch_pct,
                                  bool auto_samplerate)
 {
-    if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 2048) {
-        fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 2048).\n", fft_len);
+    if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 16384) {
+        fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 16384).\n", fft_len);
         return false;
     }
     if (lines < 32 || lines > 2048) {
