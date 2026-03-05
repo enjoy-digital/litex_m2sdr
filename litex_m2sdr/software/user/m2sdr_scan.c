@@ -2857,12 +2857,12 @@ int main(int argc, char **argv)
     s.waterfall_scroll = 0;
     s.waterfall_write_row = 0;
     s.waterfall_view_dirty = true;
-    s.spectrum_show_peak = false;
+    s.spectrum_show_peak = true;
     s.spectrum_show_avg = false;
     s.spectrum_avg_alpha = 0.10f;
     s.spectrum_peak_hold_s = 2.0f;
     s.spectrum_peak_marker = true;
-    s.spectrum_peak_markers = 3;
+    s.spectrum_peak_markers = 4;
     s.auto_samplerate = false;
     reset_peak_marker_tracking(&s);
     s.marker_a_enable = false;
