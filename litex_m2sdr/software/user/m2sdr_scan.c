@@ -38,7 +38,7 @@
 #include "libm2sdr.h"
 #include "m2sdr_config.h"
 #include "m2sdr_colormaps_gqrx.h"
-#include "simple_fft.h"
+#include "kissfft/kiss_fft.h"
 
 #define igGetIO igGetIO_Nil
 
@@ -237,7 +237,9 @@ struct scan_state {
     int gl_max_texture_size;
 
     struct litepcie_dma_ctrl dma;
-    struct simple_fft_plan fft;
+    kiss_fft_cfg fft_cfg;
+    kiss_fft_cpx *fft_in;
+    kiss_fft_cpx *fft_out;
     pthread_t fft_worker_thread;
     pthread_mutex_t fft_lock;
     pthread_cond_t fft_cond;
@@ -1041,8 +1043,14 @@ static void *fft_worker_main(void *arg)
         for (i = 0; i < s->fft_len; i++) {
             s->fft_job_re[i] *= s->window[i];
             s->fft_job_im[i] *= s->window[i];
+            s->fft_in[i].r = s->fft_job_re[i];
+            s->fft_in[i].i = s->fft_job_im[i];
         }
-        simple_fft_run(&s->fft, s->fft_job_re, s->fft_job_im, s->out_re, s->out_im);
+        kiss_fft(s->fft_cfg, s->fft_in, s->fft_out);
+        for (i = 0; i < s->fft_len; i++) {
+            s->out_re[i] = s->fft_out[i].r;
+            s->out_im[i] = s->fft_out[i].i;
+        }
         accumulate_fft_segment(s, seg);
         t1 = now_s();
 
@@ -1830,12 +1838,17 @@ static bool resize_buffers(struct scan_state *s)
     int tex_width;
 
     fft_worker_stop(s);
-    simple_fft_destroy(&s->fft);
+    if (s->fft_cfg) {
+        kiss_fft_free(s->fft_cfg);
+        s->fft_cfg = NULL;
+    }
 
     free(s->in_re);
     free(s->in_im);
     free(s->fft_job_re);
     free(s->fft_job_im);
+    free(s->fft_in);
+    free(s->fft_out);
     free(s->out_re);
     free(s->out_im);
     free(s->window);
@@ -1856,6 +1869,8 @@ static bool resize_buffers(struct scan_state *s)
     s->in_im = NULL;
     s->fft_job_re = NULL;
     s->fft_job_im = NULL;
+    s->fft_in = NULL;
+    s->fft_out = NULL;
     s->out_re = NULL;
     s->out_im = NULL;
     s->window = NULL;
@@ -1941,6 +1956,8 @@ static bool resize_buffers(struct scan_state *s)
     s->in_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->fft_job_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->fft_job_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
+    s->fft_in = (kiss_fft_cpx *)calloc((size_t)s->fft_len, sizeof(kiss_fft_cpx));
+    s->fft_out = (kiss_fft_cpx *)calloc((size_t)s->fft_len, sizeof(kiss_fft_cpx));
     s->out_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->out_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->window = (float *)calloc((size_t)s->fft_len, sizeof(float));
@@ -1962,7 +1979,8 @@ static bool resize_buffers(struct scan_state *s)
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)hist_lines, sizeof(uint32_t));
     s->waterfall_view_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
 
-    if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->out_re || !s->out_im ||
+    if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->fft_in || !s->fft_out ||
+        !s->out_re || !s->out_im ||
         !s->window || !s->line_db || !s->line_peak_db || !s->line_peak_seen_s || !s->line_avg_db ||
         !s->line_pow_accum || !s->line_w_accum ||
         !s->plot_db || !s->plot_avg || !s->plot_peak || !s->plot_points ||
@@ -1971,8 +1989,9 @@ static bool resize_buffers(struct scan_state *s)
         return false;
     }
 
-    if (simple_fft_init(&s->fft, s->fft_len) < 0) {
-        fprintf(stderr, "Failed to initialize FFT plan for length %d.\n", s->fft_len);
+    s->fft_cfg = kiss_fft_alloc(s->fft_len, 0, NULL, NULL);
+    if (!s->fft_cfg) {
+        fprintf(stderr, "Failed to initialize KISS FFT plan for length %d.\n", s->fft_len);
         return false;
     }
     if (!fft_worker_start(s)) {
@@ -3018,11 +3037,16 @@ int main(int argc, char **argv)
         glDeleteTextures(1, &s.waterfall_tex);
     scan_dma_cleanup(&s);
     fft_worker_stop(&s);
-    simple_fft_destroy(&s.fft);
+    if (s.fft_cfg) {
+        kiss_fft_free(s.fft_cfg);
+        s.fft_cfg = NULL;
+    }
     free(s.in_re);
     free(s.in_im);
     free(s.fft_job_re);
     free(s.fft_job_im);
+    free(s.fft_in);
+    free(s.fft_out);
     free(s.out_re);
     free(s.out_im);
     free(s.window);
@@ -3063,11 +3087,16 @@ fail:
         scan_dma_cleanup(&s);
 
     fft_worker_stop(&s);
-    simple_fft_destroy(&s.fft);
+    if (s.fft_cfg) {
+        kiss_fft_free(s.fft_cfg);
+        s.fft_cfg = NULL;
+    }
     free(s.in_re);
     free(s.in_im);
     free(s.fft_job_re);
     free(s.fft_job_im);
+    free(s.fft_in);
+    free(s.fft_out);
     free(s.out_re);
     free(s.out_im);
     free(s.window);
