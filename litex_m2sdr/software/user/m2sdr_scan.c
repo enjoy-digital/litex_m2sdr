@@ -57,6 +57,7 @@
 #define MAX_WATERFALL_WIDTH 262144
 #define MAX_PLOT_POINTS 4096
 #define MAX_PEAK_MARKERS 8
+#define MAX_DISPLAY_ROWS 8
 #define FASTLOCK_HW_SLOTS 8
 #define FASTLOCK_PROFILE_BYTES 16
 #define FASTLOCK_MAX_SW_CACHE 4096
@@ -197,6 +198,9 @@ struct scan_state {
     float spectrum_peak_hold_s;
     bool spectrum_peak_marker;
     int spectrum_peak_markers;
+    float marker_track_pos[MAX_DISPLAY_ROWS][MAX_PEAK_MARKERS];
+    float marker_track_val[MAX_DISPLAY_ROWS][MAX_PEAK_MARKERS];
+    uint8_t marker_track_miss[MAX_DISPLAY_ROWS][MAX_PEAK_MARKERS];
     bool marker_a_enable;
     bool marker_b_enable;
     double marker_a_hz;
@@ -303,6 +307,20 @@ static double ema_update(double prev, double sample, double alpha)
     if (prev <= 0.0)
         return sample;
     return (1.0 - alpha) * prev + alpha * sample;
+}
+
+static void reset_peak_marker_tracking(struct scan_state *s)
+{
+    int r, m;
+    if (!s)
+        return;
+    for (r = 0; r < MAX_DISPLAY_ROWS; r++) {
+        for (m = 0; m < MAX_PEAK_MARKERS; m++) {
+            s->marker_track_pos[r][m] = -1.0f;
+            s->marker_track_val[r][m] = -1e30f;
+            s->marker_track_miss[r][m] = 255;
+        }
+    }
 }
 
 static bool retune_rx(int64_t freq_hz);
@@ -421,6 +439,7 @@ static void reset_spectrum_view(struct scan_state *s)
             s->line_avg_db[i] = s->line_db[i];
         }
     }
+    reset_peak_marker_tracking(s);
 }
 
 static void show_help_tooltip(const char *text)
@@ -1315,6 +1334,7 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                                     bool show_peak,
                                     bool show_peak_marker,
                                     int peak_marker_count,
+                                    int row_idx,
                                     bool marker_a_enable,
                                     bool marker_b_enable,
                                     double marker_a_hz,
@@ -1401,9 +1421,13 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     if (show_peak_marker && plot_count > 2) {
         int top_idx[MAX_PEAK_MARKERS];
         float top_val[MAX_PEAK_MARKERS];
+        bool top_used[MAX_PEAK_MARKERS];
         int picked = 0;
         int pm = peak_marker_count;
         int min_sep;
+        int lock_bins;
+        int assign_sep;
+        bool row_ok = (row_idx >= 0 && row_idx < MAX_DISPLAY_ROWS);
         if (pm < 1)
             pm = 1;
         if (pm > MAX_PEAK_MARKERS)
@@ -1415,6 +1439,12 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         min_sep = plot_count / 40;
         if (min_sep < 2)
             min_sep = 2;
+        lock_bins = plot_count / 35;
+        if (lock_bins < 3)
+            lock_bins = 3;
+        assign_sep = min_sep;
+        if (assign_sep < 3)
+            assign_sep = 3;
 
         for (i = 1; i < plot_count - 1; i++) {
             int j, k;
@@ -1458,18 +1488,127 @@ static void draw_spectrum_with_grid(struct scan_state *s,
             (void)idx_max;
             picked = 1;
         }
+        for (i = 0; i < pm; i++)
+            top_used[i] = false;
 
-        for (i = 0; i < picked; i++) {
+        for (i = 0; i < pm; i++) {
             double freq;
             char txt[48];
             float tx;
             float x;
-            int idx = top_idx[i];
-            if (idx < 0)
+            int idx = (i < picked) ? top_idx[i] : -1;
+            float idx_f = (float)idx;
+
+            if (row_ok) {
+                float prev_pos = s->marker_track_pos[row_idx][i];
+                float prev_val = s->marker_track_val[row_idx][i];
+                uint8_t miss = s->marker_track_miss[row_idx][i];
+                bool have_prev = (prev_pos >= 0.0f && miss < 255);
+                int j, near_j = -1, best_j = -1;
+                float near_val = -1e30f;
+                float best_val = -1e30f;
+                bool too_close = false;
+
+                if (have_prev) {
+                    for (j = 0; j < picked; j++) {
+                        if (top_used[j])
+                            continue;
+                        if (fabsf((float)top_idx[j] - prev_pos) <= (float)lock_bins &&
+                            top_val[j] > near_val) {
+                            near_val = top_val[j];
+                            near_j = j;
+                        }
+                    }
+                }
+                for (j = 0; j < picked; j++) {
+                    if (top_used[j])
+                        continue;
+                    if (top_val[j] > best_val) {
+                        best_val = top_val[j];
+                        best_j = j;
+                    }
+                }
+
+                if (near_j >= 0) {
+                    float alpha = 0.30f;
+                    idx_f = prev_pos + alpha * ((float)top_idx[near_j] - prev_pos);
+                    prev_val = 0.80f * prev_val + 0.20f * top_val[near_j];
+                    miss = 0;
+                    top_used[near_j] = true;
+                } else if (best_j >= 0 && (!have_prev || top_val[best_j] > prev_val + 4.0f)) {
+                    idx_f = (float)top_idx[best_j];
+                    prev_val = top_val[best_j];
+                    miss = 0;
+                    top_used[best_j] = true;
+                } else if (have_prev) {
+                    idx_f = prev_pos;
+                    if (miss < 255)
+                        miss++;
+                    if (miss > 15) {
+                        idx_f = -1.0f;
+                        prev_val = -1e30f;
+                        miss = 255;
+                    }
+                } else {
+                    idx_f = -1.0f;
+                    prev_val = -1e30f;
+                    miss = 255;
+                }
+
+                /* Keep markers spread: avoid ending up at almost identical bins. */
+                if (idx_f >= 0.0f) {
+                    for (j = 0; j < i; j++) {
+                        float other = s->marker_track_pos[row_idx][j];
+                        if (other >= 0.0f && fabsf(other - idx_f) < (float)assign_sep) {
+                            too_close = true;
+                            break;
+                        }
+                    }
+                    if (too_close) {
+                        int alt_j = -1;
+                        float alt_val = -1e30f;
+                        for (j = 0; j < picked; j++) {
+                            bool clash = false;
+                            int k;
+                            if (top_used[j])
+                                continue;
+                            for (k = 0; k < i; k++) {
+                                float other = s->marker_track_pos[row_idx][k];
+                                if (other >= 0.0f &&
+                                    fabsf(other - (float)top_idx[j]) < (float)assign_sep) {
+                                    clash = true;
+                                    break;
+                                }
+                            }
+                            if (!clash && top_val[j] > alt_val) {
+                                alt_val = top_val[j];
+                                alt_j = j;
+                            }
+                        }
+                        if (alt_j >= 0) {
+                            idx_f = (float)top_idx[alt_j];
+                            prev_val = top_val[alt_j];
+                            miss = 0;
+                            top_used[alt_j] = true;
+                        }
+                    }
+                }
+
+                s->marker_track_pos[row_idx][i] = idx_f;
+                s->marker_track_val[row_idx][i] = prev_val;
+                s->marker_track_miss[row_idx][i] = miss;
+            }
+
+            if (idx_f < 0.0f)
                 continue;
-            x = pmin.x + (pmax.x - pmin.x) * (float)idx / (float)(plot_count - 1);
+            if (idx_f > (float)(plot_count - 1))
+                idx_f = (float)(plot_count - 1);
+            if (idx_f < 0.0f)
+                idx_f = 0.0f;
+
+            x = pmin.x + (pmax.x - pmin.x) * idx_f / (float)(plot_count - 1);
             ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.1f);
-            freq = f0_hz + (f1_hz - f0_hz) * (double)idx / (double)(plot_count - 1);
+            freq = f0_hz + (f1_hz - f0_hz) * (double)idx_f / (double)(plot_count - 1);
             format_freq_label(freq, txt, sizeof(txt));
             tx = x + 3.0f;
             if (tx > pmax.x - 54.0f)
@@ -2026,6 +2165,7 @@ static bool apply_runtime_config(struct scan_state *s,
     s->stitch_pct = stitch_pct;
     s->auto_samplerate = auto_samplerate;
     s->lo_valid = false;
+    reset_peak_marker_tracking(s);
     s->waterfall_speed_ctr = 0;
     fastlock_reset(s);
 
@@ -2386,6 +2526,7 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                         s->spectrum_show_avg, s->spectrum_show_peak,
                                         s->spectrum_peak_marker,
                                         s->spectrum_peak_markers,
+                                        row,
                                         s->marker_a_enable, s->marker_b_enable,
                                         s->marker_a_hz, s->marker_b_hz,
                                         f0_hz, f1_hz);
@@ -2664,6 +2805,7 @@ int main(int argc, char **argv)
     s.spectrum_peak_marker = true;
     s.spectrum_peak_markers = 3;
     s.auto_samplerate = false;
+    reset_peak_marker_tracking(&s);
     s.marker_a_enable = false;
     s.marker_b_enable = false;
     s.marker_a_hz = (double)s.scan_start_hz;
