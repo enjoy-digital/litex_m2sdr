@@ -69,7 +69,8 @@ static int m2sdr_clock_source_from_config(const struct m2sdr_config *cfg,
         return M2SDR_ERR_INVAL;
 
     /* Typed enums are preferred, but the old utilities still pass string
-     * overrides through chan_mode/sync_mode. */
+     * overrides through chan_mode/sync_mode. Keep that compatibility here so
+     * the rest of the RF path can stay strictly typed. */
     if (cfg->sync_mode) {
         if (strcmp(cfg->sync_mode, "internal") == 0) {
             *source = M2SDR_CLOCK_SOURCE_INTERNAL;
@@ -116,6 +117,8 @@ static void m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
                                        enum m2sdr_channel_layout channel_layout)
 {
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) {
+        /* The AD9361 init structure and the FPGA-side PHY control CSR must be
+         * kept in sync or the datapath framing becomes inconsistent. */
         printf("Setting Channel Mode to 1T1R.\n");
         default_init_param.two_rx_two_tx_mode_enable     = 0;
         default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
@@ -144,6 +147,8 @@ static void m2sdr_configure_clocking(struct m2sdr_dev *dev,
     printf("Initializing SI5351 Clocking...\n");
 
     if (clock_source == M2SDR_CLOCK_SOURCE_INTERNAL) {
+        /* The table selection is driven only by the requested AD9361 refclk.
+         * The SI5351 profile itself encodes the rest of the clock tree. */
         printf("Using internal XO as SI5351 CLKIN source...\n");
         m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
@@ -251,6 +256,8 @@ static void m2sdr_configure_modes(struct m2sdr_dev *dev, const struct m2sdr_conf
     printf("Setting Loopback to %d\n", cfg->loopback);
     ad9361_bist_loopback(ad9361_phy, cfg->loopback);
 
+    /* Bit mode is implemented in the FPGA-side AD9361 wrapper rather than in
+     * the AD9361 itself, so it is applied through a CSR write here. */
     if (cfg->enable_8bit_mode)
         printf("Enabling 8-bit mode.\n");
     else
@@ -294,6 +301,8 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
     (void)spi;
     conn = m2sdr_conn(g_rf_dev);
 
+    /* The imported AD9361 driver only uses the 2-byte-address/1-byte-read and
+     * 2-byte-address+1-byte-write transactions on this platform. */
     if (n_tx == 2 && n_rx == 1) {
         rxbuf[0] = m2sdr_ad9361_spi_read(conn, (txbuf[0] << 8) | txbuf[1]);
     } else if (n_tx == 3 && n_rx == 0) {
@@ -396,6 +405,8 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     g_rf_dev = dev;
     conn     = m2sdr_conn(dev);
 
+    /* Normalize all compatibility inputs up front so the actual bring-up code
+     * only deals with one typed representation. */
     if (m2sdr_clock_source_from_config(cfg, &clock_source) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
     if (m2sdr_channel_layout_from_config(cfg, &channel_layout) != M2SDR_ERR_OK)

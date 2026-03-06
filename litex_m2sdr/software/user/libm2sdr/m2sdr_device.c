@@ -84,6 +84,8 @@ static int m2sdr_parse_identifier(const char *id,
     }
 
     if (!strncmp(id, "pcie:", 5)) {
+        /* Explicit transport prefix: everything after it is treated as a
+         * literal device path and bypasses the IP parsing path below. */
         if (strnlen(id + 5, path_len) >= path_len)
             return -1;
         snprintf(path_out, path_len, "%s", id + 5);
@@ -94,12 +96,15 @@ static int m2sdr_parse_identifier(const char *id,
         id += 4;
 
     if (id[0] == '/') {
+        /* Preserve the historical "/dev/m2sdrN" shorthand accepted by the
+         * original utilities. */
         if (strnlen(id, path_len) >= path_len)
             return -1;
         snprintf(path_out, path_len, "%s", id);
         return 0;
     }
 
+    /* Anything else is interpreted as LiteEth shorthand: "ip[:port]". */
     if (strnlen(id, ip_len) >= ip_len)
         return -1;
 
@@ -241,6 +246,8 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         if (path[0] == '\0')
             m2sdr_default_device(path, sizeof(path));
 
+        /* Keep the public API simple: open once here, then let the HAL and
+         * higher layers operate on the stored descriptor. */
         dev->fd = open(path, O_RDWR | O_CLOEXEC);
         if (dev->fd < 0) {
             free(dev);
@@ -268,6 +275,8 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
             snprintf(ip, sizeof(ip), "192.168.1.50");
 
         snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
+        /* Etherbone owns the actual network connection; libm2sdr keeps only
+         * the resolved address tuple plus the opaque handle. */
         dev->eb = eb_connect(ip, port_str, 1);
         if (!dev->eb) {
             free(dev);
@@ -394,6 +403,8 @@ int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
     for (int i = 0; i < 8 && found < max; i++) {
         char dev_id[64];
 
+        /* Match the historical expectation that boards enumerate as a small,
+         * fixed /dev/m2sdrN set instead of walking sysfs. */
         snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", i);
         if (m2sdr_probe_one(dev_id, &list[found]) == M2SDR_ERR_OK)
             found++;
@@ -500,6 +511,7 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
     if (m2sdr_reg_read(dev, CSR_TIME_GEN_CONTROL_ADDR, &ctrl) != 0)
         return M2SDR_ERR_IO;
 
+    /* The time generator snapshots into the read registers on a write pulse. */
     m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
     m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
 
@@ -641,6 +653,8 @@ int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool so
     if (enable) {
         control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
 
+        /* Loopback and source selection are meaningful only while GPIO control
+         * is owned by the CSR path. */
         if (loopback)
             control |= (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET);
         else
