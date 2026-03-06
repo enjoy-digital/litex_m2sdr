@@ -18,6 +18,7 @@ int main(int argc, char **argv)
     struct m2sdr_dev *dev = NULL;
     struct m2sdr_config cfg;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    /* Keep application buffers aligned with the library's default DMA payload. */
     unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
     int16_t *buf = m2sdr_alloc_buffer(format, samples_per_buf);
 
@@ -52,6 +53,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* Metadata is optional on sync RX; request it when timestamps matter. */
     for (int i = 0; i < nbuf; i++) {
         struct m2sdr_metadata meta;
         if (m2sdr_sync_rx(dev, buf, samples_per_buf, &meta, 1000) != 0) {

@@ -35,6 +35,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* Use one full default payload per sync transfer. */
     unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
     if (m2sdr_sync_config(dev, M2SDR_TX, format,
                           0, samples_per_buf, 0, 1000) != 0) {
@@ -54,13 +55,14 @@ int main(int argc, char **argv)
         m2sdr_close(dev);
         return 1;
     }
+    /* Refill and transmit the same DMA-sized buffer repeatedly. */
     for (int b = 0; b < 100; b++) {
         if (format == M2SDR_FORMAT_SC8_Q7) {
             int8_t *p = (int8_t *)buf;
             for (unsigned i = 0; i < samples_per_buf; i++) {
                 int8_t v = (int8_t)(sin(phase) * 127);
-                p[2 * i + 0] = v;
-                p[2 * i + 1] = v;
+                p[2 * i + 0] = v; /* I */
+                p[2 * i + 1] = v; /* Q */
                 phase += step;
                 if (phase > 2.0 * M_PI) phase -= 2.0 * M_PI;
             }
@@ -68,8 +70,8 @@ int main(int argc, char **argv)
             int16_t *p = (int16_t *)buf;
             for (unsigned i = 0; i < samples_per_buf; i++) {
                 int16_t v = (int16_t)(sin(phase) * 2047);
-                p[2 * i + 0] = v;
-                p[2 * i + 1] = v;
+                p[2 * i + 0] = v; /* I */
+                p[2 * i + 1] = v; /* Q */
                 phase += step;
                 if (phase > 2.0 * M_PI) phase -= 2.0 * M_PI;
             }

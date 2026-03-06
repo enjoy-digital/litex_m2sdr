@@ -16,9 +16,9 @@
 
 ## C API (libm2sdr)
 
-- Docs: `doc/libm2sdr/README.md`
-- Examples: `doc/libm2sdr/example_sync_rx.c`, `doc/libm2sdr/example_sync_tx.c`
-- Install metadata: `software/user/libm2sdr/m2sdr.pc`
+- Docs: `litex_m2sdr/doc/libm2sdr/README.md`
+- Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
+- Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
 - Current public library version: `1.0.0` (ABI `1`)
 
 <div align="center">
@@ -196,7 +196,14 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    cd litex_m2sdr/software
    ./build.py
    ```
-   - This will build the necessary components including the kernel driver, user-space utilities, and the SoapySDR driver.
+   - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
+   - To install the public C API headers/library for external applications:
+   ```
+   cd litex_m2sdr/software/user
+   make
+   sudo make install_dev PREFIX=/usr/local
+   sudo ldconfig
+   ```
 
 6. **Load the Kernel Driver:**
    - Load the kernel driver with the following commands:
@@ -288,10 +295,14 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ./tone_gen.py tone_tx.bin
    ./m2sdr_play tone_tx.bin 100000
    ```
-   - C API (libm2sdr) quick start:
+   - C API (libm2sdr) quick start and examples:
    ```
-   See doc/libm2sdr/README.md
+   See litex_m2sdr/doc/libm2sdr/README.md
+   cd litex_m2sdr/software/user
+   make examples
+   ../../doc/libm2sdr/example_sync_rx > /tmp/rx.iq
    ```
+   - `libm2sdr` is the common host interface used by the user utilities and the SoapySDR module, so example code there is the reference starting point for new host applications.
 
 3. **SoapySDR Detection/Probe:**
    - Detect the LiteX-M2SDR board:

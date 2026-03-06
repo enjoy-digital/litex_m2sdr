@@ -13,6 +13,22 @@ The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and 
 
 ## Overview of utilities
 
+The user-space code is intentionally layered:
+
+- `libm2sdr/` is the public device/RF/streaming API for host applications.
+- `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr`.
+- `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
+- The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
+
+If you want to understand or extend the host stack, start with:
+
+- `libm2sdr/m2sdr.h` for the public API surface.
+- `libm2sdr/m2sdr_device.c` for open/close, capability, and register access.
+- `libm2sdr/m2sdr_stream.c` for sync streaming and metadata/header handling.
+- `libm2sdr/m2sdr_rf.c` for RF configuration helpers built around the AD9361 code.
+
+For application development, prefer starting from `../../doc/libm2sdr/example_sync_rx.c`, `../../doc/libm2sdr/example_sync_tx.c`, or the higher-level wrappers below rather than adding new direct CSR access.
+
 ## Build dependencies
 
 Core user tools build with standard C/C++ toolchains and the RF/audio dependencies already used by this project.
@@ -147,6 +163,7 @@ Example usage with PPS on GPIO pin 0:
 
 ### m2sdr_play
 Streams an I/Q samples file to the FPGA’s TX path (DMA TX). Supports piping from stdin with filename as `-`.
+This is the simplest utility to read when you want a file-backed `libm2sdr` TX example.
 
 **Usage**:
 ~~~~
@@ -164,6 +181,7 @@ Example usage:
 
 ### m2sdr_record
 Streams samples from the FPGA’s RX path back to a file on the host (DMA RX). Supports piping to stdout with filename as `-`.
+This is the matching `libm2sdr` RX example, including optional timestamp/header handling.
 
 **Usage**:
 ~~~~
@@ -369,7 +387,7 @@ Notes:
 
 ## Example End-to-End Workflow
 
-Below is a quick guide to **generate** a tone, **initialize** the RF, **play** the samples, **record** them back, and **analyze** the captured data.
+Below is a quick guide to **generate** a tone file, **initialize** the RF, **play** the samples, **record** them back, and **analyze** the captured data.
 
 1. **Generate the tone**
    ~~~~
@@ -393,9 +411,9 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **play** t
    ~~~~
    *(Here `-loopback=1` enables internal loopback for testing.)*
 
-3. **Play the tone (in Terminal #1)**
+3. **Play the tone file (in Terminal #1)**
    ~~~~
-   ./m2sdr_gen tx_file.bin 1000
+   ./m2sdr_play tx_file.bin 1000
    ~~~~
    *(Will send the file 1000 times.)*
 
@@ -420,8 +438,10 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **play** t
 ## Additional Notes
 
 - **Zero-Copy DMA Mode**
-  All tools accept a `-z` option for lower CPU overhead (if your system supports it).
+  Some tools still accept a `-z` flag for CLI compatibility, but the `libm2sdr` sync API currently hides transport-specific zero-copy details. Treat it as a compatibility knob unless the utility documentation says otherwise.
 - **Device Selection**
   If you have multiple M2SDRs, use `-c device_num` to select which board (default=0).
+- **API-first development**
+  New host applications should generally use `libm2sdr` directly and only drop to raw CSR helpers for bring-up or diagnostics that are not covered by the public API yet.
 
 Happy hacking and enjoy your LiteX M2SDR board! 🤗
