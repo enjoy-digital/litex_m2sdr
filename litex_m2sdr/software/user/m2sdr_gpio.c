@@ -14,6 +14,7 @@
 #include <inttypes.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <getopt.h>
 
 #include "libm2sdr.h"
 #include "m2sdr.h"
@@ -101,18 +102,19 @@ static void help(void) {
            "usage: m2sdr_gpio [options]\n"
            "\n"
            "Options:\n"
-           "-h                    Display this help message.\n"
+           "  -h, --help            Display this help message.\n"
+           "  -d, --device DEV      Use explicit device id.\n"
 #ifdef USE_LITEPCIE
-           "-c device_num         Select the device (default = 0).\n"
+           "  -c, --device-num N    Select the device (default: 0).\n"
 #elif defined(USE_LITEETH)
-           "-i ip_address         Target IP address of the board (required).\n"
-           "-p port               Port number (default = 1234).\n"
+           "  -i, --ip ADDR         Target IP address of the board.\n"
+           "  -p, --port PORT       Port number (default: 1234).\n"
 #endif
-           "-g                    Enable GPIO control.\n"
-           "-l                    Enable GPIO loopback mode (requires -g).\n"
-           "-s                    Use CSR mode instead of DMA mode (requires -g).\n"
-           "-o output_data        Set GPIO output data (4-bit hex, e.g., 0xF, requires -s).\n"
-           "-e output_enable      Set GPIO output enable (4-bit hex, e.g., 0xF, requires -s).\n");
+           "  -g, --enable          Enable GPIO control.\n"
+           "  -l, --loopback        Enable GPIO loopback mode (requires --enable).\n"
+           "      --source MODE     Select gpio source: dma or csr (default: dma).\n"
+           "  -o, --output-data V   Set GPIO output data (4-bit hex, requires csr source).\n"
+           "  -e, --output-enable V Set GPIO output enable (4-bit hex, requires csr source).\n");
     exit(1);
 }
 
@@ -121,26 +123,37 @@ static void help(void) {
 
 int main(int argc, char **argv) {
     int c;
+    int option_index = 0;
     static uint8_t gpio_enable = 0;
     static uint8_t loopback_enable = 0;
     static uint8_t source_csr = 0;
     static uint32_t output_data = 0;
     static uint32_t output_enable = 0;
+    static struct option options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 'p' },
+        { "enable", no_argument, NULL, 'g' },
+        { "loopback", no_argument, NULL, 'l' },
+        { "source", required_argument, NULL, 1 },
+        { "output-data", required_argument, NULL, 'o' },
+        { "output-enable", required_argument, NULL, 'e' },
+        { NULL, 0, NULL, 0 }
+    };
 
     m2sdr_cli_device_init(&g_cli_dev);
     /* Parameters */
     for (;;) {
-        #ifdef USE_LITEPCIE
-        c = getopt(argc, argv, "hc:glso:e:");
-        #elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:glso:e:");
-        #endif
+        c = getopt_long(argc, argv, "hd:c:i:p:glso:e:", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
         case 'h':
             help();
-            break;
+            return 0;
+        case 'd':
         case 'c':
         case 'i':
         case 'p':
@@ -155,6 +168,16 @@ int main(int argc, char **argv) {
             break;
         case 's':
             source_csr = 1;
+            break;
+        case 1:
+            if (!strcmp(optarg, "csr"))
+                source_csr = 1;
+            else if (!strcmp(optarg, "dma"))
+                source_csr = 0;
+            else {
+                fprintf(stderr, "Invalid source '%s' (expected dma or csr)\n", optarg);
+                exit(1);
+            }
             break;
         case 'o':
             output_data = strtoul(optarg, NULL, 0);

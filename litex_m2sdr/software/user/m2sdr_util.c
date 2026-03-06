@@ -20,6 +20,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <getopt.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -1488,18 +1489,19 @@ static void help(void)
            "usage: m2sdr_util [options] cmd [args...]\n"
            "\n"
            "options:\n"
-           "-h                                Help.\n"
+           "  -h, --help                       Help.\n"
+           "  -d, --device DEV                 Use explicit device id.\n"
 #ifdef USE_LITEPCIE
-           "-c device_num                     Select the device (default = 0).\n"
-           "-z                                Enable zero-copy DMA mode.\n"
-           "-e                                Use external loopback (default = internal).\n"
-           "-w data_width                     Width of data bus (default = 32).\n"
-           "-W warmup_buffers                 Number of DMA buffers to skip before data validation (default = 2048).\n"
-           "-a                                Automatic DMA RX-Delay calibration.\n"
-           "-t duration                       Duration of the test in seconds (default = 0, infinite).\n"
+           "  -c, --device-num N              Select the device (default: 0).\n"
+           "      --zero-copy                 Enable zero-copy DMA mode.\n"
+           "      --external-loopback         Use external loopback (default: internal).\n"
+           "      --data-width N              Width of data bus (default: 32).\n"
+           "      --warmup-buffers N          Number of DMA buffers to skip before validation.\n"
+           "      --auto-rx-delay             Automatic DMA RX-delay calibration.\n"
+           "      --duration SEC              Duration of the test in seconds (default: 0, infinite).\n"
 #elif USE_LITEETH
-           "-i ip_address                     Target IP address for Etherbone (required).\n"
-           "-p port                           Port number (default = 1234).\n"
+           "  -i, --ip ADDR                   Target IP address for Etherbone.\n"
+           "  -p, --port PORT                 Port number (default: 1234).\n"
 #endif
            "\n"
            "available commands:\n"
@@ -1547,6 +1549,7 @@ int main(int argc, char **argv)
 {
     const char *cmd;
     int c;
+    int option_index = 0;
 #ifdef USE_LITEPCIE
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
@@ -1555,21 +1558,32 @@ int main(int argc, char **argv)
     static int litepcie_auto_rx_delay = 0;
     static int test_duration = 0; /* Default to 0 for infinite duration.*/
 #endif
+    static struct option options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 'p' },
+        { "data-width", required_argument, NULL, 'w' },
+        { "warmup-buffers", required_argument, NULL, 'W' },
+        { "zero-copy", no_argument, NULL, 'z' },
+        { "external-loopback", no_argument, NULL, 'e' },
+        { "auto-rx-delay", no_argument, NULL, 'a' },
+        { "duration", required_argument, NULL, 't' },
+        { NULL, 0, NULL, 0 }
+    };
 
     /* Parameters. */
     m2sdr_cli_device_init(&g_cli_dev);
     for (;;) {
-        #ifdef USE_LITEPCIE
-        c = getopt(argc, argv, "hc:w:W:zeat:");
-        #elif USE_LITEETH
-        c = getopt(argc, argv, "hi:p:");
-        #endif
+        c = getopt_long(argc, argv, "hd:c:i:p:w:W:zeat:", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
         case 'h':
             help();
-            break;
+            return 0;
+        case 'd':
         case 'c':
         case 'i':
         case 'p':

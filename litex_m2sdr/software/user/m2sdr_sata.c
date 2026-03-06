@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <time.h>
+#include <getopt.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -468,14 +469,15 @@ static void help(void)
            "usage: m2sdr_sata [options] cmd [args...]\n"
            "\n"
            "options:\n"
-           "-h                               Help.\n"
+           "  -h, --help                     Help.\n"
+           "  -d, --device DEV               Use explicit device id.\n"
 #ifdef USE_LITEPCIE
-           "-c device_num                    Select device (default=0).\n"
+           "  -c, --device-num N             Select device (default: 0).\n"
 #elif defined(USE_LITEETH)
-           "-i ip_address                    Target IP address (default=192.168.1.50).\n"
-           "-p port                          Etherbone port (default=1234).\n"
+           "  -i, --ip ADDR                  Target IP address (default: 192.168.1.50).\n"
+           "  -p, --port PORT                Etherbone port (default: 1234).\n"
 #endif
-           "-T timeout_ms                    Timeout for streamer ops (default=10000, -1=infinite).\n"
+           "      --timeout-ms N             Timeout for streamer ops (default: 10000, -1=infinite).\n"
            "\n"
            "commands:\n"
            "status\n"
@@ -518,22 +520,29 @@ int main(int argc, char **argv)
 {
     const char *cmd;
     int c;
+    int option_index = 0;
 
     int timeout_ms = 10000;
     m2sdr_cli_device_init(&g_cli_dev);
+    static struct option options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 'p' },
+        { "timeout-ms", required_argument, NULL, 'T' },
+        { NULL, 0, NULL, 0 }
+    };
 
     for (;;) {
-#ifdef USE_LITEPCIE
-        c = getopt(argc, argv, "hc:T:");
-#elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:T:");
-#endif
+        c = getopt_long(argc, argv, "hd:c:i:p:T:", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
         case 'h':
             help();
-            break;
+            return 0;
+        case 'd':
         case 'c':
         case 'i':
         case 'p':
