@@ -2,6 +2,8 @@
 
 This directory documents the public C API for LiteX-M2SDR. The API is intentionally close to BladeRF's sync interface so C users can configure a device and stream samples without touching the CLI utilities.
 
+`libm2sdr` is now the primary low-level host interface for the project. The CLI utilities and the SoapySDR module both build on top of it.
+
 ## Build
 
 From `litex_m2sdr/software/user`:
@@ -11,7 +13,12 @@ make
 make install_dev PREFIX=/usr/local
 ```
 
-This installs headers under `include/litex_m2sdr/` and the static library under `lib/`.
+This installs:
+
+- headers under `include/litex_m2sdr/`
+- `libm2sdr.a` for static linking
+- `libm2sdr.so.1` plus the `libm2sdr.so` symlink for shared linking
+- `m2sdr.pc` under `lib/pkgconfig/`
 
 ## Getting started
 
@@ -43,6 +50,13 @@ m2sdr_selftest --stream-loopback
 cd ../soapysdr/build
 make
 sudo make install
+```
+
+4) Check the installed C API metadata if needed:
+
+```
+pkg-config --modversion m2sdr
+pkg-config --cflags --libs m2sdr
 ```
 
 ## Quick Start (SC16)
@@ -138,6 +152,14 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
+
+## Library versioning
+
+- `libm2sdr` public API version: `1.0`
+- `libm2sdr` public ABI version: `1`
+- installed shared-library SONAME: `libm2sdr.so.1`
+
+This is the first intentionally versioned public C API for the project, so the library compatibility series starts at ABI 1.
 
 ## Capabilities example
 

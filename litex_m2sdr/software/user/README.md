@@ -7,6 +7,8 @@
 - **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
 - **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
+The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module.
+
 ---
 
 ## Overview of utilities

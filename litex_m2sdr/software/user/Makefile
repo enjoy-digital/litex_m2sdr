@@ -27,7 +27,7 @@ else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
 
-LIBM2SDR_SONAME = libm2sdr.so.0
+LIBM2SDR_SONAME = libm2sdr.so.1
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n

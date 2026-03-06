@@ -18,6 +18,8 @@
 
 - Docs: `doc/libm2sdr/README.md`
 - Examples: `doc/libm2sdr/example_sync_rx.c`, `doc/libm2sdr/example_sync_tx.c`
+- Install metadata: `software/user/libm2sdr/m2sdr.pc`
+- Current public library version: `1.0.0` (ABI `1`)
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">

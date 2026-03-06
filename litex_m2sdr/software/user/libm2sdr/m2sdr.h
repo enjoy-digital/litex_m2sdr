@@ -36,9 +36,11 @@ enum m2sdr_error {
     M2SDR_ERR_UNSUPPORTED= -6,
 };
 
-#define M2SDR_API_VERSION 0x00030000
-#define M2SDR_ABI_VERSION 0x00030000
-#define M2SDR_VERSION_STRING "0.3.0"
+/* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
+ * major in sync with the installed shared-library SONAME. */
+#define M2SDR_API_VERSION 0x00010000
+#define M2SDR_ABI_VERSION 0x00010000
+#define M2SDR_VERSION_STRING "1.0.0"
 
 struct m2sdr_version {
     uint32_t api;
