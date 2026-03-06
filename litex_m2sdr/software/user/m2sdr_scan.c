@@ -2207,15 +2207,16 @@ static void help(void)
            "usage: m2sdr_scan [options]\n"
            "\n"
            "Options:\n"
-           "  -h                     Show this help message and exit.\n"
-           "  -c device_num          Select device number (default: 0).\n"
-           "  -refclk_freq hz        AD9361 reference clock in Hz (default: %" PRId64 ").\n"
-           "  -start_freq hz         Scan start frequency in Hz (default: %" PRId64 ").\n"
-           "  -stop_freq hz          Scan stop frequency in Hz (default: %" PRId64 ").\n"
-           "  -rx_gain db            RX gain in dB [0..73] (default: %d).\n"
-           "  -sample_rate hz        Scan sample rate in Hz (default: %u).\n"
-           "  -fft_len n             FFT length (power of two, default: %d).\n"
-           "  -lines n               Waterfall lines (default: %d).\n"
+           "  -h, --help             Show this help message and exit.\n"
+           "  -d, --device DEV       Use explicit device id.\n"
+           "  -c, --device-num N     Select device number (default: 0).\n"
+           "      --refclk-freq HZ   AD9361 reference clock in Hz (default: %" PRId64 ").\n"
+           "      --start-freq HZ    Scan start frequency in Hz (default: %" PRId64 ").\n"
+           "      --stop-freq HZ     Scan stop frequency in Hz (default: %" PRId64 ").\n"
+           "      --rx-gain DB       RX gain in dB [0..73] (default: %d).\n"
+           "      --sample-rate HZ   Scan sample rate in Hz (default: %u).\n"
+           "      --fft-len N        FFT length (power of two, default: %d).\n"
+           "      --lines N          Waterfall lines (default: %d).\n"
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
@@ -2921,12 +2922,20 @@ int main(int argc, char **argv)
 
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "refclk-freq", required_argument, NULL, 1 },
         { "refclk_freq", required_argument, NULL, 1 },
+        { "start-freq", required_argument, NULL, 2 },
         { "start_freq", required_argument, NULL, 2 },
+        { "stop-freq", required_argument, NULL, 3 },
         { "stop_freq", required_argument, NULL, 3 },
+        { "rx-gain", required_argument, NULL, 4 },
         { "rx_gain", required_argument, NULL, 4 },
+        { "fft-len", required_argument, NULL, 5 },
         { "fft_len", required_argument, NULL, 5 },
         { "lines", required_argument, NULL, 6 },
+        { "sample-rate", required_argument, NULL, 7 },
         { "sample_rate", required_argument, NULL, 7 },
         { NULL, 0, NULL, 0 }
     };
@@ -2977,7 +2986,7 @@ int main(int argc, char **argv)
     m2sdr_cli_device_init(&g_cli_dev);
 
     for (;;) {
-        c = getopt_long_only(argc, argv, "hc:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:", options, &option_index);
         if (c == -1)
             break;
 
@@ -2985,6 +2994,7 @@ int main(int argc, char **argv)
         case 'h':
             help();
             return 0;
+        case 'd':
         case 'c':
             if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
                 return 1;

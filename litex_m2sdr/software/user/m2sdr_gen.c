@@ -29,6 +29,7 @@
 #include <math.h>
 #include <signal.h>
 #include <time.h>
+#include <getopt.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -296,17 +297,19 @@ static void help(void) {
            "usage: m2sdr_gen [options]\n"
            "\n"
            "Options:\n"
-           "-h                               Help.\n"
-           "-c device_num                    Select the device (default = 0).\n"
-           "-s sample_rate                   Set sample rate in Hz (default = 30720000).\n"
-           "-t signal_type                   Set signal type: 'tone' (default), 'white', or 'prbs'.\n"
-           "-f frequency                     Set tone frequency in Hz (default = 1000).\n"
-           "-a amplitude                     Set amplitude (0.0 to 1.0, default = 1.0).\n"
-           "-z                               Enable zero-copy DMA mode.\n"
-           "-p [pps_freq]                    Enable PPS/toggle on GPIO (default 1 Hz, 20%% high).\n"
-           "-g gpio_pin                      Select GPIO pin for PPS (0-3, default 0).\n"
-           "-8                               Use 8-bit samples (SC8).\n"
-           "-H                               Enable TX DMA header.\n"
+           "  -h, --help                     Show this help message.\n"
+           "  -d, --device DEV               Use explicit device id.\n"
+           "  -c, --device-num N             Select PCIe device number (default: 0).\n"
+           "      --sample-rate HZ           Set sample rate in Hz (default: 30720000).\n"
+           "      --signal TYPE              Set signal type: tone, white, or prbs.\n"
+           "      --tone-freq HZ             Set tone frequency in Hz (default: 1000).\n"
+           "      --amplitude A              Set amplitude (0.0 to 1.0, default: 1.0).\n"
+           "      --pps-freq HZ              Enable PPS/toggle on GPIO.\n"
+           "      --gpio-pin N               Select GPIO pin for PPS (0-3, default: 0).\n"
+           "      --enable-header            Enable TX DMA header.\n"
+           "      --format FMT               Sample format: sc16 or sc8 (default: sc16).\n"
+           "      --zero-copy                Request zero-copy DMA mode.\n"
+           "      --8bit                     Legacy alias for --format sc8.\n"
            );
     exit(1);
 }
@@ -316,6 +319,7 @@ static void help(void) {
 
 int main(int argc, char **argv) {
     int c;
+    int option_index = 0;
     static uint8_t m2sdr_device_zero_copy = 0;
     double sample_rate = 30720000.0;
     double frequency = 1000.0;
@@ -326,19 +330,36 @@ int main(int argc, char **argv) {
     uint8_t use_8bit = 0;
     char signal_type[16] = "tone"; /* Default to tone */
     struct m2sdr_cli_device cli_dev;
+    static struct option options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "sample-rate", required_argument, NULL, 's' },
+        { "signal", required_argument, NULL, 't' },
+        { "tone-freq", required_argument, NULL, 'f' },
+        { "amplitude", required_argument, NULL, 'a' },
+        { "zero-copy", no_argument, NULL, 'z' },
+        { "pps-freq", required_argument, NULL, 'p' },
+        { "gpio-pin", required_argument, NULL, 'g' },
+        { "enable-header", no_argument, NULL, 'H' },
+        { "format", required_argument, NULL, 1 },
+        { "8bit", no_argument, NULL, 2 },
+        { NULL, 0, NULL, 0 }
+    };
 
     signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
 
     /* Parameters */
     for (;;) {
-        c = getopt(argc, argv, "hc:s:t:f:a:zp:g:8H");
+        c = getopt_long(argc, argv, "hd:c:s:t:f:a:zp:g:H", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
         case 'h':
             help();
-            break;
+            return 0;
+        case 'd':
         case 'c':
             if (m2sdr_cli_handle_device_option(&cli_dev, c, optarg) != 0)
                 exit(1);
@@ -395,7 +416,17 @@ int main(int argc, char **argv) {
                 exit(1);
             }
             break;
-        case '8':
+        case 1:
+            if (!strcmp(optarg, "sc16")) {
+                use_8bit = 0;
+            } else if (!strcmp(optarg, "sc8")) {
+                use_8bit = 1;
+            } else {
+                fprintf(stderr, "Invalid format '%s' (expected sc16 or sc8)\n", optarg);
+                return 1;
+            }
+            break;
+        case 2:
             use_8bit = 1;
             break;
         case 'H':

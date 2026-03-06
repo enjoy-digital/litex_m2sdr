@@ -8,6 +8,7 @@
 
 struct m2sdr_cli_device {
     char device_id[128];
+    bool use_explicit_device_id;
 #ifdef USE_LITEPCIE
     char pcie_path[64];
     int device_num;
@@ -19,6 +20,7 @@ struct m2sdr_cli_device {
 
 void m2sdr_cli_device_init(struct m2sdr_cli_device *dev);
 int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const char *optarg);
+int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id);
 bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev);

@@ -25,6 +25,9 @@ int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const 
     if (!dev || !optarg)
         return -1;
 
+    if (opt == 'd')
+        return m2sdr_cli_set_device_id(dev, optarg);
+
 #ifdef USE_LITEPCIE
     if (opt == 'c') {
         dev->device_num = atoi(optarg);
@@ -45,10 +48,46 @@ int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const 
     return -1;
 }
 
+int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
+{
+    if (!dev || !device_id)
+        return -1;
+
+    if (snprintf(dev->device_id, sizeof(dev->device_id), "%s", device_id) >= (int)sizeof(dev->device_id)) {
+        fprintf(stderr, "Device identifier too long\n");
+        return -1;
+    }
+    dev->use_explicit_device_id = true;
+
+#ifdef USE_LITEPCIE
+    if (strncmp(device_id, "pcie:", 5) == 0) {
+        if (snprintf(dev->pcie_path, sizeof(dev->pcie_path), "%s", device_id + 5) >= (int)sizeof(dev->pcie_path)) {
+            fprintf(stderr, "PCIe device path too long\n");
+            return -1;
+        }
+    } else if (strncmp(device_id, "/dev/m2sdr", 10) == 0) {
+        if (snprintf(dev->pcie_path, sizeof(dev->pcie_path), "%s", device_id) >= (int)sizeof(dev->pcie_path)) {
+            fprintf(stderr, "PCIe device path too long\n");
+            return -1;
+        }
+        if (snprintf(dev->device_id, sizeof(dev->device_id), "pcie:%s", dev->pcie_path) >= (int)sizeof(dev->device_id)) {
+            fprintf(stderr, "Device identifier too long\n");
+            return -1;
+        }
+    } else {
+        dev->pcie_path[0] = '\0';
+    }
+#endif
+    return 0;
+}
+
 bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev)
 {
     if (!dev)
         return false;
+
+    if (dev->use_explicit_device_id)
+        return true;
 
 #ifdef USE_LITEPCIE
     snprintf(dev->pcie_path, sizeof(dev->pcie_path), "/dev/m2sdr%d", dev->device_num);

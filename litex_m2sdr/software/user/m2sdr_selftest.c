@@ -30,6 +30,7 @@ static void usage(const char *prog)
 {
     printf("Usage: %s [options] [device]\n", prog);
     printf("  options:\n");
+    printf("    -d, --device DEV  explicit device id (pcie:/dev/m2sdr0 or eth:ip:port)\n");
     printf("    --time       check board time is monotonic\n");
     printf("    --loopback   toggle DMA loopback (PCIe only)\n");
     printf("    --stream-loopback  run a DMA streaming loopback test (PCIe only)\n");
@@ -47,6 +48,8 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             usage(argv[0]);
             return 0;
+        } else if ((!strcmp(argv[i], "-d") || !strcmp(argv[i], "--device")) && i + 1 < argc) {
+            dev_id = argv[++i];
         } else if (!strcmp(argv[i], "--time")) {
             do_time = true;
         } else if (!strcmp(argv[i], "--loopback")) {

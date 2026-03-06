@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <getopt.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
@@ -35,18 +36,20 @@ static void help(void)
            "usage: m2sdr_record [options] [filename|-] [size]\n"
            "\n"
            "Options:\n"
-           "  -h           Show this help message.\n"
+           "  -h, --help            Show this help message.\n"
+           "  -d, --device DEV      Use explicit device id.\n"
 #ifdef USE_LITEPCIE
-           "  -c N         Use /dev/m2sdrN (default: 0).\n"
+           "  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n"
 #elif defined(USE_LITEETH)
-           "  -i IP        Target IP address (default: 192.168.1.50).\n"
-           "  -p PORT      Target port (default: 1234).\n"
+           "  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n"
+           "  -p, --port PORT       Target port (default: 1234).\n"
 #endif
-           "  -z           Zero-copy (accepted, ignored in sync API).\n"
-           "  -q           Quiet mode.\n"
-           "  -H           Enable DMA header.\n"
-           "  -s           Strip DMA header from output.\n"
-           "  -8           Use 8-bit samples (SC8).\n"
+           "  -q, --quiet           Quiet mode.\n"
+           "      --enable-header   Enable DMA header.\n"
+           "      --strip-header    Strip DMA header from output.\n"
+           "      --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
+           "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
+           "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
            "Arguments:\n"
            "  filename     Output file, or '-' for stdout.\n"
@@ -174,27 +177,39 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 int main(int argc, char **argv)
 {
     int c;
+    int option_index = 0;
     static uint8_t quiet = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     struct m2sdr_cli_device cli_dev;
+    static struct option options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "device", required_argument, NULL, 'd' },
+        { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 'p' },
+        { "quiet", no_argument, NULL, 'q' },
+        { "zero-copy", no_argument, NULL, 'z' },
+        { "enable-header", no_argument, NULL, 'H' },
+        { "strip-header", no_argument, NULL, 's' },
+        { "format", required_argument, NULL, 1 },
+        { "8bit", no_argument, NULL, 2 },
+        { NULL, 0, NULL, 0 }
+    };
 
     signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
 
     for (;;) {
-#if defined(USE_LITEPCIE)
-        c = getopt(argc, argv, "hc:zqHs8");
-#elif defined(USE_LITEETH)
-        c = getopt(argc, argv, "hi:p:zqHs8");
-#endif
+        c = getopt_long(argc, argv, "hd:c:i:p:zqHs", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
         case 'h':
             help();
-            break;
+            return 0;
+        case 'd':
         case 'c':
         case 'i':
         case 'p':
@@ -212,7 +227,17 @@ int main(int argc, char **argv)
         case 's':
             strip_header = 1;
             break;
-        case '8':
+        case 1:
+            if (!strcmp(optarg, "sc16")) {
+                format = M2SDR_FORMAT_SC16_Q11;
+            } else if (!strcmp(optarg, "sc8")) {
+                format = M2SDR_FORMAT_SC8_Q7;
+            } else {
+                fprintf(stderr, "Invalid format '%s' (expected sc16 or sc8)\n", optarg);
+                return 1;
+            }
+            break;
+        case 2:
             format = M2SDR_FORMAT_SC8_Q7;
             break;
         default:
