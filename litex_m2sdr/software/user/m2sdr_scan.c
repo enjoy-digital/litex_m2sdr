@@ -58,6 +58,7 @@
 #define MAX_PLOT_POINTS 4096
 #define MAX_PEAK_MARKERS 8
 #define MAX_DISPLAY_ROWS 8
+#define MAX_SCAN_WINDOWS 16
 #define FASTLOCK_HW_SLOTS 8
 #define FASTLOCK_PROFILE_BYTES 16
 #define FASTLOCK_MAX_SW_CACHE 4096
@@ -162,7 +163,23 @@ void gpio_set_value(unsigned gpio, int value)
     (void)value;
 }
 
+enum scan_mode {
+    SCAN_MODE_SINGLE = 0,
+    SCAN_MODE_MULTI  = 1,
+};
+
+struct scan_window {
+    bool enabled;
+    char name[32];
+    int64_t start_hz;
+    int64_t stop_hz;
+};
+
 struct scan_state {
+    enum scan_mode scan_mode;
+    int window_count;
+    int multi_window_next_id;
+    struct scan_window windows[MAX_SCAN_WINDOWS];
     uint32_t sample_rate_hz;
     uint32_t rf_bandwidth_hz;
     int fft_len;
@@ -344,6 +361,40 @@ static void reset_peak_marker_tracking(struct scan_state *s)
             s->marker_track_miss[r][m] = 255;
         }
     }
+}
+
+static int add_scan_window(struct scan_state *s, const char *name, int64_t start_hz, int64_t stop_hz)
+{
+    struct scan_window *w;
+
+    if (!s || s->window_count >= MAX_SCAN_WINDOWS)
+        return -1;
+
+    w = &s->windows[s->window_count++];
+    memset(w, 0, sizeof(*w));
+    w->enabled = true;
+    w->start_hz = start_hz;
+    w->stop_hz = stop_hz;
+
+    if (name && name[0]) {
+        snprintf(w->name, sizeof(w->name), "%s", name);
+    } else {
+        snprintf(w->name, sizeof(w->name), "Window %d", s->multi_window_next_id);
+    }
+    s->multi_window_next_id++;
+    return s->window_count - 1;
+}
+
+static void remove_scan_window(struct scan_state *s, int index)
+{
+    int i;
+
+    if (!s || index < 0 || index >= s->window_count)
+        return;
+
+    for (i = index; i + 1 < s->window_count; i++)
+        s->windows[i] = s->windows[i + 1];
+    s->window_count--;
 }
 
 static bool retune_rx(int64_t freq_hz);
@@ -2439,6 +2490,10 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         "Slow",
         "Fast"
     };
+    static const char *scan_mode_items[] = {
+        "Single Sweep",
+        "Multi Window"
+    };
     const float min_span_mhz = 1.0f;
     int p = s->waterfall_palette;
     bool changed = false;
@@ -2446,6 +2501,8 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     bool changed_stop = false;
     int bi;
     int band_clicked = -1;
+    int delete_window = -1;
+    int scan_mode = (int)s->scan_mode;
     static const struct {
         const char *name;
         float f0_mhz;
@@ -2458,6 +2515,20 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         { "ADS-B", 1087.0f, 1093.0f, 15360000U, 16384 },
         { "2.4G", 2400.0f, 2483.5f, 61440000U, 8192 },
         { "WiFi5G", 5150.0f, 5850.0f, 61440000U, 8192 }
+    };
+    static const struct {
+        const char *name;
+        int64_t start_hz;
+        int64_t stop_hz;
+    } multi_window_presets[] = {
+        { "FM",    88000000LL,   108000000LL  },
+        { "Air",   118000000LL,  137000000LL  },
+        { "2m",    144000000LL,  148000000LL  },
+        { "70cm",  430000000LL,  450000000LL  },
+        { "ISM915",902000000LL,  928000000LL  },
+        { "ADS-B", 1087000000LL, 1093000000LL },
+        { "2.4G",  2400000000LL, 2483500000LL },
+        { "WiFi5G",5150000000LL, 5850000000LL }
     };
 
     if (!igBeginChild_Str("##controls_panel", (ImVec2){0.0f, controls_h}, 0, 0)) {
@@ -2474,6 +2545,13 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     ui->marker_b_enable = s->marker_b_enable;
 
     igSeparatorText("Scan Controls");
+    igSetNextItemWidth(150.0f);
+    if (igCombo_Str_arr("Mode", &scan_mode, scan_mode_items, 2, 2))
+        s->scan_mode = (enum scan_mode)scan_mode;
+    igSameLine(0.0f, 12.0f);
+    igText("%s", s->scan_mode == SCAN_MODE_SINGLE ?
+        "One stitched sweep over a continuous span." :
+        "Sparse window planning UI (scan engine wiring is the next step).");
 
     if (s->run) {
         if (igButton("Pause Scan", (ImVec2){120.0f, 0.0f}))
@@ -2511,34 +2589,86 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 12.0f);
     igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
 
-    igSeparatorText("Scan Range");
-    igSetNextItemWidth(160.0f);
-    changed_start = igDragFloat("Scan Start (MHz)", &ui->start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
-    igSameLine(0.0f, 10.0f);
-    igSetNextItemWidth(160.0f);
-    changed_stop = igDragFloat("Scan Stop (MHz)", &ui->stop_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
-    changed = changed_start || changed_stop;
-    igSameLine(0.0f, 10.0f);
-    igText("Bands:");
-    for (bi = 0; bi < (int)(sizeof(band_presets) / sizeof(band_presets[0])); bi++) {
-        igSameLine(0.0f, 4.0f);
-        if (igSmallButton(band_presets[bi].name))
-            band_clicked = bi;
-    }
+    if (s->scan_mode == SCAN_MODE_SINGLE) {
+        igSeparatorText("Scan Range");
+        igSetNextItemWidth(160.0f);
+        changed_start = igDragFloat("Scan Start (MHz)", &ui->start_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
+        igSameLine(0.0f, 10.0f);
+        igSetNextItemWidth(160.0f);
+        changed_stop = igDragFloat("Scan Stop (MHz)", &ui->stop_mhz, 0.2f, 70.0f, 6000.0f, "%.3f", 0);
+        changed = changed_start || changed_stop;
+        igSameLine(0.0f, 10.0f);
+        igText("Bands:");
+        for (bi = 0; bi < (int)(sizeof(band_presets) / sizeof(band_presets[0])); bi++) {
+            igSameLine(0.0f, 4.0f);
+            if (igSmallButton(band_presets[bi].name))
+                band_clicked = bi;
+        }
 
-    if (band_clicked >= 0) {
-        ui->start_mhz = band_presets[band_clicked].f0_mhz;
-        ui->stop_mhz = band_presets[band_clicked].f1_mhz;
-        ui->samplerate_idx = samplerate_index_from_hz(band_presets[band_clicked].sr_hz);
-        ui->fft_idx = fft_len_index_from_value(band_presets[band_clicked].fft_len);
-        ui->auto_samplerate = false;
-        changed = true;
-    }
+        if (band_clicked >= 0) {
+            ui->start_mhz = band_presets[band_clicked].f0_mhz;
+            ui->stop_mhz = band_presets[band_clicked].f1_mhz;
+            ui->samplerate_idx = samplerate_index_from_hz(band_presets[band_clicked].sr_hz);
+            ui->fft_idx = fft_len_index_from_value(band_presets[band_clicked].fft_len);
+            ui->auto_samplerate = false;
+            changed = true;
+        }
 
-    if (changed_start && ui->start_mhz > ui->stop_mhz - min_span_mhz)
-        ui->stop_mhz = ui->start_mhz + min_span_mhz;
-    if (changed_stop && ui->stop_mhz < ui->start_mhz + min_span_mhz)
-        ui->start_mhz = ui->stop_mhz - min_span_mhz;
+        if (changed_start && ui->start_mhz > ui->stop_mhz - min_span_mhz)
+            ui->stop_mhz = ui->start_mhz + min_span_mhz;
+        if (changed_stop && ui->stop_mhz < ui->start_mhz + min_span_mhz)
+            ui->start_mhz = ui->stop_mhz - min_span_mhz;
+    } else {
+        igSeparatorText("Scan Windows");
+        if (igButton("Add Custom", (ImVec2){90.0f, 0.0f}))
+            (void)add_scan_window(s, NULL, 144000000LL, 148000000LL);
+        igSameLine(0.0f, 8.0f);
+        igText("Presets:");
+        for (bi = 0; bi < (int)(sizeof(multi_window_presets) / sizeof(multi_window_presets[0])); bi++) {
+            igSameLine(0.0f, 4.0f);
+            if (igSmallButton(multi_window_presets[bi].name))
+                (void)add_scan_window(s, multi_window_presets[bi].name,
+                                      multi_window_presets[bi].start_hz,
+                                      multi_window_presets[bi].stop_hz);
+        }
+
+        if (s->window_count == 0) {
+            igTextDisabled("No windows configured.");
+        } else {
+            for (bi = 0; bi < s->window_count; bi++) {
+                struct scan_window *w = &s->windows[bi];
+                float start_mhz = (float)w->start_hz / 1e6f;
+                float stop_mhz = (float)w->stop_hz / 1e6f;
+                char label[64];
+                bool field_changed;
+
+                snprintf(label, sizeof(label), "Enable##mw_en_%d", bi);
+                igCheckbox(label, &w->enabled);
+                igSameLine(0.0f, 8.0f);
+                snprintf(label, sizeof(label), "Name##mw_name_%d", bi);
+                igSetNextItemWidth(110.0f);
+                igInputText(label, w->name, sizeof(w->name), 0, NULL, NULL);
+                igSameLine(0.0f, 8.0f);
+                snprintf(label, sizeof(label), "Start##mw_start_%d", bi);
+                igSetNextItemWidth(100.0f);
+                field_changed = igDragFloat(label, &start_mhz, 0.1f, 70.0f, 6000.0f, "%.3f MHz", 0);
+                if (field_changed)
+                    w->start_hz = (int64_t)(start_mhz * 1e6f);
+                igSameLine(0.0f, 8.0f);
+                snprintf(label, sizeof(label), "Stop##mw_stop_%d", bi);
+                igSetNextItemWidth(100.0f);
+                field_changed = igDragFloat(label, &stop_mhz, 0.1f, 70.0f, 6000.0f, "%.3f MHz", 0);
+                if (field_changed)
+                    w->stop_hz = (int64_t)(stop_mhz * 1e6f);
+                if (w->stop_hz <= w->start_hz)
+                    w->stop_hz = w->start_hz + 1000000LL;
+                igSameLine(0.0f, 8.0f);
+                snprintf(label, sizeof(label), "Delete##mw_del_%d", bi);
+                if (igSmallButton(label))
+                    delete_window = bi;
+            }
+        }
+    }
 
     igSeparatorText("Acquisition");
     igSetNextItemWidth(160.0f);
@@ -2627,6 +2757,9 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (s->db_max <= s->db_min + 1.0f) {
         s->db_max = s->db_min + 1.0f;
     }
+
+    if (delete_window >= 0)
+        remove_scan_window(s, delete_window);
 
     if (changed)
         (void)apply_ui_runtime_config(s, ui);
@@ -2937,6 +3070,9 @@ int main(int argc, char **argv)
 
     memset(&s, 0, sizeof(s));
     s.refclk_hz = DEFAULT_REFCLK_FREQ;
+    s.scan_mode = SCAN_MODE_SINGLE;
+    s.window_count = 0;
+    s.multi_window_next_id = 1;
     s.sample_rate_hz = DEFAULT_SCAN_SAMPLERATE_HZ;
     s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
     s.scan_start_hz = DEFAULT_START_FREQ_HZ;
@@ -2978,6 +3114,10 @@ int main(int argc, char **argv)
     s.marker_b_enable = false;
     s.marker_a_hz = (double)s.scan_start_hz;
     s.marker_b_hz = (double)s.scan_stop_hz;
+    (void)add_scan_window(&s, "FM", 88000000LL, 108000000LL);
+    (void)add_scan_window(&s, "2m", 144000000LL, 148000000LL);
+    if (s.window_count > 1)
+        s.windows[1].enabled = false;
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
