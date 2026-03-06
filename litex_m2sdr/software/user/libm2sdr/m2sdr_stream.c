@@ -53,6 +53,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     if (!dev)
         return M2SDR_ERR_INVAL;
 
+    /* The current backends stream fixed-size DMA payloads. The public API keeps
+     * buffer sizes in samples to stay format-centric. */
     unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
     if (direction == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
         bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
@@ -227,6 +229,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
     if (!dev->rx_configured)
         return M2SDR_ERR_UNEXPECTED;
+    /* Clear metadata once up-front so timestamps survive a successful read. */
     if (meta)
         memset(meta, 0, sizeof(*meta));
 
@@ -474,6 +477,7 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
-    /* DMA/UDP ring advances on read; no explicit release required. */
+    /* DMA/UDP ring advances on read; no explicit release step is currently
+     * required, but keep this function for API symmetry. */
     return M2SDR_ERR_OK;
 }

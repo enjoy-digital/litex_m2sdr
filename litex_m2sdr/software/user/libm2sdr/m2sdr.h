@@ -18,6 +18,7 @@
 extern "C" {
 #endif
 
+/* Public limits and fixed transport sizes used by the sync API. */
 #define M2SDR_DEVICE_STR_MAX 256
 #define M2SDR_SERIAL_MAX     32
 #define M2SDR_IDENT_MAX      256
@@ -45,7 +46,9 @@ struct m2sdr_version {
     const char *version_str;
 };
 
+/* Return a short static string for a library error code. */
 const char *m2sdr_strerror(int err);
+/* Fill version information for the linked libm2sdr instance. */
 void m2sdr_get_version(struct m2sdr_version *ver);
 
 /* Data direction */
@@ -66,36 +69,54 @@ enum m2sdr_format {
 };
 
 struct m2sdr_metadata {
+    /* Timestamp in ns when M2SDR_META_FLAG_HAS_TIME is set. */
     uint64_t timestamp;
+    /* Bitmask of M2SDR_META_FLAG_* values. */
     uint32_t flags;
 };
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
 
 struct m2sdr_sync_params {
+    /* RX or TX stream to configure. */
     enum m2sdr_direction direction;
+    /* Sample packing for the stream buffers. */
     enum m2sdr_format format;
+    /* Backend ring buffer count. Use 0 for library defaults. */
     unsigned num_buffers;
+    /* Samples per buffer, not bytes. */
     unsigned buffer_size;
+    /* Reserved for API compatibility. Use 0 for defaults. */
     unsigned num_transfers;
+    /* Blocking timeout for sync APIs in ms. */
     unsigned timeout_ms;
+    /* Enable zero-copy PCIe DMA buffers when supported. */
     bool zero_copy;
+    /* Prefix RX buffers with the FPGA DMA/VRT header. */
     bool rx_header_enable;
+    /* Hide the RX header from user buffers when enabled. */
     bool rx_strip_header;
+    /* Prefix TX buffers with the FPGA DMA/VRT header. */
     bool tx_header_enable;
 };
 
 typedef struct m2sdr_sync_params m2sdr_stream_config_t;
 
 struct m2sdr_devinfo {
+    /* Stable serial string when available. */
     char serial[M2SDR_SERIAL_MAX];
+    /* SoC/bitstream identification string. */
     char identification[M2SDR_IDENT_MAX];
+    /* Device path or transport address. */
     char path[M2SDR_DEVICE_STR_MAX];
+    /* "litepcie" or "liteeth". */
     char transport[16];
 };
 
 struct m2sdr_capabilities {
+    /* Gateware API version reported by the FPGA. */
     uint32_t api_version;
+    /* Bitmask of M2SDR_FEATURE_* values. */
     uint32_t features;
     uint32_t board_info;
     uint32_t pcie_config;
@@ -104,7 +125,9 @@ struct m2sdr_capabilities {
 };
 
 struct m2sdr_clock_info {
+    /* AD9361 reference clock frequency in Hz. */
     uint64_t refclk_hz;
+    /* System clock frequency in Hz when available. */
     uint64_t sysclk_hz;
 };
 
@@ -193,13 +216,21 @@ enum m2sdr_clock_source {
 
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
+    /* Common TX/RX sample rate in SPS. */
     int64_t sample_rate;
+    /* Common TX/RX RF bandwidth in Hz. */
     int64_t bandwidth;
+    /* AD9361 reference clock in Hz. */
     int64_t refclk_freq;
+    /* TX LO in Hz. */
     int64_t tx_freq;
+    /* RX LO in Hz. */
     int64_t rx_freq;
+    /* TX gain in dB. Positive values mean more output power. */
     int64_t tx_gain;
+    /* RX gain for channel 0 in dB. */
     int64_t rx_gain1;
+    /* RX gain for channel 1 in dB. */
     int64_t rx_gain2;
     uint8_t loopback;
     bool    bist_tx_tone;
@@ -208,18 +239,28 @@ struct m2sdr_config {
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
     bool    enable_oversample;
+    /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;
+    /* Legacy string overrides kept for compatibility with old utilities. */
     const char *chan_mode; /* legacy string override: "2t2r" or "1t1r" */
     const char *sync_mode; /* legacy string override: "internal" or "external" */
 };
 
 struct m2sdr_dev;
 
-/* Device management */
+/* Device management.
+ *
+ * Device identifiers are:
+ * - "pcie:/dev/m2sdr0"
+ * - "eth:192.168.1.50:1234"
+ *
+ * Passing NULL selects the interface default.
+ */
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 
+/* Enumerate reachable devices for the active backend. */
 int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
 
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
@@ -228,11 +269,15 @@ int  m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len);
 int  m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash);
 int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
 
-/* Register access */
+/* Register access.
+ *
+ * These are intentionally exposed for board-specific tooling, but most
+ * applications should prefer higher-level helpers.
+ */
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
-/* Low-level transport handle (for DMA/advanced use) */
+/* Low-level transport handle access for advanced integrations. */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
@@ -254,20 +299,31 @@ int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 
 /* RF config */
+/* Initialize cfg with sane defaults matching the shipped utilities. */
 void m2sdr_config_init(struct m2sdr_config *cfg);
+/* Apply a full RF configuration to the currently-open device. */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
 
+/* Direction-based RF setters. */
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+/* Convenience RF setters for the common one-direction case. */
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
 int  m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain);
+/* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
 
 /* Streaming (BladeRF-like sync API) */
+/* Configure a stream directly.
+ *
+ * buffer_size is expressed in samples per buffer. Use
+ * m2sdr_bytes_to_samples(M2SDR_FORMAT_..., M2SDR_BUFFER_BYTES)
+ * for the default DMA payload size.
+ */
 int m2sdr_sync_config(struct m2sdr_dev *dev,
                       enum m2sdr_direction direction,
                       enum m2sdr_format format,
@@ -276,11 +332,16 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                       unsigned num_transfers,
                       unsigned timeout_ms);
 
+/* Initialize the extended stream config with library defaults. */
 void m2sdr_sync_params_init(struct m2sdr_sync_params *params);
+/* Alias of m2sdr_sync_params_init() for the public stream-config name. */
 void m2sdr_stream_config_init(m2sdr_stream_config_t *config);
+/* Configure a stream with header/zero-copy options. */
 int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params);
+/* Alias of m2sdr_sync_config_ex() for the public stream-config name. */
 int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *config);
 
+/* Blocking sync receive/transmit helpers. */
 int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   void *samples,
                   unsigned num_samples,
@@ -293,7 +354,12 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                   struct m2sdr_metadata *meta,
                   unsigned timeout_ms);
 
-/* Zero-copy buffer API */
+/* Zero-copy buffer API.
+ *
+ * These helpers expose backend-owned buffers directly. RX buffers are valid
+ * until the next acquire on the same stream; TX buffers must be submitted with
+ * m2sdr_submit_buffer().
+ */
 int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      enum m2sdr_direction direction,
                      void **buffer,
@@ -310,6 +376,7 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
                          enum m2sdr_direction direction,
                          void *buffer);
 
+/* Small utility helpers for buffer sizing and allocation. */
 size_t m2sdr_format_size(enum m2sdr_format format);
 size_t m2sdr_samples_to_bytes(enum m2sdr_format format, unsigned num_samples);
 unsigned m2sdr_bytes_to_samples(enum m2sdr_format format, size_t num_bytes);

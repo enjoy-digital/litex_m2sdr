@@ -170,6 +170,8 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     enum m2sdr_clock_source clock_source = M2SDR_CLOCK_SOURCE_INTERNAL;
     enum m2sdr_channel_layout channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
 
+    /* Keep the public API typed, while still honoring the legacy string
+     * overrides used by older utilities. */
     if (m2sdr_clock_source_from_config(cfg, &clock_source) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
     if (m2sdr_channel_layout_from_config(cfg, &channel_layout) != M2SDR_ERR_OK)
