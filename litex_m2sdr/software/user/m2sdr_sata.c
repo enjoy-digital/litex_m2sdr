@@ -41,7 +41,7 @@ static uint64_t parse_u64(const char *s)
     char *end = NULL;
     uint64_t v = strtoull(s, &end, 0);
     if (!s || !*s || (end && *end)) {
-        fprintf(stderr, "Invalid number: '%s'\n", s ? s : "(null)");
+        m2sdr_cli_error("invalid number '%s'", s ? s : "(null)");
         exit(1);
     }
     return v;
@@ -144,7 +144,7 @@ static int parse_txsrc(const char *s)
     if (!strcmp(s, "pcie")) return TXSRC_PCIE;
     if (!strcmp(s, "eth"))  return TXSRC_ETH;
     if (!strcmp(s, "sata")) return TXSRC_SATA;
-    fprintf(stderr, "Invalid tx source: %s (expected: pcie|eth|sata)\n", s);
+    m2sdr_cli_invalid_choice("TX source", s, "pcie, eth, or sata");
     exit(1);
 }
 
@@ -153,7 +153,7 @@ static int parse_rxdst(const char *s)
     if (!strcmp(s, "pcie")) return RXDST_PCIE;
     if (!strcmp(s, "eth"))  return RXDST_ETH;
     if (!strcmp(s, "sata")) return RXDST_SATA;
-    fprintf(stderr, "Invalid rx destination: %s (expected: pcie|eth|sata)\n", s);
+    m2sdr_cli_invalid_choice("RX destination", s, "pcie, eth, or sata");
     exit(1);
 }
 

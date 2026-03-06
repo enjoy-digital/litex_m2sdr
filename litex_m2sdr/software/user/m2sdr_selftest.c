@@ -12,6 +12,7 @@
 #include "config.h"
 
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 
 static void print_status(const char *label, int rc, int *errors)
 {
@@ -57,7 +58,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--stream-loopback")) {
             do_stream_loopback = true;
         } else if (argv[i][0] == '-') {
-            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            m2sdr_cli_unknown_option(argv[i]);
             usage(argv[0]);
             return 1;
         } else {

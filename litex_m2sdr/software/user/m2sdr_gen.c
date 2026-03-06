@@ -375,7 +375,7 @@ int main(int argc, char **argv) {
             strncpy(signal_type, optarg, sizeof(signal_type) - 1);
             signal_type[sizeof(signal_type) - 1] = '\0';
             if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0) {
-                fprintf(stderr, "Invalid signal type: must be 'tone', 'white', or 'prbs'\n");
+                m2sdr_cli_invalid_choice("signal", signal_type, "tone, white, or prbs");
                 exit(1);
             }
             break;
@@ -422,7 +422,7 @@ int main(int argc, char **argv) {
             } else if (!strcmp(optarg, "sc8")) {
                 use_8bit = 1;
             } else {
-                fprintf(stderr, "Invalid format '%s' (expected sc16 or sc8)\n", optarg);
+                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }
             break;

@@ -155,7 +155,7 @@ int main(int argc, char **argv)
             else if (!strcmp(optarg, "sc8"))
                 cfg.enable_8bit_mode = true;
             else {
-                fprintf(stderr, "Invalid format '%s' (expected sc16 or sc8)\n", optarg);
+                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }
             break;
@@ -172,7 +172,7 @@ int main(int argc, char **argv)
             else if (strcmp(optarg, "2t2r") == 0)
                 cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
             else {
-                fprintf(stderr, "Invalid channel layout '%s'\n", optarg);
+                m2sdr_cli_invalid_choice("channel layout", optarg, "1t1r or 2t2r");
                 return 1;
             }
             break;
@@ -183,7 +183,7 @@ int main(int argc, char **argv)
             else if (strcmp(optarg, "external") == 0)
                 cfg.clock_source = M2SDR_CLOCK_SOURCE_EXTERNAL;
             else {
-                fprintf(stderr, "Invalid sync mode '%s'\n", optarg);
+                m2sdr_cli_invalid_choice("sync mode", optarg, "internal or external");
                 return 1;
             }
             break;

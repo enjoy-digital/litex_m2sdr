@@ -233,7 +233,7 @@ int main(int argc, char **argv)
             } else if (!strcmp(optarg, "sc8")) {
                 format = M2SDR_FORMAT_SC8_Q7;
             } else {
-                fprintf(stderr, "Invalid format '%s' (expected sc16 or sc8)\n", optarg);
+                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }
             break;

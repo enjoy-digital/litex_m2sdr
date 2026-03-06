@@ -175,7 +175,7 @@ int main(int argc, char **argv) {
             else if (!strcmp(optarg, "dma"))
                 source_csr = 0;
             else {
-                fprintf(stderr, "Invalid source '%s' (expected dma or csr)\n", optarg);
+                m2sdr_cli_invalid_choice("GPIO source", optarg, "dma or csr");
                 exit(1);
             }
             break;
@@ -192,15 +192,15 @@ int main(int argc, char **argv) {
 
     /* Validate options */
     if (loopback_enable && !gpio_enable) {
-        fprintf(stderr, "Error: -l (loopback) requires -g (GPIO enable).\n");
+        m2sdr_cli_error("--loopback requires --enable");
         exit(1);
     }
     if (source_csr && !gpio_enable) {
-        fprintf(stderr, "Error: -s (CSR mode) requires -g (GPIO enable).\n");
+        m2sdr_cli_error("CSR mode requires --enable");
         exit(1);
     }
     if ((output_data != 0 || output_enable != 0) && !source_csr) {
-        fprintf(stderr, "Error: -o/-e (output data/enable) requires -s (CSR mode).\n");
+        m2sdr_cli_error("--output-data/--output-enable require --source csr");
         exit(1);
     }
 

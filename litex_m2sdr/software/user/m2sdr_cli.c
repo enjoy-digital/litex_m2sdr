@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "m2sdr_cli.h"
 
@@ -117,4 +118,28 @@ const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev)
     (void)dev;
     return NULL;
 #endif
+}
+
+void m2sdr_cli_error(const char *fmt, ...)
+{
+    va_list ap;
+
+    fprintf(stderr, "error: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
+void m2sdr_cli_invalid_choice(const char *what, const char *value, const char *expected)
+{
+    m2sdr_cli_error("invalid %s '%s' (expected %s)",
+                    what ? what : "value",
+                    value ? value : "(null)",
+                    expected ? expected : "a supported value");
+}
+
+void m2sdr_cli_unknown_option(const char *opt)
+{
+    m2sdr_cli_error("unknown option: %s", opt ? opt : "(null)");
 }
