@@ -1489,57 +1489,85 @@ static void help(void)
            "usage: m2sdr_util [options] cmd [args...]\n"
            "\n"
            "options:\n"
-           "  -h, --help                       Help.\n"
+           "  -h, --help                       Show this help message.\n"
            "  -d, --device DEV                 Use explicit device id.\n"
 #ifdef USE_LITEPCIE
-           "  -c, --device-num N              Select the device (default: 0).\n"
-           "      --zero-copy                 Enable zero-copy DMA mode.\n"
-           "      --external-loopback         Use external loopback (default: internal).\n"
-           "      --data-width N              Width of data bus (default: 32).\n"
-           "      --warmup-buffers N          Number of DMA buffers to skip before validation.\n"
-           "      --auto-rx-delay             Automatic DMA RX-delay calibration.\n"
-           "      --duration SEC              Duration of the test in seconds (default: 0, infinite).\n"
+           "  -c, --device-num N               Select the device (default: 0).\n"
+           "      --zero-copy                  Enable zero-copy DMA mode.\n"
+           "      --external-loopback          Use external loopback (default: internal).\n"
+           "      --data-width N               Width of data bus (default: 32).\n"
+           "      --warmup-buffers N           Number of DMA buffers to skip before validation.\n"
+           "      --auto-rx-delay              Automatic DMA RX-delay calibration.\n"
+           "      --duration SEC               Duration of the test in seconds (default: 0, infinite).\n"
 #elif USE_LITEETH
-           "  -i, --ip ADDR                   Target IP address for Etherbone.\n"
-           "  -p, --port PORT                 Port number (default: 1234).\n"
+           "  -i, --ip ADDR                    Target IP address for Etherbone.\n"
+           "  -p, --port PORT                  Port number (default: 1234).\n"
 #endif
            "\n"
-           "available commands:\n"
-           "info                              Get Board information.\n"
-           "reg_write offset value            Write to FPGA register.\n"
-           "reg_read offset                   Read from FPGA register.\n"
+           "device commands:\n"
+           "  info | show-info\n"
+           "      Show board information.\n"
+           "  reg-read OFFSET\n"
+           "      Read an FPGA register.\n"
+           "  reg-write OFFSET VALUE\n"
+           "      Write an FPGA register.\n"
            "\n"
 #ifdef USE_LITEPCIE
-           "dma_test                          Test DMA.\n"
+           "test commands:\n"
+           "  dma-test\n"
+           "      Run the DMA test.\n"
 #endif
-           "scratch_test                      Test Scratch register.\n"
-           "clk_test                          Test Clks frequencies.\n"
+           "  scratch-test\n"
+           "      Test the scratch register.\n"
+           "  clk-test [COUNT] [DELAY]\n"
+           "      Measure on-board clock frequencies.\n"
 #ifdef  CSR_SI5351_BASE
-           "vcxo_test                         Test VCXO frequency variation.\n"
+           "  vcxo-test\n"
+           "      Measure VCXO frequency variation.\n"
 #endif
            "\n"
 #ifdef  CSR_SI5351_BASE
-           "si5351_init                       Init SI5351.\n"
-           "si5351_dump                       Dump SI5351 Registers.\n"
-           "si5351_write reg value            Write to SI5351 register.\n"
-           "si5351_read reg                   Read from SI5351 register.\n"
+           "si5351 commands:\n"
+           "  si5351-init\n"
+           "      Initialize the SI5351.\n"
+           "  si5351-dump\n"
+           "      Dump SI5351 registers.\n"
+           "  si5351-write REG VALUE\n"
+           "      Write a SI5351 register.\n"
+           "  si5351-read REG\n"
+           "      Read a SI5351 register.\n"
            "\n"
 #endif
-           "ad9361_dump                       Dump AD9361 Registers.\n"
-           "ad9361_write reg value            Write to AD9361 register.\n"
-           "ad9361_read reg                   Read from AD9361 register.\n"
-           "ad9361_port_dump                  Dump AD9361 Port Configuration.\n"
-           "ad9361_ensm_dump                  Dump AD9361 ENSM Configuration.\n"
+           "ad9361 commands:\n"
+           "  ad9361-dump\n"
+           "      Dump AD9361 registers.\n"
+           "  ad9361-write REG VALUE\n"
+           "      Write an AD9361 register.\n"
+           "  ad9361-read REG\n"
+           "      Read an AD9361 register.\n"
+           "  ad9361-port-dump\n"
+           "      Dump AD9361 port configuration.\n"
+           "  ad9361-ensm-dump\n"
+           "      Dump AD9361 ENSM state.\n"
            "\n"
 #ifdef CSR_FLASH_BASE
+           "flash commands:\n"
 #ifdef FLASH_WRITE
-           "flash_write filename [offset]     Write file to SPI Flash.\n"
+           "  flash-write FILE [OFFSET]\n"
+           "      Write a file to SPI flash.\n"
 #endif
-           "flash_read filename size [offset] Read from SPI Flash to file.\n"
-           "flash_reload                      Reload FPGA Image.\n"
+           "  flash-read FILE SIZE [OFFSET]\n"
+           "      Read from SPI flash to a file.\n"
+           "  flash-reload\n"
+           "      Reload the FPGA image.\n"
 #endif
            );
     exit(1);
+}
+
+static bool cmd_is(const char *cmd, const char *name, const char *alias)
+{
+    return (!strcmp(cmd, name) || (alias && !strcmp(cmd, alias)));
 }
 
 /* Main */
@@ -1622,28 +1650,28 @@ int main(int argc, char **argv)
     cmd = argv[optind++];
 
     /* Info cmds. */
-    if (!strcmp(cmd, "info"))
+    if (cmd_is(cmd, "info", "show-info"))
         info();
 
     /* Reg cmds. */
-    else if (!strcmp(cmd, "reg_write")) {
+    else if (cmd_is(cmd, "reg_write", "reg-write")) {
         if (optind + 2 > argc) goto show_help;
         uint32_t offset = strtoul(argv[optind++], NULL, 0);
         uint32_t value = strtoul(argv[optind++], NULL, 0);
         test_reg_write(offset, value);
     }
-    else if (!strcmp(cmd, "reg_read")) {
+    else if (cmd_is(cmd, "reg_read", "reg-read")) {
         if (optind + 1 > argc) goto show_help;
         uint32_t offset = strtoul(argv[optind++], NULL, 0);
         test_reg_read(offset);
     }
 
     /* Scratch cmds. */
-    else if (!strcmp(cmd, "scratch_test"))
+    else if (cmd_is(cmd, "scratch_test", "scratch-test"))
         scratch_test();
 
     /* Clk cmds. */
-    else if (!strcmp(cmd, "clk_test")) {
+    else if (cmd_is(cmd, "clk_test", "clk-test")) {
         int num_measurements = 10;
         int delay_between_tests = 1;
 
@@ -1657,24 +1685,24 @@ int main(int argc, char **argv)
 
 #ifdef  CSR_SI5351_BASE
     /* VCXO test cmd. */
-    else if (!strcmp(cmd, "vcxo_test")) {
+    else if (cmd_is(cmd, "vcxo_test", "vcxo-test")) {
         vcxo_test();
     }
 #endif
 
     /* SI5351 cmds. */
 #ifdef CSR_SI5351_BASE
-    else if (!strcmp(cmd, "si5351_init"))
+    else if (cmd_is(cmd, "si5351_init", "si5351-init"))
         test_si5351_init();
-    else if (!strcmp(cmd, "si5351_dump"))
+    else if (cmd_is(cmd, "si5351_dump", "si5351-dump"))
         test_si5351_dump();
-    else if (!strcmp(cmd, "si5351_write")) {
+    else if (cmd_is(cmd, "si5351_write", "si5351-write")) {
         if (optind + 2 > argc) goto show_help;
         uint8_t reg = strtoul(argv[optind++], NULL, 0);
         uint8_t value = strtoul(argv[optind++], NULL, 0);
         test_si5351_write(reg, value);
     }
-    else if (!strcmp(cmd, "si5351_read")) {
+    else if (cmd_is(cmd, "si5351_read", "si5351-read")) {
         if (optind + 1 > argc) goto show_help;
         uint8_t reg = strtoul(argv[optind++], NULL, 0);
         test_si5351_read(reg);
@@ -1682,28 +1710,28 @@ int main(int argc, char **argv)
 #endif
 
     /* AD9361 cmds. */
-    else if (!strcmp(cmd, "ad9361_dump"))
+    else if (cmd_is(cmd, "ad9361_dump", "ad9361-dump"))
         test_ad9361_dump();
-    else if (!strcmp(cmd, "ad9361_write")) {
+    else if (cmd_is(cmd, "ad9361_write", "ad9361-write")) {
         if (optind + 2 > argc) goto show_help;
         uint16_t reg = strtoul(argv[optind++], NULL, 0);
         uint16_t value = strtoul(argv[optind++], NULL, 0);
         test_ad9361_write(reg, value);
     }
-    else if (!strcmp(cmd, "ad9361_read")) {
+    else if (cmd_is(cmd, "ad9361_read", "ad9361-read")) {
         if (optind + 1 > argc) goto show_help;
         uint16_t reg = strtoul(argv[optind++], NULL, 0);
         test_ad9361_read(reg);
     }
-    else if (!strcmp(cmd, "ad9361_port_dump"))
+    else if (cmd_is(cmd, "ad9361_port_dump", "ad9361-port-dump"))
         test_ad9361_port_dump();
-    else if (!strcmp(cmd, "ad9361_ensm_dump"))
+    else if (cmd_is(cmd, "ad9361_ensm_dump", "ad9361-ensm-dump"))
         test_ad9361_ensm_dump();
 
     /* SPI Flash cmds. */
 #if CSR_FLASH_BASE
 #ifdef FLASH_WRITE
-    else if (!strcmp(cmd, "flash_write")) {
+    else if (cmd_is(cmd, "flash_write", "flash-write")) {
         const char *filename;
         uint32_t offset = CONFIG_FLASH_IMAGE_SIZE;  /* Operational */
         if (optind + 1 > argc)
@@ -1718,7 +1746,7 @@ int main(int argc, char **argv)
         flash_write(filename, offset);
     }
 #endif
-    else if (!strcmp(cmd, "flash_read")) {
+    else if (cmd_is(cmd, "flash_read", "flash-read")) {
         const char *filename;
         uint32_t size = 0;
         uint32_t offset = CONFIG_FLASH_IMAGE_SIZE; /* Operational */
@@ -1730,13 +1758,13 @@ int main(int argc, char **argv)
             offset = strtoul(argv[optind++], NULL, 0);
         flash_read(filename, size, offset);
     }
-    else if (!strcmp(cmd, "flash_reload"))
+    else if (cmd_is(cmd, "flash_reload", "flash-reload"))
         flash_reload();
 #endif
 
 #ifdef USE_LITEPCIE
     /* DMA cmds. */
-    else if (!strcmp(cmd, "dma_test"))
+    else if (cmd_is(cmd, "dma_test", "dma-test"))
         return dma_test(
             m2sdr_device_zero_copy,
             m2sdr_device_external_loopback,
