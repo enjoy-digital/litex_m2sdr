@@ -35,6 +35,7 @@
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 #include "m2sdr_config.h"
 #include "scan_ui/m2sdr_colormaps_gqrx.h"
 #include "kissfft/kiss_fft.h"
@@ -82,8 +83,7 @@ static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
 static struct m2sdr_dev *g_dev;
 
-static char m2sdr_device[1024];
-static int m2sdr_device_num = 0;
+static struct m2sdr_cli_device g_cli_dev;
 
 static void int_handler(int dummy)
 {
@@ -98,14 +98,10 @@ static void *scan_get_conn(void)
 
 static bool scan_open_device(void)
 {
-    char dev_id[M2SDR_DEVICE_STR_MAX];
-    if (strlen(m2sdr_device) + strlen("pcie:") + 1 > sizeof(dev_id)) {
-        fprintf(stderr, "Device path too long: %s\n", m2sdr_device);
+    if (!m2sdr_cli_finalize_device(&g_cli_dev))
         return false;
-    }
-    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
-    if (m2sdr_open(&g_dev, dev_id) != 0) {
-        fprintf(stderr, "Could not open %s\n", dev_id);
+    if (m2sdr_open(&g_dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
+        fprintf(stderr, "Could not open %s\n", m2sdr_cli_device_id(&g_cli_dev));
         g_dev = NULL;
         return false;
     }
@@ -2504,7 +2500,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (igButton("Snapshot", (ImVec2){85.0f, 0.0f}))
         s->export_snapshot_request = true;
     igSameLine(0.0f, 12.0f);
-    igText("Device %s", m2sdr_device);
+    igText("Device %s", m2sdr_cli_pcie_path(&g_cli_dev));
     igSameLine(0.0f, 12.0f);
     igText("LO %.3f MHz | retune %.2f/s | dma waits %.1f/s | stitch %d%%",
            (double)s->lo_hz / 1e6, s->perf.retunes_per_sec, s->perf.dma_wait_per_sec, s->stitch_pct);
@@ -2978,6 +2974,7 @@ int main(int argc, char **argv)
     s.marker_b_enable = false;
     s.marker_a_hz = (double)s.scan_start_hz;
     s.marker_b_hz = (double)s.scan_stop_hz;
+    m2sdr_cli_device_init(&g_cli_dev);
 
     for (;;) {
         c = getopt_long_only(argc, argv, "hc:", options, &option_index);
@@ -2989,7 +2986,8 @@ int main(int argc, char **argv)
             help();
             return 0;
         case 'c':
-            m2sdr_device_num = atoi(optarg);
+            if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
+                return 1;
             break;
         case 0:
             break;
@@ -3023,8 +3021,6 @@ int main(int argc, char **argv)
             return 1;
         }
     }
-
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
 
     signal(SIGINT, int_handler);
 

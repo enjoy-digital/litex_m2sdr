@@ -27,6 +27,7 @@
 #include "liblitepcie.h"
 #include "libm2sdr.h"
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 
 #include "m2sdr_config.h"
 
@@ -49,13 +50,7 @@
 /* Variables */
 /*-----------*/
 
-#ifdef USE_LITEPCIE
-static char m2sdr_device[1024];
-static int m2sdr_device_num = 0;
-#elif defined(USE_LITEETH)
-static char m2sdr_ip_address[1024] = "192.168.1.50";
-static char m2sdr_port[16] = "1234";
-#endif
+static struct m2sdr_cli_device g_cli_dev;
 
 sig_atomic_t keep_running = 1;
 
@@ -81,34 +76,14 @@ static struct m2sdr_dev *g_dev = NULL;
 static struct m2sdr_dev *m2sdr_open_dev(void) {
     if (g_dev)
         return g_dev;
-#ifdef USE_LITEPCIE
-    char dev_id[128];
-    size_t dev_max = sizeof(dev_id) - sizeof("pcie:");
-    if (strnlen(m2sdr_device, dev_max + 1) > dev_max) {
-        fprintf(stderr, "Device path too long\n");
+    if (!m2sdr_cli_finalize_device(&g_cli_dev)) {
         exit(1);
     }
-    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
-    if (m2sdr_open(&g_dev, dev_id) != 0) {
+    if (m2sdr_open(&g_dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
     return g_dev;
-#elif USE_LITEETH
-    char dev_id[128];
-    size_t ip_len = strnlen(m2sdr_ip_address, 256);
-    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
-    if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
-        fprintf(stderr, "Device address too long\n");
-        exit(1);
-    }
-    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
-    if (m2sdr_open(&g_dev, dev_id) != 0) {
-        fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
-        exit(1);
-    }
-    return g_dev;
-#endif
 }
 
 static void m2sdr_close_dev(struct m2sdr_dev *dev) {
@@ -1093,7 +1068,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (unlikely(litepcie_dma_init(&dma, m2sdr_device, zero_copy)))
+    if (unlikely(litepcie_dma_init(&dma, m2sdr_cli_pcie_path(&g_cli_dev), zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;
@@ -1582,6 +1557,7 @@ int main(int argc, char **argv)
 #endif
 
     /* Parameters. */
+    m2sdr_cli_device_init(&g_cli_dev);
     for (;;) {
         #ifdef USE_LITEPCIE
         c = getopt(argc, argv, "hc:w:W:zeat:");
@@ -1594,19 +1570,11 @@ int main(int argc, char **argv)
         case 'h':
             help();
             break;
-        #ifdef USE_LITEETH
-        case 'i':
-            strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
-            m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
-            break;
-        case 'p':
-            strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
-            m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
-            break;
-        #endif
-        #ifdef USE_LITEPCIE
         case 'c':
-            m2sdr_device_num = atoi(optarg);
+        case 'i':
+        case 'p':
+            if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
+                exit(1);
             break;
         case 'w':
             litepcie_data_width = atoi(optarg);
@@ -1628,7 +1596,6 @@ int main(int argc, char **argv)
         case 't':
             test_duration = atoi(optarg);
             break;
-        #endif
         default:
             exit(1);
         }
@@ -1637,11 +1604,6 @@ int main(int argc, char **argv)
     /* Show help when too much args. */
     if (optind >= argc)
         help();
-
-    /* Select device. */
-    #ifdef USE_LITEPCIE
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "/dev/m2sdr%d", m2sdr_device_num);
-    #endif
 
     cmd = argv[optind++];
 

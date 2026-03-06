@@ -17,14 +17,10 @@
 #include <time.h>
 
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 #include "config.h"
 
 #include "litepcie_helpers.h"
-
-#if defined(USE_LITEETH)
-static char m2sdr_ip_address[1024] = "192.168.1.50";
-static char m2sdr_port[16] = "1234";
-#endif
 
 sig_atomic_t keep_running = 1;
 
@@ -178,15 +174,14 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 int main(int argc, char **argv)
 {
     int c;
-    #if defined(USE_LITEPCIE)
-    static int m2sdr_device_num = 0;
-    #endif
     static uint8_t quiet = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    struct m2sdr_cli_device cli_dev;
 
     signal(SIGINT, intHandler);
+    m2sdr_cli_device_init(&cli_dev);
 
     for (;;) {
 #if defined(USE_LITEPCIE)
@@ -200,20 +195,12 @@ int main(int argc, char **argv)
         case 'h':
             help();
             break;
-#if defined(USE_LITEPCIE)
         case 'c':
-            m2sdr_device_num = atoi(optarg);
-            break;
-#elif defined(USE_LITEETH)
         case 'i':
-            strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
-            m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
-            break;
         case 'p':
-            strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
-            m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
+            if (m2sdr_cli_handle_device_option(&cli_dev, c, optarg) != 0)
+                exit(1);
             break;
-#endif
         case 'z':
             break;
         case 'q':
@@ -243,19 +230,9 @@ int main(int argc, char **argv)
         filename = "-";
     }
 
-    char device_id[128];
-#ifdef USE_LITEPCIE
-    snprintf(device_id, sizeof(device_id), "pcie:/dev/m2sdr%d", m2sdr_device_num);
-#elif defined(USE_LITEETH)
-    size_t ip_len = strnlen(m2sdr_ip_address, 256);
-    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
-    if (ip_len + port_len + sizeof("eth::") > sizeof(device_id)) {
-        fprintf(stderr, "Device address too long\n");
+    if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
-    }
-    snprintf(device_id, sizeof(device_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
-#endif
 
-    m2sdr_record(device_id, filename, size, quiet, header, strip_header, format);
+    m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format);
     return 0;
 }

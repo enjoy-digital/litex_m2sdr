@@ -32,6 +32,7 @@
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 #include "config.h"
 #include "csr.h"
 
@@ -315,8 +316,6 @@ static void help(void) {
 
 int main(int argc, char **argv) {
     int c;
-    static char m2sdr_device[1024];
-    static int m2sdr_device_num = 0;
     static uint8_t m2sdr_device_zero_copy = 0;
     double sample_rate = 30720000.0;
     double frequency = 1000.0;
@@ -326,8 +325,10 @@ int main(int argc, char **argv) {
     uint8_t enable_header = 0;
     uint8_t use_8bit = 0;
     char signal_type[16] = "tone"; /* Default to tone */
+    struct m2sdr_cli_device cli_dev;
 
     signal(SIGINT, intHandler);
+    m2sdr_cli_device_init(&cli_dev);
 
     /* Parameters */
     for (;;) {
@@ -339,7 +340,8 @@ int main(int argc, char **argv) {
             help();
             break;
         case 'c':
-            m2sdr_device_num = atoi(optarg);
+            if (m2sdr_cli_handle_device_option(&cli_dev, c, optarg) != 0)
+                exit(1);
             break;
         case 's':
             sample_rate = atof(optarg);
@@ -409,11 +411,11 @@ int main(int argc, char **argv) {
         help();
     }
 
-    /* Select device */
-    snprintf(m2sdr_device, sizeof(m2sdr_device), "pcie:/dev/m2sdr%d", m2sdr_device_num);
+    if (!m2sdr_cli_finalize_device(&cli_dev))
+        return 1;
 
     /* Generate and play tone with optional PPS */
-    m2sdr_gen(m2sdr_device, sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type, enable_header, use_8bit);
+    m2sdr_gen(m2sdr_cli_device_id(&cli_dev), sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type, enable_header, use_8bit);
 
     return 0;
 }

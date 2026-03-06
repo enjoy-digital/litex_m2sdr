@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+#ifndef M2SDR_CLI_H
+#define M2SDR_CLI_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+struct m2sdr_cli_device {
+    char device_id[128];
+#ifdef USE_LITEPCIE
+    char pcie_path[64];
+    int device_num;
+#elif defined(USE_LITEETH)
+    char ip_address[1024];
+    char port[16];
+#endif
+};
+
+void m2sdr_cli_device_init(struct m2sdr_cli_device *dev);
+int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const char *optarg);
+bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev);
+const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev);
+const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev);
+
+#endif /* M2SDR_CLI_H */

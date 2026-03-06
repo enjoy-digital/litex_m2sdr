@@ -19,14 +19,8 @@
 #include <stdint.h>
 
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 #include "m2sdr_config.h"
-
-#ifdef USE_LITEPCIE
-static int m2sdr_device_num = 0;
-#elif defined(USE_LITEETH)
-static char m2sdr_ip_address[1024] = "192.168.1.50";
-static char m2sdr_port[16] = "1234";
-#endif
 
 sig_atomic_t keep_running = 1;
 
@@ -91,9 +85,11 @@ int main(int argc, char **argv)
 {
     int c;
     struct m2sdr_config cfg;
+    struct m2sdr_cli_device cli_dev;
     m2sdr_config_init(&cfg);
 
     signal(SIGINT, intHandler);
+    m2sdr_cli_device_init(&cli_dev);
 
     for (;;) {
 #if defined(USE_LITEPCIE)
@@ -107,20 +103,12 @@ int main(int argc, char **argv)
         case 'h':
             help();
             break;
-#if defined(USE_LITEPCIE)
         case 'c':
-            m2sdr_device_num = atoi(optarg);
-            break;
-#elif defined(USE_LITEETH)
         case 'i':
-            strncpy(m2sdr_ip_address, optarg, sizeof(m2sdr_ip_address) - 1);
-            m2sdr_ip_address[sizeof(m2sdr_ip_address) - 1] = '\0';
-            break;
         case 'p':
-            strncpy(m2sdr_port, optarg, sizeof(m2sdr_port) - 1);
-            m2sdr_port[sizeof(m2sdr_port) - 1] = '\0';
+            if (m2sdr_cli_handle_device_option(&cli_dev, c, optarg) != 0)
+                exit(1);
             break;
-#endif
         case '8':
             cfg.enable_8bit_mode = true;
             break;
@@ -187,22 +175,12 @@ int main(int argc, char **argv)
         optind++;
     }
 
-    char dev_id[128];
-#ifdef USE_LITEPCIE
-    snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", m2sdr_device_num);
-#elif defined(USE_LITEETH)
-    size_t ip_len = strnlen(m2sdr_ip_address, 256);
-    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
-    if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
-        fprintf(stderr, "Device address too long\n");
+    if (!m2sdr_cli_finalize_device(&cli_dev))
         exit(1);
-    }
-    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
-#endif
 
     struct m2sdr_dev *dev = NULL;
-    if (m2sdr_open(&dev, dev_id) != 0) {
-        fprintf(stderr, "Could not open device: %s\n", dev_id);
+    if (m2sdr_open(&dev, m2sdr_cli_device_id(&cli_dev)) != 0) {
+        fprintf(stderr, "Could not open device: %s\n", m2sdr_cli_device_id(&cli_dev));
         return 1;
     }
 
