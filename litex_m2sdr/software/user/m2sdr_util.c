@@ -1592,19 +1592,25 @@ int main(int argc, char **argv)
         { "device-num", required_argument, NULL, 'c' },
         { "ip", required_argument, NULL, 'i' },
         { "port", required_argument, NULL, 'p' },
+#ifdef USE_LITEPCIE
         { "data-width", required_argument, NULL, 'w' },
         { "warmup-buffers", required_argument, NULL, 'W' },
         { "zero-copy", no_argument, NULL, 'z' },
         { "external-loopback", no_argument, NULL, 'e' },
         { "auto-rx-delay", no_argument, NULL, 'a' },
         { "duration", required_argument, NULL, 't' },
+#endif
         { NULL, 0, NULL, 0 }
     };
 
     /* Parameters. */
     m2sdr_cli_device_init(&g_cli_dev);
     for (;;) {
+#ifdef USE_LITEPCIE
         c = getopt_long(argc, argv, "hd:c:i:p:w:W:zeat:", options, &option_index);
+#else
+        c = getopt_long(argc, argv, "hd:c:i:p:", options, &option_index);
+#endif
         if (c == -1)
             break;
         switch(c) {
@@ -1618,6 +1624,7 @@ int main(int argc, char **argv)
             if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
                 exit(1);
             break;
+#ifdef USE_LITEPCIE
         case 'w':
             litepcie_data_width = atoi(optarg);
             break;
@@ -1638,6 +1645,7 @@ int main(int argc, char **argv)
         case 't':
             test_duration = atoi(optarg);
             break;
+#endif
         default:
             exit(1);
         }
