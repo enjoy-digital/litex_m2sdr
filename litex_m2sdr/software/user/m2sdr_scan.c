@@ -175,11 +175,43 @@ struct scan_window {
     int64_t stop_hz;
 };
 
+struct scan_window_runtime {
+    bool valid;
+    int64_t start_hz;
+    int64_t stop_hz;
+    uint32_t sample_rate_hz;
+    uint32_t rf_bandwidth_hz;
+    int fft_len;
+    int lines;
+    int stitch_pct;
+    int segments;
+    int stride_bins;
+    int overlap_bins;
+    double step_hz;
+    int waterfall_width;
+    int waterfall_tex_width;
+    int waterfall_history_lines;
+    int waterfall_scroll;
+    int waterfall_write_row;
+    bool waterfall_view_dirty;
+    float *line_db;
+    float *line_peak_db;
+    double *line_peak_seen_s;
+    float *line_avg_db;
+    float *line_pow_accum;
+    float *line_w_accum;
+    uint32_t *waterfall_rgba;
+    uint32_t *waterfall_view_rgba;
+    GLuint waterfall_tex;
+};
+
 struct scan_state {
     enum scan_mode scan_mode;
     int window_count;
     int multi_window_next_id;
+    int multi_active_window;
     struct scan_window windows[MAX_SCAN_WINDOWS];
+    struct scan_window_runtime multi_runtime[MAX_SCAN_WINDOWS];
     uint32_t sample_rate_hz;
     uint32_t rf_bandwidth_hz;
     int fft_len;
@@ -408,6 +440,182 @@ static int first_enabled_scan_window(const struct scan_state *s)
             return i;
     }
     return -1;
+}
+
+static int next_enabled_scan_window(const struct scan_state *s, int after)
+{
+    int i;
+
+    if (!s || s->window_count <= 0)
+        return -1;
+    for (i = 1; i <= s->window_count; i++) {
+        int idx = (after + i + s->window_count) % s->window_count;
+        if (s->windows[idx].enabled)
+            return idx;
+    }
+    return -1;
+}
+
+static void clear_active_runtime_refs(struct scan_state *s)
+{
+    s->line_db = NULL;
+    s->line_peak_db = NULL;
+    s->line_peak_seen_s = NULL;
+    s->line_avg_db = NULL;
+    s->line_pow_accum = NULL;
+    s->line_w_accum = NULL;
+    s->waterfall_rgba = NULL;
+    s->waterfall_view_rgba = NULL;
+    s->waterfall_tex = 0;
+    s->segments = 0;
+    s->stride_bins = 0;
+    s->overlap_bins = 0;
+    s->step_hz = 0.0;
+    s->waterfall_width = 0;
+    s->waterfall_tex_width = 0;
+    s->waterfall_history_lines = 0;
+    s->waterfall_scroll = 0;
+    s->waterfall_write_row = 0;
+    s->waterfall_view_dirty = true;
+}
+
+static void copy_state_to_runtime(struct scan_state *s, struct scan_window_runtime *rt)
+{
+    if (!s || !rt)
+        return;
+    rt->valid = true;
+    rt->start_hz = s->scan_start_hz;
+    rt->stop_hz = s->scan_stop_hz;
+    rt->sample_rate_hz = s->sample_rate_hz;
+    rt->rf_bandwidth_hz = s->rf_bandwidth_hz;
+    rt->fft_len = s->fft_len;
+    rt->lines = s->lines;
+    rt->stitch_pct = s->stitch_pct;
+    rt->segments = s->segments;
+    rt->stride_bins = s->stride_bins;
+    rt->overlap_bins = s->overlap_bins;
+    rt->step_hz = s->step_hz;
+    rt->waterfall_width = s->waterfall_width;
+    rt->waterfall_tex_width = s->waterfall_tex_width;
+    rt->waterfall_history_lines = s->waterfall_history_lines;
+    rt->waterfall_scroll = s->waterfall_scroll;
+    rt->waterfall_write_row = s->waterfall_write_row;
+    rt->waterfall_view_dirty = s->waterfall_view_dirty;
+    rt->line_db = s->line_db;
+    rt->line_peak_db = s->line_peak_db;
+    rt->line_peak_seen_s = s->line_peak_seen_s;
+    rt->line_avg_db = s->line_avg_db;
+    rt->line_pow_accum = s->line_pow_accum;
+    rt->line_w_accum = s->line_w_accum;
+    rt->waterfall_rgba = s->waterfall_rgba;
+    rt->waterfall_view_rgba = s->waterfall_view_rgba;
+    rt->waterfall_tex = s->waterfall_tex;
+}
+
+static void copy_runtime_to_state(struct scan_state *s, const struct scan_window_runtime *rt)
+{
+    if (!s || !rt)
+        return;
+    s->scan_start_hz = rt->start_hz;
+    s->scan_stop_hz = rt->stop_hz;
+    s->sample_rate_hz = rt->sample_rate_hz;
+    s->rf_bandwidth_hz = rt->rf_bandwidth_hz;
+    s->fft_len = rt->fft_len;
+    s->lines = rt->lines;
+    s->stitch_pct = rt->stitch_pct;
+    s->segments = rt->segments;
+    s->stride_bins = rt->stride_bins;
+    s->overlap_bins = rt->overlap_bins;
+    s->step_hz = rt->step_hz;
+    s->waterfall_width = rt->waterfall_width;
+    s->waterfall_tex_width = rt->waterfall_tex_width;
+    s->waterfall_history_lines = rt->waterfall_history_lines;
+    s->waterfall_scroll = rt->waterfall_scroll;
+    s->waterfall_write_row = rt->waterfall_write_row;
+    s->waterfall_view_dirty = rt->waterfall_view_dirty;
+    s->line_db = rt->line_db;
+    s->line_peak_db = rt->line_peak_db;
+    s->line_peak_seen_s = rt->line_peak_seen_s;
+    s->line_avg_db = rt->line_avg_db;
+    s->line_pow_accum = rt->line_pow_accum;
+    s->line_w_accum = rt->line_w_accum;
+    s->waterfall_rgba = rt->waterfall_rgba;
+    s->waterfall_view_rgba = rt->waterfall_view_rgba;
+    s->waterfall_tex = rt->waterfall_tex;
+}
+
+static bool runtime_matches_window(const struct scan_state *s, const struct scan_window_runtime *rt,
+                                   const struct scan_window *w)
+{
+    if (!s || !rt || !w || !rt->valid)
+        return false;
+    return rt->start_hz == w->start_hz &&
+           rt->stop_hz == w->stop_hz &&
+           rt->sample_rate_hz == s->sample_rate_hz &&
+           rt->rf_bandwidth_hz == s->rf_bandwidth_hz &&
+           rt->fft_len == s->fft_len &&
+           rt->lines == s->lines &&
+           rt->stitch_pct == s->stitch_pct;
+}
+
+static void free_scan_window_runtime(struct scan_window_runtime *rt)
+{
+    if (!rt)
+        return;
+    if (rt->waterfall_tex)
+        glDeleteTextures(1, &rt->waterfall_tex);
+    free(rt->line_db);
+    free(rt->line_peak_db);
+    free(rt->line_peak_seen_s);
+    free(rt->line_avg_db);
+    free(rt->line_pow_accum);
+    free(rt->line_w_accum);
+    free(rt->waterfall_rgba);
+    free(rt->waterfall_view_rgba);
+    memset(rt, 0, sizeof(*rt));
+}
+
+static bool resize_buffers(struct scan_state *s);
+
+static bool select_multi_window_runtime(struct scan_state *s, int index)
+{
+    struct scan_window_runtime *rt;
+    struct scan_window *w;
+
+    if (!s || index < 0 || index >= s->window_count)
+        return false;
+
+    if (s->multi_active_window >= 0 && s->multi_active_window < s->window_count)
+        copy_state_to_runtime(s, &s->multi_runtime[s->multi_active_window]);
+
+    rt = &s->multi_runtime[index];
+    w = &s->windows[index];
+    if (!runtime_matches_window(s, rt, w)) {
+        free_scan_window_runtime(rt);
+        clear_active_runtime_refs(s);
+        s->scan_start_hz = w->start_hz;
+        s->scan_stop_hz = w->stop_hz;
+        if (!resize_buffers(s))
+            return false;
+        copy_state_to_runtime(s, rt);
+    } else {
+        copy_runtime_to_state(s, rt);
+    }
+
+    s->multi_active_window = index;
+    return true;
+}
+
+static void free_all_multi_window_runtimes(struct scan_state *s)
+{
+    int i;
+
+    if (!s)
+        return;
+    for (i = 0; i < MAX_SCAN_WINDOWS; i++)
+        free_scan_window_runtime(&s->multi_runtime[i]);
+    s->multi_active_window = -1;
+    clear_active_runtime_refs(s);
 }
 
 static bool retune_rx(int64_t freq_hz);
@@ -2495,14 +2703,6 @@ static bool sync_multi_window_runtime_config(struct scan_state *s, struct ui_sta
     uint32_t sample_rate_hz;
     int fft_len;
 
-    idx = first_enabled_scan_window(s);
-    if (idx < 0)
-        return false;
-
-    w = &s->windows[idx];
-    if (w->stop_hz <= w->start_hz)
-        w->stop_hz = w->start_hz + 1000000LL;
-
     if (ui->samplerate_idx < 0 ||
         ui->samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
         ui->samplerate_idx = samplerate_index_from_hz(s->sample_rate_hz);
@@ -2518,10 +2718,20 @@ static bool sync_multi_window_runtime_config(struct scan_state *s, struct ui_sta
     }
     fft_len = k_fft_lengths[ui->fft_idx];
 
+    if (!apply_runtime_config(s, s->scan_start_hz, s->scan_stop_hz, sample_rate_hz, fft_len, s->lines,
+                              ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate))
+        return false;
+
+    for (idx = 0; idx < s->window_count; idx++)
+        free_scan_window_runtime(&s->multi_runtime[idx]);
+    s->multi_active_window = -1;
+    idx = first_enabled_scan_window(s);
+    if (idx < 0)
+        return false;
+    w = &s->windows[idx];
     ui->start_mhz = (float)w->start_hz / 1e6f;
     ui->stop_mhz = (float)w->stop_hz / 1e6f;
-    return apply_runtime_config(s, w->start_hz, w->stop_hz, sample_rate_hz, fft_len, s->lines,
-                                ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate);
+    return select_multi_window_runtime(s, idx);
 }
 
 static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float controls_h)
@@ -2838,15 +3048,74 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
         igGetContentRegionAvail(&avail);
         if (avail.x > 10.0f && avail.y > 10.0f) {
             if (s->scan_mode == SCAN_MODE_MULTI) {
-                int active_idx = first_enabled_scan_window(s);
-                if (active_idx >= 0) {
-                    igText("Multi-window bridge: scanning \"%s\" (%.3f-%.3f MHz) with current engine.",
-                           s->windows[active_idx].name,
-                           (double)s->windows[active_idx].start_hz / 1e6,
-                           (double)s->windows[active_idx].stop_hz / 1e6);
-                } else {
-                    igTextDisabled("Multi-window mode has no enabled windows.");
+                int idx;
+                int shown = 0;
+                const float row_spacing = 4.0f;
+                const float spectrum_row_h = 56.0f;
+                float window_h;
+
+                for (idx = 0; idx < s->window_count; idx++) {
+                    if (s->windows[idx].enabled && s->multi_runtime[idx].valid)
+                        shown++;
                 }
+                if (shown == 0) {
+                    igTextDisabled("Multi-window mode has no enabled windows.");
+                    igEndChild();
+                    return;
+                }
+                window_h = (avail.y - (shown - 1) * row_spacing) / shown;
+                if (window_h < 84.0f)
+                    window_h = 84.0f;
+
+                for (idx = 0; idx < s->window_count; idx++) {
+                    struct scan_window_runtime *rt = &s->multi_runtime[idx];
+                    float waterfall_row_h;
+                    double bin_hz;
+                    int plot_count;
+                    ImTextureRef tex_ref;
+                    char plot_id[48];
+
+                    if (!s->windows[idx].enabled || !rt->valid)
+                        continue;
+
+                    copy_runtime_to_state(s, rt);
+                    igText("%s  %.3f-%.3f MHz", s->windows[idx].name,
+                           (double)s->scan_start_hz / 1e6,
+                           (double)s->scan_stop_hz / 1e6);
+
+                    tex_ref._TexData = NULL;
+                    tex_ref._TexID = (ImTextureID)(uintptr_t)s->waterfall_tex;
+                    waterfall_update_view_texture(s);
+
+                    bin_hz = (s->fft_len > 0) ? ((double)s->sample_rate_hz / (double)s->fft_len) : 0.0;
+                    plot_count = build_plot_slice_from(s, s->line_db, s->plot_db, 0, s->waterfall_width);
+                    if (s->spectrum_show_avg)
+                        (void)build_plot_slice_from(s, s->line_avg_db, s->plot_avg, 0, s->waterfall_width);
+                    if (s->spectrum_show_peak)
+                        (void)build_plot_slice_from(s, s->line_peak_db, s->plot_peak, 0, s->waterfall_width);
+
+                    snprintf(plot_id, sizeof(plot_id), "##multi_spectrum_%d", idx);
+                    draw_spectrum_with_grid(s, plot_id, avail.x, spectrum_row_h, plot_count,
+                                            s->plot_db,
+                                            s->spectrum_show_avg ? s->plot_avg : NULL,
+                                            s->spectrum_show_peak ? s->plot_peak : NULL,
+                                            s->spectrum_show_avg, s->spectrum_show_peak,
+                                            s->spectrum_peak_marker,
+                                            s->spectrum_peak_markers,
+                                            0,
+                                            s->marker_a_enable, s->marker_b_enable,
+                                            s->marker_a_hz, s->marker_b_hz,
+                                            (double)s->scan_start_hz,
+                                            (double)s->scan_start_hz + (double)(s->waterfall_width - 1) * bin_hz);
+                    waterfall_row_h = window_h - spectrum_row_h - 20.0f;
+                    if (waterfall_row_h < 20.0f)
+                        waterfall_row_h = 20.0f;
+                    igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){0.0f, 1.0f}, (ImVec2){1.0f, 0.0f});
+                    if (idx != s->window_count - 1)
+                        igSeparator();
+                }
+                igEndChild();
+                return;
             }
             int row;
             int rows = s->display_rows;
@@ -3323,7 +3592,14 @@ int main(int argc, char **argv)
         }
 
         if (s.run) {
-            if (!scan_line(&s)) {
+            if (s.scan_mode == SCAN_MODE_MULTI) {
+                int next_idx = next_enabled_scan_window(&s, s.multi_active_window);
+                if (next_idx >= 0 && !select_multi_window_runtime(&s, next_idx)) {
+                    fprintf(stderr, "Failed to activate multi-window runtime.\n");
+                    quit = true;
+                }
+            }
+            if (!quit && !scan_line(&s)) {
                 fprintf(stderr, "Scan failed, stopping.\n");
                 quit = true;
             }
@@ -3392,6 +3668,8 @@ int main(int argc, char **argv)
     m2sdr_imgui_sdl2_shutdown();
     igDestroyContext(NULL);
 
+    if (s.scan_mode == SCAN_MODE_MULTI)
+        free_all_multi_window_runtimes(&s);
     if (s.waterfall_tex)
         glDeleteTextures(1, &s.waterfall_tex);
     scan_dma_cleanup(&s);
@@ -3439,6 +3717,8 @@ fail:
         SDL_DestroyWindow(window);
     SDL_Quit();
 
+    if (s.scan_mode == SCAN_MODE_MULTI)
+        free_all_multi_window_runtimes(&s);
     if (s.waterfall_tex)
         glDeleteTextures(1, &s.waterfall_tex);
 
