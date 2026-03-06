@@ -1,7 +1,10 @@
 PREFIX ?= /usr/local
-CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -MMD -fPIC
+SCAN_UI_DIR := scan_ui
+SCAN_CIMGUI_DIR := $(SCAN_UI_DIR)/cimgui
+
+CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
-CXXFLAGS = $(CFLAGS) -Icimgui -Icimgui/imgui -Icimgui/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
+CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
@@ -151,19 +154,21 @@ m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
 
 M2SDR_SCAN_IMGUI_SRCS := \
-	cimgui/cimgui.cpp \
-	cimgui/imgui/imgui.cpp \
-	cimgui/imgui/imgui_draw.cpp \
-	cimgui/imgui/imgui_demo.cpp \
-	cimgui/imgui/imgui_tables.cpp \
-	cimgui/imgui/imgui_widgets.cpp \
-	cimgui/imgui/backends/imgui_impl_sdl2.cpp \
-	cimgui/imgui/backends/imgui_impl_opengl3.cpp \
-	imgui_sdl_gl3_bridge.cpp
+	$(SCAN_CIMGUI_DIR)/cimgui.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_draw.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_demo.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_tables.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_widgets.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_sdl2.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_opengl3.cpp \
+	$(SCAN_UI_DIR)/imgui_sdl_gl3_bridge.cpp
 M2SDR_SCAN_IMGUI_OBJS := $(M2SDR_SCAN_IMGUI_SRCS:.cpp=.o)
+M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
+M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
-m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a m2sdr_scan.o kissfft/kiss_fft.o $(M2SDR_SCAN_IMGUI_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ m2sdr_scan.o kissfft/kiss_fft.o $(M2SDR_SCAN_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a $(M2SDR_SCAN_OBJS) $(M2SDR_SCAN_IMGUI_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(M2SDR_SCAN_OBJS) $(M2SDR_SCAN_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 clean:
@@ -174,6 +179,10 @@ clean:
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
 	rm -f kissfft/*.o kissfft/*.d
+	rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d
+	rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d
+	rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d
+	rm -f $(SCAN_CIMGUI_DIR)/imgui/backends/*.o $(SCAN_CIMGUI_DIR)/imgui/backends/*.d
 
 # --- Compile rules ---
 

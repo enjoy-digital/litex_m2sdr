@@ -26,7 +26,7 @@
 
 #define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
 #include "cimgui/cimgui.h"
-#include "imgui_sdl_gl3_bridge.h"
+#include "scan_ui/imgui_sdl_gl3_bridge.h"
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -36,7 +36,7 @@
 #include "libm2sdr.h"
 #include "m2sdr.h"
 #include "m2sdr_config.h"
-#include "m2sdr_colormaps_gqrx.h"
+#include "scan_ui/m2sdr_colormaps_gqrx.h"
 #include "kissfft/kiss_fft.h"
 
 #define igGetIO igGetIO_Nil
