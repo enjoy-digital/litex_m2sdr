@@ -32,6 +32,9 @@
 #define SPI_TIMEOUT 100000 /* in us */
 #define SPI_TRANSACTION_TIME_US  25
 
+/* The flash bridge exposes a small shift-register style SPI engine. These
+ * helpers wrap it so the higher-level write path can stay transport-agnostic. */
+
 /* flash_spi_cs */
 /*--------------*/
 
@@ -130,6 +133,7 @@ static void flash_erase_sector(void *conn, uint32_t addr)
 
 static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
+    /* Program in page-sized chunks using the bridge's fixed-width SPI words. */
     if (size == 1) {
         flash_spi(conn, 40, FLASH_PP, (addr << 8) | buf[0]);
     } else {
@@ -288,6 +292,8 @@ int m2sdr_flash_write(void *conn,
     flash_read_id(conn, 0);
     flash_write_enable(conn);
 
+    /* Erase all sectors that overlap the requested range first, then verify
+     * each programmed page by reading it back. */
     /* Erase */
     for (i = 0; i < size; i += FLASH_SECTOR_SIZE) {
         if (progress_cb) {

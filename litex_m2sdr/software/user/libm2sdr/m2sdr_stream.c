@@ -59,6 +59,8 @@ static unsigned m2sdr_stream_payload_bytes(struct m2sdr_dev *dev,
 
     (void)format;
 
+    /* The public sync API exposes payload samples. Header bytes are accounted
+     * for here so the caller does not need backend-specific math. */
     if (direction == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
         bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
     if (direction == M2SDR_TX && dev->tx_header_enable)
@@ -73,6 +75,8 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
                                       unsigned buffer_size,
                                       unsigned timeout_ms)
 {
+    /* Keep the active stream description in the device object so the blocking
+     * sync helpers and zero-copy helpers use one shared source of truth. */
     if (direction == M2SDR_RX) {
         dev->rx_configured  = 1;
         dev->rx_format      = format;
@@ -113,6 +117,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     struct litepcie_dma_ctrl *dma = (direction == M2SDR_RX) ? &dev->rx_dma : &dev->tx_dma;
     memset(dma, 0, sizeof(*dma));
 
+    /* libm2sdr keeps the LitePCIe DMA setup internal and exposes only the
+     * blocking sample-centric sync API on top. */
     if (direction == M2SDR_RX)
         dma->use_writer = 1;
     else
@@ -144,6 +150,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         uint16_t listen_port = 2345;
         int rx_enable = 1;
         int tx_enable = 1;
+        /* The UDP helper owns the packet ring. libm2sdr maps one UDP payload
+         * to one public sync buffer. */
         if (liteeth_udp_init(&dev->udp,
                              NULL, listen_port,
                              dev->eth_ip, dev->eth_port,
@@ -277,6 +285,8 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
         if (rc != M2SDR_ERR_OK)
             return rc;
+        /* RX metadata is currently carried only by the optional 16-byte FPGA
+         * header, so parse it before copying the payload out. */
         unsigned to_copy = DMA_BUFFER_SIZE;
         unsigned payload_off = 0;
         if (dev->rx_header_enable && dev->rx_strip_header) {
@@ -351,6 +361,8 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
         int rc = m2sdr_wait_tx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->tx_timeout_ms);
         if (rc != M2SDR_ERR_OK)
             return rc;
+        /* When enabled, the header is synthesized by libm2sdr from the public
+         * metadata structure before the payload is copied in. */
         unsigned to_copy = DMA_BUFFER_SIZE;
         unsigned payload_off = 0;
         if (dev->tx_header_enable) {
