@@ -24,6 +24,9 @@
 /* Functions */
 /*-----------*/
 
+/* The LiteI2C controller is used in a polling mode here so the same helper can
+ * be shared by PCIe and Etherbone builds without any interrupt dependency. */
+
 /* m2sdr_si5351_i2c_reset */
 /*------------------------*/
 

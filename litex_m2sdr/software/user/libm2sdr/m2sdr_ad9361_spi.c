@@ -28,6 +28,9 @@
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
+/* Helpers */
+/*---------*/
+
 /* m2sdr_ad9361_spi_init */
 /*-----------------------*/
 
@@ -48,6 +51,8 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
 /*-----------------------*/
 
 void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso) {
+    (void)len;
+
     /* Check write. */
     bool is_write = (mosi[0] & 0x80) != 0;
 

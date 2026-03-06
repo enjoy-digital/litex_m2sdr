@@ -310,12 +310,25 @@ int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 
 /* RF config */
-/* Initialize cfg with sane defaults matching the shipped utilities. */
+/* Initialize cfg with sane defaults matching the shipped utilities.
+ *
+ * This is the recommended starting point before overriding only the fields
+ * your application cares about.
+ */
 void m2sdr_config_init(struct m2sdr_config *cfg);
-/* Apply a full RF configuration to the currently-open device. */
+/* Apply a full RF configuration to the currently-open device.
+ *
+ * This performs the same high-level bring-up sequence as `m2sdr_rf`: SI5351
+ * clock selection, AD9361 SPI/RF init, channel layout, rates, gains, loopback,
+ * and optional BIST modes.
+ */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
 
-/* Direction-based RF setters. */
+/* Direction-based RF setters.
+ *
+ * These assume the AD9361 has already been initialized either through
+ * `m2sdr_apply_config()` or an advanced integration path such as Soapy.
+ */
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
