@@ -22,6 +22,8 @@ int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     if (!dev || !val || !dev->eb)
         return M2SDR_ERR_INVAL;
+    /* Etherbone already presents CSR access as 32-bit register transactions,
+     * so the HAL is just a validity check plus the backend call. */
     *val = eb_read32(dev->eb, addr);
     return M2SDR_ERR_OK;
 }

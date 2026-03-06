@@ -36,10 +36,13 @@
 
 void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
     if (reset) {
-        /* Reset Through GPIO */
+        /* The FPGA wrapper exposes the AD9361 reset line through the config
+         * CSR, so an SPI reset here is really a short GPIO pulse. */
         m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b00);
         usleep(1000);
     }
+    /* Re-enable the AD9361 interface and leave a small settle time before the
+     * imported driver starts issuing register transactions. */
     m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b11);
     usleep(1000);
 
@@ -53,7 +56,9 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
 void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso) {
     (void)len;
 
-    /* Check write. */
+    /* The AD9361 bridge always transfers 24 bits on this platform. The first
+     * control byte encodes both the R/W bit and the high register address
+     * bits, so we only need to distinguish read from write here. */
     bool is_write = (mosi[0] & 0x80) != 0;
 
     /* Write MOSI. */
@@ -64,6 +69,8 @@ void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso
 
     /* Wait done. */
 #ifdef AD9361_SPI_WAIT_DONE
+    /* Keep the helper synchronous so the caller sees a simple register-style
+     * interface even though the FPGA block is command based. */
     while ((m2sdr_readl(conn, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
 #endif
 
@@ -85,7 +92,7 @@ void m2sdr_ad9361_spi_write(void *conn, uint16_t reg, uint8_t dat) {
     printf("ad9361_spi_write_reg; reg:0x%04x dat:%02x\n", reg, dat);
 #endif
 
-    /* Prepare Data. */
+    /* Pack the AD9361 wire format: R/W bit + 15-bit register address + data. */
     mosi[0]  = (1 << 7);
     mosi[0] |= (reg >> 8) & 0x7f;
     mosi[1]  = (reg >> 0) & 0xff;
@@ -103,7 +110,7 @@ uint8_t m2sdr_ad9361_spi_read(void *conn, uint16_t reg) {
     uint8_t mosi[3];
     uint8_t miso[3];
 
-    /* Prepare Data. */
+    /* A read reuses the same 24-bit frame but leaves the payload byte empty. */
     mosi[0]  = (0 << 7);
     mosi[0] |= (reg >> 8) & 0x7f;
     mosi[1]  = (reg >> 0) & 0xff;

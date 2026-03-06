@@ -20,6 +20,8 @@
 
 size_t m2sdr_format_size(enum m2sdr_format format)
 {
+    /* Keep the size table local here so all higher layers share one canonical
+     * definition of each public sample format. */
     switch (format) {
     case M2SDR_FORMAT_SC16_Q11:
         return 4;
@@ -52,6 +54,8 @@ void *m2sdr_alloc_buffer(enum m2sdr_format format, unsigned num_samples)
     if (!bytes)
         return NULL;
     void *buf = NULL;
+    /* 64-byte alignment keeps DMA/SIMD-friendly callers out of trouble without
+     * exposing transport-specific alignment rules in the public API. */
     if (posix_memalign(&buf, 64, bytes) != 0)
         return NULL;
     return buf;

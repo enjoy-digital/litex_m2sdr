@@ -23,6 +23,8 @@ int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     if (!dev || !val || dev->fd < 0)
         return M2SDR_ERR_INVAL;
+    /* Keep the HAL intentionally thin so transport-neutral code pays almost no
+     * abstraction cost over the original direct helper calls. */
     *val = litepcie_readl(dev->fd, addr);
     return M2SDR_ERR_OK;
 }
