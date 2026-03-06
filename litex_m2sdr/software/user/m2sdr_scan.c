@@ -397,6 +397,19 @@ static void remove_scan_window(struct scan_state *s, int index)
     s->window_count--;
 }
 
+static int first_enabled_scan_window(const struct scan_state *s)
+{
+    int i;
+
+    if (!s)
+        return -1;
+    for (i = 0; i < s->window_count; i++) {
+        if (s->windows[i].enabled)
+            return i;
+    }
+    return -1;
+}
+
 static bool retune_rx(int64_t freq_hz);
 static bool fft_worker_start(struct scan_state *s);
 static void fft_worker_stop(struct scan_state *s);
@@ -2475,6 +2488,42 @@ static bool apply_ui_runtime_config(struct scan_state *s, struct ui_state *ui)
     return ok;
 }
 
+static bool sync_multi_window_runtime_config(struct scan_state *s, struct ui_state *ui)
+{
+    int idx;
+    struct scan_window *w;
+    uint32_t sample_rate_hz;
+    int fft_len;
+
+    idx = first_enabled_scan_window(s);
+    if (idx < 0)
+        return false;
+
+    w = &s->windows[idx];
+    if (w->stop_hz <= w->start_hz)
+        w->stop_hz = w->start_hz + 1000000LL;
+
+    if (ui->samplerate_idx < 0 ||
+        ui->samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
+        ui->samplerate_idx = samplerate_index_from_hz(s->sample_rate_hz);
+    if (ui->fft_idx < 0 ||
+        ui->fft_idx >= (int)(sizeof(k_fft_lengths) / sizeof(k_fft_lengths[0])))
+        ui->fft_idx = fft_len_index_from_value(s->fft_len);
+
+    sample_rate_hz = k_scan_samplerates_hz[ui->samplerate_idx];
+    if (ui->auto_samplerate) {
+        double span_hz = (double)(w->stop_hz - w->start_hz);
+        sample_rate_hz = recommended_samplerate_for_span(span_hz);
+        ui->samplerate_idx = samplerate_index_from_hz(sample_rate_hz);
+    }
+    fft_len = k_fft_lengths[ui->fft_idx];
+
+    ui->start_mhz = (float)w->start_hz / 1e6f;
+    ui->stop_mhz = (float)w->stop_hz / 1e6f;
+    return apply_runtime_config(s, w->start_hz, w->stop_hz, sample_rate_hz, fft_len, s->lines,
+                                ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate);
+}
+
 static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float controls_h)
 {
     static const char *palette_items[] = {
@@ -2497,12 +2546,14 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     const float min_span_mhz = 1.0f;
     int p = s->waterfall_palette;
     bool changed = false;
+    bool multi_changed = false;
     bool changed_start = false;
     bool changed_stop = false;
     int bi;
     int band_clicked = -1;
     int delete_window = -1;
     int scan_mode = (int)s->scan_mode;
+    enum scan_mode prev_scan_mode = s->scan_mode;
     static const struct {
         const char *name;
         float f0_mhz;
@@ -2551,7 +2602,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 12.0f);
     igText("%s", s->scan_mode == SCAN_MODE_SINGLE ?
         "One stitched sweep over a continuous span." :
-        "Sparse window planning UI (scan engine wiring is the next step).");
+        "Current engine follows the first enabled window; planner/merging comes next.");
 
     if (s->run) {
         if (igButton("Pause Scan", (ImVec2){120.0f, 0.0f}))
@@ -2621,15 +2672,15 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     } else {
         igSeparatorText("Scan Windows");
         if (igButton("Add Custom", (ImVec2){90.0f, 0.0f}))
-            (void)add_scan_window(s, NULL, 144000000LL, 148000000LL);
+            multi_changed |= (add_scan_window(s, NULL, 144000000LL, 148000000LL) >= 0);
         igSameLine(0.0f, 8.0f);
         igText("Presets:");
         for (bi = 0; bi < (int)(sizeof(multi_window_presets) / sizeof(multi_window_presets[0])); bi++) {
             igSameLine(0.0f, 4.0f);
             if (igSmallButton(multi_window_presets[bi].name))
-                (void)add_scan_window(s, multi_window_presets[bi].name,
-                                      multi_window_presets[bi].start_hz,
-                                      multi_window_presets[bi].stop_hz);
+                multi_changed |= (add_scan_window(s, multi_window_presets[bi].name,
+                                                  multi_window_presets[bi].start_hz,
+                                                  multi_window_presets[bi].stop_hz) >= 0);
         }
 
         if (s->window_count == 0) {
@@ -2643,7 +2694,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
                 bool field_changed;
 
                 snprintf(label, sizeof(label), "Enable##mw_en_%d", bi);
-                igCheckbox(label, &w->enabled);
+                multi_changed |= igCheckbox(label, &w->enabled);
                 igSameLine(0.0f, 8.0f);
                 snprintf(label, sizeof(label), "Name##mw_name_%d", bi);
                 igSetNextItemWidth(110.0f);
@@ -2653,11 +2704,15 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
                 igSetNextItemWidth(100.0f);
                 field_changed = igDragFloat(label, &start_mhz, 0.1f, 70.0f, 6000.0f, "%.3f MHz", 0);
                 if (field_changed)
+                    multi_changed = true;
+                if (field_changed)
                     w->start_hz = (int64_t)(start_mhz * 1e6f);
                 igSameLine(0.0f, 8.0f);
                 snprintf(label, sizeof(label), "Stop##mw_stop_%d", bi);
                 igSetNextItemWidth(100.0f);
                 field_changed = igDragFloat(label, &stop_mhz, 0.1f, 70.0f, 6000.0f, "%.3f MHz", 0);
+                if (field_changed)
+                    multi_changed = true;
                 if (field_changed)
                     w->stop_hz = (int64_t)(stop_mhz * 1e6f);
                 if (w->stop_hz <= w->start_hz)
@@ -2761,8 +2816,12 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (delete_window >= 0)
         remove_scan_window(s, delete_window);
 
-    if (changed)
+    if (s->scan_mode == SCAN_MODE_SINGLE && changed)
         (void)apply_ui_runtime_config(s, ui);
+    if (s->scan_mode == SCAN_MODE_MULTI && (multi_changed || delete_window >= 0 || prev_scan_mode != s->scan_mode))
+        (void)sync_multi_window_runtime_config(s, ui);
+    if (s->scan_mode == SCAN_MODE_SINGLE && prev_scan_mode != s->scan_mode)
+        ui_state_from_scan(s, ui);
 
     igEndChild();
 }
@@ -2778,6 +2837,17 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
         ImVec2 avail;
         igGetContentRegionAvail(&avail);
         if (avail.x > 10.0f && avail.y > 10.0f) {
+            if (s->scan_mode == SCAN_MODE_MULTI) {
+                int active_idx = first_enabled_scan_window(s);
+                if (active_idx >= 0) {
+                    igText("Multi-window bridge: scanning \"%s\" (%.3f-%.3f MHz) with current engine.",
+                           s->windows[active_idx].name,
+                           (double)s->windows[active_idx].start_hz / 1e6,
+                           (double)s->windows[active_idx].stop_hz / 1e6);
+                } else {
+                    igTextDisabled("Multi-window mode has no enabled windows.");
+                }
+            }
             int row;
             int rows = s->display_rows;
             const float row_spacing = 4.0f;
