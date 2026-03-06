@@ -29,14 +29,15 @@ static void print_status(const char *label, int rc, int *errors)
 
 static void usage(const char *prog)
 {
-    printf("Usage: %s [options] [device]\n", prog);
-    printf("  options:\n");
-    printf("    -d, --device DEV  explicit device id (pcie:/dev/m2sdr0 or eth:ip:port)\n");
-    printf("    --time       check board time is monotonic\n");
-    printf("    --loopback   toggle DMA loopback (PCIe only)\n");
-    printf("    --stream-loopback  run a DMA streaming loopback test (PCIe only)\n");
-    printf("    -h, --help   show this help\n");
-    printf("  device: optional device identifier (pcie:/dev/m2sdr0 or eth:ip:port)\n");
+    printf("usage: %s [options] [device]\n", prog);
+    printf("options:\n");
+    printf("  -d, --device DEV         Use explicit device id.\n");
+    printf("      --time               Check that board time is monotonic.\n");
+    printf("      --loopback           Toggle DMA loopback (PCIe only).\n");
+    printf("      --stream-loopback    Run a DMA streaming loopback test (PCIe only).\n");
+    printf("  -h, --help               Show this help message.\n");
+    printf("device:\n");
+    printf("  Optional device identifier (pcie:/dev/m2sdr0 or eth:ip:port).\n");
 }
 
 int main(int argc, char **argv)
