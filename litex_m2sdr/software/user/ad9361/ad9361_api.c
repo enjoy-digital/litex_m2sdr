@@ -45,6 +45,7 @@
 #include "platform.h"
 #include "util.h"
 #include "config.h"
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef AXI_ADC_NOT_PRESENT
@@ -65,6 +66,33 @@ static struct axiadc_chip_info axiadc_chip_info_tbl[] = {
 
 extern struct gain_table_info ad9361_adi_gt_info[];
 
+static int ad9361_verbose_init_enabled(void)
+{
+	static int cached = -1;
+	const char *value;
+
+	if (cached >= 0)
+		return cached;
+
+	value = getenv("M2SDR_VERBOSE_AD9361_INIT");
+	if (!value || value[0] == '\0' || strcmp(value, "0") == 0 ||
+	    strcmp(value, "false") == 0 || strcmp(value, "no") == 0) {
+		cached = 0;
+	} else {
+		cached = 1;
+	}
+
+	return cached;
+}
+
+#define AD9361_INIT_TRACE(...)                         \
+	do {                                              \
+		if (ad9361_verbose_init_enabled()) {          \
+			fprintf(stderr, __VA_ARGS__);             \
+			fflush(stderr);                           \
+		}                                             \
+	} while (0)
+
 /**
  * Initialize the AD9361 part.
  * @param init_param The structure that contains the AD9361 initial parameters.
@@ -81,8 +109,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	int32_t rev = 0;
 	int32_t i   = 0;
 
-	fprintf(stderr, "%s: start (do_init=%d)\n", __func__, do_init);
-	fflush(stderr);
+	AD9361_INIT_TRACE("%s: start (do_init=%d)\n", __func__, do_init);
 	phy = (struct ad9361_rf_phy *)zmalloc(sizeof(*phy));
 	if (!phy) {
 		return -ENOMEM;
@@ -520,13 +547,11 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->bist_tone_mask = 0;
 
 	if (do_init) {
-		fprintf(stderr, "%s: reset\n", __func__);
-		fflush(stderr);
+		AD9361_INIT_TRACE("%s: reset\n", __func__);
 		ad9361_reset(phy);
 	}
 
-	fprintf(stderr, "%s: read product id\n", __func__);
-	fflush(stderr);
+	AD9361_INIT_TRACE("%s: read product id\n", __func__);
 	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
 		printf("%s : Unsupported PRODUCT_ID 0x%X", __func__, (unsigned int)ret);
@@ -540,8 +565,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->ad9361_rfpll_ext_set_rate = init_param->ad9361_rfpll_ext_set_rate;
 
 	if (do_init) {
-		fprintf(stderr, "%s: register clocks\n", __func__);
-		fflush(stderr);
+		AD9361_INIT_TRACE("%s: register clocks\n", __func__);
 		ret = register_clocks(phy);
 		if (ret < 0)
 			goto out;
@@ -553,8 +577,7 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 #endif
 
 	if (do_init) {
-		fprintf(stderr, "%s: setup\n", __func__);
-		fflush(stderr);
+		AD9361_INIT_TRACE("%s: setup\n", __func__);
 		ret = ad9361_setup(phy);
 		if (ret < 0)
 			goto out;
@@ -567,7 +590,8 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 		goto out;
 #endif
 
-	printf("%s : AD936x Rev %d successfully initialized\n", __func__, (int)rev);
+	if (ad9361_verbose_init_enabled())
+		printf("%s : AD936x Rev %d successfully initialized\n", __func__, (int)rev);
 
 	*ad9361_phy = phy;
 
