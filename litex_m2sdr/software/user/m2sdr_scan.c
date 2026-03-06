@@ -581,18 +581,23 @@ static bool select_multi_window_runtime(struct scan_state *s, int index)
 {
     struct scan_window_runtime *rt;
     struct scan_window *w;
+    int prev_active;
 
     if (!s || index < 0 || index >= s->window_count)
         return false;
 
-    if (s->multi_active_window >= 0 && s->multi_active_window < s->window_count)
-        copy_state_to_runtime(s, &s->multi_runtime[s->multi_active_window]);
+    prev_active = s->multi_active_window;
+    if (prev_active >= 0 && prev_active < s->window_count) {
+        copy_state_to_runtime(s, &s->multi_runtime[prev_active]);
+        /* Active line/waterfall buffers now belong to the previous runtime entry.
+         * Detach them from scan_state so resize_buffers() does not free them. */
+        clear_active_runtime_refs(s);
+    }
 
     rt = &s->multi_runtime[index];
     w = &s->windows[index];
     if (!runtime_matches_window(s, rt, w)) {
         free_scan_window_runtime(rt);
-        clear_active_runtime_refs(s);
         s->scan_start_hz = w->start_hz;
         s->scan_stop_hz = w->stop_hz;
         if (!resize_buffers(s))
@@ -616,6 +621,14 @@ static void free_all_multi_window_runtimes(struct scan_state *s)
         free_scan_window_runtime(&s->multi_runtime[i]);
     s->multi_active_window = -1;
     clear_active_runtime_refs(s);
+}
+
+static void detach_multi_window_state(struct scan_state *s)
+{
+    if (!s)
+        return;
+    clear_active_runtime_refs(s);
+    s->multi_active_window = -1;
 }
 
 static bool retune_rx(int64_t freq_hz);
@@ -2703,6 +2716,11 @@ static bool sync_multi_window_runtime_config(struct scan_state *s, struct ui_sta
     uint32_t sample_rate_hz;
     int fft_len;
 
+    idx = first_enabled_scan_window(s);
+    if (idx < 0)
+        return false;
+    w = &s->windows[idx];
+
     if (ui->samplerate_idx < 0 ||
         ui->samplerate_idx >= (int)(sizeof(k_scan_samplerates_hz) / sizeof(k_scan_samplerates_hz[0])))
         ui->samplerate_idx = samplerate_index_from_hz(s->sample_rate_hz);
@@ -2718,20 +2736,18 @@ static bool sync_multi_window_runtime_config(struct scan_state *s, struct ui_sta
     }
     fft_len = k_fft_lengths[ui->fft_idx];
 
-    if (!apply_runtime_config(s, s->scan_start_hz, s->scan_stop_hz, sample_rate_hz, fft_len, s->lines,
+    if (s->multi_active_window >= 0)
+        detach_multi_window_state(s);
+    free_all_multi_window_runtimes(s);
+
+    if (!apply_runtime_config(s, w->start_hz, w->stop_hz, sample_rate_hz, fft_len, s->lines,
                               ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate))
         return false;
-
-    for (idx = 0; idx < s->window_count; idx++)
-        free_scan_window_runtime(&s->multi_runtime[idx]);
-    s->multi_active_window = -1;
-    idx = first_enabled_scan_window(s);
-    if (idx < 0)
-        return false;
-    w = &s->windows[idx];
     ui->start_mhz = (float)w->start_hz / 1e6f;
     ui->stop_mhz = (float)w->stop_hz / 1e6f;
-    return select_multi_window_runtime(s, idx);
+    copy_state_to_runtime(s, &s->multi_runtime[idx]);
+    s->multi_active_window = idx;
+    return true;
 }
 
 static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float controls_h)
@@ -2759,6 +2775,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     bool multi_changed = false;
     bool changed_start = false;
     bool changed_stop = false;
+    bool mode_changed = false;
     int bi;
     int band_clicked = -1;
     int delete_window = -1;
@@ -2807,8 +2824,10 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
 
     igSeparatorText("Scan Controls");
     igSetNextItemWidth(150.0f);
-    if (igCombo_Str_arr("Mode", &scan_mode, scan_mode_items, 2, 2))
+    if (igCombo_Str_arr("Mode", &scan_mode, scan_mode_items, 2, 2)) {
         s->scan_mode = (enum scan_mode)scan_mode;
+        mode_changed = true;
+    }
     igSameLine(0.0f, 12.0f);
     igText("%s", s->scan_mode == SCAN_MODE_SINGLE ?
         "One stitched sweep over a continuous span." :
@@ -3026,12 +3045,22 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     if (delete_window >= 0)
         remove_scan_window(s, delete_window);
 
+    if (mode_changed && s->scan_mode == SCAN_MODE_SINGLE && prev_scan_mode == SCAN_MODE_MULTI) {
+        int64_t keep_start = s->scan_start_hz;
+        int64_t keep_stop = s->scan_stop_hz;
+        uint32_t keep_sr = s->sample_rate_hz;
+        int keep_fft = s->fft_len;
+        detach_multi_window_state(s);
+        free_all_multi_window_runtimes(s);
+        (void)apply_runtime_config(s, keep_start, keep_stop, keep_sr, keep_fft, s->lines,
+                                   ui->rx_gain, ui->settle_us, ui->stitch_pct, ui->auto_samplerate);
+        ui_state_from_scan(s, ui);
+    }
+
     if (s->scan_mode == SCAN_MODE_SINGLE && changed)
         (void)apply_ui_runtime_config(s, ui);
-    if (s->scan_mode == SCAN_MODE_MULTI && (multi_changed || delete_window >= 0 || prev_scan_mode != s->scan_mode))
+    if (s->scan_mode == SCAN_MODE_MULTI && (multi_changed || delete_window >= 0 || mode_changed))
         (void)sync_multi_window_runtime_config(s, ui);
-    if (s->scan_mode == SCAN_MODE_SINGLE && prev_scan_mode != s->scan_mode)
-        ui_state_from_scan(s, ui);
 
     igEndChild();
 }
@@ -3048,6 +3077,7 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
         igGetContentRegionAvail(&avail);
         if (avail.x > 10.0f && avail.y > 10.0f) {
             if (s->scan_mode == SCAN_MODE_MULTI) {
+                int active_idx = s->multi_active_window;
                 int idx;
                 int shown = 0;
                 const float row_spacing = 4.0f;
@@ -3063,26 +3093,37 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                     igEndChild();
                     return;
                 }
+
+                /* Persist the just-scanned active window before reloading other runtimes for drawing. */
+                if (active_idx >= 0 && active_idx < s->window_count)
+                    copy_state_to_runtime(s, &s->multi_runtime[active_idx]);
+
                 window_h = (avail.y - (shown - 1) * row_spacing) / shown;
                 if (window_h < 84.0f)
                     window_h = 84.0f;
 
                 for (idx = 0; idx < s->window_count; idx++) {
                     struct scan_window_runtime *rt = &s->multi_runtime[idx];
+                    ImVec2 local_avail;
                     float waterfall_row_h;
                     double bin_hz;
                     int plot_count;
                     ImTextureRef tex_ref;
                     char plot_id[48];
+                    char child_id[48];
 
                     if (!s->windows[idx].enabled || !rt->valid)
                         continue;
 
                     copy_runtime_to_state(s, rt);
+                    snprintf(child_id, sizeof(child_id), "##multi_window_%d", idx);
+                    if (!igBeginChild_Str(child_id, (ImVec2){0.0f, window_h}, 0, 0)) {
+                        igEndChild();
+                        continue;
+                    }
                     igText("%s  %.3f-%.3f MHz", s->windows[idx].name,
                            (double)s->scan_start_hz / 1e6,
                            (double)s->scan_stop_hz / 1e6);
-
                     tex_ref._TexData = NULL;
                     tex_ref._TexID = (ImTextureID)(uintptr_t)s->waterfall_tex;
                     waterfall_update_view_texture(s);
@@ -3095,7 +3136,7 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                         (void)build_plot_slice_from(s, s->line_peak_db, s->plot_peak, 0, s->waterfall_width);
 
                     snprintf(plot_id, sizeof(plot_id), "##multi_spectrum_%d", idx);
-                    draw_spectrum_with_grid(s, plot_id, avail.x, spectrum_row_h, plot_count,
+                    draw_spectrum_with_grid(s, plot_id, local_avail.x, spectrum_row_h, plot_count,
                                             s->plot_db,
                                             s->spectrum_show_avg ? s->plot_avg : NULL,
                                             s->spectrum_show_peak ? s->plot_peak : NULL,
@@ -3107,13 +3148,17 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                             s->marker_a_hz, s->marker_b_hz,
                                             (double)s->scan_start_hz,
                                             (double)s->scan_start_hz + (double)(s->waterfall_width - 1) * bin_hz);
-                    waterfall_row_h = window_h - spectrum_row_h - 20.0f;
-                    if (waterfall_row_h < 20.0f)
-                        waterfall_row_h = 20.0f;
-                    igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){0.0f, 1.0f}, (ImVec2){1.0f, 0.0f});
+                    igGetContentRegionAvail(&local_avail);
+                    waterfall_row_h = local_avail.y;
+                    if (waterfall_row_h < 24.0f)
+                        waterfall_row_h = 24.0f;
+                    igImage(tex_ref, (ImVec2){local_avail.x, waterfall_row_h}, (ImVec2){0.0f, 1.0f}, (ImVec2){1.0f, 0.0f});
+                    igEndChild();
                     if (idx != s->window_count - 1)
                         igSeparator();
                 }
+                if (active_idx >= 0 && active_idx < s->window_count && s->multi_runtime[active_idx].valid)
+                    copy_runtime_to_state(s, &s->multi_runtime[active_idx]);
                 igEndChild();
                 return;
             }
@@ -3412,6 +3457,7 @@ int main(int argc, char **argv)
     s.scan_mode = SCAN_MODE_SINGLE;
     s.window_count = 0;
     s.multi_window_next_id = 1;
+    s.multi_active_window = -1;
     s.sample_rate_hz = DEFAULT_SCAN_SAMPLERATE_HZ;
     s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
     s.scan_start_hz = DEFAULT_START_FREQ_HZ;
