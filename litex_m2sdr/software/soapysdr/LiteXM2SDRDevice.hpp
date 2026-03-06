@@ -22,6 +22,7 @@
 #include "liblitepcie.h"
 #include "etherbone.h"
 #include "libm2sdr.h"
+#include "m2sdr.h"
 
 #include <SoapySDR/Constants.h>
 #include <SoapySDR/Device.hpp>
@@ -81,15 +82,23 @@ enum class SoapyLiteXM2SDREthernetMode {
 
 #if USE_LITEPCIE
 #define FD_INIT -1
-#define litex_m2sdr_writel(_fd, _addr, _val) litepcie_writel(_fd, _addr, _val)
-#define litex_m2sdr_readl(_fd, _addr) litepcie_readl(_fd, _addr)
 typedef int litex_m2sdr_device_desc_t;
 #elif USE_LITEETH
 #define FD_INIT NULL
-#define litex_m2sdr_writel(_fd, _addr, _val) eb_write32(_fd, _val, _addr)
-#define litex_m2sdr_readl(_fd, _addr) eb_read32(_fd, _addr)
 typedef struct eb_connection *litex_m2sdr_device_desc_t;
 #endif
+
+static inline uint32_t litex_m2sdr_readl(struct m2sdr_dev *dev, uint32_t addr)
+{
+    uint32_t val = 0;
+    m2sdr_reg_read(dev, addr, &val);
+    return val;
+}
+
+static inline void litex_m2sdr_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    m2sdr_reg_write(dev, addr, val);
+}
 
 class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  /**************************************************************************************************
@@ -377,6 +386,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
  **************************************************************************************************/
   private:
     SoapySDR::Kwargs _deviceArgs;
+    struct m2sdr_dev *_dev = nullptr;
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
 
@@ -479,6 +489,18 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         size_t offset);
 
     void deinterleaveCS16(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        size_t offset);
+
+    void interleaveCS8(
+        const void *src,
+        void *dst,
+        uint32_t len,
+        size_t offset);
+
+    void deinterleaveCS8(
         const void *src,
         void *dst,
         uint32_t len,

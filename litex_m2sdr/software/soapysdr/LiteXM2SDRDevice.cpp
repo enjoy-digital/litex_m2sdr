@@ -374,8 +374,8 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 }
 #endif
 
-std::string getLiteXM2SDRSerial(litex_m2sdr_device_desc_t fd);
-std::string getLiteXM2SDRIdentification(litex_m2sdr_device_desc_t fd);
+std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
+std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
 
 #if USE_LITEPCIE
 void dma_set_loopback(int fd, bool loopback_enable) {
@@ -409,13 +409,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("No LitePCIe devices found!");
     }
     std::string path = args.at("path");
-    _fd = open(path.c_str(), O_RDWR);
-    if (_fd < 0)
-        throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path);
+    std::string dev_id = "pcie:" + path;
+    int rc = m2sdr_open(&_dev, dev_id.c_str());
+    if (rc != 0) {
+        throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path + " (" + m2sdr_strerror(rc) + ")");
+    }
+    _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
     /* Global file descriptor for AD9361 lib. */
     _spi_id = spi_register_fd(_fd);
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_fd).c_str());
+    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 #elif USE_LITEETH
     /* Prepare EtherBone / Ethernet streamer */
     std::string eth_ip;
@@ -425,14 +428,19 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         eth_ip = args.at("eth_ip");
 
     /* EtherBone */
-    _fd = eb_connect(eth_ip.c_str(), "1234", 1);
-    if (!_fd)
+    std::string dev_id = "eth:" + eth_ip + ":1234";
+    int rc = m2sdr_open(&_dev, dev_id.c_str());
+    if (rc != 0) {
         throw std::runtime_error(
             "Can't connect to EtherBone at " + eth_ip +
-            ":1234 (hint: set eth_ip=... for the board IP)");
+            ":1234 (hint: set eth_ip=... for the board IP, error: " +
+            std::string(m2sdr_strerror(rc)) + ")");
+    }
+    }
+    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
     _spi_id = spi_register_fd(_fd);
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_fd).c_str());
+    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 
     std::string eth_mode = "udp";
     if (args.count("eth_mode") > 0)
@@ -457,7 +465,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     uint32_t ip_addr_val = ntohl(ip_addr_struct.s_addr);
 
     /* Write the PC's IP to the FPGA's ETH_STREAMER IP register */
-    litex_m2sdr_writel(_fd, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
+    litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
 
@@ -485,50 +493,36 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
     /* Configure Mode based on _bitMode */
-    if (_bitMode == 8) {
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1); /* 8-bit mode */
-    } else {
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0); /* 16-bit mode */
-    }
+    SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
+    m2sdr_set_bitmode(_dev, _bitMode == 8);
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
+    SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
     /* Enable Synchronizer */
-    litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+    litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 
     /* DMA RX Header */
     #if defined(_RX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-           (1 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_rx_header(_dev, true, false);
     #else
         /* Disable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_RX_CONTROL_ADDR,
-           (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-           (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_rx_header(_dev, false, false);
     #endif
 
     /* DMA TX Header */
     #if defined(_TX_DMA_HEADER_TEST)
         /* Enable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-           (1 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_tx_header(_dev, true);
     #else
         /* Disable */
-        litex_m2sdr_writel(_fd, CSR_HEADER_TX_CONTROL_ADDR,
-           (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-           (0 << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)
-        );
+        m2sdr_set_tx_header(_dev, false);
     #endif
 
     /* Disable DMA Loopback. */
-    litex_m2sdr_writel(_fd, CSR_PCIE_DMA0_LOOPBACK_ENABLE_ADDR, 0);
+    m2sdr_set_dma_loopback(_dev, false);
 #endif
 
     bool do_init = true;
@@ -587,9 +581,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         /* Initialize SI5351 Clocking */
 #ifdef CSR_SI5351_BASE
+        SoapySDR::log(SOAPY_SDR_INFO, "Initializing SI5351");
         if (clock_source == "internal") {
             /* SI5351B, XO reference */
-            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                 SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
             if (refclk_hz == 40000000) {
                 m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
@@ -602,7 +597,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             }
         } else {
             /* SI5351C, external 10 MHz CLKIN from u.FL */
-            litex_m2sdr_writel(_fd, CSR_SI5351_CONTROL_ADDR,
+            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                   SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
                   SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
             if (refclk_hz == 40000000) {
@@ -618,27 +613,36 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #endif
 
         /* Power-up AD9361 */
-        litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b11);
+        SoapySDR::log(SOAPY_SDR_INFO, "Powering up AD9361");
+        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b11);
 
         /* Initialize AD9361 SPI. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 SPI");
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
     /* Initialize AD9361 RFIC. */
+    SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
     default_init_param.reference_clk_rate = refclk_hz;
     default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync          = -1;
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
     default_init_param.id_no = _spi_id;
-    ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    if (ad9361_rc != 0 || ad9361_phy == nullptr) {
+        throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
+    }
+    m2sdr_rf_bind(_dev, ad9361_phy);
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
         ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg_base);
         ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg_base);
 
         /* Some defaults to avoid throwing. */
+        SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
         this->setClockSource("internal");
 
@@ -658,6 +662,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.gain[0]      = 20;
         _rx_stream.iqbalance[0] = 1.0;
         _tx_stream.iqbalance[0] = 1.0;
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 0");
         channel_configure(SOAPY_SDR_RX, 0);
         channel_configure(SOAPY_SDR_TX, 0);
 
@@ -669,6 +674,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.gain[1]      = 20;
         _rx_stream.iqbalance[1] = 1.0;
         _tx_stream.iqbalance[1] = 1.0;
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 1");
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);
     }
@@ -732,28 +738,32 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 #endif
 
     /* Crossbar Mux/Demux : Select PCIe streaming */
-    litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
-    litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
     /* Power-Down AD9361 */
-    litex_m2sdr_writel(_fd, CSR_AD9361_CONFIG_ADDR, 0b00);
+    litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
 
-#if USE_LITEPCIE
-    close(_fd);
-#elif USE_LITEETH
+#if USE_LITEETH
     if (_udp_inited) {
         liteeth_udp_cleanup(&_udp);
         _udp_inited = false;
     }
 #ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
     if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
-        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
     }
 #endif
-    if (_fd) {
-        eb_disconnect(&_fd);
-        _fd = NULL;
+    if (_dev) {
+        m2sdr_rf_bind(_dev, nullptr);
+        m2sdr_close(_dev);
+        _dev = nullptr;
     }
+#endif
+#if USE_LITEPCIE
+    _fd = FD_INIT;
+#elif USE_LITEETH
+    _fd = FD_INIT;
 #endif
 }
 
@@ -795,7 +805,10 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 
 #ifdef CSR_CAPABILITY_BOARD_INFO_ADDR
     {
-        const uint32_t board_info = litex_m2sdr_readl(_fd, CSR_CAPABILITY_BOARD_INFO_ADDR);
+        struct m2sdr_capabilities caps;
+        uint32_t board_info = 0;
+        if (m2sdr_get_capabilities(_dev, &caps) == 0)
+            board_info = caps.board_info;
         const int variant = (board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) &
                             ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
         switch (variant) {
@@ -966,8 +979,6 @@ void SoapyLiteXM2SDR::setGain(
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.gain[channel] = value;
         double   att_db  = (value >= 0.0) ? value : -value;
-        uint32_t att_mdb = static_cast<uint32_t>(att_db * 1000.0);
-
         /* Clarify interpretation */
         if (value >= 0.0) {
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, att_db);
@@ -977,14 +988,20 @@ void SoapyLiteXM2SDR::setGain(
                 channel, value);
         }
 
-        ad9361_set_tx_attenuation(ad9361_phy, channel, att_mdb);
+        int rc = m2sdr_set_gain(_dev, M2SDR_TX, -att_db);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+        }
     }
 
     /* RX */
     if (SOAPY_SDR_RX == direction) {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
-        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+        }
     }
 }
 
@@ -1000,8 +1017,10 @@ void SoapyLiteXM2SDR::setGain(
             /* Positive attenuation in dB. */
             _tx_stream.gain[channel] = -value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
-            uint32_t atten = static_cast<uint32_t>(value * 1000.0);
-            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            int rc = m2sdr_set_gain(_dev, M2SDR_TX, -value);
+            if (rc != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+            }
             return;
         }
         if (name == "GAIN") {
@@ -1009,8 +1028,10 @@ void SoapyLiteXM2SDR::setGain(
             _tx_stream.gain[channel] = value;
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "TX ch%zu: GAIN is deprecated; use ATT with positive dB", channel);
-            uint32_t atten = static_cast<uint32_t>(-value * 1000.0);
-            ad9361_set_tx_attenuation(ad9361_phy, channel, atten);
+            int rc = m2sdr_set_gain(_dev, M2SDR_TX, value);
+            if (rc != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+            }
             return;
         }
     }
@@ -1019,7 +1040,10 @@ void SoapyLiteXM2SDR::setGain(
     if (name == "PGA" || name == "RF" || name == "GAIN") {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
-        ad9361_set_rx_rf_gain(ad9361_phy, channel, value);
+        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+        }
         return;
     }
 
@@ -1157,11 +1181,18 @@ void SoapyLiteXM2SDR::setFrequency(
 
     uint64_t lo_freq = static_cast<uint64_t>(frequency);
 
-    if (direction == SOAPY_SDR_TX)
-        ad9361_set_tx_lo_freq(ad9361_phy, lo_freq);
-
-    if (direction == SOAPY_SDR_RX)
-        ad9361_set_rx_lo_freq(ad9361_phy, lo_freq);
+    if (direction == SOAPY_SDR_TX) {
+        int rc = m2sdr_set_frequency(_dev, M2SDR_TX, lo_freq);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(TX) failed: %s", m2sdr_strerror(rc));
+        }
+    }
+    if (direction == SOAPY_SDR_RX) {
+        int rc = m2sdr_set_frequency(_dev, M2SDR_RX, lo_freq);
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(RX) failed: %s", m2sdr_strerror(rc));
+        }
+    }
 }
 
 double SoapyLiteXM2SDR::getFrequency(
@@ -1238,13 +1269,13 @@ void SoapyLiteXM2SDR::setSampleMode() {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 1);
+        m2sdr_set_bitmode(_dev, true);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        litex_m2sdr_writel(_fd, CSR_AD9361_BITMODE_ADDR, 0);
+        m2sdr_set_bitmode(_dev, false);
     }
 }
 
@@ -1350,13 +1381,15 @@ void SoapyLiteXM2SDR::setSampleRate(
     /* Set the sample rate for the TX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
-        ad9361_set_tx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
     }
-
-    /* Set the sample rate for the RX and configure the hardware accordingly. */
     if (direction == SOAPY_SDR_RX) {
         _rx_stream.samplerate = rate;
-        ad9361_set_rx_sampling_freq(ad9361_phy, sample_rate/_rateMult);
+    }
+    {
+        int rc = m2sdr_set_sample_rate(_dev, (int64_t)(sample_rate/_rateMult));
+        if (rc != 0) {
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_sample_rate failed: %s", m2sdr_strerror(rc));
+        }
     }
 
     /* If oversampling is enabled, enable oversampling on the hardware. */
@@ -1435,6 +1468,7 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
     std::vector<std::string> formats;
     formats.push_back(SOAPY_SDR_CF32);
     formats.push_back(SOAPY_SDR_CS16);
+    formats.push_back(SOAPY_SDR_CS8);
     return formats;
 }
 
@@ -1452,13 +1486,14 @@ void SoapyLiteXM2SDR::setBandwidth(
 
     uint32_t bwi = static_cast<uint32_t>(bw);
 
-    if (direction == SOAPY_SDR_TX) {
+    if (direction == SOAPY_SDR_TX)
         _tx_stream.bandwidth = bw;
-        ad9361_set_tx_rf_bandwidth(ad9361_phy, bwi);
-    }
-    if (direction == SOAPY_SDR_RX) {
+    if (direction == SOAPY_SDR_RX)
         _rx_stream.bandwidth = bw;
-        ad9361_set_rx_rf_bandwidth(ad9361_phy, bwi);
+
+    int rc = m2sdr_set_bandwidth(_dev, bwi);
+    if (rc != 0) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_bandwidth failed: %s", m2sdr_strerror(rc));
     }
 }
 
@@ -1503,15 +1538,15 @@ long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const
     int64_t time_ns = 0;
 
     /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
-    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
     control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_fd, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
+    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
 
     /* Debug log the hardware time in nanoseconds. */
     SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", (long long)time_ns);
@@ -1524,15 +1559,15 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
     uint32_t control_reg = 0;
 
     /* Write the 64-bit Time (ns). */
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
 
     /* Pulse the WRITE bit Control Register. */
-    control_reg = litex_m2sdr_readl(_fd, CSR_TIME_GEN_CONTROL_ADDR);
+    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
     control_reg |= (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
     control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_fd, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
 
     /* Optional debug log. */
     SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time set to (ns): %lld", (long long)timeNs);
@@ -1632,26 +1667,22 @@ std::string SoapyLiteXM2SDR::readSensor(
          /* FPGA Sensors */
 #ifdef CSR_XADC_BASE
         if (deviceStr == "fpga") {
+            struct m2sdr_fpga_sensors sensors;
+            if (m2sdr_get_fpga_sensors(_dev, &sensors) != 0) {
+                throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") failed");
+            }
             /* Temp. */
             if (sensorStr == "temp") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_TEMPERATURE_ADDR) * 503.975 / 4096 - 273.15
-                );
+                sensorValue = std::to_string(sensors.temperature_c);
             /* VCCINT. */
             } else if (sensorStr == "vccint") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCINT_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccint_v);
             /* VCCAUX. */
             } else if (sensorStr == "vccaux") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCAUX_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccaux_v);
             /* VCCBRAM. */
             } else if (sensorStr == "vccbram") {
-                sensorValue = std::to_string(
-                    (double)litex_m2sdr_readl(_fd, CSR_XADC_VCCBRAM_ADDR) / 4096 * 3
-                );
+                sensorValue = std::to_string(sensors.vccbram_v);
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }

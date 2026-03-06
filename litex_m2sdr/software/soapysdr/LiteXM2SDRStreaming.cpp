@@ -225,6 +225,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _rx_stream.opened = true;
         _rx_stream.format = format;
+        if (format == SOAPY_SDR_CS8) {
+            _bitMode = 8;
+            setSampleMode();
+        }
         _rx_stream.remainderHandle = -1;
         _rx_stream.remainderSamps  = 0;
         _rx_stream.remainderOffset = 0;
@@ -343,6 +347,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _tx_stream.opened = true;
         _tx_stream.format = format;
+        if (format == SOAPY_SDR_CS8) {
+            _bitMode = 8;
+            setSampleMode();
+        }
         _tx_stream.remainderHandle = -1;
         _tx_stream.remainderSamps  = 0;
         _tx_stream.remainderOffset = 0;
@@ -354,7 +362,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     }
 
     /* Configure 2T2R/1T1R mode (PHY) */
-    litex_m2sdr_writel(_fd, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+    litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
 
     /* AD9361 Channel en/dis */
     ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
@@ -419,14 +427,14 @@ int SoapyLiteXM2SDR::activateStream(
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
 #if USE_LITEPCIE
         /* Crossbar Demux: Select PCIe streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
         /* Configure the DMA engine for RX, but don't enable it yet. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
         /* Crossbar Demux: Select Ethernet streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
 #ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR,
+        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR,
                            (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) ? 2 : 1);
 #endif
         /* UDP helper is ready; nothing to start explicitly. */
@@ -450,13 +458,13 @@ int SoapyLiteXM2SDR::activateStream(
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
 #if USE_LITEPCIE
         /* Crossbar Mux: Select PCIe streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
         /* Configure the DMA engine for TX, but don't enable it yet. */
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
 #elif USE_LITEETH
         /* Crossbar Mux: Select Ethernet streaming */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
         /* No explicit start; pacing handled by client cadence if needed. */
         _tx_stream.user_count = 0;
 #endif
@@ -1115,6 +1123,64 @@ void SoapyLiteXM2SDR::deinterleaveCS16(
     }
 }
 
+/* Interleave CS8 samples */
+void SoapyLiteXM2SDR::interleaveCS8(
+    const void *src,
+    void *dst,
+    uint32_t len,
+    size_t offset) {
+    const int8_t *samples_cs8 = reinterpret_cast<const int8_t*>(src) + (offset * _samplesPerComplex);
+
+    if (_bytesPerSample == 1) {
+        int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst) + (offset * 2 * _samplesPerComplex);
+        for (uint32_t i = 0; i < len; i++) {
+            dst_int8[0] = samples_cs8[0]; /* I. */
+            dst_int8[1] = samples_cs8[1]; /* Q. */
+            samples_cs8 += 2;
+            dst_int8 += _nChannels * _samplesPerComplex;
+        }
+    } else if (_bytesPerSample == 2) {
+        int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * _samplesPerComplex);
+        for (uint32_t i = 0; i < len; i++) {
+            dst_int16[0] = static_cast<int16_t>(samples_cs8[0]) << 4; /* I. */
+            dst_int16[1] = static_cast<int16_t>(samples_cs8[1]) << 4; /* Q. */
+            samples_cs8 += 2;
+            dst_int16 += _nChannels * _samplesPerComplex;
+        }
+    } else {
+        SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
+    }
+}
+
+/* Deinterleave CS8 samples */
+void SoapyLiteXM2SDR::deinterleaveCS8(
+    const void *src,
+    void *dst,
+    uint32_t len,
+    size_t offset) {
+    int8_t *samples_cs8 = reinterpret_cast<int8_t*>(dst) + (offset * _samplesPerComplex);
+
+    if (_bytesPerSample == 1) {
+        const int8_t *src_int8 = reinterpret_cast<const int8_t*>(src);
+        for (uint32_t i = 0; i < len; i++) {
+            samples_cs8[0] = src_int8[0]; /* I. */
+            samples_cs8[1] = src_int8[1]; /* Q. */
+            samples_cs8 += 2;
+            src_int8 += _nChannels * _samplesPerComplex;
+        }
+    } else if (_bytesPerSample == 2) {
+        const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
+        for (uint32_t i = 0; i < len; i++) {
+            samples_cs8[0] = static_cast<int8_t>(src_int16[0] >> 4); /* I. */
+            samples_cs8[1] = static_cast<int8_t>(src_int16[1] >> 4); /* Q. */
+            samples_cs8 += 2;
+            src_int16 += _nChannels * _samplesPerComplex;
+        }
+    } else {
+        SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported _bytesPerSample value: %u.", _bytesPerSample);
+    }
+}
+
 /* Interleave samples */
 void SoapyLiteXM2SDR::interleave(
     const void *src,
@@ -1126,6 +1192,8 @@ void SoapyLiteXM2SDR::interleave(
         interleaveCF32(src, dst, len, offset);
     } else if (format == SOAPY_SDR_CS16) {
         interleaveCS16(src, dst, len, offset);
+    } else if (format == SOAPY_SDR_CS8) {
+        interleaveCS8(src, dst, len, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
@@ -1142,6 +1210,8 @@ void SoapyLiteXM2SDR::deinterleave(
         deinterleaveCF32(src, dst, len, offset);
     } else if (format == SOAPY_SDR_CS16) {
         deinterleaveCS16(src, dst, len, offset);
+    } else if (format == SOAPY_SDR_CS8) {
+        deinterleaveCS8(src, dst, len, offset);
     } else {
         SoapySDR_logf(SOAPY_SDR_ERROR, "Unsupported format: %s.", format.c_str());
     }
