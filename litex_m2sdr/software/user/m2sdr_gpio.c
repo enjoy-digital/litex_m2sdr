@@ -16,6 +16,7 @@
 #include <fcntl.h>
 
 #include "libm2sdr.h"
+#include "m2sdr.h"
 
 /* Variables */
 /*-----------*/
@@ -31,37 +32,54 @@ static char m2sdr_port[16] = "1234";
 /* Connection Functions */
 /*----------------------*/
 
-static void * m2sdr_open(void) {
+static struct m2sdr_dev *g_dev = NULL;
+
+static struct m2sdr_dev *m2sdr_open_dev(void) {
+    if (g_dev)
+        return g_dev;
 #ifdef USE_LITEPCIE
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
+    char dev_id[128];
+    size_t dev_max = sizeof(dev_id) - sizeof("pcie:");
+    if (strnlen(m2sdr_device, dev_max + 1) > dev_max) {
+        fprintf(stderr, "Device path too long\n");
+        exit(1);
+    }
+    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Could not init driver\n");
         exit(1);
     }
-    return (void *)(intptr_t)fd;
+    return g_dev;
 #elif defined(USE_LITEETH)
-    struct eb_connection *eb = eb_connect(m2sdr_ip_address, m2sdr_port, 1);
-    if (!eb) {
+    char dev_id[128];
+    size_t ip_len = strnlen(m2sdr_ip_address, 256);
+    size_t port_len = strnlen(m2sdr_port, sizeof(m2sdr_port));
+    if (ip_len + port_len + sizeof("eth::") > sizeof(dev_id)) {
+        fprintf(stderr, "Device address too long\n");
+        exit(1);
+    }
+    snprintf(dev_id, sizeof(dev_id), "eth:%s:%s", m2sdr_ip_address, m2sdr_port);
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
         fprintf(stderr, "Failed to connect to %s:%s\n", m2sdr_ip_address, m2sdr_port);
         exit(1);
     }
-    return eb;
+    return g_dev;
 #endif
 }
 
-static void m2sdr_close(void *conn) {
-#ifdef USE_LITEPCIE
-    close((int)(intptr_t)conn);
-#elif defined(USE_LITEETH)
-    eb_disconnect((struct eb_connection **)&conn);
-#endif
+static void m2sdr_close_dev(struct m2sdr_dev *dev) {
+    (void)dev;
+    if (g_dev) {
+        m2sdr_close(g_dev);
+        g_dev = NULL;
+    }
 }
+
 
 /* GPIO Control Functions */
 /*-----------------------*/
 
-static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
-#ifdef CSR_GPIO_BASE
+static void configure_gpio(struct m2sdr_dev *dev, uint8_t gpio_enable, uint8_t loopback_enable, uint8_t source_csr, uint32_t output_data, uint32_t output_enable) {
     if (gpio_enable && source_csr) {
         if (output_data & ~0xF) {
             fprintf(stderr, "GPIO output_data out of range (4-bit): 0x%x\n", output_data);
@@ -72,39 +90,25 @@ static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_ena
             return;
         }
     }
-    uint32_t control = 0;
 
-    /* Read current control register value */
-    control = m2sdr_readl(conn, CSR_GPIO_CONTROL_ADDR);
-
-    /* Modify control register */
-    if (gpio_enable) {
-        control |= (1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);  /* Enable GPIO */
-        if (loopback_enable) {
-            control |= (1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET);  /* Enable loopback */
-        } else {
-            control &= ~(1 << CSR_GPIO_CONTROL_LOOPBACK_OFFSET); /* Disable loopback */
-        }
-        if (source_csr) {
-            control |= (1 << CSR_GPIO_CONTROL_SOURCE_OFFSET);  /* CSR mode */
-        } else {
-            control &= ~(1 << CSR_GPIO_CONTROL_SOURCE_OFFSET); /* Packer/Unpacker mode */
-        }
-    } else {
-        control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET); /* Disable GPIO */
+    if (m2sdr_gpio_config(dev, gpio_enable ? true : false, loopback_enable ? true : false, source_csr ? true : false) != 0) {
+        fprintf(stderr, "GPIO config failed\n");
+        return;
     }
-    m2sdr_writel(conn, CSR_GPIO_CONTROL_ADDR, control);
 
-    /* Set output data and enable if CSR mode is requested */
     if (gpio_enable && source_csr) {
-        m2sdr_writel(conn, CSR_GPIO__O_ADDR,  output_data  & 0xF); /* 4-bit output data */
-        m2sdr_writel(conn, CSR_GPIO_OE_ADDR,  output_enable & 0xF); /* 4-bit output enable */
+        if (m2sdr_gpio_write(dev, output_data & 0xF, output_enable & 0xF) != 0) {
+            fprintf(stderr, "GPIO write failed\n");
+            return;
+        }
     }
 
-    /* Read and display current GPIO input */
-    uint32_t input_data = m2sdr_readl(conn, CSR_GPIO__I_ADDR) & 0xF; /* 4-bit input data */
+    uint8_t input_data = 0;
+    if (m2sdr_gpio_read(dev, &input_data) != 0) {
+        fprintf(stderr, "GPIO read failed\n");
+        return;
+    }
 
-    /* Display configuration */
     printf("GPIO Control: %s, Source: %s, Loopback: %s\n",
            gpio_enable ? "Enabled" : "Disabled",
            gpio_enable && source_csr ? "CSR" : "DMA",
@@ -112,9 +116,7 @@ static void configure_gpio(void *conn, uint8_t gpio_enable, uint8_t loopback_ena
     printf("GPIO Output Data: 0x%01x, Output Enable: 0x%01x, Input Data: 0x%01x\n",
            gpio_enable && source_csr ? (output_data & 0xF) : 0,
            gpio_enable && source_csr ? (output_enable & 0xF) : 0,
-           input_data);
-
-#endif
+           input_data & 0xF);
 }
 
 /* Help */
@@ -219,16 +221,16 @@ int main(int argc, char **argv) {
     #endif
 
     /* Open connection */
-    void *conn = m2sdr_open();
+    struct m2sdr_dev *conn = m2sdr_open_dev();
     if (conn == NULL) {
         exit(1);
     }
 
     /* Configure GPIO */
-    configure_gpio(conn, gpio_enable, loopback_enable, source_csr, output_data, output_enable);
+    configure_gpio(g_dev, gpio_enable, loopback_enable, source_csr, output_data, output_enable);
 
     /* Close connection */
-    m2sdr_close(conn);
+    m2sdr_close_dev(conn);
 
     return 0;
 }

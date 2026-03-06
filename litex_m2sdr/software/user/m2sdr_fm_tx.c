@@ -33,6 +33,8 @@
 #include <inttypes.h>
 #include <getopt.h>
 
+#include "m2sdr.h"
+
 /* Constants */
 /*-----------*/
 
@@ -50,7 +52,20 @@ static void generate_sine_table(int16_t *sine_table, int bits) {
     }
 }
 
-static void modulate_audio(FILE *in_stream, SNDFILE *infile_wav, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode, int input_channels) {
+static int8_t sc8_from_bits(int16_t sample, int bits) {
+    int shift = bits - 8;
+    int32_t v = sample;
+    if (shift > 0) {
+        v >>= shift;
+    } else if (shift < 0) {
+        v <<= -shift;
+    }
+    if (v > 127) v = 127;
+    if (v < -128) v = -128;
+    return (int8_t)v;
+}
+
+static void modulate_audio(FILE *in_stream, SNDFILE *infile_wav, SF_INFO *sfinfo, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode, int input_channels, enum m2sdr_format format) {
     /* Modulate audio to interleaved 16-bit I/Q samples in streaming fashion */
     int N = SINE_TABLE_SIZE;
     int shift = 32;
@@ -233,8 +248,15 @@ static void modulate_audio(FILE *in_stream, SNDFILE *infile_wav, SF_INFO *sfinfo
             int index = (int)phase_int;
             int16_t i_val = sine_table[(index + N / 4) % N];
             int16_t q_val = sine_table[index];
-            fwrite(&i_val, sizeof(int16_t), 1, outfile);
-            fwrite(&q_val, sizeof(int16_t), 1, outfile);
+            if (format == M2SDR_FORMAT_SC8_Q7) {
+                int8_t i8 = sc8_from_bits(i_val, bits);
+                int8_t q8 = sc8_from_bits(q_val, bits);
+                fwrite(&i8, sizeof(int8_t), 1, outfile);
+                fwrite(&q8, sizeof(int8_t), 1, outfile);
+            } else {
+                fwrite(&i_val, sizeof(int16_t), 1, outfile);
+                fwrite(&q_val, sizeof(int16_t), 1, outfile);
+            }
         }
     }
 
@@ -296,8 +318,15 @@ static void modulate_audio(FILE *in_stream, SNDFILE *infile_wav, SF_INFO *sfinfo
             int index = (int)phase_int;
             int16_t i_val = sine_table[(index + N / 4) % N];
             int16_t q_val = sine_table[index];
-            fwrite(&i_val, sizeof(int16_t), 1, outfile);
-            fwrite(&q_val, sizeof(int16_t), 1, outfile);
+            if (format == M2SDR_FORMAT_SC8_Q7) {
+                int8_t i8 = sc8_from_bits(i_val, bits);
+                int8_t q8 = sc8_from_bits(q_val, bits);
+                fwrite(&i8, sizeof(int8_t), 1, outfile);
+                fwrite(&q8, sizeof(int8_t), 1, outfile);
+            } else {
+                fwrite(&i_val, sizeof(int16_t), 1, outfile);
+                fwrite(&q_val, sizeof(int16_t), 1, outfile);
+            }
         }
     }
 
@@ -325,6 +354,7 @@ static void help(void) {
            "-s, --samplerate sps  Set sample rate in SPS (default: 500000).\n"
            "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "-8, --sc8             Output 8-bit I/Q samples (SC8 Q7).\n"
            "-e, --emphasis type   Set pre-emphasis to us, eu or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
            "-i, --input-channels channels  Set input channels for stdin (1 or 2).\n"
@@ -350,6 +380,7 @@ static struct option options[] = {
     { "samplerate", required_argument, NULL, 's' },
     { "deviation",  required_argument, NULL, 'd' },
     { "bits",       required_argument, NULL, 'b' },
+    { "sc8",        no_argument,       NULL, '8' },
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
     { "input-channels", required_argument, NULL, 'i' },
@@ -366,6 +397,8 @@ int main(int argc, char **argv) {
     double samplerate = 1000000.0;
     double deviation = 75000.0;
     int bits = 12;
+    bool bits_set = false;
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     char *emphasis_type = "eu";
     char *mode = "mono";
     int input_channels = 0;
@@ -373,7 +406,7 @@ int main(int argc, char **argv) {
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:e:m:i:f:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:8e:m:i:f:", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -387,6 +420,11 @@ int main(int argc, char **argv) {
             break;
         case 'b':
             bits = atoi(optarg);
+            bits_set = true;
+            break;
+        case '8':
+            format = M2SDR_FORMAT_SC8_Q7;
+            if (!bits_set) bits = 8;
             break;
         case 'e':
             emphasis_type = optarg;
@@ -473,7 +511,7 @@ int main(int argc, char **argv) {
     }
 
     /* Perform FM modulation */
-    modulate_audio(in_stream, infile_wav, &sfinfo, outfile, samplerate, deviation, bits, tau, mode, input_channels);
+    modulate_audio(in_stream, infile_wav, &sfinfo, outfile, samplerate, deviation, bits, tau, mode, input_channels, format);
 
     /* Cleanup */
     if (infile_wav) sf_close(infile_wav);
