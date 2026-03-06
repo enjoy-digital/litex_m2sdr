@@ -14,6 +14,11 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Added per-test docstrings and aligned test separators/comments with the project code style.
 - Integrated optional PCIe link reset workaround logic to improve link bring-up robustness on some host platforms.
 - Refreshed README and kernel documentation (CI badge, paths, module naming, and test structure clarifications).
+- Introduced the public `libm2sdr` C API, including shared library/pkg-config packaging, example programs, and integration as the common host layer for user utilities and the SoapySDR module.
+- Introduced the `m2sdr_scan` wideband scanner utility with an ImGui/SDL/OpenGL UI, then reorganized its UI support files under `software/user/scan_ui/` to keep the user utility root cleaner.
+- Introduced a shared user-space CLI/device handling layer so utilities now build device identifiers consistently across PCIe and Etherbone modes.
+- Harmonized option naming across RF/streaming/control utilities around shared long-form arguments such as `--device`, `--sample-rate`, `--rx-freq`, `--tx-freq`, and `--format`.
+- Extended `m2sdr_scan` with preset save/load support and a headless export mode for CSV/PPM capture without launching the SDL/ImGui interface.
 
 [> 2025 Q4 (Oct - Dec)
 ----------------------
