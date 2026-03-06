@@ -48,6 +48,7 @@ Core user tools build with standard C/C++ toolchains and the RF/audio dependenci
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
+- the vendored `scan_ui/cimgui/` sources present in the workspace
 
 On Debian/Ubuntu:
 ~~~~
@@ -65,30 +66,33 @@ m2sdr_util [options] cmd [args...]
 ~~~~
 
 **Commands** include:
-- **info**
+- **info** / **show-info**
   Get board information (FPGA version, gateware build, etc.).
-- **dma_test**
+- **reg-read** / **reg-write**
+  Read/write FPGA registers.
+- **dma-test**
   Test DMA transfers between host and FPGA.
-- **scratch_test**
+- **scratch-test**
   Check scratch register for basic read/write.
-- **clk_test**
+- **clk-test**
   Measure on-board clock frequencies.
-- **vcxo_test**
+- **vcxo-test**
   Test/characterize the VCXO output frequency.
-- **si5351_scan** / **si5351_init**
-  Detect or initialize the SI5351 clock generator.
-- **ad9361_dump**
+- **si5351-init**, **si5351-dump**, **si5351-read**, **si5351-write**
+  Initialize, dump, read, or write the SI5351 clock generator.
+- **ad9361-dump**, **ad9361-read**, **ad9361-write**
   Dump AD9361 register space for debugging.
-- **flash_write** / **flash_read**
+- **flash-write** / **flash-read**
   Write to/read from the on-board SPI Flash.
-- **flash_reload**
+- **flash-reload**
   Reload the FPGA image from SPI Flash.
 
 Example usage:
 ~~~~
 ./m2sdr_util info
-./m2sdr_util dma_test
-./m2sdr_util scratch_test
+./m2sdr_util dma-test
+./m2sdr_util scratch-test
+./m2sdr_util flash-read backup.bin 0x100000
 ~~~~
 
 ---
@@ -162,7 +166,7 @@ Example usage without PPS:
 
 Example usage with PPS on GPIO pin 0:
 ~~~~
-./m2sdr_gen --device-num 0 --sample-rate 30720000 --signal tone --tone-freq 1e6 --amplitude 0.5 --pps-freq 1.0 --gpio-pin 0
+./m2sdr_gen --device pcie:/dev/m2sdr0 --sample-rate 30720000 --signal tone --tone-freq 1e6 --amplitude 0.5 --pps-freq 1.0 --gpio-pin 0
 ~~~~
 
 ---
@@ -214,17 +218,17 @@ m2sdr_sata [options] cmd [args...]
 **Commands** include:
 - **status**
   Show crossbar + SATA/loopback/streamer status.
-- **route `<txsrc> <rxdst> [loopback]`**
+- **route `TXSRC RXDST [LOOPBACK]`**
   Set routing with optional loopback (0/1).
-- **record `<dst_sector> <nsectors>`**
+- **record `DST_SECTOR NSECTORS`**
   RX stream → SSD (SATA_RX_STREAMER).
-- **play `<src_sector> <nsectors>`**
+- **play `SRC_SECTOR NSECTORS`**
   SSD → TX stream (SATA_TX_STREAMER).
-- **replay `<src_sector> <nsectors> <dst>`**
+- **replay `SRC_SECTOR NSECTORS DST`**
   SSD → TX → loopback → RX destination (`pcie|eth|sata`).
-- **copy `<src_sector> <dst_sector> <nsectors>`**
+- **copy `SRC_SECTOR DST_SECTOR NSECTORS`**
   SSD → SSD using loopback.
-- **header `<tx|rx|both> <enable> <header_enable>`**
+- **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
   Raw header control (writes HEADER CSR enable bits).
 
 Example usage:
@@ -394,6 +398,7 @@ Notes:
 - Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
+- A local `scan_ui/cimgui/` checkout is also required for the build.
 
 ---
 
@@ -421,7 +426,7 @@ Below is a quick guide to **generate** a tone file, **initialize** the RF, **pla
               --rx-gain=10 \\
               --loopback=1
    ~~~~
-   *(Here `-loopback=1` enables internal loopback for testing.)*
+   *(Here `--loopback=1` enables internal loopback for testing.)*
 
 3. **Play the tone file (in Terminal #1)**
    ~~~~
