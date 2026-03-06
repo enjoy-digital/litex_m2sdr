@@ -436,7 +436,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             ":1234 (hint: set eth_ip=... for the board IP, error: " +
             std::string(m2sdr_strerror(rc)) + ")");
     }
-    }
     _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
     _spi_id = spi_register_fd(_fd);
 
@@ -471,20 +470,20 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
         /* Route RX to Ethernet on the main crossbar. */
-        litex_m2sdr_writel(_fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
 #ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR, 2); /* Ethernet RX branch -> VRT */
+        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 2); /* Ethernet RX branch -> VRT */
 #else
         throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks eth_rx_mode CSR (rebuild with --with-eth-vrt)");
 #endif
 #ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
-        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
-        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
+        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
         if (args.count("vrt_port") > 0) {
-            litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR,
+            litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR,
                 static_cast<uint32_t>(std::stoul(args.at("vrt_port"))));
         }
-        litex_m2sdr_writel(_fd, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 1);
+        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 1);
 #else
         throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks vrt_streamer CSR (rebuild with --with-eth-vrt)");
 #endif
