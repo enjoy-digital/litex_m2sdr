@@ -14,6 +14,13 @@
 - **Who?** SDR tinkerers, FPGA devs, time‑sync enthusiats or anyone hitting the limits of other SDRs.
 - **How fast?** `apt install …` → `./build.py` → **stream/record IQ in ≈5 min** with our C API/tools or any SoapySDR compatible software.
 
+## C API (libm2sdr)
+
+- Docs: `doc/libm2sdr/README.md`
+- Examples: `doc/libm2sdr/example_sync_rx.c`, `doc/libm2sdr/example_sync_tx.c`
+- Install metadata: `software/user/libm2sdr/m2sdr.pc`
+- Current public library version: `1.0.0` (ABI `1`)
+
 <div align="center">
   <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">
 </div>
@@ -280,6 +287,10 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ./m2sdr_rf init -samplerate=30720000
    ./tone_gen.py tone_tx.bin
    ./m2sdr_play tone_tx.bin 100000
+   ```
+   - C API (libm2sdr) quick start:
+   ```
+   See doc/libm2sdr/README.md
    ```
 
 3. **SoapySDR Detection/Probe:**

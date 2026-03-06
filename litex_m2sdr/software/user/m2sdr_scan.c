@@ -7,8 +7,6 @@
  * Copyright (c) 2026 Enjoy-Digital <enjoy-digital.fr>
  */
 
-#include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
 #include <math.h>
@@ -36,6 +34,7 @@
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
+#include "m2sdr.h"
 #include "m2sdr_config.h"
 #include "m2sdr_colormaps_gqrx.h"
 #include "kissfft/kiss_fft.h"
@@ -81,10 +80,10 @@ static const char *k_fft_length_labels[] = { "128", "256", "512", "1024", "2048"
 
 static volatile sig_atomic_t g_keep_running = 1;
 static struct ad9361_rf_phy *ad9361_phy;
+static struct m2sdr_dev *g_dev;
 
 static char m2sdr_device[1024];
 static int m2sdr_device_num = 0;
-static void *g_conn;
 
 static void int_handler(int dummy)
 {
@@ -92,26 +91,34 @@ static void int_handler(int dummy)
     g_keep_running = 0;
 }
 
-static void *m2sdr_open(void)
+static void *scan_get_conn(void)
 {
-    if (g_conn)
-        return g_conn;
-
-    int fd = open(m2sdr_device, O_RDWR);
-    if (fd < 0) {
-        fprintf(stderr, "Could not open %s: %s\n", m2sdr_device, strerror(errno));
-        exit(1);
-    }
-
-    g_conn = (void *)(intptr_t)fd;
-    return g_conn;
+    return m2sdr_get_handle(g_dev);
 }
 
-static void m2sdr_close_global(void)
+static bool scan_open_device(void)
 {
-    if (g_conn)
-        close((int)(intptr_t)g_conn);
-    g_conn = NULL;
+    char dev_id[M2SDR_DEVICE_STR_MAX];
+    if (strlen(m2sdr_device) + strlen("pcie:") + 1 > sizeof(dev_id)) {
+        fprintf(stderr, "Device path too long: %s\n", m2sdr_device);
+        return false;
+    }
+    snprintf(dev_id, sizeof(dev_id), "pcie:%s", m2sdr_device);
+    if (m2sdr_open(&g_dev, dev_id) != 0) {
+        fprintf(stderr, "Could not open %s\n", dev_id);
+        g_dev = NULL;
+        return false;
+    }
+    return true;
+}
+
+static void scan_close_device(void)
+{
+    if (g_dev) {
+        m2sdr_rf_bind(g_dev, NULL);
+        m2sdr_close(g_dev);
+        g_dev = NULL;
+    }
 }
 
 int spi_write_then_read(struct spi_device *spi,
@@ -119,7 +126,7 @@ int spi_write_then_read(struct spi_device *spi,
     unsigned char *rxbuf, unsigned n_rx)
 {
     (void)spi;
-    void *conn = m2sdr_open();
+    void *conn = scan_get_conn();
 
     if (n_tx == 2 && n_rx == 1) {
         rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
@@ -932,18 +939,18 @@ static uint32_t colormap_apply(int palette, float x)
 static bool scan_dma_init(struct scan_state *s)
 {
     memset(&s->dma, 0, sizeof(s->dma));
+    s->dma.shared_fd = 1;
     s->dma.use_writer = 1;
     s->dma.zero_copy = 0;
+    s->dma.fds.fd = m2sdr_get_fd(g_dev);
 
-    if (litepcie_dma_init(&s->dma, m2sdr_device, 0) < 0)
+    if (litepcie_dma_init(&s->dma, "", 0) < 0)
         return false;
 
     s->dma.writer_enable = 1;
 
-    m2sdr_writel(s->dma.fds.fd, CSR_HEADER_RX_CONTROL_ADDR,
-        (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-        (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
-    m2sdr_writel(s->dma.fds.fd, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    m2sdr_set_rx_header(g_dev, false, false);
+    m2sdr_reg_write(g_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
     return true;
 }
@@ -1014,7 +1021,7 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
 
 static bool retune_rx(int64_t freq_hz)
 {
-    int ret = ad9361_set_rx_lo_freq(ad9361_phy, freq_hz);
+    int ret = m2sdr_set_rx_frequency(g_dev, freq_hz);
     return ret == 0;
 }
 
@@ -2149,23 +2156,19 @@ static bool resize_buffers(struct scan_state *s)
 
 static bool m2sdr_rfic_init(struct scan_state *s)
 {
-    void *conn = m2sdr_open();
+    void *conn = scan_get_conn();
 
 #ifdef CSR_SI5351_BASE
-    m2sdr_writel(conn, CSR_SI5351_CONTROL_ADDR,
-                 SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-
-    if (s->refclk_hz == 40000000) {
-        m2sdr_si5351_i2c_config(conn,
-            SI5351_I2C_ADDR,
+    m2sdr_reg_write(g_dev, CSR_SI5351_CONTROL_ADDR,
+        SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
+    if (s->refclk_hz == 40000000)
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
             si5351_xo_40m_config,
             sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0]));
-    } else {
-        m2sdr_si5351_i2c_config(conn,
-            SI5351_I2C_ADDR,
+    else
+        m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
             si5351_xo_38p4m_config,
             sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]));
-    }
 #endif
 
     m2sdr_ad9361_spi_init(conn, 1);
@@ -2180,25 +2183,24 @@ static bool m2sdr_rfic_init(struct scan_state *s)
     default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
     default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
     default_init_param.two_t_two_r_timing_enable = 0;
-    m2sdr_writel(conn, CSR_AD9361_PHY_CONTROL_ADDR, 1);
+    m2sdr_reg_write(g_dev, CSR_AD9361_PHY_CONTROL_ADDR, 1);
 
     if (ad9361_init(&ad9361_phy, &default_init_param, 1) < 0) {
         fprintf(stderr, "Failed to initialize AD9361.\n");
         return false;
     }
 
-    ad9361_set_tx_sampling_freq(ad9361_phy, s->sample_rate_hz);
-    ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
-    ad9361_set_rx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
-    ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
+    m2sdr_rf_bind(g_dev, ad9361_phy);
 
-    ad9361_set_tx_atten(ad9361_phy, -SCAN_TX_GAIN_DB * 1000, 1, 1, 1);
+    m2sdr_set_sample_rate(g_dev, s->sample_rate_hz);
+    m2sdr_set_bandwidth(g_dev, s->rf_bandwidth_hz);
+    m2sdr_set_tx_gain(g_dev, SCAN_TX_GAIN_DB);
     apply_rx_gain_request(s, s->rx_gain);
 
-    ad9361_set_tx_lo_freq(ad9361_phy, (s->scan_start_hz + s->scan_stop_hz) / 2);
-    ad9361_set_rx_lo_freq(ad9361_phy, (s->scan_start_hz + s->scan_stop_hz) / 2);
+    m2sdr_set_tx_frequency(g_dev, (s->scan_start_hz + s->scan_stop_hz) / 2);
+    m2sdr_set_rx_frequency(g_dev, (s->scan_start_hz + s->scan_stop_hz) / 2);
 
-    m2sdr_writel(conn, CSR_AD9361_BITMODE_ADDR, 0);
+    m2sdr_set_bitmode(g_dev, false);
 
     return true;
 }
@@ -2338,10 +2340,8 @@ static bool apply_runtime_config(struct scan_state *s,
     s->perf.retunes_at_prev_rate = s->perf.retunes_total;
     s->perf.dma_wait_at_prev_rate = s->perf.dma_wait_total;
 
-    ad9361_set_tx_sampling_freq(ad9361_phy, s->sample_rate_hz);
-    ad9361_set_rx_sampling_freq(ad9361_phy, s->sample_rate_hz);
-    ad9361_set_rx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
-    ad9361_set_tx_rf_bandwidth(ad9361_phy, s->rf_bandwidth_hz);
+    m2sdr_set_sample_rate(g_dev, s->sample_rate_hz);
+    m2sdr_set_bandwidth(g_dev, s->rf_bandwidth_hz);
     apply_rx_gain_request(s, s->rx_gain);
 
     return true;
@@ -3028,6 +3028,9 @@ int main(int argc, char **argv)
 
     signal(SIGINT, int_handler);
 
+    if (!scan_open_device())
+        goto fail;
+
     if (!m2sdr_rfic_init(&s))
         goto fail;
 
@@ -3219,7 +3222,7 @@ int main(int argc, char **argv)
         SDL_DestroyWindow(window);
     SDL_Quit();
 
-    m2sdr_close_global();
+    scan_close_device();
     return 0;
 
 fail:
@@ -3263,6 +3266,6 @@ fail:
     free(s.waterfall_view_rgba);
     free(s.fastlock_sw);
 
-    m2sdr_close_global();
+    scan_close_device();
     return 1;
 }

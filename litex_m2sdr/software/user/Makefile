@@ -15,9 +15,9 @@ INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata m2sdr_selftest
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_selftest
   ifeq ($(HAVE_SDL2),1)
     BINARIES += m2sdr_scan
   else
@@ -27,9 +27,43 @@ else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
 
-PROGS    = $(BINARIES) libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+LIBM2SDR_SONAME = libm2sdr.so.1
+PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
+           ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
+
+LIBM2SDR_OBJS = \
+	libm2sdr/m2sdr_si5351_i2c.o \
+	libm2sdr/m2sdr_ad9361_spi.o \
+	libm2sdr/m2sdr_flash.o \
+	libm2sdr/m2sdr_device.o \
+	libm2sdr/m2sdr_stream.o \
+	libm2sdr/m2sdr_rf.o \
+	libm2sdr/m2sdr_utils.o \
+	libm2sdr/m2sdr_hal_litepcie.o \
+	libm2sdr/m2sdr_hal_liteeth.o \
+	libliteeth/etherbone.o \
+	libliteeth/liteeth_udp.o \
+	ad9361/ad9361.o \
+	ad9361/ad9361_api.o \
+	ad9361/ad9361_conv.o \
+	ad9361/util.o
 
 all: $(PROGS)
+
+examples: libm2sdr/libm2sdr.a $(EXAMPLES)
+
+../../doc/libm2sdr/example_sync_rx: ../../doc/libm2sdr/example_sync_rx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../../doc/libm2sdr/example_sync_tx: ../../doc/libm2sdr/example_sync_tx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../../doc/libm2sdr/example_tone_tx: ../../doc/libm2sdr/example_tone_tx.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+../../doc/libm2sdr/example_rx_n: ../../doc/libm2sdr/example_rx_n.c libm2sdr/libm2sdr.a
+	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 # --- Libraries ---
 
@@ -42,9 +76,15 @@ libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: libm2sdr/m2sdr_si5351_i2c.o libm2sdr/m2sdr_ad9361_spi.o libm2sdr/m2sdr_flash.o libliteeth/etherbone.o
+libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS)
 	$(AR) rcs $@ $+
 	ranlib $@
+
+libm2sdr/$(LIBM2SDR_SONAME): $(LIBM2SDR_OBJS)
+	$(CC) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $^
+
+libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
+	ln -sf $(LIBM2SDR_SONAME) $@
 
 ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
 	$(AR) rcs $@ $+
@@ -55,48 +95,54 @@ ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361
 # Etherbone-only build
 ifeq ($(INTERFACE),USE_LITEETH)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr -lm
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm2sdr -llitepcie -lm
 
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm2sdr -llitepcie
 
-m2sdr_play: liblitepcie/liblitepcie.a libliteeth/libliteeth.a m2sdr_play.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibliteeth -lm -llitepcie -lliteeth
+m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a m2sdr_play.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_record: liblitepcie/liblitepcie.a libliteeth/libliteeth.a m2sdr_record.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibliteeth -lm -llitepcie -lliteeth
+m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a m2sdr_record.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_gpio: liblitepcie/liblitepcie.a m2sdr_gpio.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
+m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_gpio.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a m2sdr_sata.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -llitepcie -lm2sdr -lliteeth
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
+
+m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_selftest.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 endif
 
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr -lm
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm2sdr -llitepcie -lm
 
 m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm2sdr -llitepcie
 
-m2sdr_gen: liblitepcie/liblitepcie.a m2sdr_gen.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+m2sdr_gen: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_gen.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_gpio: liblitepcie/liblitepcie.a m2sdr_gpio.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_gpio.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_play: liblitepcie/liblitepcie.a m2sdr_play.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_play.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_record: liblitepcie/liblitepcie.a m2sdr_record.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie
+m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_record.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sata.o
-	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -llitepcie -lm2sdr
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
+
+m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_selftest.o
+	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
@@ -122,6 +168,7 @@ endif
 
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~
+	rm -f $(EXAMPLES)
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
@@ -151,11 +198,15 @@ install: $(BINARIES)
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
 
-install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a
+install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 	install -d $(PREFIX)/lib
 	$(foreach lib,$^, \
 		install -D -m 755 $(lib) $(PREFIX)/lib; \
 	)
+	ln -sf $(LIBM2SDR_SONAME) $(PREFIX)/lib/libm2sdr.so
+	install -d $(PREFIX)/lib/pkgconfig
+	sed -e "s|^prefix=.*|prefix=$(PREFIX)|" libm2sdr/m2sdr.pc > $(PREFIX)/lib/pkgconfig/m2sdr.pc
+	chmod 644 $(PREFIX)/lib/pkgconfig/m2sdr.pc
 	install -d $(PREFIX)/include/litex_m2sdr
 	install -d $(PREFIX)/include/litex_m2sdr/kernel
 	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel
@@ -163,5 +214,19 @@ install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sd
 		install -d $(PREFIX)/include/litex_m2sdr/$(inc); \
 		install -m 644 $(inc)/*.h $(PREFIX)/include/litex_m2sdr/$(inc); \
 	)
+	install -d $(PREFIX)/share/litex_m2sdr/examples
+	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
+		if [ -f ../doc/libm2sdr/$$ex.c ]; then \
+			install -m 644 ../doc/libm2sdr/$$ex.c $(PREFIX)/share/litex_m2sdr/examples; \
+		else \
+			echo "Skipping missing example: $$ex.c"; \
+		fi; \
+	done
+
+check:
+	$(MAKE) clean all
+	$(MAKE) examples
+	cmake -S ../soapysdr -B ../soapysdr/build
+	cmake --build ../soapysdr/build
 
 -include $(wildcard *.d)

@@ -24,6 +24,9 @@
 /* Functions */
 /*-----------*/
 
+/* The LiteI2C controller is used in a polling mode here so the same helper can
+ * be shared by PCIe and Etherbone builds without any interrupt dependency. */
+
 /* m2sdr_si5351_i2c_reset */
 /*------------------------*/
 
@@ -34,7 +37,8 @@ void m2sdr_si5351_i2c_reset(void *conn) {
     /* Reset Settings. */
     m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, 0);
 
-    /* Flush RX FIFO. */
+    /* Always drain stale RX bytes so the next transaction starts from a known
+     * empty state, which matters when switching between reads and writes. */
     while (m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR) & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)) {
         m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
     }
@@ -45,6 +49,8 @@ void m2sdr_si5351_i2c_reset(void *conn) {
 
 bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
     if (len != 1) {
+        /* The current LiteI2C helper is intentionally narrow: the config path
+         * only needs single-register writes. */
         return false;
     }
 
@@ -54,7 +60,7 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
     /* Reset I2C. */
     m2sdr_si5351_i2c_reset(conn);
 
-    /* Configure Transaction: TX=2 bytes, RX=0. */
+    /* One byte for the target register, one byte for the value. */
     m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | 2);
 
     /* Set Slave Address. */
@@ -103,6 +109,8 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
 /*-----------------------*/
 
 bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop) {
+    (void)send_stop;
+
     if (len != 1) {
         return false;
     }
@@ -113,7 +121,7 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
     /* Reset I2C. */
     m2sdr_si5351_i2c_reset(conn);
 
-    /* Configure Transaction: TX=1 byte, RX=1 byte. */
+    /* One address byte is written first, then one data byte is read back. */
     m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (1 << 8) | 1);
 
     /* Set Slave Address. */
@@ -166,6 +174,8 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
 
 bool m2sdr_si5351_i2c_poll(void *conn, uint8_t slave_addr) {
     uint8_t dummy;
+    /* Poll by attempting a harmless register read; success implies both bus and
+     * target are responsive. */
     return m2sdr_si5351_i2c_read(conn, slave_addr, 0x00, &dummy, 1, true);
 }
 
@@ -193,7 +203,8 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
     m2sdr_si5351_i2c_reset(conn);
     usleep(100);
 
-    /* Wait for System Initialization (SYS_INIT = 0) */
+    /* Wait for the SI5351 internal SYS_INIT flag to clear before pushing the
+     * full clock tree configuration. */
     int timeout = 100;
     while (timeout--) {
         if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &data, 1, false) && (data & 0x80) == 0) {
@@ -219,7 +230,7 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
     data = 0x00;
     m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1);
 
-    /* Configure SI5351 from provided register map */
+    /* Apply the selected precomputed register table verbatim. */
     for (i = 0; i < i2c_length; i++) {
         uint8_t reg = i2c_config[i][0];
         uint8_t val = i2c_config[i][1];
@@ -230,7 +241,7 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
     data = 0xAC;
     m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1);
 
-    /* Wait for PLL lock */
+    /* Do not re-enable outputs until both PLLs report locked. */
     timeout = 100;
     while (timeout--) {
         if (m2sdr_si5351_i2c_read(conn, i2c_addr, 1, &data, 1, false) && (data & 0x60) == 0) {

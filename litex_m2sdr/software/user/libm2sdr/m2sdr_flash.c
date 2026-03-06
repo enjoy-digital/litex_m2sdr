@@ -32,6 +32,9 @@
 #define SPI_TIMEOUT 100000 /* in us */
 #define SPI_TRANSACTION_TIME_US  25
 
+/* The flash bridge exposes a small shift-register style SPI engine. These
+ * helpers wrap it so the higher-level write path can stay transport-agnostic. */
+
 /* flash_spi_cs */
 /*--------------*/
 
@@ -53,6 +56,8 @@ static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
         return 0;
     }
 
+    /* The bridge expects chip-select to be driven explicitly around each
+     * logical SPI command. */
     flash_spi_cs(conn, 0);
 
     m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, (tx >> 32) & 0xffffffff);
@@ -73,7 +78,8 @@ static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
 #endif
 
 #ifdef USE_LITEETH
-    /* Etherbone: roundtrip latency, just wait */
+    /* Etherbone already pays a network latency cost, so a short fixed delay is
+     * sufficient here instead of polling a local completion bit. */
     usleep(SPI_TRANSACTION_TIME_US);
     if (tx_len > 8) {
         rx = m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
@@ -98,6 +104,7 @@ uint32_t flash_read_id(void *conn, int reg)
 
 static void flash_write_enable(void *conn)
 {
+    /* Flash program/erase operations require an explicit write-enable latch. */
     flash_spi(conn, 8, FLASH_WREN, 0);
 }
 
@@ -114,6 +121,7 @@ static void flash_write_disable(void *conn)
 
 static uint8_t flash_read_status(void *conn)
 {
+    /* The status register drives the WIP polling loops during erase/program. */
     return flash_spi(conn, 16, FLASH_RDSR, 0) & 0xff;
 }
 
@@ -130,6 +138,7 @@ static void flash_erase_sector(void *conn, uint32_t addr)
 
 static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t size)
 {
+    /* Program in page-sized chunks using the bridge's fixed-width SPI words. */
     if (size == 1) {
         flash_spi(conn, 40, FLASH_PP, (addr << 8) | buf[0]);
     } else {
@@ -206,6 +215,8 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
         return;
     }
 
+    /* Keep chip-select asserted across the command and dummy reads so the
+     * flash remains in continuous-read mode. */
     flash_spi_cs(conn, 0);
 
     tx = ((uint64_t)FLASH_READ << 32) | ((uint64_t)addr << 8);
@@ -288,6 +299,8 @@ int m2sdr_flash_write(void *conn,
     flash_read_id(conn, 0);
     flash_write_enable(conn);
 
+    /* Erase all sectors that overlap the requested range first, then verify
+     * each programmed page by reading it back. */
     /* Erase */
     for (i = 0; i < size; i += FLASH_SECTOR_SIZE) {
         if (progress_cb) {
@@ -325,6 +338,8 @@ int m2sdr_flash_write(void *conn,
             usleep(100);
         }
 
+        /* Read back each page immediately so user-space callers get a simple,
+         * conservative "program and verify" behavior. */
         m2sdr_flash_read_buffer(conn, base + i, cmp_buf, prog_size);
         if (memcmp(buf + i, cmp_buf, prog_size) != 0) {
             retries++;

@@ -1,0 +1,29 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
+      - name: Build user (PCIe)
+        run: make -C litex_m2sdr/software/user clean all
+      - name: Build examples (PCIe)
+        run: make -C litex_m2sdr/software/user examples
+      - name: Build Soapy (PCIe)
+        run: |
+          cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build
+          cmake --build litex_m2sdr/software/soapysdr/build
+      - name: Build user (LiteETH)
+        run: make -C litex_m2sdr/software/user clean all INTERFACE=USE_LITEETH
+      - name: Build Soapy (LiteETH)
+        run: |
+          cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build_liteeth -DUSE_LITEETH=ON
+          cmake --build litex_m2sdr/software/soapysdr/build_liteeth

@@ -125,13 +125,21 @@ else()
     add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=0)
 endif()
 
+add_library(SoapyLiteXM2SDR_C OBJECT ${LITEXM2SDR_SOURCE})
+set_target_properties(SoapyLiteXM2SDR_C PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    ${LITEXM2SDR_SOURCE}
+    $<TARGET_OBJECTS:SoapyLiteXM2SDR_C>
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )
+
+# Bind internal symbol references to this module to avoid conflicts
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,-Bsymbolic)
+endif()
 
 # Suppress specific warnings
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
