@@ -361,26 +361,23 @@ static void make_timestamp(char *buf, size_t buflen)
     strftime(buf, buflen, "%Y%m%d_%H%M%S", &tmv);
 }
 
-static void export_current_csv(struct scan_state *s)
+static bool export_csv_path(struct scan_state *s, const char *path)
 {
-    char ts[32], path[128];
     FILE *f;
     int i;
     double bin_hz;
     double range_hz;
 
-    if (s->fft_len <= 0 || s->sample_rate_hz == 0)
-        return;
+    if (s->fft_len <= 0 || s->sample_rate_hz == 0 || !path)
+        return false;
 
     bin_hz = (double)s->sample_rate_hz / (double)s->fft_len;
     range_hz = bin_hz * (double)(s->waterfall_width - 1);
 
-    make_timestamp(ts, sizeof(ts));
-    snprintf(path, sizeof(path), "m2sdr_scan_%s.csv", ts);
     f = fopen(path, "w");
     if (!f) {
         fprintf(stderr, "Failed to write %s\n", path);
-        return;
+        return false;
     }
     fprintf(f, "# start_hz,%" PRId64 "\n", s->scan_start_hz);
     fprintf(f, "# stop_hz,%" PRId64 "\n", s->scan_stop_hz);
@@ -395,6 +392,16 @@ static void export_current_csv(struct scan_state *s)
     }
     fclose(f);
     fprintf(stderr, "Saved %s\n", path);
+    return true;
+}
+
+static void export_current_csv(struct scan_state *s)
+{
+    char ts[32], path[128];
+
+    make_timestamp(ts, sizeof(ts));
+    snprintf(path, sizeof(path), "m2sdr_scan_%s.csv", ts);
+    (void)export_csv_path(s, path);
 }
 
 static void export_snapshot_ppm(int width, int height)
@@ -428,6 +435,165 @@ static void export_snapshot_ppm(int width, int height)
     fclose(f);
     free(pix);
     fprintf(stderr, "Saved %s\n", path);
+}
+
+static void waterfall_compose_view(struct scan_state *s)
+{
+    int y;
+    int hist_lines = s->waterfall_history_lines;
+    int max_scroll;
+    int newest_row;
+
+    if (!s->waterfall_rgba || !s->waterfall_view_rgba)
+        return;
+    if (hist_lines < 1 || s->lines < 1 || s->waterfall_tex_width < 1)
+        return;
+
+    max_scroll = hist_lines - s->lines;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (s->waterfall_scroll < 0)
+        s->waterfall_scroll = 0;
+    if (s->waterfall_scroll > max_scroll)
+        s->waterfall_scroll = max_scroll;
+
+    newest_row = s->waterfall_write_row - 1;
+    if (newest_row < 0)
+        newest_row += hist_lines;
+
+    for (y = 0; y < s->lines; y++) {
+        int age_from_newest = (s->lines - 1 - y) + s->waterfall_scroll;
+        int src_row = newest_row - age_from_newest;
+        if (hist_lines > 0) {
+            src_row %= hist_lines;
+            if (src_row < 0)
+                src_row += hist_lines;
+        }
+        memcpy(s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width,
+               s->waterfall_rgba + (size_t)src_row * (size_t)s->waterfall_tex_width,
+               (size_t)s->waterfall_tex_width * sizeof(uint32_t));
+    }
+}
+
+static bool export_waterfall_ppm_path(struct scan_state *s, const char *path)
+{
+    FILE *f;
+    int x, y;
+
+    if (!path || !s->waterfall_view_rgba || s->waterfall_tex_width <= 0 || s->lines <= 0)
+        return false;
+
+    waterfall_compose_view(s);
+
+    f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "Failed to write %s\n", path);
+        return false;
+    }
+
+    fprintf(f, "P6\n%d %d\n255\n", s->waterfall_tex_width, s->lines);
+    for (y = 0; y < s->lines; y++) {
+        const uint32_t *row = s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width;
+        for (x = 0; x < s->waterfall_tex_width; x++) {
+            uint32_t px = row[x];
+            unsigned char rgb[3];
+            rgb[0] = (unsigned char)((px >> 16) & 0xff);
+            rgb[1] = (unsigned char)((px >> 8) & 0xff);
+            rgb[2] = (unsigned char)(px & 0xff);
+            fwrite(rgb, 1, sizeof(rgb), f);
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "Saved %s\n", path);
+    return true;
+}
+
+static bool save_preset_file(const struct scan_state *s, const char *path)
+{
+    FILE *f;
+
+    if (!path || !s)
+        return false;
+
+    f = fopen(path, "w");
+    if (!f) {
+        fprintf(stderr, "Failed to write %s\n", path);
+        return false;
+    }
+
+    fprintf(f, "refclk_hz=%" PRId64 "\n", s->refclk_hz);
+    fprintf(f, "start_hz=%" PRId64 "\n", s->scan_start_hz);
+    fprintf(f, "stop_hz=%" PRId64 "\n", s->scan_stop_hz);
+    fprintf(f, "sample_rate_hz=%u\n", s->sample_rate_hz);
+    fprintf(f, "fft_len=%d\n", s->fft_len);
+    fprintf(f, "lines=%d\n", s->lines);
+    fprintf(f, "rx_gain=%d\n", s->rx_gain);
+    fprintf(f, "settle_us=%d\n", s->rx_settle_us);
+    fprintf(f, "stitch_pct=%d\n", s->stitch_pct);
+    fprintf(f, "auto_samplerate=%d\n", s->auto_samplerate ? 1 : 0);
+    fprintf(f, "db_min=%.3f\n", s->db_min);
+    fprintf(f, "db_max=%.3f\n", s->db_max);
+    fprintf(f, "display_rows=%d\n", s->display_rows);
+    fprintf(f, "waterfall_palette=%d\n", s->waterfall_palette);
+    fclose(f);
+    fprintf(stderr, "Saved preset %s\n", path);
+    return true;
+}
+
+static bool load_preset_file(struct scan_state *s, const char *path)
+{
+    FILE *f;
+    char line[256];
+
+    if (!path || !s)
+        return false;
+
+    f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "Failed to read %s\n", path);
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        char *eq = strchr(line, '=');
+        if (!eq)
+            continue;
+        *eq++ = '\0';
+        line[strcspn(line, "\r\n")] = '\0';
+        eq[strcspn(eq, "\r\n")] = '\0';
+
+        if (!strcmp(line, "refclk_hz"))
+            s->refclk_hz = (int64_t)strtoll(eq, NULL, 0);
+        else if (!strcmp(line, "start_hz"))
+            s->scan_start_hz = (int64_t)strtoll(eq, NULL, 0);
+        else if (!strcmp(line, "stop_hz"))
+            s->scan_stop_hz = (int64_t)strtoll(eq, NULL, 0);
+        else if (!strcmp(line, "sample_rate_hz"))
+            s->sample_rate_hz = (uint32_t)strtoul(eq, NULL, 0);
+        else if (!strcmp(line, "fft_len"))
+            s->fft_len = atoi(eq);
+        else if (!strcmp(line, "lines"))
+            s->lines = atoi(eq);
+        else if (!strcmp(line, "rx_gain"))
+            s->rx_gain = atoi(eq);
+        else if (!strcmp(line, "settle_us"))
+            s->rx_settle_us = atoi(eq);
+        else if (!strcmp(line, "stitch_pct"))
+            s->stitch_pct = atoi(eq);
+        else if (!strcmp(line, "auto_samplerate"))
+            s->auto_samplerate = atoi(eq) ? true : false;
+        else if (!strcmp(line, "db_min"))
+            s->db_min = strtof(eq, NULL);
+        else if (!strcmp(line, "db_max"))
+            s->db_max = strtof(eq, NULL);
+        else if (!strcmp(line, "display_rows"))
+            s->display_rows = atoi(eq);
+        else if (!strcmp(line, "waterfall_palette"))
+            s->waterfall_palette = atoi(eq);
+    }
+    fclose(f);
+    s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(s->sample_rate_hz);
+    return true;
 }
 
 static void refresh_rx_gain_status(struct scan_state *s)
@@ -1274,40 +1440,9 @@ static void waterfall_push_line(struct scan_state *s)
 
 static void waterfall_update_view_texture(struct scan_state *s)
 {
-    int y;
-    int hist_lines = s->waterfall_history_lines;
-    int max_scroll;
-    int newest_row;
-
     if (!s->waterfall_view_dirty || !s->waterfall_tex || !s->waterfall_rgba || !s->waterfall_view_rgba)
         return;
-    if (hist_lines < 1 || s->lines < 1 || s->waterfall_tex_width < 1)
-        return;
-
-    max_scroll = hist_lines - s->lines;
-    if (max_scroll < 0)
-        max_scroll = 0;
-    if (s->waterfall_scroll < 0)
-        s->waterfall_scroll = 0;
-    if (s->waterfall_scroll > max_scroll)
-        s->waterfall_scroll = max_scroll;
-
-    newest_row = s->waterfall_write_row - 1;
-    if (newest_row < 0)
-        newest_row += hist_lines;
-
-    for (y = 0; y < s->lines; y++) {
-        int age_from_newest = (s->lines - 1 - y) + s->waterfall_scroll;
-        int src_row = newest_row - age_from_newest;
-        if (hist_lines > 0) {
-            src_row %= hist_lines;
-            if (src_row < 0)
-                src_row += hist_lines;
-        }
-        memcpy(s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width,
-               s->waterfall_rgba + (size_t)src_row * (size_t)s->waterfall_tex_width,
-               (size_t)s->waterfall_tex_width * sizeof(uint32_t));
-    }
+    waterfall_compose_view(s);
 
     glBindTexture(GL_TEXTURE_2D, s->waterfall_tex);
     glTexSubImage2D(GL_TEXTURE_2D,
@@ -1320,6 +1455,45 @@ static void waterfall_update_view_texture(struct scan_state *s)
                     GL_UNSIGNED_BYTE,
                     s->waterfall_view_rgba);
     s->waterfall_view_dirty = false;
+}
+
+static void free_scan_state(struct scan_state *s)
+{
+    if (!s)
+        return;
+
+    if (s->waterfall_tex)
+        glDeleteTextures(1, &s->waterfall_tex);
+    if (s->dma.fds.fd > 0)
+        scan_dma_cleanup(s);
+
+    fft_worker_stop(s);
+    if (s->fft_cfg) {
+        kiss_fft_free(s->fft_cfg);
+        s->fft_cfg = NULL;
+    }
+    free(s->in_re);
+    free(s->in_im);
+    free(s->fft_job_re);
+    free(s->fft_job_im);
+    free(s->fft_in);
+    free(s->fft_out);
+    free(s->out_re);
+    free(s->out_im);
+    free(s->window);
+    free(s->line_db);
+    free(s->line_peak_db);
+    free(s->line_peak_seen_s);
+    free(s->line_avg_db);
+    free(s->line_pow_accum);
+    free(s->line_w_accum);
+    free(s->plot_db);
+    free(s->plot_avg);
+    free(s->plot_peak);
+    free(s->plot_points);
+    free(s->waterfall_rgba);
+    free(s->waterfall_view_rgba);
+    free(s->fastlock_sw);
 }
 
 static int build_plot_slice_from(const struct scan_state *s, const float *src,
@@ -2217,6 +2391,11 @@ static void help(void)
            "      --sample-rate HZ   Scan sample rate in Hz (default: %u).\n"
            "      --fft-len N        FFT length (power of two, default: %d).\n"
            "      --lines N          Waterfall lines (default: %d).\n"
+           "      --preset-load FILE Load scan preset before starting.\n"
+           "      --preset-save FILE Save current scan preset.\n"
+           "      --no-ui            Run headless capture/export without SDL/ImGui.\n"
+           "      --export-csv FILE  Export the final spectrum line to CSV.\n"
+           "      --export-ppm FILE  Export the waterfall buffer to PPM.\n"
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
@@ -2919,6 +3098,11 @@ int main(int argc, char **argv)
     bool quit = false;
     const char *glsl_version = "#version 130";
     struct ui_state ui;
+    const char *preset_load_path = NULL;
+    const char *preset_save_path = NULL;
+    const char *export_csv_pathname = NULL;
+    const char *export_ppm_pathname = NULL;
+    bool no_ui = false;
 
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -2937,6 +3121,11 @@ int main(int argc, char **argv)
         { "lines", required_argument, NULL, 6 },
         { "sample-rate", required_argument, NULL, 7 },
         { "sample_rate", required_argument, NULL, 7 },
+        { "preset-load", required_argument, NULL, 8 },
+        { "preset-save", required_argument, NULL, 9 },
+        { "no-ui", no_argument, NULL, 10 },
+        { "export-csv", required_argument, NULL, 11 },
+        { "export-ppm", required_argument, NULL, 12 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -3027,10 +3216,30 @@ int main(int argc, char **argv)
             }
             s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
             break;
+        case 8:
+            preset_load_path = optarg;
+            if (!load_preset_file(&s, preset_load_path))
+                return 1;
+            break;
+        case 9:
+            preset_save_path = optarg;
+            break;
+        case 10:
+            no_ui = true;
+            break;
+        case 11:
+            export_csv_pathname = optarg;
+            break;
+        case 12:
+            export_ppm_pathname = optarg;
+            break;
         default:
             return 1;
         }
     }
+
+    if (preset_save_path && !save_preset_file(&s, preset_save_path))
+        return 1;
 
     signal(SIGINT, int_handler);
 
@@ -3095,6 +3304,29 @@ int main(int argc, char **argv)
         goto fail;
 
     ui_state_from_scan(&s, &ui);
+
+    if (no_ui) {
+        int i;
+        int lines_to_run = s.lines > 0 ? s.lines : 1;
+
+        for (i = 0; i < lines_to_run && g_keep_running; i++) {
+            if (!scan_line(&s)) {
+                fprintf(stderr, "Scan failed during headless capture.\n");
+                goto fail;
+            }
+        }
+
+        if (export_csv_pathname && !export_csv_path(&s, export_csv_pathname))
+            goto fail;
+        if (export_ppm_pathname && !export_waterfall_ppm_path(&s, export_ppm_pathname))
+            goto fail;
+        if (!export_csv_pathname && !export_ppm_pathname)
+            fprintf(stderr, "Headless scan completed with no export requested.\n");
+
+        free_scan_state(&s);
+        scan_close_device();
+        return 0;
+    }
 
     while (!quit && g_keep_running) {
         SDL_Event e;
@@ -3187,40 +3419,15 @@ int main(int argc, char **argv)
         SDL_GL_SwapWindow(window);
     }
 
+    if (export_csv_pathname && !export_csv_path(&s, export_csv_pathname))
+        goto fail;
+    if (export_ppm_pathname && !export_waterfall_ppm_path(&s, export_ppm_pathname))
+        goto fail;
+
     m2sdr_imgui_opengl3_shutdown();
     m2sdr_imgui_sdl2_shutdown();
     igDestroyContext(NULL);
-
-    if (s.waterfall_tex)
-        glDeleteTextures(1, &s.waterfall_tex);
-    scan_dma_cleanup(&s);
-    fft_worker_stop(&s);
-    if (s.fft_cfg) {
-        kiss_fft_free(s.fft_cfg);
-        s.fft_cfg = NULL;
-    }
-    free(s.in_re);
-    free(s.in_im);
-    free(s.fft_job_re);
-    free(s.fft_job_im);
-    free(s.fft_in);
-    free(s.fft_out);
-    free(s.out_re);
-    free(s.out_im);
-    free(s.window);
-    free(s.line_db);
-    free(s.line_peak_db);
-    free(s.line_peak_seen_s);
-    free(s.line_avg_db);
-    free(s.line_pow_accum);
-    free(s.line_w_accum);
-    free(s.plot_db);
-    free(s.plot_avg);
-    free(s.plot_peak);
-    free(s.plot_points);
-    free(s.waterfall_rgba);
-    free(s.waterfall_view_rgba);
-    free(s.fastlock_sw);
+    free_scan_state(&s);
 
     if (gl_context)
         SDL_GL_DeleteContext(gl_context);
@@ -3237,40 +3444,7 @@ fail:
     if (window)
         SDL_DestroyWindow(window);
     SDL_Quit();
-
-    if (s.waterfall_tex)
-        glDeleteTextures(1, &s.waterfall_tex);
-
-    if (s.dma.fds.fd > 0)
-        scan_dma_cleanup(&s);
-
-    fft_worker_stop(&s);
-    if (s.fft_cfg) {
-        kiss_fft_free(s.fft_cfg);
-        s.fft_cfg = NULL;
-    }
-    free(s.in_re);
-    free(s.in_im);
-    free(s.fft_job_re);
-    free(s.fft_job_im);
-    free(s.fft_in);
-    free(s.fft_out);
-    free(s.out_re);
-    free(s.out_im);
-    free(s.window);
-    free(s.line_db);
-    free(s.line_peak_db);
-    free(s.line_peak_seen_s);
-    free(s.line_avg_db);
-    free(s.line_pow_accum);
-    free(s.line_w_accum);
-    free(s.plot_db);
-    free(s.plot_avg);
-    free(s.plot_peak);
-    free(s.plot_points);
-    free(s.waterfall_rgba);
-    free(s.waterfall_view_rgba);
-    free(s.fastlock_sw);
+    free_scan_state(&s);
 
     scan_close_device();
     return 1;
