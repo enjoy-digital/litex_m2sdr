@@ -46,6 +46,8 @@ static struct ad9361_rf_phy *ad9361_phy;
 /* Helpers */
 /*---------*/
 
+/* Return the raw backend connection object expected by the low-level AD9361
+ * SPI and SI5351 helpers. */
 static void *m2sdr_conn(struct m2sdr_dev *dev)
 {
 #ifdef USE_LITEPCIE
@@ -58,6 +60,8 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
 #endif
 }
 
+/* Resolve the effective clock source, honoring legacy string overrides when
+ * older callers still populate sync_mode. */
 static int m2sdr_clock_source_from_config(const struct m2sdr_config *cfg,
                                           enum m2sdr_clock_source *source)
 {
@@ -82,6 +86,8 @@ static int m2sdr_clock_source_from_config(const struct m2sdr_config *cfg,
     return M2SDR_ERR_OK;
 }
 
+/* Resolve the requested RF channel layout, again accepting the legacy
+ * chan_mode string used by older utilities. */
 static int m2sdr_channel_layout_from_config(const struct m2sdr_config *cfg,
                                             enum m2sdr_channel_layout *layout)
 {
@@ -104,6 +110,8 @@ static int m2sdr_channel_layout_from_config(const struct m2sdr_config *cfg,
     return M2SDR_ERR_OK;
 }
 
+/* Apply the selected 1T1R/2T2R topology both to the AD9361 init parameters and
+ * to the FPGA-side PHY control register. */
 static void m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
                                        enum m2sdr_channel_layout channel_layout)
 {
@@ -126,6 +134,7 @@ static void m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
     }
 }
 
+/* Program the SI5351 clock generator for the selected reference topology. */
 static void m2sdr_configure_clocking(struct m2sdr_dev *dev,
                                      void *conn,
                                      const struct m2sdr_config *cfg,
@@ -172,6 +181,8 @@ static void m2sdr_configure_clocking(struct m2sdr_dev *dev,
 #endif
 }
 
+/* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
+ * interpolation/decimation mode expected by the original utilities. */
 static void m2sdr_configure_samplerate(const struct m2sdr_config *cfg)
 {
     uint32_t actual_samplerate = cfg->sample_rate;
@@ -205,6 +216,7 @@ static void m2sdr_configure_samplerate(const struct m2sdr_config *cfg)
     ad9361_set_rx_sampling_freq(ad9361_phy, actual_samplerate);
 }
 
+/* Apply a common RF bandwidth to both RX and TX paths. */
 static void m2sdr_configure_bandwidth(const struct m2sdr_config *cfg)
 {
     printf("Setting TX/RX Bandwidth to %f MHz.\n", cfg->bandwidth / 1e6);
@@ -212,6 +224,7 @@ static void m2sdr_configure_bandwidth(const struct m2sdr_config *cfg)
     ad9361_set_tx_rf_bandwidth(ad9361_phy, cfg->bandwidth);
 }
 
+/* Program the TX and RX local oscillator frequencies. */
 static void m2sdr_configure_frequencies(const struct m2sdr_config *cfg)
 {
     printf("Setting TX LO Freq to %f MHz.\n", cfg->tx_freq / 1e6);
@@ -220,6 +233,7 @@ static void m2sdr_configure_frequencies(const struct m2sdr_config *cfg)
     ad9361_set_rx_lo_freq(ad9361_phy, cfg->rx_freq);
 }
 
+/* Apply TX attenuation and per-channel RX gains. */
 static void m2sdr_configure_gains(const struct m2sdr_config *cfg)
 {
     printf("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
@@ -231,6 +245,7 @@ static void m2sdr_configure_gains(const struct m2sdr_config *cfg)
     ad9361_set_rx_rf_gain(ad9361_phy, 1, cfg->rx_gain2);
 }
 
+/* Configure the FPGA-side bit mode and AD9361 internal loopback controls. */
 static void m2sdr_configure_modes(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 {
     printf("Setting Loopback to %d\n", cfg->loopback);
@@ -244,6 +259,7 @@ static void m2sdr_configure_modes(struct m2sdr_dev *dev, const struct m2sdr_conf
     m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0);
 }
 
+/* Run the optional AD9361 built-in test modes requested by the config. */
 static void m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev)
 {
     if (cfg->bist_tx_tone) {
@@ -267,6 +283,8 @@ static void m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev
 /* AD9361 platform hooks */
 /*-----------------------*/
 
+/* Bridge the AD9361 platform SPI callback onto libm2sdr's backend-neutral
+ * SPI helpers. */
 int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
                                    const unsigned char *txbuf, unsigned n_tx,
                                    unsigned char *rxbuf, unsigned n_rx)
@@ -287,27 +305,32 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
     return 0;
 }
 
+/* AD9361 platform delay hook in microseconds. */
 void M2SDR_WEAK udelay(unsigned long usecs)
 {
     usleep(usecs);
 }
 
+/* AD9361 platform delay hook in milliseconds. */
 void M2SDR_WEAK mdelay(unsigned long msecs)
 {
     usleep(msecs * 1000);
 }
 
+/* AD9361 platform sleep hook used by the imported driver code. */
 unsigned long M2SDR_WEAK msleep_interruptible(unsigned int msecs)
 {
     usleep(msecs * 1000);
     return 0;
 }
 
+/* Report which GPIO number is valid for the AD9361 reset hook. */
 bool M2SDR_WEAK gpio_is_valid(int number)
 {
     return number == AD9361_GPIO_RESET_PIN;
 }
 
+/* Placeholder GPIO setter required by the AD9361 platform layer. */
 void M2SDR_WEAK gpio_set_value(unsigned gpio, int value)
 {
     (void)gpio;
@@ -317,6 +340,8 @@ void M2SDR_WEAK gpio_set_value(unsigned gpio, int value)
 /* Public API */
 /*------------*/
 
+/* Fill a config structure with the default RF values used by the standalone
+ * utilities and examples. */
 void m2sdr_config_init(struct m2sdr_config *cfg)
 {
     if (!cfg)
@@ -344,6 +369,8 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->sync_mode         = NULL;
 }
 
+/* Bind an externally-initialized AD9361 instance to libm2sdr, primarily for
+ * the Soapy integration path. */
 int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
 {
     g_rf_dev   = dev;
@@ -355,6 +382,8 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
     return M2SDR_ERR_OK;
 }
 
+/* Execute the full RF bring-up sequence: clocks, AD9361 init, rates, gains,
+ * loopback, bit mode, and optional built-in tests. */
 int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 {
     void *conn;
@@ -406,6 +435,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     return M2SDR_ERR_OK;
 }
 
+/* Program one LO frequency on the already-initialized AD9361 instance. */
 int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq)
 {
     (void)dev;
@@ -421,6 +451,7 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
     return M2SDR_ERR_OK;
 }
 
+/* Program a common sample rate on both RX and TX paths. */
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
     (void)dev;
@@ -433,6 +464,7 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     return M2SDR_ERR_OK;
 }
 
+/* Program a common RF bandwidth on both RX and TX paths. */
 int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
 {
     (void)dev;
@@ -445,6 +477,7 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     return M2SDR_ERR_OK;
 }
 
+/* Apply one direction-specific gain setting to the initialized AD9361. */
 int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain)
 {
     (void)dev;
@@ -462,21 +495,25 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
     return M2SDR_ERR_OK;
 }
 
+/* Convenience wrapper for the RX LO frequency setter. */
 int m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq)
 {
     return m2sdr_set_frequency(dev, M2SDR_RX, freq);
 }
 
+/* Convenience wrapper for the TX LO frequency setter. */
 int m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq)
 {
     return m2sdr_set_frequency(dev, M2SDR_TX, freq);
 }
 
+/* Convenience wrapper for the RX gain setter. */
 int m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain)
 {
     return m2sdr_set_gain(dev, M2SDR_RX, gain);
 }
 
+/* Convenience wrapper for the TX gain setter. */
 int m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain)
 {
     return m2sdr_set_gain(dev, M2SDR_TX, gain);

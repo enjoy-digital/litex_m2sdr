@@ -23,6 +23,8 @@
 /* Helpers */
 /*---------*/
 
+/* Convert an error code to the short public string form used by
+ * m2sdr_strerror(). */
 static const char *m2sdr_err_str(int err)
 {
     switch (err) {
@@ -37,6 +39,7 @@ static const char *m2sdr_err_str(int err)
     }
 }
 
+/* Remove trailing newlines from firmware-provided text strings. */
 static void m2sdr_trim_nl(char *s)
 {
     size_t n;
@@ -51,6 +54,8 @@ static void m2sdr_trim_nl(char *s)
     }
 }
 
+/* Return the backend-specific default identifier used when the caller does
+ * not specify a target. */
 static void m2sdr_default_device(char *out, size_t out_len)
 {
 #ifdef USE_LITEPCIE
@@ -108,6 +113,7 @@ static int m2sdr_parse_identifier(const char *id,
     return 0;
 }
 
+/* Read one logical 64-bit CSR value stored as hi/lo 32-bit words. */
 static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *value)
 {
     uint32_t high = 0;
@@ -125,6 +131,7 @@ static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *va
     return M2SDR_ERR_OK;
 }
 
+/* Read the board identifier memory into a caller-provided string buffer. */
 static int m2sdr_read_identifier_mem(struct m2sdr_dev *dev, char *buf, size_t len)
 {
     size_t i;
@@ -153,6 +160,7 @@ static int m2sdr_read_identifier_mem(struct m2sdr_dev *dev, char *buf, size_t le
     return M2SDR_ERR_OK;
 }
 
+/* Fill the public transport/path description from the active backend state. */
 static void m2sdr_fill_transport_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
 {
 #ifdef USE_LITEPCIE
@@ -167,6 +175,7 @@ static void m2sdr_fill_transport_info(struct m2sdr_dev *dev, struct m2sdr_devinf
 #endif
 }
 
+/* Probe one candidate identifier and return its public metadata. */
 static int m2sdr_probe_one(const char *device_id, struct m2sdr_devinfo *info)
 {
     struct m2sdr_dev *dev = NULL;
@@ -184,11 +193,13 @@ static int m2sdr_probe_one(const char *device_id, struct m2sdr_devinfo *info)
 /* Version / Lifetime */
 /*--------------------*/
 
+/* Return a short static string for a libm2sdr status code. */
 const char *m2sdr_strerror(int err)
 {
     return m2sdr_err_str(err);
 }
 
+/* Report the library API/ABI/version tuple compiled into this build. */
 void m2sdr_get_version(struct m2sdr_version *ver)
 {
     if (!ver)
@@ -199,6 +210,8 @@ void m2sdr_get_version(struct m2sdr_version *ver)
     ver->version_str = M2SDR_VERSION_STRING;
 }
 
+/* Open a device using either the PCIe or LiteEth backend and return the
+ * opaque per-device library state. */
 int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 {
     struct m2sdr_dev *dev;
@@ -273,6 +286,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     return M2SDR_ERR_OK;
 }
 
+/* Close a device and release all transport-specific resources it owns. */
 void m2sdr_close(struct m2sdr_dev *dev)
 {
     if (!dev)
@@ -301,17 +315,20 @@ void m2sdr_close(struct m2sdr_dev *dev)
 /* Basic accessors */
 /*-----------------*/
 
+/* Read a CSR through the currently-selected backend HAL. */
 int m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     return m2sdr_hal_readl(dev, addr, val);
 }
 
+/* Write a CSR through the currently-selected backend HAL. */
 int m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     return m2sdr_hal_writel(dev, addr, val);
 }
 
 /* Legacy escape hatches kept for Soapy and advanced utilities. */
+/* Return the underlying PCIe file descriptor when available. */
 int m2sdr_get_fd(struct m2sdr_dev *dev)
 {
 #ifdef USE_LITEPCIE
@@ -324,6 +341,7 @@ int m2sdr_get_fd(struct m2sdr_dev *dev)
 #endif
 }
 
+/* Return the raw backend handle used by advanced integrations. */
 void *m2sdr_get_handle(struct m2sdr_dev *dev)
 {
     if (!dev)
@@ -341,6 +359,7 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev)
 /* Discovery / Identification */
 /*----------------------------*/
 
+/* Read stable board identity fields from an already-open device. */
 int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
 {
     uint64_t dna = 0;
@@ -363,6 +382,7 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
     return M2SDR_ERR_OK;
 }
 
+/* Enumerate the set of reachable devices for the active backend. */
 int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
 {
     size_t found = 0;
@@ -394,6 +414,7 @@ int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
     return M2SDR_ERR_OK;
 }
 
+/* Read the bitstream capability registers into a structured view. */
 int m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *caps)
 {
     uint32_t value = 0;
@@ -428,6 +449,7 @@ int m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *cap
     return M2SDR_ERR_OK;
 }
 
+/* Return the FPGA identifier string directly from the identifier memory. */
 int m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len)
 {
     if (!dev || !buf || len == 0)
@@ -443,6 +465,7 @@ int m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len)
 /* Board information */
 /*-------------------*/
 
+/* Read the FPGA git hash when the current gateware exposes it. */
 int m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash)
 {
     if (!dev || !hash)
@@ -457,6 +480,7 @@ int m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash)
 #endif
 }
 
+/* Reserved placeholder for future clock metadata reporting. */
 int m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info)
 {
     if (!dev || !info)
@@ -465,6 +489,7 @@ int m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info)
     return M2SDR_ERR_UNSUPPORTED;
 }
 
+/* Latch and read the current hardware time in nanoseconds. */
 int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 {
     uint32_t ctrl = 0;
@@ -481,6 +506,7 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
     return m2sdr_read_reg_u64(dev, CSR_TIME_GEN_READ_TIME_ADDR, time_ns);
 }
 
+/* Program the hardware time generator with an absolute time value. */
 int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
 {
     if (!dev)
@@ -493,6 +519,7 @@ int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
     return M2SDR_ERR_OK;
 }
 
+/* Read the 64-bit FPGA DNA value used as the stable board serial source. */
 int m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna)
 {
     if (!dev || !dna)
@@ -505,6 +532,7 @@ int m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna)
 #endif
 }
 
+/* Convert raw XADC measurements into engineering units. */
 int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors)
 {
     uint32_t temp = 0;
@@ -538,6 +566,7 @@ int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sen
 /* Control helpers */
 /*-----------------*/
 
+/* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
 int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 {
     if (!dev)
@@ -552,6 +581,7 @@ int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 #endif
 }
 
+/* Enable or disable the FPGA DMA loopback path when the backend supports it. */
 int m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable)
 {
     if (!dev)
@@ -566,6 +596,8 @@ int m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable)
 #endif
 }
 
+/* Enable or disable RX-side DMA headers and remember whether the sync API
+ * should strip them before returning samples to the caller. */
 int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
 {
     if (!dev)
@@ -580,6 +612,7 @@ int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
     return M2SDR_ERR_OK;
 }
 
+/* Enable or disable TX-side insertion of the FPGA DMA header. */
 int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
 {
     if (!dev)
@@ -593,6 +626,7 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
     return M2SDR_ERR_OK;
 }
 
+/* Configure GPIO ownership, loopback mode, and the data source selection. */
 int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool source_csr)
 {
     if (!dev)
@@ -630,6 +664,7 @@ int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool so
 #endif
 }
 
+/* Drive the 4-bit GPIO output and output-enable fields. */
 int m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe)
 {
     if (!dev)
@@ -646,6 +681,7 @@ int m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe)
 #endif
 }
 
+/* Read the current 4-bit GPIO input value. */
 int m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value)
 {
     if (!dev || !value)

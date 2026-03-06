@@ -20,7 +20,7 @@
 
 /* This header centralizes the RF defaults and the precomputed SI5351 register
  * tables used by m2sdr_rf/libm2sdr. Most callers only touch the DEFAULT_* and
- * *_MIN/*_MAX values indirectly through m2sdr_config_init() and the utilities. */
+ * range-limit values indirectly through m2sdr_config_init() and the utilities. */
 
 #ifndef M2SDR_CONFIG_DEF
 #define M2SDR_CONFIG_DEF static
