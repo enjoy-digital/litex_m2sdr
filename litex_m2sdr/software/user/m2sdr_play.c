@@ -33,6 +33,18 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
+static void print_time_banner(const char *label, uint64_t time_ns)
+{
+    time_t seconds = (time_t)(time_ns / 1000000000ULL);
+    uint32_t ms = (time_ns % 1000000000ULL) / 1000000;
+    struct tm tm;
+    char time_str[64];
+
+    localtime_r(&seconds, &tm);
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+    printf("%s %s.%03u\n", label, time_str, ms);
+}
+
 static void help(void)
 {
     printf("M2SDR I/Q Player Utility.\n"
@@ -77,6 +89,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     if (timed_start) {
         uint64_t current_ts = 0;
         if (m2sdr_get_time(dev, &current_ts) == 0) {
+            print_time_banner("Initial Time :", current_ts);
             uint64_t ns_in_sec = current_ts % 1000000000ULL;
             uint64_t wait_ns   = (ns_in_sec == 0) ? 1000000000ULL : (1000000000ULL - ns_in_sec);
             uint64_t target_ts = current_ts + wait_ns;
@@ -85,6 +98,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                 usleep(1000);
             }
             usleep(100000);
+            print_time_banner("Start Time   :", target_ts + 1000000000ULL);
         }
     }
 
@@ -107,6 +121,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     int64_t last_time = get_time_ms();
     uint64_t total_buffers = 0;
     uint64_t last_buffers  = 0;
+    uint64_t sw_underflows = 0;
 
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
@@ -116,16 +131,13 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             break;
         }
         if (feof(fi)) {
-            if (loops > 0) {
-                current_loop++;
-                if (current_loop >= loops) {
-                    break;
-                }
+            current_loop++;
+            if (loops != 0 && current_loop >= loops)
+                break;
+            if (strcmp(filename, "-") != 0) {
                 fseek(fi, 0, SEEK_SET);
-                continue;
-            } else {
-                fseek(fi, 0, SEEK_SET);
-                continue;
+                clearerr(fi);
+                len += fread(buf + len, 1, DMA_BUFFER_SIZE - len, fi);
             }
         }
 
@@ -144,13 +156,15 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             uint64_t size = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
 
             if (i % 10 == 0)
-                fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
+                fprintf(stderr, "\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");
             i++;
 
-            fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size);
+            fprintf(stderr, "%10.2f %10" PRIu64 " %10" PRIu64 " %6u %10" PRIu64 "\n",
+                    speed, total_buffers, size, current_loop, sw_underflows);
 
             last_time = get_time_ms();
             last_buffers = total_buffers;
+            sw_underflows = 0;
         }
     }
 

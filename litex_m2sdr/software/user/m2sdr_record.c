@@ -14,6 +14,7 @@
 #include <inttypes.h>
 #include <unistd.h>
 #include <signal.h>
+#include <time.h>
 
 #include "m2sdr.h"
 #include "config.h"
@@ -75,6 +76,9 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
     unsigned sample_size = m2sdr_format_size(format);
     unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
+    size_t payload_bytes_per_buf = DMA_BUFFER_SIZE;
+    if (header && strip_header)
+        payload_bytes_per_buf = DMA_BUFFER_SIZE - 16;
     if (header && strip_header)
         samples_per_buf = (DMA_BUFFER_SIZE - 16) / sample_size;
     if (m2sdr_sync_config(dev, M2SDR_RX, format,
@@ -103,18 +107,22 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     int64_t last_time = get_time_ms();
     uint64_t total_buffers = 0;
     uint64_t last_buffers  = 0;
+    uint64_t last_timestamp = 0;
 
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
+        struct m2sdr_metadata meta;
         if (size > 0 && total_len >= size)
             break;
 
-        if (m2sdr_sync_rx(dev, buf, samples_per_buf, NULL, 0) != 0) {
+        if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
             fprintf(stderr, "m2sdr_sync_rx failed\n");
             break;
         }
+        if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
+            last_timestamp = meta.timestamp;
 
-        size_t to_write = DMA_BUFFER_SIZE;
+        size_t to_write = payload_bytes_per_buf;
         if (size > 0 && to_write > size - total_len)
             to_write = size - total_len;
 
@@ -132,11 +140,30 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
             uint64_t size_mb = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
 
-            if (i % 10 == 0)
-                fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
+            if (i % 10 == 0) {
+                if (header) {
+                    fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
+                } else {
+                    fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
+                }
+            }
             i++;
 
-            fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size_mb);
+            if (header && last_timestamp != 0) {
+                uint64_t seconds = last_timestamp / 1000000000ULL;
+                uint64_t nanos   = last_timestamp % 1000000000ULL;
+                uint32_t ms      = nanos / 1000000;
+                time_t sec_time  = (time_t)seconds;
+                struct tm tm;
+                char time_str[64];
+
+                gmtime_r(&sec_time, &tm);
+                strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
+                fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u\n",
+                        speed, total_buffers, size_mb, time_str, ms);
+            } else {
+                fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size_mb);
+            }
 
             last_time = get_time_ms();
             last_buffers = total_buffers;
