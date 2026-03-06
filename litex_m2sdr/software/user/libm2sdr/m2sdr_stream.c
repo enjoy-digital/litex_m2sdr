@@ -1,14 +1,21 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LiteX-M2SDR streaming API (BladeRF-like sync)
+ * LiteX-M2SDR library
+ *
+ * This file is part of LiteX-M2SDR.
+ *
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+ *
  */
 
-#include "m2sdr_internal.h"
+/* Includes */
+/*----------*/
 
 #include <string.h>
 
 #include "config.h"
 #include "csr.h"
+#include "m2sdr_internal.h"
 
 #ifdef USE_LITEPCIE
 #include "litepcie_helpers.h"
@@ -16,6 +23,9 @@
 
 #define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
+
+/* Helpers */
+/*---------*/
 
 static unsigned m2sdr_sample_size(enum m2sdr_format format)
 {
@@ -41,6 +51,44 @@ static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_pe
     return M2SDR_ERR_OK;
 }
 
+static unsigned m2sdr_stream_payload_bytes(struct m2sdr_dev *dev,
+                                           enum m2sdr_direction direction,
+                                           enum m2sdr_format format)
+{
+    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
+
+    (void)format;
+
+    if (direction == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
+        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+    if (direction == M2SDR_TX && dev->tx_header_enable)
+        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+
+    return bytes_per_buffer;
+}
+
+static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
+                                      enum m2sdr_direction direction,
+                                      enum m2sdr_format format,
+                                      unsigned buffer_size,
+                                      unsigned timeout_ms)
+{
+    if (direction == M2SDR_RX) {
+        dev->rx_configured  = 1;
+        dev->rx_format      = format;
+        dev->rx_buffer_size = buffer_size;
+        dev->rx_timeout_ms  = timeout_ms;
+    } else {
+        dev->tx_configured  = 1;
+        dev->tx_format      = format;
+        dev->tx_buffer_size = buffer_size;
+        dev->tx_timeout_ms  = timeout_ms;
+    }
+}
+
+/* Public API */
+/*------------*/
+
 int m2sdr_sync_config(struct m2sdr_dev *dev,
                       enum m2sdr_direction direction,
                       enum m2sdr_format format,
@@ -55,11 +103,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
 
     /* The current backends stream fixed-size DMA payloads. The public API keeps
      * buffer sizes in samples to stay format-centric. */
-    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
-    if (direction == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
-        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-    if (direction == M2SDR_TX && dev->tx_header_enable)
-        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+    unsigned bytes_per_buffer = m2sdr_stream_payload_bytes(dev, direction, format);
 
     int rc = m2sdr_check_buffer_size(format, buffer_size, bytes_per_buffer);
     if (rc != M2SDR_ERR_OK)
@@ -83,10 +127,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dma->reader_enable = 1;
 
     if (direction == M2SDR_RX) {
-        dev->rx_configured = 1;
-        dev->rx_format = format;
-        dev->rx_buffer_size = buffer_size;
-        dev->rx_timeout_ms = timeout_ms;
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
         if (!dev->rx_header_enable) {
             m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
@@ -95,10 +136,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         }
         m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
     } else {
-        dev->tx_configured = 1;
-        dev->tx_format = format;
-        dev->tx_buffer_size = buffer_size;
-        dev->tx_timeout_ms = timeout_ms;
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
 
 #elif defined(USE_LITEETH)
@@ -119,10 +157,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
     if (direction == M2SDR_RX) {
-        dev->rx_configured = 1;
-        dev->rx_format = format;
-        dev->rx_buffer_size = buffer_size;
-        dev->rx_timeout_ms = timeout_ms;
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
         if (!dev->rx_header_enable) {
             m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
@@ -131,10 +166,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         }
         m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
     } else {
-        dev->tx_configured = 1;
-        dev->tx_format = format;
-        dev->tx_buffer_size = buffer_size;
-        dev->tx_timeout_ms = timeout_ms;
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
 #else
     (void)num_buffers;
@@ -188,6 +220,8 @@ int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *c
 }
 
 #ifdef USE_LITEPCIE
+/* PCIe sync helpers wait for the next DMA ring entry and enforce the public
+ * timeout semantics in milliseconds. */
 static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
 {
     int64_t start = get_time_ms();

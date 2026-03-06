@@ -255,14 +255,20 @@ struct m2sdr_dev;
  * - "pcie:/dev/m2sdr0"
  * - "eth:192.168.1.50:1234"
  *
- * Passing NULL selects the interface default.
+ * The parser also accepts the shorthand forms "/dev/m2sdr0" and
+ * "192.168.1.50:1234". Passing NULL selects the backend default.
  */
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 
-/* Enumerate reachable devices for the active backend. */
+/* Enumerate reachable devices for the active backend.
+ *
+ * PCIe currently probes /dev/m2sdr0..7. LiteEth currently probes only the
+ * default target address rather than performing subnet discovery.
+ */
 int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
 
+/* Read stable transport/path/serial/identifier metadata from an open device. */
 int  m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info);
 int  m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *caps);
 int  m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len);
@@ -277,7 +283,12 @@ int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
-/* Low-level transport handle access for advanced integrations. */
+/* Low-level transport handle access for advanced integrations.
+ *
+ * `m2sdr_get_fd()` is meaningful only on LitePCIe builds.
+ * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
+ * or the Etherbone connection handle, depending on the active backend.
+ */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
 

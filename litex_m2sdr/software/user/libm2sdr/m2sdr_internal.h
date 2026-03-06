@@ -1,10 +1,18 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LiteX-M2SDR internal definitions
+ * LiteX-M2SDR library
+ *
+ * This file is part of LiteX-M2SDR.
+ *
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+ *
  */
 
 #ifndef M2SDR_INTERNAL_H
 #define M2SDR_INTERNAL_H
+
+/* Includes */
+/*----------*/
 
 #include <stdint.h>
 
@@ -24,6 +32,7 @@ enum m2sdr_transport {
     M2SDR_TRANSPORT_LITEETH  = 1,
 };
 
+/* Internal device object shared by the transport, stream, and RF layers. */
 struct m2sdr_dev {
     enum m2sdr_transport transport;
 

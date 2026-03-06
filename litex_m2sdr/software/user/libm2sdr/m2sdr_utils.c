@@ -1,11 +1,22 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LiteX-M2SDR utility helpers
+ * LiteX-M2SDR library
+ *
+ * This file is part of LiteX-M2SDR.
+ *
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+ *
  */
+
+/* Includes */
+/*----------*/
+
+#include <stdlib.h>
 
 #include "m2sdr.h"
 
-#include <stdlib.h>
+/* Utility helpers */
+/*-----------------*/
 
 size_t m2sdr_format_size(enum m2sdr_format format)
 {

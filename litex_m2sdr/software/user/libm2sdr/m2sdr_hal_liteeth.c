@@ -1,11 +1,22 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * LiteX-M2SDR LiteEth (Etherbone) HAL
+ * LiteX-M2SDR library
+ *
+ * This file is part of LiteX-M2SDR.
+ *
+ * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+ *
  */
+
+/* Includes */
+/*----------*/
 
 #include "m2sdr_internal.h"
 
 #ifdef USE_LITEETH
+
+/* HAL */
+/*-----*/
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
