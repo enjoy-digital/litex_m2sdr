@@ -605,12 +605,16 @@ static void status(void)
 #endif
 
 #ifdef CSR_SATA_TX_STREAMER_BASE
-    printf("  TX streamer        done=%" PRIu32 " error=%" PRIu32 "\n",
+    printf("  TX streamer        sector=0x%016" PRIx64 " nsectors=%" PRIu32 " done=%" PRIu32 " error=%" PRIu32 "\n",
+        csr_read64(conn, CSR_SATA_TX_STREAMER_SECTOR_ADDR),
+        m2sdr_read32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR),
         m2sdr_read32(conn, CSR_SATA_TX_STREAMER_DONE_ADDR),
         m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR));
 #endif
 #ifdef CSR_SATA_RX_STREAMER_BASE
-    printf("  RX streamer        done=%" PRIu32 " error=%" PRIu32 "\n",
+    printf("  RX streamer        sector=0x%016" PRIx64 " nsectors=%" PRIu32 " done=%" PRIu32 " error=%" PRIu32 "\n",
+        csr_read64(conn, CSR_SATA_RX_STREAMER_SECTOR_ADDR),
+        m2sdr_read32(conn, CSR_SATA_RX_STREAMER_NSECTORS_ADDR),
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR),
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR));
 #endif
