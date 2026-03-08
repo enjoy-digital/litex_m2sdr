@@ -314,3 +314,44 @@ def test_header_inserter_zero_frame_cycles_behaves_as_single_word_frames():
     assert [l for _, l in first_frame] == [0, 0, 1]
     assert [w for w, _ in second_frame] == [0xAAAA0000AAAA0000, 0xBBBB0000BBBB0000, 0x11]
     assert [l for _, l in second_frame] == [0, 0, 1]
+
+
+def test_header_extractor_header_disabled_passthrough():
+    """Verify extractor is payload passthrough when header extraction is disabled."""
+    dut = HeaderInserterExtractor(mode="extractor", data_width=64, with_csr=False)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(0)
+        yield dut.frame_cycles.eq(4)
+        yield dut.source.ready.eq(1)
+
+        for i, word in enumerate([0x20, 0x21, 0x22, 0x23]):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == 3)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.first), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert [w for w, _, _ in out] == [0x20, 0x21, 0x22, 0x23]
+    assert [f for _, f, _ in out] == [0, 0, 0, 0]
+    assert [l for _, _, l in out] == [0, 0, 0, 1]

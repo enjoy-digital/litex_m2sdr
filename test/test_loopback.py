@@ -211,3 +211,55 @@ def test_txrx_loopback_mode_toggle_reference_mapping():
     run_simulation(dut, [gen(), mon()])
     assert tx_out == expected_tx
     assert rx_out == expected_rx
+
+
+def test_txrx_loopback_return_to_normal_mode_restores_tx_path():
+    """Verify disabling loopback restores TX->TX routing after loopback activity."""
+    dut = TXRXLoopback(data_width=64, with_csr=False)
+    tx_out = []
+    rx_out = []
+
+    def gen():
+        yield dut.tx_source.ready.eq(1)
+        yield dut.rx_source.ready.eq(1)
+
+        yield dut.enable.eq(1)
+        yield dut.tx_sink.valid.eq(1)
+        yield dut.tx_sink.first.eq(1)
+        yield dut.tx_sink.last.eq(1)
+        yield dut.tx_sink.data.eq(0x1111)
+        yield dut.rx_sink.valid.eq(1)
+        yield dut.rx_sink.data.eq(0x2222)
+        yield
+        yield dut.tx_sink.valid.eq(0)
+        yield dut.rx_sink.valid.eq(0)
+        yield
+
+        yield dut.enable.eq(0)
+        yield dut.tx_sink.valid.eq(1)
+        yield dut.tx_sink.first.eq(1)
+        yield dut.tx_sink.last.eq(1)
+        yield dut.tx_sink.data.eq(0x3333)
+        yield dut.rx_sink.valid.eq(1)
+        yield dut.rx_sink.first.eq(1)
+        yield dut.rx_sink.last.eq(1)
+        yield dut.rx_sink.data.eq(0x4444)
+        yield
+        yield dut.tx_sink.valid.eq(0)
+        yield dut.rx_sink.valid.eq(0)
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.tx_source.valid) and (yield dut.tx_source.ready):
+                tx_out.append((yield dut.tx_source.data))
+            if (yield dut.rx_source.valid) and (yield dut.rx_source.ready):
+                rx_out.append((yield dut.rx_source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert tx_out == [0x3333]
+    assert rx_out == [0x1111, 0x4444]
