@@ -186,6 +186,26 @@ static int parse_rxdst(const char *s)
     exit(1);
 }
 
+static const char *txsrc_name(int txsrc)
+{
+    switch (txsrc) {
+    case TXSRC_PCIE: return "pcie";
+    case TXSRC_ETH:  return "eth";
+    case TXSRC_SATA: return "sata";
+    default:         return "unknown";
+    }
+}
+
+static const char *rxdst_name(int rxdst)
+{
+    switch (rxdst) {
+    case RXDST_PCIE: return "pcie";
+    case RXDST_ETH:  return "eth";
+    case RXDST_SATA: return "sata";
+    default:         return "unknown";
+    }
+}
+
 static void crossbar_set(void *conn, int txsrc, int rxdst)
 {
 #ifdef CSR_CROSSBAR_BASE
@@ -463,46 +483,62 @@ static void status(void)
 #ifdef CSR_CROSSBAR_BASE
     uint32_t txsel = m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
     uint32_t rxsel = m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
-    printf("Crossbar:\n");
-    printf("  mux.sel   = %" PRIu32 " (0=pcie,1=eth,2=sata)\n", txsel);
-    printf("  demux.sel = %" PRIu32 " (0=pcie,1=eth,2=sata)\n", rxsel);
+    printf("Route:\n");
+    printf("  TX source          %s (%" PRIu32 ")\n", txsrc_name((int)txsel), txsel);
+    printf("  RX destination     %s (%" PRIu32 ")\n", rxdst_name((int)rxsel), rxsel);
 #else
-    printf("Crossbar: not present\n");
+    printf("Route:\n");
+    printf("  Crossbar           not present\n");
 #endif
 
 #ifdef CSR_SATA_PHY_BASE
     printf("SATA:\n");
-    printf("  phy.enable = %" PRIu32 "\n", m2sdr_read32(conn, CSR_SATA_PHY_ENABLE_ADDR));
+    printf("  PHY enable         %" PRIu32 "\n", m2sdr_read32(conn, CSR_SATA_PHY_ENABLE_ADDR));
     {
         uint32_t st = m2sdr_read32(conn, CSR_SATA_PHY_STATUS_ADDR);
-        printf("  phy.status = 0x%08" PRIx32 "\n", st);
-        printf("    ready      = %u\n", (st >> CSR_SATA_PHY_STATUS_READY_OFFSET)      & ((1u << CSR_SATA_PHY_STATUS_READY_SIZE)      - 1));
-        printf("    tx_ready   = %u\n", (st >> CSR_SATA_PHY_STATUS_TX_READY_OFFSET)   & ((1u << CSR_SATA_PHY_STATUS_TX_READY_SIZE)   - 1));
-        printf("    rx_ready   = %u\n", (st >> CSR_SATA_PHY_STATUS_RX_READY_OFFSET)   & ((1u << CSR_SATA_PHY_STATUS_RX_READY_SIZE)   - 1));
-        printf("    ctrl_ready = %u\n", (st >> CSR_SATA_PHY_STATUS_CTRL_READY_OFFSET) & ((1u << CSR_SATA_PHY_STATUS_CTRL_READY_SIZE) - 1));
+        uint32_t ready =
+            (st >> CSR_SATA_PHY_STATUS_READY_OFFSET) &
+            ((1u << CSR_SATA_PHY_STATUS_READY_SIZE) - 1);
+        uint32_t tx_ready =
+            (st >> CSR_SATA_PHY_STATUS_TX_READY_OFFSET) &
+            ((1u << CSR_SATA_PHY_STATUS_TX_READY_SIZE) - 1);
+        uint32_t rx_ready =
+            (st >> CSR_SATA_PHY_STATUS_RX_READY_OFFSET) &
+            ((1u << CSR_SATA_PHY_STATUS_RX_READY_SIZE) - 1);
+        uint32_t ctrl_ready =
+            (st >> CSR_SATA_PHY_STATUS_CTRL_READY_OFFSET) &
+            ((1u << CSR_SATA_PHY_STATUS_CTRL_READY_SIZE) - 1);
+        printf("  PHY status         0x%08" PRIx32 "\n", st);
+        printf("  PHY ready          %s\n", ready ? "yes" : "no");
+        printf("  TX ready           %s\n", tx_ready ? "yes" : "no");
+        printf("  RX ready           %s\n", rx_ready ? "yes" : "no");
+        printf("  CTRL ready         %s\n", ctrl_ready ? "yes" : "no");
     }
 
 #ifdef CSR_TXRX_LOOPBACK_BASE
     {
         uint32_t v = m2sdr_read32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR);
-        printf("  txrx_loopback.enable = %u\n",
-            (v >> CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET) & ((1u << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_SIZE) - 1));
+        uint32_t loopback =
+            (v >> CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET) &
+            ((1u << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_SIZE) - 1);
+        printf("  Loopback           %s\n", loopback ? "enabled" : "disabled");
     }
 #endif
 
 #ifdef CSR_SATA_TX_STREAMER_BASE
-    printf("  sata_tx_streamer: done=%" PRIu32 " error=%" PRIu32 "\n",
+    printf("  TX streamer        done=%" PRIu32 " error=%" PRIu32 "\n",
         m2sdr_read32(conn, CSR_SATA_TX_STREAMER_DONE_ADDR),
         m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR));
 #endif
 #ifdef CSR_SATA_RX_STREAMER_BASE
-    printf("  sata_rx_streamer: done=%" PRIu32 " error=%" PRIu32 "\n",
+    printf("  RX streamer        done=%" PRIu32 " error=%" PRIu32 "\n",
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR),
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR));
 #endif
 
 #else
-    printf("SATA: not present\n");
+    printf("SATA:\n");
+    printf("  not present\n");
 #endif
 
     m2sdr_close_dev(conn);
