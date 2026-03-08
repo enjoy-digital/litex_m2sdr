@@ -23,6 +23,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <time.h>
+#include <signal.h>
 #include <getopt.h>
 
 #include "liblitepcie.h"
@@ -33,6 +34,13 @@
 /* Connection options -------------------------------------------------------- */
 
 static struct m2sdr_cli_device g_cli_dev;
+static sig_atomic_t keep_running = 1;
+
+static void int_handler(int dummy)
+{
+    (void)dummy;
+    keep_running = 0;
+}
 
 /* Helpers ------------------------------------------------------------------- */
 
@@ -264,6 +272,12 @@ struct sata_operation {
     struct sata_route_state saved_route;
 };
 
+enum sata_wait_result {
+    SATA_WAIT_OK = 0,
+    SATA_WAIT_TIMEOUT = 1,
+    SATA_WAIT_INTERRUPTED = 2,
+};
+
 /* Optional header raw control ---------------------------------------------- */
 
 static void header_set_raw(void *conn, int which, int enable, int header_enable)
@@ -365,27 +379,31 @@ static uint32_t sata_tx_error(void *conn)
     return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
 }
 
-static void wait_done(const char *name,
-                      uint32_t (*done_fn)(void *),
-                      uint32_t (*err_fn)(void *),
-                      void *conn,
-                      int timeout_ms,
-                      uint64_t nsectors)
+static enum sata_wait_result wait_done(const char *name,
+                                       uint32_t (*done_fn)(void *),
+                                       uint32_t (*err_fn)(void *),
+                                       void *conn,
+                                       int timeout_ms,
+                                       uint64_t nsectors)
 {
     int elapsed = 0;
     int64_t start = m2sdr_sata_get_time_ms();
     int64_t last  = start;
     for (;;) {
+        if (!keep_running) {
+            fprintf(stderr, "%s: interrupted\n", name);
+            return SATA_WAIT_INTERRUPTED;
+        }
         uint32_t done = done_fn(conn);
         uint32_t err  = err_fn(conn);
         if (done) {
             if (err) printf("%s: done (error=1)\n", name);
             else     printf("%s: done\n", name);
-            return;
+            return SATA_WAIT_OK;
         }
         if (timeout_ms >= 0 && elapsed >= timeout_ms) {
             fprintf(stderr, "%s: timeout\n", name);
-            exit(1);
+            return SATA_WAIT_TIMEOUT;
         }
         int64_t now = m2sdr_sata_get_time_ms();
         if (now - last >= 500) {
@@ -400,45 +418,82 @@ static void wait_done(const char *name,
     }
 }
 
-static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
+static void print_planned_transfer(const char *name,
+                                   uint64_t src_sector,
+                                   uint64_t dst_sector,
+                                   uint32_t nsectors,
+                                   int txsrc,
+                                   int rxdst,
+                                   int loopback,
+                                   int timeout_ms)
+{
+    printf("%s dry-run:\n", name);
+    if (src_sector != UINT64_MAX)
+        printf("  Source sector      0x%016" PRIx64 "\n", src_sector);
+    if (dst_sector != UINT64_MAX)
+        printf("  Destination sector 0x%016" PRIx64 "\n", dst_sector);
+    printf("  Sector count       %" PRIu32 "\n", nsectors);
+    printf("  TX source          %s\n", txsrc_name(txsrc));
+    printf("  RX destination     %s\n", rxdst_name(rxdst));
+    printf("  Loopback           %s\n", loopback ? "enabled" : "disabled");
+    printf("  Timeout            %d ms\n", timeout_ms);
+}
+
+static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
+    int txsrc = (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
 
     /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
     txrx_loopback_set(conn, 0);
     crossbar_set(conn,
-        (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR),
+        txsrc,
         RXDST_SATA
     );
 
     sata_rx_program(conn, dst_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("record", UINT64_MAX, dst_sector, nsectors, txsrc, RXDST_SATA, 0, timeout_ms);
+        sata_operation_finish(&op);
+        return 0;
+    }
     sata_rx_start(conn);
 
-    wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+    enum sata_wait_result rc =
+        wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
     sata_operation_finish(&op);
+    return rc == SATA_WAIT_OK ? 0 : 1;
 }
 
-static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
+static int do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
+    int rxdst = (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
 
     /* Normal path: SATA_TX_STREAMER -> mux -> TX. */
     txrx_loopback_set(conn, 0);
     crossbar_set(conn,
         TXSRC_SATA,
-        (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR)
+        rxdst
     );
 
     sata_tx_program(conn, src_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("play", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 0, timeout_ms);
+        sata_operation_finish(&op);
+        return 0;
+    }
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    enum sata_wait_result rc =
+        wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     sata_operation_finish(&op);
+    return rc == SATA_WAIT_OK ? 0 : 1;
 }
 
-static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms)
+static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
@@ -450,13 +505,20 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
     txrx_loopback_set(conn, 1);
 
     sata_tx_program(conn, src_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("replay", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 1, timeout_ms);
+        sata_operation_finish(&op);
+        return 0;
+    }
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    enum sata_wait_result rc =
+        wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     sata_operation_finish(&op);
+    return rc == SATA_WAIT_OK ? 0 : 1;
 }
 
-static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
+static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
@@ -470,14 +532,23 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
     /* Start RX first. */
     sata_rx_program(conn, dst_sector, nsectors);
     sata_tx_program(conn, src_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("copy", src_sector, dst_sector, nsectors, TXSRC_SATA, RXDST_SATA, 1, timeout_ms);
+        sata_operation_finish(&op);
+        return 0;
+    }
 
     sata_rx_start(conn);
     msleep(5);
     sata_tx_start(conn);
 
-    wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
-    wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+    enum sata_wait_result tx_rc =
+        wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    enum sata_wait_result rx_rc = SATA_WAIT_OK;
+    if (tx_rc == SATA_WAIT_OK)
+        rx_rc = wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
     sata_operation_finish(&op);
+    return (tx_rc == SATA_WAIT_OK && rx_rc == SATA_WAIT_OK) ? 0 : 1;
 }
 
 #endif /* CSR_SATA_PHY_BASE */
@@ -600,6 +671,7 @@ static void help(void)
            "  -p, --port PORT                Port number (default: 1234).\n"
 #endif
            "      --timeout-ms MS            Timeout for streamer operations (default: 10000, -1=infinite).\n"
+           "      --dry-run                  Show planned operation without starting the streamer.\n"
            "\n"
            "commands:\n"
            "status\n"
@@ -645,6 +717,7 @@ int main(int argc, char **argv)
     int option_index = 0;
 
     int timeout_ms = 10000;
+    bool dry_run = false;
     m2sdr_cli_device_init(&g_cli_dev);
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -653,11 +726,13 @@ int main(int argc, char **argv)
         { "ip", required_argument, NULL, 'i' },
         { "port", required_argument, NULL, 'p' },
         { "timeout-ms", required_argument, NULL, 'T' },
+        { "dry-run", no_argument, NULL, 'n' },
         { NULL, 0, NULL, 0 }
     };
 
+    signal(SIGINT, int_handler);
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:i:p:T:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:T:n", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
@@ -673,6 +748,9 @@ int main(int argc, char **argv)
             break;
         case 'T':
             timeout_ms = parse_timeout_ms(optarg);
+            break;
+        case 'n':
+            dry_run = true;
             break;
         default:
             exit(1);
@@ -713,8 +791,7 @@ int main(int argc, char **argv)
             m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
-        do_record(dst_sector, nsectors, timeout_ms);
-        return 0;
+        return do_record(dst_sector, nsectors, timeout_ms, dry_run);
     }
 
     if (!strcmp(cmd, "play")) {
@@ -725,8 +802,7 @@ int main(int argc, char **argv)
             m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
-        do_play(src_sector, nsectors, timeout_ms);
-        return 0;
+        return do_play(src_sector, nsectors, timeout_ms, dry_run);
     }
 
     if (!strcmp(cmd, "replay")) {
@@ -738,8 +814,7 @@ int main(int argc, char **argv)
             m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
-        do_replay(src_sector, nsectors, dst, timeout_ms);
-        return 0;
+        return do_replay(src_sector, nsectors, dst, timeout_ms, dry_run);
     }
 
     if (!strcmp(cmd, "copy")) {
@@ -751,8 +826,7 @@ int main(int argc, char **argv)
             m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
-        do_copy(src_sector, dst_sector, nsectors, timeout_ms);
-        return 0;
+        return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
     }
 #else
     if (!strcmp(cmd, "record") || !strcmp(cmd, "play") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
