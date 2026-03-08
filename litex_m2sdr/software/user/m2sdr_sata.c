@@ -139,6 +139,10 @@ enum {
     RXDST_SATA = 2,
 };
 
+#ifdef CSR_TXRX_LOOPBACK_BASE
+static void txrx_loopback_set(void *conn, int enable);
+#endif
+
 static int parse_txsrc(const char *s)
 {
     if (!strcmp(s, "pcie")) return TXSRC_PCIE;
@@ -166,6 +170,47 @@ static void crossbar_set(void *conn, int txsrc, int rxdst)
     (void)conn; (void)txsrc; (void)rxdst;
     fprintf(stderr, "Crossbar CSR not present in this gateware.\n");
     exit(1);
+#endif
+}
+
+struct sata_route_state {
+    bool crossbar_valid;
+    bool loopback_valid;
+    int txsrc;
+    int rxdst;
+    int loopback_en;
+};
+
+static struct sata_route_state sata_route_state_capture(void *conn)
+{
+    struct sata_route_state state = {0};
+#ifdef CSR_CROSSBAR_BASE
+    state.crossbar_valid = true;
+    state.txsrc = (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
+    state.rxdst = (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
+#else
+    (void)conn;
+#endif
+#ifdef CSR_TXRX_LOOPBACK_BASE
+    state.loopback_valid = true;
+    state.loopback_en =
+        (int)((m2sdr_read32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR) >>
+              CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET) &
+              ((1u << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_SIZE) - 1));
+#endif
+    return state;
+}
+
+static void sata_route_state_restore(void *conn, const struct sata_route_state *state)
+{
+    if (state->crossbar_valid)
+        crossbar_set(conn, state->txsrc, state->rxdst);
+#ifdef CSR_TXRX_LOOPBACK_BASE
+    if (state->loopback_valid)
+        txrx_loopback_set(conn, state->loopback_en);
+#else
+    (void)conn;
+    (void)state;
 #endif
 }
 
@@ -293,6 +338,7 @@ static void wait_done(const char *name,
 static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct sata_route_state saved_route = sata_route_state_capture(conn);
     sata_require_csrs();
 
     /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
@@ -306,6 +352,7 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
     sata_rx_start(conn);
 
     wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+    sata_route_state_restore(conn, &saved_route);
 
     m2sdr_close_dev(conn);
 }
@@ -313,6 +360,7 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct sata_route_state saved_route = sata_route_state_capture(conn);
     sata_require_csrs();
 
     /* Normal path: SATA_TX_STREAMER -> mux -> TX. */
@@ -326,6 +374,7 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
     sata_tx_start(conn);
 
     wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    sata_route_state_restore(conn, &saved_route);
 
     m2sdr_close_dev(conn);
 }
@@ -333,6 +382,7 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct sata_route_state saved_route = sata_route_state_capture(conn);
     sata_require_csrs();
 
     int rxdst = parse_rxdst(dst_s);
@@ -345,6 +395,7 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
     sata_tx_start(conn);
 
     wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    sata_route_state_restore(conn, &saved_route);
 
     m2sdr_close_dev(conn);
 }
@@ -352,6 +403,7 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
 static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct sata_route_state saved_route = sata_route_state_capture(conn);
     sata_require_csrs();
 
     /* SSD -> SSD:
@@ -370,6 +422,7 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
 
     wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+    sata_route_state_restore(conn, &saved_route);
 
     m2sdr_close_dev(conn);
 }
