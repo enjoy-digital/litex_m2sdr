@@ -259,6 +259,11 @@ static void sata_route_state_restore(void *conn, const struct sata_route_state *
 #endif
 }
 
+struct sata_operation {
+    struct m2sdr_dev *conn;
+    struct sata_route_state saved_route;
+};
+
 /* Optional header raw control ---------------------------------------------- */
 
 static void header_set_raw(void *conn, int which, int enable, int header_enable)
@@ -294,6 +299,21 @@ static void sata_require_csrs(void)
     fprintf(stderr, "SATA blocks not fully present in this gateware.\n");
     exit(1);
 #endif
+}
+
+static struct sata_operation sata_operation_begin(void)
+{
+    struct sata_operation op;
+    op.conn = m2sdr_open_dev();
+    op.saved_route = sata_route_state_capture(op.conn);
+    sata_require_csrs();
+    return op;
+}
+
+static void sata_operation_finish(struct sata_operation *op)
+{
+    sata_route_state_restore(op->conn, &op->saved_route);
+    m2sdr_close_dev(op->conn);
 }
 
 static void txrx_loopback_set(void *conn, int enable)
@@ -382,9 +402,8 @@ static void wait_done(const char *name,
 
 static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    struct sata_route_state saved_route = sata_route_state_capture(conn);
-    sata_require_csrs();
+    struct sata_operation op = sata_operation_begin();
+    struct m2sdr_dev *conn = op.conn;
 
     /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
     txrx_loopback_set(conn, 0);
@@ -397,16 +416,13 @@ static void do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
     sata_rx_start(conn);
 
     wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
-    sata_route_state_restore(conn, &saved_route);
-
-    m2sdr_close_dev(conn);
+    sata_operation_finish(&op);
 }
 
 static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    struct sata_route_state saved_route = sata_route_state_capture(conn);
-    sata_require_csrs();
+    struct sata_operation op = sata_operation_begin();
+    struct m2sdr_dev *conn = op.conn;
 
     /* Normal path: SATA_TX_STREAMER -> mux -> TX. */
     txrx_loopback_set(conn, 0);
@@ -419,16 +435,13 @@ static void do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms)
     sata_tx_start(conn);
 
     wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
-    sata_route_state_restore(conn, &saved_route);
-
-    m2sdr_close_dev(conn);
+    sata_operation_finish(&op);
 }
 
 static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    struct sata_route_state saved_route = sata_route_state_capture(conn);
-    sata_require_csrs();
+    struct sata_operation op = sata_operation_begin();
+    struct m2sdr_dev *conn = op.conn;
 
     int rxdst = parse_rxdst(dst_s);
 
@@ -440,16 +453,13 @@ static void do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
     sata_tx_start(conn);
 
     wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
-    sata_route_state_restore(conn, &saved_route);
-
-    m2sdr_close_dev(conn);
+    sata_operation_finish(&op);
 }
 
 static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    struct sata_route_state saved_route = sata_route_state_capture(conn);
-    sata_require_csrs();
+    struct sata_operation op = sata_operation_begin();
+    struct m2sdr_dev *conn = op.conn;
 
     /* SSD -> SSD:
      * SATA_TX_STREAMER -> TX -> loopback -> RX -> SATA_RX_STREAMER.
@@ -467,9 +477,7 @@ static void do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors,
 
     wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
-    sata_route_state_restore(conn, &saved_route);
-
-    m2sdr_close_dev(conn);
+    sata_operation_finish(&op);
 }
 
 #endif /* CSR_SATA_PHY_BASE */
