@@ -57,6 +57,31 @@ static uint32_t parse_u32(const char *s)
     return (uint32_t)v;
 }
 
+static int parse_timeout_ms(const char *s)
+{
+    char *end = NULL;
+    long v = strtol(s, &end, 0);
+    if (!s || !*s || (end && *end)) {
+        m2sdr_cli_error("invalid timeout '%s'", s ? s : "(null)");
+        exit(1);
+    }
+    if (v < -1 || v > INT32_MAX) {
+        m2sdr_cli_error("timeout must be -1 or a non-negative integer");
+        exit(1);
+    }
+    return (int)v;
+}
+
+static int parse_bool01(const char *label, const char *s)
+{
+    uint32_t v = parse_u32(s);
+    if (v > 1) {
+        m2sdr_cli_invalid_choice(label, s, "0 or 1");
+        exit(1);
+    }
+    return (int)v;
+}
+
 static __attribute__((unused)) void msleep(unsigned ms)
 {
     usleep(ms * 1000);
@@ -603,7 +628,7 @@ int main(int argc, char **argv)
                 exit(1);
             break;
         case 'T':
-            timeout_ms = (int)strtol(optarg, NULL, 0);
+            timeout_ms = parse_timeout_ms(optarg);
             break;
         default:
             exit(1);
@@ -630,7 +655,7 @@ int main(int argc, char **argv)
         const char *rxdst = argv[optind++];
         int loopback = -1;
         if (optind < argc)
-            loopback = (int)parse_u32(argv[optind++]);
+            loopback = parse_bool01("loopback", argv[optind++]);
         do_route(txsrc, rxdst, loopback);
         return 0;
     }
@@ -641,7 +666,7 @@ int main(int argc, char **argv)
         uint64_t dst_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
         if (nsectors == 0) {
-            fprintf(stderr, "nsectors must be > 0\n");
+            m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
         do_record(dst_sector, nsectors, timeout_ms);
@@ -653,7 +678,7 @@ int main(int argc, char **argv)
         uint64_t src_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
         if (nsectors == 0) {
-            fprintf(stderr, "nsectors must be > 0\n");
+            m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
         do_play(src_sector, nsectors, timeout_ms);
@@ -666,7 +691,7 @@ int main(int argc, char **argv)
         uint32_t nsectors   = parse_u32(argv[optind++]);
         const char *dst     = argv[optind++];
         if (nsectors == 0) {
-            fprintf(stderr, "nsectors must be > 0\n");
+            m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
         do_replay(src_sector, nsectors, dst, timeout_ms);
@@ -679,7 +704,7 @@ int main(int argc, char **argv)
         uint64_t dst_sector = parse_u64(argv[optind++]);
         uint32_t nsectors   = parse_u32(argv[optind++]);
         if (nsectors == 0) {
-            fprintf(stderr, "nsectors must be > 0\n");
+            m2sdr_cli_error("nsectors must be greater than zero");
             return 1;
         }
         do_copy(src_sector, dst_sector, nsectors, timeout_ms);
@@ -700,11 +725,11 @@ int main(int argc, char **argv)
         else if (!strcmp(which_s, "rx")) which = 1;
         else if (!strcmp(which_s, "both")) which = 2;
         else {
-            fprintf(stderr, "header: expected tx|rx|both\n");
+            m2sdr_cli_invalid_choice("header target", which_s, "tx, rx, or both");
             return 1;
         }
-        int enable        = (int)parse_u32(argv[optind++]);
-        int header_enable = (int)parse_u32(argv[optind++]);
+        int enable        = parse_bool01("header enable", argv[optind++]);
+        int header_enable = parse_bool01("header header_enable", argv[optind++]);
 
         struct m2sdr_dev *conn = m2sdr_open_dev();
         header_set_raw(conn, which, enable, header_enable);
