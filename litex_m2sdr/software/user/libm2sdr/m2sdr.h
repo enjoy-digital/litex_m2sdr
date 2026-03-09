@@ -18,6 +18,13 @@
 extern "C" {
 #endif
 
+/* Thread-safety notes:
+ *
+ * - A single m2sdr_dev instance is not safe for concurrent calls from multiple
+ *   threads without external synchronization.
+ * - Independent m2sdr_dev instances can be used concurrently.
+ */
+
 /* Public limits and fixed transport sizes used by the sync API. */
 #define M2SDR_DEVICE_STR_MAX 256
 #define M2SDR_SERIAL_MAX     32
@@ -90,7 +97,9 @@ struct m2sdr_sync_params {
     unsigned buffer_size;
     /* Reserved for API compatibility. Use 0 for defaults. */
     unsigned num_transfers;
-    /* Blocking timeout for sync APIs in ms. */
+    /* Blocking timeout for sync APIs in ms.
+     * Passing 0 to per-call timeout arguments means "use this configured
+     * timeout", not "non-blocking". */
     unsigned timeout_ms;
     /* Enable zero-copy PCIe DMA buffers when supported. */
     bool zero_copy;
@@ -289,7 +298,9 @@ int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
  *
  * `m2sdr_get_fd()` is meaningful only on LitePCIe builds.
  * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
- * or the Etherbone connection handle, depending on the active backend.
+ * or the Etherbone connection handle, depending on the active backend. On
+ * LitePCIe builds this value is an integer fd reinterpreted as a pointer; it is
+ * only for passing through opaque APIs and must not be dereferenced.
  */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
@@ -384,7 +395,8 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  *
  * These helpers expose backend-owned buffers directly. RX buffers are valid
  * until the next acquire on the same stream; TX buffers must be submitted with
- * m2sdr_submit_buffer().
+ * m2sdr_submit_buffer(). Passing timeout_ms=0 uses the timeout configured by
+ * m2sdr_sync_config()/m2sdr_sync_config_ex().
  */
 int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      enum m2sdr_direction direction,
@@ -401,6 +413,13 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
 int m2sdr_release_buffer(struct m2sdr_dev *dev,
                          enum m2sdr_direction direction,
                          void *buffer);
+
+/* Backend notes for zero-copy submit/release:
+ *
+ * - m2sdr_submit_buffer() performs an explicit enqueue on LiteEth, while on
+ *   LitePCIe the DMA ring already owns the buffer and submit is a no-op.
+ * - m2sdr_release_buffer() is currently a no-op kept for API symmetry.
+ */
 
 /* Small utility helpers for buffer sizing and allocation. */
 size_t m2sdr_format_size(enum m2sdr_format format);
