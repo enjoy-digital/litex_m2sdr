@@ -25,6 +25,8 @@ struct m2sdr_rfic_ops {
     int (*set_sample_rate)(struct m2sdr_dev *dev, void *ctx, int64_t rate);
     int (*set_bandwidth)(struct m2sdr_dev *dev, void *ctx, int64_t bw);
     int (*set_gain)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, int64_t gain);
+    int (*set_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned bits);
+    int (*get_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned *bits);
     int (*get_caps)(struct m2sdr_dev *dev, void *ctx, struct m2sdr_rfic_caps *caps);
     int (*set_property)(struct m2sdr_dev *dev, void *ctx, const char *key, const char *value);
     int (*get_property)(struct m2sdr_dev *dev, void *ctx, const char *key, char *value, size_t value_len);

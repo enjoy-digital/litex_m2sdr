@@ -12,6 +12,7 @@
 /*----------*/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
@@ -370,6 +371,7 @@ static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *ph
 
     if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0) != 0)
         return M2SDR_ERR_IO;
+    dev->iq_bits = cfg->enable_8bit_mode ? 8u : 12u;
 
     return M2SDR_ERR_OK;
 }
@@ -677,12 +679,40 @@ static int m2sdr_rfic_ad9361_set_gain(struct m2sdr_dev *dev, void *ctx,
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_rfic_ad9361_set_iq_bits(struct m2sdr_dev *dev, void *ctx, unsigned bits)
+{
+    (void)ctx;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (bits != 8u && bits != 12u)
+        return M2SDR_ERR_RANGE;
+
+    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, bits == 8u ? 1u : 0u) != 0)
+        return M2SDR_ERR_IO;
+
+    dev->iq_bits = bits;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_rfic_ad9361_get_iq_bits(struct m2sdr_dev *dev, void *ctx, unsigned *bits)
+{
+    (void)ctx;
+
+    if (!dev || !bits)
+        return M2SDR_ERR_INVAL;
+
+    *bits = dev->iq_bits ? dev->iq_bits : 12u;
+    return M2SDR_ERR_OK;
+}
+
 static int m2sdr_rfic_ad9361_init(struct m2sdr_dev *dev, void **ctx_out)
 {
     if (!dev || !ctx_out)
         return M2SDR_ERR_INVAL;
     *ctx_out = NULL;
     dev->ad9361_phy = NULL;
+    dev->iq_bits = 12u;
     return M2SDR_ERR_OK;
 }
 
@@ -718,27 +748,52 @@ static int m2sdr_rfic_ad9361_get_caps(struct m2sdr_dev *dev, void *ctx, struct m
     caps->max_tx_gain     = M2SDR_TX_GAIN_MAX_DB;
     caps->min_rx_gain     = M2SDR_RX_GAIN_MIN_DB;
     caps->max_rx_gain     = M2SDR_RX_GAIN_MAX_DB;
+    caps->supported_iq_bits_mask = M2SDR_IQ_BITS_MASK(8) | M2SDR_IQ_BITS_MASK(12);
+    caps->native_iq_bits = 12u;
+    caps->min_iq_bits = 8u;
+    caps->max_iq_bits = 12u;
     return M2SDR_ERR_OK;
 }
 
 static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, const char *value)
 {
-    (void)dev;
     (void)ctx;
-    (void)key;
-    (void)value;
+    char *end = NULL;
+    unsigned long bits;
+
+    if (!dev || !key || !value)
+        return M2SDR_ERR_INVAL;
+
+    if (strcmp(key, "ad9361.iq_bits") == 0) {
+        bits = strtoul(value, &end, 10);
+        if (!end || *end != '\0')
+            return M2SDR_ERR_PARSE;
+        if (bits > UINT_MAX)
+            return M2SDR_ERR_RANGE;
+        return m2sdr_rfic_ad9361_set_iq_bits(dev, ctx, (unsigned)bits);
+    }
+
     return M2SDR_ERR_UNSUPPORTED;
 }
 
 static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, char *value, size_t value_len)
 {
-    (void)dev;
     (void)ctx;
-    (void)key;
-    (void)value;
-    (void)value_len;
+    if (!dev || !key || !value || value_len == 0)
+        return M2SDR_ERR_INVAL;
+
+    if (strcmp(key, "ad9361.iq_bits") == 0) {
+        unsigned bits = 0;
+        int rc = m2sdr_rfic_ad9361_get_iq_bits(dev, ctx, &bits);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        if (snprintf(value, value_len, "%u", bits) >= (int)value_len)
+            return M2SDR_ERR_RANGE;
+        return M2SDR_ERR_OK;
+    }
+
     return M2SDR_ERR_UNSUPPORTED;
 }
 
@@ -753,6 +808,8 @@ const struct m2sdr_rfic_ops m2sdr_rfic_ad9361_ops = {
     .set_sample_rate= m2sdr_rfic_ad9361_set_sample_rate,
     .set_bandwidth  = m2sdr_rfic_ad9361_set_bandwidth,
     .set_gain       = m2sdr_rfic_ad9361_set_gain,
+    .set_iq_bits    = m2sdr_rfic_ad9361_set_iq_bits,
+    .get_iq_bits    = m2sdr_rfic_ad9361_get_iq_bits,
     .get_caps       = m2sdr_rfic_ad9361_get_caps,
     .set_property   = m2sdr_rfic_ad9361_set_property,
     .get_property   = m2sdr_rfic_ad9361_get_property,

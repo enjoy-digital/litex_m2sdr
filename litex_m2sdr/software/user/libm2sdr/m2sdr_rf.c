@@ -148,6 +148,38 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
     return dev->rfic_ops->set_gain(dev, dev->rfic_ctx, direction, gain);
 }
 
+int m2sdr_set_iq_bits(struct m2sdr_dev *dev, unsigned bits)
+{
+    int rc;
+
+    if (!dev || bits == 0)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->set_iq_bits)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->set_iq_bits(dev, dev->rfic_ctx, bits);
+}
+
+int m2sdr_get_iq_bits(struct m2sdr_dev *dev, unsigned *bits)
+{
+    int rc;
+
+    if (!dev || !bits)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->get_iq_bits)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->get_iq_bits(dev, dev->rfic_ctx, bits);
+}
+
 int m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq)
 {
     return m2sdr_set_frequency(dev, M2SDR_RX, freq);

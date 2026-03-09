@@ -110,6 +110,7 @@ struct m2sdr_metadata {
 };
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
+#define M2SDR_IQ_BITS_MASK(bits) (1u << (bits))
 
 struct m2sdr_sync_params {
     /* RX or TX stream to configure. */
@@ -179,6 +180,10 @@ struct m2sdr_rfic_caps {
     int64_t max_tx_gain;
     int64_t min_rx_gain;
     int64_t max_rx_gain;
+    uint32_t supported_iq_bits_mask;
+    uint8_t native_iq_bits;
+    uint8_t min_iq_bits;
+    uint8_t max_iq_bits;
 };
 
 enum m2sdr_feature_flag {
@@ -373,6 +378,8 @@ int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
+int  m2sdr_set_iq_bits(struct m2sdr_dev *dev, unsigned bits);
+int  m2sdr_get_iq_bits(struct m2sdr_dev *dev, unsigned *bits);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);

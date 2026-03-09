@@ -69,6 +69,7 @@ struct m2sdr_dev {
     const struct m2sdr_rfic_ops *rfic_ops;
     void *rfic_ctx;
     enum m2sdr_rfic_kind rfic_kind;
+    unsigned iq_bits;
     struct ad9361_rf_phy *ad9361_phy;
 };
 

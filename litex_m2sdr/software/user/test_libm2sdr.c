@@ -116,6 +116,19 @@ static int test_rfic_helpers(void)
         return -1;
     if ((caps.features & M2SDR_RFIC_FEATURE_BIND_EXTERNAL) == 0)
         return -1;
+    if (caps.native_iq_bits != 12u)
+        return -1;
+    if ((caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(8)) == 0)
+        return -1;
+    if ((caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(12)) == 0)
+        return -1;
+
+    if (m2sdr_set_iq_bits(&dev, 7) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_iq_bits(&dev, 16) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_get_iq_bits(&dev, NULL) != M2SDR_ERR_INVAL)
+        return -1;
 
     if (m2sdr_set_property(&dev, "ad9361.test", "1") != M2SDR_ERR_UNSUPPORTED)
         return -1;
