@@ -69,6 +69,12 @@ enum m2sdr_direction {
     M2SDR_TX = 1,
 };
 
+enum m2sdr_transport_kind {
+    M2SDR_TRANSPORT_KIND_UNKNOWN = 0,
+    M2SDR_TRANSPORT_KIND_LITEPCIE = 1,
+    M2SDR_TRANSPORT_KIND_LITEETH = 2,
+};
+
 /* Backward-compatible alias for older code. */
 typedef enum m2sdr_direction m2sdr_module_t;
 
@@ -300,12 +306,17 @@ int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 /* Low-level transport handle access for advanced integrations.
  *
  * `m2sdr_get_fd()` is meaningful only on LitePCIe builds.
+ * `m2sdr_get_eb_handle()` is meaningful only on LiteEth builds.
+ * `m2sdr_get_transport()` is the preferred way to branch on active backend.
  * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
  * or the Etherbone connection handle, depending on the active backend. On
  * LitePCIe builds this value is an integer fd reinterpreted as a pointer; it is
- * only for passing through opaque APIs and must not be dereferenced.
+ * only for passing through opaque APIs and must not be dereferenced. Prefer
+ * backend-specific accessors in new code.
  */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
+void *m2sdr_get_eb_handle(struct m2sdr_dev *dev);
+int  m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transport);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
 /* DMA header control */

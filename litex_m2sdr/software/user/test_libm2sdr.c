@@ -66,6 +66,23 @@ static int test_rf_range_validation(void)
     return 0;
 }
 
+static int test_transport_helpers(void)
+{
+    struct m2sdr_dev dev;
+    enum m2sdr_transport_kind kind = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.transport = M2SDR_TRANSPORT_LITEPCIE;
+    if (m2sdr_get_transport(&dev, &kind) != M2SDR_ERR_OK)
+        return -1;
+    if (kind != M2SDR_TRANSPORT_KIND_LITEPCIE)
+        return -1;
+    if (m2sdr_get_eb_handle(&dev) != NULL)
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -78,6 +95,10 @@ int main(void)
     }
     if (test_rf_range_validation() != 0) {
         fprintf(stderr, "test_rf_range_validation failed\n");
+        return 1;
+    }
+    if (test_transport_helpers() != 0) {
+        fprintf(stderr, "test_transport_helpers failed\n");
         return 1;
     }
 

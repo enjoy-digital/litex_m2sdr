@@ -377,6 +377,39 @@ int m2sdr_get_fd(struct m2sdr_dev *dev)
 }
 
 /* Return the raw backend handle used by advanced integrations. */
+void *m2sdr_get_eb_handle(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return NULL;
+
+#ifdef USE_LITEETH
+    return dev->eb;
+#else
+    return NULL;
+#endif
+}
+
+int m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transport)
+{
+    if (!dev || !transport)
+        return M2SDR_ERR_INVAL;
+
+    switch (dev->transport) {
+    case M2SDR_TRANSPORT_LITEPCIE:
+        *transport = M2SDR_TRANSPORT_KIND_LITEPCIE;
+        return M2SDR_ERR_OK;
+    case M2SDR_TRANSPORT_LITEETH:
+        *transport = M2SDR_TRANSPORT_KIND_LITEETH;
+        return M2SDR_ERR_OK;
+    default:
+        *transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+        return M2SDR_ERR_STATE;
+    }
+}
+
+/* Return the raw backend handle used by advanced integrations.
+ * This is kept for backward compatibility; prefer m2sdr_get_fd() and
+ * m2sdr_get_eb_handle() in new code. */
 void *m2sdr_get_handle(struct m2sdr_dev *dev)
 {
     if (!dev)
