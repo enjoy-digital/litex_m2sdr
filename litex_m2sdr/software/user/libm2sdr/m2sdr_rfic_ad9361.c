@@ -808,6 +808,68 @@ static int m2sdr_rfic_ad9361_get_iq_bits(struct m2sdr_dev *dev, void *ctx, unsig
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_rfic_ad9361_configure_stream_channels(struct m2sdr_dev *dev, void *ctx,
+                                                       size_t rx_count, const size_t *rx_channels,
+                                                       size_t tx_count, const size_t *tx_channels)
+{
+    struct ad9361_rf_phy *phy;
+    struct ad9361_phy_platform_data *pd;
+    size_t active_count;
+    enum m2sdr_channel_layout layout;
+    int rc;
+
+    (void)ctx;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if ((rx_count > 2) || (tx_count > 2))
+        return M2SDR_ERR_RANGE;
+    if ((rx_count == 0 && tx_count == 0) || rx_count != tx_count)
+        return M2SDR_ERR_INVAL;
+    active_count = rx_count ? rx_count : tx_count;
+    if (active_count != 1 && active_count != 2)
+        return M2SDR_ERR_RANGE;
+    if (!rx_channels || !tx_channels)
+        return M2SDR_ERR_INVAL;
+
+    if (active_count == 1) {
+        if (rx_channels[0] > 1 || tx_channels[0] > 1)
+            return M2SDR_ERR_RANGE;
+    } else {
+        if (!((rx_channels[0] == 0 && rx_channels[1] == 1) ||
+              (rx_channels[0] == 1 && rx_channels[1] == 0)))
+            return M2SDR_ERR_INVAL;
+        if (!((tx_channels[0] == 0 && tx_channels[1] == 1) ||
+              (tx_channels[0] == 1 && tx_channels[1] == 0)))
+            return M2SDR_ERR_INVAL;
+    }
+
+    layout = (active_count == 2) ? M2SDR_CHANNEL_LAYOUT_2T2R : M2SDR_CHANNEL_LAYOUT_1T1R;
+    rc = m2sdr_apply_channel_layout(dev, layout);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    phy->pdata->rx2tx2 = (active_count == 2);
+    if (active_count == 1) {
+        phy->pdata->rx1tx1_mode_use_rx_num = rx_channels[0] == 0 ? RX_1 : RX_2;
+        phy->pdata->rx1tx1_mode_use_tx_num = tx_channels[0] == 0 ? TX_1 : TX_2;
+    } else {
+        phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
+        phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+    }
+
+    pd = phy->pdata;
+    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
+    if (active_count == 2)
+        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_no_ch_mode(phy, active_count)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
 static int m2sdr_rfic_ad9361_init(struct m2sdr_dev *dev, void **ctx_out)
 {
     if (!dev || !ctx_out)
@@ -916,6 +978,7 @@ const struct m2sdr_rfic_ops m2sdr_rfic_ad9361_ops = {
     .get_gain       = m2sdr_rfic_ad9361_get_gain,
     .set_iq_bits    = m2sdr_rfic_ad9361_set_iq_bits,
     .get_iq_bits    = m2sdr_rfic_ad9361_get_iq_bits,
+    .configure_stream_channels = m2sdr_rfic_ad9361_configure_stream_channels,
     .get_caps       = m2sdr_rfic_ad9361_get_caps,
     .set_property   = m2sdr_rfic_ad9361_set_property,
     .get_property   = m2sdr_rfic_ad9361_get_property,

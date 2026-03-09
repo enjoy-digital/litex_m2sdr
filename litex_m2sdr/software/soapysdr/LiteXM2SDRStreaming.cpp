@@ -28,6 +28,10 @@
 #include "liteeth_udp.h"
 #endif
 
+extern "C" int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
+                                                     size_t rx_count, const size_t *rx_channels,
+                                                     size_t tx_count, const size_t *tx_channels);
+
 /* Parse Soapy-style "channels" argument: "0", "1", "0,1", "[0,1]", "0 1". */
 static std::vector<size_t> parse_channel_list(const std::string &channels_str)
 {
@@ -366,30 +370,16 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         throw std::runtime_error("Invalid direction.");
     }
 
-    /* Configure 2T2R/1T1R mode (PHY) */
-    litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
-
-    /* AD9361 Channel en/dis */
-    ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
-    if (_nChannels == 1) {
-        if (direction == SOAPY_SDR_RX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
-        else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _tx_stream.channels[0] == 0 ? TX_1 : TX_2;
-    } else {
-        if (direction == SOAPY_SDR_RX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-        else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+    {
+        int rc = m2sdr_rfic_configure_stream_channels(
+            _dev,
+            _rx_stream.channels.size(), _rx_stream.channels.empty() ? nullptr : _rx_stream.channels.data(),
+            _tx_stream.channels.size(), _tx_stream.channels.empty() ? nullptr : _tx_stream.channels.data());
+        if (rc != 0) {
+            throw std::runtime_error(
+                "RFIC stream channel configuration failed (" + std::string(m2sdr_strerror(rc)) + ")");
+        }
     }
-
-    /* AD9361 Port Control 2t2r timing enable */
-    struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
-    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-    if (_nChannels == 2)
-        pd->port_ctrl.pp_conf[0] |= (1 << 2);
-
-    ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
 
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }

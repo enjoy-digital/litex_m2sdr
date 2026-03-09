@@ -248,6 +248,24 @@ int m2sdr_get_iq_bits(struct m2sdr_dev *dev, unsigned *bits)
     return dev->rfic_ops->get_iq_bits(dev, dev->rfic_ctx, bits);
 }
 
+int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
+                                         size_t rx_count, const size_t *rx_channels,
+                                         size_t tx_count, const size_t *tx_channels)
+{
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->configure_stream_channels)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->configure_stream_channels(
+        dev, dev->rfic_ctx, rx_count, rx_channels, tx_count, tx_channels);
+}
+
 int m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq)
 {
     return m2sdr_set_frequency(dev, M2SDR_RX, freq);

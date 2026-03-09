@@ -31,6 +31,9 @@ struct m2sdr_rfic_ops {
     int (*get_gain)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, int64_t *gain);
     int (*set_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned bits);
     int (*get_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned *bits);
+    int (*configure_stream_channels)(struct m2sdr_dev *dev, void *ctx,
+                                     size_t rx_count, const size_t *rx_channels,
+                                     size_t tx_count, const size_t *tx_channels);
     int (*get_caps)(struct m2sdr_dev *dev, void *ctx, struct m2sdr_rfic_caps *caps);
     int (*set_property)(struct m2sdr_dev *dev, void *ctx, const char *key, const char *value);
     int (*get_property)(struct m2sdr_dev *dev, void *ctx, const char *key, char *value, size_t value_len);

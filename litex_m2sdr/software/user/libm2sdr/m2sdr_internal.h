@@ -75,6 +75,9 @@ struct m2sdr_dev {
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
+                                         size_t rx_count, const size_t *rx_channels,
+                                         size_t tx_count, const size_t *tx_channels);
 
 int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);
 

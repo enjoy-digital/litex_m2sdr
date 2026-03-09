@@ -199,6 +199,19 @@ static int m2sdr_rfic_mock_get_iq_bits(struct m2sdr_dev *dev, void *ctx_void, un
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_rfic_mock_configure_stream_channels(struct m2sdr_dev *dev, void *ctx_void,
+                                                     size_t rx_count, const size_t *rx_channels,
+                                                     size_t tx_count, const size_t *tx_channels)
+{
+    (void)dev;
+    (void)ctx_void;
+    (void)rx_count;
+    (void)rx_channels;
+    (void)tx_count;
+    (void)tx_channels;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
 static int m2sdr_rfic_mock_get_caps(struct m2sdr_dev *dev, void *ctx_void, struct m2sdr_rfic_caps *caps)
 {
     (void)dev;
@@ -278,6 +291,7 @@ const struct m2sdr_rfic_ops m2sdr_rfic_mock_ops = {
     .get_gain        = m2sdr_rfic_mock_get_gain,
     .set_iq_bits     = m2sdr_rfic_mock_set_iq_bits,
     .get_iq_bits     = m2sdr_rfic_mock_get_iq_bits,
+    .configure_stream_channels = m2sdr_rfic_mock_configure_stream_channels,
     .get_caps        = m2sdr_rfic_mock_get_caps,
     .set_property    = m2sdr_rfic_mock_set_property,
     .get_property    = m2sdr_rfic_mock_get_property,

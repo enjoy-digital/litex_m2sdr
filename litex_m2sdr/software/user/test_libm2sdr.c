@@ -182,6 +182,8 @@ static int test_mock_backend(void)
         return -1;
     if (m2sdr_get_iq_bits(&dev, &bits) != M2SDR_ERR_OK || bits != 16u)
         return -1;
+    if (m2sdr_rfic_configure_stream_channels(&dev, 1, (const size_t[]){0}, 1, (const size_t[]){0}) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
 
     m2sdr_rfic_detach(&dev);
     unsetenv("M2SDR_RFIC");
