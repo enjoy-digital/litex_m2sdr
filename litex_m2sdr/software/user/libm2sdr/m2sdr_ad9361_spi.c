@@ -53,7 +53,7 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
 /* m2sdr_ad9361_spi_xfer */
 /*-----------------------*/
 
-void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso) {
+void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, const uint8_t *mosi, uint8_t *miso) {
     (void)len;
 
     /* The AD9361 bridge always transfers 24 bits on this platform. The first

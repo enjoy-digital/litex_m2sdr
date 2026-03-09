@@ -181,25 +181,19 @@ static AD9361_TXFIRConfig m2sdr_make_tx_fir_bypass(void)
 
 static int m2sdr_ad9361_canonical_gain_mode(const char *value, char *out, size_t out_len)
 {
-    const char *canonical = NULL;
-
     if (!value || !out || out_len == 0)
         return M2SDR_ERR_INVAL;
 
     if (strcmp(value, "slow") == 0 || strcmp(value, "slowattack") == 0)
-        canonical = "slowattack";
+        return (snprintf(out, out_len, "%s", "slowattack") >= (int)out_len) ? M2SDR_ERR_RANGE : M2SDR_ERR_OK;
     else if (strcmp(value, "fast") == 0 || strcmp(value, "fastattack") == 0)
-        canonical = "fastattack";
+        return (snprintf(out, out_len, "%s", "fastattack") >= (int)out_len) ? M2SDR_ERR_RANGE : M2SDR_ERR_OK;
     else if (strcmp(value, "hybrid") == 0)
-        canonical = "hybrid";
+        return (snprintf(out, out_len, "%s", "hybrid") >= (int)out_len) ? M2SDR_ERR_RANGE : M2SDR_ERR_OK;
     else if (strcmp(value, "manual") == 0 || strcmp(value, "mgc") == 0)
-        canonical = "manual";
+        return (snprintf(out, out_len, "%s", "manual") >= (int)out_len) ? M2SDR_ERR_RANGE : M2SDR_ERR_OK;
     else
         return M2SDR_ERR_PARSE;
-
-    if (snprintf(out, out_len, "%s", canonical) >= (int)out_len)
-        return M2SDR_ERR_RANGE;
-    return M2SDR_ERR_OK;
 }
 
 static uint8_t m2sdr_ad9361_gain_mode_to_api(const char *mode)
@@ -753,7 +747,7 @@ static int m2sdr_rfic_ad9361_get_frequency(struct m2sdr_dev *dev, void *ctx,
 static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, int64_t rate)
 {
     struct ad9361_rf_phy *phy;
-    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
+    const struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
     AD9361_RXFIRConfig rx_fir_cfg;
     AD9361_TXFIRConfig tx_fir_cfg;
     char canonical_name[M2SDR_AD9361_FIR_PROFILE_MAX];
@@ -1124,17 +1118,14 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, const char *value)
 {
     struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
-    char *end = NULL;
-    unsigned long bits;
     struct ad9361_rf_phy *phy = NULL;
-    char canonical_mode[16];
-    int rc;
 
     if (!dev || !ad9361 || !key || !value)
         return M2SDR_ERR_INVAL;
 
     if (strcmp(key, "ad9361.iq_bits") == 0) {
-        bits = strtoul(value, &end, 10);
+        char *end = NULL;
+        unsigned long bits = strtoul(value, &end, 10);
         if (!end || *end != '\0')
             return M2SDR_ERR_PARSE;
         if (bits > UINT_MAX)
@@ -1157,6 +1148,7 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
         AD9361_RXFIRConfig rx_fir_cfg;
         AD9361_TXFIRConfig tx_fir_cfg;
         char canonical_name[M2SDR_AD9361_FIR_PROFILE_MAX];
+        int rc;
 
         rc = m2sdr_ad9361_select_fir_profile(value,
                                              &rx_fir_cfg,
@@ -1172,6 +1164,8 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
     }
     if (strcmp(key, "ad9361.rx0_gain_mode") == 0 || strcmp(key, "ad9361.rx1_gain_mode") == 0) {
         const unsigned channel = (key[10] == '0') ? 0u : 1u;
+        char canonical_mode[16];
+        int rc;
 
         rc = m2sdr_ad9361_canonical_gain_mode(value, canonical_mode, sizeof(canonical_mode));
         if (rc != M2SDR_ERR_OK)
@@ -1200,8 +1194,6 @@ static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, char *value, size_t value_len)
 {
     struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
-    struct ad9361_rf_phy *phy = NULL;
-    int rc;
 
     if (!dev || !ad9361 || !key || !value || value_len == 0)
         return M2SDR_ERR_INVAL;
@@ -1233,7 +1225,8 @@ static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
         return M2SDR_ERR_OK;
     }
     if (strcmp(key, "ad9361.temperature_c") == 0) {
-        rc = m2sdr_require_phy(dev, &phy);
+        struct ad9361_rf_phy *phy = NULL;
+        int rc = m2sdr_require_phy(dev, &phy);
         if (rc != M2SDR_ERR_OK)
             return rc;
         if (snprintf(value, value_len, "%.3f", (double)ad9361_get_temp(phy) / 1000.0) >= (int)value_len)

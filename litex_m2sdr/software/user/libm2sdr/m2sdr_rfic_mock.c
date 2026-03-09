@@ -120,7 +120,7 @@ static int m2sdr_rfic_mock_set_sample_rate(struct m2sdr_dev *dev, void *ctx_void
 
 static int m2sdr_rfic_mock_get_sample_rate(struct m2sdr_dev *dev, void *ctx_void, int64_t *rate)
 {
-    struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
+    const struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
 
     if (!dev || !ctx || !rate)
         return M2SDR_ERR_INVAL;
@@ -142,7 +142,7 @@ static int m2sdr_rfic_mock_set_bandwidth(struct m2sdr_dev *dev, void *ctx_void, 
 
 static int m2sdr_rfic_mock_get_bandwidth(struct m2sdr_dev *dev, void *ctx_void, int64_t *bw)
 {
-    struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
+    const struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
 
     if (!dev || !ctx || !bw)
         return M2SDR_ERR_INVAL;
@@ -191,7 +191,7 @@ static int m2sdr_rfic_mock_set_iq_bits(struct m2sdr_dev *dev, void *ctx_void, un
 
 static int m2sdr_rfic_mock_get_iq_bits(struct m2sdr_dev *dev, void *ctx_void, unsigned *bits)
 {
-    struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
+    const struct m2sdr_rfic_mock_ctx *ctx = ctx_void;
 
     if (!dev || !ctx || !bits)
         return M2SDR_ERR_INVAL;

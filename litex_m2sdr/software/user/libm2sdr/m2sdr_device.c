@@ -82,7 +82,6 @@ static int m2sdr_parse_identifier(const char *id,
     char tmp[M2SDR_DEVICE_STR_MAX];
     char *colon;
     char *endptr = NULL;
-    unsigned long port_ul = 0;
 
     if (!id || !id[0]) {
         m2sdr_default_device(tmp, sizeof(tmp));
@@ -117,6 +116,7 @@ static int m2sdr_parse_identifier(const char *id,
     snprintf(ip_out, ip_len, "%s", id);
     colon = strchr(ip_out, ':');
     if (colon) {
+        unsigned long port_ul;
         if (colon == ip_out || colon[1] == '\0')
             return -1;
         *colon = '\0';

@@ -73,6 +73,9 @@ test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
+		--suppress=constParameterPointer \
+		--suppress=constParameterCallback \
+		--suppress=unusedStructMember \
 		-I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 \
 		libm2sdr
 

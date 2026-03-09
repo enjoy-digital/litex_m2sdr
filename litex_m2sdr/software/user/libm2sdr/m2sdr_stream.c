@@ -449,25 +449,21 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
 
     unsigned sample_sz = 0;
-    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
-    unsigned payload_off = 0;
+    unsigned bytes_per_buffer;
+    unsigned payload_off;
 
     if (direction == M2SDR_RX) {
         if (!dev->rx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->rx_format);
-        if (dev->rx_header_enable && dev->rx_strip_header) {
-            payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
+        payload_off = (dev->rx_header_enable && dev->rx_strip_header) ? M2SDR_DMA_HEADER_SIZE : 0;
+        bytes_per_buffer = DMA_BUFFER_SIZE - payload_off;
     } else {
         if (!dev->tx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->tx_format);
-        if (dev->tx_header_enable) {
-            payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
+        payload_off = dev->tx_header_enable ? M2SDR_DMA_HEADER_SIZE : 0;
+        bytes_per_buffer = DMA_BUFFER_SIZE - payload_off;
     }
 
     if (!sample_sz)
