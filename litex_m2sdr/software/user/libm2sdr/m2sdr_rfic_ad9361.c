@@ -443,16 +443,26 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
 /* Apply TX attenuation and per-channel RX gains. */
 static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
+    int tx_rc;
+    int rx0_rc;
+    int rx1_rc;
+
     M2SDR_LOGF("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    tx_rc = ad9361_set_tx_atten(phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1);
+    if (m2sdr_from_ad9361_rc(tx_rc) != M2SDR_ERR_OK)
+        M2SDR_LOGF("Warning: AD9361 TX gain configuration failed (rc=%d), continuing.\n",
+                   tx_rc);
 
     M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
            (long)cfg->rx_gain1, (long)cfg->rx_gain2);
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    rx0_rc = ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1);
+    if (m2sdr_from_ad9361_rc(rx0_rc) != M2SDR_ERR_OK)
+        M2SDR_LOGF("Warning: AD9361 RX0 gain configuration failed (rc=%d), continuing.\n",
+                   rx0_rc);
+    rx1_rc = ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2);
+    if (m2sdr_from_ad9361_rc(rx1_rc) != M2SDR_ERR_OK)
+        M2SDR_LOGF("Warning: AD9361 RX1 gain configuration failed (rc=%d), continuing.\n",
+                   rx1_rc);
     return M2SDR_ERR_OK;
 }
 
