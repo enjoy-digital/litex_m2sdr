@@ -3,9 +3,7 @@
 import pytest
 
 from litex_m2sdr.wr_helper import (
-    ERR_WR_PATCH_MISSING_CHECK,
     prepare_wr_environment,
-    preflight_wr_cores,
     validate_wr_platform,
 )
 
@@ -28,15 +26,6 @@ def test_validate_wr_platform_rejects_non_baseboard():
         validate_wr_platform(variant="m2", wr_sfp=0, baseboard_io=BASEBOARD_IO)
 
 
-def test_preflight_check_mode_detects_missing_patch(tmp_path):
-    wr_subsystem_vhd = tmp_path / "wr-cores" / "modules" / "wrc_core" / "xwr_subsystem.vhd"
-    wr_subsystem_vhd.parent.mkdir(parents=True)
-    wr_subsystem_vhd.write_text('mux_class_i(1) => x"f0");\n')
-
-    with pytest.raises(ValueError, match=ERR_WR_PATCH_MISSING_CHECK):
-        preflight_wr_cores(str(tmp_path), wr_nic_dir=None, patch_mode="check")
-
-
 def test_prepare_wr_environment_status_only_prints(capsys, tmp_path):
     wr_env = prepare_wr_environment(
         root_dir=str(tmp_path),
@@ -48,7 +37,6 @@ def test_prepare_wr_environment_status_only_prints(capsys, tmp_path):
         wr_firmware=None,
         wr_firmware_target="acorn",
         build=False,
-        patch_mode="auto",
         status=True,
     )
 

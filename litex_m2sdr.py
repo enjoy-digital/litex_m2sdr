@@ -1044,7 +1044,6 @@ def main():
     parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
     parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
     parser.add_argument("--wr-status",           action="store_true",                    help="Print resolved WR environment status.")
-    parser.add_argument("--wr-patch-mode",       default="auto",                         help="WR patch behavior for xwr_subsystem (auto/check/off).", choices=["auto", "check", "off"])
     parser.add_argument("--wr-ext-clk10-port",   default=None,                           help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
     parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,              help="External 10MHz clock period in ns for constraint.")
     parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                 help="External 10MHz clock name for constraint.")
@@ -1072,7 +1071,6 @@ def main():
         wr_firmware       = args.wr_firmware,
         wr_firmware_target= args.wr_firmware_target,
         build             = args.build,
-        patch_mode        = args.wr_patch_mode,
         status            = args.wr_status,
     )
     wr_firmware = wr_env["wr_firmware"]

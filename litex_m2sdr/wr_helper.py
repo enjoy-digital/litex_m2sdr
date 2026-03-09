@@ -25,9 +25,7 @@ WR_COMMON_REL                = os.path.join("gateware", "wr_common.py")
 
 WR_CORES_DIRNAME        = "wr-cores"
 WR_SUBSYSTEM_VHD_REL    = os.path.join("modules", "wrc_core", "xwr_subsystem.vhd")
-WR_PATCH_FILE_REL       = os.path.join("patches", "wr-cores", "0001-xwr_subsystem-mux-class.patch")
 WR_PATCHED_SIGNATURE    = 'mux_class_i(1) => x"ff");'
-WR_PATCH_MODE_VALUES    = ("auto", "check", "off")
 
 WR_CORES_RENAME_HINT      = "Rename/remove local wr-cores (for example: 'mv wr-cores wr-cores.old') and rerun."
 WR_CORES_INIT_RENAME_HINT = "Rename/remove it (for example: 'mv wr-cores wr-cores.old') and rerun so the expected WR-cores can be initialized."
@@ -37,8 +35,6 @@ ERR_WR_FIRMWARE_BUILD_FAIL = "White Rabbit Firmware build failed."
 ERR_WR_CORES_STALE_TREE    = "Incompatible local 'wr-cores' tree detected (missing modules/wrc_core/xwr_subsystem.vhd). "
 ERR_WR_CORES_STALE_TREE   += "This usually means an older WR-cores checkout is present in the litex_m2sdr directory. "
 ERR_GIT_REV_PARSE_FAILED   = "Failed to query local wr-cores revision with git rev-parse."
-ERR_WR_PATCH_MODE          = f"Invalid WR patch mode '{{patch_mode}}'. Expected one of: {', '.join(WR_PATCH_MODE_VALUES)}."
-ERR_WR_PATCH_MISSING_CHECK = "WR patch not applied in xwr_subsystem.vhd. Re-run with --wr-patch-mode=auto to apply it automatically."
 
 # Internal Helpers ---------------------------------------------------------------------------------
 
@@ -155,12 +151,10 @@ def build_wr_firmware(wr_nic_dir, wr_firmware, wr_firmware_target, enforce_fresh
 def inspect_wr_cores(root_dir, wr_nic_dir):
     wr_cores_dir     = os.path.join(root_dir, WR_CORES_DIRNAME)
     wr_subsystem_vhd = os.path.join(wr_cores_dir, WR_SUBSYSTEM_VHD_REL)
-    wr_patch_file    = os.path.join(root_dir, WR_PATCH_FILE_REL)
 
     state = {
         "wr_cores_dir"     : wr_cores_dir,
         "wr_subsystem_vhd" : wr_subsystem_vhd,
-        "wr_patch_file"    : wr_patch_file,
         "exists"           : os.path.isdir(wr_cores_dir),
         "valid_layout"     : False,
         "expected_sha"     : _get_expected_wr_cores_sha(wr_nic_dir),
@@ -190,10 +184,7 @@ def inspect_wr_cores(root_dir, wr_nic_dir):
     return state
 
 
-def preflight_wr_cores(root_dir, wr_nic_dir, patch_mode="auto"):
-    if patch_mode not in WR_PATCH_MODE_VALUES:
-        raise ValueError(ERR_WR_PATCH_MODE.format(patch_mode=patch_mode))
-
+def preflight_wr_cores(root_dir, wr_nic_dir):
     state = inspect_wr_cores(root_dir, wr_nic_dir)
 
     if not state["exists"]:
@@ -210,25 +201,6 @@ def preflight_wr_cores(root_dir, wr_nic_dir, patch_mode="auto"):
             msg += WR_CORES_RENAME_HINT
             raise ValueError(msg)
 
-    if patch_mode == "off":
-        return state
-
-    if state["patched"]:
-        return state
-
-    if patch_mode == "check":
-        raise ValueError(ERR_WR_PATCH_MISSING_CHECK)
-
-    wr_patch_file = state["wr_patch_file"]
-    if not os.path.isfile(wr_patch_file):
-        raise RuntimeError(f"Required WR patch file not found: {wr_patch_file}")
-
-    result = subprocess.run(["git", "-C", state["wr_cores_dir"], "apply", wr_patch_file], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to apply WR patch file {wr_patch_file}: {result.stderr.strip()}")
-
-    print(f"Applied WR patch: {wr_patch_file}")
-    state["patched"] = True
     return state
 
 
@@ -266,14 +238,13 @@ def validate_wr_platform(variant, wr_sfp, baseboard_io):
     }
 
 
-def print_wr_status(*, variant, wr_sfp, available_sfps, wr_nic_dir, wr_firmware, wr_cores_state, patch_mode):
+def print_wr_status(*, variant, wr_sfp, available_sfps, wr_nic_dir, wr_firmware, wr_cores_state):
     print("White Rabbit status:")
     print(f"- variant: {variant}")
     print(f"- requested wr_sfp: {wr_sfp}")
     print(f"- available sfp indices: {available_sfps}")
     print(f"- wr_nic_dir: {wr_nic_dir}")
     print(f"- wr_firmware: {wr_firmware}")
-    print(f"- wr_patch_mode: {patch_mode}")
 
     if not wr_cores_state["exists"]:
         print("- wr_cores: not present in repo (will be initialized by build flow when needed)")
@@ -301,7 +272,6 @@ def prepare_wr_environment(*,
     wr_firmware,
     wr_firmware_target,
     build,
-    patch_mode,
     status,
 ):
     wr_nic_dir, wr_firmware = resolve_wr_paths(
@@ -354,7 +324,6 @@ def prepare_wr_environment(*,
         preflight_wr_cores(
             root_dir   = root_dir,
             wr_nic_dir = wr_nic_dir,
-            patch_mode = patch_mode,
         )
 
     wr_cores_state = inspect_wr_cores(root_dir, wr_nic_dir)
@@ -366,7 +335,6 @@ def prepare_wr_environment(*,
             f"wr_sfp={resolved_wr_sfp}, "
             f"wr_nic_dir={wr_nic_dir}, "
             f"wr_firmware={wr_firmware}, "
-            f"patch_mode={patch_mode}, "
             f"wr_cores_exists={wr_cores_state['exists']}, "
             f"wr_cores_patched={wr_cores_state['patched']}"
         )
@@ -379,7 +347,6 @@ def prepare_wr_environment(*,
             wr_nic_dir     = wr_nic_dir,
             wr_firmware    = wr_firmware,
             wr_cores_state = wr_cores_state,
-            patch_mode     = patch_mode,
         )
 
     return {
