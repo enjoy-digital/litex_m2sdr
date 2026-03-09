@@ -500,11 +500,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-    /* Configure Mode based on _bitMode */
-    SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
-    m2sdr_set_bitmode(_dev, _bitMode == 8);
-
-
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
@@ -539,11 +534,18 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         do_init = args.at("bypass_init")[0] == '0';
     }
 
-    if (args.count("bitmode") > 0) {
-        _bitMode = std::stoi(args.at("bitmode"));
+    if (args.count("iq_bits") > 0) {
+        _iqBits = static_cast<uint32_t>(std::stoul(args.at("iq_bits")));
+    } else if (args.count("bitmode") > 0) {
+        /* Backward-compatible alias:
+         * bitmode=8 -> iq_bits=8
+         * bitmode=16 -> iq_bits=12 (AD9361 native precision in 16-bit container) */
+        const uint32_t legacy = static_cast<uint32_t>(std::stoul(args.at("bitmode")));
+        _iqBits = (legacy == 8u) ? 8u : 12u;
     } else {
-        _bitMode = 16;
+        _iqBits = 12u;
     }
+    _bitMode = (_iqBits <= 8u) ? 8u : 16u;
 
     if (args.count("oversampling") > 0) {
         _oversampling = std::stoi(args.at("oversampling"));
@@ -704,6 +706,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         !antenna_allowed(_tx_antennas, _tx_stream.antenna[1])) {
         throw std::runtime_error("Invalid TX antenna selection");
     }
+
+    setSampleMode();
 
     const std::string rfic_name = getLiteXM2SDRRficName(_dev);
     SoapySDR::logf(SOAPY_SDR_INFO, "Active RFIC backend: %s", rfic_name.c_str());
@@ -1283,18 +1287,31 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 /* listFrequencies now exposes RF and BB; BB currently aliases RF. */
 
 void SoapyLiteXM2SDR::setSampleMode() {
+    int rc = 0;
+
+    _bitMode = (_iqBits <= 8u) ? 8u : 16u;
+
     /* 8-bit mode */
     if (_bitMode == 8) {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, true);
+        rc = m2sdr_set_iq_bits(_dev, 8u);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
-        _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, false);
+        if (_iqBits > 1u && _iqBits <= 16u)
+            _samplesScaling = static_cast<float>((1u << (_iqBits - 1u)) - 1u);
+        else
+            _samplesScaling = 2047.0f;
+        rc = m2sdr_set_iq_bits(_dev, _iqBits);
+    }
+
+    if (rc != 0) {
+        throw std::runtime_error(
+            "Failed to set IQ bit depth " + std::to_string(_iqBits) +
+            " (" + std::string(m2sdr_strerror(rc)) + ")");
     }
 }
 
@@ -1321,12 +1338,12 @@ void SoapyLiteXM2SDR::setSampleRate(
 #if USE_LITEPCIE
     /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
     if (rate > LITEPCIE_8BIT_THRESHOLD) {
-        if (_bitMode != 8) {
+        if (_iqBits != 8u) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
-                "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
+                "Sample rate %.2f MSPS requires 8-bit IQ + oversampling on PCIe, overriding iq_bits",
                 rate / 1e6);
         }
-        _bitMode      = 8;
+        _iqBits       = 8u;
         _oversampling = 1;
     } else {
         _oversampling = 0;
@@ -1334,10 +1351,11 @@ void SoapyLiteXM2SDR::setSampleRate(
 #elif USE_LITEETH
     /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
     if (rate > LITEETH_8BIT_THRESHOLD) {
-        _bitMode      = 8;
+        _iqBits       = 8u;
         _oversampling = 0;
     } else {
-        _bitMode      = 16;
+        if (_iqBits <= 8u)
+            _iqBits = 12u;
         _oversampling = 0;
     }
 #endif

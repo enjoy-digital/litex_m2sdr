@@ -226,7 +226,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.opened = true;
         _rx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
-            _bitMode = 8;
+            _iqBits = 8u;
             setSampleMode();
         }
         _rx_stream.remainderHandle = -1;
@@ -348,7 +348,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.opened = true;
         _tx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
-            _bitMode = 8;
+            _iqBits = 8u;
             setSampleMode();
         }
         _tx_stream.remainderHandle = -1;

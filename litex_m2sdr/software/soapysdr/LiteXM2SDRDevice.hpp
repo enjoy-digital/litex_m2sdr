@@ -530,6 +530,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct ad9361_rf_phy *ad9361_phy;
     uint8_t _spi_id = 0;
 
+    uint32_t _iqBits            = 12;
     uint32_t _bitMode           = 16;
     uint32_t _oversampling      = 0;
     uint32_t _nChannels         = 2;
