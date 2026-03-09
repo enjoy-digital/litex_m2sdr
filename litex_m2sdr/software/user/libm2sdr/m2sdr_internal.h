@@ -18,6 +18,8 @@
 
 #include "m2sdr.h"
 
+struct ad9361_rf_phy;
+
 #ifdef USE_LITEPCIE
 #include "liblitepcie.h"
 #endif
@@ -63,6 +65,7 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    struct ad9361_rf_phy *ad9361_phy;
 };
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);

@@ -45,8 +45,13 @@
 
 /* The Analog Devices AD9361 code expects Linux-like platform hooks with a
  * single implicit active device. libm2sdr keeps that glue local here. */
-static struct m2sdr_dev *g_rf_dev;
-static struct ad9361_rf_phy *ad9361_phy;
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+static _Thread_local struct m2sdr_dev *tls_rf_dev;
+#elif defined(__GNUC__) || defined(__clang__)
+static __thread struct m2sdr_dev *tls_rf_dev;
+#else
+static struct m2sdr_dev *tls_rf_dev;
+#endif
 
 /* Helpers */
 /*---------*/
@@ -68,6 +73,19 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
 static int m2sdr_from_ad9361_rc(int32_t rc)
 {
     return (rc == 0) ? M2SDR_ERR_OK : M2SDR_ERR_IO;
+}
+
+static int m2sdr_select_rf_dev(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    tls_rf_dev = dev;
+    return M2SDR_ERR_OK;
+}
+
+static struct ad9361_rf_phy *m2sdr_current_phy(struct m2sdr_dev *dev)
+{
+    return dev ? dev->ad9361_phy : NULL;
 }
 
 static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
@@ -228,7 +246,7 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
 
 /* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
  * interpolation/decimation mode expected by the original utilities. */
-static int m2sdr_configure_samplerate(const struct m2sdr_config *cfg)
+static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
     uint32_t actual_samplerate = cfg->sample_rate;
 
@@ -244,75 +262,75 @@ static int m2sdr_configure_samplerate(const struct m2sdr_config *cfg)
         AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
 
         printf("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
-        ad9361_phy->rx_fir_dec    = 4;
-        ad9361_phy->tx_fir_int    = 4;
-        ad9361_phy->bypass_rx_fir = 0;
-        ad9361_phy->bypass_tx_fir = 0;
+        phy->rx_fir_dec    = 4;
+        phy->tx_fir_int    = 4;
+        phy->bypass_rx_fir = 0;
+        phy->bypass_tx_fir = 0;
         rx_fir_cfg.rx_dec         = 4;
         tx_fir_cfg.tx_int         = 4;
 
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_cfg)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_cfg)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_en_dis(ad9361_phy, 1)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_en_dis(ad9361_phy, 1)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(ad9361_phy, actual_samplerate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_samplerate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(ad9361_phy, actual_samplerate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, actual_samplerate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     return M2SDR_ERR_OK;
 }
 
 /* Apply a common RF bandwidth to both RX and TX paths. */
-static int m2sdr_configure_bandwidth(const struct m2sdr_config *cfg)
+static int m2sdr_configure_bandwidth(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
     printf("Setting TX/RX Bandwidth to %f MHz.\n", cfg->bandwidth / 1e6);
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(ad9361_phy, cfg->bandwidth)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(phy, cfg->bandwidth)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(ad9361_phy, cfg->bandwidth)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, cfg->bandwidth)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
 /* Program the TX and RX local oscillator frequencies. */
-static int m2sdr_configure_frequencies(const struct m2sdr_config *cfg)
+static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
     printf("Setting TX LO Freq to %f MHz.\n", cfg->tx_freq / 1e6);
     printf("Setting RX LO Freq to %f MHz.\n", cfg->rx_freq / 1e6);
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(ad9361_phy, cfg->tx_freq)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(phy, cfg->tx_freq)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(ad9361_phy, cfg->rx_freq)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(phy, cfg->rx_freq)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
 /* Apply TX attenuation and per-channel RX gains. */
-static int m2sdr_configure_gains(const struct m2sdr_config *cfg)
+static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
     printf("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(ad9361_phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     printf("Setting RX Gain to %ld dB and %ld dB.\n",
            (long)cfg->rx_gain1, (long)cfg->rx_gain2);
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(ad9361_phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(ad9361_phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
 /* Configure the FPGA-side bit mode and AD9361 internal loopback controls. */
-static int m2sdr_configure_modes(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
+static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
     printf("Setting Loopback to %d\n", cfg->loopback);
-    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(ad9361_phy, cfg->loopback)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, cfg->loopback)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     /* Bit mode is implemented in the FPGA-side AD9361 wrapper rather than in
@@ -329,17 +347,17 @@ static int m2sdr_configure_modes(struct m2sdr_dev *dev, const struct m2sdr_confi
 }
 
 /* Run the optional AD9361 built-in test modes requested by the config. */
-static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev)
+static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
 {
     if (cfg->bist_tx_tone) {
         printf("BIST_TX_TONE_TEST...\n");
-        if (m2sdr_from_ad9361_rc(ad9361_bist_tone(ad9361_phy, BIST_INJ_TX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_bist_tone(phy, BIST_INJ_TX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
     if (cfg->bist_rx_tone) {
         printf("BIST_RX_TONE_TEST...\n");
-        if (m2sdr_from_ad9361_rc(ad9361_bist_tone(ad9361_phy, BIST_INJ_RX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_bist_tone(phy, BIST_INJ_RX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
@@ -348,7 +366,7 @@ static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev)
         if (m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR,
             0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET)) != 0)
             return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(ad9361_phy, BIST_INJ_RX)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, BIST_INJ_RX)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
@@ -367,7 +385,10 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
     void *conn;
 
     (void)spi;
-    conn = m2sdr_conn(g_rf_dev);
+    if (!tls_rf_dev)
+        return -1;
+
+    conn = m2sdr_conn(tls_rf_dev);
 
     /* The imported AD9361 driver only uses the 2-byte-address/1-byte-read and
      * 2-byte-address+1-byte-write transactions on this platform. */
@@ -450,11 +471,14 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
  * the Soapy integration path. */
 int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
 {
-    g_rf_dev   = dev;
-    ad9361_phy = (struct ad9361_rf_phy *)phy;
-
     if (!dev && phy)
         return M2SDR_ERR_INVAL;
+    if (!dev)
+        return M2SDR_ERR_OK;
+
+    dev->ad9361_phy = (struct ad9361_rf_phy *)phy;
+    if (phy)
+        tls_rf_dev = dev;
 
     return M2SDR_ERR_OK;
 }
@@ -464,6 +488,7 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
 int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 {
     void *conn;
+    struct ad9361_rf_phy *phy;
     int rc;
     enum m2sdr_clock_source clock_source     = M2SDR_CLOCK_SOURCE_INTERNAL;
     enum m2sdr_channel_layout channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
@@ -474,7 +499,9 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    g_rf_dev = dev;
+    rc = m2sdr_select_rf_dev(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
     conn     = m2sdr_conn(dev);
 
     /* Normalize all compatibility inputs up front so the actual bring-up code
@@ -501,38 +528,41 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     rc = m2sdr_apply_channel_layout(dev, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    if (m2sdr_from_ad9361_rc(ad9361_init(&ad9361_phy, &default_init_param, 1)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy, &default_init_param, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
+        return M2SDR_ERR_UNEXPECTED;
 
-    rc = m2sdr_configure_samplerate(cfg);
+    rc = m2sdr_configure_samplerate(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    rc = m2sdr_configure_bandwidth(cfg);
+    rc = m2sdr_configure_bandwidth(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    rc = m2sdr_configure_frequencies(cfg);
+    rc = m2sdr_configure_frequencies(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
     /* Re-apply the default FIR tables after the sample-rate step so the
      * AD9361 state stays aligned with the shipped utility behavior. */
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(ad9361_phy, tx_fir_config)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_config)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(ad9361_phy, rx_fir_config)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
-    rc = m2sdr_configure_gains(cfg);
+    rc = m2sdr_configure_gains(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    rc = m2sdr_configure_modes(dev, cfg);
+    rc = m2sdr_configure_modes(dev, phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    rc = m2sdr_run_bist(cfg, dev);
+    rc = m2sdr_run_bist(cfg, dev, phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
     if (cfg->enable_oversample)
-        ad9361_enable_oversampling(ad9361_phy);
+        ad9361_enable_oversampling(phy);
 
     return M2SDR_ERR_OK;
 }
@@ -540,19 +570,24 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 /* Program one LO frequency on the already-initialized AD9361 instance. */
 int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq)
 {
+    struct ad9361_rf_phy *phy;
+
     if (!dev || freq == 0)
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_TX && direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
 
-    if (!ad9361_phy)
+    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
         return M2SDR_ERR_UNEXPECTED;
 
     if (direction == M2SDR_TX) {
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(ad9361_phy, freq)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     } else {
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(ad9361_phy, freq)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
@@ -562,16 +597,21 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
 /* Program a common sample rate on both RX and TX paths. */
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
+    struct ad9361_rf_phy *phy;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (rate <= 0 || rate > UINT32_MAX)
         return M2SDR_ERR_INVAL;
-    if (!ad9361_phy)
+    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
         return M2SDR_ERR_UNEXPECTED;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(ad9361_phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(ad9361_phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
@@ -579,16 +619,21 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 /* Program a common RF bandwidth on both RX and TX paths. */
 int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
 {
+    struct ad9361_rf_phy *phy;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (bw <= 0 || bw > UINT32_MAX)
         return M2SDR_ERR_INVAL;
-    if (!ad9361_phy)
+    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
         return M2SDR_ERR_UNEXPECTED;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(ad9361_phy, bw)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(ad9361_phy, bw)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
@@ -596,24 +641,29 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
 /* Apply one direction-specific gain setting to the initialized AD9361. */
 int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain)
 {
+    struct ad9361_rf_phy *phy;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_TX && direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
-    if (!ad9361_phy)
+    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
         return M2SDR_ERR_UNEXPECTED;
 
     if (direction == M2SDR_TX) {
         if (gain < M2SDR_TX_GAIN_MIN_DB || gain > M2SDR_TX_GAIN_MAX_DB)
             return M2SDR_ERR_INVAL;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(ad9361_phy, (uint32_t)(-gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     } else {
         if (gain < M2SDR_RX_GAIN_MIN_DB || gain > M2SDR_RX_GAIN_MAX_DB)
             return M2SDR_ERR_INVAL;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(ad9361_phy, 0, gain)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, gain)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(ad9361_phy, 1, gain)) != M2SDR_ERR_OK)
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, gain)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
