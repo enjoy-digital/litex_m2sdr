@@ -19,6 +19,11 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Introduced a shared user-space CLI/device handling layer so utilities now build device identifiers consistently across PCIe and Etherbone modes.
 - Harmonized option naming across RF/streaming/control utilities around shared long-form arguments such as `--device`, `--sample-rate`, `--rx-freq`, `--tx-freq`, and `--format`.
 - Extended `m2sdr_scan` with preset save/load support and a headless export mode for CSV/PPM capture without launching the SDL/ImGui interface.
+- Removed the White Rabbit patch-preflight flow from gateware build scripts, simplifying setup for the current clocking-first White Rabbit usage.
+- Hardened `libm2sdr` API validation and error reporting with stricter device parsing/stream checks and new public error categories (`parse`, `range`, `state`).
+- Improved `libm2sdr` backend integration with explicit transport/handle accessors (`m2sdr_get_transport`, `m2sdr_get_eb_handle`) while preserving legacy handle compatibility.
+- Refined `libm2sdr` RF and streaming internals with per-device RF state ownership, safer DMA header access, and documented 16-byte wire header layout.
+- Added focused `libm2sdr` unit coverage and CI lanes for unit checks, LiteEth-mode checks, sanitizers, and `cppcheck`.
 
 [> 2025 Q4 (Oct - Dec)
 ----------------------
