@@ -16,8 +16,9 @@
 #ifdef USE_LITEPCIE
 #include "litepcie_helpers.h"
 
-/* HAL */
-/*-----*/
+/* HAL
+ * Keep this layer intentionally narrow: CSR read/write only. DMA, time, and
+ * RFIC policy live in higher layers so the transport abstraction stays cheap. */
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {

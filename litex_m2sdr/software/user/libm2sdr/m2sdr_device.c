@@ -317,6 +317,9 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 
+    /* Transport open and RFIC attach stay separate so callers can keep using a
+     * single m2sdr_open() entry point while still swapping backend selection
+     * through policy such as M2SDR_RFIC. */
     rc = m2sdr_rfic_attach_default(dev);
     if (rc != M2SDR_ERR_OK) {
 #ifdef USE_LITEPCIE
@@ -344,6 +347,8 @@ void m2sdr_close(struct m2sdr_dev *dev)
     if (!dev)
         return;
 
+    /* Tear down RFIC state before the transport disappears, since backend
+     * cleanup may still need register or sideband access through dev. */
     m2sdr_rfic_detach(dev);
 
 #ifdef USE_LITEPCIE

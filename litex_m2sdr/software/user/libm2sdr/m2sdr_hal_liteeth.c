@@ -15,8 +15,9 @@
 
 #ifdef USE_LITEETH
 
-/* HAL */
-/*-----*/
+/* HAL
+ * Keep this layer intentionally narrow: CSR read/write only. UDP streaming
+ * policy stays above this boundary even though both paths use LiteEth. */
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
