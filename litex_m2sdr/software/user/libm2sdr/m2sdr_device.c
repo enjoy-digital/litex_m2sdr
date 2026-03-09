@@ -534,10 +534,12 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
     if (m2sdr_reg_read(dev, CSR_TIME_GEN_CONTROL_ADDR, &ctrl) != 0)
         return M2SDR_ERR_IO;
 
-    /* The time generator snapshots into the read registers on a write pulse. */
-    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2) != 0)
+    /* The time generator snapshots into the read registers on a READ pulse. */
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR,
+        ctrl | (1u << CSR_TIME_GEN_CONTROL_READ_OFFSET)) != 0)
         return M2SDR_ERR_IO;
-    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2) != 0)
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR,
+        ctrl & ~(1u << CSR_TIME_GEN_CONTROL_READ_OFFSET)) != 0)
         return M2SDR_ERR_IO;
 
     return m2sdr_read_reg_u64(dev, CSR_TIME_GEN_READ_TIME_ADDR, time_ns);
