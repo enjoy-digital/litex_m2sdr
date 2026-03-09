@@ -6,23 +6,14 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
 #include <unistd.h>
-#include <memory>
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <cstring>
 #include <stdexcept>
-#include <unordered_map>
 #include <algorithm>
 #include <cctype>
-
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
-
-#include "libm2sdr/m2sdr_config.h"
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
@@ -34,84 +25,7 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 
-/***************************************************************************************************
- *                                    AD9361
- **************************************************************************************************/
-
-/* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
-
-/* AD9361 SPI */
-
 namespace {
-std::mutex spi_map_mutex;
-std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
-uint8_t spi_next_id = 0;
-litex_m2sdr_device_desc_t spi_last_fd =
-#if USE_LITEPCIE
-    FD_INIT;
-#else
-    nullptr;
-#endif
-bool spi_warned_fallback = false;
-
-uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    uint8_t id = spi_next_id;
-    for (uint16_t i = 0; i < 256; i++) {
-        if (spi_fd_map.find(id) == spi_fd_map.end()) {
-            spi_next_id = static_cast<uint8_t>(id + 1);
-            spi_fd_map[id] = fd;
-            spi_last_fd = fd;
-            return id;
-        }
-        id = static_cast<uint8_t>(id + 1);
-    }
-    throw std::runtime_error("spi_register_fd(): no free SPI ids available");
-}
-
-void spi_unregister_fd(uint8_t id)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    spi_fd_map.erase(id);
-    if (spi_fd_map.empty()) {
-#if USE_LITEPCIE
-        spi_last_fd = FD_INIT;
-#else
-        spi_last_fd = nullptr;
-#endif
-    } else {
-        spi_last_fd = spi_fd_map.begin()->second;
-    }
-}
-
-litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    auto it = spi_fd_map.find(spi->id_no);
-    if (it == spi_fd_map.end()) {
-#if USE_LITEPCIE
-        if (spi_last_fd >= 0) {
-#else
-        if (spi_last_fd) {
-#endif
-            if (!spi_warned_fallback) {
-                spi_warned_fallback = true;
-                fprintf(stderr,
-                        "spi_write_then_read(): SPI id %u not found, using last registered fd\n",
-                        (unsigned)spi->id_no);
-            }
-            return spi_last_fd;
-        }
-#if USE_LITEPCIE
-        return FD_INIT;
-#else
-        return nullptr;
-#endif
-    }
-    return it->second;
-}
-
 std::vector<std::string> split_list(const std::string &value)
 {
     std::vector<std::string> out;
@@ -165,76 +79,6 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
     return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
 } // namespace
-
-//#define AD9361_SPI_WRITE_DEBUG
-//#define AD9361_SPI_READ_DEBUG
-
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
-{
-    litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
-#if USE_LITEPCIE
-    if (fd < 0)
-        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    void *conn = (void *)(intptr_t)fd;
-#else
-    if (!fd)
-        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    void *conn = fd;
-#endif
-
-    /* Single Byte Read. */
-    if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
-
-    /* Single Byte Write. */
-    } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-
-    /* Unsupported. */
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-                n_tx, n_rx);
-        exit(1);
-    }
-
-    return 0;
-}
-
-/* AD9361 Delays */
-
-void udelay(unsigned long usecs)
-{
-    usleep(usecs);
-}
-
-void mdelay(unsigned long msecs)
-{
-    usleep(msecs * 1000);
-}
-
-unsigned long msleep_interruptible(unsigned int msecs)
-{
-    usleep(msecs * 1000);
-    return 0;
-}
-
-/* AD9361 GPIO */
-
-#define AD9361_GPIO_RESET_PIN 0
-
-bool gpio_is_valid(int number)
-{
-    switch(number) {
-       case AD9361_GPIO_RESET_PIN:
-           return true;
-       default:
-           return false;
-    }
-}
-
-void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 
 /***************************************************************************************************
  *                                     Constructor
@@ -331,8 +175,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path + " (" + m2sdr_strerror(rc) + ")");
     }
     _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
-    /* Global file descriptor for AD9361 lib. */
-    _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 #elif USE_LITEETH
@@ -353,7 +195,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             std::string(m2sdr_strerror(rc)) + ")");
     }
     _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_eb_handle(_dev));
-    _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 
@@ -499,75 +340,36 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("clock_source") > 0) {
         clock_source = args.at("clock_source");
     }
-    if (_rficName == "ad9361" && do_init) {
-
-        /* Initialize SI5351 Clocking */
-#ifdef CSR_SI5351_BASE
-        SoapySDR::log(SOAPY_SDR_INFO, "Initializing SI5351");
-        if (clock_source == "internal") {
-            /* SI5351B, XO reference */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-            if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_40m_config,
-                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
-            } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_38p4m_config,
-                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
-            }
-        } else {
-            /* SI5351C, external 10 MHz CLKIN from u.FL */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                  SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-                  SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-            if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
-            } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
-            }
-        }
-#endif
-
-        /* Power-up AD9361 */
-        SoapySDR::log(SOAPY_SDR_INFO, "Powering up AD9361");
-        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b11);
-
-        /* Initialize AD9361 SPI. */
-        SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 SPI");
-        m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
-    }
-
-    /* Initialize AD9361 RFIC. */
     if (_rficName == "ad9361") {
-        SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
-        default_init_param.reference_clk_rate = refclk_hz;
-        default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-        default_init_param.gpio_sync          = -1;
-        default_init_param.gpio_cal_sw1       = -1;
-        default_init_param.gpio_cal_sw2       = -1;
-        default_init_param.id_no = _spi_id;
-        int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
-        if (ad9361_rc != 0 || ad9361_phy == nullptr) {
-            throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
+        struct m2sdr_config cfg;
+        int rc;
+
+        SoapySDR::log(SOAPY_SDR_INFO, do_init ? "Initializing RFIC through libm2sdr" :
+                                            "Attaching to existing RFIC state through libm2sdr");
+
+        m2sdr_config_init(&cfg);
+        cfg.sample_rate       = 30720000;
+        cfg.bandwidth         = 30720000;
+        cfg.refclk_freq       = refclk_hz;
+        cfg.tx_freq           = 1000000;
+        cfg.rx_freq           = 1000000;
+        cfg.tx_gain           = -20;
+        cfg.rx_gain1          = 0;
+        cfg.rx_gain2          = 0;
+        cfg.enable_8bit_mode  = (_iqBits <= 8u);
+        cfg.enable_oversample = (_oversampling != 0);
+        cfg.bypass_rfic_init  = !do_init;
+        cfg.channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
+        cfg.clock_source      = (clock_source == "external") ? M2SDR_CLOCK_SOURCE_EXTERNAL
+                                                             : M2SDR_CLOCK_SOURCE_INTERNAL;
+
+        rc = m2sdr_apply_config(_dev, &cfg);
+        if (rc != 0) {
+            throw std::runtime_error("m2sdr_apply_config failed (" + std::string(m2sdr_strerror(rc)) + ")");
         }
-        m2sdr_rf_bind(_dev, ad9361_phy);
     }
 
     if (_rficName == "ad9361" && do_init) {
-        int prop_rc = m2sdr_set_property(_dev, "ad9361.oversampling", _oversampling ? "1" : "0");
-        if (prop_rc != 0) {
-            throw std::runtime_error("Failed to set AD9361 oversampling policy (" + std::string(m2sdr_strerror(prop_rc)) + ")");
-        }
-
-        /* Configure AD9361 TX/RX FIRs. */
-        SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
-
         /* Some defaults to avoid throwing. */
         SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
@@ -643,7 +445,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
-    spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
 #if USE_LITEPCIE
          /* Release the DMA engine. */
@@ -688,7 +489,6 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
 #endif
     if (_dev) {
-        m2sdr_rf_bind(_dev, nullptr);
         m2sdr_close(_dev);
         _dev = nullptr;
     }

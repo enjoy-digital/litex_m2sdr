@@ -19,9 +19,6 @@
 #include <cstdlib>
 #include <cmath>
 
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
-
 #include "LiteXM2SDRDevice.hpp"
 
 #if USE_LITEETH

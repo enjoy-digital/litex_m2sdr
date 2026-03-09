@@ -45,7 +45,10 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+- **Bypass RFIC init**: `bypass_init=1`
+  - Keeps the legacy Soapy escape hatch for attaching to an already-configured RFIC without rerunning the full `libm2sdr` bring-up sequence.
 - These AD9361-specific knobs are now routed through the libm2sdr RFIC backend property layer, so Soapy no longer owns the FIR/AGC runtime logic directly.
+- Initial AD9361 bring-up is now also routed through `m2sdr_apply_config()`, so the Soapy module no longer embeds its own AD9361 platform/init path.
 - **Active RFIC backend** is exposed as the discovered `rfic` field in Soapy probe results.
 - Non-AD9361 backends can be opened for generic probe/control paths, but Soapy streaming remains implemented only for the AD9361 backend today.
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
