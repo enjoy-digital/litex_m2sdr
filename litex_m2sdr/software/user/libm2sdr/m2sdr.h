@@ -166,7 +166,7 @@ struct m2sdr_capabilities {
 };
 
 struct m2sdr_clock_info {
-    /* AD9361 reference clock frequency in Hz. */
+    /* Active RFIC reference clock frequency in Hz. */
     uint64_t refclk_hz;
     /* System clock frequency in Hz when available. */
     uint64_t sysclk_hz;
@@ -285,7 +285,7 @@ struct m2sdr_config {
     int64_t sample_rate;
     /* Common TX/RX RF bandwidth in Hz. */
     int64_t bandwidth;
-    /* AD9361 reference clock in Hz. */
+    /* Active RFIC reference clock in Hz. */
     int64_t refclk_freq;
     /* TX LO in Hz. */
     int64_t tx_freq;
@@ -413,16 +413,17 @@ int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *se
 void m2sdr_config_init(struct m2sdr_config *cfg);
 /* Apply a full RF configuration to the currently-open device.
  *
- * This performs the same high-level bring-up sequence as `m2sdr_rf`: SI5351
- * clock selection, AD9361 SPI/RF init, channel layout, rates, gains, loopback,
- * and optional BIST modes.
+ * This performs the same high-level bring-up sequence as `m2sdr_rf`: board
+ * clock selection, RFIC init, channel layout, rates, gains, loopback, and
+ * optional BIST modes when supported by the active backend.
  */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
 
 /* Direction-based RF setters.
  *
- * These assume the AD9361 has already been initialized either through
- * `m2sdr_apply_config()` or an advanced integration path such as Soapy.
+ * These assume the active RFIC backend has already been initialized either
+ * through `m2sdr_apply_config()` or an advanced integration path such as
+ * Soapy.
  */
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
 int  m2sdr_get_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t *freq);
@@ -437,8 +438,9 @@ int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
 int  m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain);
-/* Advanced integration hook used by the SoapySDR driver. */
-int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
+/* Advanced integration hook used by transitional integrations that still need
+ * to attach an externally-created RFIC handle to the active backend. */
+int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *rfic_handle);
 
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.

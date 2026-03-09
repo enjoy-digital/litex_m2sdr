@@ -218,10 +218,12 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 
 ### Symbol collisions with other SDR drivers
 
-If you use multiple SDR drivers that embed their own AD9361 stacks (for example, BladeRF),
-symbol collisions can cause crashes or misbehavior. This build links AD9361 into libm2sdr
-and binds symbols inside the Soapy module to avoid cross-driver resolution. If you build
-custom modules, ensure they do not export or override AD9361 symbols used by LiteX-M2SDR.
+If you use multiple SDR drivers that embed their own RFIC vendor stacks
+(for example, AD9361-based drivers), symbol collisions can cause crashes or
+misbehavior. This build links the current RFIC support stack into libm2sdr and
+binds symbols inside the Soapy module to avoid cross-driver resolution. If you
+build custom modules, ensure they do not export or override RFIC support
+symbols used by LiteX-M2SDR.
 
 ### SoapyRemote socket buffer warnings
 
