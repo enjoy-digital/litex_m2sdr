@@ -304,7 +304,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
     if (!dev || !samples)
         return M2SDR_ERR_INVAL;
     if (!dev->rx_configured)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
     /* Clear metadata once up-front so timestamps survive a successful read. */
     if (meta)
         memset(meta, 0, sizeof(*meta));
@@ -377,7 +377,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     if (!dev || !samples)
         return M2SDR_ERR_INVAL;
     if (!dev->tx_configured)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     unsigned sample_sz = m2sdr_sample_size(dev->tx_format);
     unsigned total_bytes = num_samples * sample_sz;
@@ -450,7 +450,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
 
     if (direction == M2SDR_RX) {
         if (!dev->rx_configured)
-            return M2SDR_ERR_UNEXPECTED;
+            return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->rx_format);
         if (dev->rx_header_enable && dev->rx_strip_header) {
             payload_off = M2SDR_DMA_HEADER_SIZE;
@@ -458,7 +458,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         }
     } else {
         if (!dev->tx_configured)
-            return M2SDR_ERR_UNEXPECTED;
+            return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->tx_format);
         if (dev->tx_header_enable) {
             payload_off = M2SDR_DMA_HEADER_SIZE;

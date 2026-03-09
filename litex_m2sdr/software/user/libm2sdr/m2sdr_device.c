@@ -36,6 +36,9 @@ static const char *m2sdr_err_str(int err)
     case M2SDR_ERR_TIMEOUT:     return "timeout";
     case M2SDR_ERR_NO_MEM:      return "no_mem";
     case M2SDR_ERR_UNSUPPORTED: return "unsupported";
+    case M2SDR_ERR_PARSE:       return "parse";
+    case M2SDR_ERR_RANGE:       return "range";
+    case M2SDR_ERR_STATE:       return "state";
     default:                    return "unknown";
     }
 }
@@ -262,7 +265,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         if (m2sdr_parse_identifier(device_identifier, path, sizeof(path),
                                    ip_dummy, sizeof(ip_dummy), &port_dummy) != 0) {
             free(dev);
-            return M2SDR_ERR_INVAL;
+            return M2SDR_ERR_PARSE;
         }
 
         if (path[0] == '\0')
@@ -290,7 +293,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         if (m2sdr_parse_identifier(device_identifier, path_dummy, sizeof(path_dummy),
                                    ip, sizeof(ip), &port) != 0) {
             free(dev);
-            return M2SDR_ERR_INVAL;
+            return M2SDR_ERR_PARSE;
         }
 
         if (ip[0] == '\0')

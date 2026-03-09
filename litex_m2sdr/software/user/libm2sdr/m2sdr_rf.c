@@ -104,19 +104,19 @@ static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
         return M2SDR_ERR_INVAL;
 
     if (cfg->sample_rate <= 0 || cfg->sample_rate > UINT32_MAX)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->bandwidth <= 0 || cfg->bandwidth > UINT32_MAX)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->refclk_freq <= 0 || cfg->refclk_freq > UINT32_MAX)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->tx_freq <= 0 || cfg->rx_freq <= 0)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->tx_gain < M2SDR_TX_GAIN_MIN_DB || cfg->tx_gain > M2SDR_TX_GAIN_MAX_DB)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->rx_gain1 < M2SDR_RX_GAIN_MIN_DB || cfg->rx_gain1 > M2SDR_RX_GAIN_MAX_DB)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (cfg->rx_gain2 < M2SDR_RX_GAIN_MIN_DB || cfg->rx_gain2 > M2SDR_RX_GAIN_MAX_DB)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
 
     return M2SDR_ERR_OK;
 }
@@ -487,7 +487,7 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
         return M2SDR_ERR_OK;
 
     if (dev->ad9361_phy && phy && dev->ad9361_phy != (struct ad9361_rf_phy *)phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     dev->ad9361_phy = (struct ad9361_rf_phy *)phy;
     if (phy)
@@ -511,7 +511,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     /* AD9361 init allocates opaque driver state with no public teardown API.
      * Refuse implicit re-init on the same device to avoid leaking that state. */
     if (dev->ad9361_phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
     rc = m2sdr_validate_config_values(cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
@@ -549,7 +549,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
         return M2SDR_ERR_IO;
     phy = m2sdr_current_phy(dev);
     if (!phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     rc = m2sdr_configure_samplerate(phy, cfg);
     if (rc != M2SDR_ERR_OK)
@@ -598,7 +598,7 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
         return M2SDR_ERR_INVAL;
     phy = m2sdr_current_phy(dev);
     if (!phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     if (direction == M2SDR_TX) {
         if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
@@ -619,12 +619,12 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (rate <= 0 || rate > UINT32_MAX)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
     phy = m2sdr_current_phy(dev);
     if (!phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -641,12 +641,12 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (bw <= 0 || bw > UINT32_MAX)
-        return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_RANGE;
     if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
     phy = m2sdr_current_phy(dev);
     if (!phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -668,16 +668,16 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
         return M2SDR_ERR_INVAL;
     phy = m2sdr_current_phy(dev);
     if (!phy)
-        return M2SDR_ERR_UNEXPECTED;
+        return M2SDR_ERR_STATE;
 
     if (direction == M2SDR_TX) {
         if (gain < M2SDR_TX_GAIN_MIN_DB || gain > M2SDR_TX_GAIN_MAX_DB)
-            return M2SDR_ERR_INVAL;
+            return M2SDR_ERR_RANGE;
         if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     } else {
         if (gain < M2SDR_RX_GAIN_MIN_DB || gain > M2SDR_RX_GAIN_MAX_DB)
-            return M2SDR_ERR_INVAL;
+            return M2SDR_ERR_RANGE;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, gain)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, gain)) != M2SDR_ERR_OK)

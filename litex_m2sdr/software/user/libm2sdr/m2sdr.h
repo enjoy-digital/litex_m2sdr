@@ -41,6 +41,9 @@ enum m2sdr_error {
     M2SDR_ERR_TIMEOUT    = -4,
     M2SDR_ERR_NO_MEM     = -5,
     M2SDR_ERR_UNSUPPORTED= -6,
+    M2SDR_ERR_PARSE      = -7,
+    M2SDR_ERR_RANGE      = -8,
+    M2SDR_ERR_STATE      = -9,
 };
 
 /* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
