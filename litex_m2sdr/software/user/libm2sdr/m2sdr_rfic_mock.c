@@ -224,6 +224,12 @@ static int m2sdr_rfic_mock_get_caps(struct m2sdr_dev *dev, void *ctx_void, struc
     caps->kind = M2SDR_RFIC_KIND_MOCK;
     snprintf(caps->name, sizeof(caps->name), "mock");
     caps->features = 0;
+    caps->rx_channels = 2u;
+    caps->tx_channels = 2u;
+    caps->min_rx_frequency = 30000000LL;
+    caps->max_rx_frequency = 6000000000LL;
+    caps->min_tx_frequency = 30000000LL;
+    caps->max_tx_frequency = 6000000000LL;
     caps->min_sample_rate = 1;
     caps->max_sample_rate = 245760000;
     caps->min_bandwidth = 1;

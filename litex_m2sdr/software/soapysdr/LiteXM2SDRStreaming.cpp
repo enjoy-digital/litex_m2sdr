@@ -28,6 +28,7 @@
 extern "C" int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
                                                      size_t rx_count, const size_t *rx_channels,
                                                      size_t tx_count, const size_t *tx_channels);
+extern "C" int m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);
 
 /* Parse Soapy-style "channels" argument: "0", "1", "0,1", "[0,1]", "0 1". */
 static std::vector<size_t> parse_channel_list(const std::string &channels_str)
@@ -109,7 +110,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const SoapySDR::Kwargs &args) {
     std::lock_guard<std::mutex> lock(_mutex);
 
-    if (_rficName != "ad9361") {
+    struct m2sdr_rfic_caps caps;
+
+    if (m2sdr_get_rfic_caps(_dev, &caps) != 0 ||
+        (caps.features & M2SDR_RFIC_FEATURE_STREAMING) == 0) {
         throw std::runtime_error(
             "Streaming is not implemented for RFIC backend '" + _rficName + "' in Soapy yet");
     }

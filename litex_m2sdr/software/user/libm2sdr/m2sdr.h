@@ -90,6 +90,7 @@ enum m2sdr_rfic_feature_flag {
     M2SDR_RFIC_FEATURE_BIND_EXTERNAL = (1u << 0),
     M2SDR_RFIC_FEATURE_BIST          = (1u << 1),
     M2SDR_RFIC_FEATURE_OVERSAMPLE    = (1u << 2),
+    M2SDR_RFIC_FEATURE_STREAMING     = (1u << 3),
 };
 
 /* Backward-compatible alias for older code. */
@@ -173,6 +174,12 @@ struct m2sdr_rfic_caps {
     enum m2sdr_rfic_kind kind;
     char name[32];
     uint32_t features;
+    uint8_t rx_channels;
+    uint8_t tx_channels;
+    int64_t min_rx_frequency;
+    int64_t max_rx_frequency;
+    int64_t min_tx_frequency;
+    int64_t max_tx_frequency;
     int64_t min_sample_rate;
     int64_t max_sample_rate;
     int64_t min_bandwidth;

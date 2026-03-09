@@ -174,6 +174,7 @@ Use `m2sdr_strerror()` for concise error text in logs.
 
 - Active backend can be queried with `m2sdr_get_rfic_name()`.
 - Backend ranges/features can be queried with `m2sdr_get_rfic_caps()`.
+  - Caps now include channel counts, LO frequency ranges, sample-rate ranges, bandwidth ranges, gain ranges, IQ bit support, and feature flags such as streaming support.
 - Backend-specific controls use namespaced string properties via
   `m2sdr_set_property()` / `m2sdr_get_property()`.
   - AD9361 currently exposes runtime policy/state through:

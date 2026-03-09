@@ -575,6 +575,10 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 ***************************************************************************************************/
 
 size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps))
+        return std::max<size_t>(caps.rx_channels, caps.tx_channels);
     return 2;
 }
 
@@ -1000,14 +1004,21 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
     const int direction,
     const size_t /*channel*/,
     const std::string &name) const {
+    struct m2sdr_rfic_caps caps;
 
     if (name == "BB") {
         return(SoapySDR::RangeList(1, SoapySDR::Range(0, 0)));
     }
 
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        if (direction == SOAPY_SDR_TX)
+            return SoapySDR::RangeList(1, SoapySDR::Range((double)caps.min_tx_frequency, (double)caps.max_tx_frequency));
+        if (direction == SOAPY_SDR_RX)
+            return SoapySDR::RangeList(1, SoapySDR::Range((double)caps.min_rx_frequency, (double)caps.max_rx_frequency));
+    }
+
     if (direction == SOAPY_SDR_TX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(47000000, 6000000000ull)));
-
     if (direction == SOAPY_SDR_RX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
 
@@ -1155,7 +1166,9 @@ double SoapyLiteXM2SDR::getSampleRate(
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     const int /*direction*/,
     const size_t /*channel*/) const {
+    struct m2sdr_rfic_caps caps;
     std::vector<double> sampleRates;
+    std::vector<double> filtered;
 
     /* Standard SampleRates */
     sampleRates.push_back(1.0e6);     /*      1 MSPS. */
@@ -1173,6 +1186,19 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     sampleRates.push_back(30.72e6);   /* 30.72 MSPS (LTE 20 MHz BW).  */
     sampleRates.push_back(61.44e6);   /* 61.44 MSPS (LTE 40 MHz BW via 2x 20 MHz CA, 5G NR 50 MHz BW). */
     sampleRates.push_back(122.88e6);  /* 122.88 MSPS (LTE 80 MHz BW via 4x 20 MHz CA, 5G NR 100 MHz BW). */
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        for (double rate : sampleRates) {
+            if (rate >= (double)caps.min_sample_rate && rate <= (double)caps.max_sample_rate)
+                filtered.push_back(rate);
+        }
+        if (!filtered.empty())
+            return filtered;
+        filtered.push_back((double)caps.min_sample_rate);
+        if (caps.max_sample_rate != caps.min_sample_rate)
+            filtered.push_back((double)caps.max_sample_rate);
+        return filtered;
+    }
 
     /* Return supported SampleRates */
     return sampleRates;

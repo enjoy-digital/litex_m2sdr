@@ -1085,7 +1085,14 @@ static int m2sdr_rfic_ad9361_get_caps(struct m2sdr_dev *dev, void *ctx, struct m
     snprintf(caps->name, sizeof(caps->name), "ad9361");
     caps->features = M2SDR_RFIC_FEATURE_BIND_EXTERNAL |
                      M2SDR_RFIC_FEATURE_BIST |
-                     M2SDR_RFIC_FEATURE_OVERSAMPLE;
+                     M2SDR_RFIC_FEATURE_OVERSAMPLE |
+                     M2SDR_RFIC_FEATURE_STREAMING;
+    caps->rx_channels = 2u;
+    caps->tx_channels = 2u;
+    caps->min_rx_frequency = 70000000LL;
+    caps->max_rx_frequency = 6000000000LL;
+    caps->min_tx_frequency = 47000000LL;
+    caps->max_tx_frequency = 6000000000LL;
     caps->min_sample_rate = 1;
     caps->max_sample_rate = UINT32_MAX;
     caps->min_bandwidth   = 1;

@@ -50,6 +50,7 @@ You can pass device arguments to configure the driver. These are most useful whe
 - These AD9361-specific knobs are now routed through the libm2sdr RFIC backend property layer, so Soapy no longer owns the FIR/AGC runtime logic directly.
 - Initial AD9361 bring-up is now also routed through `m2sdr_apply_config()`, so the Soapy module no longer embeds its own AD9361 platform/init path.
 - **Active RFIC backend** is exposed as the discovered `rfic` field in Soapy probe results.
+- Soapy channel count, LO ranges, sample-rate ranges, and stream eligibility now come from `libm2sdr` RFIC capabilities instead of AD9361-only constants.
 - Non-AD9361 backends can be opened for generic probe/control paths, but Soapy streaming remains implemented only for the AD9361 backend today.
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.

@@ -120,6 +120,12 @@ static int test_rfic_helpers(void)
         return -1;
     if ((caps.features & M2SDR_RFIC_FEATURE_BIND_EXTERNAL) == 0)
         return -1;
+    if ((caps.features & M2SDR_RFIC_FEATURE_STREAMING) == 0)
+        return -1;
+    if (caps.rx_channels != 2u || caps.tx_channels != 2u)
+        return -1;
+    if (caps.min_rx_frequency != 70000000LL || caps.max_tx_frequency != 6000000000LL)
+        return -1;
     if (caps.native_iq_bits != 12u)
         return -1;
     if ((caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(8)) == 0)
@@ -185,6 +191,10 @@ static int test_mock_backend(void)
     if (m2sdr_get_rfic_caps(&dev, &caps) != M2SDR_ERR_OK)
         return -1;
     if (caps.kind != M2SDR_RFIC_KIND_MOCK)
+        return -1;
+    if ((caps.features & M2SDR_RFIC_FEATURE_STREAMING) != 0)
+        return -1;
+    if (caps.rx_channels != 2u || caps.tx_channels != 2u)
         return -1;
     if (caps.native_iq_bits != 16u)
         return -1;
