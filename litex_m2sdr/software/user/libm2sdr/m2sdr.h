@@ -411,6 +411,13 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  * until the next acquire on the same stream; TX buffers must be submitted with
  * m2sdr_submit_buffer(). Passing timeout_ms=0 uses the timeout configured by
  * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ *
+ * DMA header layout (when enabled):
+ * - Total size: 16 bytes.
+ * - Bytes [0..7]: sync word 0x5aa55aa55aa55aa5.
+ * - Bytes [8..15]: timestamp in nanoseconds.
+ * - Endianness: values are encoded/decoded in native little-endian byte order
+ *   as used by current host/FPGA flows.
  */
 int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      enum m2sdr_direction direction,
