@@ -440,12 +440,41 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
     return M2SDR_ERR_OK;
 }
 
+/* Apply the cached RX gain-control modes before pushing explicit RX gains. */
+static int m2sdr_configure_gain_modes(struct m2sdr_rfic_ad9361_ctx *ad9361,
+                                      struct ad9361_rf_phy *phy)
+{
+    unsigned channel;
+
+    if (!ad9361 || !phy)
+        return M2SDR_ERR_INVAL;
+
+    for (channel = 0; channel < 2; channel++) {
+        const char *mode = ad9361->rx_gain_mode[channel];
+
+        if (!mode[0])
+            mode = "manual";
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(
+                phy, channel, m2sdr_ad9361_gain_mode_to_api(mode))) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    }
+
+    return M2SDR_ERR_OK;
+}
+
 /* Apply TX attenuation and per-channel RX gains. */
-static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
+static int m2sdr_configure_gains(struct m2sdr_rfic_ad9361_ctx *ad9361,
+                                 struct ad9361_rf_phy *phy,
+                                 const struct m2sdr_config *cfg)
 {
     int tx_rc;
     int rx0_rc;
     int rx1_rc;
+    int rc;
+
+    rc = m2sdr_configure_gain_modes(ad9361, phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     M2SDR_LOGF("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
     tx_rc = ad9361_set_tx_atten(phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1);
@@ -692,7 +721,7 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    rc = m2sdr_configure_gains(phy, cfg);
+    rc = m2sdr_configure_gains(ad9361, phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
     rc = m2sdr_configure_modes(dev, phy, cfg);
