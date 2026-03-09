@@ -98,6 +98,23 @@ static struct ad9361_rf_phy *m2sdr_current_phy(struct m2sdr_dev *dev)
     return dev ? dev->ad9361_phy : NULL;
 }
 
+static int m2sdr_require_phy(struct m2sdr_dev *dev, struct ad9361_rf_phy **phy_out)
+{
+    struct ad9361_rf_phy *phy;
+
+    if (!dev || !phy_out)
+        return M2SDR_ERR_INVAL;
+    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+
+    phy = m2sdr_current_phy(dev);
+    if (!phy)
+        return M2SDR_ERR_STATE;
+
+    *phy_out = phy;
+    return M2SDR_ERR_OK;
+}
+
 static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
 {
     if (!cfg)
@@ -588,17 +605,16 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq)
 {
     struct ad9361_rf_phy *phy;
+    int rc;
 
     if (!dev || freq == 0)
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_TX && direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
 
-    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
-        return M2SDR_ERR_INVAL;
-    phy = m2sdr_current_phy(dev);
-    if (!phy)
-        return M2SDR_ERR_STATE;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     if (direction == M2SDR_TX) {
         if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
@@ -615,16 +631,15 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
     struct ad9361_rf_phy *phy;
+    int rc;
 
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (rate <= 0 || rate > UINT32_MAX)
         return M2SDR_ERR_RANGE;
-    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
-        return M2SDR_ERR_INVAL;
-    phy = m2sdr_current_phy(dev);
-    if (!phy)
-        return M2SDR_ERR_STATE;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -637,16 +652,15 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
 {
     struct ad9361_rf_phy *phy;
+    int rc;
 
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (bw <= 0 || bw > UINT32_MAX)
         return M2SDR_ERR_RANGE;
-    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
-        return M2SDR_ERR_INVAL;
-    phy = m2sdr_current_phy(dev);
-    if (!phy)
-        return M2SDR_ERR_STATE;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -659,16 +673,15 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
 int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain)
 {
     struct ad9361_rf_phy *phy;
+    int rc;
 
     if (!dev)
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_TX && direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
-    if (m2sdr_select_rf_dev(dev) != M2SDR_ERR_OK)
-        return M2SDR_ERR_INVAL;
-    phy = m2sdr_current_phy(dev);
-    if (!phy)
-        return M2SDR_ERR_STATE;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     if (direction == M2SDR_TX) {
         if (gain < M2SDR_TX_GAIN_MIN_DB || gain > M2SDR_TX_GAIN_MAX_DB)
