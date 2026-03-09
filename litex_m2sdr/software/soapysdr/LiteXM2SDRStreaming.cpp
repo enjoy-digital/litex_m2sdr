@@ -108,6 +108,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const SoapySDR::Kwargs &args) {
     std::lock_guard<std::mutex> lock(_mutex);
 
+    if (_rficName != "ad9361") {
+        throw std::runtime_error(
+            "Streaming is not implemented for RFIC backend '" + _rficName + "' in Soapy yet");
+    }
+
     SoapySDR::Kwargs searchArgs = args;
     if (searchArgs.empty())
         searchArgs = _deviceArgs;

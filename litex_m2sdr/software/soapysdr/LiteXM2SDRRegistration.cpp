@@ -59,6 +59,14 @@ std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev) {
     return std::string(serial);
 }
 
+std::string getLiteXM2SDRRficNameForRegistration(struct m2sdr_dev *dev)
+{
+    char name[32] = {0};
+    if (m2sdr_get_rfic_name(dev, name, sizeof(name)) != 0 || name[0] == '\0')
+        return "unknown";
+    return std::string(name);
+}
+
 std::string generateDeviceLabel(
     const SoapySDR::Kwargs &dev,
     const std::string &path) {
@@ -78,6 +86,7 @@ SoapySDR::Kwargs createDeviceKwargs(
         {"path",           path},
         {"serial",         getLiteXM2SDRSerial(m2sdr_dev)},
         {"identification", getLiteXM2SDRIdentification(m2sdr_dev)},
+        {"rfic",           getLiteXM2SDRRficNameForRegistration(m2sdr_dev)},
         {"version",        "1234"},
         {"label",          ""},
         {"oversampling",   "0"},
