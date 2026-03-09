@@ -19,13 +19,17 @@ The user-space code is intentionally layered:
 - `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr`.
 - `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
+- RFIC handling is now split behind an internal backend interface (`ad9361`
+  backend currently), so transport/streaming code stays reusable when adding
+  other RFICs.
 
 If you want to understand or extend the host stack, start with:
 
 - `libm2sdr/m2sdr.h` for the public API surface.
 - `libm2sdr/m2sdr_device.c` for open/close, capability, and register access.
 - `libm2sdr/m2sdr_stream.c` for sync streaming and metadata/header handling.
-- `libm2sdr/m2sdr_rf.c` for RF configuration helpers built around the AD9361 code.
+- `libm2sdr/m2sdr_rf.c` for the generic RF API dispatch layer.
+- `libm2sdr/m2sdr_rfic_*.c` for RFIC backend implementations (currently AD9361).
 
 For application development, prefer starting from `../../doc/libm2sdr/example_sync_rx.c`, `../../doc/libm2sdr/example_sync_tx.c`, or the higher-level wrappers below rather than adding new direct CSR access.
 

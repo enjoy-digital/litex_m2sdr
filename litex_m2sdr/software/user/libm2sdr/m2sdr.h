@@ -348,6 +348,13 @@ int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_eb_handle(struct m2sdr_dev *dev);
 int  m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transport);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
+/* RFIC backend discovery and extension hooks.
+ *
+ * `m2sdr_get_rfic_name()` and `m2sdr_get_rfic_caps()` expose the currently
+ * selected RFIC backend.
+ * `m2sdr_set_property()` / `m2sdr_get_property()` use namespaced keys
+ * (for example `ad9361.*`) for backend-specific controls.
+ */
 int  m2sdr_get_rfic_name(struct m2sdr_dev *dev, char *buf, size_t len);
 int  m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);
 int  m2sdr_set_property(struct m2sdr_dev *dev, const char *key, const char *value);

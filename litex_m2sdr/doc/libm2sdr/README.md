@@ -3,6 +3,8 @@
 This directory documents the public C API for LiteX-M2SDR. The API is intentionally close to BladeRF's sync interface so C users can configure a device and stream samples without touching the CLI utilities.
 
 `libm2sdr` is now the primary low-level host interface for the project. The CLI utilities and the SoapySDR module both build on top of it.
+The RF path is internally backend-based (`ad9361` today), so future RFIC
+targets can reuse transport/stream/time code and swap only the RFIC module.
 
 ## Build
 
@@ -147,6 +149,7 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
 - Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
+- RFIC discovery/extension: `m2sdr_get_rfic_name`, `m2sdr_get_rfic_caps`, `m2sdr_set_property`, `m2sdr_get_property`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`
@@ -165,6 +168,14 @@ uses:
 - `M2SDR_ERR_STATE` for invalid call sequencing (for example, streaming before configuration).
 
 Use `m2sdr_strerror()` for concise error text in logs.
+
+## RFIC backends
+
+- Active backend can be queried with `m2sdr_get_rfic_name()`.
+- Backend ranges/features can be queried with `m2sdr_get_rfic_caps()`.
+- Backend-specific controls use namespaced string properties via
+  `m2sdr_set_property()` / `m2sdr_get_property()`.
+- Environment override: set `M2SDR_RFIC=ad9361` to force backend selection.
 
 ## Library versioning
 
