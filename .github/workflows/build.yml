@@ -12,9 +12,19 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
+          sudo apt-get install -y cmake cppcheck libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
       - name: Build user (PCIe)
         run: make -C litex_m2sdr/software/user clean all
+      - name: Run libm2sdr unit checks (PCIe)
+        run: make -C litex_m2sdr/software/user test-libm2sdr
+      - name: Build libm2sdr with ASan/UBSan
+        run: |
+          make -C litex_m2sdr/software/user clean \
+            libm2sdr/libm2sdr.a test-libm2sdr \
+            EXTRA_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
+            EXTRA_LDFLAGS="-fsanitize=address,undefined"
+      - name: Run cppcheck on libm2sdr
+        run: make -C litex_m2sdr/software/user analyze-libm2sdr
       - name: Build examples (PCIe)
         run: make -C litex_m2sdr/software/user examples
       - name: Build Soapy (PCIe)

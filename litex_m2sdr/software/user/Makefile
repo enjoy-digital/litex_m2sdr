@@ -4,11 +4,13 @@ SCAN_CIMGUI_DIR := $(SCAN_UI_DIR)/cimgui
 
 CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
+CFLAGS += $(EXTRA_CFLAGS)
 CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
 LDFLAGS = -g
+LDFLAGS += $(EXTRA_LDFLAGS)
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
@@ -62,6 +64,11 @@ test-libm2sdr: $(TEST_PROGS)
 
 test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
 	$(CC) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+
+analyze-libm2sdr:
+	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
+		-I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 \
+		libm2sdr
 
 ../../doc/libm2sdr/example_sync_rx: ../../doc/libm2sdr/example_sync_rx.c libm2sdr/libm2sdr.a
 	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
