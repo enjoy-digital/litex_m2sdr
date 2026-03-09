@@ -35,7 +35,7 @@
 #define M2SDR_RX_GAIN_MAX_DB  76
 
 #ifndef M2SDR_LOG_ENABLED
-#define M2SDR_LOG_ENABLED 0
+#define M2SDR_LOG_ENABLED 1
 #endif
 
 #if M2SDR_LOG_ENABLED
