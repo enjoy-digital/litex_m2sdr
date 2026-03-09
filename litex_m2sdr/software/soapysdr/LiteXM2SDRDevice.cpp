@@ -79,17 +79,31 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
     return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
 
+std::string normalize_antenna_name(const std::string &rfic_name, int direction, const std::string &name)
+{
+    /* GUI clients such as Gqrx often persist generic "RX"/"TX" antenna names.
+     * Accept those aliases on AD9361 as well so reopening an existing session
+     * does not fail just because the backend now exposes a more specific name. */
+    if (rfic_name == "ad9361") {
+        if (direction == SOAPY_SDR_RX && name == "RX")
+            return "A_BALANCED";
+        if (direction == SOAPY_SDR_TX && name == "TX")
+            return "A";
+    }
+    return name;
+}
+
 std::vector<std::string> default_rx_antennas_for_backend(const std::string &rfic_name)
 {
     if (rfic_name == "ad9361")
-        return {"A_BALANCED"};
+        return {"A_BALANCED", "RX"};
     return {"RX"};
 }
 
 std::vector<std::string> default_tx_antennas_for_backend(const std::string &rfic_name)
 {
     if (rfic_name == "ad9361")
-        return {"A"};
+        return {"A", "TX"};
     return {"TX"};
 }
 } // namespace
@@ -430,13 +444,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     if (args.count("rx_antenna0") > 0)
-        _rx_stream.antenna[0] = args.at("rx_antenna0");
+        _rx_stream.antenna[0] = normalize_antenna_name(_rficName, SOAPY_SDR_RX, args.at("rx_antenna0"));
     if (args.count("rx_antenna1") > 0)
-        _rx_stream.antenna[1] = args.at("rx_antenna1");
+        _rx_stream.antenna[1] = normalize_antenna_name(_rficName, SOAPY_SDR_RX, args.at("rx_antenna1"));
     if (args.count("tx_antenna0") > 0)
-        _tx_stream.antenna[0] = args.at("tx_antenna0");
+        _tx_stream.antenna[0] = normalize_antenna_name(_rficName, SOAPY_SDR_TX, args.at("tx_antenna0"));
     if (args.count("tx_antenna1") > 0)
-        _tx_stream.antenna[1] = args.at("tx_antenna1");
+        _tx_stream.antenna[1] = normalize_antenna_name(_rficName, SOAPY_SDR_TX, args.at("tx_antenna1"));
 
     if (!antenna_allowed(_rx_antennas, _rx_stream.antenna[0]) ||
         !antenna_allowed(_rx_antennas, _rx_stream.antenna[1])) {
@@ -632,15 +646,16 @@ void SoapyLiteXM2SDR::setAntenna(
     const size_t channel,
     const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
+    const std::string canonical = normalize_antenna_name(_rficName, direction, name);
     if (direction == SOAPY_SDR_RX) {
-        if (!antenna_allowed(_rx_antennas, name))
+        if (!antenna_allowed(_rx_antennas, canonical))
             throw std::runtime_error("Unsupported RX antenna: " + name);
-        _rx_stream.antenna[channel] = name;
+        _rx_stream.antenna[channel] = canonical;
     }
     if (direction == SOAPY_SDR_TX) {
-        if (!antenna_allowed(_tx_antennas, name))
+        if (!antenna_allowed(_tx_antennas, canonical))
             throw std::runtime_error("Unsupported TX antenna: " + name);
-        _tx_stream.antenna[channel] = name;
+        _tx_stream.antenna[channel] = canonical;
     }
 }
 
