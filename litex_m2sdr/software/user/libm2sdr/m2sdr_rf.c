@@ -34,6 +34,16 @@
 #define M2SDR_RX_GAIN_MIN_DB   0
 #define M2SDR_RX_GAIN_MAX_DB  76
 
+#ifndef M2SDR_LOG_ENABLED
+#define M2SDR_LOG_ENABLED 0
+#endif
+
+#if M2SDR_LOG_ENABLED
+#define M2SDR_LOGF(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
+#else
+#define M2SDR_LOGF(...) do {} while (0)
+#endif
+
 #if defined(__GNUC__) || defined(__clang__)
 #define M2SDR_WEAK __attribute__((weak))
 #else
@@ -170,7 +180,7 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) {
         /* The AD9361 init structure and the FPGA-side PHY control CSR must be
          * kept in sync or the datapath framing becomes inconsistent. */
-        printf("Setting Channel Mode to 1T1R.\n");
+        M2SDR_LOGF("Setting Channel Mode to 1T1R.\n");
         default_init_param.two_rx_two_tx_mode_enable     = 0;
         default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
@@ -180,7 +190,7 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
     }
 
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R) {
-        printf("Setting Channel Mode to 2T2R.\n");
+        M2SDR_LOGF("Setting Channel Mode to 2T2R.\n");
         default_init_param.two_rx_two_tx_mode_enable     = 1;
         default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
         default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
@@ -199,12 +209,12 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                                      enum m2sdr_clock_source clock_source)
 {
 #ifdef CSR_SI5351_BASE
-    printf("Initializing SI5351 Clocking...\n");
+    M2SDR_LOGF("Initializing SI5351 Clocking...\n");
 
     if (clock_source == M2SDR_CLOCK_SOURCE_INTERNAL) {
         /* The table selection is driven only by the requested AD9361 refclk.
          * The SI5351 profile itself encodes the rest of the clock tree. */
-        printf("Using internal XO as SI5351 CLKIN source...\n");
+        M2SDR_LOGF("Using internal XO as SI5351 CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)) != 0)
             return M2SDR_ERR_IO;
@@ -219,7 +229,7 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                 sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]));
         }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_EXTERNAL) {
-        printf("Using external 10MHz as SI5351 CLKIN source...\n");
+        M2SDR_LOGF("Using external 10MHz as SI5351 CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)) != 0)
@@ -250,7 +260,7 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2
 {
     uint32_t actual_samplerate = cfg->sample_rate;
 
-    printf("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
+    M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
 
     if (cfg->enable_oversample)
         actual_samplerate /= 2;
@@ -261,7 +271,7 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2
         AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
         AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
 
-        printf("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
+        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
         phy->rx_fir_dec    = 4;
         phy->tx_fir_int    = 4;
         phy->bypass_rx_fir = 0;
@@ -290,7 +300,7 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2
 /* Apply a common RF bandwidth to both RX and TX paths. */
 static int m2sdr_configure_bandwidth(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
-    printf("Setting TX/RX Bandwidth to %f MHz.\n", cfg->bandwidth / 1e6);
+    M2SDR_LOGF("Setting TX/RX Bandwidth to %f MHz.\n", cfg->bandwidth / 1e6);
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_bandwidth(phy, cfg->bandwidth)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, cfg->bandwidth)) != M2SDR_ERR_OK)
@@ -301,8 +311,8 @@ static int m2sdr_configure_bandwidth(struct ad9361_rf_phy *phy, const struct m2s
 /* Program the TX and RX local oscillator frequencies. */
 static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
-    printf("Setting TX LO Freq to %f MHz.\n", cfg->tx_freq / 1e6);
-    printf("Setting RX LO Freq to %f MHz.\n", cfg->rx_freq / 1e6);
+    M2SDR_LOGF("Setting TX LO Freq to %f MHz.\n", cfg->tx_freq / 1e6);
+    M2SDR_LOGF("Setting RX LO Freq to %f MHz.\n", cfg->rx_freq / 1e6);
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_lo_freq(phy, cfg->tx_freq)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(phy, cfg->rx_freq)) != M2SDR_ERR_OK)
@@ -313,11 +323,11 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
 /* Apply TX attenuation and per-channel RX gains. */
 static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
-    printf("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
+    M2SDR_LOGF("Setting TX Gain to %ld dB.\n", (long)cfg->tx_gain);
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-cfg->tx_gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
-    printf("Setting RX Gain to %ld dB and %ld dB.\n",
+    M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
            (long)cfg->rx_gain1, (long)cfg->rx_gain2);
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -329,16 +339,16 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_c
 /* Configure the FPGA-side bit mode and AD9361 internal loopback controls. */
 static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
-    printf("Setting Loopback to %d\n", cfg->loopback);
+    M2SDR_LOGF("Setting Loopback to %d\n", cfg->loopback);
     if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, cfg->loopback)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     /* Bit mode is implemented in the FPGA-side AD9361 wrapper rather than in
      * the AD9361 itself, so it is applied through a CSR write here. */
     if (cfg->enable_8bit_mode)
-        printf("Enabling 8-bit mode.\n");
+        M2SDR_LOGF("Enabling 8-bit mode.\n");
     else
-        printf("Enabling 16-bit mode.\n");
+        M2SDR_LOGF("Enabling 16-bit mode.\n");
 
     if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0) != 0)
         return M2SDR_ERR_IO;
@@ -350,19 +360,19 @@ static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *ph
 static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
 {
     if (cfg->bist_tx_tone) {
-        printf("BIST_TX_TONE_TEST...\n");
+        M2SDR_LOGF("BIST_TX_TONE_TEST...\n");
         if (m2sdr_from_ad9361_rc(ad9361_bist_tone(phy, BIST_INJ_TX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
     if (cfg->bist_rx_tone) {
-        printf("BIST_RX_TONE_TEST...\n");
+        M2SDR_LOGF("BIST_RX_TONE_TEST...\n");
         if (m2sdr_from_ad9361_rc(ad9361_bist_tone(phy, BIST_INJ_RX, cfg->bist_tone_freq, 0, 0x0)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     }
 
     if (cfg->bist_prbs) {
-        printf("BIST_PRBS TEST...\n");
+        M2SDR_LOGF("BIST_PRBS TEST...\n");
         if (m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR,
             0 * (1 << CSR_AD9361_PRBS_TX_ENABLE_OFFSET)) != 0)
             return M2SDR_ERR_IO;
@@ -522,10 +532,10 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    printf("Initializing AD9361 SPI...\n");
+    M2SDR_LOGF("Initializing AD9361 SPI...\n");
     m2sdr_ad9361_spi_init(conn, 1);
 
-    printf("Initializing AD9361 RFIC...\n");
+    M2SDR_LOGF("Initializing AD9361 RFIC...\n");
     default_init_param.reference_clk_rate = cfg->refclk_freq;
     default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
     default_init_param.gpio_sync          = -1;
