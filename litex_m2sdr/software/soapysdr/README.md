@@ -45,6 +45,8 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+- **Active RFIC backend** is exposed as the discovered `rfic` field in Soapy probe results.
+- Non-AD9361 backends can be opened for generic probe/control paths, but Soapy streaming remains implemented only for the AD9361 backend today.
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.

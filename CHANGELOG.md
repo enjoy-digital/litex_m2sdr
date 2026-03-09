@@ -25,6 +25,7 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Refined `libm2sdr` RF and streaming internals with per-device RF state ownership, safer DMA header access, and documented 16-byte wire header layout.
 - Added focused `libm2sdr` unit coverage and CI lanes for unit checks, LiteEth-mode checks, sanitizers, and `cppcheck`.
 - Refactored `libm2sdr` RF handling into a pluggable backend interface, with AD9361 as the first backend and new API hooks for RFIC discovery/capabilities/properties.
+- Added a mock RFIC backend plus generic RF readback APIs, and updated the Soapy driver to consume backend caps/state for probe/control paths.
 
 [> 2025 Q4 (Oct - Dec)
 ----------------------

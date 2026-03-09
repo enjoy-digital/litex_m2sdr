@@ -152,7 +152,7 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - RFIC discovery/extension: `m2sdr_get_rfic_name`, `m2sdr_get_rfic_caps`, `m2sdr_set_property`, `m2sdr_get_property`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`
+- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_get_frequency`, `m2sdr_set_sample_rate`, `m2sdr_get_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_get_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`, `m2sdr_get_gain`
 - IQ precision: `m2sdr_set_iq_bits`, `m2sdr_get_iq_bits`
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
@@ -176,9 +176,10 @@ Use `m2sdr_strerror()` for concise error text in logs.
 - Backend ranges/features can be queried with `m2sdr_get_rfic_caps()`.
 - Backend-specific controls use namespaced string properties via
   `m2sdr_set_property()` / `m2sdr_get_property()`.
-- Environment override: set `M2SDR_RFIC=ad9361` to force backend selection.
+- Environment override: set `M2SDR_RFIC=ad9361` or `M2SDR_RFIC=mock` to force backend selection.
 - IQ precision is backend-defined:
   - AD9361 currently supports `8` or `12` (`12` uses the 16-bit sample container path).
+  - Mock backend currently supports `8`, `12`, or `16` and exists to exercise backend interchangeability in tests/control paths.
 
 ## Library versioning
 
