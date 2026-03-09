@@ -449,7 +449,6 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
 
     unsigned sample_sz = 0;
-    unsigned bytes_per_buffer;
     unsigned payload_off;
 
     if (direction == M2SDR_RX) {
@@ -457,13 +456,11 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->rx_format);
         payload_off = (dev->rx_header_enable && dev->rx_strip_header) ? M2SDR_DMA_HEADER_SIZE : 0;
-        bytes_per_buffer = DMA_BUFFER_SIZE - payload_off;
     } else {
         if (!dev->tx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->tx_format);
         payload_off = dev->tx_header_enable ? M2SDR_DMA_HEADER_SIZE : 0;
-        bytes_per_buffer = DMA_BUFFER_SIZE - payload_off;
     }
 
     if (!sample_sz)
@@ -488,7 +485,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
 #elif defined(USE_LITEETH)
     if (direction == M2SDR_RX) {
         liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
-        uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
+        const uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
         if (!buf)
             return M2SDR_ERR_TIMEOUT;
         *buffer = buf + payload_off;
@@ -502,7 +499,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 
-    *num_samples = bytes_per_buffer / sample_sz;
+    *num_samples = (DMA_BUFFER_SIZE - payload_off) / sample_sz;
     return M2SDR_ERR_OK;
 }
 

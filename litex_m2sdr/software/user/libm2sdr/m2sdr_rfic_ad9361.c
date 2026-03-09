@@ -1218,9 +1218,8 @@ static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
         return M2SDR_ERR_OK;
     }
     if (strcmp(key, "ad9361.rx0_gain_mode") == 0 || strcmp(key, "ad9361.rx1_gain_mode") == 0) {
-        const unsigned channel = (key[10] == '0') ? 0u : 1u;
-
-        if (snprintf(value, value_len, "%s", ad9361->rx_gain_mode[channel]) >= (int)value_len)
+        if (snprintf(value, value_len, "%s",
+                     ad9361->rx_gain_mode[(key[10] == '0') ? 0u : 1u]) >= (int)value_len)
             return M2SDR_ERR_RANGE;
         return M2SDR_ERR_OK;
     }
