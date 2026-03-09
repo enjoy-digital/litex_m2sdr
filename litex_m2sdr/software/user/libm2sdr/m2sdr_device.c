@@ -245,6 +245,7 @@ void m2sdr_get_version(struct m2sdr_version *ver)
 int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 {
     struct m2sdr_dev *dev;
+    int rc;
 
     if (!dev_out)
         return M2SDR_ERR_INVAL;
@@ -316,6 +317,23 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 
+    rc = m2sdr_rfic_attach_default(dev);
+    if (rc != M2SDR_ERR_OK) {
+#ifdef USE_LITEPCIE
+        if (dev->fd >= 0)
+            close(dev->fd);
+        dev->fd = -1;
+#endif
+#ifdef USE_LITEETH
+        if (dev->eb) {
+            eb_disconnect(&dev->eb);
+            dev->eb = NULL;
+        }
+#endif
+        free(dev);
+        return rc;
+    }
+
     *dev_out = dev;
     return M2SDR_ERR_OK;
 }
@@ -325,6 +343,8 @@ void m2sdr_close(struct m2sdr_dev *dev)
 {
     if (!dev)
         return;
+
+    m2sdr_rfic_detach(dev);
 
 #ifdef USE_LITEPCIE
     if (dev->fd >= 0)

@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "m2sdr.h"
+#include "m2sdr_rfic_iface.h"
 
 struct ad9361_rf_phy;
 
@@ -65,6 +66,9 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    const struct m2sdr_rfic_ops *rfic_ops;
+    void *rfic_ctx;
+    enum m2sdr_rfic_kind rfic_kind;
     struct ad9361_rf_phy *ad9361_phy;
 };
 

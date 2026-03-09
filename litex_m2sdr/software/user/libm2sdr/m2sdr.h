@@ -80,6 +80,17 @@ enum m2sdr_transport_kind {
     M2SDR_TRANSPORT_KIND_LITEETH = 2,
 };
 
+enum m2sdr_rfic_kind {
+    M2SDR_RFIC_KIND_UNKNOWN = 0,
+    M2SDR_RFIC_KIND_AD9361 = 1,
+};
+
+enum m2sdr_rfic_feature_flag {
+    M2SDR_RFIC_FEATURE_BIND_EXTERNAL = (1u << 0),
+    M2SDR_RFIC_FEATURE_BIST          = (1u << 1),
+    M2SDR_RFIC_FEATURE_OVERSAMPLE    = (1u << 2),
+};
+
 /* Backward-compatible alias for older code. */
 typedef enum m2sdr_direction m2sdr_module_t;
 
@@ -154,6 +165,20 @@ struct m2sdr_clock_info {
     uint64_t refclk_hz;
     /* System clock frequency in Hz when available. */
     uint64_t sysclk_hz;
+};
+
+struct m2sdr_rfic_caps {
+    enum m2sdr_rfic_kind kind;
+    char name[32];
+    uint32_t features;
+    int64_t min_sample_rate;
+    int64_t max_sample_rate;
+    int64_t min_bandwidth;
+    int64_t max_bandwidth;
+    int64_t min_tx_gain;
+    int64_t max_tx_gain;
+    int64_t min_rx_gain;
+    int64_t max_rx_gain;
 };
 
 enum m2sdr_feature_flag {
@@ -323,6 +348,10 @@ int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_eb_handle(struct m2sdr_dev *dev);
 int  m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transport);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
+int  m2sdr_get_rfic_name(struct m2sdr_dev *dev, char *buf, size_t len);
+int  m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);
+int  m2sdr_set_property(struct m2sdr_dev *dev, const char *key, const char *value);
+int  m2sdr_get_property(struct m2sdr_dev *dev, const char *key, char *value, size_t value_len);
 
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
