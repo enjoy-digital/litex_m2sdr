@@ -135,6 +135,30 @@ static int test_rfic_helpers(void)
         return -1;
     if (m2sdr_get_property(&dev, "ad9361.test", value, sizeof(value)) != M2SDR_ERR_UNSUPPORTED)
         return -1;
+    if (m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(value, "legacy") != 0)
+        return -1;
+    if (m2sdr_set_property(&dev, "ad9361.fir_profile", "wide") != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(value, "wide") != 0)
+        return -1;
+    if (m2sdr_set_property(&dev, "ad9361.oversampling", "1") != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_property(&dev, "ad9361.oversampling", value, sizeof(value)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(value, "1") != 0)
+        return -1;
+    if (m2sdr_set_property(&dev, "ad9361.rx0_gain_mode", "slow") != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_property(&dev, "ad9361.rx0_gain_mode", value, sizeof(value)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(value, "slowattack") != 0)
+        return -1;
+    if (m2sdr_get_property(&dev, "ad9361.temperature_c", value, sizeof(value)) != M2SDR_ERR_STATE)
+        return -1;
 
     return 0;
 }

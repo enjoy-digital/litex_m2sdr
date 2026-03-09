@@ -360,6 +360,11 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev);
  * selected RFIC backend.
  * `m2sdr_set_property()` / `m2sdr_get_property()` use namespaced keys
  * (for example `ad9361.*`) for backend-specific controls.
+ * Current AD9361 backend properties include:
+ * - `ad9361.fir_profile`
+ * - `ad9361.oversampling`
+ * - `ad9361.rx0_gain_mode` / `ad9361.rx1_gain_mode`
+ * - `ad9361.temperature_c`
  */
 int  m2sdr_get_rfic_name(struct m2sdr_dev *dev, char *buf, size_t len);
 int  m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);

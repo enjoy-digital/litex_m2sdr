@@ -35,6 +35,7 @@
 #define M2SDR_TX_GAIN_MAX_DB   0
 #define M2SDR_RX_GAIN_MIN_DB   0
 #define M2SDR_RX_GAIN_MAX_DB  76
+#define M2SDR_AD9361_FIR_PROFILE_MAX 16
 
 #ifndef M2SDR_LOG_ENABLED
 #define M2SDR_LOG_ENABLED 1
@@ -54,6 +55,12 @@
 
 /* State */
 /*-------*/
+
+struct m2sdr_rfic_ad9361_ctx {
+    char fir_profile[M2SDR_AD9361_FIR_PROFILE_MAX];
+    char rx_gain_mode[2][16];
+    unsigned oversampling;
+};
 
 /* The Analog Devices AD9361 code expects Linux-like platform hooks with a
  * single implicit active device. libm2sdr keeps that glue local here. */
@@ -98,6 +105,149 @@ static int m2sdr_select_rf_dev(struct m2sdr_dev *dev)
 static struct ad9361_rf_phy *m2sdr_current_phy(struct m2sdr_dev *dev)
 {
     return dev ? dev->ad9361_phy : NULL;
+}
+
+static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, int64_t rate);
+
+/* Experimental 1x FIR candidates for the 122.88 MSPS oversampling mode.
+ * These widen the FIR passband versus the legacy BladeRF-derived RX filter.
+ * They are symmetric 64-tap LPFs and should be treated as A/B test profiles. */
+static const int16_t m2sdr_fir_1x_wide_taps[64] = {
+     -65,     15,    109,    -15,   -166,      9,    240,      4,
+    -331,    -30,    442,     72,   -577,   -135,    739,    228,
+    -934,   -359,   1173,    544,  -1473,   -811,   1867,   1208,
+   -2425,  -1847,   3323,   3033,  -5141,  -6052,  11568,  32767,
+   32767,  11568,  -6052,  -5141,   3033,   3323,  -1847,  -2425,
+    1208,   1867,   -811,  -1473,    544,   1173,   -359,   -934,
+     228,    739,   -135,   -577,     72,    442,    -30,   -331,
+       4,    240,      9,   -166,    -15,    109,     15,    -65,
+};
+
+static void m2sdr_fir_set_64_taps(int16_t *dst, const int16_t *src)
+{
+    memset(dst, 0, 128 * sizeof(int16_t));
+    memcpy(dst, src, 64 * sizeof(int16_t));
+}
+
+static AD9361_RXFIRConfig m2sdr_make_rx_fir_from_64(const int16_t *taps)
+{
+    AD9361_RXFIRConfig cfg = rx_fir_config;
+
+    cfg.rx      = 3;
+    cfg.rx_gain = -6;
+    cfg.rx_dec  = 1;
+    m2sdr_fir_set_64_taps(cfg.rx_coef, taps);
+    cfg.rx_coef_size = 64;
+    return cfg;
+}
+
+static AD9361_TXFIRConfig m2sdr_make_tx_fir_from_64(const int16_t *taps, int tx_gain_db)
+{
+    AD9361_TXFIRConfig cfg = tx_fir_config;
+
+    cfg.tx      = 3;
+    cfg.tx_gain = tx_gain_db;
+    cfg.tx_int  = 1;
+    m2sdr_fir_set_64_taps(cfg.tx_coef, taps);
+    cfg.tx_coef_size = 64;
+    return cfg;
+}
+
+static AD9361_RXFIRConfig m2sdr_make_rx_fir_bypass(void)
+{
+    AD9361_RXFIRConfig cfg = rx_fir_config;
+
+    cfg.rx      = 3;
+    cfg.rx_gain = -6;
+    cfg.rx_dec  = 1;
+    memset(cfg.rx_coef, 0, sizeof(cfg.rx_coef));
+    cfg.rx_coef[0] = 32767;
+    cfg.rx_coef_size = 64;
+    return cfg;
+}
+
+static AD9361_TXFIRConfig m2sdr_make_tx_fir_bypass(void)
+{
+    AD9361_TXFIRConfig cfg = tx_fir_config;
+
+    cfg.tx      = 3;
+    cfg.tx_gain = 0;
+    cfg.tx_int  = 1;
+    memset(cfg.tx_coef, 0, sizeof(cfg.tx_coef));
+    cfg.tx_coef[0] = 32767;
+    cfg.tx_coef_size = 64;
+    return cfg;
+}
+
+static int m2sdr_ad9361_canonical_gain_mode(const char *value, char *out, size_t out_len)
+{
+    const char *canonical = NULL;
+
+    if (!value || !out || out_len == 0)
+        return M2SDR_ERR_INVAL;
+
+    if (strcmp(value, "slow") == 0 || strcmp(value, "slowattack") == 0)
+        canonical = "slowattack";
+    else if (strcmp(value, "fast") == 0 || strcmp(value, "fastattack") == 0)
+        canonical = "fastattack";
+    else if (strcmp(value, "hybrid") == 0)
+        canonical = "hybrid";
+    else if (strcmp(value, "manual") == 0 || strcmp(value, "mgc") == 0)
+        canonical = "manual";
+    else
+        return M2SDR_ERR_PARSE;
+
+    if (snprintf(out, out_len, "%s", canonical) >= (int)out_len)
+        return M2SDR_ERR_RANGE;
+    return M2SDR_ERR_OK;
+}
+
+static uint8_t m2sdr_ad9361_gain_mode_to_api(const char *mode)
+{
+    if (strcmp(mode, "slowattack") == 0)
+        return RF_GAIN_SLOWATTACK_AGC;
+    if (strcmp(mode, "fastattack") == 0)
+        return RF_GAIN_FASTATTACK_AGC;
+    if (strcmp(mode, "hybrid") == 0)
+        return RF_GAIN_HYBRID_AGC;
+    return RF_GAIN_MGC;
+}
+
+static int m2sdr_ad9361_select_fir_profile(const char *name,
+                                           AD9361_RXFIRConfig *rx_cfg,
+                                           AD9361_TXFIRConfig *tx_cfg,
+                                           char *canonical_name,
+                                           size_t canonical_name_len)
+{
+    if (!name || !rx_cfg || !tx_cfg || !canonical_name || canonical_name_len == 0)
+        return M2SDR_ERR_INVAL;
+
+    if (name[0] == '\0' || strcmp(name, "legacy") == 0) {
+        *rx_cfg = rx_fir_config;
+        *tx_cfg = tx_fir_config;
+        snprintf(canonical_name, canonical_name_len, "legacy");
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(name, "bypass") == 0) {
+        *rx_cfg = m2sdr_make_rx_fir_bypass();
+        *tx_cfg = m2sdr_make_tx_fir_bypass();
+        snprintf(canonical_name, canonical_name_len, "bypass");
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(name, "match") == 0) {
+        *rx_cfg = rx_fir_config;
+        *tx_cfg = m2sdr_make_tx_fir_from_64(rx_fir_config.rx_coef, -6);
+        snprintf(canonical_name, canonical_name_len, "match");
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(name, "wide") == 0) {
+        *rx_cfg = m2sdr_make_rx_fir_from_64(m2sdr_fir_1x_wide_taps);
+        *tx_cfg = m2sdr_make_tx_fir_from_64(m2sdr_fir_1x_wide_taps, -6);
+        snprintf(canonical_name, canonical_name_len, "wide");
+        return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_PARSE;
 }
 
 static int m2sdr_require_phy(struct m2sdr_dev *dev, struct ad9361_rf_phy **phy_out)
@@ -270,49 +420,6 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
     (void)cfg;
     (void)clock_source;
 #endif
-    return M2SDR_ERR_OK;
-}
-
-/* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
- * interpolation/decimation mode expected by the original utilities. */
-static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
-{
-    uint32_t actual_samplerate = cfg->sample_rate;
-
-    M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
-
-    if (cfg->enable_oversample)
-        actual_samplerate /= 2;
-
-    /* Match the historical utility behavior: for the lowest rates, switch the
-     * AD9361 FIRs to x4 interpolation/decimation before programming clocks. */
-    if (actual_samplerate < 2500000) {
-        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
-        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
-
-        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
-        phy->rx_fir_dec    = 4;
-        phy->tx_fir_int    = 4;
-        phy->bypass_rx_fir = 0;
-        phy->bypass_tx_fir = 0;
-        rx_fir_cfg.rx_dec         = 4;
-        tx_fir_cfg.tx_int         = 4;
-
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_cfg)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_cfg)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-    }
-
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_samplerate)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, actual_samplerate)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
     return M2SDR_ERR_OK;
 }
 
@@ -490,13 +597,14 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
 {
     void *conn;
     struct ad9361_rf_phy *phy;
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
     int rc;
     enum m2sdr_clock_source clock_source     = M2SDR_CLOCK_SOURCE_INTERNAL;
     enum m2sdr_channel_layout channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
 
     (void)ctx;
 
-    if (!dev || !cfg)
+    if (!dev || !cfg || !ad9361)
         return M2SDR_ERR_INVAL;
     /* AD9361 init allocates opaque driver state with no public teardown API.
      * Refuse implicit re-init on the same device to avoid leaking that state. */
@@ -541,9 +649,8 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
     if (!phy)
         return M2SDR_ERR_STATE;
 
-    rc = m2sdr_configure_samplerate(phy, cfg);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
+    ad9361->oversampling = cfg->enable_oversample ? 1u : 0u;
+
     rc = m2sdr_configure_bandwidth(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
@@ -553,10 +660,9 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
 
     /* Re-apply the default FIR tables after the sample-rate step so the
      * AD9361 state stays aligned with the shipped utility behavior. */
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    rc = m2sdr_rfic_ad9361_set_sample_rate(dev, ctx, cfg->sample_rate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     rc = m2sdr_configure_gains(phy, cfg);
     if (rc != M2SDR_ERR_OK)
@@ -567,9 +673,6 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
     rc = m2sdr_run_bist(cfg, dev, phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
-
-    if (cfg->enable_oversample)
-        ad9361_enable_oversampling(phy);
 
     return M2SDR_ERR_OK;
 }
@@ -634,10 +737,14 @@ static int m2sdr_rfic_ad9361_get_frequency(struct m2sdr_dev *dev, void *ctx,
 static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, int64_t rate)
 {
     struct ad9361_rf_phy *phy;
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
+    AD9361_RXFIRConfig rx_fir_cfg;
+    AD9361_TXFIRConfig tx_fir_cfg;
+    char canonical_name[M2SDR_AD9361_FIR_PROFILE_MAX];
+    uint32_t actual_rate;
     int rc;
-    (void)ctx;
 
-    if (!dev)
+    if (!dev || !ad9361)
         return M2SDR_ERR_INVAL;
     if (rate <= 0 || rate > UINT32_MAX)
         return M2SDR_ERR_RANGE;
@@ -645,10 +752,64 @@ static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, i
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    actual_rate = (uint32_t)rate;
+    if (ad9361->oversampling) {
+        if ((actual_rate % 2u) != 0u)
+            return M2SDR_ERR_RANGE;
+        actual_rate /= 2u;
+    }
+
+    /* Preserve the original utility behavior:
+     * - below 1.25 MSPS: use x4 FIR interpolation/decimation
+     * - below 2.5 MSPS: use x2 FIR interpolation/decimation
+     * - otherwise: restore the selected 1x FIR profile */
+    if (actual_rate < 1250000u) {
+        rx_fir_cfg = rx_fir_config_dec4;
+        tx_fir_cfg = tx_fir_config_int4;
+        phy->rx_fir_dec    = 4;
+        phy->tx_fir_int    = 4;
+        phy->bypass_rx_fir = 0;
+        phy->bypass_tx_fir = 0;
+        rx_fir_cfg.rx_dec  = 4;
+        tx_fir_cfg.tx_int  = 4;
+    } else if (actual_rate < 2500000u) {
+        rx_fir_cfg = rx_fir_config_dec2;
+        tx_fir_cfg = tx_fir_config_int2;
+        phy->rx_fir_dec    = 2;
+        phy->tx_fir_int    = 2;
+        phy->bypass_rx_fir = 0;
+        phy->bypass_tx_fir = 0;
+        rx_fir_cfg.rx_dec  = 2;
+        tx_fir_cfg.tx_int  = 2;
+    } else {
+        rc = m2sdr_ad9361_select_fir_profile(ad9361->fir_profile,
+                                             &rx_fir_cfg,
+                                             &tx_fir_cfg,
+                                             canonical_name,
+                                             sizeof(canonical_name));
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        phy->rx_fir_dec    = 1;
+        phy->tx_fir_int    = 1;
+        phy->bypass_rx_fir = 0;
+        phy->bypass_tx_fir = 0;
+    }
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_cfg)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_cfg)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (ad9361->oversampling)
+        ad9361_enable_oversampling(phy);
     return M2SDR_ERR_OK;
 }
 
@@ -872,9 +1033,18 @@ static int m2sdr_rfic_ad9361_configure_stream_channels(struct m2sdr_dev *dev, vo
 
 static int m2sdr_rfic_ad9361_init(struct m2sdr_dev *dev, void **ctx_out)
 {
+    struct m2sdr_rfic_ad9361_ctx *ctx;
+
     if (!dev || !ctx_out)
         return M2SDR_ERR_INVAL;
-    *ctx_out = NULL;
+    ctx = calloc(1, sizeof(*ctx));
+    if (!ctx)
+        return M2SDR_ERR_NO_MEM;
+    snprintf(ctx->fir_profile, sizeof(ctx->fir_profile), "legacy");
+    snprintf(ctx->rx_gain_mode[0], sizeof(ctx->rx_gain_mode[0]), "manual");
+    snprintf(ctx->rx_gain_mode[1], sizeof(ctx->rx_gain_mode[1]), "manual");
+    ctx->oversampling = 0u;
+    *ctx_out = ctx;
     dev->ad9361_phy = NULL;
     dev->iq_bits = 12u;
     return M2SDR_ERR_OK;
@@ -882,12 +1052,15 @@ static int m2sdr_rfic_ad9361_init(struct m2sdr_dev *dev, void **ctx_out)
 
 static void m2sdr_rfic_ad9361_cleanup(struct m2sdr_dev *dev, void *ctx)
 {
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
+
     (void)ctx;
     if (!dev)
         return;
     if (tls_rf_dev == dev)
         tls_rf_dev = NULL;
     dev->ad9361_phy = NULL;
+    free(ad9361);
 }
 
 static int m2sdr_rfic_ad9361_get_caps(struct m2sdr_dev *dev, void *ctx, struct m2sdr_rfic_caps *caps)
@@ -922,11 +1095,14 @@ static int m2sdr_rfic_ad9361_get_caps(struct m2sdr_dev *dev, void *ctx, struct m
 static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, const char *value)
 {
-    (void)ctx;
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
     char *end = NULL;
     unsigned long bits;
+    struct ad9361_rf_phy *phy = NULL;
+    char canonical_mode[16];
+    int rc;
 
-    if (!dev || !key || !value)
+    if (!dev || !ad9361 || !key || !value)
         return M2SDR_ERR_INVAL;
 
     if (strcmp(key, "ad9361.iq_bits") == 0) {
@@ -937,6 +1113,49 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
             return M2SDR_ERR_RANGE;
         return m2sdr_rfic_ad9361_set_iq_bits(dev, ctx, (unsigned)bits);
     }
+    if (strcmp(key, "ad9361.oversampling") == 0) {
+        if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0)
+            ad9361->oversampling = 0u;
+        else if (strcmp(value, "1") == 0 || strcmp(value, "true") == 0)
+            ad9361->oversampling = 1u;
+        else
+            return M2SDR_ERR_PARSE;
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.fir_profile") == 0) {
+        AD9361_RXFIRConfig rx_fir_cfg;
+        AD9361_TXFIRConfig tx_fir_cfg;
+        char canonical_name[M2SDR_AD9361_FIR_PROFILE_MAX];
+
+        rc = m2sdr_ad9361_select_fir_profile(value,
+                                             &rx_fir_cfg,
+                                             &tx_fir_cfg,
+                                             canonical_name,
+                                             sizeof(canonical_name));
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        snprintf(ad9361->fir_profile, sizeof(ad9361->fir_profile), "%s", canonical_name);
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.rx0_gain_mode") == 0 || strcmp(key, "ad9361.rx1_gain_mode") == 0) {
+        const unsigned channel = (key[10] == '0') ? 0u : 1u;
+
+        rc = m2sdr_ad9361_canonical_gain_mode(value, canonical_mode, sizeof(canonical_mode));
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        snprintf(ad9361->rx_gain_mode[channel], sizeof(ad9361->rx_gain_mode[channel]), "%s", canonical_mode);
+        rc = m2sdr_require_phy(dev, &phy);
+        if (rc == M2SDR_ERR_OK) {
+            if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy,
+                                                                     channel,
+                                                                     m2sdr_ad9361_gain_mode_to_api(canonical_mode))) != M2SDR_ERR_OK)
+                return M2SDR_ERR_IO;
+            return M2SDR_ERR_OK;
+        }
+        if (rc == M2SDR_ERR_STATE)
+            return M2SDR_ERR_OK;
+        return rc;
+    }
 
     return M2SDR_ERR_UNSUPPORTED;
 }
@@ -944,8 +1163,11 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
 static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
                                           const char *key, char *value, size_t value_len)
 {
-    (void)ctx;
-    if (!dev || !key || !value || value_len == 0)
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
+    struct ad9361_rf_phy *phy = NULL;
+    int rc;
+
+    if (!dev || !ad9361 || !key || !value || value_len == 0)
         return M2SDR_ERR_INVAL;
 
     if (strcmp(key, "ad9361.iq_bits") == 0) {
@@ -954,6 +1176,31 @@ static int m2sdr_rfic_ad9361_get_property(struct m2sdr_dev *dev, void *ctx,
         if (rc != M2SDR_ERR_OK)
             return rc;
         if (snprintf(value, value_len, "%u", bits) >= (int)value_len)
+            return M2SDR_ERR_RANGE;
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.oversampling") == 0) {
+        if (snprintf(value, value_len, "%u", ad9361->oversampling ? 1u : 0u) >= (int)value_len)
+            return M2SDR_ERR_RANGE;
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.fir_profile") == 0) {
+        if (snprintf(value, value_len, "%s", ad9361->fir_profile) >= (int)value_len)
+            return M2SDR_ERR_RANGE;
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.rx0_gain_mode") == 0 || strcmp(key, "ad9361.rx1_gain_mode") == 0) {
+        const unsigned channel = (key[10] == '0') ? 0u : 1u;
+
+        if (snprintf(value, value_len, "%s", ad9361->rx_gain_mode[channel]) >= (int)value_len)
+            return M2SDR_ERR_RANGE;
+        return M2SDR_ERR_OK;
+    }
+    if (strcmp(key, "ad9361.temperature_c") == 0) {
+        rc = m2sdr_require_phy(dev, &phy);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        if (snprintf(value, value_len, "%.3f", (double)ad9361_get_temp(phy) / 1000.0) >= (int)value_len)
             return M2SDR_ERR_RANGE;
         return M2SDR_ERR_OK;
     }
