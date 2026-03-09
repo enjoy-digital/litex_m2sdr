@@ -165,6 +165,11 @@ void gpio_set_value(unsigned gpio, int value)
     (void)value;
 }
 
+/* Helper used by preset loading before the implementation appears later in the
+ * file. Keep the declaration local rather than reordering a large block of the
+ * scan pipeline helpers. */
+static uint32_t scan_bandwidth_from_samplerate(uint32_t sample_rate_hz);
+
 struct scan_state {
     uint32_t sample_rate_hz;
     uint32_t rf_bandwidth_hz;

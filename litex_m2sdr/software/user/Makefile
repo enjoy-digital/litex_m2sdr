@@ -1,11 +1,14 @@
 PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
-SCAN_CIMGUI_DIR := $(SCAN_UI_DIR)/cimgui
+# Dear ImGui/cimgui lives directly under software/user/cimgui in this tree.
+# Keep the scan UI bridge under scan_ui/, but point the build to the actual
+# vendored cimgui location.
+SCAN_CIMGUI_DIR := cimgui
 
 CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
 CFLAGS += $(EXTRA_CFLAGS)
-CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
+CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
