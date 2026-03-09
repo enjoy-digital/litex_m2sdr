@@ -467,7 +467,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     TXStream _tx_stream;
     std::vector<std::string> _rx_antennas;
     std::vector<std::string> _tx_antennas;
-    int _rx_agc_mode = 0;
+    std::string _rx_agc_mode = "slowattack";
     std::string _ad9361_fir_profile = "legacy"; /* legacy | bypass | match | wide */
 
     void interleaveCF32(
@@ -527,7 +527,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     }
 
     litex_m2sdr_device_desc_t _fd;
-    struct ad9361_rf_phy *ad9361_phy;
+    struct ad9361_rf_phy *ad9361_phy = nullptr;
     uint8_t _spi_id = 0;
 
     uint32_t _iqBits            = 12;
