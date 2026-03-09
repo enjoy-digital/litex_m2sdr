@@ -705,7 +705,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
-    SoapySDR::logf(SOAPY_SDR_INFO, "Active RFIC backend: %s", getLiteXM2SDRRficName(_dev).c_str());
+    const std::string rfic_name = getLiteXM2SDRRficName(_dev);
+    SoapySDR::logf(SOAPY_SDR_INFO, "Active RFIC backend: %s", rfic_name.c_str());
+    if (rfic_name != "ad9361") {
+        throw std::runtime_error(
+            "SoapyLiteXM2SDR currently supports only the ad9361 RFIC backend "
+            "(active backend: " + rfic_name + ")");
+    }
 
 #if USE_LITEPCIE
     /* Set-up the DMA. */
