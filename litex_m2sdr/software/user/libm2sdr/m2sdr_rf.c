@@ -476,6 +476,9 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
     if (!dev)
         return M2SDR_ERR_OK;
 
+    if (dev->ad9361_phy && phy && dev->ad9361_phy != (struct ad9361_rf_phy *)phy)
+        return M2SDR_ERR_UNEXPECTED;
+
     dev->ad9361_phy = (struct ad9361_rf_phy *)phy;
     if (phy)
         tls_rf_dev = dev;
@@ -495,6 +498,10 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 
     if (!dev || !cfg)
         return M2SDR_ERR_INVAL;
+    /* AD9361 init allocates opaque driver state with no public teardown API.
+     * Refuse implicit re-init on the same device to avoid leaking that state. */
+    if (dev->ad9361_phy)
+        return M2SDR_ERR_UNEXPECTED;
     rc = m2sdr_validate_config_values(cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;

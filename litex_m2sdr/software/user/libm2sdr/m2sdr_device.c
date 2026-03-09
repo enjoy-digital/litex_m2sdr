@@ -340,6 +340,7 @@ void m2sdr_close(struct m2sdr_dev *dev)
     }
 #endif
 
+    dev->ad9361_phy = NULL;
     free(dev);
 }
 
