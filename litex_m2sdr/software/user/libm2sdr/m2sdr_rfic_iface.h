@@ -14,6 +14,11 @@
 
 struct m2sdr_dev;
 
+/* Internal RFIC backend contract.
+ *
+ * The public C API stays generic and dispatches through this table. Backends
+ * own RFIC-specific init, runtime policy, capability reporting, and optional
+ * property namespaces, while transport and DMA stay in the core library. */
 struct m2sdr_rfic_ops {
     enum m2sdr_rfic_kind kind;
     const char *name;
@@ -35,6 +40,9 @@ struct m2sdr_rfic_ops {
                                      size_t rx_count, const size_t *rx_channels,
                                      size_t tx_count, const size_t *tx_channels);
     int (*get_caps)(struct m2sdr_dev *dev, void *ctx, struct m2sdr_rfic_caps *caps);
+    /* Properties are the escape hatch for backend-specific controls that do
+     * not justify a first-class generic API yet. Keys are namespaced by
+     * backend name, eg. "ad9361.fir_profile". */
     int (*set_property)(struct m2sdr_dev *dev, void *ctx, const char *key, const char *value);
     int (*get_property)(struct m2sdr_dev *dev, void *ctx, const char *key, char *value, size_t value_len);
 };

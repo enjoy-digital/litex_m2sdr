@@ -584,6 +584,9 @@ static int m2sdr_rfic_ad9361_bind(struct m2sdr_dev *dev, void *ctx, void *phy)
     if (dev->ad9361_phy && phy && dev->ad9361_phy != (struct ad9361_rf_phy *)phy)
         return M2SDR_ERR_STATE;
 
+    /* bind() is the escape hatch for advanced integrations that already own an
+     * AD9361 instance. Once bound, the backend reuses that state instead of
+     * calling ad9361_init() itself. */
     dev->ad9361_phy = (struct ad9361_rf_phy *)phy;
     if (phy)
         tls_rf_dev = dev;
@@ -645,6 +648,10 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
         if (rc != M2SDR_ERR_OK)
             return rc;
     }
+    /* The imported AD9361 stack multiplexes two modes through ad9361_init():
+     * normal hardware init, or attach to an already-running instance when
+     * bypass_rfic_init is requested. Keep both flows behind apply_config() so
+     * Soapy and utilities do not need their own AD9361 bootstrap logic. */
     if (m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy,
                                          &default_init_param,
                                          cfg->bypass_rfic_init ? 0 : 1)) != M2SDR_ERR_OK)
@@ -1015,6 +1022,9 @@ static int m2sdr_rfic_ad9361_configure_stream_channels(struct m2sdr_dev *dev, vo
             return M2SDR_ERR_INVAL;
     }
 
+    /* Soapy expresses channel selection as explicit channel lists, but the
+     * AD9361 datapath still exposes it as 1T1R/2T2R plus RX/TX lane picks. Do
+     * the translation once here so upper layers stay backend-neutral. */
     layout = (active_count == 2) ? M2SDR_CHANNEL_LAYOUT_2T2R : M2SDR_CHANNEL_LAYOUT_1T1R;
     rc = m2sdr_apply_channel_layout(dev, layout);
     if (rc != M2SDR_ERR_OK)
@@ -1132,6 +1142,9 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
         return m2sdr_rfic_ad9361_set_iq_bits(dev, ctx, (unsigned)bits);
     }
     if (strcmp(key, "ad9361.oversampling") == 0) {
+        /* Oversampling is cached as backend policy and consumed when the sample
+         * rate is next applied. This mirrors the old Soapy behavior without
+         * forcing upper layers to sequence AD9361 FIR calls directly. */
         if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0)
             ad9361->oversampling = 0u;
         else if (strcmp(value, "1") == 0 || strcmp(value, "true") == 0)
@@ -1152,6 +1165,8 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
                                              sizeof(canonical_name));
         if (rc != M2SDR_ERR_OK)
             return rc;
+        /* Validate eagerly even if the PHY is not initialized yet, so callers
+         * get fast feedback on bad profile names before the next rate change. */
         snprintf(ad9361->fir_profile, sizeof(ad9361->fir_profile), "%s", canonical_name);
         return M2SDR_ERR_OK;
     }
@@ -1162,6 +1177,9 @@ static int m2sdr_rfic_ad9361_set_property(struct m2sdr_dev *dev, void *ctx,
         if (rc != M2SDR_ERR_OK)
             return rc;
         snprintf(ad9361->rx_gain_mode[channel], sizeof(ad9361->rx_gain_mode[channel]), "%s", canonical_mode);
+        /* Gain mode is both cached policy and live state: before init we keep
+         * the requested mode in the backend context, after init we also push it
+         * into the vendor driver immediately. */
         rc = m2sdr_require_phy(dev, &phy);
         if (rc == M2SDR_ERR_OK) {
             if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy,

@@ -17,6 +17,9 @@ static int m2sdr_require_backend(struct m2sdr_dev *dev)
 {
     if (!dev)
         return M2SDR_ERR_INVAL;
+    /* RFIC backends are attached lazily so transport-only users can still open
+     * a device, inspect registers, or query non-RF capabilities without paying
+     * the RFIC init cost up front. */
     return m2sdr_rfic_ensure(dev);
 }
 
@@ -74,6 +77,9 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (!dev->rfic_ops || !dev->rfic_ops->apply_config)
         return M2SDR_ERR_UNSUPPORTED;
 
+    /* apply_config() is the backend-owned bring-up path. The core validates the
+     * generic call boundary, but the backend decides how cfg maps to a real
+     * vendor init sequence versus cached runtime policy. */
     return dev->rfic_ops->apply_config(dev, dev->rfic_ctx, cfg);
 }
 
@@ -335,6 +341,9 @@ int m2sdr_set_property(struct m2sdr_dev *dev, const char *key, const char *value
     if (!dev->rfic_ops || !dev->rfic_ops->set_property)
         return M2SDR_ERR_UNSUPPORTED;
 
+    /* Properties deliberately dispatch straight to the active backend. The core
+     * does not interpret namespaced keys, which lets backend-specific controls
+     * evolve without touching the transport or stream layers. */
     return dev->rfic_ops->set_property(dev, dev->rfic_ctx, key, value);
 }
 

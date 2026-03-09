@@ -15,6 +15,9 @@ extern const struct m2sdr_rfic_ops m2sdr_rfic_mock_ops;
 
 static const struct m2sdr_rfic_ops *m2sdr_lookup_rfic(const char *name)
 {
+    /* Default to the shipped RFIC when no explicit override is provided. This
+     * keeps existing deployments working while allowing alternative backends to
+     * be exercised via M2SDR_RFIC without changing callers. */
     if (!name || !name[0])
         return &m2sdr_rfic_ad9361_ops;
 
@@ -64,6 +67,8 @@ void m2sdr_rfic_detach(struct m2sdr_dev *dev)
 {
     if (!dev)
         return;
+    /* cleanup() is backend-owned because only the backend knows whether rfic_ctx
+     * also implies vendor-driver state that needs teardown or just cached policy. */
     if (dev->rfic_ops && dev->rfic_ops->cleanup)
         dev->rfic_ops->cleanup(dev, dev->rfic_ctx);
     dev->rfic_ctx = NULL;

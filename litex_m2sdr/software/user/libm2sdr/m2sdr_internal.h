@@ -66,10 +66,14 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    /* RFIC backend selected for this device instance. The backend owns rfic_ctx
+     * and may also stash vendor-driver handles in the tail fields below. */
     const struct m2sdr_rfic_ops *rfic_ops;
     void *rfic_ctx;
     enum m2sdr_rfic_kind rfic_kind;
     unsigned iq_bits;
+    /* Legacy AD9361 driver handle kept here until a future backend-neutral
+     * session object replaces the current vendor-driver ownership model. */
     struct ad9361_rf_phy *ad9361_phy;
 };
 

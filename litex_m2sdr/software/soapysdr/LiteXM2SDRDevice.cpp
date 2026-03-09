@@ -298,6 +298,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         do_init = args.at("bypass_init")[0] == '0';
     }
 
+    /* Keep argument parsing in Soapy, but push RFIC-specific validation and
+     * hardware programming into libm2sdr. */
     if (args.count("iq_bits") > 0) {
         _iqBits = static_cast<uint32_t>(std::stoul(args.at("iq_bits")));
     } else if (args.count("bitmode") > 0) {
@@ -320,6 +322,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _ad9361_fir_profile = args.at("fir_profile");
     }
 
+    /* FIR profile is still backend-specific, so it stays in the namespaced
+     * property path until another RFIC needs a generic equivalent. */
     if (_rficName == "ad9361") {
         int prop_rc = m2sdr_set_property(_dev, "ad9361.fir_profile", _ad9361_fir_profile.c_str());
 
@@ -354,6 +358,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("clock_source") > 0) {
         clock_source = args.at("clock_source");
     }
+    /* Soapy now delegates RFIC bring-up to libm2sdr. The plugin remains
+     * responsible for default selection and Soapy-facing behavior, while
+     * backend-specific sequencing stays in one place. */
     if (_rficName == "ad9361") {
         struct m2sdr_config cfg;
         int rc;
@@ -707,6 +714,8 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     if (_rficName != "ad9361")
         throw std::runtime_error("Gain mode control is not implemented for RFIC backend " + _rficName);
 
+    /* Gain-mode strings are backend properties because the generic Soapy toggle
+     * still fans out to AD9361-specific policies such as slowattack/hybrid. */
     _rx_stream.gainMode[channel] = automatic;
     if (m2sdr_set_property(_dev, key.c_str(), mode.c_str()) != 0)
         throw std::runtime_error("Failed to set RX gain mode for channel " + std::to_string(channel));
@@ -1135,6 +1144,8 @@ void SoapyLiteXM2SDR::setSampleRate(
             throw std::runtime_error(
                 "Failed to set AD9361 FIR profile (" + std::string(m2sdr_strerror(prop_rc)) + ")");
         }
+        /* oversampling is requested here as policy; the backend decides how it
+         * maps to FIR decimation/interpolation and hardware sample clocks. */
         prop_rc = m2sdr_set_property(_dev, "ad9361.oversampling", _oversampling ? "1" : "0");
         if (prop_rc != 0) {
             throw std::runtime_error(
@@ -1473,6 +1484,8 @@ std::string SoapyLiteXM2SDR::readSensor(
         if (deviceStr == "rfic") {
             /* Temp. */
             if (sensorStr == "temp") {
+                /* Sensor naming is generic on the Soapy side, but the backend
+                 * property key stays vendor-namespaced. */
                 std::string property_key = _rficName + ".temperature_c";
                 char value[32];
                 if (m2sdr_get_property(_dev, property_key.c_str(), value, sizeof(value)) != 0)
