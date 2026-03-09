@@ -102,6 +102,11 @@ SOAPY_SDR_MODULE_UTIL(
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
 )
 
+set_target_properties(SoapyLiteXM2SDR PROPERTIES
+    BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/../user/libm2sdr"
+    INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+)
+
 # Bind internal symbol references to this module to avoid conflicts
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,-Bsymbolic)

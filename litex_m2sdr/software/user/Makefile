@@ -225,11 +225,14 @@ ad9361/%.o: ad9361/%.c
 %.o: %.cpp
 	$(CXX) -c $(CXXFLAGS) $(SDL2_CFLAGS) -o $@ $<
 
-install: $(BINARIES)
+install: $(BINARIES) libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so
 	install -d $(PREFIX)/bin
 	$(foreach bin,$(BINARIES), \
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
+	install -d $(PREFIX)/lib
+	install -m 755 libm2sdr/$(LIBM2SDR_SONAME) $(PREFIX)/lib/$(LIBM2SDR_SONAME)
+	ln -sf $(LIBM2SDR_SONAME) $(PREFIX)/lib/libm2sdr.so
 
 install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 	install -d $(PREFIX)/lib
