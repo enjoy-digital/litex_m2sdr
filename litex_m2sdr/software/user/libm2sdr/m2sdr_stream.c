@@ -39,6 +39,28 @@ static unsigned m2sdr_sample_size(enum m2sdr_format format)
     }
 }
 
+static int m2sdr_parse_dma_header(const uint8_t *buf, uint64_t *timestamp)
+{
+    uint64_t sync_word = 0;
+    uint64_t ts = 0;
+
+    memcpy(&sync_word, buf, sizeof(sync_word));
+    if (sync_word != M2SDR_DMA_HEADER_SYNC_WORD)
+        return 0;
+
+    memcpy(&ts, buf + 8, sizeof(ts));
+    *timestamp = ts;
+    return 1;
+}
+
+static void m2sdr_write_dma_header(uint8_t *buf, uint64_t timestamp)
+{
+    const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
+
+    memcpy(buf, &sync_word, sizeof(sync_word));
+    memcpy(buf + 8, &timestamp, sizeof(timestamp));
+}
+
 static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_per_buffer, unsigned bytes_per_buffer)
 {
     unsigned sz = m2sdr_sample_size(format);
@@ -308,13 +330,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
         if (dev->rx_header_enable) {
-            uint64_t header = *(uint64_t *)buf;
-            if (header == M2SDR_DMA_HEADER_SYNC_WORD) {
-                uint64_t ts = *(uint64_t *)(buf + 8);
-                if (meta) {
-                    meta->timestamp = ts;
-                    meta->flags |= M2SDR_META_FLAG_HAS_TIME;
-                }
+            uint64_t ts = 0;
+            if (m2sdr_parse_dma_header((const uint8_t *)buf, &ts) && meta) {
+                meta->timestamp = ts;
+                meta->flags |= M2SDR_META_FLAG_HAS_TIME;
             }
         }
         memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
@@ -333,13 +352,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
         if (dev->rx_header_enable) {
-            uint64_t header = *(uint64_t *)buf;
-            if (header == M2SDR_DMA_HEADER_SYNC_WORD) {
-                uint64_t ts = *(uint64_t *)(buf + 8);
-                if (meta) {
-                    meta->timestamp = ts;
-                    meta->flags |= M2SDR_META_FLAG_HAS_TIME;
-                }
+            uint64_t ts = 0;
+            if (m2sdr_parse_dma_header(buf, &ts) && meta) {
+                meta->timestamp = ts;
+                meta->flags |= M2SDR_META_FLAG_HAS_TIME;
             }
         }
         memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
@@ -383,8 +399,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
             uint64_t ts = 0;
             if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
                 ts = meta->timestamp;
-            *(uint64_t *)buf = M2SDR_DMA_HEADER_SYNC_WORD;
-            *(uint64_t *)(buf + 8) = ts;
+            m2sdr_write_dma_header((uint8_t *)buf, ts);
         }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
@@ -402,8 +417,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
             uint64_t ts = 0;
             if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
                 ts = meta->timestamp;
-            *(uint64_t *)buf = M2SDR_DMA_HEADER_SYNC_WORD;
-            *(uint64_t *)(buf + 8) = ts;
+            m2sdr_write_dma_header(buf, ts);
         }
         if (to_copy > total_bytes - copied)
             to_copy = total_bytes - copied;
@@ -511,8 +525,7 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
         uint64_t ts = 0;
         if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
             ts = meta->timestamp;
-        *(uint64_t *)base = M2SDR_DMA_HEADER_SYNC_WORD;
-        *(uint64_t *)(base + 8) = ts;
+        m2sdr_write_dma_header(base, ts);
     }
 
     (void)num_samples;
