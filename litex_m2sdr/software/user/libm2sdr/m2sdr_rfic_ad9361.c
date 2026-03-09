@@ -459,9 +459,17 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_c
 /* Configure the FPGA-side bit mode and AD9361 internal loopback controls. */
 static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
+    int loopback_rc;
+
     M2SDR_LOGF("Setting Loopback to %d\n", cfg->loopback);
-    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, cfg->loopback)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    /* Keep loopback configuration best-effort for compatibility with the
+     * original utility, which never treated ad9361_bist_loopback() failures
+     * as fatal during bring-up. Some boards return an error even on the
+     * default "disable loopback" path while the rest of the RF setup works. */
+    loopback_rc = ad9361_bist_loopback(phy, cfg->loopback);
+    if (m2sdr_from_ad9361_rc(loopback_rc) != M2SDR_ERR_OK)
+        M2SDR_LOGF("Warning: AD9361 loopback configuration failed (rc=%d), continuing.\n",
+                   loopback_rc);
 
     /* Bit mode is implemented in the FPGA-side AD9361 wrapper rather than in
      * the AD9361 itself, so it is applied through a CSR write here. */

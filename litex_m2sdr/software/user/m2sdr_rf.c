@@ -244,8 +244,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (m2sdr_apply_config(dev, &cfg) != 0) {
-        fprintf(stderr, "m2sdr_apply_config failed\n");
+    int rc = m2sdr_apply_config(dev, &cfg);
+    if (rc != 0) {
+        fprintf(stderr, "m2sdr_apply_config failed: %s (%d)\n", m2sdr_strerror(rc), rc);
         m2sdr_close(dev);
         return 1;
     }
