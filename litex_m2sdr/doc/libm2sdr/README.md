@@ -146,6 +146,7 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 ## API overview
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
+- Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`
@@ -153,9 +154,21 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
 
+## Error model
+
+Library calls return `0` on success and negative status codes on failure.
+In addition to generic `M2SDR_ERR_INVAL`/`M2SDR_ERR_IO` classes, the API now
+uses:
+
+- `M2SDR_ERR_PARSE` for malformed strings/identifiers.
+- `M2SDR_ERR_RANGE` for out-of-range numeric values.
+- `M2SDR_ERR_STATE` for invalid call sequencing (for example, streaming before configuration).
+
+Use `m2sdr_strerror()` for concise error text in logs.
+
 ## Library versioning
 
-- `libm2sdr` public API version: `1.0`
+- `libm2sdr` public API version: `1.0.0`
 - `libm2sdr` public ABI version: `1`
 - installed shared-library SONAME: `libm2sdr.so.1`
 
@@ -197,6 +210,7 @@ sudo sysctl -w net.core.wmem_max=67108864
 ```
 - RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
 - Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
+- RF helper logs are enabled by default; define `M2SDR_LOG_ENABLED=0` at build time to mute them.
 
 ## Migration (utilities to C API)
 

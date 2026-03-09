@@ -32,7 +32,12 @@ extern "C" {
 #define M2SDR_BUFFER_BYTES   8192u
 #define M2SDR_HEADER_BYTES   16u
 
-/* Error codes (0 on success, negative on failure) */
+/* Error codes (0 on success, negative on failure).
+ *
+ * - PARSE: malformed text input (device identifiers, legacy mode strings).
+ * - RANGE: numeric value outside supported device/library limits.
+ * - STATE: API call ordering/state preconditions not met.
+ */
 enum m2sdr_error {
     M2SDR_ERR_OK         =  0,
     M2SDR_ERR_UNEXPECTED = -1,
