@@ -78,6 +78,20 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
         return true;
     return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
+
+std::vector<std::string> default_rx_antennas_for_backend(const std::string &rfic_name)
+{
+    if (rfic_name == "ad9361")
+        return {"A_BALANCED"};
+    return {"RX"};
+}
+
+std::vector<std::string> default_tx_antennas_for_backend(const std::string &rfic_name)
+{
+    if (rfic_name == "ad9361")
+        return {"A"};
+    return {"TX"};
+}
 } // namespace
 
 /***************************************************************************************************
@@ -320,8 +334,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::logf(SOAPY_SDR_INFO, "AD9361 1x FIR profile: %s", _ad9361_fir_profile.c_str());
     }
 
-    _rx_antennas = {"A_BALANCED"};
-    _tx_antennas = {"A"};
+    _rx_antennas = default_rx_antennas_for_backend(_rficName);
+    _tx_antennas = default_tx_antennas_for_backend(_rficName);
     if (args.count("rx_antenna_list") > 0)
         _rx_antennas = split_list(args.at("rx_antenna_list"));
     if (args.count("tx_antenna_list") > 0)
@@ -384,8 +398,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.bandwidth    = 30.72e6;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+        _rx_stream.antenna[0]   = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
+        _tx_stream.antenna[0]   = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
         _rx_stream.gainMode[0]  = false;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -396,8 +410,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+        _rx_stream.antenna[1]   = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
+        _tx_stream.antenna[1]   = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
         _rx_stream.gainMode[1]  = false;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
@@ -596,12 +610,12 @@ std::vector<std::string> SoapyLiteXM2SDR::listAntennas(
     if (direction == SOAPY_SDR_RX) {
         if (!_rx_antennas.empty())
             return _rx_antennas;
-        return {"A_BALANCED"};
+        return default_rx_antennas_for_backend(_rficName);
     }
     if (direction == SOAPY_SDR_TX) {
         if (!_tx_antennas.empty())
             return _tx_antennas;
-        return {"A"};
+        return default_tx_antennas_for_backend(_rficName);
     }
     return {};
 }
@@ -665,6 +679,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listGains(
 bool SoapyLiteXM2SDR::hasGainMode(
     const int direction,
     const size_t /*channel*/) const {
+    struct m2sdr_rfic_caps caps;
 
     /* TX */
     if (direction == SOAPY_SDR_TX)
@@ -672,7 +687,8 @@ bool SoapyLiteXM2SDR::hasGainMode(
 
     /* RX */
     if (direction == SOAPY_SDR_RX)
-        return true;
+        return getLiteXM2SDRRficCaps(_dev, &caps) &&
+               (caps.features & M2SDR_RFIC_FEATURE_RX_GAIN_MODE) != 0;
 
     /* Fallback */
     return false;
@@ -1340,14 +1356,16 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
 
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     std::vector<std::string> sensors;
+    struct m2sdr_rfic_caps caps;
 #ifdef CSR_XADC_BASE
     sensors.push_back("fpga_temp");
     sensors.push_back("fpga_vccint");
     sensors.push_back("fpga_vccaux");
     sensors.push_back("fpga_vccbram");
 #endif
-    if (_rficName == "ad9361")
-        sensors.push_back("ad9361_temp");
+    if (getLiteXM2SDRRficCaps(_dev, &caps) &&
+        (caps.features & M2SDR_RFIC_FEATURE_TEMP_SENSOR) != 0)
+        sensors.push_back("rfic_temp");
     return sensors;
 }
 
@@ -1397,14 +1415,14 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 #endif
-        /* AD9361 Sensors */
-        if (deviceStr == "ad9361" && _rficName == "ad9361") {
+        /* RFIC Sensors */
+        if (deviceStr == "rfic") {
             /* Temp. */
             if (sensorStr == "temp") {
                 info.key         = "temp";
                 info.value       = "0.0";
                 info.units       = "°C";
-                info.description = "AD9361 temperature";
+                info.description = "RFIC temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
@@ -1451,12 +1469,13 @@ std::string SoapyLiteXM2SDR::readSensor(
             return sensorValue;
         }
 #endif
-        /* AD9361 Sensors */
-        if (deviceStr == "ad9361" && _rficName == "ad9361") {
+        /* RFIC Sensors */
+        if (deviceStr == "rfic") {
             /* Temp. */
             if (sensorStr == "temp") {
+                std::string property_key = _rficName + ".temperature_c";
                 char value[32];
-                if (m2sdr_get_property(_dev, "ad9361.temperature_c", value, sizeof(value)) != 0)
+                if (m2sdr_get_property(_dev, property_key.c_str(), value, sizeof(value)) != 0)
                     throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") failed");
                 sensorValue = value;
             } else {

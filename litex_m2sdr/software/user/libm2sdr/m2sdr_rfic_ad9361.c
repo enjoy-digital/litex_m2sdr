@@ -1086,7 +1086,9 @@ static int m2sdr_rfic_ad9361_get_caps(struct m2sdr_dev *dev, void *ctx, struct m
     caps->features = M2SDR_RFIC_FEATURE_BIND_EXTERNAL |
                      M2SDR_RFIC_FEATURE_BIST |
                      M2SDR_RFIC_FEATURE_OVERSAMPLE |
-                     M2SDR_RFIC_FEATURE_STREAMING;
+                     M2SDR_RFIC_FEATURE_STREAMING |
+                     M2SDR_RFIC_FEATURE_RX_GAIN_MODE |
+                     M2SDR_RFIC_FEATURE_TEMP_SENSOR;
     caps->rx_channels = 2u;
     caps->tx_channels = 2u;
     caps->min_rx_frequency = 70000000LL;

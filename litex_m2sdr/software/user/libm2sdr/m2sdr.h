@@ -91,6 +91,8 @@ enum m2sdr_rfic_feature_flag {
     M2SDR_RFIC_FEATURE_BIST          = (1u << 1),
     M2SDR_RFIC_FEATURE_OVERSAMPLE    = (1u << 2),
     M2SDR_RFIC_FEATURE_STREAMING     = (1u << 3),
+    M2SDR_RFIC_FEATURE_RX_GAIN_MODE  = (1u << 4),
+    M2SDR_RFIC_FEATURE_TEMP_SENSOR   = (1u << 5),
 };
 
 /* Backward-compatible alias for older code. */
