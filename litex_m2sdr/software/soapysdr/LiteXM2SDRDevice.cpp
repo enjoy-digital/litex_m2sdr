@@ -376,6 +376,15 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
+static std::string getLiteXM2SDRRficName(struct m2sdr_dev *dev);
+
+static std::string getLiteXM2SDRRficName(struct m2sdr_dev *dev)
+{
+    char name[32] = {0};
+    if (m2sdr_get_rfic_name(dev, name, sizeof(name)) != 0 || name[0] == '\0')
+        return "unknown-rfic";
+    return std::string(name);
+}
 
 #if USE_LITEPCIE
 void dma_set_loopback(int fd, bool loopback_enable) {
@@ -436,7 +445,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             ":1234 (hint: set eth_ip=... for the board IP, error: " +
             std::string(m2sdr_strerror(rc)) + ")");
     }
-    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
+    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_eb_handle(_dev));
     _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
@@ -696,6 +705,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
+    SoapySDR::logf(SOAPY_SDR_INFO, "Active RFIC backend: %s", getLiteXM2SDRRficName(_dev).c_str());
+
 #if USE_LITEPCIE
     /* Set-up the DMA. */
     checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
@@ -829,6 +840,9 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 #elif USE_LITEETH
     key += "-eth";
 #endif
+
+    key += "-";
+    key += getLiteXM2SDRRficName(_dev);
 
     return key;
 }

@@ -96,6 +96,35 @@ static int test_transport_helpers(void)
     return 0;
 }
 
+static int test_rfic_helpers(void)
+{
+    struct m2sdr_dev dev;
+    struct m2sdr_rfic_caps caps;
+    char name[32];
+    char value[32];
+
+    memset(&dev, 0, sizeof(dev));
+
+    if (m2sdr_get_rfic_name(&dev, name, sizeof(name)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(name, "ad9361") != 0)
+        return -1;
+
+    if (m2sdr_get_rfic_caps(&dev, &caps) != M2SDR_ERR_OK)
+        return -1;
+    if (caps.kind != M2SDR_RFIC_KIND_AD9361)
+        return -1;
+    if ((caps.features & M2SDR_RFIC_FEATURE_BIND_EXTERNAL) == 0)
+        return -1;
+
+    if (m2sdr_set_property(&dev, "ad9361.test", "1") != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (m2sdr_get_property(&dev, "ad9361.test", value, sizeof(value)) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -112,6 +141,10 @@ int main(void)
     }
     if (test_transport_helpers() != 0) {
         fprintf(stderr, "test_transport_helpers failed\n");
+        return 1;
+    }
+    if (test_rfic_helpers() != 0) {
+        fprintf(stderr, "test_rfic_helpers failed\n");
         return 1;
     }
 
