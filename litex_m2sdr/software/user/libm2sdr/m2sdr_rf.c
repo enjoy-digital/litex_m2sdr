@@ -41,6 +41,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->bist_prbs         = false;
     cfg->enable_8bit_mode  = false;
     cfg->enable_oversample = false;
+    cfg->bypass_rfic_init  = false;
     cfg->channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
     cfg->clock_source      = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg->chan_mode         = NULL;

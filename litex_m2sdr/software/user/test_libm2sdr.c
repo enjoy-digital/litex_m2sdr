@@ -72,6 +72,9 @@ static int test_rf_range_validation(void)
         return -1;
     if (m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
         return -1;
+    m2sdr_config_init(&cfg);
+    if (cfg.bypass_rfic_init)
+        return -1;
 
     return 0;
 }

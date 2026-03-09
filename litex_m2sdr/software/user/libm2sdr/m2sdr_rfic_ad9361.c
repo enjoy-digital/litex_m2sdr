@@ -626,13 +626,6 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
     if (m2sdr_channel_layout_from_config(cfg, &channel_layout) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
 
-    rc = m2sdr_configure_clocking(dev, conn, cfg, clock_source);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-
-    M2SDR_LOGF("Initializing AD9361 SPI...\n");
-    m2sdr_ad9361_spi_init(conn, 1);
-
     M2SDR_LOGF("Initializing AD9361 RFIC...\n");
     default_init_param.reference_clk_rate = cfg->refclk_freq;
     default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
@@ -640,14 +633,30 @@ static int m2sdr_rfic_ad9361_apply_config(struct m2sdr_dev *dev, void *ctx, cons
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
 
-    rc = m2sdr_apply_channel_layout(dev, channel_layout);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-    if (m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy, &default_init_param, 1)) != M2SDR_ERR_OK)
+    if (!cfg->bypass_rfic_init) {
+        rc = m2sdr_configure_clocking(dev, conn, cfg, clock_source);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+
+        M2SDR_LOGF("Initializing AD9361 SPI...\n");
+        m2sdr_ad9361_spi_init(conn, 1);
+
+        rc = m2sdr_apply_channel_layout(dev, channel_layout);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    if (m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy,
+                                         &default_init_param,
+                                         cfg->bypass_rfic_init ? 0 : 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     phy = m2sdr_current_phy(dev);
     if (!phy)
         return M2SDR_ERR_STATE;
+
+    if (cfg->bypass_rfic_init) {
+        dev->iq_bits = cfg->enable_8bit_mode ? 8u : 12u;
+        return M2SDR_ERR_OK;
+    }
 
     ad9361->oversampling = cfg->enable_oversample ? 1u : 0u;
 

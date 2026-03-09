@@ -181,6 +181,9 @@ Use `m2sdr_strerror()` for concise error text in logs.
     - `ad9361.oversampling`
     - `ad9361.rx0_gain_mode` / `ad9361.rx1_gain_mode`
     - `ad9361.temperature_c`
+- `m2sdr_config.bypass_rfic_init` keeps a compatibility path for advanced
+  integrations such as Soapy that need to attach to an already-configured RFIC
+  without rerunning the full bring-up sequence.
 - Environment override: set `M2SDR_RFIC=ad9361` or `M2SDR_RFIC=mock` to force backend selection.
 - IQ precision is backend-defined:
   - AD9361 currently supports `8` or `12` (`12` uses the 16-bit sample container path).

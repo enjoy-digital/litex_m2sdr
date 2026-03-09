@@ -295,6 +295,11 @@ struct m2sdr_config {
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
     bool    enable_oversample;
+    /* Skip full RFIC re-initialization and only attach backend state to an
+     * already-configured RFIC instance. This keeps Soapy's legacy
+     * `bypass_init` behavior available while new code should prefer a normal
+     * full `m2sdr_apply_config()` bring-up. */
+    bool    bypass_rfic_init;
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;
