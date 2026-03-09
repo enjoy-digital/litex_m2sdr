@@ -176,6 +176,11 @@ Use `m2sdr_strerror()` for concise error text in logs.
 - Backend ranges/features can be queried with `m2sdr_get_rfic_caps()`.
 - Backend-specific controls use namespaced string properties via
   `m2sdr_set_property()` / `m2sdr_get_property()`.
+  - AD9361 currently exposes runtime policy/state through:
+    - `ad9361.fir_profile`
+    - `ad9361.oversampling`
+    - `ad9361.rx0_gain_mode` / `ad9361.rx1_gain_mode`
+    - `ad9361.temperature_c`
 - Environment override: set `M2SDR_RFIC=ad9361` or `M2SDR_RFIC=mock` to force backend selection.
 - IQ precision is backend-defined:
   - AD9361 currently supports `8` or `12` (`12` uses the 16-bit sample container path).
