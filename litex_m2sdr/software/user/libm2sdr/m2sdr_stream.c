@@ -104,6 +104,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     (void)num_transfers;
     if (!dev)
         return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
 
     /* The current backends stream fixed-size DMA payloads. The public API keeps
      * buffer sizes in samples to stay format-centric. */
@@ -136,11 +138,13 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
         if (!dev->rx_header_enable) {
-            m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
+            if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
                 (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+                return M2SDR_ERR_IO;
         }
-        m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
+            return M2SDR_ERR_IO;
     } else {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
@@ -168,11 +172,13 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
         if (!dev->rx_header_enable) {
-            m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
+            if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
                 (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+                return M2SDR_ERR_IO;
         }
-        m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
     } else {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
@@ -205,12 +211,18 @@ int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *
 {
     if (!dev || !params)
         return M2SDR_ERR_INVAL;
+    if (params->direction != M2SDR_RX && params->direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
 
     dev->zero_copy = params->zero_copy ? 1 : 0;
     if (params->direction == M2SDR_RX) {
-        m2sdr_set_rx_header(dev, params->rx_header_enable, params->rx_strip_header);
+        int rc = m2sdr_set_rx_header(dev, params->rx_header_enable, params->rx_strip_header);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
     } else {
-        m2sdr_set_tx_header(dev, params->tx_header_enable);
+        int rc = m2sdr_set_tx_header(dev, params->tx_header_enable);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
     }
 
     return m2sdr_sync_config(dev,
@@ -414,6 +426,8 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      unsigned timeout_ms)
 {
     if (!dev || !buffer || !num_samples)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
         return M2SDR_ERR_INVAL;
 
     unsigned sample_sz = 0;

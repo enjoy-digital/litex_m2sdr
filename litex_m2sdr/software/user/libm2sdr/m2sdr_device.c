@@ -12,6 +12,7 @@
 /*----------*/
 
 #include <fcntl.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +78,8 @@ static int m2sdr_parse_identifier(const char *id,
 {
     char tmp[M2SDR_DEVICE_STR_MAX];
     char *colon;
+    char *endptr = NULL;
+    unsigned long port_ul = 0;
 
     if (!id || !id[0]) {
         m2sdr_default_device(tmp, sizeof(tmp));
@@ -111,8 +114,14 @@ static int m2sdr_parse_identifier(const char *id,
     snprintf(ip_out, ip_len, "%s", id);
     colon = strchr(ip_out, ':');
     if (colon) {
+        if (colon == ip_out || colon[1] == '\0')
+            return -1;
         *colon = '\0';
-        *port_out = (uint16_t)strtoul(colon + 1, NULL, 0);
+        errno = 0;
+        port_ul = strtoul(colon + 1, &endptr, 10);
+        if (errno != 0 || endptr == (colon + 1) || *endptr != '\0' || port_ul == 0 || port_ul > 65535)
+            return -1;
+        *port_out = (uint16_t)port_ul;
     }
 
     return 0;
@@ -512,8 +521,10 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
         return M2SDR_ERR_IO;
 
     /* The time generator snapshots into the read registers on a write pulse. */
-    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2);
-    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2);
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl | 0x2) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, ctrl & ~0x2) != 0)
+        return M2SDR_ERR_IO;
 
     return m2sdr_read_reg_u64(dev, CSR_TIME_GEN_READ_TIME_ADDR, time_ns);
 }
@@ -524,10 +535,14 @@ int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
     if (!dev)
         return M2SDR_ERR_INVAL;
 
-    m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, (uint32_t)(time_ns >> 32));
-    m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, (uint32_t)(time_ns & 0xffffffffu));
-    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET));
-    m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, 0);
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, (uint32_t)(time_ns >> 32)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, (uint32_t)(time_ns & 0xffffffffu)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_TIME_GEN_CONTROL_ADDR, 0) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
@@ -618,9 +633,10 @@ int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
     dev->rx_header_enable = enable ? 1 : 0;
     dev->rx_strip_header  = strip_header ? 1 : 0;
 
-    m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
+    if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
         (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-        ((enable ? 1 : 0) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET));
+        ((enable ? 1 : 0) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
@@ -632,9 +648,10 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
 
     dev->tx_header_enable = enable ? 1 : 0;
 
-    m2sdr_reg_write(dev, CSR_HEADER_TX_CONTROL_ADDR,
+    if (m2sdr_reg_write(dev, CSR_HEADER_TX_CONTROL_ADDR,
         (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-        ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET));
+        ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
@@ -668,7 +685,8 @@ int m2sdr_gpio_config(struct m2sdr_dev *dev, bool enable, bool loopback, bool so
         control &= ~(1 << CSR_GPIO_CONTROL_ENABLE_OFFSET);
     }
 
-    m2sdr_reg_write(dev, CSR_GPIO_CONTROL_ADDR, control);
+    if (m2sdr_reg_write(dev, CSR_GPIO_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 #else
     (void)enable;
@@ -685,8 +703,10 @@ int m2sdr_gpio_write(struct m2sdr_dev *dev, uint8_t value, uint8_t oe)
         return M2SDR_ERR_INVAL;
 
 #ifdef CSR_GPIO_BASE
-    m2sdr_reg_write(dev, CSR_GPIO__O_ADDR, value & 0xF);
-    m2sdr_reg_write(dev, CSR_GPIO_OE_ADDR, oe & 0xF);
+    if (m2sdr_reg_write(dev, CSR_GPIO__O_ADDR, value & 0xF) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_GPIO_OE_ADDR, oe & 0xF) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 #else
     (void)value;
