@@ -32,6 +32,7 @@ static int test_stream_direction_validation(void)
 {
     struct m2sdr_dev dev;
     struct m2sdr_sync_params params;
+    int16_t samples[8];
 
     memset(&dev, 0, sizeof(dev));
     m2sdr_sync_params_init(&params);
@@ -41,6 +42,10 @@ static int test_stream_direction_validation(void)
     if (m2sdr_sync_config_ex(&dev, &params) != M2SDR_ERR_INVAL)
         return -1;
     if (m2sdr_get_buffer(&dev, (enum m2sdr_direction)42, (void **)&params, &params.buffer_size, 1) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_sync_rx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)
+        return -1;
+    if (m2sdr_sync_tx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)
         return -1;
 
     return 0;
@@ -62,6 +67,10 @@ static int test_rf_range_validation(void)
     cfg.tx_gain = -100;
     if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_RANGE)
         return -1;
+    if (m2sdr_set_sample_rate(&dev, -1) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
+        return -1;
 
     return 0;
 }
@@ -78,6 +87,10 @@ static int test_transport_helpers(void)
     if (kind != M2SDR_TRANSPORT_KIND_LITEPCIE)
         return -1;
     if (m2sdr_get_eb_handle(&dev) != NULL)
+        return -1;
+    if (m2sdr_get_transport(NULL, &kind) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_transport(&dev, NULL) != M2SDR_ERR_INVAL)
         return -1;
 
     return 0;
