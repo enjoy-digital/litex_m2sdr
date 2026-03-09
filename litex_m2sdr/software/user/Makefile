@@ -60,7 +60,7 @@ all: $(PROGS)
 
 examples: libm2sdr/libm2sdr.a $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
-	./test_libm2sdr
+	LD_LIBRARY_PATH=libm2sdr:$${LD_LIBRARY_PATH} ./test_libm2sdr
 
 test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
 	$(CC) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm

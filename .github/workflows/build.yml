@@ -15,6 +15,10 @@ jobs:
           sudo apt-get install -y cmake cppcheck libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
       - name: Build user (PCIe)
         run: make -C litex_m2sdr/software/user clean all
+      - name: Check libm2sdr exported symbols
+        run: |
+          nm -D --defined-only litex_m2sdr/software/user/libm2sdr/libm2sdr.so.1 | grep -q " m2sdr_get_transport$"
+          nm -D --defined-only litex_m2sdr/software/user/libm2sdr/libm2sdr.so.1 | grep -q " m2sdr_get_eb_handle$"
       - name: Run libm2sdr unit checks (PCIe)
         run: make -C litex_m2sdr/software/user test-libm2sdr
       - name: Build libm2sdr with ASan/UBSan
@@ -33,6 +37,8 @@ jobs:
           cmake --build litex_m2sdr/software/soapysdr/build
       - name: Build user (LiteETH)
         run: make -C litex_m2sdr/software/user clean all INTERFACE=USE_LITEETH
+      - name: Run libm2sdr unit checks (LiteETH)
+        run: make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEETH
       - name: Build Soapy (LiteETH)
         run: |
           cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build_liteeth -DUSE_LITEETH=ON
