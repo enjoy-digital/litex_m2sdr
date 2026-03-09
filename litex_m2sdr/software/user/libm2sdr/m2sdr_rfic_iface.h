@@ -22,9 +22,13 @@ struct m2sdr_rfic_ops {
     int (*bind)(struct m2sdr_dev *dev, void *ctx, void *phy);
     int (*apply_config)(struct m2sdr_dev *dev, void *ctx, const struct m2sdr_config *cfg);
     int (*set_frequency)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, uint64_t freq);
+    int (*get_frequency)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, uint64_t *freq);
     int (*set_sample_rate)(struct m2sdr_dev *dev, void *ctx, int64_t rate);
+    int (*get_sample_rate)(struct m2sdr_dev *dev, void *ctx, int64_t *rate);
     int (*set_bandwidth)(struct m2sdr_dev *dev, void *ctx, int64_t bw);
+    int (*get_bandwidth)(struct m2sdr_dev *dev, void *ctx, int64_t *bw);
     int (*set_gain)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, int64_t gain);
+    int (*get_gain)(struct m2sdr_dev *dev, void *ctx, enum m2sdr_direction direction, int64_t *gain);
     int (*set_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned bits);
     int (*get_iq_bits)(struct m2sdr_dev *dev, void *ctx, unsigned *bits);
     int (*get_caps)(struct m2sdr_dev *dev, void *ctx, struct m2sdr_rfic_caps *caps);

@@ -83,6 +83,7 @@ enum m2sdr_transport_kind {
 enum m2sdr_rfic_kind {
     M2SDR_RFIC_KIND_UNKNOWN = 0,
     M2SDR_RFIC_KIND_AD9361 = 1,
+    M2SDR_RFIC_KIND_MOCK = 2,
 };
 
 enum m2sdr_rfic_feature_flag {
@@ -405,9 +406,13 @@ int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
  * `m2sdr_apply_config()` or an advanced integration path such as Soapy.
  */
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
+int  m2sdr_get_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t *freq);
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
+int  m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
+int  m2sdr_get_bandwidth(struct m2sdr_dev *dev, int64_t *bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+int  m2sdr_get_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t *gain);
 /* Convenience RF setters for the common one-direction case. */
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);

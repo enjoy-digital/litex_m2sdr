@@ -11,6 +11,7 @@
 #include "m2sdr_internal.h"
 
 extern const struct m2sdr_rfic_ops m2sdr_rfic_ad9361_ops;
+extern const struct m2sdr_rfic_ops m2sdr_rfic_mock_ops;
 
 static const struct m2sdr_rfic_ops *m2sdr_lookup_rfic(const char *name)
 {
@@ -19,6 +20,8 @@ static const struct m2sdr_rfic_ops *m2sdr_lookup_rfic(const char *name)
 
     if (strcmp(name, "ad9361") == 0)
         return &m2sdr_rfic_ad9361_ops;
+    if (strcmp(name, "mock") == 0)
+        return &m2sdr_rfic_mock_ops;
 
     return NULL;
 }

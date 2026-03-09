@@ -602,6 +602,34 @@ static int m2sdr_rfic_ad9361_set_frequency(struct m2sdr_dev *dev, void *ctx,
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_rfic_ad9361_get_frequency(struct m2sdr_dev *dev, void *ctx,
+                                           enum m2sdr_direction direction, uint64_t *freq)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    (void)ctx;
+
+    if (!dev || !freq)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_TX && direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (direction == M2SDR_TX) {
+        if (m2sdr_from_ad9361_rc(ad9361_get_tx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    } else {
+        if (m2sdr_from_ad9361_rc(ad9361_get_rx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    }
+
+    return M2SDR_ERR_OK;
+}
+
 /* Program a common sample rate on both RX and TX paths. */
 static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, int64_t rate)
 {
@@ -624,6 +652,27 @@ static int m2sdr_rfic_ad9361_set_sample_rate(struct m2sdr_dev *dev, void *ctx, i
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_rfic_ad9361_get_sample_rate(struct m2sdr_dev *dev, void *ctx, int64_t *rate)
+{
+    struct ad9361_rf_phy *phy;
+    uint32_t value = 0;
+    int rc;
+
+    (void)ctx;
+
+    if (!dev || !rate)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_get_rx_sampling_freq(phy, &value)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    *rate = (int64_t)value;
+    return M2SDR_ERR_OK;
+}
+
 /* Program a common RF bandwidth on both RX and TX paths. */
 static int m2sdr_rfic_ad9361_set_bandwidth(struct m2sdr_dev *dev, void *ctx, int64_t bw)
 {
@@ -643,6 +692,27 @@ static int m2sdr_rfic_ad9361_set_bandwidth(struct m2sdr_dev *dev, void *ctx, int
         return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_rfic_ad9361_get_bandwidth(struct m2sdr_dev *dev, void *ctx, int64_t *bw)
+{
+    struct ad9361_rf_phy *phy;
+    uint32_t value = 0;
+    int rc;
+
+    (void)ctx;
+
+    if (!dev || !bw)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_get_rx_rf_bandwidth(phy, &value)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    *bw = (int64_t)value;
     return M2SDR_ERR_OK;
 }
 
@@ -674,6 +744,38 @@ static int m2sdr_rfic_ad9361_set_gain(struct m2sdr_dev *dev, void *ctx,
             return M2SDR_ERR_IO;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, gain)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
+    }
+
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_rfic_ad9361_get_gain(struct m2sdr_dev *dev, void *ctx,
+                                      enum m2sdr_direction direction, int64_t *gain)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    (void)ctx;
+
+    if (!dev || !gain)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_TX && direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (direction == M2SDR_TX) {
+        uint32_t atten_mdb = 0;
+        if (m2sdr_from_ad9361_rc(ad9361_get_tx_attenuation(phy, 0, &atten_mdb)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        *gain = -((int64_t)atten_mdb / 1000);
+    } else {
+        int32_t rx_gain = 0;
+        if (m2sdr_from_ad9361_rc(ad9361_get_rx_rf_gain(phy, 0, &rx_gain)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        *gain = (int64_t)rx_gain;
     }
 
     return M2SDR_ERR_OK;
@@ -805,9 +907,13 @@ const struct m2sdr_rfic_ops m2sdr_rfic_ad9361_ops = {
     .bind           = m2sdr_rfic_ad9361_bind,
     .apply_config   = m2sdr_rfic_ad9361_apply_config,
     .set_frequency  = m2sdr_rfic_ad9361_set_frequency,
+    .get_frequency  = m2sdr_rfic_ad9361_get_frequency,
     .set_sample_rate= m2sdr_rfic_ad9361_set_sample_rate,
+    .get_sample_rate= m2sdr_rfic_ad9361_get_sample_rate,
     .set_bandwidth  = m2sdr_rfic_ad9361_set_bandwidth,
+    .get_bandwidth  = m2sdr_rfic_ad9361_get_bandwidth,
     .set_gain       = m2sdr_rfic_ad9361_set_gain,
+    .get_gain       = m2sdr_rfic_ad9361_get_gain,
     .set_iq_bits    = m2sdr_rfic_ad9361_set_iq_bits,
     .get_iq_bits    = m2sdr_rfic_ad9361_get_iq_bits,
     .get_caps       = m2sdr_rfic_ad9361_get_caps,

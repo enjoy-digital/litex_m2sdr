@@ -94,6 +94,24 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
     return dev->rfic_ops->set_frequency(dev, dev->rfic_ctx, direction, freq);
 }
 
+int m2sdr_get_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t *freq)
+{
+    int rc;
+
+    if (!dev || !freq)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_TX && direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->get_frequency)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->get_frequency(dev, dev->rfic_ctx, direction, freq);
+}
+
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
     int rc;
@@ -110,6 +128,22 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
         return M2SDR_ERR_UNSUPPORTED;
 
     return dev->rfic_ops->set_sample_rate(dev, dev->rfic_ctx, rate);
+}
+
+int m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate)
+{
+    int rc;
+
+    if (!dev || !rate)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->get_sample_rate)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->get_sample_rate(dev, dev->rfic_ctx, rate);
 }
 
 int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
@@ -130,6 +164,22 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     return dev->rfic_ops->set_bandwidth(dev, dev->rfic_ctx, bw);
 }
 
+int m2sdr_get_bandwidth(struct m2sdr_dev *dev, int64_t *bw)
+{
+    int rc;
+
+    if (!dev || !bw)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->get_bandwidth)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->get_bandwidth(dev, dev->rfic_ctx, bw);
+}
+
 int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain)
 {
     int rc;
@@ -146,6 +196,24 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
         return M2SDR_ERR_UNSUPPORTED;
 
     return dev->rfic_ops->set_gain(dev, dev->rfic_ctx, direction, gain);
+}
+
+int m2sdr_get_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t *gain)
+{
+    int rc;
+
+    if (!dev || !gain)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_TX && direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_backend(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!dev->rfic_ops || !dev->rfic_ops->get_gain)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return dev->rfic_ops->get_gain(dev, dev->rfic_ctx, direction, gain);
 }
 
 int m2sdr_set_iq_bits(struct m2sdr_dev *dev, unsigned bits)

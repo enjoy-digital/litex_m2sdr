@@ -668,10 +668,18 @@ int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sen
 /* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
 int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 {
+    struct m2sdr_rfic_caps caps;
+
     /* Backward compatibility:
      * - true  -> 8-bit packed mode.
-     * - false -> default native precision path (12-bit on AD9361 in 16-bit container). */
-    return m2sdr_set_iq_bits(dev, enable_8bit ? 8u : 12u);
+     * - false -> default native precision path for the active RFIC backend. */
+    if (enable_8bit)
+        return m2sdr_set_iq_bits(dev, 8u);
+
+    if (m2sdr_get_rfic_caps(dev, &caps) == M2SDR_ERR_OK && caps.native_iq_bits != 0)
+        return m2sdr_set_iq_bits(dev, caps.native_iq_bits);
+
+    return m2sdr_set_iq_bits(dev, 12u);
 }
 
 /* Enable or disable the FPGA DMA loopback path when the backend supports it. */

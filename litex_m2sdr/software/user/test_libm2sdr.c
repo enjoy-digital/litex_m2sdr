@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "libm2sdr/m2sdr.h"
@@ -138,6 +139,55 @@ static int test_rfic_helpers(void)
     return 0;
 }
 
+static int test_mock_backend(void)
+{
+    struct m2sdr_dev dev;
+    struct m2sdr_rfic_caps caps;
+    uint64_t freq = 0;
+    int64_t value = 0;
+    unsigned bits = 0;
+    char name[32];
+
+    memset(&dev, 0, sizeof(dev));
+    setenv("M2SDR_RFIC", "mock", 1);
+
+    if (m2sdr_get_rfic_name(&dev, name, sizeof(name)) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(name, "mock") != 0)
+        return -1;
+    if (m2sdr_get_rfic_caps(&dev, &caps) != M2SDR_ERR_OK)
+        return -1;
+    if (caps.kind != M2SDR_RFIC_KIND_MOCK)
+        return -1;
+    if (caps.native_iq_bits != 16u)
+        return -1;
+
+    if (m2sdr_set_frequency(&dev, M2SDR_RX, 123456789ULL) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_frequency(&dev, M2SDR_RX, &freq) != M2SDR_ERR_OK || freq != 123456789ULL)
+        return -1;
+    if (m2sdr_set_sample_rate(&dev, 2000000) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_sample_rate(&dev, &value) != M2SDR_ERR_OK || value != 2000000)
+        return -1;
+    if (m2sdr_set_bandwidth(&dev, 1500000) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_bandwidth(&dev, &value) != M2SDR_ERR_OK || value != 1500000)
+        return -1;
+    if (m2sdr_set_gain(&dev, M2SDR_TX, -5) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_gain(&dev, M2SDR_TX, &value) != M2SDR_ERR_OK || value != -5)
+        return -1;
+    if (m2sdr_set_iq_bits(&dev, 16) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_get_iq_bits(&dev, &bits) != M2SDR_ERR_OK || bits != 16u)
+        return -1;
+
+    m2sdr_rfic_detach(&dev);
+    unsetenv("M2SDR_RFIC");
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -158,6 +208,10 @@ int main(void)
     }
     if (test_rfic_helpers() != 0) {
         fprintf(stderr, "test_rfic_helpers failed\n");
+        return 1;
+    }
+    if (test_mock_backend() != 0) {
+        fprintf(stderr, "test_mock_backend failed\n");
         return 1;
     }
 
