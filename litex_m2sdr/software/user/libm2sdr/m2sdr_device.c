@@ -127,6 +127,19 @@ static int m2sdr_parse_identifier(const char *id,
     return 0;
 }
 
+int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out)
+{
+    char path[M2SDR_DEVICE_STR_MAX] = {0};
+    char ip[M2SDR_DEVICE_STR_MAX] = {0};
+    uint16_t port = 1234;
+    int rc;
+
+    rc = m2sdr_parse_identifier(id, path, sizeof(path), ip, sizeof(ip), &port);
+    if (port_out)
+        *port_out = port;
+    return rc;
+}
+
 /* Read one logical 64-bit CSR value stored as hi/lo 32-bit words. */
 static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *value)
 {

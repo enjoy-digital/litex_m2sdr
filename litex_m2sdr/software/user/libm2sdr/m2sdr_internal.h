@@ -71,4 +71,6 @@ struct m2sdr_dev {
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
+int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);
+
 #endif /* M2SDR_INTERNAL_H */

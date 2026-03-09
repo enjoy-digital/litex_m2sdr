@@ -35,6 +35,7 @@ PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
+TEST_PROGS = test_libm2sdr
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -56,6 +57,11 @@ LIBM2SDR_OBJS = \
 all: $(PROGS)
 
 examples: libm2sdr/libm2sdr.a $(EXAMPLES)
+test-libm2sdr: $(TEST_PROGS)
+	./test_libm2sdr
+
+test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
+	$(CC) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 ../../doc/libm2sdr/example_sync_rx: ../../doc/libm2sdr/example_sync_rx.c libm2sdr/libm2sdr.a
 	$(CC) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
@@ -119,6 +125,7 @@ m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.
 
 m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_selftest.o
 	$(CC) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
+
 endif
 
 # PCIe-only build
