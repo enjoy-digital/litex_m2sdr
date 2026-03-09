@@ -56,27 +56,33 @@ static int test_rf_range_validation(void)
 {
     struct m2sdr_dev dev;
     struct m2sdr_config cfg;
+    int rc = 0;
 
     memset(&dev, 0, sizeof(dev));
     m2sdr_config_init(&cfg);
 
     cfg.sample_rate = -1;
     if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_RANGE)
-        return -1;
+        rc = -1;
 
-    m2sdr_config_init(&cfg);
-    cfg.tx_gain = -100;
-    if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_RANGE)
-        return -1;
-    if (m2sdr_set_sample_rate(&dev, -1) != M2SDR_ERR_RANGE)
-        return -1;
-    if (m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
-        return -1;
-    m2sdr_config_init(&cfg);
-    if (cfg.bypass_rfic_init)
-        return -1;
+    if (rc == 0) {
+        m2sdr_config_init(&cfg);
+        cfg.tx_gain = -100;
+        if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_RANGE)
+            rc = -1;
+    }
+    if (rc == 0 && m2sdr_set_sample_rate(&dev, -1) != M2SDR_ERR_RANGE)
+        rc = -1;
+    if (rc == 0 && m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
+        rc = -1;
+    if (rc == 0) {
+        m2sdr_config_init(&cfg);
+        if (cfg.bypass_rfic_init)
+            rc = -1;
+    }
 
-    return 0;
+    m2sdr_rfic_detach(&dev);
+    return rc;
 }
 
 static int test_transport_helpers(void)
@@ -106,74 +112,76 @@ static int test_rfic_helpers(void)
     struct m2sdr_rfic_caps caps;
     char name[32];
     char value[32];
+    int rc = 0;
 
     memset(&dev, 0, sizeof(dev));
 
     if (m2sdr_get_rfic_name(&dev, name, sizeof(name)) != M2SDR_ERR_OK)
-        return -1;
+        rc = -1;
     if (strcmp(name, "ad9361") != 0)
-        return -1;
+        rc = -1;
 
-    if (m2sdr_get_rfic_caps(&dev, &caps) != M2SDR_ERR_OK)
-        return -1;
-    if (caps.kind != M2SDR_RFIC_KIND_AD9361)
-        return -1;
-    if ((caps.features & M2SDR_RFIC_FEATURE_BIND_EXTERNAL) == 0)
-        return -1;
-    if ((caps.features & M2SDR_RFIC_FEATURE_STREAMING) == 0)
-        return -1;
-    if ((caps.features & M2SDR_RFIC_FEATURE_RX_GAIN_MODE) == 0)
-        return -1;
-    if ((caps.features & M2SDR_RFIC_FEATURE_TEMP_SENSOR) == 0)
-        return -1;
-    if (caps.rx_channels != 2u || caps.tx_channels != 2u)
-        return -1;
-    if (caps.min_rx_frequency != 70000000LL || caps.max_tx_frequency != 6000000000LL)
-        return -1;
-    if (caps.native_iq_bits != 12u)
-        return -1;
-    if ((caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(8)) == 0)
-        return -1;
-    if ((caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(12)) == 0)
-        return -1;
+    if (rc == 0 && m2sdr_get_rfic_caps(&dev, &caps) != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && caps.kind != M2SDR_RFIC_KIND_AD9361)
+        rc = -1;
+    if (rc == 0 && (caps.features & M2SDR_RFIC_FEATURE_BIND_EXTERNAL) == 0)
+        rc = -1;
+    if (rc == 0 && (caps.features & M2SDR_RFIC_FEATURE_STREAMING) == 0)
+        rc = -1;
+    if (rc == 0 && (caps.features & M2SDR_RFIC_FEATURE_RX_GAIN_MODE) == 0)
+        rc = -1;
+    if (rc == 0 && (caps.features & M2SDR_RFIC_FEATURE_TEMP_SENSOR) == 0)
+        rc = -1;
+    if (rc == 0 && (caps.rx_channels != 2u || caps.tx_channels != 2u))
+        rc = -1;
+    if (rc == 0 && (caps.min_rx_frequency != 70000000LL || caps.max_tx_frequency != 6000000000LL))
+        rc = -1;
+    if (rc == 0 && caps.native_iq_bits != 12u)
+        rc = -1;
+    if (rc == 0 && (caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(8)) == 0)
+        rc = -1;
+    if (rc == 0 && (caps.supported_iq_bits_mask & M2SDR_IQ_BITS_MASK(12)) == 0)
+        rc = -1;
 
-    if (m2sdr_set_iq_bits(&dev, 7) != M2SDR_ERR_RANGE)
-        return -1;
-    if (m2sdr_set_iq_bits(&dev, 16) != M2SDR_ERR_RANGE)
-        return -1;
-    if (m2sdr_get_iq_bits(&dev, NULL) != M2SDR_ERR_INVAL)
-        return -1;
+    if (rc == 0 && m2sdr_set_iq_bits(&dev, 7) != M2SDR_ERR_RANGE)
+        rc = -1;
+    if (rc == 0 && m2sdr_set_iq_bits(&dev, 16) != M2SDR_ERR_RANGE)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_iq_bits(&dev, NULL) != M2SDR_ERR_INVAL)
+        rc = -1;
 
-    if (m2sdr_set_property(&dev, "ad9361.test", "1") != M2SDR_ERR_UNSUPPORTED)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.test", value, sizeof(value)) != M2SDR_ERR_UNSUPPORTED)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
-        return -1;
-    if (strcmp(value, "legacy") != 0)
-        return -1;
-    if (m2sdr_set_property(&dev, "ad9361.fir_profile", "wide") != M2SDR_ERR_OK)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
-        return -1;
-    if (strcmp(value, "wide") != 0)
-        return -1;
-    if (m2sdr_set_property(&dev, "ad9361.oversampling", "1") != M2SDR_ERR_OK)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.oversampling", value, sizeof(value)) != M2SDR_ERR_OK)
-        return -1;
-    if (strcmp(value, "1") != 0)
-        return -1;
-    if (m2sdr_set_property(&dev, "ad9361.rx0_gain_mode", "slow") != M2SDR_ERR_OK)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.rx0_gain_mode", value, sizeof(value)) != M2SDR_ERR_OK)
-        return -1;
-    if (strcmp(value, "slowattack") != 0)
-        return -1;
-    if (m2sdr_get_property(&dev, "ad9361.temperature_c", value, sizeof(value)) != M2SDR_ERR_STATE)
-        return -1;
+    if (rc == 0 && m2sdr_set_property(&dev, "ad9361.test", "1") != M2SDR_ERR_UNSUPPORTED)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.test", value, sizeof(value)) != M2SDR_ERR_UNSUPPORTED)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && strcmp(value, "legacy") != 0)
+        rc = -1;
+    if (rc == 0 && m2sdr_set_property(&dev, "ad9361.fir_profile", "wide") != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.fir_profile", value, sizeof(value)) != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && strcmp(value, "wide") != 0)
+        rc = -1;
+    if (rc == 0 && m2sdr_set_property(&dev, "ad9361.oversampling", "1") != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.oversampling", value, sizeof(value)) != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && strcmp(value, "1") != 0)
+        rc = -1;
+    if (rc == 0 && m2sdr_set_property(&dev, "ad9361.rx0_gain_mode", "slow") != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.rx0_gain_mode", value, sizeof(value)) != M2SDR_ERR_OK)
+        rc = -1;
+    if (rc == 0 && strcmp(value, "slowattack") != 0)
+        rc = -1;
+    if (rc == 0 && m2sdr_get_property(&dev, "ad9361.temperature_c", value, sizeof(value)) != M2SDR_ERR_STATE)
+        rc = -1;
 
-    return 0;
+    m2sdr_rfic_detach(&dev);
+    return rc;
 }
 
 static int test_mock_backend(void)
