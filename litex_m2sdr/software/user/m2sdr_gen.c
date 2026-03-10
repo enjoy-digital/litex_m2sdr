@@ -135,8 +135,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     printf("  Zero-Copy Mode: %d\n", zero_copy);
 
     /* Initialize DMA */
+    dma.shared_fd = 1;
+    dma.fds.fd = fd;
     if (litepcie_dma_init(&dma, "", zero_copy)) {
-        close(fd);
         m2sdr_close(dev);
         exit(1);
     }
