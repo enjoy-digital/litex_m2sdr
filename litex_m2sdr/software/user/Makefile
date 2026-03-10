@@ -94,27 +94,27 @@ analyze-libm2sdr:
 
 # --- Libraries ---
 
-liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o | $(BUILD_FLAGS_FILE)
-	$(AR) rcs $@ $+
+liblitepcie/liblitepcie.a: $(BUILD_FLAGS_FILE) liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
+	$(AR) rcs $@ liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
 	ranlib $@
 
 
-libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
-	$(AR) rcs $@ $+
+libliteeth/libliteeth.a: $(BUILD_FLAGS_FILE) libliteeth/etherbone.o libliteeth/liteeth_udp.o
+	$(AR) rcs $@ libliteeth/etherbone.o libliteeth/liteeth_udp.o
 	ranlib $@
 
-libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS) | $(BUILD_FLAGS_FILE)
-	$(AR) rcs $@ $+
+libm2sdr/libm2sdr.a: $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
+	$(AR) rcs $@ $(LIBM2SDR_OBJS)
 	ranlib $@
 
-libm2sdr/$(LIBM2SDR_SONAME): $(LIBM2SDR_OBJS) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $^
+libm2sdr/$(LIBM2SDR_SONAME): $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $(LIBM2SDR_OBJS)
 
 libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
 	ln -sf $(LIBM2SDR_SONAME) $@
 
-ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o | $(BUILD_FLAGS_FILE)
-	$(AR) rcs $@ $+
+ad9361/libad9361_m2sdr.a: $(BUILD_FLAGS_FILE) ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
+	$(AR) rcs $@ ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
 	ranlib $@
 
 # --- Binaries ---
