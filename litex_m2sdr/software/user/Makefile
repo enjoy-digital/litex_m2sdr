@@ -31,13 +31,17 @@ ifeq ($(INTERFACE),USE_LITEETH)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sata m2sdr_selftest
 else ifeq ($(INTERFACE),USE_LITEPCIE)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_selftest
-  ifeq ($(HAVE_SDL2),1)
-    BINARIES += m2sdr_scan
-  else
-    $(warning SDL2 not found; skipping m2sdr_scan build)
-  endif
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
+endif
+
+ifeq ($(HAVE_SDL2),1)
+  BINARIES += m2sdr_check
+  ifeq ($(INTERFACE),USE_LITEPCIE)
+    BINARIES += m2sdr_scan
+  endif
+else
+  $(warning SDL2 not found; skipping SDL2-based tools)
 endif
 
 LIBM2SDR_SONAME = libm2sdr.so.1
@@ -63,6 +67,18 @@ LIBM2SDR_OBJS = \
 	ad9361/ad9361_api.o \
 	ad9361/ad9361_conv.o \
 	ad9361/util.o
+
+M2SDR_IMGUI_SRCS := \
+	$(SCAN_CIMGUI_DIR)/cimgui.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_draw.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_demo.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_tables.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/imgui_widgets.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_sdl2.cpp \
+	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_opengl3.cpp \
+	$(SCAN_UI_DIR)/imgui_sdl_gl3_bridge.cpp
+M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
 
@@ -147,6 +163,11 @@ m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_
 
 endif
 
+ifeq ($(HAVE_SDL2),1)
+m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+endif
+
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_util.o
@@ -180,22 +201,11 @@ m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
 m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
 
-M2SDR_SCAN_IMGUI_SRCS := \
-	$(SCAN_CIMGUI_DIR)/cimgui.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/imgui.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/imgui_draw.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/imgui_demo.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/imgui_tables.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/imgui_widgets.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_sdl2.cpp \
-	$(SCAN_CIMGUI_DIR)/imgui/backends/imgui_impl_opengl3.cpp \
-	$(SCAN_UI_DIR)/imgui_sdl_gl3_bridge.cpp
-M2SDR_SCAN_IMGUI_OBJS := $(M2SDR_SCAN_IMGUI_SRCS:.cpp=.o)
 M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
-m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_SCAN_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_SCAN_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 clean:

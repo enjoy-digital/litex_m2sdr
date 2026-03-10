@@ -16,7 +16,7 @@ The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and 
 The user-space code is intentionally layered:
 
 - `libm2sdr/` is the public device/RF/streaming API for host applications.
-- `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr`.
+- `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr` or the shared host-side support code.
 - `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
 
@@ -44,7 +44,7 @@ The user utilities now follow a mostly shared CLI vocabulary:
 
 Core user tools build with standard C/C++ toolchains and the RF/audio dependencies already used by this project.
 
-`m2sdr_scan` additionally requires:
+`m2sdr_scan` and `m2sdr_check` additionally require:
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
@@ -55,7 +55,7 @@ On Debian/Ubuntu:
 sudo apt install pkg-config libsdl2-dev libgl1-mesa-dev
 ~~~~
 
-When SDL2 is not available, `m2sdr_scan` is skipped by the `Makefile` and other user tools still build.
+When SDL2 is not available, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile` and other user tools still build.
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
@@ -215,6 +215,38 @@ Example usage:
 
 ---
 
+### m2sdr_check
+Native GUI utility to inspect recorded I/Q sample files. It is intended as the host-side replacement for lightweight Python checks such as `tone_check.py`.
+
+**Usage**:
+~~~~
+m2sdr_check [options] filename
+~~~~
+
+**Relevant options**:
+- `--nchannels`
+- `--nbits`
+- `--sample-rate`
+- `--format sc16|sc8`
+- `--frame-header`
+- `--frame-size`
+- `--max-samples`
+
+The GUI provides:
+- time-domain I/Q and magnitude plots
+- constellation view
+- FFT spectrum view
+- I/Q histograms
+- DC offset / RMS / clipping / timestamp summary
+
+Example usage:
+~~~~
+./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
+./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000 --frame-header --frame-size 245760
+~~~~
+
+---
+
 ### m2sdr_sata
 Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, and supports replay through the TX/RX loopback.
 
@@ -252,7 +284,8 @@ Example usage:
 ---
 
 ### tone_gen.py
-Python script that generates a pure-tone (sine wave) sample file.
+Legacy Python script that generates a pure-tone (sine wave) sample file.
+Prefer `m2sdr_gen --signal tone` for new workflows.
 
 **Key arguments**:
 - `--frequency FREQUENCY` (default=1e6)
@@ -275,7 +308,8 @@ Example usage:
 ---
 
 ### tone_check.py
-Python script that analyzes a file of I/Q samples. Can compute approximate amplitude and plot the time-domain waveform if requested.
+Legacy Python script that analyzes a file of I/Q samples.
+Prefer `m2sdr_check` for new workflows.
 
 **Key arguments**:
 - `--plot`
