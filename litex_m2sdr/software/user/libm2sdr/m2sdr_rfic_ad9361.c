@@ -60,6 +60,7 @@ struct m2sdr_rfic_ad9361_ctx {
     char fir_profile[M2SDR_AD9361_FIR_PROFILE_MAX];
     char rx_gain_mode[2][16];
     unsigned oversampling;
+    bool runtime_rx_gain_warned[2];
 };
 
 /* The Analog Devices AD9361 code expects Linux-like platform hooks with a
@@ -939,10 +940,11 @@ static int m2sdr_rfic_ad9361_set_gain(struct m2sdr_dev *dev, void *ctx,
                                       enum m2sdr_direction direction, int64_t gain)
 {
     struct ad9361_rf_phy *phy;
+    struct m2sdr_rfic_ad9361_ctx *ad9361 = ctx;
+    unsigned rx_mask;
     int rc;
-    (void)ctx;
 
-    if (!dev)
+    if (!dev || !ad9361)
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_TX && direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
@@ -956,12 +958,34 @@ static int m2sdr_rfic_ad9361_set_gain(struct m2sdr_dev *dev, void *ctx,
         if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(-gain * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
     } else {
+        int rx0_rc = 0;
+        int rx1_rc = 0;
+
         if (gain < M2SDR_RX_GAIN_MIN_DB || gain > M2SDR_RX_GAIN_MAX_DB)
             return M2SDR_ERR_RANGE;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, gain)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, gain)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
+        rx_mask = phy->pdata->rx2tx2 ? (RX_1 | RX_2) : phy->pdata->rx1tx1_mode_use_rx_num;
+        if ((rx_mask & RX_1) && phy->agc_mode[0] != RF_GAIN_MGC) {
+            if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+                return M2SDR_ERR_IO;
+            snprintf(ad9361->rx_gain_mode[0], sizeof(ad9361->rx_gain_mode[0]), "%s", "manual");
+        }
+        if ((rx_mask & RX_2) && phy->agc_mode[1] != RF_GAIN_MGC) {
+            if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+                return M2SDR_ERR_IO;
+            snprintf(ad9361->rx_gain_mode[1], sizeof(ad9361->rx_gain_mode[1]), "%s", "manual");
+        }
+        if (rx_mask & RX_1)
+            rx0_rc = ad9361_set_rx_rf_gain(phy, 0, gain);
+        if (rx_mask & RX_2)
+            rx1_rc = ad9361_set_rx_rf_gain(phy, 1, gain);
+        if ((rx_mask & RX_1) && m2sdr_from_ad9361_rc(rx0_rc) != M2SDR_ERR_OK && !ad9361->runtime_rx_gain_warned[0]) {
+            M2SDR_LOGF("Warning: AD9361 RX0 runtime gain update failed (rc=%d), continuing.\n", rx0_rc);
+            ad9361->runtime_rx_gain_warned[0] = true;
+        }
+        if ((rx_mask & RX_2) && m2sdr_from_ad9361_rc(rx1_rc) != M2SDR_ERR_OK && !ad9361->runtime_rx_gain_warned[1]) {
+            M2SDR_LOGF("Warning: AD9361 RX1 runtime gain update failed (rc=%d), continuing.\n", rx1_rc);
+            ad9361->runtime_rx_gain_warned[1] = true;
+        }
     }
 
     return M2SDR_ERR_OK;
