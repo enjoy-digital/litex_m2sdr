@@ -85,6 +85,8 @@ static struct m2sdr_dev *g_dev;
 
 static struct m2sdr_cli_device g_cli_dev;
 
+static uint32_t scan_bandwidth_from_samplerate(uint32_t sample_rate_hz);
+
 static void int_handler(int dummy)
 {
     (void)dummy;
