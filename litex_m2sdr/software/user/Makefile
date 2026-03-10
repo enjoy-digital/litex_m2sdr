@@ -62,13 +62,13 @@ LIBM2SDR_OBJS = \
 	ad9361/ad9361_conv.o \
 	ad9361/util.o
 
-all: $(BUILD_FLAGS_FILE) $(PROGS)
+all: $(PROGS)
 
-examples: $(BUILD_FLAGS_FILE) libm2sdr/libm2sdr.a $(EXAMPLES)
+examples: libm2sdr/libm2sdr.a $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
 	LD_LIBRARY_PATH=libm2sdr:$${LD_LIBRARY_PATH} ./test_libm2sdr
 
-test_libm2sdr: $(BUILD_FLAGS_FILE) liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
+test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 analyze-libm2sdr:
@@ -80,40 +80,40 @@ analyze-libm2sdr:
 		-I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 \
 		libm2sdr
 
-../../doc/libm2sdr/example_sync_rx: $(BUILD_FLAGS_FILE) ../../doc/libm2sdr/example_sync_rx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a
+../../doc/libm2sdr/example_sync_rx: ../../doc/libm2sdr/example_sync_rx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
-../../doc/libm2sdr/example_sync_tx: $(BUILD_FLAGS_FILE) ../../doc/libm2sdr/example_sync_tx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a
+../../doc/libm2sdr/example_sync_tx: ../../doc/libm2sdr/example_sync_tx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
-../../doc/libm2sdr/example_tone_tx: $(BUILD_FLAGS_FILE) ../../doc/libm2sdr/example_tone_tx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a
+../../doc/libm2sdr/example_tone_tx: ../../doc/libm2sdr/example_tone_tx.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
-../../doc/libm2sdr/example_rx_n: $(BUILD_FLAGS_FILE) ../../doc/libm2sdr/example_rx_n.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a
+../../doc/libm2sdr/example_rx_n: ../../doc/libm2sdr/example_rx_n.c liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 # --- Libraries ---
 
-liblitepcie/liblitepcie.a: $(BUILD_FLAGS_FILE) liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o
+liblitepcie/liblitepcie.a: liblitepcie/litepcie_dma.o liblitepcie/litepcie_helpers.o | $(BUILD_FLAGS_FILE)
 	$(AR) rcs $@ $+
 	ranlib $@
 
 
-libliteeth/libliteeth.a: $(BUILD_FLAGS_FILE) libliteeth/etherbone.o libliteeth/liteeth_udp.o
+libliteeth/libliteeth.a: libliteeth/etherbone.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/libm2sdr.a: $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
+libm2sdr/libm2sdr.a: $(LIBM2SDR_OBJS) | $(BUILD_FLAGS_FILE)
 	$(AR) rcs $@ $+
 	ranlib $@
 
-libm2sdr/$(LIBM2SDR_SONAME): $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
+libm2sdr/$(LIBM2SDR_SONAME): $(LIBM2SDR_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $^
 
 libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
 	ln -sf $(LIBM2SDR_SONAME) $@
 
-ad9361/libad9361_m2sdr.a: $(BUILD_FLAGS_FILE) ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o
+ad9361/libad9361_m2sdr.a: ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/ad9361.o ad9361/util.o | $(BUILD_FLAGS_FILE)
 	$(AR) rcs $@ $+
 	ranlib $@
 
