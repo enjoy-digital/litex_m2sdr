@@ -18,6 +18,8 @@ SANITIZER_FLAGS := $(sort $(filter -fsanitize=% -fno-sanitize-recover=%,$(CFLAGS
 LDFLAGS += $(SANITIZER_FLAGS)
 LINK_CFLAGS := $(filter-out -MMD,$(CFLAGS))
 LINK_CXXFLAGS := $(filter-out -MMD,$(CXXFLAGS))
+BUILD_FLAGS_FILE := .build-flags-$(INTERFACE)
+BUILD_FLAGS_CONTENT := INTERFACE=$(INTERFACE)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXFLAGS)\nLDFLAGS=$(LDFLAGS)
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
@@ -197,6 +199,7 @@ endif
 clean:
 	rm -f $(PROGS) *.o *.a *.d *~
 	rm -f $(EXAMPLES)
+	rm -f .build-flags-*
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
@@ -209,19 +212,37 @@ clean:
 
 # --- Compile rules ---
 
-%.o: %.c
+$(BUILD_FLAGS_FILE):
+	@printf '%b\n' "$(BUILD_FLAGS_CONTENT)" > $@.tmp
+	@if ! cmp -s $@.tmp $@ 2>/dev/null; then \
+		rm -f *.o *.a *.d; \
+		rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d; \
+		rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d; \
+		rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d; \
+		rm -f ad9361/*.o ad9361/*.d; \
+		rm -f kissfft/*.o kissfft/*.d; \
+		rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d; \
+		rm -f $(SCAN_CIMGUI_DIR)/*.o $(SCAN_CIMGUI_DIR)/*.d; \
+		rm -f $(SCAN_CIMGUI_DIR)/imgui/*.o $(SCAN_CIMGUI_DIR)/imgui/*.d; \
+		rm -f $(SCAN_CIMGUI_DIR)/imgui/backends/*.o $(SCAN_CIMGUI_DIR)/imgui/backends/*.d; \
+		mv $@.tmp $@; \
+	else \
+		rm -f $@.tmp; \
+	fi
+
+%.o: %.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-liblitepcie/%.o: liblitepcie/%.c
+liblitepcie/%.o: liblitepcie/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-libm2sdr/%.o: libm2sdr/%.c
+libm2sdr/%.o: libm2sdr/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-ad9361/%.o: ad9361/%.c
+ad9361/%.o: ad9361/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-%.o: %.cpp
+%.o: %.cpp $(BUILD_FLAGS_FILE)
 	$(CXX) -c $(CXXFLAGS) $(SDL2_CFLAGS) -o $@ $<
 
 install: $(BINARIES)
