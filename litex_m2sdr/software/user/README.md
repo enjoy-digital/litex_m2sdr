@@ -216,7 +216,7 @@ Example usage:
 ---
 
 ### m2sdr_check
-Native GUI utility to inspect recorded I/Q sample files. It is intended as the host-side replacement for lightweight Python checks such as `tone_check.py`.
+Native GUI utility to inspect recorded I/Q sample files.
 
 **Usage**:
 ~~~~
@@ -279,50 +279,6 @@ Example usage:
 ./m2sdr_sata play 0x1000 8192
 ./m2sdr_sata replay 0x1000 8192 pcie
 ./m2sdr_sata copy 0x2000 0x4000 4096
-~~~~
-
----
-
-### tone_gen.py
-Legacy Python script that generates a pure-tone (sine wave) sample file.
-Prefer `m2sdr_gen --signal tone` for new workflows.
-
-**Key arguments**:
-- `--frequency FREQUENCY` (default=1e6)
-- `--amplitude AMPLITUDE` (0..1)
-- `--samplerate SAMPLERATE` (default=30720000.0)
-- `--nchannels`, `--nbits`
-- `--nsamples`
-*(for optional LiteX framing)*
-
-Example usage:
-~~~~
-./tone_gen.py --frequency 1e6 \\
-              --amplitude 0.8 \\
-              --nchannels 2 \\
-              --nbits 12 \\
-              --nsamples 30720 \\
-              tx_file.bin
-~~~~
-
----
-
-### tone_check.py
-Legacy Python script that analyzes a file of I/Q samples.
-Prefer `m2sdr_check` for new workflows.
-
-**Key arguments**:
-- `--plot`
-- `--nchannels`, `--nbits`
-- `--samplerate`
-
-Example usage:
-~~~~
-./tone_check.py tx_file.bin \\
-                --nchannels=2 \\
-                --nbits=12 \\
-                --samplerate=30720000 \\
-                --plot
 ~~~~
 
 ---
@@ -446,16 +402,11 @@ Notes:
 
 ## Example End-to-End Workflow
 
-Below is a quick guide to **generate** a tone file, **initialize** the RF, **play** the samples, **record** them back, and **analyze** the captured data.
+Below is a quick guide to **generate** a tone, **initialize** the RF, **record** samples back, and **analyze** the captured data.
 
 1. **Generate the tone**
    ~~~~
-   ./tone_gen.py --frequency 1000000 \\
-                 --amplitude 0.8 \\
-                 --nchannels=2 \\
-                 --nbits=12 \\
-                 --nsamples=30720 \\
-                 tx_file.bin
+   ./m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1000000 --amplitude 0.8
    ~~~~
 
 2. **Initialize the RF**
@@ -470,27 +421,17 @@ Below is a quick guide to **generate** a tone file, **initialize** the RF, **pla
    ~~~~
    *(Here `--loopback=1` enables internal loopback for testing.)*
 
-3. **Play the tone file (in Terminal #1)**
-   ~~~~
-   ./m2sdr_play tx_file.bin 1000
-   ~~~~
-   *(Will send the file 1000 times.)*
-
-4. **Record the RX (in Terminal #2)**
+3. **Record the RX**
    ~~~~
    ./m2sdr_record rx_file.bin 20000
    ~~~~
-   *(Starts capturing 20K samples while TX is active.)*
+   *(Starts capturing 20K samples while `m2sdr_gen` is active.)*
 
-5. **Analyze the captured data**
+4. **Analyze the captured data**
    ~~~~
-   ./tone_check.py rx_file.bin \\
-                   --nchannels=2 \\
-                   --nbits=12 \\
-                   --samplerate=30720000 \\
-                   --plot
+   ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
    ~~~~
-   If loopback is active (or you have an over-the-air setup), you’ll see a sine wave in the time-domain plot/
+   If loopback is active (or you have an over-the-air setup), you’ll see the received waveform in the time-domain, constellation, and spectrum views.
 
 ---
 
