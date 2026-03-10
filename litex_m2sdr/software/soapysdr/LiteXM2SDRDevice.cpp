@@ -93,17 +93,32 @@ std::string normalize_antenna_name(const std::string &rfic_name, int direction, 
     return name;
 }
 
+std::vector<std::string> normalize_antenna_list(
+    const std::string &rfic_name,
+    int direction,
+    const std::vector<std::string> &antennas)
+{
+    std::vector<std::string> normalized;
+    normalized.reserve(antennas.size());
+    for (const auto &antenna : antennas) {
+        const std::string canonical = normalize_antenna_name(rfic_name, direction, antenna);
+        if (std::find(normalized.begin(), normalized.end(), canonical) == normalized.end())
+            normalized.push_back(canonical);
+    }
+    return normalized;
+}
+
 std::vector<std::string> default_rx_antennas_for_backend(const std::string &rfic_name)
 {
     if (rfic_name == "ad9361")
-        return {"A_BALANCED", "RX"};
+        return {"A_BALANCED"};
     return {"RX"};
 }
 
 std::vector<std::string> default_tx_antennas_for_backend(const std::string &rfic_name)
 {
     if (rfic_name == "ad9361")
-        return {"A", "TX"};
+        return {"A"};
     return {"TX"};
 }
 } // namespace
@@ -278,6 +293,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
+    _rficName = getLiteXM2SDRRficName(_dev);
+
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
@@ -355,9 +372,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _rx_antennas = default_rx_antennas_for_backend(_rficName);
     _tx_antennas = default_tx_antennas_for_backend(_rficName);
     if (args.count("rx_antenna_list") > 0)
-        _rx_antennas = split_list(args.at("rx_antenna_list"));
+        _rx_antennas = normalize_antenna_list(
+            _rficName, SOAPY_SDR_RX, split_list(args.at("rx_antenna_list")));
     if (args.count("tx_antenna_list") > 0)
-        _tx_antennas = split_list(args.at("tx_antenna_list"));
+        _tx_antennas = normalize_antenna_list(
+            _rficName, SOAPY_SDR_TX, split_list(args.at("tx_antenna_list")));
+
+    _rx_stream.antenna[0] = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
+    _rx_stream.antenna[1] = _rx_stream.antenna[0];
+    _tx_stream.antenna[0] = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
+    _tx_stream.antenna[1] = _tx_stream.antenna[0];
 
     _rx_agc_mode = "slowattack";
     if (_rficName == "ad9361" && args.count("rx_agc_mode") > 0)
@@ -419,8 +443,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.bandwidth    = 30.72e6;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
         _rx_stream.gainMode[0]  = false;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -431,8 +453,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
         _rx_stream.gainMode[1]  = false;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;

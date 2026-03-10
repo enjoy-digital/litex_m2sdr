@@ -1033,6 +1033,8 @@ static int m2sdr_rfic_ad9361_configure_stream_channels(struct m2sdr_dev *dev, vo
     struct ad9361_rf_phy *phy;
     struct ad9361_phy_platform_data *pd;
     size_t active_count;
+    size_t rx_local[2];
+    size_t tx_local[2];
     enum m2sdr_channel_layout layout;
     int rc;
 
@@ -1043,13 +1045,28 @@ static int m2sdr_rfic_ad9361_configure_stream_channels(struct m2sdr_dev *dev, vo
         return rc;
     if ((rx_count > 2) || (tx_count > 2))
         return M2SDR_ERR_RANGE;
-    if ((rx_count == 0 && tx_count == 0) || rx_count != tx_count)
+    if (rx_count == 0 && tx_count == 0)
         return M2SDR_ERR_INVAL;
     active_count = rx_count ? rx_count : tx_count;
     if (active_count != 1 && active_count != 2)
         return M2SDR_ERR_RANGE;
-    if (!rx_channels || !tx_channels)
+    if ((rx_count != 0 && !rx_channels) || (tx_count != 0 && !tx_channels))
         return M2SDR_ERR_INVAL;
+
+    if (rx_count == 0) {
+        rx_count = tx_count;
+        rx_local[0] = tx_channels[0];
+        if (tx_count > 1)
+            rx_local[1] = tx_channels[1];
+        rx_channels = rx_local;
+    }
+    if (tx_count == 0) {
+        tx_count = rx_count;
+        tx_local[0] = rx_channels[0];
+        if (rx_count > 1)
+            tx_local[1] = rx_channels[1];
+        tx_channels = tx_local;
+    }
 
     if (active_count == 1) {
         if (rx_channels[0] > 1 || tx_channels[0] > 1)
