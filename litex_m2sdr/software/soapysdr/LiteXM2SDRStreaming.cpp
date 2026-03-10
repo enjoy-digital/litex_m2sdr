@@ -102,6 +102,17 @@ static constexpr size_t TX_DMA_HEADER_SIZE = 16;
 static constexpr size_t TX_DMA_HEADER_SIZE = 0;
 #endif
 
+static std::vector<size_t> transport_channels_for_stream_topology(
+    const std::string &rfic_name,
+    const std::vector<size_t> &selected_channels)
+{
+#if USE_LITEPCIE
+    if (rfic_name == "ad9361" && selected_channels.size() == 1)
+        return {0, 1};
+#endif
+    return selected_channels;
+}
+
 /* Setup and configure a stream for RX or TX.
  *
  * Soapy expresses streams as channel vectors plus a host sample format. This
@@ -258,7 +269,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         _rx_stream.channels = selected_channels;
-        _nChannels = _rx_stream.channels.size();
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
@@ -372,23 +382,31 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.remainderOffset = 0;
 
         _tx_stream.channels = selected_channels;
-        _nChannels = _tx_stream.channels.size();
     } else {
         throw std::runtime_error("Invalid direction.");
     }
 
     {
+        const std::vector<size_t> rx_transport_channels =
+            transport_channels_for_stream_topology(_rficName, _rx_stream.channels);
+        const std::vector<size_t> tx_transport_channels =
+            transport_channels_for_stream_topology(_rficName, _tx_stream.channels);
+
         /* Apply the combined RX/TX topology only after both sides have picked
          * their requested channel vectors, since backends such as AD9361 still
          * model topology as one shared RFIC state. */
         int rc = m2sdr_rfic_configure_stream_channels(
             _dev,
-            _rx_stream.channels.size(), _rx_stream.channels.empty() ? nullptr : _rx_stream.channels.data(),
-            _tx_stream.channels.size(), _tx_stream.channels.empty() ? nullptr : _tx_stream.channels.data());
+            rx_transport_channels.size(),
+            rx_transport_channels.empty() ? nullptr : rx_transport_channels.data(),
+            tx_transport_channels.size(),
+            tx_transport_channels.empty() ? nullptr : tx_transport_channels.data());
         if (rc != 0) {
             throw std::runtime_error(
                 "RFIC stream channel configuration failed (" + std::string(m2sdr_strerror(rc)) + ")");
         }
+
+        _nChannels = std::max(rx_transport_channels.size(), tx_transport_channels.size());
     }
 
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
