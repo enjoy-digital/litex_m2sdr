@@ -6,11 +6,13 @@ CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad936
 CFLAGS += -D$(INTERFACE)
 CFLAGS += $(EXTRA_CFLAGS)
 CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
+SANITIZER_FLAGS := $(filter -fsanitize=% -fno-sanitize-recover=%,$(EXTRA_CFLAGS) $(EXTRA_LDFLAGS))
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
 LDFLAGS = -g
 LDFLAGS += $(EXTRA_LDFLAGS)
+LDFLAGS += $(SANITIZER_FLAGS)
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
