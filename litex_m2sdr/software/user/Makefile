@@ -23,6 +23,8 @@ BUILD_FLAGS_CONTENT := INTERFACE=$(INTERFACE)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXF
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
+FORCE:
+.PHONY: FORCE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
@@ -212,7 +214,7 @@ clean:
 
 # --- Compile rules ---
 
-$(BUILD_FLAGS_FILE):
+$(BUILD_FLAGS_FILE): FORCE
 	@printf '%b\n' "$(BUILD_FLAGS_CONTENT)" > $@.tmp
 	@if ! cmp -s $@.tmp $@ 2>/dev/null; then \
 		rm -f *.o *.a *.d; \
