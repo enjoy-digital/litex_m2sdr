@@ -340,7 +340,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         copied += to_copy;
 #elif defined(USE_LITEETH)
         liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
-        uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
+        const uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
         if (!buf)
             return M2SDR_ERR_TIMEOUT;
         unsigned to_copy = dev->rx_buffer_size * sample_sz;
