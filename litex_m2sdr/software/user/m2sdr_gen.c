@@ -34,6 +34,7 @@
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "kissfft/kiss_fft.h"
 #include "config.h"
 #include "csr.h"
 
@@ -55,6 +56,159 @@ static int get_prbs_bit(void) {
     return bit;
 }
 
+struct ofdm_state {
+    int fft_size;
+    int cp_len;
+    int occupied_carriers;
+    int bits_per_symbol;
+    uint32_t lfsr;
+    kiss_fft_cfg ifft_cfg;
+    kiss_fft_cpx *freq_bins;
+    kiss_fft_cpx *time_bins;
+    float *symbol_i;
+    float *symbol_q;
+    int symbol_len;
+    int sample_index;
+};
+
+static void *xcalloc(size_t nmemb, size_t size)
+{
+    void *ptr = calloc(nmemb, size);
+    if (!ptr) {
+        fprintf(stderr, "Out of memory\n");
+        exit(1);
+    }
+    return ptr;
+}
+
+static uint32_t prng_next(uint32_t *state)
+{
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    if (x == 0)
+        x = 1;
+    *state = x;
+    return x;
+}
+
+static kiss_fft_cpx ofdm_modulate_symbol(struct ofdm_state *st)
+{
+    kiss_fft_cpx out = {0.0f, 0.0f};
+
+    if (st->bits_per_symbol == 2) {
+        out.r = (prng_next(&st->lfsr) & 1) ? 0.70710678f : -0.70710678f;
+        out.i = (prng_next(&st->lfsr) & 1) ? 0.70710678f : -0.70710678f;
+        return out;
+    }
+
+    if (st->bits_per_symbol == 4) {
+        static const float levels[4] = {-3.0f, -1.0f, 3.0f, 1.0f};
+        out.r = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
+        out.i = levels[prng_next(&st->lfsr) & 3] * 0.31622777f;
+        return out;
+    }
+
+    out.r = (prng_next(&st->lfsr) & 1) ? 1.0f : -1.0f;
+    out.i = 0.0f;
+    return out;
+}
+
+static void ofdm_generate_symbol(struct ofdm_state *st)
+{
+    float max_mag = 0.0f;
+    int half = st->occupied_carriers / 2;
+
+    memset(st->freq_bins, 0, sizeof(*st->freq_bins) * st->fft_size);
+    memset(st->time_bins, 0, sizeof(*st->time_bins) * st->fft_size);
+
+    for (int i = 0; i < half; i++) {
+        st->freq_bins[1 + i] = ofdm_modulate_symbol(st);
+        st->freq_bins[st->fft_size - half + i] = ofdm_modulate_symbol(st);
+    }
+
+    kiss_fft(st->ifft_cfg, st->freq_bins, st->time_bins);
+
+    for (int i = 0; i < st->fft_size; i++) {
+        st->time_bins[i].r /= st->fft_size;
+        st->time_bins[i].i /= st->fft_size;
+        float mag = hypotf(st->time_bins[i].r, st->time_bins[i].i);
+        if (mag > max_mag)
+            max_mag = mag;
+    }
+
+    if (max_mag < 1e-9f)
+        max_mag = 1.0f;
+
+    for (int i = 0; i < st->cp_len; i++) {
+        int src = st->fft_size - st->cp_len + i;
+        st->symbol_i[i] = st->time_bins[src].r / max_mag;
+        st->symbol_q[i] = st->time_bins[src].i / max_mag;
+    }
+    for (int i = 0; i < st->fft_size; i++) {
+        st->symbol_i[st->cp_len + i] = st->time_bins[i].r / max_mag;
+        st->symbol_q[st->cp_len + i] = st->time_bins[i].i / max_mag;
+    }
+
+    st->sample_index = 0;
+}
+
+static void ofdm_init(struct ofdm_state *st, int fft_size, int cp_len, int occupied_carriers, const char *modulation, uint32_t seed)
+{
+    size_t cfg_size = 0;
+
+    memset(st, 0, sizeof(*st));
+    st->fft_size = fft_size;
+    st->cp_len = cp_len;
+    st->occupied_carriers = occupied_carriers;
+    st->symbol_len = fft_size + cp_len;
+    st->lfsr = seed ? seed : 1;
+
+    if (strcmp(modulation, "qpsk") == 0)
+        st->bits_per_symbol = 2;
+    else if (strcmp(modulation, "16qam") == 0)
+        st->bits_per_symbol = 4;
+    else {
+        fprintf(stderr, "Unsupported OFDM modulation: %s\n", modulation);
+        exit(1);
+    }
+
+    kiss_fft_alloc(st->fft_size, 1, NULL, &cfg_size);
+    st->ifft_cfg = kiss_fft_alloc(st->fft_size, 1, malloc(cfg_size), &cfg_size);
+    if (!st->ifft_cfg) {
+        fprintf(stderr, "Failed to allocate OFDM IFFT state\n");
+        exit(1);
+    }
+
+    st->freq_bins = xcalloc(st->fft_size, sizeof(*st->freq_bins));
+    st->time_bins = xcalloc(st->fft_size, sizeof(*st->time_bins));
+    st->symbol_i = xcalloc(st->symbol_len, sizeof(*st->symbol_i));
+    st->symbol_q = xcalloc(st->symbol_len, sizeof(*st->symbol_q));
+    ofdm_generate_symbol(st);
+}
+
+static void ofdm_cleanup(struct ofdm_state *st)
+{
+    if (!st)
+        return;
+    kiss_fft_free(st->ifft_cfg);
+    free(st->freq_bins);
+    free(st->time_bins);
+    free(st->symbol_i);
+    free(st->symbol_q);
+    memset(st, 0, sizeof(*st));
+}
+
+static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
+{
+    if (st->sample_index >= st->symbol_len)
+        ofdm_generate_symbol(st);
+    *i_out = st->symbol_i[st->sample_index];
+    *q_out = st->symbol_q[st->sample_index];
+    st->sample_index++;
+}
+
 static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     if (m2sdr_reg_write(dev, addr, val) != 0) {
@@ -66,7 +220,7 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
-static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type, uint8_t enable_header, uint8_t use_8bit) {
+static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type, uint8_t enable_header, uint8_t use_8bit, int ofdm_fft_size, int ofdm_cp_len, int ofdm_occupied_carriers, const char *ofdm_modulation, uint32_t ofdm_seed) {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
@@ -76,6 +230,8 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     int64_t hw_count_stop = 0;
     struct m2sdr_dev *dev = NULL;
     int fd = -1;
+    struct ofdm_state ofdm;
+    int ofdm_enabled = strcmp(signal_type, "ofdm") == 0;
 
     /* Open device for CSR access */
     if (m2sdr_open(&dev, device_id) != 0) {
@@ -130,6 +286,12 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     printf("  Signal Type: %s\n", signal_type);
     if (strcmp(signal_type, "tone") == 0) {
         printf("  Frequency: %.0f Hz\n", frequency);
+    } else if (ofdm_enabled) {
+        printf("  OFDM FFT Size: %d\n", ofdm_fft_size);
+        printf("  OFDM CP Length: %d\n", ofdm_cp_len);
+        printf("  OFDM Occupied Carriers: %d\n", ofdm_occupied_carriers);
+        printf("  OFDM Modulation: %s\n", ofdm_modulation);
+        printf("  OFDM Seed: %" PRIu32 "\n", ofdm_seed);
     }
     printf("  Amplitude: %.2f\n", amplitude);
     printf("  Zero-Copy Mode: %d\n", zero_copy);
@@ -143,6 +305,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     }
 
     dma.reader_enable = 1;
+
+    if (ofdm_enabled)
+        ofdm_init(&ofdm, ofdm_fft_size, ofdm_cp_len, ofdm_occupied_carriers, ofdm_modulation, ofdm_seed);
 
     /* Tone generation parameters */
     double phi = 0.0;
@@ -202,6 +367,10 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                     Q = sin(phi) * amplitude;
                     phi += omega;
                     if (phi >= 2 * M_PI) phi -= 2 * M_PI;
+                } else if (strcmp(signal_type, "ofdm") == 0) {
+                    ofdm_next_sample(&ofdm, &I, &Q);
+                    I *= amplitude;
+                    Q *= amplitude;
                 } else if (strcmp(signal_type, "white") == 0) {
                     /* Fast LFSR-based noise (avoid rand() in hot loop) */
                     lfsr ^= lfsr << 13;
@@ -283,10 +452,11 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 
     /* Cleanup DMA and close device */
     litepcie_dma_cleanup(&dma);
+    if (ofdm_enabled)
+        ofdm_cleanup(&ofdm);
 #ifdef CSR_GPIO_BASE
     m2sdr_write32(dev, CSR_GPIO_CONTROL_ADDR, 0);
 #endif
-    close(fd);
     m2sdr_close(dev);
 }
 
@@ -302,8 +472,13 @@ static void help(void) {
            "  -d, --device DEV               Use explicit device id.\n"
            "  -c, --device-num N             Select PCIe device number (default: 0).\n"
            "      --sample-rate HZ           Set sample rate in Hz (default: 30720000).\n"
-           "      --signal TYPE              Set signal type: tone, white, or prbs.\n"
+           "      --signal TYPE              Set signal type: tone, white, prbs, or ofdm.\n"
            "      --tone-freq HZ             Set tone frequency in Hz (default: 1000).\n"
+           "      --ofdm-fft-size N          OFDM FFT size (default: 1024).\n"
+           "      --ofdm-cp-len N            OFDM cyclic prefix length (default: 32).\n"
+           "      --ofdm-carriers N          OFDM occupied carriers (default: 200).\n"
+           "      --ofdm-modulation MOD      OFDM modulation: qpsk or 16qam (default: qpsk).\n"
+           "      --ofdm-seed N              OFDM PRBS seed (default: 1).\n"
            "      --amplitude A              Set amplitude (0.0 to 1.0, default: 1.0).\n"
            "      --pps-freq HZ              Enable PPS/toggle on GPIO.\n"
            "      --gpio-pin N               Select GPIO pin for PPS (0-3, default: 0).\n"
@@ -329,7 +504,12 @@ int main(int argc, char **argv) {
     uint8_t gpio_pin = 0;  /* Default to GPIO bit 0 */
     uint8_t enable_header = 0;
     uint8_t use_8bit = 0;
+    int ofdm_fft_size = 1024;
+    int ofdm_cp_len = 32;
+    int ofdm_occupied_carriers = 200;
+    uint32_t ofdm_seed = 1;
     char signal_type[16] = "tone"; /* Default to tone */
+    char ofdm_modulation[16] = "qpsk";
     struct m2sdr_cli_device cli_dev;
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -343,6 +523,11 @@ int main(int argc, char **argv) {
         { "pps-freq", required_argument, NULL, 'p' },
         { "gpio-pin", required_argument, NULL, 'g' },
         { "enable-header", no_argument, NULL, 'H' },
+        { "ofdm-fft-size", required_argument, NULL, 3 },
+        { "ofdm-cp-len", required_argument, NULL, 4 },
+        { "ofdm-carriers", required_argument, NULL, 5 },
+        { "ofdm-modulation", required_argument, NULL, 6 },
+        { "ofdm-seed", required_argument, NULL, 7 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -375,8 +560,8 @@ int main(int argc, char **argv) {
         case 't':
             strncpy(signal_type, optarg, sizeof(signal_type) - 1);
             signal_type[sizeof(signal_type) - 1] = '\0';
-            if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0) {
-                m2sdr_cli_invalid_choice("signal", signal_type, "tone, white, or prbs");
+            if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0 && strcmp(signal_type, "ofdm") != 0) {
+                m2sdr_cli_invalid_choice("signal", signal_type, "tone, white, prbs, or ofdm");
                 exit(1);
             }
             break;
@@ -433,9 +618,38 @@ int main(int argc, char **argv) {
         case 'H':
             enable_header = 1;
             break;
+        case 3:
+            ofdm_fft_size = atoi(optarg);
+            break;
+        case 4:
+            ofdm_cp_len = atoi(optarg);
+            break;
+        case 5:
+            ofdm_occupied_carriers = atoi(optarg);
+            break;
+        case 6:
+            strncpy(ofdm_modulation, optarg, sizeof(ofdm_modulation) - 1);
+            ofdm_modulation[sizeof(ofdm_modulation) - 1] = '\0';
+            if (strcmp(ofdm_modulation, "qpsk") != 0 && strcmp(ofdm_modulation, "16qam") != 0) {
+                m2sdr_cli_invalid_choice("ofdm modulation", ofdm_modulation, "qpsk or 16qam");
+                return 1;
+            }
+            break;
+        case 7:
+            ofdm_seed = (uint32_t)strtoul(optarg, NULL, 0);
+            break;
         default:
             exit(1);
         }
+    }
+
+    if (ofdm_fft_size <= 0 || ofdm_cp_len < 0 || ofdm_cp_len >= ofdm_fft_size) {
+        fprintf(stderr, "Invalid OFDM parameters: require fft-size > 0 and 0 <= cp-len < fft-size\n");
+        return 1;
+    }
+    if (ofdm_occupied_carriers <= 0 || ofdm_occupied_carriers >= ofdm_fft_size || (ofdm_occupied_carriers & 1)) {
+        fprintf(stderr, "Invalid OFDM occupied carriers: require an even value in [2, fft-size-1]\n");
+        return 1;
     }
 
     /* Show help only if no options are provided */
@@ -447,7 +661,7 @@ int main(int argc, char **argv) {
         return 1;
 
     /* Generate and play tone with optional PPS */
-    m2sdr_gen(m2sdr_cli_device_id(&cli_dev), sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type, enable_header, use_8bit);
+    m2sdr_gen(m2sdr_cli_device_id(&cli_dev), sample_rate, frequency, amplitude, m2sdr_device_zero_copy, pps_freq, gpio_pin, signal_type, enable_header, use_8bit, ofdm_fft_size, ofdm_cp_len, ofdm_occupied_carriers, ofdm_modulation, ofdm_seed);
 
     return 0;
 }

@@ -137,7 +137,7 @@ External 10MHz synchronization example:
 ---
 
 ### m2sdr_gen
-Generates and streams a tone, white noise, or PRBS signal directly to the FPGA’s TX path in real-time (DMA TX).
+Generates and streams a tone, white noise, PRBS, or basic OFDM signal directly to the FPGA’s TX path in real-time (DMA TX).
 Also supports GPIO/PPS (pulse-per-second) toggling on a selected GPIO pin.
 
 **Usage**:
@@ -150,6 +150,11 @@ m2sdr_gen [options]
 - `--sample-rate`
 - `--signal`
 - `--tone-freq`
+- `--ofdm-fft-size`
+- `--ofdm-cp-len`
+- `--ofdm-carriers`
+- `--ofdm-modulation`
+- `--ofdm-seed`
 - `--amplitude`
 - `--zero-copy`
 - `--pps-freq`
@@ -162,7 +167,10 @@ Example usage without PPS:
 ./m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1e6 --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal white --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal prbs --amplitude 0.5
+./m2sdr_gen --sample-rate 30720000 --signal ofdm --ofdm-fft-size 1024 --ofdm-cp-len 128 --ofdm-carriers 800 --ofdm-modulation qpsk --amplitude 0.5
 ~~~~
+
+OFDM mode currently generates repeated random OFDM symbols in real time with configurable FFT size, cyclic prefix length, occupied carrier count, modulation (`qpsk` or `16qam`), and PRBS seed. It is intended as a simple waveform generator rather than a complete framed modem/PHY.
 
 Example usage with PPS on GPIO pin 0:
 ~~~~
