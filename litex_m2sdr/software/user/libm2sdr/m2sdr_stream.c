@@ -22,6 +22,8 @@
 #endif
 
 #define M2SDR_DMA_HEADER_SIZE 16
+/* FPGA DMA headers are a transport-side convention shared by the sync and
+ * zero-copy paths: 64-bit sync word followed by a 64-bit timestamp payload. */
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 
 /* Helpers */
@@ -49,6 +51,8 @@ static int m2sdr_parse_dma_header(const uint8_t *buf, uint64_t *timestamp)
         return 0;
 
     memcpy(&ts, buf + 8, sizeof(ts));
+    /* The public metadata model currently exposes only a timestamp bit, so the
+     * DMA header parser intentionally ignores any future transport-private data. */
     *timestamp = ts;
     return 1;
 }
@@ -445,25 +449,18 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
 
     unsigned sample_sz = 0;
-    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
-    unsigned payload_off = 0;
+    unsigned payload_off;
 
     if (direction == M2SDR_RX) {
         if (!dev->rx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->rx_format);
-        if (dev->rx_header_enable && dev->rx_strip_header) {
-            payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
+        payload_off = (dev->rx_header_enable && dev->rx_strip_header) ? M2SDR_DMA_HEADER_SIZE : 0;
     } else {
         if (!dev->tx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->tx_format);
-        if (dev->tx_header_enable) {
-            payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
+        payload_off = dev->tx_header_enable ? M2SDR_DMA_HEADER_SIZE : 0;
     }
 
     if (!sample_sz)
@@ -475,6 +472,8 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
         if (rc != M2SDR_ERR_OK)
             return rc;
+        /* Zero-copy returns the transport-owned slot directly; callers must not
+         * retain it past the corresponding submit/release step. */
         *buffer = buf + payload_off;
     } else {
         char *buf = NULL;
@@ -486,7 +485,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
 #elif defined(USE_LITEETH)
     if (direction == M2SDR_RX) {
         liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
-        uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
+        const uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
         if (!buf)
             return M2SDR_ERR_TIMEOUT;
         *buffer = buf + payload_off;
@@ -500,7 +499,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 
-    *num_samples = bytes_per_buffer / sample_sz;
+    *num_samples = (DMA_BUFFER_SIZE - payload_off) / sample_sz;
     return M2SDR_ERR_OK;
 }
 
@@ -528,6 +527,8 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
         m2sdr_write_dma_header(base, ts);
     }
 
+    /* num_samples is currently implied by the configured DMA payload size. Keep
+     * it in the API so future backends can validate partial-buffer submits. */
     (void)num_samples;
 
 #ifdef USE_LITEPCIE

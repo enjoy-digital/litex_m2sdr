@@ -1028,6 +1028,7 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
 static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration, int warmup_buffers)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
+    struct m2sdr_dev *conn;
     dma.loopback = external_loopback ? 0 : 1;
     keep_running = 1;
 
@@ -1069,7 +1070,14 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (unlikely(litepcie_dma_init(&dma, m2sdr_cli_pcie_path(&g_cli_dev), zero_copy)))
+    /* Reuse the common libm2sdr device-open path so DMA tests follow the same
+     * CLI device selection rules as the rest of the utility. The DMA helper
+     * then borrows the already-open PCIe fd through shared_fd. */
+    conn = m2sdr_open_dev();
+    dma.shared_fd = 1;
+    dma.fds.fd = m2sdr_get_fd(conn);
+
+    if (unlikely(litepcie_dma_init(&dma, "", zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;
@@ -1217,6 +1225,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 end:
 #endif
     litepcie_dma_cleanup(&dma);
+    m2sdr_close_dev(conn);
     return status;
 }
 

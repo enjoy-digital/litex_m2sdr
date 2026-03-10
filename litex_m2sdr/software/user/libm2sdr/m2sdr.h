@@ -80,6 +80,21 @@ enum m2sdr_transport_kind {
     M2SDR_TRANSPORT_KIND_LITEETH = 2,
 };
 
+enum m2sdr_rfic_kind {
+    M2SDR_RFIC_KIND_UNKNOWN = 0,
+    M2SDR_RFIC_KIND_AD9361 = 1,
+    M2SDR_RFIC_KIND_MOCK = 2,
+};
+
+enum m2sdr_rfic_feature_flag {
+    M2SDR_RFIC_FEATURE_BIND_EXTERNAL = (1u << 0),
+    M2SDR_RFIC_FEATURE_BIST          = (1u << 1),
+    M2SDR_RFIC_FEATURE_OVERSAMPLE    = (1u << 2),
+    M2SDR_RFIC_FEATURE_STREAMING     = (1u << 3),
+    M2SDR_RFIC_FEATURE_RX_GAIN_MODE  = (1u << 4),
+    M2SDR_RFIC_FEATURE_TEMP_SENSOR   = (1u << 5),
+};
+
 /* Backward-compatible alias for older code. */
 typedef enum m2sdr_direction m2sdr_module_t;
 
@@ -99,6 +114,7 @@ struct m2sdr_metadata {
 };
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
+#define M2SDR_IQ_BITS_MASK(bits) (1u << (bits))
 
 struct m2sdr_sync_params {
     /* RX or TX stream to configure. */
@@ -150,10 +166,34 @@ struct m2sdr_capabilities {
 };
 
 struct m2sdr_clock_info {
-    /* AD9361 reference clock frequency in Hz. */
+    /* Active RFIC reference clock frequency in Hz. */
     uint64_t refclk_hz;
     /* System clock frequency in Hz when available. */
     uint64_t sysclk_hz;
+};
+
+struct m2sdr_rfic_caps {
+    enum m2sdr_rfic_kind kind;
+    char name[32];
+    uint32_t features;
+    uint8_t rx_channels;
+    uint8_t tx_channels;
+    int64_t min_rx_frequency;
+    int64_t max_rx_frequency;
+    int64_t min_tx_frequency;
+    int64_t max_tx_frequency;
+    int64_t min_sample_rate;
+    int64_t max_sample_rate;
+    int64_t min_bandwidth;
+    int64_t max_bandwidth;
+    int64_t min_tx_gain;
+    int64_t max_tx_gain;
+    int64_t min_rx_gain;
+    int64_t max_rx_gain;
+    uint32_t supported_iq_bits_mask;
+    uint8_t native_iq_bits;
+    uint8_t min_iq_bits;
+    uint8_t max_iq_bits;
 };
 
 enum m2sdr_feature_flag {
@@ -245,7 +285,7 @@ struct m2sdr_config {
     int64_t sample_rate;
     /* Common TX/RX RF bandwidth in Hz. */
     int64_t bandwidth;
-    /* AD9361 reference clock in Hz. */
+    /* Active RFIC reference clock in Hz. */
     int64_t refclk_freq;
     /* TX LO in Hz. */
     int64_t tx_freq;
@@ -264,6 +304,11 @@ struct m2sdr_config {
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
     bool    enable_oversample;
+    /* Skip full RFIC re-initialization and only attach backend state to an
+     * already-configured RFIC instance. This keeps Soapy's legacy
+     * `bypass_init` behavior available while new code should prefer a normal
+     * full `m2sdr_apply_config()` bring-up. */
+    bool    bypass_rfic_init;
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;
@@ -323,6 +368,22 @@ int  m2sdr_get_fd(struct m2sdr_dev *dev);
 void *m2sdr_get_eb_handle(struct m2sdr_dev *dev);
 int  m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transport);
 void *m2sdr_get_handle(struct m2sdr_dev *dev);
+/* RFIC backend discovery and extension hooks.
+ *
+ * `m2sdr_get_rfic_name()` and `m2sdr_get_rfic_caps()` expose the currently
+ * selected RFIC backend.
+ * `m2sdr_set_property()` / `m2sdr_get_property()` use namespaced keys
+ * (for example `ad9361.*`) for backend-specific controls.
+ * Current AD9361 backend properties include:
+ * - `ad9361.fir_profile`
+ * - `ad9361.oversampling`
+ * - `ad9361.rx0_gain_mode` / `ad9361.rx1_gain_mode`
+ * - `ad9361.temperature_c`
+ */
+int  m2sdr_get_rfic_name(struct m2sdr_dev *dev, char *buf, size_t len);
+int  m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);
+int  m2sdr_set_property(struct m2sdr_dev *dev, const char *key, const char *value);
+int  m2sdr_get_property(struct m2sdr_dev *dev, const char *key, char *value, size_t value_len);
 
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
@@ -337,6 +398,8 @@ int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
+int  m2sdr_set_iq_bits(struct m2sdr_dev *dev, unsigned bits);
+int  m2sdr_get_iq_bits(struct m2sdr_dev *dev, unsigned *bits);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
@@ -350,28 +413,34 @@ int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *se
 void m2sdr_config_init(struct m2sdr_config *cfg);
 /* Apply a full RF configuration to the currently-open device.
  *
- * This performs the same high-level bring-up sequence as `m2sdr_rf`: SI5351
- * clock selection, AD9361 SPI/RF init, channel layout, rates, gains, loopback,
- * and optional BIST modes.
+ * This performs the same high-level bring-up sequence as `m2sdr_rf`: board
+ * clock selection, RFIC init, channel layout, rates, gains, loopback, and
+ * optional BIST modes when supported by the active backend.
  */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
 
 /* Direction-based RF setters.
  *
- * These assume the AD9361 has already been initialized either through
- * `m2sdr_apply_config()` or an advanced integration path such as Soapy.
+ * These assume the active RFIC backend has already been initialized either
+ * through `m2sdr_apply_config()` or an advanced integration path such as
+ * Soapy.
  */
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
+int  m2sdr_get_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t *freq);
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
+int  m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
+int  m2sdr_get_bandwidth(struct m2sdr_dev *dev, int64_t *bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+int  m2sdr_get_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t *gain);
 /* Convenience RF setters for the common one-direction case. */
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
 int  m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain);
-/* Advanced integration hook used by the SoapySDR driver. */
-int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
+/* Advanced integration hook used by transitional integrations that still need
+ * to attach an externally-created RFIC handle to the active backend. */
+int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *rfic_handle);
 
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.

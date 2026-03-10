@@ -95,7 +95,7 @@ static __attribute__((unused)) void msleep(unsigned ms)
     usleep(ms * 1000);
 }
 
-static int64_t m2sdr_sata_get_time_ms(void)
+static __attribute__((unused)) int64_t m2sdr_sata_get_time_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -125,7 +125,7 @@ static void m2sdr_close_dev(struct m2sdr_dev *dev)
 
 /* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4) -------- */
 
-static void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
+static __attribute__((unused)) void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
 {
     m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
     m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
@@ -172,7 +172,7 @@ enum {
     RXDST_SATA = 2,
 };
 
-#ifdef CSR_TXRX_LOOPBACK_BASE
+#if defined(CSR_TXRX_LOOPBACK_BASE) && defined(CSR_SATA_PHY_BASE)
 static void txrx_loopback_set(void *conn, int enable);
 #endif
 
@@ -234,7 +234,7 @@ struct sata_route_state {
     int loopback_en;
 };
 
-static struct sata_route_state sata_route_state_capture(void *conn)
+static __attribute__((unused)) struct sata_route_state sata_route_state_capture(void *conn)
 {
     struct sata_route_state state = {0};
 #ifdef CSR_CROSSBAR_BASE
@@ -254,11 +254,11 @@ static struct sata_route_state sata_route_state_capture(void *conn)
     return state;
 }
 
-static void sata_route_state_restore(void *conn, const struct sata_route_state *state)
+static __attribute__((unused)) void sata_route_state_restore(void *conn, const struct sata_route_state *state)
 {
     if (state->crossbar_valid)
         crossbar_set(conn, state->txsrc, state->rxdst);
-#ifdef CSR_TXRX_LOOPBACK_BASE
+#if defined(CSR_TXRX_LOOPBACK_BASE) && defined(CSR_SATA_PHY_BASE)
     if (state->loopback_valid)
         txrx_loopback_set(conn, state->loopback_en);
 #else
@@ -735,6 +735,7 @@ int main(int argc, char **argv)
     };
 
     signal(SIGINT, int_handler);
+    (void)dry_run;
     for (;;) {
         c = getopt_long(argc, argv, "hd:c:i:p:T:n", options, &option_index);
         if (c == -1)

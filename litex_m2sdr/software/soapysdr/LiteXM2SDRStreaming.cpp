@@ -19,14 +19,16 @@
 #include <cstdlib>
 #include <cmath>
 
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
-
 #include "LiteXM2SDRDevice.hpp"
 
 #if USE_LITEETH
 #include "liteeth_udp.h"
 #endif
+
+extern "C" int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
+                                                     size_t rx_count, const size_t *rx_channels,
+                                                     size_t tx_count, const size_t *tx_channels);
+extern "C" int m2sdr_get_rfic_caps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps);
 
 /* Parse Soapy-style "channels" argument: "0", "1", "0,1", "[0,1]", "0 1". */
 static std::vector<size_t> parse_channel_list(const std::string &channels_str)
@@ -100,13 +102,38 @@ static constexpr size_t TX_DMA_HEADER_SIZE = 16;
 static constexpr size_t TX_DMA_HEADER_SIZE = 0;
 #endif
 
-/* Setup and configure a stream for RX or TX. */
+static std::vector<size_t> transport_channels_for_stream_topology(
+    const std::string &rfic_name,
+    const std::vector<size_t> &selected_channels)
+{
+#if USE_LITEPCIE
+    if (rfic_name == "ad9361" && selected_channels.size() == 1)
+        return {0, 1};
+#endif
+    return selected_channels;
+}
+
+/* Setup and configure a stream for RX or TX.
+ *
+ * Soapy expresses streams as channel vectors plus a host sample format. This
+ * method translates that into three lower-level decisions:
+ * - RFIC channel topology via libm2sdr
+ * - transport buffer ownership (PCIe zero-copy or LiteEth staging)
+ * - host/container sample width via _bytesPerSample and _bytesPerComplex */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const int direction,
     const std::string &format,
     const std::vector<size_t> &channels,
     const SoapySDR::Kwargs &args) {
     std::lock_guard<std::mutex> lock(_mutex);
+
+    struct m2sdr_rfic_caps caps;
+
+    if (m2sdr_get_rfic_caps(_dev, &caps) != 0 ||
+        (caps.features & M2SDR_RFIC_FEATURE_STREAMING) == 0) {
+        throw std::runtime_error(
+            "Streaming is not implemented for RFIC backend '" + _rficName + "' in Soapy yet");
+    }
 
     SoapySDR::Kwargs searchArgs = args;
     if (searchArgs.empty())
@@ -226,7 +253,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.opened = true;
         _rx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
-            _bitMode = 8;
+            _iqBits = 8u;
             setSampleMode();
         }
         _rx_stream.remainderHandle = -1;
@@ -242,7 +269,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         _rx_stream.channels = selected_channels;
-        _nChannels = _rx_stream.channels.size();
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
@@ -348,7 +374,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.opened = true;
         _tx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
-            _bitMode = 8;
+            _iqBits = 8u;
             setSampleMode();
         }
         _tx_stream.remainderHandle = -1;
@@ -356,35 +382,32 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.remainderOffset = 0;
 
         _tx_stream.channels = selected_channels;
-        _nChannels = _tx_stream.channels.size();
     } else {
         throw std::runtime_error("Invalid direction.");
     }
 
-    /* Configure 2T2R/1T1R mode (PHY) */
-    litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+    {
+        const std::vector<size_t> rx_transport_channels =
+            transport_channels_for_stream_topology(_rficName, _rx_stream.channels);
+        const std::vector<size_t> tx_transport_channels =
+            transport_channels_for_stream_topology(_rficName, _tx_stream.channels);
 
-    /* AD9361 Channel en/dis */
-    ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
-    if (_nChannels == 1) {
-        if (direction == SOAPY_SDR_RX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
-        else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _tx_stream.channels[0] == 0 ? TX_1 : TX_2;
-    } else {
-        if (direction == SOAPY_SDR_RX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-        else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+        /* Apply the combined RX/TX topology only after both sides have picked
+         * their requested channel vectors, since backends such as AD9361 still
+         * model topology as one shared RFIC state. */
+        int rc = m2sdr_rfic_configure_stream_channels(
+            _dev,
+            rx_transport_channels.size(),
+            rx_transport_channels.empty() ? nullptr : rx_transport_channels.data(),
+            tx_transport_channels.size(),
+            tx_transport_channels.empty() ? nullptr : tx_transport_channels.data());
+        if (rc != 0) {
+            throw std::runtime_error(
+                "RFIC stream channel configuration failed (" + std::string(m2sdr_strerror(rc)) + ")");
+        }
+
+        _nChannels = std::max(rx_transport_channels.size(), tx_transport_channels.size());
     }
-
-    /* AD9361 Port Control 2t2r timing enable */
-    struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
-    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-    if (_nChannels == 2)
-        pd->port_ctrl.pp_conf[0] |= (1 << 2);
-
-    ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
 
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }
@@ -527,6 +550,8 @@ int SoapyLiteXM2SDR::deactivateStream(
 /* Retrieve the maximum transmission unit (MTU) for a stream. */
 size_t SoapyLiteXM2SDR::getStreamMTU(SoapySDR::Stream *stream) const {
     if (stream == RX_STREAM) {
+        /* MTU is reported in complex samples per channel, not raw transport
+         * bytes, so divide by both channel count and active container width. */
         /* Each sample is 2 * Complex{Int16}. */
         return _rx_buf_size / (_nChannels * _bytesPerComplex);
     } else if (stream == TX_STREAM) {
@@ -675,7 +700,8 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         return static_cast<int>(payload_bytes / (_nChannels * _bytesPerComplex));
     }
 
-    /* Stage into RX buffer; remainder/deinterleave pipeline expects a flat buffer. */
+    /* Stage into RX buffer; the common remainder/deinterleave path below expects
+     * one flat interleaved payload regardless of the transport source. */
     std::memcpy(_rx_stream.buf, src, _rx_buf_size);
     buffs[0] = _rx_stream.buf;
     handle   = 0; /* dummy for LiteEth path */
@@ -780,7 +806,9 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         }
 #endif
 
-        /* Get the pointer to the actual sample data (skipping the header). */
+        /* getDirectAccessBufferAddrs() already applies the optional header skip,
+         * so the remainder/deinterleave path can treat PCIe like a plain sample
+         * payload buffer here. */
         getDirectAccessBufferAddrs(stream, buf_offset, (void **)buffs);
 
         /* Update the DMA counters. */
@@ -937,6 +965,8 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const size_t numElems,
     int &flags,
     const long long timeNs) {
+    /* Timed TX is implemented in userspace by delaying the handoff of the
+     * prepared buffer. The transport itself still sees an immediate submit. */
     if ((flags & SOAPY_SDR_HAS_TIME) && timeNs > 0) {
         while (true) {
             const long long now = this->getHardwareTime("");
@@ -1003,6 +1033,8 @@ void SoapyLiteXM2SDR::interleaveCF32(
     size_t offset) {
     const float *samples_cf32 = reinterpret_cast<const float*>(src) + (offset * _samplesPerComplex);
 
+    /* Host format and RFIC precision are decoupled: CF32 is a host-side format
+     * while _bytesPerSample tracks the active on-wire/on-DMA container width. */
     if (_bytesPerSample == 2) {
         int16_t *dst_int16 = reinterpret_cast<int16_t*>(dst) + (offset * 2 * _samplesPerComplex);
         for (uint32_t i = 0; i < len; i++) {
@@ -1036,7 +1068,8 @@ void SoapyLiteXM2SDR::deinterleaveCF32(
         const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
 
         for (uint32_t i = 0; i < len; i++) {
-            /* Mask 12 LSB and sign-extend */
+            /* SC16 transport buffers still carry the AD9361-style 12-bit native
+             * payload in a 16-bit container, so sign-extend before scaling. */
             int16_t i_sample = static_cast<int16_t>(src_int16[0] << 4) >> 4;  /* I. */
             int16_t q_sample = static_cast<int16_t>(src_int16[1] << 4) >> 4;  /* Q. */
             /* Scale to float (-1.0 to 1.0 range) */
@@ -1321,7 +1354,8 @@ int SoapyLiteXM2SDR::readStream(
         _rx_stream.time_warned = true;
     }
 
-    /* Read out channels from the new buffer. */
+    /* The DMA/UDP payload is channel-interleaved. Deinterleave only the user-
+     * requested channels into the Soapy buffer array. */
     for (size_t i = 0; i < _rx_stream.channels.size(); i++) {
         const uint32_t chan = _rx_stream.channels[i];
         this->deinterleave(
@@ -1415,7 +1449,8 @@ int SoapyLiteXM2SDR::writeStream(
 
     const size_t n = std::min((returnedElems - samp_avail), _tx_stream.remainderSamps);
 
-    /* Write out channels to the new buffer. */
+    /* Interleave the requested Soapy channel buffers back into the transport
+     * payload layout expected by the FPGA/driver path. */
     for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
         this->interleave(
             buffs[i],

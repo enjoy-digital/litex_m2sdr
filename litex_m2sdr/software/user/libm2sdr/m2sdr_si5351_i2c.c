@@ -61,7 +61,7 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
     m2sdr_si5351_i2c_reset(conn);
 
     /* One byte for the target register, one byte for the value. */
-    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | 2);
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, 2);
 
     /* Set Slave Address. */
     m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);

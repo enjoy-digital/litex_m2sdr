@@ -34,7 +34,7 @@
 /* Reset and enable the FPGA-side AD9361 SPI engine. */
 void m2sdr_ad9361_spi_init(void *conn, uint8_t reset);
 /* Submit one raw 24-bit AD9361 SPI transaction. */
-void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso);
+void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, const uint8_t *mosi, uint8_t *miso);
 /* Write an 8-bit AD9361 register value. */
 void m2sdr_ad9361_spi_write(void *conn, uint16_t reg, uint8_t dat);
 /* Read an 8-bit AD9361 register value. */

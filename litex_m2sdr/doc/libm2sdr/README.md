@@ -3,6 +3,8 @@
 This directory documents the public C API for LiteX-M2SDR. The API is intentionally close to BladeRF's sync interface so C users can configure a device and stream samples without touching the CLI utilities.
 
 `libm2sdr` is now the primary low-level host interface for the project. The CLI utilities and the SoapySDR module both build on top of it.
+The RF path is internally backend-based (`ad9361` today), so future RFIC
+targets can reuse transport/stream/time code and swap only the RFIC module.
 
 ## Build
 
@@ -147,9 +149,11 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
 - Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
+- RFIC discovery/extension: `m2sdr_get_rfic_name`, `m2sdr_get_rfic_caps`, `m2sdr_set_property`, `m2sdr_get_property`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`
+- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_get_frequency`, `m2sdr_set_sample_rate`, `m2sdr_get_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_get_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`, `m2sdr_get_gain`
+- IQ precision: `m2sdr_set_iq_bits`, `m2sdr_get_iq_bits`
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
@@ -165,6 +169,26 @@ uses:
 - `M2SDR_ERR_STATE` for invalid call sequencing (for example, streaming before configuration).
 
 Use `m2sdr_strerror()` for concise error text in logs.
+
+## RFIC backends
+
+- Active backend can be queried with `m2sdr_get_rfic_name()`.
+- Backend ranges/features can be queried with `m2sdr_get_rfic_caps()`.
+  - Caps now include channel counts, LO frequency ranges, sample-rate ranges, bandwidth ranges, gain ranges, IQ bit support, and feature flags such as streaming support.
+- Backend-specific controls use namespaced string properties via
+  `m2sdr_set_property()` / `m2sdr_get_property()`.
+  - AD9361 currently exposes runtime policy/state through:
+    - `ad9361.fir_profile`
+    - `ad9361.oversampling`
+    - `ad9361.rx0_gain_mode` / `ad9361.rx1_gain_mode`
+    - `ad9361.temperature_c`
+- `m2sdr_config.bypass_rfic_init` keeps a compatibility path for advanced
+  integrations such as Soapy that need to attach to an already-configured RFIC
+  without rerunning the full bring-up sequence.
+- Environment override: set `M2SDR_RFIC=ad9361` or `M2SDR_RFIC=mock` to force backend selection.
+- IQ precision is backend-defined:
+  - AD9361 currently supports `8` or `12` (`12` uses the 16-bit sample container path).
+  - Mock backend currently supports `8`, `12`, or `16` and exists to exercise backend interchangeability in tests/control paths.
 
 ## Library versioning
 
@@ -194,10 +218,12 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 
 ### Symbol collisions with other SDR drivers
 
-If you use multiple SDR drivers that embed their own AD9361 stacks (for example, BladeRF),
-symbol collisions can cause crashes or misbehavior. This build links AD9361 into libm2sdr
-and binds symbols inside the Soapy module to avoid cross-driver resolution. If you build
-custom modules, ensure they do not export or override AD9361 symbols used by LiteX-M2SDR.
+If you use multiple SDR drivers that embed their own RFIC vendor stacks
+(for example, AD9361-based drivers), symbol collisions can cause crashes or
+misbehavior. This build links the current RFIC support stack into libm2sdr and
+binds symbols inside the Soapy module to avoid cross-driver resolution. If you
+build custom modules, ensure they do not export or override RFIC support
+symbols used by LiteX-M2SDR.
 
 ### SoapyRemote socket buffer warnings
 

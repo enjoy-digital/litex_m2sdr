@@ -60,6 +60,8 @@ def main():
 
     # Utilities compilation.
     run_command(["make", "clean", f"INTERFACE={interface}", "all"], cwd=os.path.join(base_dir, "user"))
+    if do_install:
+        run_command(["make", f"INTERFACE={interface}", f"PREFIX={args.prefix}", "install"], cwd=os.path.join(base_dir, "user"))
 
     # SoapySDR Driver compilation.
     build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install)

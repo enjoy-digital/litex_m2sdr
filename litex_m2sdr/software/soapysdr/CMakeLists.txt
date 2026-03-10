@@ -51,36 +51,6 @@ find_path(LITEETH_INCLUDE_DIR etherbone.h
 include_directories(${LITEETH_INCLUDE_DIR})
 
 ########################################################################
-## USER discovery
-########################################################################
-
-find_path(USER_INCLUDE_DIR m2sdr_config.h
-          REQUIRED
-          HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
-          PATH_SUFFIXES
-            litex_m2sdr/libm2sdr
-            software/user/libm2sdr
-)
-
-include_directories(${USER_INCLUDE_DIR})
-
-########################################################################
-## AD9361 discovery
-########################################################################
-
-find_path(AD9361_INCLUDE_DIR ad9361/ad9361.h
-          REQUIRED
-          HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
-          PATH_SUFFIXES
-            litex_m2sdr
-            software/user
-)
-
-include_directories(${AD9361_INCLUDE_DIR})
-
-########################################################################
 ## LIBM2SDR discovery
 ########################################################################
 
@@ -111,10 +81,6 @@ find_library(LIBM2SDR_LIBRARY m2sdr
 find_package(SoapySDR "0.2.1" REQUIRED)
 
 set(LITEXM2SDR_SOURCE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_api.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/etherbone.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/liteeth_udp.c
 )
@@ -134,6 +100,11 @@ SOAPY_SDR_MODULE_UTIL(
     LiteXM2SDRRegistration.cpp
     $<TARGET_OBJECTS:SoapyLiteXM2SDR_C>
     LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
+)
+
+set_target_properties(SoapyLiteXM2SDR PROPERTIES
+    BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/../user/libm2sdr"
+    INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
 )
 
 # Bind internal symbol references to this module to avoid conflicts

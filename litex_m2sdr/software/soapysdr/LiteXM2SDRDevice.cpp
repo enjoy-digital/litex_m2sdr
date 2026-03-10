@@ -6,23 +6,14 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
 #include <unistd.h>
-#include <memory>
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #include <stdint.h>
 #include <cstring>
 #include <stdexcept>
-#include <unordered_map>
 #include <algorithm>
 #include <cctype>
-
-#include "ad9361/platform.h"
-#include "ad9361/ad9361.h"
-#include "ad9361/ad9361_api.h"
-
-#include "libm2sdr/m2sdr_config.h"
 
 #include "liblitepcie.h"
 #include "libm2sdr.h"
@@ -34,84 +25,7 @@
 #include <SoapySDR/Logger.hpp>
 #include <SoapySDR/Types.hpp>
 
-/***************************************************************************************************
- *                                    AD9361
- **************************************************************************************************/
-
-/* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
-
-/* AD9361 SPI */
-
 namespace {
-std::mutex spi_map_mutex;
-std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
-uint8_t spi_next_id = 0;
-litex_m2sdr_device_desc_t spi_last_fd =
-#if USE_LITEPCIE
-    FD_INIT;
-#else
-    nullptr;
-#endif
-bool spi_warned_fallback = false;
-
-uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    uint8_t id = spi_next_id;
-    for (uint16_t i = 0; i < 256; i++) {
-        if (spi_fd_map.find(id) == spi_fd_map.end()) {
-            spi_next_id = static_cast<uint8_t>(id + 1);
-            spi_fd_map[id] = fd;
-            spi_last_fd = fd;
-            return id;
-        }
-        id = static_cast<uint8_t>(id + 1);
-    }
-    throw std::runtime_error("spi_register_fd(): no free SPI ids available");
-}
-
-void spi_unregister_fd(uint8_t id)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    spi_fd_map.erase(id);
-    if (spi_fd_map.empty()) {
-#if USE_LITEPCIE
-        spi_last_fd = FD_INIT;
-#else
-        spi_last_fd = nullptr;
-#endif
-    } else {
-        spi_last_fd = spi_fd_map.begin()->second;
-    }
-}
-
-litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
-{
-    std::lock_guard<std::mutex> lock(spi_map_mutex);
-    auto it = spi_fd_map.find(spi->id_no);
-    if (it == spi_fd_map.end()) {
-#if USE_LITEPCIE
-        if (spi_last_fd >= 0) {
-#else
-        if (spi_last_fd) {
-#endif
-            if (!spi_warned_fallback) {
-                spi_warned_fallback = true;
-                fprintf(stderr,
-                        "spi_write_then_read(): SPI id %u not found, using last registered fd\n",
-                        (unsigned)spi->id_no);
-            }
-            return spi_last_fd;
-        }
-#if USE_LITEPCIE
-        return FD_INIT;
-#else
-        return nullptr;
-#endif
-    }
-    return it->second;
-}
-
 std::vector<std::string> split_list(const std::string &value)
 {
     std::vector<std::string> out;
@@ -145,16 +59,16 @@ std::vector<std::string> split_list(const std::string &value)
     return out;
 }
 
-uint8_t parse_agc_mode(const std::string &mode)
+std::string parse_agc_mode(const std::string &mode)
 {
     if (mode == "slow" || mode == "slowattack")
-        return RF_GAIN_SLOWATTACK_AGC;
+        return "slowattack";
     if (mode == "fast" || mode == "fastattack")
-        return RF_GAIN_FASTATTACK_AGC;
+        return "fastattack";
     if (mode == "hybrid")
-        return RF_GAIN_HYBRID_AGC;
+        return "hybrid";
     if (mode == "manual" || mode == "mgc")
-        return RF_GAIN_MGC;
+        return "manual";
     throw std::runtime_error("Invalid rx_agc_mode: " + mode);
 }
 
@@ -165,174 +79,49 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
     return std::find(ants.begin(), ants.end(), name) != ants.end();
 }
 
-void fir_set_64_taps(int16_t *dst, const int16_t *src)
+std::string normalize_antenna_name(const std::string &rfic_name, int direction, const std::string &name)
 {
-    std::memset(dst, 0, 128 * sizeof(int16_t));
-    std::memcpy(dst, src, 64 * sizeof(int16_t));
-}
-
-AD9361_RXFIRConfig make_rx_fir_from_64(const int16_t *taps)
-{
-    AD9361_RXFIRConfig cfg = rx_fir_config;
-    cfg.rx      = 3;
-    cfg.rx_gain = -6;
-    cfg.rx_dec  = 1;
-    fir_set_64_taps(cfg.rx_coef, taps);
-    cfg.rx_coef_size = 64;
-    return cfg;
-}
-
-AD9361_TXFIRConfig make_tx_fir_from_64(const int16_t *taps, int tx_gain_db = -6)
-{
-    AD9361_TXFIRConfig cfg = tx_fir_config;
-    cfg.tx      = 3;
-    cfg.tx_gain = tx_gain_db;
-    cfg.tx_int  = 1;
-    fir_set_64_taps(cfg.tx_coef, taps);
-    cfg.tx_coef_size = 64;
-    return cfg;
-}
-
-AD9361_RXFIRConfig make_rx_fir_bypass()
-{
-    AD9361_RXFIRConfig cfg = rx_fir_config;
-    cfg.rx      = 3;
-    cfg.rx_gain = -6;
-    cfg.rx_dec  = 1;
-    std::memset(cfg.rx_coef, 0, sizeof(cfg.rx_coef));
-    cfg.rx_coef[0] = 32767;
-    cfg.rx_coef_size = 64;
-    return cfg;
-}
-
-AD9361_TXFIRConfig make_tx_fir_bypass()
-{
-    AD9361_TXFIRConfig cfg = tx_fir_config;
-    cfg.tx      = 3;
-    cfg.tx_gain = 0;
-    cfg.tx_int  = 1;
-    std::memset(cfg.tx_coef, 0, sizeof(cfg.tx_coef));
-    cfg.tx_coef[0] = 32767;
-    cfg.tx_coef_size = 64;
-    return cfg;
-}
-
-/* Experimental 1x FIR candidates for the 122.88 MSPS oversampling mode.
- * These widen the FIR passband versus the legacy BladeRF-derived RX filter.
- * They are symmetric 64-tap LPFs and should be treated as A/B test profiles. */
-static const int16_t fir_1x_wide_taps[64] = {
-     -65,     15,    109,    -15,   -166,      9,    240,      4,
-    -331,    -30,    442,     72,   -577,   -135,    739,    228,
-    -934,   -359,   1173,    544,  -1473,   -811,   1867,   1208,
-   -2425,  -1847,   3323,   3033,  -5141,  -6052,  11568,  32767,
-   32767,  11568,  -6052,  -5141,   3033,   3323,  -1847,  -2425,
-    1208,   1867,   -811,  -1473,    544,   1173,   -359,   -934,
-     228,    739,   -135,   -577,     72,    442,    -30,   -331,
-       4,    240,      9,   -166,    -15,    109,     15,    -65,
-};
-
-bool select_ad9361_fir_profile_1x(const std::string &name,
-                                  AD9361_RXFIRConfig &rx_cfg,
-                                  AD9361_TXFIRConfig &tx_cfg,
-                                  std::string &canonical_name)
-{
-    if (name.empty() || name == "legacy") {
-        rx_cfg = rx_fir_config;
-        tx_cfg = tx_fir_config;
-        canonical_name = "legacy";
-        return true;
+    /* GUI clients such as Gqrx often persist generic "RX"/"TX" antenna names.
+     * Accept those aliases on AD9361 as well so reopening an existing session
+     * does not fail just because the backend now exposes a more specific name. */
+    if (rfic_name == "ad9361") {
+        if (direction == SOAPY_SDR_RX && name == "RX")
+            return "A_BALANCED";
+        if (direction == SOAPY_SDR_TX && name == "TX")
+            return "A";
     }
-    if (name == "bypass") {
-        rx_cfg = make_rx_fir_bypass();
-        tx_cfg = make_tx_fir_bypass();
-        canonical_name = "bypass";
-        return true;
+    return name;
+}
+
+std::vector<std::string> normalize_antenna_list(
+    const std::string &rfic_name,
+    int direction,
+    const std::vector<std::string> &antennas)
+{
+    std::vector<std::string> normalized;
+    normalized.reserve(antennas.size());
+    for (const auto &antenna : antennas) {
+        const std::string canonical = normalize_antenna_name(rfic_name, direction, antenna);
+        if (std::find(normalized.begin(), normalized.end(), canonical) == normalized.end())
+            normalized.push_back(canonical);
     }
-    if (name == "match") {
-        rx_cfg = rx_fir_config;
-        tx_cfg = make_tx_fir_from_64(rx_fir_config.rx_coef, -6);
-        canonical_name = "match";
-        return true;
-    }
-    if (name == "wide") {
-        rx_cfg = make_rx_fir_from_64(fir_1x_wide_taps);
-        tx_cfg = make_tx_fir_from_64(fir_1x_wide_taps, -6);
-        canonical_name = "wide";
-        return true;
-    }
-    return false;
+    return normalized;
+}
+
+std::vector<std::string> default_rx_antennas_for_backend(const std::string &rfic_name)
+{
+    if (rfic_name == "ad9361")
+        return {"A_BALANCED"};
+    return {"RX"};
+}
+
+std::vector<std::string> default_tx_antennas_for_backend(const std::string &rfic_name)
+{
+    if (rfic_name == "ad9361")
+        return {"A"};
+    return {"TX"};
 }
 } // namespace
-
-//#define AD9361_SPI_WRITE_DEBUG
-//#define AD9361_SPI_READ_DEBUG
-
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
-{
-    litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
-#if USE_LITEPCIE
-    if (fd < 0)
-        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    void *conn = (void *)(intptr_t)fd;
-#else
-    if (!fd)
-        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    void *conn = fd;
-#endif
-
-    /* Single Byte Read. */
-    if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
-
-    /* Single Byte Write. */
-    } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
-
-    /* Unsupported. */
-    } else {
-        fprintf(stderr, "Unsupported SPI transfer n_tx=%d n_rx=%d\n",
-                n_tx, n_rx);
-        exit(1);
-    }
-
-    return 0;
-}
-
-/* AD9361 Delays */
-
-void udelay(unsigned long usecs)
-{
-    usleep(usecs);
-}
-
-void mdelay(unsigned long msecs)
-{
-    usleep(msecs * 1000);
-}
-
-unsigned long msleep_interruptible(unsigned int msecs)
-{
-    usleep(msecs * 1000);
-    return 0;
-}
-
-/* AD9361 GPIO */
-
-#define AD9361_GPIO_RESET_PIN 0
-
-bool gpio_is_valid(int number)
-{
-    switch(number) {
-       case AD9361_GPIO_RESET_PIN:
-           return true;
-       default:
-           return false;
-    }
-}
-
-void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 
 /***************************************************************************************************
  *                                     Constructor
@@ -376,6 +165,20 @@ static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
+static std::string getLiteXM2SDRRficName(struct m2sdr_dev *dev);
+
+static std::string getLiteXM2SDRRficName(struct m2sdr_dev *dev)
+{
+    char name[32] = {0};
+    if (m2sdr_get_rfic_name(dev, name, sizeof(name)) != 0 || name[0] == '\0')
+        return "unknown-rfic";
+    return std::string(name);
+}
+
+static bool getLiteXM2SDRRficCaps(struct m2sdr_dev *dev, struct m2sdr_rfic_caps *caps)
+{
+    return dev && caps && m2sdr_get_rfic_caps(dev, caps) == 0;
+}
 
 #if USE_LITEPCIE
 void dma_set_loopback(int fd, bool loopback_enable) {
@@ -390,7 +193,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #if USE_LITEETH
       _udp_inited(false),
 #endif
-      _fd(FD_INIT), ad9361_phy(NULL) {
+      _fd(FD_INIT) {
 
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -415,8 +218,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path + " (" + m2sdr_strerror(rc) + ")");
     }
     _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
-    /* Global file descriptor for AD9361 lib. */
-    _spi_id = spi_register_fd(_fd);
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 #elif USE_LITEETH
@@ -436,8 +237,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             ":1234 (hint: set eth_ip=... for the board IP, error: " +
             std::string(m2sdr_strerror(rc)) + ")");
     }
-    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
-    _spi_id = spi_register_fd(_fd);
+    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_eb_handle(_dev));
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
 
@@ -476,6 +276,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #else
         throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks eth_rx_mode CSR (rebuild with --with-eth-vrt)");
 #endif
+
+    _rficName = getLiteXM2SDRRficName(_dev);
 #ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
         litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
         litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
@@ -491,10 +293,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-    /* Configure Mode based on _bitMode */
-    SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
-    m2sdr_set_bitmode(_dev, _bitMode == 8);
-
+    _rficName = getLiteXM2SDRRficName(_dev);
 
     /* Configure PCIe Synchronizer and DMA Headers. */
 #if USE_LITEPCIE
@@ -530,11 +329,20 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         do_init = args.at("bypass_init")[0] == '0';
     }
 
-    if (args.count("bitmode") > 0) {
-        _bitMode = std::stoi(args.at("bitmode"));
+    /* Keep argument parsing in Soapy, but push RFIC-specific validation and
+     * hardware programming into libm2sdr. */
+    if (args.count("iq_bits") > 0) {
+        _iqBits = static_cast<uint32_t>(std::stoul(args.at("iq_bits")));
+    } else if (args.count("bitmode") > 0) {
+        /* Backward-compatible alias:
+         * bitmode=8 -> iq_bits=8
+         * bitmode=16 -> iq_bits=12 (AD9361 native precision in 16-bit container) */
+        const uint32_t legacy = static_cast<uint32_t>(std::stoul(args.at("bitmode")));
+        _iqBits = (legacy == 8u) ? 8u : 12u;
     } else {
-        _bitMode = 16;
+        _iqBits = 12u;
     }
+    _bitMode = (_iqBits <= 8u) ? 8u : 16u;
 
     if (args.count("oversampling") > 0) {
         _oversampling = std::stoi(args.at("oversampling"));
@@ -545,26 +353,38 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _ad9361_fir_profile = args.at("fir_profile");
     }
 
-    AD9361_RXFIRConfig rx_fir_cfg_base;
-    AD9361_TXFIRConfig tx_fir_cfg_base;
-    std::string fir_profile_canonical;
-    if (!select_ad9361_fir_profile_1x(_ad9361_fir_profile, rx_fir_cfg_base, tx_fir_cfg_base, fir_profile_canonical)) {
-        throw std::runtime_error(
-            "Invalid ad9361_fir_profile '" + _ad9361_fir_profile +
-            "' (supported: legacy, bypass, match, wide)");
+    /* FIR profile is still backend-specific, so it stays in the namespaced
+     * property path until another RFIC needs a generic equivalent. */
+    if (_rficName == "ad9361") {
+        int prop_rc = m2sdr_set_property(_dev, "ad9361.fir_profile", _ad9361_fir_profile.c_str());
+
+        if (prop_rc != 0) {
+            throw std::runtime_error(
+                "Invalid ad9361_fir_profile '" + _ad9361_fir_profile +
+                "' (supported: legacy, bypass, match, wide)");
+        }
+        char fir_profile_canonical[32];
+        if (m2sdr_get_property(_dev, "ad9361.fir_profile", fir_profile_canonical, sizeof(fir_profile_canonical)) == 0)
+            _ad9361_fir_profile = fir_profile_canonical;
+        SoapySDR::logf(SOAPY_SDR_INFO, "AD9361 1x FIR profile: %s", _ad9361_fir_profile.c_str());
     }
-    _ad9361_fir_profile = fir_profile_canonical;
-    SoapySDR::logf(SOAPY_SDR_INFO, "AD9361 1x FIR profile: %s", _ad9361_fir_profile.c_str());
 
-    _rx_antennas = {"A_BALANCED"};
-    _tx_antennas = {"A"};
+    _rx_antennas = default_rx_antennas_for_backend(_rficName);
+    _tx_antennas = default_tx_antennas_for_backend(_rficName);
     if (args.count("rx_antenna_list") > 0)
-        _rx_antennas = split_list(args.at("rx_antenna_list"));
+        _rx_antennas = normalize_antenna_list(
+            _rficName, SOAPY_SDR_RX, split_list(args.at("rx_antenna_list")));
     if (args.count("tx_antenna_list") > 0)
-        _tx_antennas = split_list(args.at("tx_antenna_list"));
+        _tx_antennas = normalize_antenna_list(
+            _rficName, SOAPY_SDR_TX, split_list(args.at("tx_antenna_list")));
 
-    _rx_agc_mode = RF_GAIN_SLOWATTACK_AGC;
-    if (args.count("rx_agc_mode") > 0)
+    _rx_stream.antenna[0] = _rx_antennas.empty() ? default_rx_antennas_for_backend(_rficName)[0] : _rx_antennas[0];
+    _rx_stream.antenna[1] = _rx_stream.antenna[0];
+    _tx_stream.antenna[0] = _tx_antennas.empty() ? default_tx_antennas_for_backend(_rficName)[0] : _tx_antennas[0];
+    _tx_stream.antenna[1] = _tx_stream.antenna[0];
+
+    _rx_agc_mode = "slowattack";
+    if (_rficName == "ad9361" && args.count("rx_agc_mode") > 0)
         _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
 
     /* RefClk Selection */
@@ -576,70 +396,39 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("clock_source") > 0) {
         clock_source = args.at("clock_source");
     }
-    if (do_init) {
+    /* Soapy now delegates RFIC bring-up to libm2sdr. The plugin remains
+     * responsible for default selection and Soapy-facing behavior, while
+     * backend-specific sequencing stays in one place. */
+    if (_rficName == "ad9361") {
+        struct m2sdr_config cfg;
+        int rc;
 
-        /* Initialize SI5351 Clocking */
-#ifdef CSR_SI5351_BASE
-        SoapySDR::log(SOAPY_SDR_INFO, "Initializing SI5351");
-        if (clock_source == "internal") {
-            /* SI5351B, XO reference */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-            if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_40m_config,
-                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
-            } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_38p4m_config,
-                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
-            }
-        } else {
-            /* SI5351C, external 10 MHz CLKIN from u.FL */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                  SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-                  SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-            if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
-            } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
-            }
+        SoapySDR::log(SOAPY_SDR_INFO, do_init ? "Initializing RFIC through libm2sdr" :
+                                            "Attaching to existing RFIC state through libm2sdr");
+
+        m2sdr_config_init(&cfg);
+        cfg.sample_rate       = 30720000;
+        cfg.bandwidth         = 30720000;
+        cfg.refclk_freq       = refclk_hz;
+        cfg.tx_freq           = 1000000;
+        cfg.rx_freq           = 1000000;
+        cfg.tx_gain           = -20;
+        cfg.rx_gain1          = 0;
+        cfg.rx_gain2          = 0;
+        cfg.enable_8bit_mode  = (_iqBits <= 8u);
+        cfg.enable_oversample = (_oversampling != 0);
+        cfg.bypass_rfic_init  = !do_init;
+        cfg.channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
+        cfg.clock_source      = (clock_source == "external") ? M2SDR_CLOCK_SOURCE_EXTERNAL
+                                                             : M2SDR_CLOCK_SOURCE_INTERNAL;
+
+        rc = m2sdr_apply_config(_dev, &cfg);
+        if (rc != 0) {
+            throw std::runtime_error("m2sdr_apply_config failed (" + std::string(m2sdr_strerror(rc)) + ")");
         }
-#endif
-
-        /* Power-up AD9361 */
-        SoapySDR::log(SOAPY_SDR_INFO, "Powering up AD9361");
-        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b11);
-
-        /* Initialize AD9361 SPI. */
-        SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 SPI");
-        m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
-    /* Initialize AD9361 RFIC. */
-    SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
-    default_init_param.reference_clk_rate = refclk_hz;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
-    default_init_param.id_no = _spi_id;
-    int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
-    if (ad9361_rc != 0 || ad9361_phy == nullptr) {
-        throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
-    }
-    m2sdr_rf_bind(_dev, ad9361_phy);
-
-    if (do_init) {
-        /* Configure AD9361 TX/RX FIRs. */
-        SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg_base);
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg_base);
-
+    if (_rficName == "ad9361" && do_init) {
         /* Some defaults to avoid throwing. */
         SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
@@ -654,8 +443,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.bandwidth    = 30.72e6;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[0]  = false;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -666,8 +453,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[1]  = false;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
@@ -679,13 +464,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     if (args.count("rx_antenna0") > 0)
-        _rx_stream.antenna[0] = args.at("rx_antenna0");
+        _rx_stream.antenna[0] = normalize_antenna_name(_rficName, SOAPY_SDR_RX, args.at("rx_antenna0"));
     if (args.count("rx_antenna1") > 0)
-        _rx_stream.antenna[1] = args.at("rx_antenna1");
+        _rx_stream.antenna[1] = normalize_antenna_name(_rficName, SOAPY_SDR_RX, args.at("rx_antenna1"));
     if (args.count("tx_antenna0") > 0)
-        _tx_stream.antenna[0] = args.at("tx_antenna0");
+        _tx_stream.antenna[0] = normalize_antenna_name(_rficName, SOAPY_SDR_TX, args.at("tx_antenna0"));
     if (args.count("tx_antenna1") > 0)
-        _tx_stream.antenna[1] = args.at("tx_antenna1");
+        _tx_stream.antenna[1] = normalize_antenna_name(_rficName, SOAPY_SDR_TX, args.at("tx_antenna1"));
 
     if (!antenna_allowed(_rx_antennas, _rx_stream.antenna[0]) ||
         !antenna_allowed(_rx_antennas, _rx_stream.antenna[1])) {
@@ -695,6 +480,10 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         !antenna_allowed(_tx_antennas, _tx_stream.antenna[1])) {
         throw std::runtime_error("Invalid TX antenna selection");
     }
+
+    setSampleMode();
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "Active RFIC backend: %s", _rficName.c_str());
 
 #if USE_LITEPCIE
     /* Set-up the DMA. */
@@ -711,7 +500,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
-    spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
 #if USE_LITEPCIE
          /* Release the DMA engine. */
@@ -740,8 +528,10 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
     litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-    /* Power-Down AD9361 */
-    litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+    if (_rficName == "ad9361") {
+        /* Power-Down AD9361 */
+        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+    }
 
 #if USE_LITEETH
     if (_udp_inited) {
@@ -754,7 +544,6 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
 #endif
     if (_dev) {
-        m2sdr_rf_bind(_dev, nullptr);
         m2sdr_close(_dev);
         _dev = nullptr;
     }
@@ -830,6 +619,9 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
     key += "-eth";
 #endif
 
+    key += "-";
+    key += getLiteXM2SDRRficName(_dev);
+
     return key;
 }
 
@@ -838,6 +630,10 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
 ***************************************************************************************************/
 
 size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps))
+        return std::max<size_t>(caps.rx_channels, caps.tx_channels);
     return 2;
 }
 
@@ -855,12 +651,12 @@ std::vector<std::string> SoapyLiteXM2SDR::listAntennas(
     if (direction == SOAPY_SDR_RX) {
         if (!_rx_antennas.empty())
             return _rx_antennas;
-        return {"A_BALANCED"};
+        return default_rx_antennas_for_backend(_rficName);
     }
     if (direction == SOAPY_SDR_TX) {
         if (!_tx_antennas.empty())
             return _tx_antennas;
-        return {"A"};
+        return default_tx_antennas_for_backend(_rficName);
     }
     return {};
 }
@@ -870,15 +666,16 @@ void SoapyLiteXM2SDR::setAntenna(
     const size_t channel,
     const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
+    const std::string canonical = normalize_antenna_name(_rficName, direction, name);
     if (direction == SOAPY_SDR_RX) {
-        if (!antenna_allowed(_rx_antennas, name))
+        if (!antenna_allowed(_rx_antennas, canonical))
             throw std::runtime_error("Unsupported RX antenna: " + name);
-        _rx_stream.antenna[channel] = name;
+        _rx_stream.antenna[channel] = canonical;
     }
     if (direction == SOAPY_SDR_TX) {
-        if (!antenna_allowed(_tx_antennas, name))
+        if (!antenna_allowed(_tx_antennas, canonical))
             throw std::runtime_error("Unsupported TX antenna: " + name);
-        _tx_stream.antenna[channel] = name;
+        _tx_stream.antenna[channel] = canonical;
     }
 }
 
@@ -924,6 +721,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listGains(
 bool SoapyLiteXM2SDR::hasGainMode(
     const int direction,
     const size_t /*channel*/) const {
+    struct m2sdr_rfic_caps caps;
 
     /* TX */
     if (direction == SOAPY_SDR_TX)
@@ -931,7 +729,8 @@ bool SoapyLiteXM2SDR::hasGainMode(
 
     /* RX */
     if (direction == SOAPY_SDR_RX)
-        return true;
+        return getLiteXM2SDRRficCaps(_dev, &caps) &&
+               (caps.features & M2SDR_RFIC_FEATURE_RX_GAIN_MODE) != 0;
 
     /* Fallback */
     return false;
@@ -941,13 +740,20 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     const bool automatic)
 {
     std::lock_guard<std::mutex> lock(_mutex);
+    const std::string key = std::string("ad9361.rx") + std::to_string(channel) + "_gain_mode";
+    const std::string mode = automatic ? _rx_agc_mode : "manual";
+
     /* N/A. */
     if (direction == SOAPY_SDR_TX)
         return;
+    if (_rficName != "ad9361")
+        throw std::runtime_error("Gain mode control is not implemented for RFIC backend " + _rficName);
 
+    /* Gain-mode strings are backend properties because the generic Soapy toggle
+     * still fans out to AD9361-specific policies such as slowattack/hybrid. */
     _rx_stream.gainMode[channel] = automatic;
-    ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
-        (automatic ? _rx_agc_mode : RF_GAIN_MGC));
+    if (m2sdr_set_property(_dev, key.c_str(), mode.c_str()) != 0)
+        throw std::runtime_error("Failed to set RX gain mode for channel " + std::to_string(channel));
 }
 
 bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) const
@@ -959,9 +765,16 @@ bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) con
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
-        uint8_t gc_mode;
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
-        return (gc_mode != RF_GAIN_MGC);
+        char value[32];
+
+        if (_rficName != "ad9361")
+            return false;
+        if (m2sdr_get_property(_dev,
+                               (std::string("ad9361.rx") + std::to_string(channel) + "_gain_mode").c_str(),
+                               value,
+                               sizeof(value)) != 0)
+            return _rx_stream.gainMode[channel];
+        return std::string(value) != "manual";
     }
 
     /* Fallback */
@@ -1054,19 +867,12 @@ double SoapyLiteXM2SDR::getGain(
     const int direction,
     const size_t channel) const
 {
-    int32_t gain = 0;
+    int64_t gain = 0;
+    const enum m2sdr_direction mdir = (direction == SOAPY_SDR_TX) ? M2SDR_TX : M2SDR_RX;
 
-    /* TX */
-    if (direction == SOAPY_SDR_TX) {
-        ad9361_get_tx_attenuation(ad9361_phy, channel, (uint32_t *) &gain);
-        gain = -gain/1000;
-    }
-
-    /* RX */
-    if (direction == SOAPY_SDR_RX) {
-        ad9361_get_rx_rf_gain(ad9361_phy, channel, &gain);
-    }
-
+    (void)channel;
+    if (m2sdr_get_gain(_dev, mdir, &gain) != 0)
+        return 0.0;
     return static_cast<double>(gain);
 }
 
@@ -1077,9 +883,7 @@ double SoapyLiteXM2SDR::getGain(
 {
     /* TX */
     if (direction == SOAPY_SDR_TX) {
-        uint32_t atten_mdb = 0;
-        ad9361_get_tx_attenuation(ad9361_phy, channel, &atten_mdb);
-        double atten_db = atten_mdb / 1000.0;
+        const double atten_db = -getGain(direction, channel);
         if (name == "ATT")
             return atten_db;     /* Positive attenuation. */
         if (name == "GAIN")
@@ -1100,6 +904,14 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const int direction,
     const size_t /*channel*/) const
 {
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        if (direction == SOAPY_SDR_TX)
+            return SoapySDR::Range((double)caps.min_tx_gain, (double)caps.max_tx_gain);
+        if (direction == SOAPY_SDR_RX)
+            return SoapySDR::Range((double)caps.min_rx_gain, (double)caps.max_rx_gain);
+    }
 
     /* TX */
     if (direction == SOAPY_SDR_TX)
@@ -1118,6 +930,18 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
     const size_t /*channel*/,
     const std::string &name) const
 {
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        if (direction == SOAPY_SDR_TX) {
+            if (name == "ATT")
+                return SoapySDR::Range((double)(-caps.max_tx_gain), (double)(-caps.min_tx_gain));
+            if (name == "GAIN")
+                return SoapySDR::Range((double)caps.min_tx_gain, (double)caps.max_tx_gain);
+        }
+        if (direction == SOAPY_SDR_RX && (name == "PGA" || name == "RF" || name == "GAIN"))
+            return SoapySDR::Range((double)caps.min_rx_gain, (double)caps.max_rx_gain);
+    }
 
     /* TX */
     if (direction == SOAPY_SDR_TX) {
@@ -1219,12 +1043,10 @@ double SoapyLiteXM2SDR::getFrequency(
     }
 
     uint64_t lo_freq = 0;
+    const enum m2sdr_direction mdir = (direction == SOAPY_SDR_TX) ? M2SDR_TX : M2SDR_RX;
 
-    if (direction == SOAPY_SDR_TX)
-        ad9361_get_tx_lo_freq(ad9361_phy, &lo_freq);
-
-    if (direction == SOAPY_SDR_RX)
-        ad9361_get_rx_lo_freq(ad9361_phy, &lo_freq);
+    if (m2sdr_get_frequency(_dev, mdir, &lo_freq) != 0)
+        return 0.0;
 
     return static_cast<double>(lo_freq);
 }
@@ -1242,14 +1064,21 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
     const int direction,
     const size_t /*channel*/,
     const std::string &name) const {
+    struct m2sdr_rfic_caps caps;
 
     if (name == "BB") {
         return(SoapySDR::RangeList(1, SoapySDR::Range(0, 0)));
     }
 
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        if (direction == SOAPY_SDR_TX)
+            return SoapySDR::RangeList(1, SoapySDR::Range((double)caps.min_tx_frequency, (double)caps.max_tx_frequency));
+        if (direction == SOAPY_SDR_RX)
+            return SoapySDR::RangeList(1, SoapySDR::Range((double)caps.min_rx_frequency, (double)caps.max_rx_frequency));
+    }
+
     if (direction == SOAPY_SDR_TX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(47000000, 6000000000ull)));
-
     if (direction == SOAPY_SDR_RX)
         return(SoapySDR::RangeList(1, SoapySDR::Range(70000000, 6000000000ull)));
 
@@ -1263,18 +1092,31 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 /* listFrequencies now exposes RF and BB; BB currently aliases RF. */
 
 void SoapyLiteXM2SDR::setSampleMode() {
+    int rc = 0;
+
+    _bitMode = (_iqBits <= 8u) ? 8u : 16u;
+
     /* 8-bit mode */
     if (_bitMode == 8) {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, true);
+        rc = m2sdr_set_iq_bits(_dev, 8u);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
-        _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, false);
+        if (_iqBits > 1u && _iqBits <= 16u)
+            _samplesScaling = static_cast<float>((1u << (_iqBits - 1u)) - 1u);
+        else
+            _samplesScaling = 2047.0f;
+        rc = m2sdr_set_iq_bits(_dev, _iqBits);
+    }
+
+    if (rc != 0) {
+        throw std::runtime_error(
+            "Failed to set IQ bit depth " + std::to_string(_iqBits) +
+            " (" + std::string(m2sdr_strerror(rc)) + ")");
     }
 }
 
@@ -1301,12 +1143,12 @@ void SoapyLiteXM2SDR::setSampleRate(
 #if USE_LITEPCIE
     /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
     if (rate > LITEPCIE_8BIT_THRESHOLD) {
-        if (_bitMode != 8) {
+        if (_iqBits != 8u) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
-                "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
+                "Sample rate %.2f MSPS requires 8-bit IQ + oversampling on PCIe, overriding iq_bits",
                 rate / 1e6);
         }
-        _bitMode      = 8;
+        _iqBits       = 8u;
         _oversampling = 1;
     } else {
         _oversampling = 0;
@@ -1314,10 +1156,11 @@ void SoapyLiteXM2SDR::setSampleRate(
 #elif USE_LITEETH
     /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
     if (rate > LITEETH_8BIT_THRESHOLD) {
-        _bitMode      = 8;
+        _iqBits       = 8u;
         _oversampling = 0;
     } else {
-        _bitMode      = 16;
+        if (_iqBits <= 8u)
+            _iqBits = 12u;
         _oversampling = 0;
     }
 #endif
@@ -1327,54 +1170,22 @@ void SoapyLiteXM2SDR::setSampleRate(
         _rateMult = 2.0;
     }
 
-    /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
-    double actual_rate = rate / _rateMult;
-    if (actual_rate < 1250000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", actual_rate);
-        ad9361_phy->rx_fir_dec    = 4;
-        ad9361_phy->tx_fir_int    = 4;
-        ad9361_phy->bypass_rx_fir = 0;
-        ad9361_phy->bypass_tx_fir = 0;
-        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config_dec4;
-        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config_int4;
-        rx_fir_cfg.rx_dec = 4;
-        tx_fir_cfg.tx_int = 4;
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
-        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
-        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
-    }
-    else if (actual_rate < 2500000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", actual_rate);
-        ad9361_phy->rx_fir_dec    = 2;
-        ad9361_phy->tx_fir_int    = 2;
-        ad9361_phy->bypass_rx_fir = 0;
-        ad9361_phy->bypass_tx_fir = 0;
-        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config_dec2;
-        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config_int2;
-        rx_fir_cfg.rx_dec = 2;
-        tx_fir_cfg.tx_int = 2;
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
-        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
-        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
-    }
-    else {
-        /* Restore default FIR configs when above 2.5 Msps. */
-        ad9361_phy->rx_fir_dec    = 1;
-        ad9361_phy->tx_fir_int    = 1;
-        ad9361_phy->bypass_rx_fir = 0;
-        ad9361_phy->bypass_tx_fir = 0;
-        AD9361_RXFIRConfig rx_fir_cfg;
-        AD9361_TXFIRConfig tx_fir_cfg;
-        std::string canonical;
-        if (!select_ad9361_fir_profile_1x(_ad9361_fir_profile, rx_fir_cfg, tx_fir_cfg, canonical)) {
-            throw std::runtime_error("Invalid cached ad9361_fir_profile: " + _ad9361_fir_profile);
+    /* RFIC-specific FIR and oversampling policy live in the backend. Soapy only
+     * sets the requested policy and the common sample rate here. */
+    if (_rficName == "ad9361") {
+        int prop_rc = m2sdr_set_property(_dev, "ad9361.fir_profile", _ad9361_fir_profile.c_str());
+
+        if (prop_rc != 0) {
+            throw std::runtime_error(
+                "Failed to set AD9361 FIR profile (" + std::string(m2sdr_strerror(prop_rc)) + ")");
         }
-        ad9361_set_rx_fir_config(ad9361_phy, rx_fir_cfg);
-        ad9361_set_tx_fir_config(ad9361_phy, tx_fir_cfg);
-        ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
-        ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
+        /* oversampling is requested here as policy; the backend decides how it
+         * maps to FIR decimation/interpolation and hardware sample clocks. */
+        prop_rc = m2sdr_set_property(_dev, "ad9361.oversampling", _oversampling ? "1" : "0");
+        if (prop_rc != 0) {
+            throw std::runtime_error(
+                "Failed to set AD9361 oversampling policy (" + std::string(m2sdr_strerror(prop_rc)) + ")");
+        }
     }
 
     /* Set the sample rate for the TX and configure the hardware accordingly. */
@@ -1389,11 +1200,6 @@ void SoapyLiteXM2SDR::setSampleRate(
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_sample_rate failed: %s", m2sdr_strerror(rc));
         }
-    }
-
-    /* If oversampling is enabled, enable oversampling on the hardware. */
-    if (_oversampling) {
-        ad9361_enable_oversampling(ad9361_phy);
     }
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
@@ -1412,21 +1218,19 @@ void SoapyLiteXM2SDR::setSampleRate(
 double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
-
-    uint32_t sample_rate = 0;
-
-    if (direction == SOAPY_SDR_TX)
-        ad9361_get_tx_sampling_freq(ad9361_phy, &sample_rate);
-    if (direction == SOAPY_SDR_RX)
-        ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
-
-    return static_cast<double>(_rateMult*sample_rate);
+    int64_t sample_rate = 0;
+    (void)direction;
+    if (m2sdr_get_sample_rate(_dev, &sample_rate) != 0)
+        return 0.0;
+    return static_cast<double>(_rateMult * sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     const int /*direction*/,
     const size_t /*channel*/) const {
+    struct m2sdr_rfic_caps caps;
     std::vector<double> sampleRates;
+    std::vector<double> filtered;
 
     /* Standard SampleRates */
     sampleRates.push_back(1.0e6);     /*      1 MSPS. */
@@ -1445,6 +1249,19 @@ std::vector<double> SoapyLiteXM2SDR::listSampleRates(
     sampleRates.push_back(61.44e6);   /* 61.44 MSPS (LTE 40 MHz BW via 2x 20 MHz CA, 5G NR 50 MHz BW). */
     sampleRates.push_back(122.88e6);  /* 122.88 MSPS (LTE 80 MHz BW via 4x 20 MHz CA, 5G NR 100 MHz BW). */
 
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        for (double rate : sampleRates) {
+            if (rate >= (double)caps.min_sample_rate && rate <= (double)caps.max_sample_rate)
+                filtered.push_back(rate);
+        }
+        if (!filtered.empty())
+            return filtered;
+        filtered.push_back((double)caps.min_sample_rate);
+        if (caps.max_sample_rate != caps.min_sample_rate)
+            filtered.push_back((double)caps.max_sample_rate);
+        return filtered;
+    }
+
     /* Return supported SampleRates */
     return sampleRates;
 }
@@ -1453,6 +1270,12 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getSampleRateRange(
     const int /*direction*/,
     const size_t  /*channel*/) const {
     SoapySDR::RangeList results;
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        results.push_back(SoapySDR::Range((double)caps.min_sample_rate, (double)caps.max_sample_rate));
+        return results;
+    }
     results.push_back(SoapySDR::Range(0.55e6, 122.88e6));
     return results;
 }
@@ -1499,14 +1322,10 @@ void SoapyLiteXM2SDR::setBandwidth(
 double SoapyLiteXM2SDR::getBandwidth(
     const int direction,
     const size_t /*channel*/) const {
-
-    uint32_t bw = 0;
-
-    if (direction == SOAPY_SDR_TX)
-        ad9361_get_tx_rf_bandwidth(ad9361_phy, &bw);
-    if (direction == SOAPY_SDR_RX)
-        ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw);
-
+    int64_t bw = 0;
+    (void)direction;
+    if (m2sdr_get_bandwidth(_dev, &bw) != 0)
+        return 0.0;
     return static_cast<double>(bw);
 }
 
@@ -1514,8 +1333,13 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
     const int /*direction*/,
     const size_t /*channel*/) const {
     SoapySDR::RangeList results;
-        /* AD9361 supports a bandwidth range from 200 kHz to 56 MHz. */
-        results.push_back(SoapySDR::Range(0.2e6, 56.0e6));
+    struct m2sdr_rfic_caps caps;
+
+    if (getLiteXM2SDRRficCaps(_dev, &caps)) {
+        results.push_back(SoapySDR::Range((double)caps.min_bandwidth, (double)caps.max_bandwidth));
+        return results;
+    }
+    results.push_back(SoapySDR::Range(0.2e6, 56.0e6));
     return results;
 }
 
@@ -1578,13 +1402,16 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
 
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     std::vector<std::string> sensors;
+    struct m2sdr_rfic_caps caps;
 #ifdef CSR_XADC_BASE
     sensors.push_back("fpga_temp");
     sensors.push_back("fpga_vccint");
     sensors.push_back("fpga_vccaux");
     sensors.push_back("fpga_vccbram");
 #endif
-    sensors.push_back("ad9361_temp");
+    if (getLiteXM2SDRRficCaps(_dev, &caps) &&
+        (caps.features & M2SDR_RFIC_FEATURE_TEMP_SENSOR) != 0)
+        sensors.push_back("rfic_temp");
     return sensors;
 }
 
@@ -1634,14 +1461,14 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 #endif
-        /* AD9361 Sensors */
-        if (deviceStr == "ad9361") {
+        /* RFIC Sensors */
+        if (deviceStr == "rfic") {
             /* Temp. */
             if (sensorStr == "temp") {
                 info.key         = "temp";
                 info.value       = "0.0";
                 info.units       = "°C";
-                info.description = "AD9361 temperature";
+                info.description = "RFIC temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
@@ -1688,11 +1515,17 @@ std::string SoapyLiteXM2SDR::readSensor(
             return sensorValue;
         }
 #endif
-        /* AD9361 Sensors */
-        if (deviceStr == "ad9361") {
+        /* RFIC Sensors */
+        if (deviceStr == "rfic") {
             /* Temp. */
             if (sensorStr == "temp") {
-                sensorValue = std::to_string(ad9361_get_temp(ad9361_phy)/1000); /* FIXME/CHECKME*/
+                /* Sensor naming is generic on the Soapy side, but the backend
+                 * property key stays vendor-namespaced. */
+                std::string property_key = _rficName + ".temperature_c";
+                char value[32];
+                if (m2sdr_get_property(_dev, property_key.c_str(), value, sizeof(value)) != 0)
+                    throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") failed");
+                sensorValue = value;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }

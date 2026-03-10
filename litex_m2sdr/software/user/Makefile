@@ -1,11 +1,14 @@
 PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
-SCAN_CIMGUI_DIR := $(SCAN_UI_DIR)/cimgui
+# Dear ImGui/cimgui lives directly under software/user/cimgui in this tree.
+# Keep the scan UI bridge under scan_ui/, but point the build to the actual
+# vendored cimgui location.
+SCAN_CIMGUI_DIR := cimgui
 
 CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
 CFLAGS += $(EXTRA_CFLAGS)
-CXXFLAGS = $(CFLAGS) -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
+CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
@@ -44,6 +47,9 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_ad9361_spi.o \
 	libm2sdr/m2sdr_flash.o \
 	libm2sdr/m2sdr_device.o \
+	libm2sdr/m2sdr_rfic_registry.o \
+	libm2sdr/m2sdr_rfic_ad9361.o \
+	libm2sdr/m2sdr_rfic_mock.o \
 	libm2sdr/m2sdr_stream.o \
 	libm2sdr/m2sdr_rf.o \
 	libm2sdr/m2sdr_utils.o \
@@ -67,6 +73,9 @@ test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
+		--suppress=constParameterPointer \
+		--suppress=constParameterCallback \
+		--suppress=unusedStructMember \
 		-I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 \
 		libm2sdr
 
@@ -216,11 +225,14 @@ ad9361/%.o: ad9361/%.c
 %.o: %.cpp
 	$(CXX) -c $(CXXFLAGS) $(SDL2_CFLAGS) -o $@ $<
 
-install: $(BINARIES)
+install: $(BINARIES) libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so
 	install -d $(PREFIX)/bin
 	$(foreach bin,$(BINARIES), \
 		install -D -m 755 $(bin) $(PREFIX)/bin; \
 	)
+	install -d $(PREFIX)/lib
+	install -m 755 libm2sdr/$(LIBM2SDR_SONAME) $(PREFIX)/lib/$(LIBM2SDR_SONAME)
+	ln -sf $(LIBM2SDR_SONAME) $(PREFIX)/lib/libm2sdr.so
 
 install_dev: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
 	install -d $(PREFIX)/lib

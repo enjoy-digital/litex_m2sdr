@@ -38,12 +38,23 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
-- **Antenna lists**: `rx_antenna_list=A_BALANCED,B_BALANCED` and `tx_antenna_list=A,B`
+  - Exposed only when the active RFIC backend advertises RX gain-mode support.
+- **Antenna lists**: `rx_antenna_list=...` and `tx_antenna_list=...`
+  - Defaults are backend-specific: `A_BALANCED` / `A` on AD9361, generic `RX` / `TX` otherwise.
 - **Per-channel antenna**: `rx_antenna0=...`, `rx_antenna1=...`, `tx_antenna0=...`, `tx_antenna1=...`
-- **Bit mode**: `bitmode=8|16`
+- **IQ bits**: `iq_bits=8|12` (preferred)
+- **Bit mode**: `bitmode=8|16` (legacy alias; `16` maps to `iq_bits=12` on AD9361)
 - **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+- **Bypass RFIC init**: `bypass_init=1`
+  - Keeps the legacy Soapy escape hatch for attaching to an already-configured RFIC without rerunning the full `libm2sdr` bring-up sequence.
+- These AD9361-specific knobs are now routed through the libm2sdr RFIC backend property layer, so Soapy no longer owns the FIR/AGC runtime logic directly.
+- Initial AD9361 bring-up is now also routed through `m2sdr_apply_config()`, so the Soapy module no longer embeds its own AD9361 platform/init path.
+- **Active RFIC backend** is exposed as the discovered `rfic` field in Soapy probe results.
+- Soapy channel count, LO ranges, sample-rate ranges, and stream eligibility now come from `libm2sdr` RFIC capabilities instead of AD9361-only constants.
+- RFIC temperature is exposed through the generic sensor key `rfic_temp` when the active backend advertises a temperature sensor.
+- Non-AD9361 backends can be opened for generic probe/control paths, but Soapy streaming remains implemented only for the AD9361 backend today.
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
@@ -51,12 +62,12 @@ You can pass device arguments to configure the driver. These are most useful whe
 
 Example:
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,rx_antenna_list=A_BALANCED,tx_antenna_list=A,bitmode=8,oversampling=1"
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,rx_antenna_list=A_BALANCED,tx_antenna_list=A,iq_bits=8,oversampling=1"
 ```
 
 Example (122.88 MSPS edge-flatness A/B test):
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
+SoapySDRUtil --probe="driver=LiteXM2SDR,iq_bits=8,oversampling=1,ad9361_fir_profile=wide"
 ```
 
 Example (Etherbone control + Soapy RX over FPGA VRT):

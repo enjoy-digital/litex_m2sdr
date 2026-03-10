@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "m2sdr.h"
+#include "m2sdr_rfic_iface.h"
 
 struct ad9361_rf_phy;
 
@@ -65,11 +66,22 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    /* RFIC backend selected for this device instance. The backend owns rfic_ctx
+     * and may also stash vendor-driver handles in the tail fields below. */
+    const struct m2sdr_rfic_ops *rfic_ops;
+    void *rfic_ctx;
+    enum m2sdr_rfic_kind rfic_kind;
+    unsigned iq_bits;
+    /* Legacy AD9361 driver handle kept here until a future backend-neutral
+     * session object replaces the current vendor-driver ownership model. */
     struct ad9361_rf_phy *ad9361_phy;
 };
 
 int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+int m2sdr_rfic_configure_stream_channels(struct m2sdr_dev *dev,
+                                         size_t rx_count, const size_t *rx_channels,
+                                         size_t tx_count, const size_t *tx_channels);
 
 int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);
 

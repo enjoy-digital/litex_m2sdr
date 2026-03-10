@@ -82,7 +82,6 @@ static int m2sdr_parse_identifier(const char *id,
     char tmp[M2SDR_DEVICE_STR_MAX];
     char *colon;
     char *endptr = NULL;
-    unsigned long port_ul = 0;
 
     if (!id || !id[0]) {
         m2sdr_default_device(tmp, sizeof(tmp));
@@ -117,6 +116,7 @@ static int m2sdr_parse_identifier(const char *id,
     snprintf(ip_out, ip_len, "%s", id);
     colon = strchr(ip_out, ':');
     if (colon) {
+        unsigned long port_ul;
         if (colon == ip_out || colon[1] == '\0')
             return -1;
         *colon = '\0';
@@ -245,6 +245,7 @@ void m2sdr_get_version(struct m2sdr_version *ver)
 int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 {
     struct m2sdr_dev *dev;
+    int rc;
 
     if (!dev_out)
         return M2SDR_ERR_INVAL;
@@ -316,6 +317,26 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 
+    /* Transport open and RFIC attach stay separate so callers can keep using a
+     * single m2sdr_open() entry point while still swapping backend selection
+     * through policy such as M2SDR_RFIC. */
+    rc = m2sdr_rfic_attach_default(dev);
+    if (rc != M2SDR_ERR_OK) {
+#ifdef USE_LITEPCIE
+        if (dev->fd >= 0)
+            close(dev->fd);
+        dev->fd = -1;
+#endif
+#ifdef USE_LITEETH
+        if (dev->eb) {
+            eb_disconnect(&dev->eb);
+            dev->eb = NULL;
+        }
+#endif
+        free(dev);
+        return rc;
+    }
+
     *dev_out = dev;
     return M2SDR_ERR_OK;
 }
@@ -325,6 +346,10 @@ void m2sdr_close(struct m2sdr_dev *dev)
 {
     if (!dev)
         return;
+
+    /* Tear down RFIC state before the transport disappears, since backend
+     * cleanup may still need register or sideband access through dev. */
+    m2sdr_rfic_detach(dev);
 
 #ifdef USE_LITEPCIE
     if (dev->fd >= 0)
@@ -648,16 +673,18 @@ int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sen
 /* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
 int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 {
-    if (!dev)
-        return M2SDR_ERR_INVAL;
+    struct m2sdr_rfic_caps caps;
 
-#ifdef CSR_AD9361_BITMODE_ADDR
-    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, enable_8bit ? 1 : 0) != 0)
-        return M2SDR_ERR_IO;
-    return M2SDR_ERR_OK;
-#else
-    return M2SDR_ERR_UNSUPPORTED;
-#endif
+    /* Backward compatibility:
+     * - true  -> 8-bit packed mode.
+     * - false -> default native precision path for the active RFIC backend. */
+    if (enable_8bit)
+        return m2sdr_set_iq_bits(dev, 8u);
+
+    if (m2sdr_get_rfic_caps(dev, &caps) == M2SDR_ERR_OK && caps.native_iq_bits != 0)
+        return m2sdr_set_iq_bits(dev, caps.native_iq_bits);
+
+    return m2sdr_set_iq_bits(dev, 12u);
 }
 
 /* Enable or disable the FPGA DMA loopback path when the backend supports it. */
