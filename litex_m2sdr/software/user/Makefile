@@ -2,6 +2,9 @@ PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
 SCAN_CIMGUI_DIR := cimgui
 
+# Backend selection: USE_LITEPCIE (default) or USE_LITEETH
+INTERFACE ?= USE_LITEPCIE
+
 CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
 CFLAGS += $(EXTRA_CFLAGS)
@@ -18,9 +21,6 @@ LINK_CXXFLAGS := $(filter-out -MMD,$(CXXFLAGS))
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
-
-# Backend selection: USE_LITEPCIE (default) or USE_LITEETH
-INTERFACE ?= USE_LITEPCIE
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
