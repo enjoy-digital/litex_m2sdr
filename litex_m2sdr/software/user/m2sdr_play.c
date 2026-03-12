@@ -75,6 +75,7 @@ static void help(void)
 #endif
            "  -q, --quiet           Quiet mode.\n"
            "  -t, --timed-start     Timed start (align to next second).\n"
+           "      --capture-index N SigMF capture index to use (default: 0).\n"
            "      --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
@@ -217,6 +218,7 @@ int main(int argc, char **argv)
     static uint8_t quiet = 0;
     static uint8_t timed_start = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    unsigned capture_index = 0;
     unsigned sigmf_header_bytes = 0;
     struct m2sdr_sigmf_meta sigmf_meta;
     char resolved_filename[1024] = {0};
@@ -230,6 +232,7 @@ int main(int argc, char **argv)
         { "quiet", no_argument, NULL, 'q' },
         { "timed-start", no_argument, NULL, 't' },
         { "zero-copy", no_argument, NULL, 'z' },
+        { "capture-index", required_argument, NULL, 3 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -269,6 +272,9 @@ int main(int argc, char **argv)
         case 2:
             format = M2SDR_FORMAT_SC8_Q7;
             break;
+        case 3:
+            capture_index = (unsigned)strtoul(optarg, NULL, 0);
+            break;
         case 'q':
             quiet = 1;
             break;
@@ -298,12 +304,29 @@ int main(int argc, char **argv)
 
     if (strcmp(filename, "-") != 0 && m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {
         enum m2sdr_format sigmf_format = m2sdr_sigmf_format_from_datatype(sigmf_meta.datatype);
+        const struct m2sdr_sigmf_capture *capture = NULL;
 
         if (sigmf_format == (enum m2sdr_format)-1) {
             fprintf(stderr, "Unsupported SigMF datatype: %s\n", sigmf_meta.datatype);
             return 1;
         }
-        if (sigmf_meta.has_header_bytes) {
+        if (sigmf_meta.capture_count > 0) {
+            if (capture_index >= sigmf_meta.capture_count) {
+                fprintf(stderr, "SigMF capture index %u out of range (captures=%u)\n",
+                        capture_index, sigmf_meta.capture_count);
+                return 1;
+            }
+            capture = &sigmf_meta.captures[capture_index];
+        }
+        if (capture && capture->has_header_bytes) {
+            if (capture->header_bytes == M2SDR_DMA_HEADER_SIZE) {
+                sigmf_header_bytes = capture->header_bytes;
+            } else if (capture->header_bytes != 0) {
+                fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",
+                        capture->header_bytes);
+                return 1;
+            }
+        } else if (sigmf_meta.has_header_bytes) {
             if (sigmf_meta.header_bytes == M2SDR_DMA_HEADER_SIZE) {
                 sigmf_header_bytes = sigmf_meta.header_bytes;
             } else if (sigmf_meta.header_bytes != 0) {

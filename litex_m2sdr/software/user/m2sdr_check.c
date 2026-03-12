@@ -82,6 +82,7 @@ struct check_data {
     double avg_timestamp_step_ns;
     double rms_timestamp_jitter_ns;
     bool sigmf_loaded;
+    unsigned active_capture_index;
     struct m2sdr_sigmf_meta sigmf_meta;
     char source_path[1024];
 };
@@ -107,6 +108,7 @@ struct ui_state {
     int constellation_points;
     int fft_len_idx;
     int selected_annotation;
+    int selected_capture;
     int hovered_sample;
     bool hovered_sample_valid;
     double hovered_freq_hz;
@@ -144,6 +146,7 @@ static void help(void)
            "      --frame-header      Expect a 16-byte DMA header per frame.\n"
            "      --frame-size BYTES  Frame size in bytes including header (default: %d).\n"
            "      --max-samples N     Maximum samples to load per channel (default: %d).\n"
+           "      --capture-index N   SigMF capture index to focus (default: 0).\n"
            "\n"
            "The GUI shows:\n"
            "  - time-domain I/Q/magnitude\n"
@@ -679,6 +682,7 @@ static void draw_constellation(const struct check_data *data,
 static void draw_controls(const struct check_data *data, struct ui_state *ui)
 {
     int max_start = 0;
+    unsigned i;
 
     if (data->samples > (size_t)ui->view_samples)
         max_start = (int)data->samples - ui->view_samples;
@@ -705,6 +709,19 @@ static void draw_controls(const struct check_data *data, struct ui_state *ui)
         igCombo_Str_arr("Channel", &ui->selected_channel, labels, data->nchannels, data->nchannels);
     } else {
         ui->selected_channel = 0;
+    }
+
+    if (data->sigmf_loaded && data->sigmf_meta.capture_count > 1) {
+        const char *labels[M2SDR_SIGMF_MAX_CAPTURES];
+        static char storage[M2SDR_SIGMF_MAX_CAPTURES][48];
+
+        for (i = 0; i < data->sigmf_meta.capture_count && i < M2SDR_SIGMF_MAX_CAPTURES; i++) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+            snprintf(storage[i], sizeof(storage[i]), "#%u @%" PRIu64, i, cap->sample_start);
+            labels[i] = storage[i];
+        }
+        igCombo_Str_arr("Capture", &ui->selected_capture, labels, (int)data->sigmf_meta.capture_count,
+                        (int)data->sigmf_meta.capture_count);
     }
 
     igSliderInt("Start", &ui->start_sample, 0, max_start > 0 ? max_start : 0, "%d", 0);
@@ -767,6 +784,16 @@ static void draw_stats_panel(const struct check_data *data, int channel)
         if (data->sigmf_meta.description[0]) {
             igText("Description");
             igTextWrapped("%s", data->sigmf_meta.description);
+        }
+        if (data->sigmf_meta.capture_count > 0) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[data->active_capture_index];
+
+            igText("Active capture    : %u / %u", data->active_capture_index, data->sigmf_meta.capture_count - 1);
+            igText("Capture start     : %" PRIu64, cap->sample_start);
+            if (cap->has_center_freq)
+                igText("Capture freq      : %.6f MHz", cap->center_freq / 1e6);
+            if (cap->has_datetime)
+                igText("Capture datetime  : %s", cap->datetime);
         }
         igText("Annotations       : %u", data->sigmf_meta.annotation_count);
     }
@@ -1195,6 +1222,7 @@ int main(int argc, char **argv)
     bool quit = false;
     int option_index = 0;
     int c;
+    unsigned capture_index = 0;
     static struct option options[] = {
         {"help", no_argument, NULL, 'h'},
         {"nchannels", required_argument, NULL, 1},
@@ -1204,6 +1232,7 @@ int main(int argc, char **argv)
         {"frame-header", no_argument, NULL, 5},
         {"frame-size", required_argument, NULL, 6},
         {"max-samples", required_argument, NULL, 7},
+        {"capture-index", required_argument, NULL, 8},
         {NULL, 0, NULL, 0}
     };
 
@@ -1216,6 +1245,7 @@ int main(int argc, char **argv)
     ui.constellation_points = CHECK_DEFAULT_CONSTELLATION_POINTS;
     ui.fft_len_idx = 4;
     ui.selected_annotation = -1;
+    ui.selected_capture = 0;
     ui.hovered_sample = 0;
     ui.hovered_sample_valid = false;
     ui.hovered_freq_hz = 0.0;
@@ -1264,6 +1294,9 @@ int main(int argc, char **argv)
         case 7:
             max_samples = (size_t)strtoull(optarg, NULL, 0);
             break;
+        case 8:
+            capture_index = (unsigned)strtoul(optarg, NULL, 0);
+            break;
         default:
             return 1;
         }
@@ -1277,6 +1310,7 @@ int main(int argc, char **argv)
 
     if (m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {
         enum m2sdr_format sigmf_format = m2sdr_sigmf_format_from_datatype(sigmf_meta.datatype);
+        const struct m2sdr_sigmf_capture *capture = NULL;
 
         if (sigmf_format == M2SDR_FORMAT_SC16_Q11)
             sample_bytes = 2;
@@ -1287,11 +1321,27 @@ int main(int argc, char **argv)
             return 1;
         }
 
+        if (sigmf_meta.capture_count > 0) {
+            if (capture_index >= sigmf_meta.capture_count) {
+                fprintf(stderr, "SigMF capture index %u out of range (captures=%u)\n",
+                        capture_index, sigmf_meta.capture_count);
+                return 1;
+            }
+            capture = &sigmf_meta.captures[capture_index];
+        }
+
         if (sigmf_meta.has_sample_rate)
             sample_rate = sigmf_meta.sample_rate;
         if (sigmf_meta.has_num_channels)
             nchannels = (int)sigmf_meta.num_channels;
-        if (sigmf_meta.has_header_bytes) {
+        if (capture && capture->has_header_bytes) {
+            if (capture->header_bytes == 16) {
+                frame_header = true;
+            } else {
+                fprintf(stderr, "Unsupported SigMF header_bytes=%u in m2sdr_check\n", capture->header_bytes);
+                return 1;
+            }
+        } else if (sigmf_meta.has_header_bytes) {
             if (sigmf_meta.header_bytes == 16) {
                 frame_header = true;
             } else {
@@ -1303,13 +1353,20 @@ int main(int argc, char **argv)
         snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
         filename = resolved_filename;
         data.sigmf_loaded = true;
+        data.active_capture_index = capture_index;
         memcpy(&data.sigmf_meta, &sigmf_meta, sizeof(sigmf_meta));
+        ui.selected_capture = (int)capture_index;
     }
 
     if (!load_file(filename, nchannels, nbits, sample_bytes, sample_rate, frame_header, frame_size, max_samples, &data))
         return 1;
 
     compute_stats(&data);
+
+    if (data.sigmf_loaded && data.sigmf_meta.capture_count > 0) {
+        const struct m2sdr_sigmf_capture *cap = &data.sigmf_meta.captures[data.active_capture_index];
+        ui.start_sample = (int)((cap->sample_start < data.samples) ? cap->sample_start : 0);
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -1386,6 +1443,15 @@ int main(int argc, char **argv)
                 else if (e.key.keysym.sym == SDLK_END)
                     ui.start_sample = (int)data.samples - ui.view_samples;
             }
+        }
+
+        if (data.sigmf_loaded && data.sigmf_meta.capture_count > 1 &&
+            ui.selected_capture >= 0 && ui.selected_capture < (int)data.sigmf_meta.capture_count &&
+            (unsigned)ui.selected_capture != data.active_capture_index) {
+            const struct m2sdr_sigmf_capture *cap = &data.sigmf_meta.captures[ui.selected_capture];
+
+            data.active_capture_index = (unsigned)ui.selected_capture;
+            ui.start_sample = (int)((cap->sample_start < data.samples) ? cap->sample_start : 0);
         }
 
         if (ui.view_samples < 16)

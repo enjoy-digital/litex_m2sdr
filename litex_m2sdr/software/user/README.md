@@ -198,6 +198,7 @@ Example usage:
 ~~~~
 ./m2sdr_play --format sc16 tx_file.bin 10
 ./m2sdr_play capture.sigmf-meta 10
+./m2sdr_play --capture-index 1 capture.sigmf-meta 1
 ~~~~
 
 ---
@@ -264,6 +265,7 @@ M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted for 
 - `--frame-header`
 - `--frame-size`
 - `--max-samples`
+- `--capture-index`
 
 The GUI provides:
 - time-domain I/Q and magnitude plots
@@ -277,6 +279,7 @@ Example usage:
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000 --frame-header --frame-size 245760
 ./m2sdr_check capture.sigmf-meta
+./m2sdr_check --capture-index 1 capture.sigmf-meta
 ~~~~
 
 ---
