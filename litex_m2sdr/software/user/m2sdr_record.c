@@ -78,6 +78,47 @@ static void sigmf_datetime_from_ns(uint64_t ts_ns, char *buf, size_t buf_len)
              tm.tm_hour, tm.tm_min, tm.tm_sec, nanos);
 }
 
+static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_sigmf_meta *sigmf_meta)
+{
+    struct m2sdr_devinfo info;
+    enum {
+        HW_SAFE_ID = 72,
+        HW_SAFE_SERIAL = 32,
+        HW_SAFE_TRANSPORT = 16,
+        HW_SAFE_PATH = 64,
+        DESC_SAFE_PATH = 96,
+        DESC_SAFE_TRANSPORT = 16
+    };
+
+    if (!dev || !sigmf_meta)
+        return;
+    if (m2sdr_get_device_info(dev, &info) != 0)
+        return;
+
+    if (!sigmf_meta->hw[0]) {
+        if (info.identification[0] && info.serial[0]) {
+            snprintf(sigmf_meta->hw, sizeof(sigmf_meta->hw), "%.*s serial=%.*s",
+                     HW_SAFE_ID, info.identification, HW_SAFE_SERIAL, info.serial);
+        } else if (info.identification[0]) {
+            snprintf(sigmf_meta->hw, sizeof(sigmf_meta->hw), "%.*s", HW_SAFE_ID, info.identification);
+        } else if (info.transport[0] && info.path[0]) {
+            snprintf(sigmf_meta->hw, sizeof(sigmf_meta->hw), "LiteX M2SDR (%.*s %.*s)",
+                     HW_SAFE_TRANSPORT, info.transport, HW_SAFE_PATH, info.path);
+        }
+    }
+
+    if (!sigmf_meta->description[0]) {
+        if (info.transport[0] && info.path[0]) {
+            snprintf(sigmf_meta->description, sizeof(sigmf_meta->description),
+                     "Capture recorded with m2sdr_record on %.*s via %.*s",
+                     DESC_SAFE_PATH, info.path, DESC_SAFE_TRANSPORT, info.transport);
+        } else {
+            snprintf(sigmf_meta->description, sizeof(sigmf_meta->description),
+                     "Capture recorded with m2sdr_record");
+        }
+    }
+}
+
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
                          bool sigmf_enable, struct m2sdr_sigmf_meta *sigmf_meta)
@@ -97,6 +138,9 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             exit(1);
         }
     }
+
+    if (sigmf_enable)
+        sigmf_fill_defaults_from_device(dev, sigmf_meta);
 
     unsigned sample_size = m2sdr_format_size(format);
     unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
