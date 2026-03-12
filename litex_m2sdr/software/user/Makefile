@@ -5,7 +5,7 @@ SCAN_CIMGUI_DIR := cimgui
 # Backend selection: USE_LITEPCIE (default) or USE_LITEETH
 INTERFACE ?= USE_LITEPCIE
 
-CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
+CFLAGS  = -O3 -Wall -g -I../kernel -Iinclude -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += -D$(INTERFACE)
 CFLAGS += $(EXTRA_CFLAGS)
 CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
@@ -49,7 +49,7 @@ PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
-M2SDR_SIGMF_OBJS = m2sdr_sigmf.o m2sdr_json.o
+M2SDR_SIGMF_OBJS = lib/m2sdr_sigmf.o lib/m2sdr_json.o
 TEST_PROGS = test_libm2sdr test_m2sdr_sigmf test_sigmf_capture_smoke test_sigmf_info_cli
 
 LIBM2SDR_OBJS = \
@@ -238,6 +238,7 @@ clean:
 	rm -f $(EXAMPLES)
 	rm -f .build-flags-*
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
+	rm -f lib/*.o lib/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
@@ -254,6 +255,7 @@ $(BUILD_FLAGS_FILE): FORCE
 	@if ! cmp -s $@.tmp $@ 2>/dev/null; then \
 		rm -f *.o *.a *.d; \
 		rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d; \
+		rm -f lib/*.o lib/*.d; \
 		rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d; \
 		rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d; \
 		rm -f ad9361/*.o ad9361/*.d; \
@@ -271,6 +273,9 @@ $(BUILD_FLAGS_FILE): FORCE
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 liblitepcie/%.o: liblitepcie/%.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+lib/%.o: lib/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 libm2sdr/%.o: libm2sdr/%.c $(BUILD_FLAGS_FILE)
@@ -319,4 +324,4 @@ check:
 	cmake -S ../soapysdr -B ../soapysdr/build
 	cmake --build ../soapysdr/build
 
--include $(wildcard *.d)
+-include $(wildcard *.d lib/*.d)
