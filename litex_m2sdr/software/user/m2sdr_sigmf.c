@@ -4,6 +4,7 @@
 #include "m2sdr_json.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -228,6 +229,32 @@ int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
 
     fclose(f);
     return 0;
+}
+
+int m2sdr_sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
+                                     unsigned capture_index,
+                                     uint64_t *start_sample,
+                                     uint64_t *end_sample)
+{
+    if (!meta || capture_index >= meta->capture_count || !start_sample || !end_sample)
+        return -1;
+
+    *start_sample = meta->captures[capture_index].sample_start;
+    *end_sample = (capture_index + 1u < meta->capture_count) ?
+        meta->captures[capture_index + 1u].sample_start : 0;
+    return 0;
+}
+
+bool m2sdr_sigmf_timestamp_jump_is_anomalous(uint64_t nominal_dt_ns,
+                                             uint64_t dt_ns,
+                                             double threshold_pct)
+{
+    double diff_ratio;
+
+    if (nominal_dt_ns == 0 || threshold_pct < 0.0)
+        return false;
+    diff_ratio = fabs((double)dt_ns - (double)nominal_dt_ns) / (double)nominal_dt_ns;
+    return diff_ratio > (threshold_pct / 100.0);
 }
 
 static void sigmf_read_annotation(const char *buf,

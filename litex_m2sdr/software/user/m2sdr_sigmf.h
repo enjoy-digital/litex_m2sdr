@@ -71,5 +71,12 @@ int m2sdr_sigmf_derive_paths(const char *input_path,
 
 int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta);
 int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta);
+int m2sdr_sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
+                                     unsigned capture_index,
+                                     uint64_t *start_sample,
+                                     uint64_t *end_sample);
+bool m2sdr_sigmf_timestamp_jump_is_anomalous(uint64_t nominal_dt_ns,
+                                             uint64_t dt_ns,
+                                             double threshold_pct);
 
 #endif /* M2SDR_SIGMF_H */

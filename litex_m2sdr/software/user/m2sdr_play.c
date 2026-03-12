@@ -86,20 +86,6 @@ static void help(void)
     exit(1);
 }
 
-static int sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
-                                      unsigned capture_index,
-                                      uint64_t *start_sample,
-                                      uint64_t *end_sample)
-{
-    if (!meta || capture_index >= meta->capture_count || !start_sample || !end_sample)
-        return -1;
-
-    *start_sample = meta->captures[capture_index].sample_start;
-    *end_sample = (capture_index + 1u < meta->capture_count) ?
-        meta->captures[capture_index + 1u].sample_start : 0;
-    return 0;
-}
-
 static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet,
                        uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes,
                        uint64_t start_offset_bytes, uint64_t end_offset_bytes)
@@ -386,7 +372,7 @@ int main(int argc, char **argv)
             size_t sample_size = m2sdr_format_size(format);
 
             if (sample_size == 0 ||
-                sigmf_capture_sample_range(&sigmf_meta, capture_index, &start_sample, &end_sample) != 0) {
+                m2sdr_sigmf_capture_sample_range(&sigmf_meta, capture_index, &start_sample, &end_sample) != 0) {
                 fprintf(stderr, "Could not derive capture sample range from SigMF metadata\n");
                 return 1;
             }

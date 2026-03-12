@@ -164,6 +164,45 @@ static int test_manual_metadata(const char *dir)
     return 0;
 }
 
+static int test_capture_sample_range(void)
+{
+    struct m2sdr_sigmf_meta meta;
+    uint64_t start_sample = 0;
+    uint64_t end_sample = 0;
+
+    memset(&meta, 0, sizeof(meta));
+    meta.capture_count = 3;
+    meta.captures[0].sample_start = 0;
+    meta.captures[1].sample_start = 4096;
+    meta.captures[2].sample_start = 8192;
+
+    if (m2sdr_sigmf_capture_sample_range(&meta, 1, &start_sample, &end_sample) != 0)
+        return expect_true(0, "capture range helper succeeds");
+    if (expect_true(start_sample == 4096, "capture range start") != 0 ||
+        expect_true(end_sample == 8192, "capture range end") != 0)
+        return -1;
+
+    if (m2sdr_sigmf_capture_sample_range(&meta, 2, &start_sample, &end_sample) != 0)
+        return expect_true(0, "last capture range helper succeeds");
+    if (expect_true(start_sample == 8192, "last capture start") != 0 ||
+        expect_true(end_sample == 0, "last capture open-ended end") != 0)
+        return -1;
+
+    return 0;
+}
+
+static int test_timestamp_jump_detection(void)
+{
+    if (expect_true(!m2sdr_sigmf_timestamp_jump_is_anomalous(1000, 1030, 5.0),
+                    "small timestamp delta stays nominal") != 0 ||
+        expect_true(m2sdr_sigmf_timestamp_jump_is_anomalous(1000, 1200, 5.0),
+                    "large timestamp delta is anomalous") != 0 ||
+        expect_true(!m2sdr_sigmf_timestamp_jump_is_anomalous(0, 1200, 5.0),
+                    "zero nominal timestamp delta is ignored") != 0)
+        return -1;
+    return 0;
+}
+
 int main(void)
 {
     char template[] = "/tmp/m2sdr_sigmf_testXXXXXX";
@@ -177,7 +216,9 @@ int main(void)
 
     if (test_derive_paths() != 0 ||
         test_roundtrip(dir) != 0 ||
-        test_manual_metadata(dir) != 0)
+        test_manual_metadata(dir) != 0 ||
+        test_capture_sample_range() != 0 ||
+        test_timestamp_jump_detection() != 0)
         return 1;
 
     printf("test_m2sdr_sigmf: ok\n");

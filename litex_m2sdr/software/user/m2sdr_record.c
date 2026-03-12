@@ -282,13 +282,9 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
                 if (nominal_dt == 0) {
                     nominal_dt = dt_ns;
-                } else if (nominal_dt > 0) {
-                    double diff_ratio = fabs((double)dt_ns - (double)nominal_dt) / (double)nominal_dt;
-
-                    if (diff_ratio > (ts_jump_threshold_pct / 100.0)) {
-                        uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
-                        sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
-                    }
+                } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
+                    uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+                    sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
                 }
             }
             prev_timestamp = meta.timestamp;
