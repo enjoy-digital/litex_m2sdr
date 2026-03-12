@@ -199,6 +199,7 @@ Example usage:
 ./m2sdr_play --format sc16 tx_file.bin 10
 ./m2sdr_play capture.sigmf-meta 10
 ./m2sdr_play --capture-index 1 capture.sigmf-meta 1
+./m2sdr_play --capture-index 2 framed_capture.sigmf-meta 0
 ~~~~
 
 ---
@@ -300,6 +301,7 @@ Example usage:
 ./m2sdr_sigmf_info capture.sigmf-meta
 ./m2sdr_sigmf_info --validate capture.sigmf-meta
 ./m2sdr_sigmf_info --validate --strict --ci capture.sigmf-meta
+./m2sdr_sigmf_info --validate --strict framed_capture.sigmf-meta
 ~~~~
 
 ---
