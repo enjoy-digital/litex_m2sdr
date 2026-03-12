@@ -17,6 +17,7 @@
 #include <time.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
@@ -64,6 +65,8 @@ static void help(void)
            "      --annotation-freq-low HZ   SigMF annotation lower frequency edge.\n"
            "      --annotation-freq-high HZ  SigMF annotation upper frequency edge.\n"
            "      --annotation-add           Finalize current SigMF annotation.\n"
+           "      --annotate-ts-jumps        Add SigMF annotations on RX timestamp jumps.\n"
+           "      --ts-jump-threshold-pct P  Relative timestamp jump threshold (default: 5).\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
@@ -124,6 +127,26 @@ static void sigmf_finalize_annotation_ranges(struct m2sdr_sigmf_meta *meta, uint
     }
 }
 
+static void sigmf_record_timestamp_jump(struct m2sdr_sigmf_meta *meta,
+                                        uint64_t sample_start,
+                                        uint64_t sample_count,
+                                        uint64_t dt_ns,
+                                        uint64_t expected_dt_ns)
+{
+    struct m2sdr_sigmf_annotation ann;
+
+    if (!meta || meta->annotation_count >= M2SDR_SIGMF_MAX_ANNOTATIONS)
+        return;
+
+    memset(&ann, 0, sizeof(ann));
+    ann.sample_start = sample_start;
+    ann.sample_count = sample_count;
+    ann.has_sample_count = true;
+    snprintf(ann.label, sizeof(ann.label), "timestamp-jump");
+    snprintf(ann.comment, sizeof(ann.comment), "dt=%" PRIu64 " ns expected=%" PRIu64 " ns", dt_ns, expected_dt_ns);
+    sigmf_append_annotation(meta, &ann);
+}
+
 static void sigmf_datetime_from_ns(uint64_t ts_ns, char *buf, size_t buf_len)
 {
     time_t seconds = (time_t)(ts_ns / 1000000000ULL);
@@ -179,7 +202,8 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
 
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
-                         bool sigmf_enable, struct m2sdr_sigmf_meta *sigmf_meta)
+                         bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
+                         struct m2sdr_sigmf_meta *sigmf_meta)
 {
     struct m2sdr_dev *dev = NULL;
     char sigmf_data_path[1024] = {0};
@@ -235,6 +259,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     uint64_t last_buffers  = 0;
     uint64_t last_timestamp = 0;
     uint64_t first_timestamp = 0;
+    uint64_t prev_timestamp = 0;
+    uint64_t nominal_dt = 0;
 
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
@@ -250,6 +276,23 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             last_timestamp = meta.timestamp;
         if (first_timestamp == 0 && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
             first_timestamp = meta.timestamp;
+        if (sigmf_enable && annotate_ts_jumps && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
+            if (prev_timestamp != 0) {
+                uint64_t dt_ns = meta.timestamp - prev_timestamp;
+
+                if (nominal_dt == 0) {
+                    nominal_dt = dt_ns;
+                } else if (nominal_dt > 0) {
+                    double diff_ratio = fabs((double)dt_ns - (double)nominal_dt) / (double)nominal_dt;
+
+                    if (diff_ratio > (ts_jump_threshold_pct / 100.0)) {
+                        uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+                        sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
+                    }
+                }
+            }
+            prev_timestamp = meta.timestamp;
+        }
 
         size_t to_write = payload_bytes_per_buf;
         if (size > 0 && to_write > size - total_len)
@@ -332,7 +375,9 @@ int main(int argc, char **argv)
     static uint8_t sigmf_enable = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
+    static uint8_t annotate_ts_jumps = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    double ts_jump_threshold_pct = 5.0;
     struct m2sdr_sigmf_meta sigmf_meta;
     struct m2sdr_sigmf_annotation pending_annotation;
     struct m2sdr_cli_device cli_dev;
@@ -360,6 +405,8 @@ int main(int argc, char **argv)
         { "annotation-freq-low", required_argument, NULL, 13 },
         { "annotation-freq-high", required_argument, NULL, 14 },
         { "annotation-add", no_argument, NULL, 15 },
+        { "annotate-ts-jumps", no_argument, NULL, 16 },
+        { "ts-jump-threshold-pct", required_argument, NULL, 17 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -461,6 +508,12 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
+        case 16:
+            annotate_ts_jumps = 1;
+            break;
+        case 17:
+            ts_jump_threshold_pct = atof(optarg);
+            break;
         default:
             exit(1);
         }
@@ -494,6 +547,10 @@ int main(int argc, char **argv)
             fprintf(stderr, "SigMF MVP currently requires --strip-header when --enable-header is used\n");
             return 1;
         }
+        if (annotate_ts_jumps && !header) {
+            fprintf(stderr, "--annotate-ts-jumps requires --enable-header\n");
+            return 1;
+        }
         if (!datatype) {
             fprintf(stderr, "Unsupported SigMF datatype for selected format\n");
             return 1;
@@ -510,6 +567,6 @@ int main(int argc, char **argv)
     }
 
     m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
-                 sigmf_enable ? true : false, &sigmf_meta);
+                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct, &sigmf_meta);
     return 0;
 }

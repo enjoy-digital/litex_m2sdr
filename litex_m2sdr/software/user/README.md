@@ -232,6 +232,8 @@ Relevant options:
 - `--annotation-freq-low`
 - `--annotation-freq-high`
 - `--annotation-add`
+- `--annotate-ts-jumps`
+- `--ts-jump-threshold-pct`
 
 Example usage:
 ~~~~
@@ -239,6 +241,7 @@ Example usage:
 ./m2sdr_record --sigmf --sample-rate 30720000 --center-freq 2400000000 --enable-header --strip-header capture 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst --annotation-comment "loopback capture" capture 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst-a --annotation-start 0 --annotation-count 8192 --annotation-add --annotation-label burst-b --annotation-start 16384 --annotation-count 8192 capture 2000000
+./m2sdr_record --sigmf --enable-header --strip-header --annotate-ts-jumps capture 2000000
 ~~~~
 
 Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
