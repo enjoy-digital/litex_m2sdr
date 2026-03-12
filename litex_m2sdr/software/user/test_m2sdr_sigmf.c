@@ -164,6 +164,49 @@ static int test_manual_metadata(const char *dir)
     return 0;
 }
 
+static int test_multi_capture_multi_annotation(const char *dir)
+{
+    struct m2sdr_sigmf_meta parsed;
+    char meta_path[512];
+    const char *json =
+        "{\n"
+        "  \"global\": {\n"
+        "    \"core:version\": \"1.2.5\",\n"
+        "    \"core:datatype\": \"ci16_le\",\n"
+        "    \"core:dataset\": \"multi.sigmf-data\",\n"
+        "    \"core:sample_rate\": 30720000,\n"
+        "    \"core:num_channels\": 2\n"
+        "  },\n"
+        "  \"captures\": [\n"
+        "    {\"core:sample_start\": 0, \"core:frequency\": 2400000000},\n"
+        "    {\"core:sample_start\": 4096, \"core:frequency\": 2410000000},\n"
+        "    {\"core:sample_start\": 8192, \"core:frequency\": 2420000000}\n"
+        "  ],\n"
+        "  \"annotations\": [\n"
+        "    {\"core:sample_start\": 128, \"core:sample_count\": 512, \"core:label\": \"cap0-a\"},\n"
+        "    {\"core:sample_start\": 4608, \"core:sample_count\": 256, \"core:label\": \"cap1-a\", \"core:comment\": \"middle\"},\n"
+        "    {\"core:sample_start\": 8704, \"core:sample_count\": 128, \"core:freq_lower_edge\": 2419000000, \"core:freq_upper_edge\": 2421000000, \"core:label\": \"cap2-a\"}\n"
+        "  ]\n"
+        "}\n";
+
+    snprintf(meta_path, sizeof(meta_path), "%s/multi.sigmf-meta", dir);
+    if (write_file(meta_path, json) != 0)
+        return expect_true(0, "write multi capture metadata");
+    if (m2sdr_sigmf_read(meta_path, &parsed) != 0)
+        return expect_true(0, "read multi capture metadata");
+
+    if (expect_true(parsed.capture_count == 3, "multi capture count") != 0 ||
+        expect_true(parsed.annotation_count == 3, "multi annotation count") != 0 ||
+        expect_true(parsed.captures[2].has_center_freq && parsed.captures[2].center_freq == 2420000000.0,
+                    "multi capture frequency") != 0 ||
+        expect_true(strcmp(parsed.annotations[1].comment, "middle") == 0, "multi annotation comment") != 0 ||
+        expect_true(parsed.annotations[2].has_freq_lower_edge && parsed.annotations[2].has_freq_upper_edge,
+                    "multi annotation frequency edges") != 0)
+        return -1;
+
+    return 0;
+}
+
 static int test_capture_sample_range(void)
 {
     struct m2sdr_sigmf_meta meta;
@@ -251,6 +294,7 @@ int main(void)
     if (test_derive_paths() != 0 ||
         test_roundtrip(dir) != 0 ||
         test_manual_metadata(dir) != 0 ||
+        test_multi_capture_multi_annotation(dir) != 0 ||
         test_capture_sample_range() != 0 ||
         test_timestamp_jump_detection() != 0 ||
         test_capture_byte_range() != 0)
