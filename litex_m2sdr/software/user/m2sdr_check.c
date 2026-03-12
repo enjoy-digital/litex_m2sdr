@@ -524,6 +524,89 @@ static void draw_overview_panel(const struct check_data *data, const struct chan
     igEndChild();
 }
 
+static void draw_capture_overview_panel(const struct check_data *data, struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    uint64_t total_samples;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0 || data->samples == 0)
+        return;
+
+    igText("Capture Layout");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 56.0f;
+    igInvisibleButton("##capture_overview", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+    total_samples = (uint64_t)data->samples;
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF171A1Eu, 6.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 20.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 14.0f}, 0xFF252A30u, 4.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        uint64_t cap_start = cap->sample_start;
+        uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[i + 1u].sample_start : total_samples;
+        float x0, x1;
+        ImU32 col;
+
+        if (cap_start >= total_samples)
+            continue;
+        if (cap_end > total_samples)
+            cap_end = total_samples;
+        if (cap_end <= cap_start)
+            cap_end = cap_start + 1;
+
+        x0 = (float)(pmin.x + 8.0f + ((double)cap_start / (double)total_samples) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((double)cap_end   / (double)total_samples) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+
+        col = (i == data->active_capture_index) ? 0xFF6CCB5Fu : 0xFF4E88D9u;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 21.0f}, (ImVec2){x1, pmax.y - 15.0f}, col, 3.0f, 0);
+        if (x1 - x0 > 28.0f) {
+            char label[16];
+            snprintf(label, sizeof(label), "#%u", i);
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 4.0f, pmin.y + 4.0f}, 0xFFFFFFFFu, label, NULL);
+        }
+    }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false)) {
+        ImVec2 mouse;
+        double ratio;
+        uint64_t clicked_sample;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        clicked_sample = (uint64_t)(ratio * (double)(total_samples - 1));
+
+        for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+            uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+                data->sigmf_meta.captures[i + 1u].sample_start : total_samples;
+
+            if (clicked_sample >= cap->sample_start && clicked_sample < cap_end) {
+                ui->selected_capture = (int)i;
+                ui->start_sample = (int)cap->sample_start;
+                break;
+            }
+        }
+    }
+
+    igText("Dataset span: 0 .. %" PRIu64 " samples", total_samples - 1u);
+}
+
 static void fill_time_plots(const struct check_data *data,
                             struct plot_cache *cache,
                             int channel,
@@ -1493,6 +1576,7 @@ int main(int argc, char **argv)
                 ImGuiWindowFlags_NoTitleBar);
         {
             draw_overview_panel(&data, &data.stats[ui.selected_channel], ui.start_sample, count);
+            draw_capture_overview_panel(&data, &ui);
             if (igBeginChild_Str("##left", (ImVec2){340.0f, 0.0f}, 0, 0)) {
                 draw_controls(&data, &ui);
                 igSeparator();
