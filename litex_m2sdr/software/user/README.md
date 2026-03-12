@@ -49,14 +49,14 @@ Core user tools build with standard C/C++ toolchains and the RF/audio dependenci
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
-- the vendored `scan_ui/cimgui/` sources present in the workspace
+- a local `software/user/cimgui/` checkout containing the `cimgui` and Dear ImGui sources
 
 On Debian/Ubuntu:
 ~~~~
 sudo apt install pkg-config libsdl2-dev libgl1-mesa-dev
 ~~~~
 
-When SDL2 is not available, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile` and other user tools still build.
+When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile` and other user tools still build.
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
@@ -459,7 +459,7 @@ Notes:
 - Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
-- A local `scan_ui/cimgui/` checkout is also required for the build.
+- A local `software/user/cimgui/` checkout is also required for the build.
 
 ---
 

@@ -12,6 +12,7 @@ CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCA
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
+HAVE_CIMGUI := $(shell test -f $(SCAN_CIMGUI_DIR)/cimgui.h && test -f $(SCAN_CIMGUI_DIR)/imgui/imgui.cpp && echo 1 || echo 0)
 LDFLAGS = -g
 LDFLAGS += $(EXTRA_LDFLAGS)
 SANITIZER_FLAGS := $(sort $(filter -fsanitize=% -fno-sanitize-recover=%,$(CFLAGS) $(CXXFLAGS) $(LDFLAGS)))
@@ -35,13 +36,18 @@ else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
 
-ifeq ($(HAVE_SDL2),1)
+ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
   BINARIES += m2sdr_check
   ifeq ($(INTERFACE),USE_LITEPCIE)
     BINARIES += m2sdr_scan
   endif
 else
-  $(warning SDL2 not found; skipping SDL2-based tools)
+  ifneq ($(HAVE_SDL2),1)
+    $(warning SDL2 not found; skipping SDL2-based tools)
+  endif
+  ifneq ($(HAVE_CIMGUI),1)
+    $(warning cimgui sources not found in software/user/cimgui; skipping SDL2-based tools)
+  endif
 endif
 
 LIBM2SDR_SONAME = libm2sdr.so.1

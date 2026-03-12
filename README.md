@@ -198,6 +198,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    ./build.py
    ```
    - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
+   - `m2sdr_check` and `m2sdr_scan` are built only when SDL2/OpenGL development packages are installed and a local `litex_m2sdr/software/user/cimgui/` checkout is present. Otherwise they are skipped and the rest of the software build still succeeds.
    - To install the public C API headers/library for external applications:
    ```
    cd litex_m2sdr/software/user
