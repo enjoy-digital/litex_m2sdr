@@ -927,6 +927,55 @@ static void draw_time_domain(const struct ui_state *ui, const struct plot_cache 
         igPlotLines_FloatPtr("|IQ|", cache->time_mag, count, 0, NULL, min_v, max_v, (ImVec2){0.0f, 110.0f}, sizeof(float));
 }
 
+static void draw_time_annotation_overlay(const struct check_data *data, const struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    uint64_t view_start, view_end;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.annotation_count == 0)
+        return;
+
+    igText("Time annotations");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 44.0f;
+    igInvisibleButton("##time_annotation_overlay", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+    view_start = (uint64_t)ui->start_sample;
+    view_end = (uint64_t)ui->start_sample + (uint64_t)ui->view_samples;
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF1A1A1Au, 4.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 14.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 10.0f}, 0xFF2A2A2Au, 3.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+        uint64_t ann_start = ann->sample_start;
+        uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+        uint64_t clip_start, clip_end;
+        float x0, x1;
+        ImU32 col;
+
+        if (ann_end <= view_start || ann_start >= view_end)
+            continue;
+        clip_start = ann_start > view_start ? ann_start : view_start;
+        clip_end = ann_end < view_end ? ann_end : view_end;
+        x0 = (float)(pmin.x + 8.0f + ((double)(clip_start - view_start) / (double)(view_end - view_start)) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((double)(clip_end - view_start) / (double)(view_end - view_start)) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+        col = (ui->selected_annotation == (int)i) ? 0xFF7AC943u : 0xFF4EA1D3u;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 16.0f}, (ImVec2){x1, pmax.y - 12.0f}, col, 2.0f, 0);
+        if (ann->label[0])
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
+    }
+}
+
 static void draw_histograms(const struct plot_cache *cache)
 {
     igText("I/Q histograms");
@@ -953,6 +1002,62 @@ static void draw_spectrum(const struct check_data *data, const struct plot_cache
     igPlotLines_FloatPtr("FFT (dBFS)", cache->fft_db, fft_len, 0, NULL, -140.0f, 10.0f, (ImVec2){0.0f, 140.0f}, sizeof(float));
     igText("Peak bin: %d, peak freq: %.3f MHz, peak level: %.2f dBFS, RBW: %.1f kHz",
            peak_bin, peak_hz / 1e6, peak_db, (data->sample_rate / (double)fft_len) / 1e3);
+}
+
+static void draw_spectrum_annotation_overlay(const struct check_data *data, const struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    double fmin_hz, fmax_hz;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.annotation_count == 0)
+        return;
+
+    igText("Spectrum annotations");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 44.0f;
+    igInvisibleButton("##spectrum_annotation_overlay", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+
+    fmin_hz = -data->sample_rate / 2.0;
+    fmax_hz =  data->sample_rate / 2.0;
+    if (data->sigmf_meta.has_center_freq) {
+        fmin_hz += data->sigmf_meta.center_freq;
+        fmax_hz += data->sigmf_meta.center_freq;
+    }
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF1A1A1Au, 4.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 14.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 10.0f}, 0xFF2A2A2Au, 3.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+        double lo, hi;
+        float x0, x1;
+        ImU32 col;
+
+        if (!ann->has_freq_lower_edge || !ann->has_freq_upper_edge)
+            continue;
+        lo = ann->freq_lower_edge;
+        hi = ann->freq_upper_edge;
+        if (hi <= fmin_hz || lo >= fmax_hz)
+            continue;
+        if (lo < fmin_hz) lo = fmin_hz;
+        if (hi > fmax_hz) hi = fmax_hz;
+        x0 = (float)(pmin.x + 8.0f + ((lo - fmin_hz) / (fmax_hz - fmin_hz)) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((hi - fmin_hz) / (fmax_hz - fmin_hz)) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+        col = (ui->selected_annotation == (int)i) ? 0xFFE4A93Au : 0xFFB66DFFu;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 16.0f}, (ImVec2){x1, pmax.y - 12.0f}, col, 2.0f, 0);
+        if (ann->label[0])
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
+    }
 }
 
 int main(int argc, char **argv)
@@ -1216,8 +1321,10 @@ int main(int argc, char **argv)
 
             if (igBeginChild_Str("##right", (ImVec2){0.0f, 0.0f}, 0, 0)) {
                 draw_time_domain(&ui, &cache, count);
+                draw_time_annotation_overlay(&data, &ui);
                 draw_constellation(&data, &cache, &ui, ui.start_sample, count);
                 draw_spectrum(&data, &cache, fft_len);
+                draw_spectrum_annotation_overlay(&data, &ui);
                 draw_histograms(&cache);
             }
             igEndChild();
