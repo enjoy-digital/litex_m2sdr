@@ -984,9 +984,9 @@ void SoapyLiteXM2SDR::setGain(
         _tx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, value);
 
-        int rc = m2sdr_set_gain(_dev, M2SDR_TX, value);
+        int rc = m2sdr_set_tx_att(_dev, value);
         if (rc != 0) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
         }
     }
 
@@ -994,9 +994,9 @@ void SoapyLiteXM2SDR::setGain(
     if (SOAPY_SDR_RX == direction) {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
     }
 }
@@ -1012,9 +1012,9 @@ void SoapyLiteXM2SDR::setGain(
         if (name == "ATT") {
             _tx_stream.gain[channel] = value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
-            int rc = m2sdr_set_gain(_dev, M2SDR_TX, value);
+            int rc = m2sdr_set_tx_att(_dev, value);
             if (rc != 0) {
-                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(TX) failed: %s", m2sdr_strerror(rc));
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
             }
             return;
         }
@@ -1024,9 +1024,9 @@ void SoapyLiteXM2SDR::setGain(
     if (name == "PGA" || name == "RF" || name == "GAIN") {
         _rx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_gain(_dev, M2SDR_RX, value);
+        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_gain(RX) failed: %s", m2sdr_strerror(rc));
+            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
         return;
     }

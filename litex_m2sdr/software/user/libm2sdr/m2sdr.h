@@ -369,6 +369,7 @@ int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
+int  m2sdr_set_rx_gain_chan(struct m2sdr_dev *dev, unsigned channel, int64_t gain);
 int  m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);

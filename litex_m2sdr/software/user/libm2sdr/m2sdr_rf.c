@@ -718,6 +718,28 @@ int m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain)
     return m2sdr_set_gain(dev, M2SDR_RX, gain);
 }
 
+int m2sdr_set_rx_gain_chan(struct m2sdr_dev *dev, unsigned channel, int64_t gain)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (channel > 1)
+        return M2SDR_ERR_RANGE;
+    if (gain < M2SDR_RX_GAIN_MIN_DB || gain > M2SDR_RX_GAIN_MAX_DB)
+        return M2SDR_ERR_RANGE;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, channel, gain)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db)
 {
     return m2sdr_set_gain(dev, M2SDR_TX, attenuation_db);
