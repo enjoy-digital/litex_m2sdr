@@ -72,6 +72,10 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool
             warnings++;
             break;
         }
+        if (i > 0 && cap->sample_start == meta->captures[i - 1].sample_start) {
+            if (!ci_mode) validation_message("WARNING", "captures[] contain duplicate core:sample_start values");
+            warnings++;
+        }
         if (cap->has_header_bytes && cap->header_bytes != 0 && cap->header_bytes != 16) {
             if (!ci_mode) validation_message("ERROR", "capture core:header_bytes is unsupported by m2sdr tools");
             errors++;
@@ -89,6 +93,28 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool
         if (ann->has_sample_count && ann->sample_count == 0) {
             if (!ci_mode) validation_message("WARNING", "annotation has zero sample_count");
             warnings++;
+        }
+        if (meta->capture_count > 0 && ann->sample_start < meta->captures[0].sample_start) {
+            if (!ci_mode) validation_message("WARNING", "annotation starts before first capture");
+            warnings++;
+        }
+    }
+
+    if (meta->capture_count > 1) {
+        for (i = 0; i + 1u < meta->capture_count; i++) {
+            uint64_t a = meta->captures[i].sample_start;
+            uint64_t b = meta->captures[i + 1u].sample_start;
+
+            if (b < a) {
+                if (!ci_mode) validation_message("ERROR", "captures[] overlap or are reversed");
+                errors++;
+                break;
+            }
+            if (b > a && b - a > 1u) {
+                if (!ci_mode) validation_message("WARNING", "captures[] contain uncovered sample gaps");
+                warnings++;
+                break;
+            }
         }
     }
 
