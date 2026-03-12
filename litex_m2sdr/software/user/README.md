@@ -183,6 +183,7 @@ Example usage with PPS on GPIO pin 0:
 ### m2sdr_play
 Streams an I/Q samples file to the FPGA’s TX path (DMA TX). Supports piping from stdin with filename as `-`.
 This is the simplest utility to read when you want a file-backed `libm2sdr` TX example.
+For runtime-driven pipelines, it can also stage input through a host-side ring before feeding DMA.
 
 **Usage**:
 ~~~~
@@ -201,13 +202,20 @@ Example usage:
 ./m2sdr_play capture.sigmf-meta 10
 ./m2sdr_play --capture-index 1 capture.sigmf-meta 1
 ./m2sdr_play --capture-index 2 framed_capture.sigmf-meta 0
+./m2sdr_play --host-buffers 64 --prefill 16 - 1 < tx_file.bin
 ~~~~
+
+Useful streaming options:
+- `--host-buffers N`
+- `--prefill N`
+- `--stats-interval MS`
 
 ---
 
 ### m2sdr_record
 Streams samples from the FPGA’s RX path back to a file on the host (DMA RX). Supports piping to stdout with filename as `-`.
 This is the matching `libm2sdr` RX example, including optional timestamp/header handling.
+For pipe-driven workflows, it can decouple DMA RX from file/stdout writes with a host-side ring.
 
 **Usage**:
 ~~~~
@@ -236,6 +244,10 @@ Relevant options:
 - `--annotation-add`
 - `--annotate-ts-jumps`
 - `--ts-jump-threshold-pct`
+- `--host-buffers N`
+- `--drop-oldest`
+- `--drop-newest`
+- `--stats-interval MS`
 
 Example usage:
 ~~~~
@@ -244,9 +256,11 @@ Example usage:
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst --annotation-comment "loopback capture" capture 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst-a --annotation-start 0 --annotation-count 8192 --annotation-add --annotation-label burst-b --annotation-start 16384 --annotation-count 8192 capture 2000000
 ./m2sdr_record --sigmf --enable-header --strip-header --annotate-ts-jumps capture 2000000
+./m2sdr_record --host-buffers 64 - 0 | julia my_rx_pipeline.jl
 ~~~~
 
 Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
+When `--sigmf` is used, drop policies are intentionally rejected so the metadata always matches the written dataset.
 
 ---
 
