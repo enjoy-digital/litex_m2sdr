@@ -18,9 +18,11 @@
 #include <getopt.h>
 #include <stdbool.h>
 #include <math.h>
+#include <pthread.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_host_ring.h"
 #include "m2sdr_sigmf.h"
 #include "config.h"
 
@@ -28,9 +30,44 @@
 
 sig_atomic_t keep_running = 1;
 
+struct m2sdr_record_sink {
+    struct m2sdr_host_ring ring;
+    FILE *fo;
+    pthread_t thread;
+    bool enabled;
+    int error;
+    size_t bytes_written;
+};
+
 void intHandler(int dummy) {
     (void)dummy;
     keep_running = 0;
+}
+
+static void *m2sdr_record_sink_worker(void *arg)
+{
+    struct m2sdr_record_sink *sink = (struct m2sdr_record_sink *)arg;
+    uint8_t buf[DMA_BUFFER_SIZE];
+
+    while (1) {
+        size_t len = 0;
+        int rc = m2sdr_host_ring_pop(&sink->ring, buf, &len, NULL, NULL);
+        if (rc == 1)
+            break;
+        if (rc != 0) {
+            sink->error = 1;
+            break;
+        }
+        if (fwrite(buf, 1, len, sink->fo) != len) {
+            perror("fwrite");
+            sink->error = 1;
+            m2sdr_host_ring_stop(&sink->ring);
+            break;
+        }
+        sink->bytes_written += len;
+    }
+
+    return NULL;
 }
 
 static void help(void)
@@ -67,6 +104,10 @@ static void help(void)
            "      --annotation-add           Finalize current SigMF annotation.\n"
            "      --annotate-ts-jumps        Add SigMF annotations on RX timestamp jumps.\n"
            "      --ts-jump-threshold-pct P  Relative timestamp jump threshold (default: 5).\n"
+           "      --host-buffers N           Host-side ring depth for file/stdout sinks.\n"
+           "      --drop-oldest              On full host ring, discard oldest pending RX buffers.\n"
+           "      --drop-newest              On full host ring, discard newest RX buffers.\n"
+           "      --stats-interval MS        Progress print interval in ms (default: 200).\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
@@ -203,11 +244,18 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
                          bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
-                         struct m2sdr_sigmf_meta *sigmf_meta)
+                         struct m2sdr_sigmf_meta *sigmf_meta,
+                         unsigned host_buffers,
+                         enum m2sdr_host_ring_policy host_policy,
+                         unsigned stats_interval_ms)
 {
     struct m2sdr_dev *dev = NULL;
+    struct m2sdr_record_sink sink;
     char sigmf_data_path[1024] = {0};
     char sigmf_meta_path[1024] = {0};
+    size_t produced_len = 0;
+
+    memset(&sink, 0, sizeof(sink));
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
@@ -251,6 +299,25 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             }
         }
     }
+    if (fo && host_buffers > 0) {
+        if (m2sdr_host_ring_init(&sink.ring, host_buffers, DMA_BUFFER_SIZE) != 0) {
+            fprintf(stderr, "Could not allocate host RX ring\n");
+            if (fo != stdout)
+                fclose(fo);
+            m2sdr_close(dev);
+            exit(1);
+        }
+        sink.fo = fo;
+        sink.enabled = true;
+        if (pthread_create(&sink.thread, NULL, m2sdr_record_sink_worker, &sink) != 0) {
+            fprintf(stderr, "Could not start host RX writer thread\n");
+            m2sdr_host_ring_destroy(&sink.ring);
+            if (fo != stdout)
+                fclose(fo);
+            m2sdr_close(dev);
+            exit(1);
+        }
+    }
 
     int i = 0;
     size_t total_len = 0;
@@ -265,7 +332,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
         struct m2sdr_metadata meta;
-        if (size > 0 && total_len >= size)
+        if (size > 0 && produced_len >= size)
             break;
 
         if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
@@ -283,7 +350,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                 if (nominal_dt == 0) {
                     nominal_dt = dt_ns;
                 } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
-                    uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+                    uint64_t sample_start = sample_size ? (uint64_t)(produced_len / sample_size) : 0;
                     sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
                 }
             }
@@ -291,28 +358,44 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         }
 
         size_t to_write = payload_bytes_per_buf;
-        if (size > 0 && to_write > size - total_len)
-            to_write = size - total_len;
+        if (size > 0 && to_write > size - produced_len)
+            to_write = size - produced_len;
 
         if (fo) {
-            if (fwrite(buf, 1, to_write, fo) != to_write) {
+            if (sink.enabled) {
+                int push_rc = m2sdr_host_ring_push(&sink.ring, buf, to_write, NULL, false, host_policy);
+                if (push_rc < 0) {
+                    fprintf(stderr, "Host RX ring stopped\n");
+                    break;
+                }
+            } else if (fwrite(buf, 1, to_write, fo) != to_write) {
                 perror("fwrite");
                 break;
             }
         }
-        total_len += to_write;
+        produced_len += to_write;
+        if (!sink.enabled)
+            total_len += to_write;
         total_buffers++;
 
         int64_t duration = get_time_ms() - last_time;
-        if (!quiet && duration > 200) {
+        if (!quiet && duration > (int64_t)stats_interval_ms) {
             double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
             uint64_t size_mb = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
+            unsigned host_fill = sink.enabled ? m2sdr_host_ring_count(&sink.ring) : 0;
+            uint64_t host_drop = sink.enabled ? m2sdr_host_ring_dropped(&sink.ring) : 0;
 
             if (i % 10 == 0) {
                 if (header) {
-                    fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
+                    if (sink.enabled)
+                        fprintf(stderr, "\e[1m%10s %10s %8s %23s %6s %8s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME", "HOSTQ", "DROPPED");
+                    else
+                        fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
                 } else {
-                    fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
+                    if (sink.enabled)
+                        fprintf(stderr, "\e[1m%10s %10s %9s %6s %8s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "HOSTQ", "DROPPED");
+                    else
+                        fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
                 }
             }
             i++;
@@ -327,15 +410,34 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
                 gmtime_r(&sec_time, &tm);
                 strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
-                fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u\n",
-                        speed, total_buffers, size_mb, time_str, ms);
+                if (sink.enabled) {
+                    fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u %6u %8" PRIu64 "\n",
+                            speed, total_buffers, size_mb, time_str, ms, host_fill, host_drop);
+                } else {
+                    fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u\n",
+                            speed, total_buffers, size_mb, time_str, ms);
+                }
             } else {
-                fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size_mb);
+                if (sink.enabled) {
+                    fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 " %6u %8" PRIu64 "\n",
+                            speed, total_buffers, size_mb, host_fill, host_drop);
+                } else {
+                    fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size_mb);
+                }
             }
 
             last_time = get_time_ms();
             last_buffers = total_buffers;
         }
+    }
+
+    if (sink.enabled) {
+        m2sdr_host_ring_close_writer(&sink.ring);
+        pthread_join(sink.thread, NULL);
+        total_len = sink.bytes_written;
+        if (sink.error)
+            fprintf(stderr, "Host RX writer thread failed\n");
+        m2sdr_host_ring_destroy(&sink.ring);
     }
 
     if (fo && fo != stdout)
@@ -373,6 +475,9 @@ int main(int argc, char **argv)
     static uint8_t strip_header = 0;
     static uint8_t annotate_ts_jumps = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    unsigned host_buffers = 0;
+    unsigned stats_interval_ms = 200;
+    enum m2sdr_host_ring_policy host_policy = M2SDR_HOST_RING_BLOCK;
     double ts_jump_threshold_pct = 5.0;
     struct m2sdr_sigmf_meta sigmf_meta;
     struct m2sdr_sigmf_annotation pending_annotation;
@@ -403,6 +508,10 @@ int main(int argc, char **argv)
         { "annotation-add", no_argument, NULL, 15 },
         { "annotate-ts-jumps", no_argument, NULL, 16 },
         { "ts-jump-threshold-pct", required_argument, NULL, 17 },
+        { "host-buffers", required_argument, NULL, 18 },
+        { "drop-oldest", no_argument, NULL, 19 },
+        { "drop-newest", no_argument, NULL, 20 },
+        { "stats-interval", required_argument, NULL, 21 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -510,6 +619,20 @@ int main(int argc, char **argv)
         case 17:
             ts_jump_threshold_pct = atof(optarg);
             break;
+        case 18:
+            host_buffers = (unsigned)strtoul(optarg, NULL, 0);
+            break;
+        case 19:
+            host_policy = M2SDR_HOST_RING_DROP_OLDEST;
+            break;
+        case 20:
+            host_policy = M2SDR_HOST_RING_DROP_NEWEST;
+            break;
+        case 21:
+            stats_interval_ms = (unsigned)strtoul(optarg, NULL, 0);
+            if (stats_interval_ms == 0)
+                stats_interval_ms = 200;
+            break;
         default:
             exit(1);
         }
@@ -547,6 +670,10 @@ int main(int argc, char **argv)
             fprintf(stderr, "--annotate-ts-jumps requires --enable-header\n");
             return 1;
         }
+        if (host_policy != M2SDR_HOST_RING_BLOCK) {
+            fprintf(stderr, "SigMF output does not support --drop-oldest/--drop-newest\n");
+            return 1;
+        }
         if (!datatype) {
             fprintf(stderr, "Unsupported SigMF datatype for selected format\n");
             return 1;
@@ -563,6 +690,7 @@ int main(int argc, char **argv)
     }
 
     m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
-                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct, &sigmf_meta);
+                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct, &sigmf_meta,
+                 host_buffers, host_policy, stats_interval_ms);
     return 0;
 }
