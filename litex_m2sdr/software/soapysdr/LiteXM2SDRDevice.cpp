@@ -992,7 +992,13 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (SOAPY_SDR_RX == direction) {
+        uint8_t gc_mode = RF_GAIN_MGC;
         _rx_stream.gain[channel] = value;
+        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
+        if (gc_mode != RF_GAIN_MGC) {
+            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+            _rx_stream.gainMode[channel] = false;
+        }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
         int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
@@ -1022,7 +1028,13 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (name == "PGA" || name == "RF" || name == "GAIN") {
+        uint8_t gc_mode = RF_GAIN_MGC;
         _rx_stream.gain[channel] = value;
+        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
+        if (gc_mode != RF_GAIN_MGC) {
+            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+            _rx_stream.gainMode[channel] = false;
+        }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
         int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
