@@ -8,31 +8,142 @@
  */
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <getopt.h>
 
 #include "m2sdr_sigmf.h"
 
 static void help(void)
 {
     printf("M2SDR SigMF Info Utility.\n"
-           "usage: m2sdr_sigmf_info <sigmf-meta|sigmf-data|basename>\n");
+           "usage: m2sdr_sigmf_info [--validate] <sigmf-meta|sigmf-data|basename>\n");
+}
+
+static void validation_message(const char *level, const char *msg)
+{
+    printf("%s: %s\n", level, msg);
+}
+
+static int validate_sigmf(const struct m2sdr_sigmf_meta *meta)
+{
+    unsigned i;
+    int errors = 0;
+    int warnings = 0;
+
+    if (!meta->datatype[0]) {
+        validation_message("ERROR", "missing core:datatype");
+        errors++;
+    } else if (m2sdr_sigmf_format_from_datatype(meta->datatype) == (enum m2sdr_format)-1) {
+        validation_message("ERROR", "unsupported core:datatype for current m2sdr tools");
+        errors++;
+    }
+
+    if (!meta->data_path[0]) {
+        validation_message("ERROR", "missing or unresolved core:dataset");
+        errors++;
+    } else if (access(meta->data_path, R_OK) != 0) {
+        validation_message("WARNING", "dataset file is not readable from current path");
+        warnings++;
+    }
+
+    if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
+        validation_message("ERROR", "core:sample_rate must be > 0");
+        errors++;
+    }
+    if (meta->has_num_channels && meta->num_channels == 0) {
+        validation_message("ERROR", "core:num_channels must be > 0");
+        errors++;
+    }
+    if (meta->capture_count == 0) {
+        validation_message("WARNING", "no captures[] entries found");
+        warnings++;
+    }
+
+    for (i = 0; i < meta->capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &meta->captures[i];
+
+        if (i > 0 && cap->sample_start < meta->captures[i - 1].sample_start) {
+            validation_message("WARNING", "captures[] are not ordered by core:sample_start");
+            warnings++;
+            break;
+        }
+        if (cap->has_header_bytes && cap->header_bytes != 0 && cap->header_bytes != 16) {
+            validation_message("ERROR", "capture core:header_bytes is unsupported by m2sdr tools");
+            errors++;
+        }
+    }
+
+    for (i = 0; i < meta->annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &meta->annotations[i];
+
+        if (ann->has_freq_lower_edge && ann->has_freq_upper_edge &&
+            ann->freq_lower_edge > ann->freq_upper_edge) {
+            validation_message("ERROR", "annotation has freq_lower_edge > freq_upper_edge");
+            errors++;
+        }
+        if (ann->has_sample_count && ann->sample_count == 0) {
+            validation_message("WARNING", "annotation has zero sample_count");
+            warnings++;
+        }
+    }
+
+    printf("Validation summary: %d error(s), %d warning(s)\n", errors, warnings);
+    return errors == 0 ? 0 : 1;
 }
 
 int main(int argc, char **argv)
 {
     struct m2sdr_sigmf_meta meta;
+    bool validate_only = false;
     unsigned i;
+    int c;
+    int option_index = 0;
+    static struct option options[] = {
+        {"help", no_argument, NULL, 'h'},
+        {"validate", no_argument, NULL, 'v'},
+        {NULL, 0, NULL, 0}
+    };
 
-    if (argc != 2) {
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        help();
+        return 0;
+    }
+    opterr = 0;
+
+    for (;;) {
+        c = getopt_long(argc, argv, "hv", options, &option_index);
+        if (c == -1)
+            break;
+        switch (c) {
+        case 'h':
+            help();
+            return 0;
+        case 'v':
+            validate_only = true;
+            break;
+        default:
+            help();
+            return 1;
+        }
+    }
+
+    if (optind + 1 != argc) {
         help();
         return 1;
     }
 
-    if (m2sdr_sigmf_read(argv[1], &meta) != 0) {
-        fprintf(stderr, "Could not read SigMF metadata from %s\n", argv[1]);
+    if (m2sdr_sigmf_read(argv[optind], &meta) != 0) {
+        fprintf(stderr, "Could not read SigMF metadata from %s\n", argv[optind]);
         return 1;
     }
+
+    if (validate_only)
+        return validate_sigmf(&meta);
 
     printf("SigMF\n");
     printf("  Meta Path         %s\n", meta.meta_path);
