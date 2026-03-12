@@ -1103,6 +1103,25 @@ static void draw_time_annotation_overlay(const struct check_data *data, const st
     ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 14.0f},
                              (ImVec2){pmax.x - 8.0f, pmax.y - 10.0f}, 0xFF2A2A2Au, 3.0f, 0);
 
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        float x;
+        ImU32 col;
+
+        if (cap->sample_start < view_start || cap->sample_start >= view_end)
+            continue;
+        x = (float)(pmin.x + 8.0f +
+                    ((double)(cap->sample_start - view_start) / (double)(view_end - view_start)) *
+                    (double)(pmax.x - pmin.x - 16.0f));
+        col = (i == data->active_capture_index) ? 0xFFFFD166u : 0x88FFFFFFu;
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y + 12.0f}, (ImVec2){x, pmax.y - 8.0f}, col, 1.5f);
+        if (i == data->active_capture_index) {
+            char label[16];
+            snprintf(label, sizeof(label), "C%u", i);
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x + 3.0f, pmax.y - 24.0f}, 0xFFFFFFFFu, label, NULL);
+        }
+    }
+
     for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
         const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
         uint64_t ann_start = ann->sample_start;
