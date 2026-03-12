@@ -380,7 +380,33 @@ int main(int argc, char **argv)
             if (end_sample > start_sample)
                 end_offset_bytes = end_sample * (uint64_t)sample_size;
         } else if (capture && sigmf_header_bytes != 0) {
-            fprintf(stderr, "Capture-local looping is not available for headered SigMF datasets; replaying full file\n");
+            uint64_t start_sample = 0;
+            uint64_t end_sample = 0;
+            size_t sample_size = m2sdr_format_size(format);
+            uint64_t samples_per_frame;
+            uint64_t frame_bytes;
+
+            if (sample_size == 0 ||
+                m2sdr_sigmf_capture_sample_range(&sigmf_meta, capture_index, &start_sample, &end_sample) != 0) {
+                fprintf(stderr, "Could not derive capture sample range from SigMF metadata\n");
+                return 1;
+            }
+
+            samples_per_frame = (DMA_BUFFER_SIZE - sigmf_header_bytes) / sample_size;
+            frame_bytes = DMA_BUFFER_SIZE;
+            if (samples_per_frame == 0) {
+                fprintf(stderr, "Invalid samples/frame for headered SigMF dataset\n");
+                return 1;
+            }
+
+            if ((start_sample % samples_per_frame) == 0 &&
+                (end_sample == 0 || (end_sample % samples_per_frame) == 0)) {
+                start_offset_bytes = (start_sample / samples_per_frame) * frame_bytes;
+                if (end_sample > start_sample)
+                    end_offset_bytes = (end_sample / samples_per_frame) * frame_bytes;
+            } else {
+                fprintf(stderr, "Capture-local looping requires frame-aligned headered SigMF captures; replaying full file\n");
+            }
         }
         snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
         filename = resolved_filename;
