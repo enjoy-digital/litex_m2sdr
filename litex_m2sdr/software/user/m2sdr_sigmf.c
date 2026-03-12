@@ -289,6 +289,124 @@ static int json_extract_uint(const char *buf, const char *key, unsigned *value)
     return 0;
 }
 
+static int json_extract_u64(const char *buf, const char *key, uint64_t *value)
+{
+    const char *p = json_find_key(buf, key);
+    char *end = NULL;
+    unsigned long long v;
+
+    if (!p || !value)
+        return -1;
+    p = strchr(p, ':');
+    if (!p)
+        return -1;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    v = strtoull(p, &end, 10);
+    if (end == p)
+        return -1;
+    *value = (uint64_t)v;
+    return 0;
+}
+
+static const char *json_find_array_start(const char *buf, const char *key)
+{
+    const char *p = json_find_key(buf, key);
+
+    if (!p)
+        return NULL;
+    p = strchr(p, ':');
+    if (!p)
+        return NULL;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    return (*p == '[') ? p : NULL;
+}
+
+static const char *json_find_object_end(const char *start)
+{
+    int depth = 0;
+    int in_string = 0;
+    int escaped = 0;
+    const char *p = start;
+
+    for (; *p; p++) {
+        char c = *p;
+
+        if (in_string) {
+            if (escaped) {
+                escaped = 0;
+            } else if (c == '\\') {
+                escaped = 1;
+            } else if (c == '"') {
+                in_string = 0;
+            }
+            continue;
+        }
+
+        if (c == '"') {
+            in_string = 1;
+        } else if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0)
+                return p;
+        }
+    }
+    return NULL;
+}
+
+static void json_parse_annotations(const char *buf, struct m2sdr_sigmf_meta *meta)
+{
+    const char *p = json_find_array_start(buf, "annotations");
+
+    if (!p || !meta)
+        return;
+    p++;
+    while (*p && meta->annotation_count < M2SDR_SIGMF_MAX_ANNOTATIONS) {
+        const char *obj_end;
+        struct m2sdr_sigmf_annotation *ann;
+        char obj[1024];
+        size_t obj_len;
+
+        while (*p && (isspace((unsigned char)*p) || *p == ','))
+            p++;
+        if (*p == ']' || *p == '\0')
+            break;
+        if (*p != '{')
+            break;
+
+        obj_end = json_find_object_end(p);
+        if (!obj_end)
+            break;
+        obj_len = (size_t)(obj_end - p + 1);
+        if (obj_len >= sizeof(obj))
+            obj_len = sizeof(obj) - 1;
+        memcpy(obj, p, obj_len);
+        obj[obj_len] = '\0';
+
+        ann = &meta->annotations[meta->annotation_count];
+        memset(ann, 0, sizeof(*ann));
+        if (json_extract_u64(obj, "core:sample_start", &ann->sample_start) != 0) {
+            p = obj_end + 1;
+            continue;
+        }
+        if (json_extract_u64(obj, "core:sample_count", &ann->sample_count) == 0)
+            ann->has_sample_count = true;
+        if (json_extract_double(obj, "core:freq_lower_edge", &ann->freq_lower_edge) == 0)
+            ann->has_freq_lower_edge = true;
+        if (json_extract_double(obj, "core:freq_upper_edge", &ann->freq_upper_edge) == 0)
+            ann->has_freq_upper_edge = true;
+        json_extract_string(obj, "core:label", ann->label, sizeof(ann->label));
+        json_extract_string(obj, "core:comment", ann->comment, sizeof(ann->comment));
+        meta->annotation_count++;
+        p = obj_end + 1;
+    }
+}
+
 int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
 {
     FILE *f;
@@ -345,6 +463,7 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
         meta->has_num_channels = true;
     if (json_extract_uint(buf, "core:header_bytes", &meta->header_bytes) == 0)
         meta->has_header_bytes = true;
+    json_parse_annotations(buf, meta);
 
     if (meta->datatype[0] == '\0') {
         free(buf);

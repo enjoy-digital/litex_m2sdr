@@ -9,6 +9,20 @@
 
 #include "m2sdr.h"
 
+#define M2SDR_SIGMF_MAX_ANNOTATIONS 64
+
+struct m2sdr_sigmf_annotation {
+    uint64_t sample_start;
+    uint64_t sample_count;
+    double freq_lower_edge;
+    double freq_upper_edge;
+    char label[64];
+    char comment[160];
+    bool has_sample_count;
+    bool has_freq_lower_edge;
+    bool has_freq_upper_edge;
+};
+
 struct m2sdr_sigmf_meta {
     char data_path[1024];
     char meta_path[1024];
@@ -22,6 +36,8 @@ struct m2sdr_sigmf_meta {
     double center_freq;
     unsigned num_channels;
     unsigned header_bytes;
+    unsigned annotation_count;
+    struct m2sdr_sigmf_annotation annotations[M2SDR_SIGMF_MAX_ANNOTATIONS];
     bool has_sample_rate;
     bool has_center_freq;
     bool has_num_channels;

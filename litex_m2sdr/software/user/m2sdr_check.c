@@ -761,6 +761,27 @@ static void draw_stats_panel(const struct check_data *data, int channel)
             igText("Description");
             igTextWrapped("%s", data->sigmf_meta.description);
         }
+        igText("Annotations       : %u", data->sigmf_meta.annotation_count);
+        if (data->sigmf_meta.annotation_count > 0) {
+            unsigned i;
+            igText("Annotation list");
+            for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+                const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+                igSeparator();
+                igText("#%u start=%" PRIu64, i, ann->sample_start);
+                if (ann->has_sample_count)
+                    igText("  count=%" PRIu64, ann->sample_count);
+                if (ann->label[0])
+                    igText("  label=%s", ann->label);
+                if (ann->has_freq_lower_edge || ann->has_freq_upper_edge) {
+                    double flo = ann->has_freq_lower_edge ? ann->freq_lower_edge / 1e6 : 0.0;
+                    double fhi = ann->has_freq_upper_edge ? ann->freq_upper_edge / 1e6 : 0.0;
+                    igText("  freq=%.6f..%.6f MHz", flo, fhi);
+                }
+                if (ann->comment[0])
+                    igTextWrapped("  %s", ann->comment);
+            }
+        }
     }
     if (data->frame_header) {
         igText("Headers seen      : %zu", data->headers_seen);
