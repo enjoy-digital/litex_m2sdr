@@ -37,7 +37,7 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - `-c` / `--device-num` remains the short PCIe shorthand for `/dev/m2sdrN`.
 - `--ip` and `--port` remain available on Etherbone-capable tools.
 - Hyphenated long options are preferred: use `--sample-rate`, `--rx-freq`, `--tx-freq`, `--rx-gain`, `--tx-att`, `--refclk-freq`, etc.
-- TX control now prefers positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR. Legacy native `--tx-gain` is still accepted as a compatibility alias.
+- TX control uses positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR.
 - Streaming-oriented tools that support both SC16 and SC8 expose `--format sc16|sc8`. Older `--8bit` / `-8` forms are kept as compatibility aliases where applicable.
 - Some tools still accept `-z` / `--zero-copy` for compatibility, but the current sync API hides transport-specific zero-copy behavior.
 
@@ -115,7 +115,6 @@ m2sdr_rf [options] cmd [args...]
 - `--tx-freq freq` (default=`2400000000`)
 - `--rx-freq freq` (default=`2400000000`)
 - `--tx-att att` (default=`20` dB, preferred positive TX attenuation)
-- `--tx-gain gain` legacy compatibility alias for native/libm2sdr TX control
 - `--rx-gain gain` (default=`0` dB)
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)

@@ -64,7 +64,7 @@ static int test_rf_range_validation(void)
         return -1;
 
     m2sdr_config_init(&cfg);
-    cfg.tx_gain = -100;
+    cfg.tx_att = 100;
     if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_RANGE)
         return -1;
     if (m2sdr_set_sample_rate(&dev, -1) != M2SDR_ERR_RANGE)

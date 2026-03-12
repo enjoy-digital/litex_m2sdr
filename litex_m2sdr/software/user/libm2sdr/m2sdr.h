@@ -251,9 +251,8 @@ struct m2sdr_config {
     int64_t tx_freq;
     /* RX LO in Hz. */
     int64_t rx_freq;
-    /* Historical TX gain field in dB. TX attenuation is typically expressed
-     * with negative values, e.g. -10 dB means 10 dB attenuation. */
-    int64_t tx_gain;
+    /* TX attenuation in dB. Higher values mean lower output power. */
+    int64_t tx_att;
     /* RX gain for channel 0 in dB. */
     int64_t rx_gain1;
     /* RX gain for channel 1 in dB. */
@@ -370,8 +369,6 @@ int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
-int  m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain);
-/* Preferred TX helper using positive attenuation in dB. */
 int  m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);

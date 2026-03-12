@@ -18,8 +18,7 @@
  *     ./m2sdr_gen -s 30.72e6 -t white -a 1.0
  *     ./m2sdr_gen -s 30.72e6 -t prbs -a 1.0
  *
- * Native m2sdr TX gain uses the libm2sdr convention (typically negative values
- * for TX attenuation). The SoapySDR path instead prefers positive TX ATT values.
+ * TX control uses positive attenuation values across both the native and SoapySDR paths.
  *
  */
 

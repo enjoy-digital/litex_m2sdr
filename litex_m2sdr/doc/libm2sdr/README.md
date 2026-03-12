@@ -4,11 +4,9 @@ This directory documents the public C API for LiteX-M2SDR. The API is intentiona
 
 `libm2sdr` is now the primary low-level host interface for the project. The CLI utilities and the SoapySDR module both build on top of it.
 
-Note on TX control semantics: user-facing TX control now prefers positive attenuation
-values across both native tools and the SoapySDR layer. The low-level `tx_gain` field
-and `m2sdr_set_tx_gain()` helper are still kept for backward compatibility with the
-historical AD9361-style convention, where TX attenuation is expressed with negative dB
-values. New code should prefer `m2sdr_set_tx_att()`.
+Note on TX control semantics: TX control uses positive attenuation values across
+both native tools and the SoapySDR layer. Use the `tx_att` config field and
+`m2sdr_set_tx_att()` helper.
 
 ## Build
 
@@ -155,9 +153,8 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_gain`, `m2sdr_set_tx_att`
-  - `m2sdr_set_tx_att` is the preferred positive-dB TX attenuation helper.
-  - `m2sdr_set_tx_gain` remains available for backward compatibility with the historical negative-gain convention.
+- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_att`
+  - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
