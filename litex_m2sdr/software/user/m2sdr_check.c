@@ -1046,6 +1046,55 @@ static void draw_annotations_panel(const struct check_data *data, struct ui_stat
     igEndChild();
 }
 
+static void draw_capture_details_panel(const struct check_data *data, struct ui_state *ui)
+{
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0)
+        return;
+
+    igSeparator();
+    igText("Captures");
+
+    if (!igBeginChild_Str("##capture_list", (ImVec2){0.0f, 160.0f}, 1, 0)) {
+        igEndChild();
+        return;
+    }
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        char label[128];
+
+        snprintf(label, sizeof(label), "#%u @%" PRIu64, i, cap->sample_start);
+        if (igSelectable_Bool(label, ui->selected_capture == (int)i,
+                              ImGuiSelectableFlags_SpanAvailWidth, (ImVec2){0.0f, 0.0f})) {
+            ui->selected_capture = (int)i;
+            ui->start_sample = (int)((cap->sample_start < data->samples) ? cap->sample_start : 0);
+        }
+        if (i == data->active_capture_index) {
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("[active]");
+        }
+    }
+    igEndChild();
+
+    if (ui->selected_capture >= 0 && ui->selected_capture < (int)data->sigmf_meta.capture_count) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[ui->selected_capture];
+        uint64_t end_sample = (ui->selected_capture + 1 < (int)data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[ui->selected_capture + 1].sample_start : (uint64_t)data->samples;
+
+        igText("Selected capture : %d", ui->selected_capture);
+        igText("Sample start      : %" PRIu64, cap->sample_start);
+        igText("Sample end        : %" PRIu64, end_sample);
+        if (cap->has_center_freq)
+            igText("Center freq       : %.6f MHz", cap->center_freq / 1e6);
+        if (cap->has_datetime)
+            igTextWrapped("Datetime          : %s", cap->datetime);
+        if (cap->has_header_bytes)
+            igText("Header bytes      : %u", cap->header_bytes);
+    }
+}
+
 static void draw_time_domain(const struct ui_state *ui, const struct plot_cache *cache, int count)
 {
     float min_v = -1.0f;
@@ -1616,6 +1665,7 @@ int main(int argc, char **argv)
                 draw_controls(&data, &ui);
                 igSeparator();
                 draw_stats_panel(&data, ui.selected_channel);
+                draw_capture_details_panel(&data, &ui);
                 draw_annotations_panel(&data, &ui);
             }
             igEndChild();
