@@ -940,6 +940,24 @@ static int find_annotation_at_frequency(const struct check_data *data, double fr
     return -1;
 }
 
+static int find_capture_for_sample(const struct check_data *data, uint64_t sample)
+{
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0)
+        return -1;
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        uint64_t cap_start = data->sigmf_meta.captures[i].sample_start;
+        uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[i + 1u].sample_start : (uint64_t)data->samples;
+
+        if (sample >= cap_start && sample < cap_end)
+            return (int)i;
+    }
+    return -1;
+}
+
 static int contains_case_insensitive(const char *haystack, const char *needle)
 {
     size_t needle_len;
@@ -1017,6 +1035,11 @@ static void draw_annotations_panel(const struct check_data *data, struct ui_stat
         if (igSelectable_Bool(label, ui->selected_annotation == (int)i,
                               ImGuiSelectableFlags_SpanAvailWidth, (ImVec2){0.0f, 0.0f})) {
             ui->selected_annotation = (int)i;
+            {
+                int capture_idx = find_capture_for_sample(data, ann->sample_start);
+                if (capture_idx >= 0)
+                    ui->selected_capture = capture_idx;
+            }
             selected_visible = 1;
         }
         if (overlaps) {
@@ -1064,6 +1087,12 @@ static void draw_capture_details_panel(const struct check_data *data, struct ui_
     for (i = 0; i < data->sigmf_meta.capture_count; i++) {
         const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
         char label[128];
+        bool contains_selected_annotation = false;
+
+        if (ui->selected_annotation >= 0 && ui->selected_annotation < (int)data->sigmf_meta.annotation_count) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[ui->selected_annotation];
+            contains_selected_annotation = (find_capture_for_sample(data, ann->sample_start) == (int)i);
+        }
 
         snprintf(label, sizeof(label), "#%u @%" PRIu64, i, cap->sample_start);
         if (igSelectable_Bool(label, ui->selected_capture == (int)i,
@@ -1074,6 +1103,10 @@ static void draw_capture_details_panel(const struct check_data *data, struct ui_
         if (i == data->active_capture_index) {
             igSameLine(0.0f, -1.0f);
             igTextDisabled("[active]");
+        }
+        if (contains_selected_annotation) {
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("[annotation]");
         }
     }
     igEndChild();
