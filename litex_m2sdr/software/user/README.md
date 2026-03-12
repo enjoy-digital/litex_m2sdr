@@ -277,6 +277,9 @@ The GUI provides:
 - FFT spectrum view
 - I/Q histograms
 - DC offset / RMS / clipping / timestamp summary
+- SigMF capture layout and capture details panels
+- SigMF capture-boundary markers in time view
+- SigMF capture-center markers in spectrum view
 
 Example usage:
 ~~~~
