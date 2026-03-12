@@ -164,7 +164,7 @@ m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_
 endif
 
 ifeq ($(HAVE_SDL2),1)
-m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS)
+m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o m2sdr_sigmf.o $(M2SDR_IMGUI_OBJS)
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 

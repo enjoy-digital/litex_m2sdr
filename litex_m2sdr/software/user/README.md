@@ -238,6 +238,8 @@ Native GUI utility to inspect recorded I/Q sample files.
 m2sdr_check [options] filename
 ~~~~
 
+`filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+
 **Relevant options**:
 - `--nchannels`
 - `--nbits`
@@ -258,6 +260,7 @@ Example usage:
 ~~~~
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000 --frame-header --frame-size 245760
+./m2sdr_check capture.sigmf-meta
 ~~~~
 
 ---

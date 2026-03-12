@@ -25,6 +25,7 @@
 #include "cimgui/cimgui.h"
 #include "scan_ui/imgui_sdl_gl3_bridge.h"
 #include "kissfft/kiss_fft.h"
+#include "m2sdr_sigmf.h"
 
 #define igGetIO igGetIO_Nil
 
@@ -80,6 +81,8 @@ struct check_data {
     uint64_t last_timestamp;
     double avg_timestamp_step_ns;
     double rms_timestamp_jitter_ns;
+    bool sigmf_loaded;
+    struct m2sdr_sigmf_meta sigmf_meta;
     char source_path[1024];
 };
 
@@ -734,6 +737,17 @@ static void draw_stats_panel(const struct check_data *data, int channel)
 
     igSeparator();
     igText("Format            : %s (%d-bit effective)", data->sample_bytes == 1 ? "sc8" : "sc16", data->nbits);
+    if (data->sigmf_loaded) {
+        igText("SigMF datatype    : %s", data->sigmf_meta.datatype);
+        if (data->sigmf_meta.has_center_freq)
+            igText("SigMF center freq : %.6f MHz", data->sigmf_meta.center_freq / 1e6);
+        if (data->sigmf_meta.description[0])
+            igTextWrapped("SigMF description : %s", data->sigmf_meta.description);
+        if (data->sigmf_meta.author[0])
+            igText("SigMF author      : %s", data->sigmf_meta.author);
+        if (data->sigmf_meta.hw[0])
+            igText("SigMF hw          : %s", data->sigmf_meta.hw);
+    }
     if (data->frame_header) {
         igText("Headers seen      : %zu", data->headers_seen);
         igText("Bad header magic  : %zu", data->headers_bad_magic);
@@ -810,9 +824,11 @@ static void draw_spectrum(const struct check_data *data, const struct plot_cache
 int main(int argc, char **argv)
 {
     const char *filename = NULL;
+    char resolved_filename[1024] = {0};
     struct check_data data;
     struct plot_cache cache;
     struct ui_state ui;
+    struct m2sdr_sigmf_meta sigmf_meta;
     SDL_Window *window = NULL;
     SDL_GLContext gl_context = NULL;
     const char *glsl_version = "#version 130";
@@ -840,6 +856,7 @@ int main(int argc, char **argv)
 
     memset(&data, 0, sizeof(data));
     memset(&cache, 0, sizeof(cache));
+    memset(&sigmf_meta, 0, sizeof(sigmf_meta));
     ui.selected_channel = 0;
     ui.start_sample = 0;
     ui.view_samples = CHECK_DEFAULT_VIEW_SAMPLES;
@@ -897,6 +914,37 @@ int main(int argc, char **argv)
         return 1;
     }
     filename = argv[optind];
+
+    if (m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {
+        enum m2sdr_format sigmf_format = m2sdr_sigmf_format_from_datatype(sigmf_meta.datatype);
+
+        if (sigmf_format == M2SDR_FORMAT_SC16_Q11)
+            sample_bytes = 2;
+        else if (sigmf_format == M2SDR_FORMAT_SC8_Q7)
+            sample_bytes = 1;
+        else {
+            fprintf(stderr, "Unsupported SigMF datatype: %s\n", sigmf_meta.datatype);
+            return 1;
+        }
+
+        if (sigmf_meta.has_sample_rate)
+            sample_rate = sigmf_meta.sample_rate;
+        if (sigmf_meta.has_num_channels)
+            nchannels = (int)sigmf_meta.num_channels;
+        if (sigmf_meta.has_header_bytes) {
+            if (sigmf_meta.header_bytes == 16) {
+                frame_header = true;
+            } else {
+                fprintf(stderr, "Unsupported SigMF header_bytes=%u in m2sdr_check\n", sigmf_meta.header_bytes);
+                return 1;
+            }
+        }
+
+        snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
+        filename = resolved_filename;
+        data.sigmf_loaded = true;
+        memcpy(&data.sigmf_meta, &sigmf_meta, sizeof(sigmf_meta));
+    }
 
     if (!load_file(filename, nchannels, nbits, sample_bytes, sample_rate, frame_header, frame_size, max_samples, &data))
         return 1;
