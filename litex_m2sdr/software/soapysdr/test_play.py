@@ -18,10 +18,10 @@ can be looped a specified number of times.
 Usage Examples:
 
 Tone Generation:
-    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --channel 0 --tone-freq 1e6 --ampl 0.8 --secs 5
+    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --att 20 --channel 0 --tone-freq 1e6 --ampl 0.8 --secs 5
 
 File Playback:
-    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --channel 0 path/to/file.bin 10
+    ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --att 20 --channel 0 path/to/file.bin 10
 """
 
 import time
@@ -66,7 +66,8 @@ def main():
     parser.add_argument("--samplerate", type=float, default=4e6,    help="TX Sample rate in Hz")
     parser.add_argument("--bandwidth",  type=float, default=56e6,   help="TX Filter bandwidth in Hz")
     parser.add_argument("--freq",       type=float, default=2.4e9,  help="TX frequency in Hz")
-    parser.add_argument("--gain",       type=float, default=-20.0,  help="TX gain in dB")
+    parser.add_argument("--att", "--gain", dest="att", type=float, default=20.0,
+                        help="TX attenuation in dB (positive, --gain kept as deprecated alias)")
     parser.add_argument("--channel",    type=int,   choices=[0, 1], default=0, help="TX channel index (0 or 1)")
 
     # Transmission mode: tone generation or file playback.
@@ -87,7 +88,7 @@ def main():
     # Basic RF configuration using the selected channel.
     sdr.setSampleRate(SOAPY_SDR_TX, args.channel, args.samplerate)
     sdr.setFrequency( SOAPY_SDR_TX, args.channel, args.freq)
-    sdr.setGain(      SOAPY_SDR_TX, args.channel, args.gain)
+    sdr.setGain(      SOAPY_SDR_TX, args.channel, args.att)
     sdr.setBandwidth( SOAPY_SDR_TX, args.channel, args.bandwidth)
 
     # Determine the data source based on mode.

@@ -129,7 +129,7 @@ blocks:
     alias: ''
     comment: '- center Frequency may be changed using  freqRX slider
 
-      - gain may be increased/decreased by using gainTX slider
+      - gain may be increased/decreased by using gainRx slider
 
       - both channel are displayed
 

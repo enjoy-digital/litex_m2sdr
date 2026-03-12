@@ -85,7 +85,7 @@ This repository includes several Python utilities to help test and demonstrate t
 
   *Usage Example:*
   ```bash
-  ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain -20 --channel 0 --tone-freq 1e6 --ampl 0.8 --secs 5
+  ./test_play.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --att 20 --channel 0 --tone-freq 1e6 --ampl 0.8 --secs 5
   ```
 
 - **test_record.py**

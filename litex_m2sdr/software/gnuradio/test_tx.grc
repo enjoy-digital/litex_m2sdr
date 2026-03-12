@@ -54,7 +54,7 @@ blocks:
     coordinate: [264, 12.0]
     rotation: 0
     state: enabled
-- name: gainTX
+- name: attTX
   id: variable_qtgui_range
   parameters:
     comment: ''
@@ -63,10 +63,10 @@ blocks:
     min_len: '200'
     orient: QtCore.Qt.Horizontal
     rangeType: float
-    start: int(-89)
+    start: int(0)
     step: int(1)
-    stop: int(0)
-    value: int(-89)
+    stop: int(89)
+    value: int(89)
     widget: counter_slider
   states:
     bus_sink: false
@@ -167,7 +167,9 @@ blocks:
 
       - freqTx slider is used to change center frequency
 
-      - gainTX slider is used to increase/decrease attenuation/gain'
+      - attTX slider sets TX attenuation in positive dB
+
+      - lower attenuation increases TX output power'
     note: Dual Channels TX test
   states:
     bus_sink: false
@@ -223,8 +225,8 @@ blocks:
     driver: LiteXM2SDR
     freq_correction0: '0'
     freq_correction1: '0'
-    gain0: gainTX
-    gain1: gainTX
+    gain0: attTX
+    gain1: attTX
     iq_balance0: '0'
     iq_balance1: '0'
     nchan: '2'

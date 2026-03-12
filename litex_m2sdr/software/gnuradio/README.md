@@ -40,7 +40,7 @@ This flowchart is a two-channel transmitter (TX1 and TX2). The source stream is 
 
 Two sliders let you adjust:
 - **Frequency**
-- **Gain/Attenuation**
+- **TX Attenuation** (`attTx`, positive dB)
 
 ![test_tx_fig](https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/ff7b4a2f-f0db-4c11-b3db-b0c5a6e4bef1)
 
@@ -56,7 +56,7 @@ This flowchart provides a loopback test using a single channel. It verifies both
 
 Four sliders allow real-time adjustments of:
 - **TX Center Frequency** (`freqTx`)
-- **TX Gain/Attenuation** (`gainTx`)
+- **TX Attenuation** (`attTx`, positive dB)
 - **RX Center Frequency** (`freqRx`)
 - **RX Gain** (`gainRx`)
 
