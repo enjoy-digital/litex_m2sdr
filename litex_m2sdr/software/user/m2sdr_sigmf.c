@@ -1,0 +1,329 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+#include "m2sdr_sigmf.h"
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int has_suffix(const char *path, const char *suffix)
+{
+    size_t path_len = strlen(path);
+    size_t suffix_len = strlen(suffix);
+
+    if (path_len < suffix_len)
+        return 0;
+    return strcmp(path + path_len - suffix_len, suffix) == 0;
+}
+
+const char *m2sdr_sigmf_datatype_from_format(enum m2sdr_format format)
+{
+    switch (format) {
+    case M2SDR_FORMAT_SC16_Q11:
+        return "ci16_le";
+    case M2SDR_FORMAT_SC8_Q7:
+        return "ci8";
+    default:
+        return NULL;
+    }
+}
+
+enum m2sdr_format m2sdr_sigmf_format_from_datatype(const char *datatype)
+{
+    if (!datatype)
+        return (enum m2sdr_format)-1;
+    if (strcmp(datatype, "ci16_le") == 0)
+        return M2SDR_FORMAT_SC16_Q11;
+    if (strcmp(datatype, "ci8") == 0)
+        return M2SDR_FORMAT_SC8_Q7;
+    return (enum m2sdr_format)-1;
+}
+
+int m2sdr_sigmf_is_meta_path(const char *path)
+{
+    return path && has_suffix(path, ".sigmf-meta");
+}
+
+int m2sdr_sigmf_is_data_path(const char *path)
+{
+    return path && has_suffix(path, ".sigmf-data");
+}
+
+int m2sdr_sigmf_derive_paths(const char *input_path,
+                             char *data_path,
+                             size_t data_path_len,
+                             char *meta_path,
+                             size_t meta_path_len)
+{
+    size_t len;
+
+    if (!input_path || !data_path || !meta_path)
+        return -1;
+
+    if (m2sdr_sigmf_is_meta_path(input_path)) {
+        len = strlen(input_path) - strlen(".sigmf-meta");
+        if (snprintf(data_path, data_path_len, "%.*s.sigmf-data", (int)len, input_path) >= (int)data_path_len)
+            return -1;
+        if (snprintf(meta_path, meta_path_len, "%s", input_path) >= (int)meta_path_len)
+            return -1;
+        return 0;
+    }
+
+    if (m2sdr_sigmf_is_data_path(input_path)) {
+        len = strlen(input_path) - strlen(".sigmf-data");
+        if (snprintf(data_path, data_path_len, "%s", input_path) >= (int)data_path_len)
+            return -1;
+        if (snprintf(meta_path, meta_path_len, "%.*s.sigmf-meta", (int)len, input_path) >= (int)meta_path_len)
+            return -1;
+        return 0;
+    }
+
+    if (snprintf(data_path, data_path_len, "%s.sigmf-data", input_path) >= (int)data_path_len)
+        return -1;
+    if (snprintf(meta_path, meta_path_len, "%s.sigmf-meta", input_path) >= (int)meta_path_len)
+        return -1;
+    return 0;
+}
+
+static void json_write_escaped(FILE *f, const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    fputc('"', f);
+    while (*p) {
+        switch (*p) {
+        case '\\':
+        case '"':
+            fputc('\\', f);
+            fputc(*p, f);
+            break;
+        case '\n':
+            fputs("\\n", f);
+            break;
+        case '\r':
+            fputs("\\r", f);
+            break;
+        case '\t':
+            fputs("\\t", f);
+            break;
+        default:
+            if (*p < 0x20)
+                fprintf(f, "\\u%04x", *p);
+            else
+                fputc(*p, f);
+            break;
+        }
+        p++;
+    }
+    fputc('"', f);
+}
+
+int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
+{
+    FILE *f;
+    const char *dataset_name;
+    const char *slash;
+
+    if (!meta || !meta->meta_path[0] || !meta->data_path[0] || !meta->datatype[0])
+        return -1;
+
+    f = fopen(meta->meta_path, "wb");
+    if (!f)
+        return -1;
+
+    slash = strrchr(meta->data_path, '/');
+    dataset_name = slash ? slash + 1 : meta->data_path;
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"global\": {\n");
+    fprintf(f, "    \"core:version\": \"1.2.5\",\n");
+    fprintf(f, "    \"core:datatype\": ");
+    json_write_escaped(f, meta->datatype);
+    fprintf(f, ",\n");
+    fprintf(f, "    \"core:dataset\": ");
+    json_write_escaped(f, dataset_name);
+    if (meta->has_sample_rate) {
+        fprintf(f, ",\n    \"core:sample_rate\": %.17g", meta->sample_rate);
+    }
+    if (meta->has_num_channels) {
+        fprintf(f, ",\n    \"core:num_channels\": %u", meta->num_channels);
+    }
+    if (meta->description[0]) {
+        fprintf(f, ",\n    \"core:description\": ");
+        json_write_escaped(f, meta->description);
+    }
+    if (meta->author[0]) {
+        fprintf(f, ",\n    \"core:author\": ");
+        json_write_escaped(f, meta->author);
+    }
+    if (meta->hw[0]) {
+        fprintf(f, ",\n    \"core:hw\": ");
+        json_write_escaped(f, meta->hw);
+    }
+    if (meta->recorder[0]) {
+        fprintf(f, ",\n    \"core:recorder\": ");
+        json_write_escaped(f, meta->recorder);
+    }
+    fprintf(f, "\n  },\n");
+    fprintf(f, "  \"captures\": [\n");
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"core:sample_start\": 0");
+    if (meta->has_center_freq)
+        fprintf(f, ",\n      \"core:frequency\": %.17g", meta->center_freq);
+    if (meta->has_datetime) {
+        fprintf(f, ",\n      \"core:datetime\": ");
+        json_write_escaped(f, meta->datetime);
+    }
+    if (meta->has_header_bytes)
+        fprintf(f, ",\n      \"core:header_bytes\": %u", meta->header_bytes);
+    fprintf(f, "\n    }\n");
+    fprintf(f, "  ],\n");
+    fprintf(f, "  \"annotations\": []\n");
+    fprintf(f, "}\n");
+
+    fclose(f);
+    return 0;
+}
+
+static const char *json_find_key(const char *buf, const char *key)
+{
+    char pattern[128];
+
+    if (snprintf(pattern, sizeof(pattern), "\"%s\"", key) >= (int)sizeof(pattern))
+        return NULL;
+    return strstr(buf, pattern);
+}
+
+static int json_extract_string(const char *buf, const char *key, char *out, size_t out_len)
+{
+    const char *p = json_find_key(buf, key);
+    size_t i = 0;
+
+    if (!p || !out || out_len == 0)
+        return -1;
+    p = strchr(p, ':');
+    if (!p)
+        return -1;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    if (*p != '"')
+        return -1;
+    p++;
+    while (*p && *p != '"' && i + 1 < out_len) {
+        if (*p == '\\' && p[1]) {
+            p++;
+            switch (*p) {
+            case 'n': out[i++] = '\n'; break;
+            case 'r': out[i++] = '\r'; break;
+            case 't': out[i++] = '\t'; break;
+            default:  out[i++] = *p; break;
+            }
+            p++;
+            continue;
+        }
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+    return (*p == '"') ? 0 : -1;
+}
+
+static int json_extract_double(const char *buf, const char *key, double *value)
+{
+    const char *p = json_find_key(buf, key);
+    char *end = NULL;
+
+    if (!p || !value)
+        return -1;
+    p = strchr(p, ':');
+    if (!p)
+        return -1;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    *value = strtod(p, &end);
+    return (end != p) ? 0 : -1;
+}
+
+static int json_extract_uint(const char *buf, const char *key, unsigned *value)
+{
+    const char *p = json_find_key(buf, key);
+    char *end = NULL;
+    unsigned long v;
+
+    if (!p || !value)
+        return -1;
+    p = strchr(p, ':');
+    if (!p)
+        return -1;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    v = strtoul(p, &end, 10);
+    if (end == p)
+        return -1;
+    *value = (unsigned)v;
+    return 0;
+}
+
+int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
+{
+    FILE *f;
+    long len;
+    char *buf = NULL;
+
+    if (!input_path || !meta)
+        return -1;
+    memset(meta, 0, sizeof(*meta));
+    if (m2sdr_sigmf_derive_paths(input_path, meta->data_path, sizeof(meta->data_path),
+                                 meta->meta_path, sizeof(meta->meta_path)) != 0)
+        return -1;
+
+    f = fopen(meta->meta_path, "rb");
+    if (!f)
+        return -1;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    len = ftell(f);
+    if (len < 0) {
+        fclose(f);
+        return -1;
+    }
+    rewind(f);
+    buf = calloc((size_t)len + 1u, 1u);
+    if (!buf) {
+        fclose(f);
+        return -1;
+    }
+    if (fread(buf, 1, (size_t)len, f) != (size_t)len) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    json_extract_string(buf, "core:datatype", meta->datatype, sizeof(meta->datatype));
+    json_extract_string(buf, "core:description", meta->description, sizeof(meta->description));
+    json_extract_string(buf, "core:author", meta->author, sizeof(meta->author));
+    json_extract_string(buf, "core:hw", meta->hw, sizeof(meta->hw));
+    json_extract_string(buf, "core:recorder", meta->recorder, sizeof(meta->recorder));
+    if (json_extract_string(buf, "core:datetime", meta->datetime, sizeof(meta->datetime)) == 0)
+        meta->has_datetime = true;
+    if (json_extract_double(buf, "core:sample_rate", &meta->sample_rate) == 0)
+        meta->has_sample_rate = true;
+    if (json_extract_double(buf, "core:frequency", &meta->center_freq) == 0)
+        meta->has_center_freq = true;
+    if (json_extract_uint(buf, "core:num_channels", &meta->num_channels) == 0)
+        meta->has_num_channels = true;
+    if (json_extract_uint(buf, "core:header_bytes", &meta->header_bytes) == 0)
+        meta->has_header_bytes = true;
+
+    if (meta->datatype[0] == '\0') {
+        free(buf);
+        return -1;
+    }
+    free(buf);
+    return 0;
+}
