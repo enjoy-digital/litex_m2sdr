@@ -19,6 +19,7 @@
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_sigmf.h"
 #include "config.h"
 
 #include "litepcie_helpers.h"
@@ -63,7 +64,7 @@ static void help(void)
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
            "Arguments:\n"
-           "  filename     Raw SC16 IQ file, or '-' for stdin.\n"
+           "  filename     Raw IQ file, SigMF file/basename, or '-' for stdin.\n"
            "  loops        Number of times to loop playback (default=1, 0 for infinite).\n");
     exit(1);
 }
@@ -179,6 +180,8 @@ int main(int argc, char **argv)
     static uint8_t quiet = 0;
     static uint8_t timed_start = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    struct m2sdr_sigmf_meta sigmf_meta;
+    char resolved_filename[1024] = {0};
     struct m2sdr_cli_device cli_dev;
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -196,6 +199,7 @@ int main(int argc, char **argv)
 
     signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
+    memset(&sigmf_meta, 0, sizeof(sigmf_meta));
 
     for (;;) {
         c = getopt_long(argc, argv, "hd:c:i:p:zqt", options, &option_index);
@@ -252,6 +256,24 @@ int main(int argc, char **argv)
         loops = 1;
     } else {
         help();
+    }
+
+    if (strcmp(filename, "-") != 0 && m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {
+        enum m2sdr_format sigmf_format = m2sdr_sigmf_format_from_datatype(sigmf_meta.datatype);
+
+        if (sigmf_format == (enum m2sdr_format)-1) {
+            fprintf(stderr, "Unsupported SigMF datatype: %s\n", sigmf_meta.datatype);
+            return 1;
+        }
+        if (sigmf_meta.has_header_bytes && sigmf_meta.header_bytes != 0) {
+            fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",
+                    sigmf_meta.header_bytes);
+            return 1;
+        }
+
+        format = sigmf_format;
+        snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
+        filename = resolved_filename;
     }
 
     if (!m2sdr_cli_finalize_device(&cli_dev))

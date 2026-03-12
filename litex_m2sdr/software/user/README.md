@@ -190,9 +190,12 @@ m2sdr_play [options] filename [loops]
 - **filename**: Binary file of I/Q samples (or `-` for stdin).
 - **loops**: Number of times to loop playback (default=1).
 
+`filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+
 Example usage:
 ~~~~
 ./m2sdr_play --format sc16 tx_file.bin 10
+./m2sdr_play capture.sigmf-meta 10
 ~~~~
 
 ---
