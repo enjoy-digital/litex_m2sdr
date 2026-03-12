@@ -3,6 +3,7 @@
 #include "m2sdr_sigmf.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -201,7 +202,28 @@ int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
         fprintf(f, ",\n      \"core:header_bytes\": %u", meta->header_bytes);
     fprintf(f, "\n    }\n");
     fprintf(f, "  ],\n");
-    fprintf(f, "  \"annotations\": []\n");
+    fprintf(f, "  \"annotations\": [\n");
+    for (unsigned i = 0; i < meta->annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &meta->annotations[i];
+        fprintf(f, "    {\n");
+        fprintf(f, "      \"core:sample_start\": %" PRIu64, ann->sample_start);
+        if (ann->has_sample_count)
+            fprintf(f, ",\n      \"core:sample_count\": %" PRIu64, ann->sample_count);
+        if (ann->has_freq_lower_edge)
+            fprintf(f, ",\n      \"core:freq_lower_edge\": %.17g", ann->freq_lower_edge);
+        if (ann->has_freq_upper_edge)
+            fprintf(f, ",\n      \"core:freq_upper_edge\": %.17g", ann->freq_upper_edge);
+        if (ann->label[0]) {
+            fprintf(f, ",\n      \"core:label\": ");
+            json_write_escaped(f, ann->label);
+        }
+        if (ann->comment[0]) {
+            fprintf(f, ",\n      \"core:comment\": ");
+            json_write_escaped(f, ann->comment);
+        }
+        fprintf(f, "\n    }%s\n", (i + 1u < meta->annotation_count) ? "," : "");
+    }
+    fprintf(f, "  ]\n");
     fprintf(f, "}\n");
 
     fclose(f);

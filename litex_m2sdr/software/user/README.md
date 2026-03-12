@@ -224,11 +224,14 @@ Relevant options:
 - `--description`
 - `--author`
 - `--hw`
+- `--annotation-label`
+- `--annotation-comment`
 
 Example usage:
 ~~~~
 ./m2sdr_record --enable-header --strip-header rx_file.bin 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --center-freq 2400000000 --enable-header --strip-header capture 2000000
+./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst --annotation-comment "loopback capture" capture 2000000
 ~~~~
 
 Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.

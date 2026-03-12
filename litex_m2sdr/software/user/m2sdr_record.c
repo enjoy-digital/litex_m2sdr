@@ -57,6 +57,8 @@ static void help(void)
            "      --description TXT SigMF description metadata.\n"
            "      --author TXT      SigMF author metadata.\n"
            "      --hw TXT          SigMF hardware metadata.\n"
+           "      --annotation-label TXT   SigMF annotation label.\n"
+           "      --annotation-comment TXT SigMF annotation comment.\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
@@ -245,12 +247,19 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         fclose(fo);
 
     if (sigmf_enable) {
+        uint64_t total_samples = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+
         if (m2sdr_sigmf_derive_paths(filename, sigmf_data_path, sizeof(sigmf_data_path),
                                      sigmf_meta_path, sizeof(sigmf_meta_path)) != 0) {
             fprintf(stderr, "Could not derive SigMF paths from %s\n", filename);
         } else {
             snprintf(sigmf_meta->data_path, sizeof(sigmf_meta->data_path), "%s", sigmf_data_path);
             snprintf(sigmf_meta->meta_path, sizeof(sigmf_meta->meta_path), "%s", sigmf_meta_path);
+            if (sigmf_meta->annotation_count > 0) {
+                sigmf_meta->annotations[0].sample_start = 0;
+                sigmf_meta->annotations[0].sample_count = total_samples;
+                sigmf_meta->annotations[0].has_sample_count = total_samples > 0;
+            }
             if (first_timestamp != 0) {
                 sigmf_datetime_from_ns(first_timestamp, sigmf_meta->datetime, sizeof(sigmf_meta->datetime));
                 sigmf_meta->has_datetime = true;
@@ -291,6 +300,8 @@ int main(int argc, char **argv)
         { "description", required_argument, NULL, 6 },
         { "author", required_argument, NULL, 7 },
         { "hw", required_argument, NULL, 8 },
+        { "annotation-label", required_argument, NULL, 9 },
+        { "annotation-comment", required_argument, NULL, 10 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -363,6 +374,14 @@ int main(int argc, char **argv)
             break;
         case 8:
             snprintf(sigmf_meta.hw, sizeof(sigmf_meta.hw), "%s", optarg);
+            break;
+        case 9:
+            sigmf_meta.annotation_count = 1;
+            snprintf(sigmf_meta.annotations[0].label, sizeof(sigmf_meta.annotations[0].label), "%s", optarg);
+            break;
+        case 10:
+            sigmf_meta.annotation_count = 1;
+            snprintf(sigmf_meta.annotations[0].comment, sizeof(sigmf_meta.annotations[0].comment), "%s", optarg);
             break;
         default:
             exit(1);
