@@ -57,8 +57,13 @@ static void help(void)
            "      --description TXT SigMF description metadata.\n"
            "      --author TXT      SigMF author metadata.\n"
            "      --hw TXT          SigMF hardware metadata.\n"
-           "      --annotation-label TXT   SigMF annotation label.\n"
-           "      --annotation-comment TXT SigMF annotation comment.\n"
+           "      --annotation-label TXT     SigMF annotation label.\n"
+           "      --annotation-comment TXT   SigMF annotation comment.\n"
+           "      --annotation-start N       SigMF annotation start sample.\n"
+           "      --annotation-count N       SigMF annotation sample count.\n"
+           "      --annotation-freq-low HZ   SigMF annotation lower frequency edge.\n"
+           "      --annotation-freq-high HZ  SigMF annotation upper frequency edge.\n"
+           "      --annotation-add           Finalize current SigMF annotation.\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
@@ -66,6 +71,57 @@ static void help(void)
            "  filename     Output file, or '-' for stdout.\n"
            "  size         Optional byte limit to record.\n");
     exit(1);
+}
+
+static bool sigmf_annotation_has_fields(const struct m2sdr_sigmf_annotation *ann)
+{
+    if (!ann)
+        return false;
+    return ann->label[0] || ann->comment[0] || ann->sample_start != 0 || ann->has_sample_count ||
+           ann->has_freq_lower_edge || ann->has_freq_upper_edge;
+}
+
+static int sigmf_append_annotation(struct m2sdr_sigmf_meta *meta, const struct m2sdr_sigmf_annotation *ann)
+{
+    if (!meta || !ann || !sigmf_annotation_has_fields(ann))
+        return -1;
+    if (meta->annotation_count >= M2SDR_SIGMF_MAX_ANNOTATIONS)
+        return -1;
+    meta->annotations[meta->annotation_count++] = *ann;
+    return 0;
+}
+
+static int sigmf_finalize_pending_annotation(struct m2sdr_sigmf_meta *meta,
+                                             struct m2sdr_sigmf_annotation *pending)
+{
+    if (!sigmf_annotation_has_fields(pending))
+        return 0;
+    if (sigmf_append_annotation(meta, pending) != 0)
+        return -1;
+    memset(pending, 0, sizeof(*pending));
+    return 0;
+}
+
+static void sigmf_finalize_annotation_ranges(struct m2sdr_sigmf_meta *meta, uint64_t total_samples)
+{
+    unsigned i;
+
+    if (!meta)
+        return;
+
+    for (i = 0; i < meta->annotation_count; i++) {
+        struct m2sdr_sigmf_annotation *ann = &meta->annotations[i];
+
+        if (ann->has_sample_count)
+            continue;
+        if (ann->sample_start >= total_samples) {
+            ann->sample_count = 0;
+            ann->has_sample_count = true;
+            continue;
+        }
+        ann->sample_count = total_samples - ann->sample_start;
+        ann->has_sample_count = true;
+    }
 }
 
 static void sigmf_datetime_from_ns(uint64_t ts_ns, char *buf, size_t buf_len)
@@ -255,11 +311,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         } else {
             snprintf(sigmf_meta->data_path, sizeof(sigmf_meta->data_path), "%s", sigmf_data_path);
             snprintf(sigmf_meta->meta_path, sizeof(sigmf_meta->meta_path), "%s", sigmf_meta_path);
-            if (sigmf_meta->annotation_count > 0) {
-                sigmf_meta->annotations[0].sample_start = 0;
-                sigmf_meta->annotations[0].sample_count = total_samples;
-                sigmf_meta->annotations[0].has_sample_count = total_samples > 0;
-            }
+            sigmf_finalize_annotation_ranges(sigmf_meta, total_samples);
             if (first_timestamp != 0) {
                 sigmf_datetime_from_ns(first_timestamp, sigmf_meta->datetime, sizeof(sigmf_meta->datetime));
                 sigmf_meta->has_datetime = true;
@@ -282,6 +334,7 @@ int main(int argc, char **argv)
     static uint8_t strip_header = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     struct m2sdr_sigmf_meta sigmf_meta;
+    struct m2sdr_sigmf_annotation pending_annotation;
     struct m2sdr_cli_device cli_dev;
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -302,6 +355,11 @@ int main(int argc, char **argv)
         { "hw", required_argument, NULL, 8 },
         { "annotation-label", required_argument, NULL, 9 },
         { "annotation-comment", required_argument, NULL, 10 },
+        { "annotation-start", required_argument, NULL, 11 },
+        { "annotation-count", required_argument, NULL, 12 },
+        { "annotation-freq-low", required_argument, NULL, 13 },
+        { "annotation-freq-high", required_argument, NULL, 14 },
+        { "annotation-add", no_argument, NULL, 15 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -310,6 +368,7 @@ int main(int argc, char **argv)
     signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
     memset(&sigmf_meta, 0, sizeof(sigmf_meta));
+    memset(&pending_annotation, 0, sizeof(pending_annotation));
     snprintf(sigmf_meta.recorder, sizeof(sigmf_meta.recorder), "m2sdr_record");
 
     for (;;) {
@@ -376,16 +435,40 @@ int main(int argc, char **argv)
             snprintf(sigmf_meta.hw, sizeof(sigmf_meta.hw), "%s", optarg);
             break;
         case 9:
-            sigmf_meta.annotation_count = 1;
-            snprintf(sigmf_meta.annotations[0].label, sizeof(sigmf_meta.annotations[0].label), "%s", optarg);
+            snprintf(pending_annotation.label, sizeof(pending_annotation.label), "%s", optarg);
             break;
         case 10:
-            sigmf_meta.annotation_count = 1;
-            snprintf(sigmf_meta.annotations[0].comment, sizeof(sigmf_meta.annotations[0].comment), "%s", optarg);
+            snprintf(pending_annotation.comment, sizeof(pending_annotation.comment), "%s", optarg);
+            break;
+        case 11:
+            pending_annotation.sample_start = strtoull(optarg, NULL, 0);
+            break;
+        case 12:
+            pending_annotation.sample_count = strtoull(optarg, NULL, 0);
+            pending_annotation.has_sample_count = true;
+            break;
+        case 13:
+            pending_annotation.freq_lower_edge = atof(optarg);
+            pending_annotation.has_freq_lower_edge = true;
+            break;
+        case 14:
+            pending_annotation.freq_upper_edge = atof(optarg);
+            pending_annotation.has_freq_upper_edge = true;
+            break;
+        case 15:
+            if (sigmf_finalize_pending_annotation(&sigmf_meta, &pending_annotation) != 0) {
+                fprintf(stderr, "Could not append SigMF annotation\n");
+                return 1;
+            }
             break;
         default:
             exit(1);
         }
+    }
+
+    if (sigmf_finalize_pending_annotation(&sigmf_meta, &pending_annotation) != 0) {
+        fprintf(stderr, "Could not append SigMF annotation\n");
+        return 1;
     }
 
     const char *filename = NULL;
