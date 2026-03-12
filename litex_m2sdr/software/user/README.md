@@ -191,6 +191,7 @@ m2sdr_play [options] filename [loops]
 - **loops**: Number of times to loop playback (default=1).
 
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
 
 Example usage:
 ~~~~
@@ -242,6 +243,7 @@ m2sdr_check [options] filename
 ~~~~
 
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
 
 **Relevant options**:
 - `--nchannels`

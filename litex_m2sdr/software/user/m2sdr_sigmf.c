@@ -17,6 +17,29 @@ static int has_suffix(const char *path, const char *suffix)
     return strcmp(path + path_len - suffix_len, suffix) == 0;
 }
 
+static int is_absolute_path(const char *path)
+{
+    return path && path[0] == '/';
+}
+
+static void dirname_of(const char *path, char *out, size_t out_len)
+{
+    const char *slash;
+
+    if (!path || !out || out_len == 0)
+        return;
+    slash = strrchr(path, '/');
+    if (!slash) {
+        snprintf(out, out_len, ".");
+        return;
+    }
+    if (slash == path) {
+        snprintf(out, out_len, "/");
+        return;
+    }
+    snprintf(out, out_len, "%.*s", (int)(slash - path), path);
+}
+
 const char *m2sdr_sigmf_datatype_from_format(enum m2sdr_format format)
 {
     switch (format) {
@@ -271,6 +294,8 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     FILE *f;
     long len;
     char *buf = NULL;
+    char dataset_path[1024] = {0};
+    char meta_dir[1024] = {0};
 
     if (!input_path || !meta)
         return -1;
@@ -305,6 +330,7 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     fclose(f);
 
     json_extract_string(buf, "core:datatype", meta->datatype, sizeof(meta->datatype));
+    json_extract_string(buf, "core:dataset", dataset_path, sizeof(dataset_path));
     json_extract_string(buf, "core:description", meta->description, sizeof(meta->description));
     json_extract_string(buf, "core:author", meta->author, sizeof(meta->author));
     json_extract_string(buf, "core:hw", meta->hw, sizeof(meta->hw));
@@ -323,6 +349,25 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     if (meta->datatype[0] == '\0') {
         free(buf);
         return -1;
+    }
+    if (meta->has_num_channels && meta->num_channels == 0) {
+        free(buf);
+        return -1;
+    }
+    if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
+        free(buf);
+        return -1;
+    }
+    if (dataset_path[0]) {
+        if (is_absolute_path(dataset_path)) {
+            snprintf(meta->data_path, sizeof(meta->data_path), "%s", dataset_path);
+        } else {
+            dirname_of(meta->meta_path, meta_dir, sizeof(meta_dir));
+            if (strcmp(meta_dir, ".") == 0)
+                snprintf(meta->data_path, sizeof(meta->data_path), "%s", dataset_path);
+            else
+                snprintf(meta->data_path, sizeof(meta->data_path), "%s/%s", meta_dir, dataset_path);
+        }
     }
     free(buf);
     return 0;
