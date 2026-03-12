@@ -16,7 +16,7 @@
  *     ffmpeg -i input.mp3 input.wav
  *
  * Usage Example:
- *     ./m2sdr_rf -samplerate 1e6 -tx_freq 100e6 -tx_gain -10 -chan 1t1r
+ *     ./m2sdr_rf -samplerate 1e6 -tx_freq 100e6 -tx-att 10 -chan 1t1r
  *     ./m2sdr_fm_tx -s 1000000 -b 12 music.wav - | ./m2sdr_play -
  *     ffmpeg -i music.mp3 -f s16le -ac 1 -ar 44100 - | ./m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 1 -f 44100 - - | ./m2sdr_play -
  *

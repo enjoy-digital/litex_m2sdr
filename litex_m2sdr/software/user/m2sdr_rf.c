@@ -57,7 +57,8 @@ static void help(void)
            "      --bandwidth HZ     Set the RF bandwidth in Hz (default: %d).\n"
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
-           "      --tx-gain DB       Set the TX gain in dB (default: %d).\n"
+           "      --tx-att DB        Set TX attenuation in dB (preferred, positive, default: %d).\n"
+           "      --tx-gain DB       Legacy native TX gain in dB (typically negative attenuation, default: %d).\n"
            "      --rx-gain DB       Set both RX gains in dB (default: %d).\n"
            "      --rx-gain1 DB      Set RX gain 1 in dB (default: %d).\n"
            "      --rx-gain2 DB      Set RX gain 2 in dB (default: %d).\n"
@@ -71,6 +72,7 @@ static void help(void)
            DEFAULT_BANDWIDTH,
            DEFAULT_TX_FREQ,
            DEFAULT_RX_FREQ,
+           -DEFAULT_TX_GAIN,
            DEFAULT_TX_GAIN,
            DEFAULT_RX_GAIN,
            DEFAULT_RX_GAIN,
@@ -112,6 +114,8 @@ int main(int argc, char **argv)
         { "rx_freq", required_argument, NULL, 10 },
         { "tx-gain", required_argument, NULL, 11 },
         { "tx_gain", required_argument, NULL, 11 },
+        { "tx-att", required_argument, NULL, 20 },
+        { "tx_att", required_argument, NULL, 20 },
         { "rx-gain", required_argument, NULL, 12 },
         { "rx_gain", required_argument, NULL, 12 },
         { "rx-gain1", required_argument, NULL, 13 },
@@ -204,6 +208,9 @@ int main(int argc, char **argv)
             break;
         case 11:
             cfg.tx_gain = strtoll(optarg, NULL, 0);
+            break;
+        case 20:
+            cfg.tx_gain = -strtoll(optarg, NULL, 0);
             break;
         case 12:
             cfg.rx_gain1 = strtoll(optarg, NULL, 0);

@@ -44,7 +44,7 @@
 
 #define DEFAULT_SCAN_SAMPLERATE_HZ 61440000U
 #define DEFAULT_SCAN_BANDWIDTH_HZ  56000000U
-#define SCAN_TX_GAIN_DB    -30
+#define SCAN_TX_ATT_DB      30
 #define DEFAULT_START_FREQ_HZ 2300000000LL
 #define DEFAULT_STOP_FREQ_HZ  2500000000LL
 #define DEFAULT_RX_GAIN_DB    50
@@ -2366,7 +2366,7 @@ static bool m2sdr_rfic_init(struct scan_state *s)
 
     m2sdr_set_sample_rate(g_dev, s->sample_rate_hz);
     m2sdr_set_bandwidth(g_dev, s->rf_bandwidth_hz);
-    m2sdr_set_tx_gain(g_dev, SCAN_TX_GAIN_DB);
+    m2sdr_set_tx_att(g_dev, SCAN_TX_ATT_DB);
     apply_rx_gain_request(s, s->rx_gain);
 
     m2sdr_set_tx_frequency(g_dev, (s->scan_start_hz + s->scan_stop_hz) / 2);

@@ -34,9 +34,15 @@ int main(int argc, char **argv)
     cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
     cfg.clock_source   = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg.tx_freq        = 100000000; /* 100 MHz */
-    cfg.tx_gain        = -5;
+    cfg.tx_gain        = 0; /* Leave the compatibility field neutral; prefer m2sdr_set_tx_att(). */
     if (m2sdr_apply_config(dev, &cfg) != 0) {
         fprintf(stderr, "m2sdr_apply_config failed\n");
+        m2sdr_free_buffer(buf);
+        m2sdr_close(dev);
+        return 1;
+    }
+    if (m2sdr_set_tx_att(dev, 5) != 0) {
+        fprintf(stderr, "m2sdr_set_tx_att failed\n");
         m2sdr_free_buffer(buf);
         m2sdr_close(dev);
         return 1;

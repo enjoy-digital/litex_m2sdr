@@ -723,3 +723,11 @@ int m2sdr_set_tx_gain(struct m2sdr_dev *dev, int64_t gain)
 {
     return m2sdr_set_gain(dev, M2SDR_TX, gain);
 }
+
+/* Preferred TX attenuation wrapper using positive dB values. */
+int m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db)
+{
+    if (attenuation_db < 0 || attenuation_db > -M2SDR_TX_GAIN_MIN_DB)
+        return M2SDR_ERR_RANGE;
+    return m2sdr_set_gain(dev, M2SDR_TX, -attenuation_db);
+}

@@ -36,7 +36,8 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - `--device <dev-id>` selects an explicit device such as `pcie:/dev/m2sdr0` or `eth:192.168.1.50:1234`.
 - `-c` / `--device-num` remains the short PCIe shorthand for `/dev/m2sdrN`.
 - `--ip` and `--port` remain available on Etherbone-capable tools.
-- Hyphenated long options are preferred: use `--sample-rate`, `--rx-freq`, `--tx-freq`, `--rx-gain`, `--tx-gain`, `--refclk-freq`, etc.
+- Hyphenated long options are preferred: use `--sample-rate`, `--rx-freq`, `--tx-freq`, `--rx-gain`, `--tx-att`, `--refclk-freq`, etc.
+- TX control now prefers positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR. Legacy native `--tx-gain` is still accepted as a compatibility alias.
 - Streaming-oriented tools that support both SC16 and SC8 expose `--format sc16|sc8`. Older `--8bit` / `-8` forms are kept as compatibility aliases where applicable.
 - Some tools still accept `-z` / `--zero-copy` for compatibility, but the current sync API hides transport-specific zero-copy behavior.
 
@@ -113,7 +114,8 @@ m2sdr_rf [options] cmd [args...]
 - `--bandwidth bw` (default=`56000000`)
 - `--tx-freq freq` (default=`2400000000`)
 - `--rx-freq freq` (default=`2400000000`)
-- `--tx-gain gain` (default=`-20` dB)
+- `--tx-att att` (default=`20` dB, preferred positive TX attenuation)
+- `--tx-gain gain` legacy compatibility alias for native/libm2sdr TX control
 - `--rx-gain gain` (default=`0` dB)
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)
@@ -125,7 +127,7 @@ Example usage:
            --bandwidth=20000000 \\
            --tx-freq=2400000000 \\
            --rx-freq=2400000000 \\
-           --tx-gain=-10 \\
+           --tx-att=10 \\
            --rx-gain=10
 ~~~~
 
@@ -477,7 +479,7 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **record**
               --bandwidth=40000000 \\
               --tx-freq=2400000000 \\
               --rx-freq=2400000000 \\
-              --tx-gain=-10 \\
+              --tx-att=10 \\
               --rx-gain=10 \\
               --loopback=1
    ~~~~

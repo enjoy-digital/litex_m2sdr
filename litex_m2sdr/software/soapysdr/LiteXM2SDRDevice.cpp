@@ -976,8 +976,8 @@ void SoapyLiteXM2SDR::setGain(
 
     /* TX */
     if (direction == SOAPY_SDR_TX) {
-        _tx_stream.gain[channel] = value;
         double   att_db  = (value >= 0.0) ? value : -value;
+        _tx_stream.gain[channel] = att_db;
         /* Clarify interpretation */
         if (value >= 0.0) {
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, att_db);
@@ -1014,7 +1014,7 @@ void SoapyLiteXM2SDR::setGain(
     if (direction == SOAPY_SDR_TX) {
         if (name == "ATT") {
             /* Positive attenuation in dB. */
-            _tx_stream.gain[channel] = -value;
+            _tx_stream.gain[channel] = value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
             int rc = m2sdr_set_gain(_dev, M2SDR_TX, -value);
             if (rc != 0) {
@@ -1024,7 +1024,7 @@ void SoapyLiteXM2SDR::setGain(
         }
         if (name == "GAIN") {
             /* Negative gain in dB. */
-            _tx_stream.gain[channel] = value;
+            _tx_stream.gain[channel] = -value;
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "TX ch%zu: GAIN is deprecated; use ATT with positive dB", channel);
             int rc = m2sdr_set_gain(_dev, M2SDR_TX, value);
@@ -1058,8 +1058,9 @@ double SoapyLiteXM2SDR::getGain(
 
     /* TX */
     if (direction == SOAPY_SDR_TX) {
-        ad9361_get_tx_attenuation(ad9361_phy, channel, (uint32_t *) &gain);
-        gain = -gain/1000;
+        uint32_t atten_mdb = 0;
+        ad9361_get_tx_attenuation(ad9361_phy, channel, &atten_mdb);
+        gain = (int32_t)(atten_mdb / 1000);
     }
 
     /* RX */
@@ -1103,7 +1104,7 @@ SoapySDR::Range SoapyLiteXM2SDR::getGainRange(
 
     /* TX */
     if (direction == SOAPY_SDR_TX)
-        return(SoapySDR::Range(-89, 0));
+        return(SoapySDR::Range(0, 89));
 
     /* RX */
     if (direction == SOAPY_SDR_RX)

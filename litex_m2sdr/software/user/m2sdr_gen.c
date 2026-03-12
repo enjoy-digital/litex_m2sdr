@@ -13,10 +13,13 @@
  * Note: Configure the RF settings first using m2sdr_rf before running this utility.
  *
  * Usage Example:
- *     ./m2sdr_rf -samplerate 30.72e6 -tx_freq 100e6 -tx_gain -10
+ *     ./m2sdr_rf -samplerate 30.72e6 -tx_freq 100e6 -tx-att 10
  *     ./m2sdr_gen -s 30.72e6 -t tone -f 1e6 -a 1.0
  *     ./m2sdr_gen -s 30.72e6 -t white -a 1.0
  *     ./m2sdr_gen -s 30.72e6 -t prbs -a 1.0
+ *
+ * Native m2sdr TX gain uses the libm2sdr convention (typically negative values
+ * for TX attenuation). The SoapySDR path instead prefers positive TX ATT values.
  *
  */
 
