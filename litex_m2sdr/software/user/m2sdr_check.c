@@ -738,15 +738,29 @@ static void draw_stats_panel(const struct check_data *data, int channel)
     igSeparator();
     igText("Format            : %s (%d-bit effective)", data->sample_bytes == 1 ? "sc8" : "sc16", data->nbits);
     if (data->sigmf_loaded) {
-        igText("SigMF datatype    : %s", data->sigmf_meta.datatype);
+        igSeparator();
+        igText("SigMF");
+        igText("Meta path         : %s", data->sigmf_meta.meta_path);
+        igText("Data path         : %s", data->sigmf_meta.data_path);
+        igText("Datatype          : %s", data->sigmf_meta.datatype);
+        if (data->sigmf_meta.has_sample_rate)
+            igText("Sample rate       : %.6f MSPS", data->sigmf_meta.sample_rate / 1e6);
+        if (data->sigmf_meta.has_num_channels)
+            igText("Num channels      : %u", data->sigmf_meta.num_channels);
         if (data->sigmf_meta.has_center_freq)
-            igText("SigMF center freq : %.6f MHz", data->sigmf_meta.center_freq / 1e6);
-        if (data->sigmf_meta.description[0])
-            igTextWrapped("SigMF description : %s", data->sigmf_meta.description);
+            igText("Center freq       : %.6f MHz", data->sigmf_meta.center_freq / 1e6);
+        if (data->sigmf_meta.has_datetime)
+            igText("Datetime          : %s", data->sigmf_meta.datetime);
+        if (data->sigmf_meta.recorder[0])
+            igText("Recorder          : %s", data->sigmf_meta.recorder);
         if (data->sigmf_meta.author[0])
-            igText("SigMF author      : %s", data->sigmf_meta.author);
+            igText("Author            : %s", data->sigmf_meta.author);
         if (data->sigmf_meta.hw[0])
-            igText("SigMF hw          : %s", data->sigmf_meta.hw);
+            igText("Hardware          : %s", data->sigmf_meta.hw);
+        if (data->sigmf_meta.description[0]) {
+            igText("Description");
+            igTextWrapped("%s", data->sigmf_meta.description);
+        }
     }
     if (data->frame_header) {
         igText("Headers seen      : %zu", data->headers_seen);
