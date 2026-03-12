@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 
 #include "m2sdr_sigmf.h"
+#include "m2sdr_json.h"
 
-#include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -230,248 +230,97 @@ int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
     return 0;
 }
 
-static const char *json_find_key(const char *buf, const char *key)
+static void sigmf_read_annotation(const char *buf,
+                                  const struct m2sdr_json_token *tokens,
+                                  int count,
+                                  int object_index,
+                                  struct m2sdr_sigmf_annotation *ann)
 {
-    char pattern[128];
+    int idx;
 
-    if (snprintf(pattern, sizeof(pattern), "\"%s\"", key) >= (int)sizeof(pattern))
-        return NULL;
-    return strstr(buf, pattern);
-}
-
-static int json_extract_string(const char *buf, const char *key, char *out, size_t out_len)
-{
-    const char *p = json_find_key(buf, key);
-    size_t i = 0;
-
-    if (!p || !out || out_len == 0)
-        return -1;
-    p = strchr(p, ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-    if (*p != '"')
-        return -1;
-    p++;
-    while (*p && *p != '"' && i + 1 < out_len) {
-        if (*p == '\\' && p[1]) {
-            p++;
-            switch (*p) {
-            case 'n': out[i++] = '\n'; break;
-            case 'r': out[i++] = '\r'; break;
-            case 't': out[i++] = '\t'; break;
-            default:  out[i++] = *p; break;
-            }
-            p++;
-            continue;
-        }
-        out[i++] = *p++;
-    }
-    out[i] = '\0';
-    return (*p == '"') ? 0 : -1;
-}
-
-static int json_extract_double(const char *buf, const char *key, double *value)
-{
-    const char *p = json_find_key(buf, key);
-    char *end = NULL;
-
-    if (!p || !value)
-        return -1;
-    p = strchr(p, ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-    *value = strtod(p, &end);
-    return (end != p) ? 0 : -1;
-}
-
-static int json_extract_uint(const char *buf, const char *key, unsigned *value)
-{
-    const char *p = json_find_key(buf, key);
-    char *end = NULL;
-    unsigned long v;
-
-    if (!p || !value)
-        return -1;
-    p = strchr(p, ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-    v = strtoul(p, &end, 10);
-    if (end == p)
-        return -1;
-    *value = (unsigned)v;
-    return 0;
-}
-
-static int json_extract_u64(const char *buf, const char *key, uint64_t *value)
-{
-    const char *p = json_find_key(buf, key);
-    char *end = NULL;
-    unsigned long long v;
-
-    if (!p || !value)
-        return -1;
-    p = strchr(p, ':');
-    if (!p)
-        return -1;
-    p++;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-    v = strtoull(p, &end, 10);
-    if (end == p)
-        return -1;
-    *value = (uint64_t)v;
-    return 0;
-}
-
-static const char *json_find_array_start(const char *buf, const char *key)
-{
-    const char *p = json_find_key(buf, key);
-
-    if (!p)
-        return NULL;
-    p = strchr(p, ':');
-    if (!p)
-        return NULL;
-    p++;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-    return (*p == '[') ? p : NULL;
-}
-
-static const char *json_find_object_end(const char *start)
-{
-    int depth = 0;
-    int in_string = 0;
-    int escaped = 0;
-    const char *p = start;
-
-    for (; *p; p++) {
-        char c = *p;
-
-        if (in_string) {
-            if (escaped) {
-                escaped = 0;
-            } else if (c == '\\') {
-                escaped = 1;
-            } else if (c == '"') {
-                in_string = 0;
-            }
-            continue;
-        }
-
-        if (c == '"') {
-            in_string = 1;
-        } else if (c == '{') {
-            depth++;
-        } else if (c == '}') {
-            depth--;
-            if (depth == 0)
-                return p;
-        }
-    }
-    return NULL;
-}
-
-static void json_parse_annotations(const char *buf, struct m2sdr_sigmf_meta *meta)
-{
-    const char *p = json_find_array_start(buf, "annotations");
-
-    if (!p || !meta)
+    if (!buf || !tokens || !ann || object_index < 0 || object_index >= count)
         return;
-    p++;
-    while (*p && meta->annotation_count < M2SDR_SIGMF_MAX_ANNOTATIONS) {
-        const char *obj_end;
-        struct m2sdr_sigmf_annotation *ann;
-        char obj[1024];
-        size_t obj_len;
 
-        while (*p && (isspace((unsigned char)*p) || *p == ','))
-            p++;
-        if (*p == ']' || *p == '\0')
-            break;
-        if (*p != '{')
-            break;
+    memset(ann, 0, sizeof(*ann));
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:sample_start");
+    if (idx >= 0)
+        m2sdr_json_token_tou64(buf, &tokens[idx], &ann->sample_start);
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:sample_count");
+    if (idx >= 0 && m2sdr_json_token_tou64(buf, &tokens[idx], &ann->sample_count) == 0)
+        ann->has_sample_count = true;
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:freq_lower_edge");
+    if (idx >= 0 && m2sdr_json_token_todouble(buf, &tokens[idx], &ann->freq_lower_edge) == 0)
+        ann->has_freq_lower_edge = true;
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:freq_upper_edge");
+    if (idx >= 0 && m2sdr_json_token_todouble(buf, &tokens[idx], &ann->freq_upper_edge) == 0)
+        ann->has_freq_upper_edge = true;
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:label");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], ann->label, sizeof(ann->label));
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:comment");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], ann->comment, sizeof(ann->comment));
+}
 
-        obj_end = json_find_object_end(p);
-        if (!obj_end)
-            break;
-        obj_len = (size_t)(obj_end - p + 1);
-        if (obj_len >= sizeof(obj))
-            obj_len = sizeof(obj) - 1;
-        memcpy(obj, p, obj_len);
-        obj[obj_len] = '\0';
+static void sigmf_read_capture(const char *buf,
+                               const struct m2sdr_json_token *tokens,
+                               int count,
+                               int object_index,
+                               struct m2sdr_sigmf_capture *cap)
+{
+    int idx;
 
-        ann = &meta->annotations[meta->annotation_count];
-        memset(ann, 0, sizeof(*ann));
-        if (json_extract_u64(obj, "core:sample_start", &ann->sample_start) != 0) {
-            p = obj_end + 1;
-            continue;
+    if (!buf || !tokens || !cap || object_index < 0 || object_index >= count)
+        return;
+
+    memset(cap, 0, sizeof(*cap));
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:sample_start");
+    if (idx >= 0)
+        m2sdr_json_token_tou64(buf, &tokens[idx], &cap->sample_start);
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:frequency");
+    if (idx >= 0 && m2sdr_json_token_todouble(buf, &tokens[idx], &cap->center_freq) == 0)
+        cap->has_center_freq = true;
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:datetime");
+    if (idx >= 0 && m2sdr_json_token_tostr(buf, &tokens[idx], cap->datetime, sizeof(cap->datetime)) == 0)
+        cap->has_datetime = true;
+    idx = m2sdr_json_object_get(buf, tokens, count, object_index, "core:header_bytes");
+    if (idx >= 0 && m2sdr_json_token_touint(buf, &tokens[idx], &cap->header_bytes) == 0)
+        cap->has_header_bytes = true;
+}
+
+static void sigmf_read_capture_array(const char *buf,
+                                     const struct m2sdr_json_token *tokens,
+                                     int count,
+                                     int array_index,
+                                     struct m2sdr_sigmf_meta *meta)
+{
+    int i = array_index + 1;
+
+    while (i < count && tokens[i].start < tokens[array_index].end &&
+           meta->capture_count < M2SDR_SIGMF_MAX_CAPTURES) {
+        if (tokens[i].parent == array_index && tokens[i].type == M2SDR_JSON_OBJECT) {
+            sigmf_read_capture(buf, tokens, count, i, &meta->captures[meta->capture_count]);
+            meta->capture_count++;
         }
-        if (json_extract_u64(obj, "core:sample_count", &ann->sample_count) == 0)
-            ann->has_sample_count = true;
-        if (json_extract_double(obj, "core:freq_lower_edge", &ann->freq_lower_edge) == 0)
-            ann->has_freq_lower_edge = true;
-        if (json_extract_double(obj, "core:freq_upper_edge", &ann->freq_upper_edge) == 0)
-            ann->has_freq_upper_edge = true;
-        json_extract_string(obj, "core:label", ann->label, sizeof(ann->label));
-        json_extract_string(obj, "core:comment", ann->comment, sizeof(ann->comment));
-        meta->annotation_count++;
-        p = obj_end + 1;
+        i = m2sdr_json_skip(tokens, count, i);
     }
 }
 
-static void json_parse_captures(const char *buf, struct m2sdr_sigmf_meta *meta)
+static void sigmf_read_annotation_array(const char *buf,
+                                        const struct m2sdr_json_token *tokens,
+                                        int count,
+                                        int array_index,
+                                        struct m2sdr_sigmf_meta *meta)
 {
-    const char *p = json_find_array_start(buf, "captures");
+    int i = array_index + 1;
 
-    if (!p || !meta)
-        return;
-    p++;
-    while (*p && meta->capture_count < M2SDR_SIGMF_MAX_CAPTURES) {
-        const char *obj_end;
-        struct m2sdr_sigmf_capture *cap;
-        char obj[1024];
-        size_t obj_len;
-
-        while (*p && (isspace((unsigned char)*p) || *p == ','))
-            p++;
-        if (*p == ']' || *p == '\0')
-            break;
-        if (*p != '{')
-            break;
-
-        obj_end = json_find_object_end(p);
-        if (!obj_end)
-            break;
-        obj_len = (size_t)(obj_end - p + 1);
-        if (obj_len >= sizeof(obj))
-            obj_len = sizeof(obj) - 1;
-        memcpy(obj, p, obj_len);
-        obj[obj_len] = '\0';
-
-        cap = &meta->captures[meta->capture_count];
-        memset(cap, 0, sizeof(*cap));
-        if (json_extract_u64(obj, "core:sample_start", &cap->sample_start) != 0) {
-            p = obj_end + 1;
-            continue;
+    while (i < count && tokens[i].start < tokens[array_index].end &&
+           meta->annotation_count < M2SDR_SIGMF_MAX_ANNOTATIONS) {
+        if (tokens[i].parent == array_index && tokens[i].type == M2SDR_JSON_OBJECT) {
+            sigmf_read_annotation(buf, tokens, count, i, &meta->annotations[meta->annotation_count]);
+            meta->annotation_count++;
         }
-        if (json_extract_double(obj, "core:frequency", &cap->center_freq) == 0)
-            cap->has_center_freq = true;
-        if (json_extract_string(obj, "core:datetime", cap->datetime, sizeof(cap->datetime)) == 0)
-            cap->has_datetime = true;
-        if (json_extract_uint(obj, "core:header_bytes", &cap->header_bytes) == 0)
-            cap->has_header_bytes = true;
-        meta->capture_count++;
-        p = obj_end + 1;
+        i = m2sdr_json_skip(tokens, count, i);
     }
 }
 
@@ -480,8 +329,16 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     FILE *f;
     long len;
     char *buf = NULL;
+    struct m2sdr_json_parser parser;
+    struct m2sdr_json_token *tokens = NULL;
+    int token_count;
     char dataset_path[1024] = {0};
     char meta_dir[1024] = {0};
+    int root_index = 0;
+    int global_index;
+    int captures_index;
+    int annotations_index;
+    int idx;
 
     if (!input_path || !meta)
         return -1;
@@ -515,28 +372,70 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     }
     fclose(f);
 
-    json_extract_string(buf, "core:datatype", meta->datatype, sizeof(meta->datatype));
-    json_extract_string(buf, "core:dataset", dataset_path, sizeof(dataset_path));
-    json_extract_string(buf, "core:description", meta->description, sizeof(meta->description));
-    json_extract_string(buf, "core:author", meta->author, sizeof(meta->author));
-    json_extract_string(buf, "core:hw", meta->hw, sizeof(meta->hw));
-    json_extract_string(buf, "core:recorder", meta->recorder, sizeof(meta->recorder));
-    if (json_extract_double(buf, "core:sample_rate", &meta->sample_rate) == 0)
+    tokens = calloc(512u, sizeof(*tokens));
+    if (!tokens) {
+        free(buf);
+        return -1;
+    }
+    m2sdr_json_parser_init(&parser);
+    token_count = m2sdr_json_parse(&parser, buf, (size_t)len, tokens, 512u);
+    if (token_count <= 0 || tokens[root_index].type != M2SDR_JSON_OBJECT) {
+        free(tokens);
+        free(buf);
+        return -1;
+    }
+
+    global_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "global");
+    captures_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "captures");
+    annotations_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "annotations");
+    if (global_index < 0 || tokens[global_index].type != M2SDR_JSON_OBJECT) {
+        free(tokens);
+        free(buf);
+        return -1;
+    }
+
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:datatype");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], meta->datatype, sizeof(meta->datatype));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:dataset");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], dataset_path, sizeof(dataset_path));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:description");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], meta->description, sizeof(meta->description));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:author");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], meta->author, sizeof(meta->author));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:hw");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], meta->hw, sizeof(meta->hw));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:recorder");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(buf, &tokens[idx], meta->recorder, sizeof(meta->recorder));
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:sample_rate");
+    if (idx >= 0 && m2sdr_json_token_todouble(buf, &tokens[idx], &meta->sample_rate) == 0)
         meta->has_sample_rate = true;
-    if (json_extract_uint(buf, "core:num_channels", &meta->num_channels) == 0)
+    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:num_channels");
+    if (idx >= 0 && m2sdr_json_token_touint(buf, &tokens[idx], &meta->num_channels) == 0)
         meta->has_num_channels = true;
-    json_parse_captures(buf, meta);
-    json_parse_annotations(buf, meta);
+
+    if (captures_index >= 0 && tokens[captures_index].type == M2SDR_JSON_ARRAY)
+        sigmf_read_capture_array(buf, tokens, token_count, captures_index, meta);
+    if (annotations_index >= 0 && tokens[annotations_index].type == M2SDR_JSON_ARRAY)
+        sigmf_read_annotation_array(buf, tokens, token_count, annotations_index, meta);
 
     if (meta->datatype[0] == '\0') {
+        free(tokens);
         free(buf);
         return -1;
     }
     if (meta->has_num_channels && meta->num_channels == 0) {
+        free(tokens);
         free(buf);
         return -1;
     }
     if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
+        free(tokens);
         free(buf);
         return -1;
     }
@@ -566,6 +465,7 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
                 snprintf(meta->data_path, sizeof(meta->data_path), "%s/%s", meta_dir, dataset_path);
         }
     }
+    free(tokens);
     free(buf);
     return 0;
 }

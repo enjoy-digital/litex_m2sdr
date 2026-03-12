@@ -49,6 +49,7 @@ PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
+M2SDR_SIGMF_OBJS = m2sdr_sigmf.o m2sdr_json.o
 TEST_PROGS = test_libm2sdr
 
 LIBM2SDR_OBJS = \
@@ -146,13 +147,13 @@ m2sdr_rf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_rf.o \
 	ad9361/ad9361.o ad9361/ad9361_api.o ad9361/ad9361_conv.o ad9361/util.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm2sdr -llitepcie
 
-m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_play.o m2sdr_sigmf.o
+m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_play.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_record.o m2sdr_sigmf.o
+m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_record.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o m2sdr_sigmf.o
+m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_gpio.o
@@ -167,7 +168,7 @@ m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_
 endif
 
 ifeq ($(HAVE_SDL2),1)
-m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o m2sdr_sigmf.o $(M2SDR_IMGUI_OBJS)
+m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_SIGMF_OBJS) $(M2SDR_IMGUI_OBJS)
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
@@ -186,13 +187,13 @@ m2sdr_gen: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_gen.o
 m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_gpio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_play.o m2sdr_sigmf.o
+m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_play.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_record.o m2sdr_sigmf.o
+m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_record.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o m2sdr_sigmf.o
+m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_sata.o
