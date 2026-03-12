@@ -86,8 +86,23 @@ static void help(void)
     exit(1);
 }
 
+static int sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
+                                      unsigned capture_index,
+                                      uint64_t *start_sample,
+                                      uint64_t *end_sample)
+{
+    if (!meta || capture_index >= meta->capture_count || !start_sample || !end_sample)
+        return -1;
+
+    *start_sample = meta->captures[capture_index].sample_start;
+    *end_sample = (capture_index + 1u < meta->capture_count) ?
+        meta->captures[capture_index + 1u].sample_start : 0;
+    return 0;
+}
+
 static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet,
-                       uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes)
+                       uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes,
+                       uint64_t start_offset_bytes, uint64_t end_offset_bytes)
 {
     struct m2sdr_dev *dev = NULL;
     size_t frame_bytes;
@@ -140,6 +155,12 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             m2sdr_close(dev);
             exit(1);
         }
+        if (start_offset_bytes > 0 && fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
+            perror("fseeko");
+            fclose(fi);
+            m2sdr_close(dev);
+            exit(1);
+        }
         close_fi = 1;
     }
 
@@ -153,8 +174,28 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     uint8_t raw_buf[DMA_BUFFER_SIZE];
     uint8_t payload_buf[DMA_BUFFER_SIZE];
     while (keep_running) {
-        size_t len = fread(raw_buf, 1, frame_bytes, fi);
+        uint64_t current_pos;
+        size_t to_read = frame_bytes;
+        size_t len;
         struct m2sdr_metadata meta = {0};
+
+        if (close_fi && end_offset_bytes > 0) {
+            current_pos = (uint64_t)ftello(fi);
+            if (current_pos >= end_offset_bytes) {
+                current_loop++;
+                if (loops != 0 && current_loop >= loops)
+                    break;
+                if (fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
+                    perror("fseeko");
+                    break;
+                }
+                current_pos = start_offset_bytes;
+            }
+            if (current_pos + to_read > end_offset_bytes)
+                to_read = (size_t)(end_offset_bytes - current_pos);
+        }
+
+        len = fread(raw_buf, 1, to_read, fi);
         if (ferror(fi)) {
             perror("fread");
             break;
@@ -164,7 +205,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             if (loops != 0 && current_loop >= loops)
                 break;
             if (strcmp(filename, "-") != 0) {
-                fseek(fi, 0, SEEK_SET);
+                fseeko(fi, (off_t)start_offset_bytes, SEEK_SET);
                 clearerr(fi);
                 len += fread(raw_buf + len, 1, frame_bytes - len, fi);
             }
@@ -220,6 +261,8 @@ int main(int argc, char **argv)
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     unsigned capture_index = 0;
     unsigned sigmf_header_bytes = 0;
+    uint64_t start_offset_bytes = 0;
+    uint64_t end_offset_bytes = 0;
     struct m2sdr_sigmf_meta sigmf_meta;
     char resolved_filename[1024] = {0};
     struct m2sdr_cli_device cli_dev;
@@ -337,6 +380,22 @@ int main(int argc, char **argv)
         }
 
         format = sigmf_format;
+        if (capture && sigmf_header_bytes == 0) {
+            uint64_t start_sample = 0;
+            uint64_t end_sample = 0;
+            size_t sample_size = m2sdr_format_size(format);
+
+            if (sample_size == 0 ||
+                sigmf_capture_sample_range(&sigmf_meta, capture_index, &start_sample, &end_sample) != 0) {
+                fprintf(stderr, "Could not derive capture sample range from SigMF metadata\n");
+                return 1;
+            }
+            start_offset_bytes = start_sample * (uint64_t)sample_size;
+            if (end_sample > start_sample)
+                end_offset_bytes = end_sample * (uint64_t)sample_size;
+        } else if (capture && sigmf_header_bytes != 0) {
+            fprintf(stderr, "Capture-local looping is not available for headered SigMF datasets; replaying full file\n");
+        }
         snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
         filename = resolved_filename;
     }
@@ -344,6 +403,7 @@ int main(int argc, char **argv)
     if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
 
-    m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format, sigmf_header_bytes);
+    m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format,
+               sigmf_header_bytes, start_offset_bytes, end_offset_bytes);
     return 0;
 }
