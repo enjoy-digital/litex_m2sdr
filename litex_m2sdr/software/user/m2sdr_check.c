@@ -107,6 +107,10 @@ struct ui_state {
     int constellation_points;
     int fft_len_idx;
     int selected_annotation;
+    int hovered_sample;
+    bool hovered_sample_valid;
+    double hovered_freq_hz;
+    bool hovered_freq_valid;
     bool autoscale_time;
     bool autoscale_constellation;
     bool show_i;
@@ -790,6 +794,42 @@ static int annotation_overlaps_view(const struct m2sdr_sigmf_annotation *ann, in
     return (ann_start < view_end) && (ann_end > view_start);
 }
 
+static int annotation_contains_sample(const struct m2sdr_sigmf_annotation *ann, uint64_t sample)
+{
+    uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+
+    return sample >= ann->sample_start && sample < ann_end;
+}
+
+static int annotation_contains_frequency(const struct m2sdr_sigmf_annotation *ann, double freq_hz)
+{
+    if (!ann->has_freq_lower_edge || !ann->has_freq_upper_edge)
+        return 0;
+    return freq_hz >= ann->freq_lower_edge && freq_hz <= ann->freq_upper_edge;
+}
+
+static int find_annotation_at_sample(const struct check_data *data, uint64_t sample)
+{
+    unsigned i;
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        if (annotation_contains_sample(&data->sigmf_meta.annotations[i], sample))
+            return (int)i;
+    }
+    return -1;
+}
+
+static int find_annotation_at_frequency(const struct check_data *data, double freq_hz)
+{
+    unsigned i;
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        if (annotation_contains_frequency(&data->sigmf_meta.annotations[i], freq_hz))
+            return (int)i;
+    }
+    return -1;
+}
+
 static int contains_case_insensitive(const char *haystack, const char *needle)
 {
     size_t needle_len;
@@ -974,6 +1014,43 @@ static void draw_time_annotation_overlay(const struct check_data *data, const st
         if (ann->label[0])
             ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
     }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && view_end > view_start) {
+        ImVec2 mouse;
+        double ratio;
+        int hovered_idx;
+        uint64_t hovered_sample;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        hovered_sample = view_start + (uint64_t)(ratio * (double)(view_end - view_start - 1));
+        ((struct ui_state *)ui)->hovered_sample = (int)hovered_sample;
+        ((struct ui_state *)ui)->hovered_sample_valid = true;
+        hovered_idx = find_annotation_at_sample(data, hovered_sample);
+        if (hovered_idx >= 0 && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false))
+            ((struct ui_state *)ui)->selected_annotation = hovered_idx;
+        ImDrawList_AddLine(dl, (ImVec2){mouse.x, pmin.y + 12.0f}, (ImVec2){mouse.x, pmax.y - 8.0f}, 0xCCFFFFFFu, 1.0f);
+    } else {
+        ((struct ui_state *)ui)->hovered_sample_valid = false;
+    }
+
+    if (ui->hovered_sample_valid) {
+        int idx = find_annotation_at_sample(data, (uint64_t)ui->hovered_sample);
+
+        igText("Cursor sample: %d", ui->hovered_sample);
+        if (idx >= 0) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[idx];
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("annotation: %s%s%s",
+                           ann->label[0] ? ann->label : "#",
+                           ann->label[0] && ann->comment[0] ? " / " : "",
+                           ann->comment[0] ? ann->comment : "");
+        }
+    }
 }
 
 static void draw_histograms(const struct plot_cache *cache)
@@ -1058,6 +1135,43 @@ static void draw_spectrum_annotation_overlay(const struct check_data *data, cons
         if (ann->label[0])
             ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
     }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && fmax_hz > fmin_hz) {
+        ImVec2 mouse;
+        double ratio;
+        double hovered_freq_hz;
+        int hovered_idx;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        hovered_freq_hz = fmin_hz + ratio * (fmax_hz - fmin_hz);
+        ((struct ui_state *)ui)->hovered_freq_hz = hovered_freq_hz;
+        ((struct ui_state *)ui)->hovered_freq_valid = true;
+        hovered_idx = find_annotation_at_frequency(data, hovered_freq_hz);
+        if (hovered_idx >= 0 && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false))
+            ((struct ui_state *)ui)->selected_annotation = hovered_idx;
+        ImDrawList_AddLine(dl, (ImVec2){mouse.x, pmin.y + 12.0f}, (ImVec2){mouse.x, pmax.y - 8.0f}, 0xCCFFFFFFu, 1.0f);
+    } else {
+        ((struct ui_state *)ui)->hovered_freq_valid = false;
+    }
+
+    if (ui->hovered_freq_valid) {
+        int idx = find_annotation_at_frequency(data, ui->hovered_freq_hz);
+
+        igText("Cursor freq: %.6f MHz", ui->hovered_freq_hz / 1e6);
+        if (idx >= 0) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[idx];
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("annotation: %s%s%s",
+                           ann->label[0] ? ann->label : "#",
+                           ann->label[0] && ann->comment[0] ? " / " : "",
+                           ann->comment[0] ? ann->comment : "");
+        }
+    }
 }
 
 int main(int argc, char **argv)
@@ -1102,6 +1216,10 @@ int main(int argc, char **argv)
     ui.constellation_points = CHECK_DEFAULT_CONSTELLATION_POINTS;
     ui.fft_len_idx = 4;
     ui.selected_annotation = -1;
+    ui.hovered_sample = 0;
+    ui.hovered_sample_valid = false;
+    ui.hovered_freq_hz = 0.0;
+    ui.hovered_freq_valid = false;
     ui.autoscale_time = true;
     ui.autoscale_constellation = true;
     ui.show_i = true;
