@@ -25,6 +25,7 @@
 #include "cimgui/cimgui.h"
 #include "scan_ui/imgui_sdl_gl3_bridge.h"
 #include "kissfft/kiss_fft.h"
+#include "m2sdr_sigmf.h"
 
 #define igGetIO igGetIO_Nil
 
@@ -80,6 +81,9 @@ struct check_data {
     uint64_t last_timestamp;
     double avg_timestamp_step_ns;
     double rms_timestamp_jitter_ns;
+    bool sigmf_loaded;
+    unsigned active_capture_index;
+    struct m2sdr_sigmf_meta sigmf_meta;
     char source_path[1024];
 };
 
@@ -103,11 +107,19 @@ struct ui_state {
     int view_samples;
     int constellation_points;
     int fft_len_idx;
+    int selected_annotation;
+    int selected_capture;
+    int hovered_sample;
+    bool hovered_sample_valid;
+    double hovered_freq_hz;
+    bool hovered_freq_valid;
     bool autoscale_time;
     bool autoscale_constellation;
     bool show_i;
     bool show_q;
     bool show_mag;
+    bool annotation_overlaps_only;
+    char annotation_filter[64];
 };
 
 static const int k_fft_lengths[] = {128, 256, 512, 1024, 2048, 4096, 8192, 16384};
@@ -134,6 +146,7 @@ static void help(void)
            "      --frame-header      Expect a 16-byte DMA header per frame.\n"
            "      --frame-size BYTES  Frame size in bytes including header (default: %d).\n"
            "      --max-samples N     Maximum samples to load per channel (default: %d).\n"
+           "      --capture-index N   SigMF capture index to focus (default: 0).\n"
            "\n"
            "The GUI shows:\n"
            "  - time-domain I/Q/magnitude\n"
@@ -511,6 +524,89 @@ static void draw_overview_panel(const struct check_data *data, const struct chan
     igEndChild();
 }
 
+static void draw_capture_overview_panel(const struct check_data *data, struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    uint64_t total_samples;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0 || data->samples == 0)
+        return;
+
+    igText("Capture Layout");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 56.0f;
+    igInvisibleButton("##capture_overview", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+    total_samples = (uint64_t)data->samples;
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF171A1Eu, 6.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 20.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 14.0f}, 0xFF252A30u, 4.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        uint64_t cap_start = cap->sample_start;
+        uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[i + 1u].sample_start : total_samples;
+        float x0, x1;
+        ImU32 col;
+
+        if (cap_start >= total_samples)
+            continue;
+        if (cap_end > total_samples)
+            cap_end = total_samples;
+        if (cap_end <= cap_start)
+            cap_end = cap_start + 1;
+
+        x0 = (float)(pmin.x + 8.0f + ((double)cap_start / (double)total_samples) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((double)cap_end   / (double)total_samples) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+
+        col = (i == data->active_capture_index) ? 0xFF6CCB5Fu : 0xFF4E88D9u;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 21.0f}, (ImVec2){x1, pmax.y - 15.0f}, col, 3.0f, 0);
+        if (x1 - x0 > 28.0f) {
+            char label[16];
+            snprintf(label, sizeof(label), "#%u", i);
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 4.0f, pmin.y + 4.0f}, 0xFFFFFFFFu, label, NULL);
+        }
+    }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false)) {
+        ImVec2 mouse;
+        double ratio;
+        uint64_t clicked_sample;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        clicked_sample = (uint64_t)(ratio * (double)(total_samples - 1));
+
+        for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+            uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+                data->sigmf_meta.captures[i + 1u].sample_start : total_samples;
+
+            if (clicked_sample >= cap->sample_start && clicked_sample < cap_end) {
+                ui->selected_capture = (int)i;
+                ui->start_sample = (int)cap->sample_start;
+                break;
+            }
+        }
+    }
+
+    igText("Dataset span: 0 .. %" PRIu64 " samples", total_samples - 1u);
+}
+
 static void fill_time_plots(const struct check_data *data,
                             struct plot_cache *cache,
                             int channel,
@@ -669,6 +765,7 @@ static void draw_constellation(const struct check_data *data,
 static void draw_controls(const struct check_data *data, struct ui_state *ui)
 {
     int max_start = 0;
+    unsigned i;
 
     if (data->samples > (size_t)ui->view_samples)
         max_start = (int)data->samples - ui->view_samples;
@@ -695,6 +792,19 @@ static void draw_controls(const struct check_data *data, struct ui_state *ui)
         igCombo_Str_arr("Channel", &ui->selected_channel, labels, data->nchannels, data->nchannels);
     } else {
         ui->selected_channel = 0;
+    }
+
+    if (data->sigmf_loaded && data->sigmf_meta.capture_count > 1) {
+        const char *labels[M2SDR_SIGMF_MAX_CAPTURES];
+        static char storage[M2SDR_SIGMF_MAX_CAPTURES][48];
+
+        for (i = 0; i < data->sigmf_meta.capture_count && i < M2SDR_SIGMF_MAX_CAPTURES; i++) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+            snprintf(storage[i], sizeof(storage[i]), "#%u @%" PRIu64, i, cap->sample_start);
+            labels[i] = storage[i];
+        }
+        igCombo_Str_arr("Capture", &ui->selected_capture, labels, (int)data->sigmf_meta.capture_count,
+                        (int)data->sigmf_meta.capture_count);
     }
 
     igSliderInt("Start", &ui->start_sample, 0, max_start > 0 ? max_start : 0, "%d", 0);
@@ -734,6 +844,42 @@ static void draw_stats_panel(const struct check_data *data, int channel)
 
     igSeparator();
     igText("Format            : %s (%d-bit effective)", data->sample_bytes == 1 ? "sc8" : "sc16", data->nbits);
+    if (data->sigmf_loaded) {
+        igSeparator();
+        igText("SigMF");
+        igText("Meta path         : %s", data->sigmf_meta.meta_path);
+        igText("Data path         : %s", data->sigmf_meta.data_path);
+        igText("Datatype          : %s", data->sigmf_meta.datatype);
+        if (data->sigmf_meta.has_sample_rate)
+            igText("Sample rate       : %.6f MSPS", data->sigmf_meta.sample_rate / 1e6);
+        if (data->sigmf_meta.has_num_channels)
+            igText("Num channels      : %u", data->sigmf_meta.num_channels);
+        if (data->sigmf_meta.has_center_freq)
+            igText("Center freq       : %.6f MHz", data->sigmf_meta.center_freq / 1e6);
+        if (data->sigmf_meta.has_datetime)
+            igText("Datetime          : %s", data->sigmf_meta.datetime);
+        if (data->sigmf_meta.recorder[0])
+            igText("Recorder          : %s", data->sigmf_meta.recorder);
+        if (data->sigmf_meta.author[0])
+            igText("Author            : %s", data->sigmf_meta.author);
+        if (data->sigmf_meta.hw[0])
+            igText("Hardware          : %s", data->sigmf_meta.hw);
+        if (data->sigmf_meta.description[0]) {
+            igText("Description");
+            igTextWrapped("%s", data->sigmf_meta.description);
+        }
+        if (data->sigmf_meta.capture_count > 0) {
+            const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[data->active_capture_index];
+
+            igText("Active capture    : %u / %u", data->active_capture_index, data->sigmf_meta.capture_count - 1);
+            igText("Capture start     : %" PRIu64, cap->sample_start);
+            if (cap->has_center_freq)
+                igText("Capture freq      : %.6f MHz", cap->center_freq / 1e6);
+            if (cap->has_datetime)
+                igText("Capture datetime  : %s", cap->datetime);
+        }
+        igText("Annotations       : %u", data->sigmf_meta.annotation_count);
+    }
     if (data->frame_header) {
         igText("Headers seen      : %zu", data->headers_seen);
         igText("Bad header magic  : %zu", data->headers_bad_magic);
@@ -745,6 +891,240 @@ static void draw_stats_panel(const struct check_data *data, int channel)
             igText("Avg ts step       : %.3f us", data->avg_timestamp_step_ns / 1000.0);
         if (data->headers_seen > 2)
             igText("RMS ts jitter     : %.3f ns", data->rms_timestamp_jitter_ns);
+    }
+}
+
+static int annotation_overlaps_view(const struct m2sdr_sigmf_annotation *ann, int start_sample, int view_samples)
+{
+    uint64_t view_start = (uint64_t)start_sample;
+    uint64_t view_end = (uint64_t)start_sample + (uint64_t)view_samples;
+    uint64_t ann_start = ann->sample_start;
+    uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+
+    return (ann_start < view_end) && (ann_end > view_start);
+}
+
+static int annotation_contains_sample(const struct m2sdr_sigmf_annotation *ann, uint64_t sample)
+{
+    uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+
+    return sample >= ann->sample_start && sample < ann_end;
+}
+
+static int annotation_contains_frequency(const struct m2sdr_sigmf_annotation *ann, double freq_hz)
+{
+    if (!ann->has_freq_lower_edge || !ann->has_freq_upper_edge)
+        return 0;
+    return freq_hz >= ann->freq_lower_edge && freq_hz <= ann->freq_upper_edge;
+}
+
+static int find_annotation_at_sample(const struct check_data *data, uint64_t sample)
+{
+    unsigned i;
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        if (annotation_contains_sample(&data->sigmf_meta.annotations[i], sample))
+            return (int)i;
+    }
+    return -1;
+}
+
+static int find_annotation_at_frequency(const struct check_data *data, double freq_hz)
+{
+    unsigned i;
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        if (annotation_contains_frequency(&data->sigmf_meta.annotations[i], freq_hz))
+            return (int)i;
+    }
+    return -1;
+}
+
+static int find_capture_for_sample(const struct check_data *data, uint64_t sample)
+{
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0)
+        return -1;
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        uint64_t cap_start = data->sigmf_meta.captures[i].sample_start;
+        uint64_t cap_end = (i + 1u < data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[i + 1u].sample_start : (uint64_t)data->samples;
+
+        if (sample >= cap_start && sample < cap_end)
+            return (int)i;
+    }
+    return -1;
+}
+
+static int contains_case_insensitive(const char *haystack, const char *needle)
+{
+    size_t needle_len;
+    size_t i;
+
+    if (!needle || !needle[0])
+        return 1;
+    if (!haystack)
+        return 0;
+    needle_len = strlen(needle);
+    for (i = 0; haystack[i]; i++) {
+        size_t j = 0;
+        while (haystack[i + j] && needle[j] &&
+               tolower((unsigned char)haystack[i + j]) == tolower((unsigned char)needle[j])) {
+            j++;
+        }
+        if (j == needle_len)
+            return 1;
+    }
+    return 0;
+}
+
+static void draw_annotations_panel(const struct check_data *data, struct ui_state *ui)
+{
+    unsigned i;
+    unsigned visible = 0;
+    int selected_visible = 0;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.annotation_count == 0)
+        return;
+
+    igSeparator();
+    igText("Annotations");
+    igCheckbox("Overlap only", &ui->annotation_overlaps_only);
+    igInputTextWithHint("##annotation_filter", "Filter label/comment", ui->annotation_filter,
+                        sizeof(ui->annotation_filter), 0, NULL, NULL);
+
+    if (ui->selected_annotation >= 0 && ui->selected_annotation < (int)data->sigmf_meta.annotation_count) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[ui->selected_annotation];
+        if (igButton("Jump to Selected", (ImVec2){0.0f, 0.0f})) {
+            ui->start_sample = (int)ann->sample_start;
+            if (ann->has_sample_count && ann->sample_count > 0 && ann->sample_count < (uint64_t)ui->view_samples) {
+                int centered = (int)ann->sample_start - (ui->view_samples - (int)ann->sample_count) / 2;
+                ui->start_sample = centered > 0 ? centered : 0;
+            }
+        }
+        igSameLine(0.0f, -1.0f);
+        if (igButton("Center on Selected", (ImVec2){0.0f, 0.0f})) {
+            int centered = (int)ann->sample_start - ui->view_samples / 2;
+            ui->start_sample = centered > 0 ? centered : 0;
+        }
+    }
+
+    if (!igBeginChild_Str("##annotation_list", (ImVec2){0.0f, 220.0f}, 1, 0)) {
+        igEndChild();
+        return;
+    }
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+        char label[256];
+        int overlaps = annotation_overlaps_view(ann, ui->start_sample, ui->view_samples);
+
+        if (ui->annotation_overlaps_only && !overlaps)
+            continue;
+        if (!contains_case_insensitive(ann->label, ui->annotation_filter) &&
+            !contains_case_insensitive(ann->comment, ui->annotation_filter))
+            continue;
+
+        visible++;
+        snprintf(label, sizeof(label), "#%u  @%" PRIu64 "%s%s",
+                 i, ann->sample_start,
+                 ann->label[0] ? "  " : "",
+                 ann->label[0] ? ann->label : "");
+        if (igSelectable_Bool(label, ui->selected_annotation == (int)i,
+                              ImGuiSelectableFlags_SpanAvailWidth, (ImVec2){0.0f, 0.0f})) {
+            ui->selected_annotation = (int)i;
+            {
+                int capture_idx = find_capture_for_sample(data, ann->sample_start);
+                if (capture_idx >= 0)
+                    ui->selected_capture = capture_idx;
+            }
+            selected_visible = 1;
+        }
+        if (overlaps) {
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("[in view]");
+        }
+        if (ui->selected_annotation == (int)i) {
+            selected_visible = 1;
+            if (ann->has_sample_count)
+                igText("  count=%" PRIu64, ann->sample_count);
+            if (ann->has_freq_lower_edge || ann->has_freq_upper_edge) {
+                double flo = ann->has_freq_lower_edge ? ann->freq_lower_edge / 1e6 : 0.0;
+                double fhi = ann->has_freq_upper_edge ? ann->freq_upper_edge / 1e6 : 0.0;
+                igText("  freq=%.6f..%.6f MHz", flo, fhi);
+            }
+            if (ann->comment[0])
+                igTextWrapped("  %s", ann->comment);
+            igSetScrollHereY(0.5f);
+        }
+    }
+
+    if (!selected_visible && ui->selected_annotation >= (int)data->sigmf_meta.annotation_count)
+        ui->selected_annotation = -1;
+    if (visible == 0)
+        igTextDisabled("No annotations match the current filter.");
+
+    igEndChild();
+}
+
+static void draw_capture_details_panel(const struct check_data *data, struct ui_state *ui)
+{
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.capture_count == 0)
+        return;
+
+    igSeparator();
+    igText("Captures");
+
+    if (!igBeginChild_Str("##capture_list", (ImVec2){0.0f, 160.0f}, 1, 0)) {
+        igEndChild();
+        return;
+    }
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        char label[128];
+        bool contains_selected_annotation = false;
+
+        if (ui->selected_annotation >= 0 && ui->selected_annotation < (int)data->sigmf_meta.annotation_count) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[ui->selected_annotation];
+            contains_selected_annotation = (find_capture_for_sample(data, ann->sample_start) == (int)i);
+        }
+
+        snprintf(label, sizeof(label), "#%u @%" PRIu64, i, cap->sample_start);
+        if (igSelectable_Bool(label, ui->selected_capture == (int)i,
+                              ImGuiSelectableFlags_SpanAvailWidth, (ImVec2){0.0f, 0.0f})) {
+            ui->selected_capture = (int)i;
+            ui->start_sample = (int)((cap->sample_start < data->samples) ? cap->sample_start : 0);
+        }
+        if (i == data->active_capture_index) {
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("[active]");
+        }
+        if (contains_selected_annotation) {
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("[annotation]");
+        }
+    }
+    igEndChild();
+
+    if (ui->selected_capture >= 0 && ui->selected_capture < (int)data->sigmf_meta.capture_count) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[ui->selected_capture];
+        uint64_t end_sample = (ui->selected_capture + 1 < (int)data->sigmf_meta.capture_count) ?
+            data->sigmf_meta.captures[ui->selected_capture + 1].sample_start : (uint64_t)data->samples;
+
+        igText("Selected capture : %d", ui->selected_capture);
+        igText("Sample start      : %" PRIu64, cap->sample_start);
+        igText("Sample end        : %" PRIu64, end_sample);
+        if (cap->has_center_freq)
+            igText("Center freq       : %.6f MHz", cap->center_freq / 1e6);
+        if (cap->has_datetime)
+            igTextWrapped("Datetime          : %s", cap->datetime);
+        if (cap->has_header_bytes)
+            igText("Header bytes      : %u", cap->header_bytes);
     }
 }
 
@@ -779,6 +1159,111 @@ static void draw_time_domain(const struct ui_state *ui, const struct plot_cache 
         igPlotLines_FloatPtr("|IQ|", cache->time_mag, count, 0, NULL, min_v, max_v, (ImVec2){0.0f, 110.0f}, sizeof(float));
 }
 
+static void draw_time_annotation_overlay(const struct check_data *data, const struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    uint64_t view_start, view_end;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.annotation_count == 0)
+        return;
+
+    igText("Time annotations");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 44.0f;
+    igInvisibleButton("##time_annotation_overlay", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+    view_start = (uint64_t)ui->start_sample;
+    view_end = (uint64_t)ui->start_sample + (uint64_t)ui->view_samples;
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF1A1A1Au, 4.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 14.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 10.0f}, 0xFF2A2A2Au, 3.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        float x;
+        ImU32 col;
+
+        if (cap->sample_start < view_start || cap->sample_start >= view_end)
+            continue;
+        x = (float)(pmin.x + 8.0f +
+                    ((double)(cap->sample_start - view_start) / (double)(view_end - view_start)) *
+                    (double)(pmax.x - pmin.x - 16.0f));
+        col = (i == data->active_capture_index) ? 0xFFFFD166u : 0x88FFFFFFu;
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y + 12.0f}, (ImVec2){x, pmax.y - 8.0f}, col, 1.5f);
+        if (i == data->active_capture_index) {
+            char label[16];
+            snprintf(label, sizeof(label), "C%u", i);
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x + 3.0f, pmax.y - 24.0f}, 0xFFFFFFFFu, label, NULL);
+        }
+    }
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+        uint64_t ann_start = ann->sample_start;
+        uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+        uint64_t clip_start, clip_end;
+        float x0, x1;
+        ImU32 col;
+
+        if (ann_end <= view_start || ann_start >= view_end)
+            continue;
+        clip_start = ann_start > view_start ? ann_start : view_start;
+        clip_end = ann_end < view_end ? ann_end : view_end;
+        x0 = (float)(pmin.x + 8.0f + ((double)(clip_start - view_start) / (double)(view_end - view_start)) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((double)(clip_end - view_start) / (double)(view_end - view_start)) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+        col = (ui->selected_annotation == (int)i) ? 0xFF7AC943u : 0xFF4EA1D3u;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 16.0f}, (ImVec2){x1, pmax.y - 12.0f}, col, 2.0f, 0);
+        if (ann->label[0])
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
+    }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && view_end > view_start) {
+        ImVec2 mouse;
+        double ratio;
+        int hovered_idx;
+        uint64_t hovered_sample;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        hovered_sample = view_start + (uint64_t)(ratio * (double)(view_end - view_start - 1));
+        ((struct ui_state *)ui)->hovered_sample = (int)hovered_sample;
+        ((struct ui_state *)ui)->hovered_sample_valid = true;
+        hovered_idx = find_annotation_at_sample(data, hovered_sample);
+        if (hovered_idx >= 0 && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false))
+            ((struct ui_state *)ui)->selected_annotation = hovered_idx;
+        ImDrawList_AddLine(dl, (ImVec2){mouse.x, pmin.y + 12.0f}, (ImVec2){mouse.x, pmax.y - 8.0f}, 0xCCFFFFFFu, 1.0f);
+    } else {
+        ((struct ui_state *)ui)->hovered_sample_valid = false;
+    }
+
+    if (ui->hovered_sample_valid) {
+        int idx = find_annotation_at_sample(data, (uint64_t)ui->hovered_sample);
+
+        igText("Cursor sample: %d", ui->hovered_sample);
+        if (idx >= 0) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[idx];
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("annotation: %s%s%s",
+                           ann->label[0] ? ann->label : "#",
+                           ann->label[0] && ann->comment[0] ? " / " : "",
+                           ann->comment[0] ? ann->comment : "");
+        }
+    }
+}
+
 static void draw_histograms(const struct plot_cache *cache)
 {
     igText("I/Q histograms");
@@ -807,12 +1292,123 @@ static void draw_spectrum(const struct check_data *data, const struct plot_cache
            peak_bin, peak_hz / 1e6, peak_db, (data->sample_rate / (double)fft_len) / 1e3);
 }
 
+static void draw_spectrum_annotation_overlay(const struct check_data *data, const struct ui_state *ui)
+{
+    ImVec2 avail, pmin, pmax;
+    ImDrawList *dl;
+    double fmin_hz, fmax_hz;
+    unsigned i;
+
+    if (!data->sigmf_loaded || data->sigmf_meta.annotation_count == 0)
+        return;
+
+    igText("Spectrum annotations");
+    igGetContentRegionAvail(&avail);
+    if (avail.x < 40.0f)
+        avail.x = 40.0f;
+    avail.y = 44.0f;
+    igInvisibleButton("##spectrum_annotation_overlay", avail, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+
+    fmin_hz = -data->sample_rate / 2.0;
+    fmax_hz =  data->sample_rate / 2.0;
+    if (data->sigmf_meta.has_center_freq) {
+        fmin_hz += data->sigmf_meta.center_freq;
+        fmax_hz += data->sigmf_meta.center_freq;
+    }
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF1A1A1Au, 4.0f, 0);
+    ImDrawList_AddRectFilled(dl, (ImVec2){pmin.x + 8.0f, pmin.y + 14.0f},
+                             (ImVec2){pmax.x - 8.0f, pmax.y - 10.0f}, 0xFF2A2A2Au, 3.0f, 0);
+
+    for (i = 0; i < data->sigmf_meta.capture_count; i++) {
+        const struct m2sdr_sigmf_capture *cap = &data->sigmf_meta.captures[i];
+        float x;
+        ImU32 col;
+        char label[24];
+
+        if (!cap->has_center_freq || cap->center_freq < fmin_hz || cap->center_freq > fmax_hz)
+            continue;
+        x = (float)(pmin.x + 8.0f + ((cap->center_freq - fmin_hz) / (fmax_hz - fmin_hz)) *
+                    (double)(pmax.x - pmin.x - 16.0f));
+        col = (i == data->active_capture_index) ? 0xFFFFD166u : 0x88FFFFFFu;
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y + 12.0f}, (ImVec2){x, pmax.y - 8.0f}, col, 1.5f);
+        snprintf(label, sizeof(label), "C%u", i);
+        ImDrawList_AddText_Vec2(dl, (ImVec2){x + 3.0f, pmax.y - 24.0f}, 0xFFFFFFFFu, label, NULL);
+    }
+
+    for (i = 0; i < data->sigmf_meta.annotation_count; i++) {
+        const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[i];
+        double lo, hi;
+        float x0, x1;
+        ImU32 col;
+
+        if (!ann->has_freq_lower_edge || !ann->has_freq_upper_edge)
+            continue;
+        lo = ann->freq_lower_edge;
+        hi = ann->freq_upper_edge;
+        if (hi <= fmin_hz || lo >= fmax_hz)
+            continue;
+        if (lo < fmin_hz) lo = fmin_hz;
+        if (hi > fmax_hz) hi = fmax_hz;
+        x0 = (float)(pmin.x + 8.0f + ((lo - fmin_hz) / (fmax_hz - fmin_hz)) * (double)(pmax.x - pmin.x - 16.0f));
+        x1 = (float)(pmin.x + 8.0f + ((hi - fmin_hz) / (fmax_hz - fmin_hz)) * (double)(pmax.x - pmin.x - 16.0f));
+        if (x1 < x0 + 2.0f)
+            x1 = x0 + 2.0f;
+        col = (ui->selected_annotation == (int)i) ? 0xFFE4A93Au : 0xFFB66DFFu;
+        ImDrawList_AddRectFilled(dl, (ImVec2){x0, pmin.y + 16.0f}, (ImVec2){x1, pmax.y - 12.0f}, col, 2.0f, 0);
+        if (ann->label[0])
+            ImDrawList_AddText_Vec2(dl, (ImVec2){x0 + 2.0f, pmin.y + 2.0f}, 0xFFFFFFFFu, ann->label, NULL);
+    }
+
+    if (igIsItemHovered(ImGuiHoveredFlags_None) && fmax_hz > fmin_hz) {
+        ImVec2 mouse;
+        double ratio;
+        double hovered_freq_hz;
+        int hovered_idx;
+
+        igGetMousePos(&mouse);
+        ratio = (double)(mouse.x - (pmin.x + 8.0f)) / (double)(pmax.x - pmin.x - 16.0f);
+        if (ratio < 0.0)
+            ratio = 0.0;
+        if (ratio > 1.0)
+            ratio = 1.0;
+        hovered_freq_hz = fmin_hz + ratio * (fmax_hz - fmin_hz);
+        ((struct ui_state *)ui)->hovered_freq_hz = hovered_freq_hz;
+        ((struct ui_state *)ui)->hovered_freq_valid = true;
+        hovered_idx = find_annotation_at_frequency(data, hovered_freq_hz);
+        if (hovered_idx >= 0 && igIsMouseClicked_Bool(ImGuiMouseButton_Left, false))
+            ((struct ui_state *)ui)->selected_annotation = hovered_idx;
+        ImDrawList_AddLine(dl, (ImVec2){mouse.x, pmin.y + 12.0f}, (ImVec2){mouse.x, pmax.y - 8.0f}, 0xCCFFFFFFu, 1.0f);
+    } else {
+        ((struct ui_state *)ui)->hovered_freq_valid = false;
+    }
+
+    if (ui->hovered_freq_valid) {
+        int idx = find_annotation_at_frequency(data, ui->hovered_freq_hz);
+
+        igText("Cursor freq: %.6f MHz", ui->hovered_freq_hz / 1e6);
+        if (idx >= 0) {
+            const struct m2sdr_sigmf_annotation *ann = &data->sigmf_meta.annotations[idx];
+            igSameLine(0.0f, -1.0f);
+            igTextDisabled("annotation: %s%s%s",
+                           ann->label[0] ? ann->label : "#",
+                           ann->label[0] && ann->comment[0] ? " / " : "",
+                           ann->comment[0] ? ann->comment : "");
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *filename = NULL;
+    char resolved_filename[1024] = {0};
     struct check_data data;
     struct plot_cache cache;
     struct ui_state ui;
+    struct m2sdr_sigmf_meta sigmf_meta;
     SDL_Window *window = NULL;
     SDL_GLContext gl_context = NULL;
     const char *glsl_version = "#version 130";
@@ -826,6 +1422,7 @@ int main(int argc, char **argv)
     bool quit = false;
     int option_index = 0;
     int c;
+    unsigned capture_index = 0;
     static struct option options[] = {
         {"help", no_argument, NULL, 'h'},
         {"nchannels", required_argument, NULL, 1},
@@ -835,21 +1432,31 @@ int main(int argc, char **argv)
         {"frame-header", no_argument, NULL, 5},
         {"frame-size", required_argument, NULL, 6},
         {"max-samples", required_argument, NULL, 7},
+        {"capture-index", required_argument, NULL, 8},
         {NULL, 0, NULL, 0}
     };
 
     memset(&data, 0, sizeof(data));
     memset(&cache, 0, sizeof(cache));
+    memset(&sigmf_meta, 0, sizeof(sigmf_meta));
     ui.selected_channel = 0;
     ui.start_sample = 0;
     ui.view_samples = CHECK_DEFAULT_VIEW_SAMPLES;
     ui.constellation_points = CHECK_DEFAULT_CONSTELLATION_POINTS;
     ui.fft_len_idx = 4;
+    ui.selected_annotation = -1;
+    ui.selected_capture = 0;
+    ui.hovered_sample = 0;
+    ui.hovered_sample_valid = false;
+    ui.hovered_freq_hz = 0.0;
+    ui.hovered_freq_valid = false;
     ui.autoscale_time = true;
     ui.autoscale_constellation = true;
     ui.show_i = true;
     ui.show_q = true;
     ui.show_mag = false;
+    ui.annotation_overlaps_only = false;
+    ui.annotation_filter[0] = '\0';
 
     for (;;) {
         c = getopt_long(argc, argv, "h", options, &option_index);
@@ -887,6 +1494,9 @@ int main(int argc, char **argv)
         case 7:
             max_samples = (size_t)strtoull(optarg, NULL, 0);
             break;
+        case 8:
+            capture_index = (unsigned)strtoul(optarg, NULL, 0);
+            break;
         default:
             return 1;
         }
@@ -898,10 +1508,65 @@ int main(int argc, char **argv)
     }
     filename = argv[optind];
 
+    if (m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {
+        enum m2sdr_format sigmf_format = m2sdr_sigmf_format_from_datatype(sigmf_meta.datatype);
+        const struct m2sdr_sigmf_capture *capture = NULL;
+
+        if (sigmf_format == M2SDR_FORMAT_SC16_Q11)
+            sample_bytes = 2;
+        else if (sigmf_format == M2SDR_FORMAT_SC8_Q7)
+            sample_bytes = 1;
+        else {
+            fprintf(stderr, "Unsupported SigMF datatype: %s\n", sigmf_meta.datatype);
+            return 1;
+        }
+
+        if (sigmf_meta.capture_count > 0) {
+            if (capture_index >= sigmf_meta.capture_count) {
+                fprintf(stderr, "SigMF capture index %u out of range (captures=%u)\n",
+                        capture_index, sigmf_meta.capture_count);
+                return 1;
+            }
+            capture = &sigmf_meta.captures[capture_index];
+        }
+
+        if (sigmf_meta.has_sample_rate)
+            sample_rate = sigmf_meta.sample_rate;
+        if (sigmf_meta.has_num_channels)
+            nchannels = (int)sigmf_meta.num_channels;
+        if (capture && capture->has_header_bytes) {
+            if (capture->header_bytes == 16) {
+                frame_header = true;
+            } else {
+                fprintf(stderr, "Unsupported SigMF header_bytes=%u in m2sdr_check\n", capture->header_bytes);
+                return 1;
+            }
+        } else if (sigmf_meta.has_header_bytes) {
+            if (sigmf_meta.header_bytes == 16) {
+                frame_header = true;
+            } else {
+                fprintf(stderr, "Unsupported SigMF header_bytes=%u in m2sdr_check\n", sigmf_meta.header_bytes);
+                return 1;
+            }
+        }
+
+        snprintf(resolved_filename, sizeof(resolved_filename), "%s", sigmf_meta.data_path);
+        filename = resolved_filename;
+        data.sigmf_loaded = true;
+        data.active_capture_index = capture_index;
+        memcpy(&data.sigmf_meta, &sigmf_meta, sizeof(sigmf_meta));
+        ui.selected_capture = (int)capture_index;
+    }
+
     if (!load_file(filename, nchannels, nbits, sample_bytes, sample_rate, frame_header, frame_size, max_samples, &data))
         return 1;
 
     compute_stats(&data);
+
+    if (data.sigmf_loaded && data.sigmf_meta.capture_count > 0) {
+        const struct m2sdr_sigmf_capture *cap = &data.sigmf_meta.captures[data.active_capture_index];
+        ui.start_sample = (int)((cap->sample_start < data.samples) ? cap->sample_start : 0);
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -980,6 +1645,15 @@ int main(int argc, char **argv)
             }
         }
 
+        if (data.sigmf_loaded && data.sigmf_meta.capture_count > 1 &&
+            ui.selected_capture >= 0 && ui.selected_capture < (int)data.sigmf_meta.capture_count &&
+            (unsigned)ui.selected_capture != data.active_capture_index) {
+            const struct m2sdr_sigmf_capture *cap = &data.sigmf_meta.captures[ui.selected_capture];
+
+            data.active_capture_index = (unsigned)ui.selected_capture;
+            ui.start_sample = (int)((cap->sample_start < data.samples) ? cap->sample_start : 0);
+        }
+
         if (ui.view_samples < 16)
             ui.view_samples = 16;
         if ((size_t)ui.view_samples > data.samples)
@@ -1019,10 +1693,13 @@ int main(int argc, char **argv)
                 ImGuiWindowFlags_NoTitleBar);
         {
             draw_overview_panel(&data, &data.stats[ui.selected_channel], ui.start_sample, count);
+            draw_capture_overview_panel(&data, &ui);
             if (igBeginChild_Str("##left", (ImVec2){340.0f, 0.0f}, 0, 0)) {
                 draw_controls(&data, &ui);
                 igSeparator();
                 draw_stats_panel(&data, ui.selected_channel);
+                draw_capture_details_panel(&data, &ui);
+                draw_annotations_panel(&data, &ui);
             }
             igEndChild();
 
@@ -1030,8 +1707,10 @@ int main(int argc, char **argv)
 
             if (igBeginChild_Str("##right", (ImVec2){0.0f, 0.0f}, 0, 0)) {
                 draw_time_domain(&ui, &cache, count);
+                draw_time_annotation_overlay(&data, &ui);
                 draw_constellation(&data, &cache, &ui, ui.start_sample, count);
                 draw_spectrum(&data, &cache, fft_len);
+                draw_spectrum_annotation_overlay(&data, &ui);
                 draw_histograms(&cache);
             }
             igEndChild();

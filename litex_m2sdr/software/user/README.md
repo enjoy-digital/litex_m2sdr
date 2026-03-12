@@ -190,9 +190,16 @@ m2sdr_play [options] filename [loops]
 - **filename**: Binary file of I/Q samples (or `-` for stdin).
 - **loops**: Number of times to loop playback (default=1).
 
+`filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
+M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted and replayed with timestamps restored into TX metadata.
+
 Example usage:
 ~~~~
 ./m2sdr_play --format sc16 tx_file.bin 10
+./m2sdr_play capture.sigmf-meta 10
+./m2sdr_play --capture-index 1 capture.sigmf-meta 1
+./m2sdr_play --capture-index 2 framed_capture.sigmf-meta 0
 ~~~~
 
 ---
@@ -208,10 +215,37 @@ m2sdr_record [options] filename size
 - **filename**: Destination file for captured I/Q samples (or `-` for stdout).
 - **size**: Number of samples to capture.
 
+Relevant options:
+- `--format sc16|sc8`
+- `--enable-header`
+- `--strip-header`
+- `--sigmf`
+- `--sample-rate`
+- `--center-freq`
+- `--nchannels`
+- `--description`
+- `--author`
+- `--hw`
+- `--annotation-label`
+- `--annotation-comment`
+- `--annotation-start`
+- `--annotation-count`
+- `--annotation-freq-low`
+- `--annotation-freq-high`
+- `--annotation-add`
+- `--annotate-ts-jumps`
+- `--ts-jump-threshold-pct`
+
 Example usage:
 ~~~~
 ./m2sdr_record --enable-header --strip-header rx_file.bin 2000000
+./m2sdr_record --sigmf --sample-rate 30720000 --center-freq 2400000000 --enable-header --strip-header capture 2000000
+./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst --annotation-comment "loopback capture" capture 2000000
+./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst-a --annotation-start 0 --annotation-count 8192 --annotation-add --annotation-label burst-b --annotation-start 16384 --annotation-count 8192 capture 2000000
+./m2sdr_record --sigmf --enable-header --strip-header --annotate-ts-jumps capture 2000000
 ~~~~
+
+Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
 
 ---
 
@@ -223,6 +257,10 @@ Native GUI utility to inspect recorded I/Q sample files.
 m2sdr_check [options] filename
 ~~~~
 
+`filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
+For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
+M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted for inspection.
+
 **Relevant options**:
 - `--nchannels`
 - `--nbits`
@@ -231,6 +269,7 @@ m2sdr_check [options] filename
 - `--frame-header`
 - `--frame-size`
 - `--max-samples`
+- `--capture-index`
 
 The GUI provides:
 - time-domain I/Q and magnitude plots
@@ -238,11 +277,34 @@ The GUI provides:
 - FFT spectrum view
 - I/Q histograms
 - DC offset / RMS / clipping / timestamp summary
+- SigMF capture layout and capture details panels
+- SigMF capture-boundary markers in time view
+- SigMF capture-center markers in spectrum view
 
 Example usage:
 ~~~~
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
 ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000 --frame-header --frame-size 245760
+./m2sdr_check capture.sigmf-meta
+./m2sdr_check --capture-index 1 capture.sigmf-meta
+~~~~
+
+---
+
+### m2sdr_sigmf_info
+Small text utility to inspect SigMF metadata without opening the GUI.
+
+**Usage**:
+~~~~
+m2sdr_sigmf_info [--validate] [--strict] [--ci] <sigmf-meta|sigmf-data|basename>
+~~~~
+
+Example usage:
+~~~~
+./m2sdr_sigmf_info capture.sigmf-meta
+./m2sdr_sigmf_info --validate capture.sigmf-meta
+./m2sdr_sigmf_info --validate --strict --ci capture.sigmf-meta
+./m2sdr_sigmf_info --validate --strict framed_capture.sigmf-meta
 ~~~~
 
 ---
