@@ -24,11 +24,27 @@
 
 #include "litepcie_helpers.h"
 
+#define M2SDR_DMA_HEADER_SIZE 16
+#define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
+
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     (void)dummy;
     keep_running = 0;
+}
+
+static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
+{
+    uint64_t sync_word = 0;
+    uint64_t ts = 0;
+
+    memcpy(&sync_word, buf, sizeof(sync_word));
+    if (sync_word != M2SDR_DMA_HEADER_SYNC_WORD)
+        return 0;
+    memcpy(&ts, buf + 8, sizeof(ts));
+    *timestamp = ts;
+    return 1;
 }
 
 static void print_time_banner(const char *label, uint64_t time_ns)
@@ -69,16 +85,26 @@ static void help(void)
     exit(1);
 }
 
-static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet, uint8_t timed_start, enum m2sdr_format format)
+static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet,
+                       uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes)
 {
     struct m2sdr_dev *dev = NULL;
+    size_t frame_bytes;
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
     }
 
     unsigned sample_size = m2sdr_format_size(format);
-    unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
+    unsigned samples_per_buf = (DMA_BUFFER_SIZE - header_bytes) / sample_size;
+    frame_bytes = (size_t)samples_per_buf * sample_size + header_bytes;
+    if (header_bytes > 0) {
+        if (m2sdr_set_tx_header(dev, true) != 0) {
+            fprintf(stderr, "m2sdr_set_tx_header failed\n");
+            m2sdr_close(dev);
+            exit(1);
+        }
+    }
     if (m2sdr_sync_config(dev, M2SDR_TX, format,
                           0, samples_per_buf, 0, 1000) != 0) {
         fprintf(stderr, "m2sdr_sync_config failed\n");
@@ -123,9 +149,11 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     uint64_t last_buffers  = 0;
     uint64_t sw_underflows = 0;
 
-    uint8_t buf[DMA_BUFFER_SIZE];
+    uint8_t raw_buf[DMA_BUFFER_SIZE];
+    uint8_t payload_buf[DMA_BUFFER_SIZE];
     while (keep_running) {
-        size_t len = fread(buf, 1, DMA_BUFFER_SIZE, fi);
+        size_t len = fread(raw_buf, 1, frame_bytes, fi);
+        struct m2sdr_metadata meta = {0};
         if (ferror(fi)) {
             perror("fread");
             break;
@@ -137,14 +165,23 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             if (strcmp(filename, "-") != 0) {
                 fseek(fi, 0, SEEK_SET);
                 clearerr(fi);
-                len += fread(buf + len, 1, DMA_BUFFER_SIZE - len, fi);
+                len += fread(raw_buf + len, 1, frame_bytes - len, fi);
             }
         }
 
-        if (len < DMA_BUFFER_SIZE)
-            memset(buf + len, 0, DMA_BUFFER_SIZE - len);
+        if (len < frame_bytes)
+            memset(raw_buf + len, 0, frame_bytes - len);
 
-        if (m2sdr_sync_tx(dev, buf, samples_per_buf, NULL, 0) != 0) {
+        if (header_bytes > 0) {
+            if (len >= M2SDR_DMA_HEADER_SIZE && parse_m2sdr_dma_header(raw_buf, &meta.timestamp))
+                meta.flags |= M2SDR_META_FLAG_HAS_TIME;
+            memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
+        } else {
+            memcpy(payload_buf, raw_buf, frame_bytes);
+        }
+
+        if (m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
+                          header_bytes > 0 ? &meta : NULL, 0) != 0) {
             fprintf(stderr, "m2sdr_sync_tx failed\n");
             break;
         }
@@ -180,6 +217,7 @@ int main(int argc, char **argv)
     static uint8_t quiet = 0;
     static uint8_t timed_start = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    unsigned sigmf_header_bytes = 0;
     struct m2sdr_sigmf_meta sigmf_meta;
     char resolved_filename[1024] = {0};
     struct m2sdr_cli_device cli_dev;
@@ -265,10 +303,14 @@ int main(int argc, char **argv)
             fprintf(stderr, "Unsupported SigMF datatype: %s\n", sigmf_meta.datatype);
             return 1;
         }
-        if (sigmf_meta.has_header_bytes && sigmf_meta.header_bytes != 0) {
-            fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",
-                    sigmf_meta.header_bytes);
-            return 1;
+        if (sigmf_meta.has_header_bytes) {
+            if (sigmf_meta.header_bytes == M2SDR_DMA_HEADER_SIZE) {
+                sigmf_header_bytes = sigmf_meta.header_bytes;
+            } else if (sigmf_meta.header_bytes != 0) {
+                fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",
+                        sigmf_meta.header_bytes);
+                return 1;
+            }
         }
 
         format = sigmf_format;
@@ -279,6 +321,6 @@ int main(int argc, char **argv)
     if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
 
-    m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format);
+    m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format, sigmf_header_bytes);
     return 0;
 }

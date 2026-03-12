@@ -192,6 +192,7 @@ m2sdr_play [options] filename [loops]
 
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
 For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
+M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted and replayed with timestamps restored into TX metadata.
 
 Example usage:
 ~~~~
@@ -244,6 +245,7 @@ m2sdr_check [options] filename
 
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
 For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
+M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted for inspection.
 
 **Relevant options**:
 - `--nchannels`
