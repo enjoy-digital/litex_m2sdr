@@ -29,6 +29,25 @@ static void validation_message(const char *level, const char *msg)
     printf("%s: %s\n", level, msg);
 }
 
+static bool annotation_is_within_capture(const struct m2sdr_sigmf_meta *meta,
+                                         const struct m2sdr_sigmf_annotation *ann)
+{
+    unsigned i;
+    uint64_t ann_end = ann->has_sample_count ? (ann->sample_start + ann->sample_count) : (ann->sample_start + 1);
+
+    if (!meta || !ann || meta->capture_count == 0)
+        return false;
+
+    for (i = 0; i < meta->capture_count; i++) {
+        uint64_t cap_start = meta->captures[i].sample_start;
+        uint64_t cap_end = (i + 1u < meta->capture_count) ? meta->captures[i + 1u].sample_start : UINT64_MAX;
+
+        if (ann->sample_start >= cap_start && ann_end <= cap_end)
+            return true;
+    }
+    return false;
+}
+
 static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool ci_mode)
 {
     unsigned i;
@@ -96,6 +115,10 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool
         }
         if (meta->capture_count > 0 && ann->sample_start < meta->captures[0].sample_start) {
             if (!ci_mode) validation_message("WARNING", "annotation starts before first capture");
+            warnings++;
+        }
+        if (meta->capture_count > 0 && !annotation_is_within_capture(meta, ann)) {
+            if (!ci_mode) validation_message("WARNING", "annotation is not fully contained in any capture interval");
             warnings++;
         }
     }
