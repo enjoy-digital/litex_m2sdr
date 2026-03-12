@@ -19,6 +19,18 @@ static int has_suffix(const char *path, const char *suffix)
     return strcmp(path + path_len - suffix_len, suffix) == 0;
 }
 
+static size_t sigmf_format_size(enum m2sdr_format format)
+{
+    switch (format) {
+    case M2SDR_FORMAT_SC16_Q11:
+        return 4;
+    case M2SDR_FORMAT_SC8_Q7:
+        return 2;
+    default:
+        return 0;
+    }
+}
+
 static int is_absolute_path(const char *path)
 {
     return path && path[0] == '/';
@@ -255,6 +267,51 @@ bool m2sdr_sigmf_timestamp_jump_is_anomalous(uint64_t nominal_dt_ns,
         return false;
     diff_ratio = fabs((double)dt_ns - (double)nominal_dt_ns) / (double)nominal_dt_ns;
     return diff_ratio > (threshold_pct / 100.0);
+}
+
+int m2sdr_sigmf_capture_byte_range(const struct m2sdr_sigmf_meta *meta,
+                                   unsigned capture_index,
+                                   enum m2sdr_format format,
+                                   unsigned header_bytes,
+                                   unsigned dma_buffer_bytes,
+                                   uint64_t *start_offset_bytes,
+                                   uint64_t *end_offset_bytes)
+{
+    uint64_t start_sample = 0;
+    uint64_t end_sample = 0;
+    size_t sample_size = sigmf_format_size(format);
+
+    if (!start_offset_bytes || !end_offset_bytes || sample_size == 0 ||
+        m2sdr_sigmf_capture_sample_range(meta, capture_index, &start_sample, &end_sample) != 0)
+        return -1;
+
+    *start_offset_bytes = 0;
+    *end_offset_bytes = 0;
+
+    if (header_bytes == 0) {
+        *start_offset_bytes = start_sample * (uint64_t)sample_size;
+        if (end_sample > start_sample)
+            *end_offset_bytes = end_sample * (uint64_t)sample_size;
+        return 0;
+    } else {
+        uint64_t samples_per_frame;
+        uint64_t frame_bytes = dma_buffer_bytes;
+
+        if (dma_buffer_bytes <= header_bytes)
+            return -1;
+        samples_per_frame = (dma_buffer_bytes - header_bytes) / sample_size;
+        if (samples_per_frame == 0)
+            return -1;
+        if ((start_sample % samples_per_frame) != 0)
+            return -1;
+        if (end_sample != 0 && (end_sample % samples_per_frame) != 0)
+            return -1;
+
+        *start_offset_bytes = (start_sample / samples_per_frame) * frame_bytes;
+        if (end_sample > start_sample)
+            *end_offset_bytes = (end_sample / samples_per_frame) * frame_bytes;
+        return 0;
+    }
 }
 
 static void sigmf_read_annotation(const char *buf,

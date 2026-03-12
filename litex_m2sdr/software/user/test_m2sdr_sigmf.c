@@ -203,6 +203,40 @@ static int test_timestamp_jump_detection(void)
     return 0;
 }
 
+static int test_capture_byte_range(void)
+{
+    struct m2sdr_sigmf_meta meta;
+    uint64_t start_offset = 0;
+    uint64_t end_offset = 0;
+
+    memset(&meta, 0, sizeof(meta));
+    meta.capture_count = 2;
+    meta.captures[0].sample_start = 0;
+    meta.captures[1].sample_start = 4;
+
+    if (m2sdr_sigmf_capture_byte_range(&meta, 1, M2SDR_FORMAT_SC16_Q11, 0, 8192,
+                                       &start_offset, &end_offset) != 0)
+        return expect_true(0, "headerless capture byte range succeeds");
+    if (expect_true(start_offset == 16, "headerless capture start offset") != 0 ||
+        expect_true(end_offset == 0, "headerless capture end offset") != 0)
+        return -1;
+
+    meta.captures[1].sample_start = 2044;
+    if (m2sdr_sigmf_capture_byte_range(&meta, 1, M2SDR_FORMAT_SC16_Q11, 16, 8192,
+                                       &start_offset, &end_offset) != 0)
+        return expect_true(0, "headered aligned capture byte range succeeds");
+    if (expect_true(start_offset == 8192, "headered aligned capture start offset") != 0)
+        return -1;
+
+    meta.captures[1].sample_start = 100;
+    if (expect_true(m2sdr_sigmf_capture_byte_range(&meta, 1, M2SDR_FORMAT_SC16_Q11, 16, 8192,
+                                                   &start_offset, &end_offset) != 0,
+                    "headered misaligned capture byte range fails") != 0)
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     char template[] = "/tmp/m2sdr_sigmf_testXXXXXX";
@@ -218,7 +252,8 @@ int main(void)
         test_roundtrip(dir) != 0 ||
         test_manual_metadata(dir) != 0 ||
         test_capture_sample_range() != 0 ||
-        test_timestamp_jump_detection() != 0)
+        test_timestamp_jump_detection() != 0 ||
+        test_capture_byte_range() != 0)
         return 1;
 
     printf("test_m2sdr_sigmf: ok\n");

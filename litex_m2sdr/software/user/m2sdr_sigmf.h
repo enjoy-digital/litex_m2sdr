@@ -78,5 +78,12 @@ int m2sdr_sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
 bool m2sdr_sigmf_timestamp_jump_is_anomalous(uint64_t nominal_dt_ns,
                                              uint64_t dt_ns,
                                              double threshold_pct);
+int m2sdr_sigmf_capture_byte_range(const struct m2sdr_sigmf_meta *meta,
+                                   unsigned capture_index,
+                                   enum m2sdr_format format,
+                                   unsigned header_bytes,
+                                   unsigned dma_buffer_bytes,
+                                   uint64_t *start_offset_bytes,
+                                   uint64_t *end_offset_bytes);
 
 #endif /* M2SDR_SIGMF_H */
