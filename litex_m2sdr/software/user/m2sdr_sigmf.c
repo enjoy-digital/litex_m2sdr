@@ -407,6 +407,52 @@ static void json_parse_annotations(const char *buf, struct m2sdr_sigmf_meta *met
     }
 }
 
+static void json_parse_captures(const char *buf, struct m2sdr_sigmf_meta *meta)
+{
+    const char *p = json_find_array_start(buf, "captures");
+
+    if (!p || !meta)
+        return;
+    p++;
+    while (*p && meta->capture_count < M2SDR_SIGMF_MAX_CAPTURES) {
+        const char *obj_end;
+        struct m2sdr_sigmf_capture *cap;
+        char obj[1024];
+        size_t obj_len;
+
+        while (*p && (isspace((unsigned char)*p) || *p == ','))
+            p++;
+        if (*p == ']' || *p == '\0')
+            break;
+        if (*p != '{')
+            break;
+
+        obj_end = json_find_object_end(p);
+        if (!obj_end)
+            break;
+        obj_len = (size_t)(obj_end - p + 1);
+        if (obj_len >= sizeof(obj))
+            obj_len = sizeof(obj) - 1;
+        memcpy(obj, p, obj_len);
+        obj[obj_len] = '\0';
+
+        cap = &meta->captures[meta->capture_count];
+        memset(cap, 0, sizeof(*cap));
+        if (json_extract_u64(obj, "core:sample_start", &cap->sample_start) != 0) {
+            p = obj_end + 1;
+            continue;
+        }
+        if (json_extract_double(obj, "core:frequency", &cap->center_freq) == 0)
+            cap->has_center_freq = true;
+        if (json_extract_string(obj, "core:datetime", cap->datetime, sizeof(cap->datetime)) == 0)
+            cap->has_datetime = true;
+        if (json_extract_uint(obj, "core:header_bytes", &cap->header_bytes) == 0)
+            cap->has_header_bytes = true;
+        meta->capture_count++;
+        p = obj_end + 1;
+    }
+}
+
 int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
 {
     FILE *f;
@@ -453,16 +499,11 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     json_extract_string(buf, "core:author", meta->author, sizeof(meta->author));
     json_extract_string(buf, "core:hw", meta->hw, sizeof(meta->hw));
     json_extract_string(buf, "core:recorder", meta->recorder, sizeof(meta->recorder));
-    if (json_extract_string(buf, "core:datetime", meta->datetime, sizeof(meta->datetime)) == 0)
-        meta->has_datetime = true;
     if (json_extract_double(buf, "core:sample_rate", &meta->sample_rate) == 0)
         meta->has_sample_rate = true;
-    if (json_extract_double(buf, "core:frequency", &meta->center_freq) == 0)
-        meta->has_center_freq = true;
     if (json_extract_uint(buf, "core:num_channels", &meta->num_channels) == 0)
         meta->has_num_channels = true;
-    if (json_extract_uint(buf, "core:header_bytes", &meta->header_bytes) == 0)
-        meta->has_header_bytes = true;
+    json_parse_captures(buf, meta);
     json_parse_annotations(buf, meta);
 
     if (meta->datatype[0] == '\0') {
@@ -476,6 +517,21 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
         free(buf);
         return -1;
+    }
+    if (meta->capture_count > 0) {
+        const struct m2sdr_sigmf_capture *cap0 = &meta->captures[0];
+        if (cap0->has_center_freq) {
+            meta->center_freq = cap0->center_freq;
+            meta->has_center_freq = true;
+        }
+        if (cap0->has_datetime) {
+            snprintf(meta->datetime, sizeof(meta->datetime), "%s", cap0->datetime);
+            meta->has_datetime = true;
+        }
+        if (cap0->has_header_bytes) {
+            meta->header_bytes = cap0->header_bytes;
+            meta->has_header_bytes = true;
+        }
     }
     if (dataset_path[0]) {
         if (is_absolute_path(dataset_path)) {

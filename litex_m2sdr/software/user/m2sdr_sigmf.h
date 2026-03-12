@@ -10,6 +10,17 @@
 #include "m2sdr.h"
 
 #define M2SDR_SIGMF_MAX_ANNOTATIONS 64
+#define M2SDR_SIGMF_MAX_CAPTURES 64
+
+struct m2sdr_sigmf_capture {
+    uint64_t sample_start;
+    double center_freq;
+    char datetime[64];
+    unsigned header_bytes;
+    bool has_center_freq;
+    bool has_datetime;
+    bool has_header_bytes;
+};
 
 struct m2sdr_sigmf_annotation {
     uint64_t sample_start;
@@ -36,6 +47,8 @@ struct m2sdr_sigmf_meta {
     double center_freq;
     unsigned num_channels;
     unsigned header_bytes;
+    unsigned capture_count;
+    struct m2sdr_sigmf_capture captures[M2SDR_SIGMF_MAX_CAPTURES];
     unsigned annotation_count;
     struct m2sdr_sigmf_annotation annotations[M2SDR_SIGMF_MAX_ANNOTATIONS];
     bool has_sample_rate;
