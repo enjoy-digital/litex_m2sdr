@@ -275,6 +275,21 @@ Example usage:
 
 ---
 
+### m2sdr_sigmf_info
+Small text utility to inspect SigMF metadata without opening the GUI.
+
+**Usage**:
+~~~~
+m2sdr_sigmf_info <sigmf-meta|sigmf-data|basename>
+~~~~
+
+Example usage:
+~~~~
+./m2sdr_sigmf_info capture.sigmf-meta
+~~~~
+
+---
+
 ### m2sdr_sata
 Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, and supports replay through the TX/RX loopback.
 
