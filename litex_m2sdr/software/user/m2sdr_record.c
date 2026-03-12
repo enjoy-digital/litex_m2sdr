@@ -16,9 +16,11 @@
 #include <signal.h>
 #include <time.h>
 #include <getopt.h>
+#include <stdbool.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_sigmf.h"
 #include "config.h"
 
 #include "litepcie_helpers.h"
@@ -45,9 +47,16 @@ static void help(void)
            "  -p, --port PORT       Target port (default: 1234).\n"
 #endif
            "  -q, --quiet           Quiet mode.\n"
+           "      --sigmf           Write a SigMF dataset + metadata pair.\n"
            "      --enable-header   Enable DMA header.\n"
            "      --strip-header    Strip DMA header from output.\n"
            "      --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
+           "      --sample-rate HZ  SigMF sample rate metadata.\n"
+           "      --center-freq HZ  SigMF center frequency metadata.\n"
+           "      --nchannels N     SigMF channel count metadata.\n"
+           "      --description TXT SigMF description metadata.\n"
+           "      --author TXT      SigMF author metadata.\n"
+           "      --hw TXT          SigMF hardware metadata.\n"
            "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
            "      --8bit            Legacy alias for --format sc8.\n"
            "\n"
@@ -57,9 +66,25 @@ static void help(void)
     exit(1);
 }
 
-static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet, uint8_t header, uint8_t strip_header, enum m2sdr_format format)
+static void sigmf_datetime_from_ns(uint64_t ts_ns, char *buf, size_t buf_len)
+{
+    time_t seconds = (time_t)(ts_ns / 1000000000ULL);
+    uint32_t nanos = (uint32_t)(ts_ns % 1000000000ULL);
+    struct tm tm;
+
+    gmtime_r(&seconds, &tm);
+    snprintf(buf, buf_len, "%04d-%02d-%02dT%02d:%02d:%02d.%09uZ",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+             tm.tm_hour, tm.tm_min, tm.tm_sec, nanos);
+}
+
+static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
+                         uint8_t header, uint8_t strip_header, enum m2sdr_format format,
+                         bool sigmf_enable, struct m2sdr_sigmf_meta *sigmf_meta)
 {
     struct m2sdr_dev *dev = NULL;
+    char sigmf_data_path[1024] = {0};
+    char sigmf_meta_path[1024] = {0};
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
@@ -107,6 +132,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     uint64_t total_buffers = 0;
     uint64_t last_buffers  = 0;
     uint64_t last_timestamp = 0;
+    uint64_t first_timestamp = 0;
 
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
@@ -120,6 +146,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         }
         if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
             last_timestamp = meta.timestamp;
+        if (first_timestamp == 0 && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
+            first_timestamp = meta.timestamp;
 
         size_t to_write = payload_bytes_per_buf;
         if (size > 0 && to_write > size - total_len)
@@ -171,6 +199,23 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
     if (fo && fo != stdout)
         fclose(fo);
+
+    if (sigmf_enable) {
+        if (m2sdr_sigmf_derive_paths(filename, sigmf_data_path, sizeof(sigmf_data_path),
+                                     sigmf_meta_path, sizeof(sigmf_meta_path)) != 0) {
+            fprintf(stderr, "Could not derive SigMF paths from %s\n", filename);
+        } else {
+            snprintf(sigmf_meta->data_path, sizeof(sigmf_meta->data_path), "%s", sigmf_data_path);
+            snprintf(sigmf_meta->meta_path, sizeof(sigmf_meta->meta_path), "%s", sigmf_meta_path);
+            if (first_timestamp != 0) {
+                sigmf_datetime_from_ns(first_timestamp, sigmf_meta->datetime, sizeof(sigmf_meta->datetime));
+                sigmf_meta->has_datetime = true;
+            }
+            if (m2sdr_sigmf_write(sigmf_meta) != 0)
+                fprintf(stderr, "Failed to write SigMF metadata: %s\n", sigmf_meta_path);
+        }
+    }
+
     m2sdr_close(dev);
 }
 
@@ -179,9 +224,11 @@ int main(int argc, char **argv)
     int c;
     int option_index = 0;
     static uint8_t quiet = 0;
+    static uint8_t sigmf_enable = 0;
     static uint8_t header = 0;
     static uint8_t strip_header = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    struct m2sdr_sigmf_meta sigmf_meta;
     struct m2sdr_cli_device cli_dev;
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -190,9 +237,16 @@ int main(int argc, char **argv)
         { "ip", required_argument, NULL, 'i' },
         { "port", required_argument, NULL, 'p' },
         { "quiet", no_argument, NULL, 'q' },
+        { "sigmf", no_argument, NULL, 'm' },
         { "zero-copy", no_argument, NULL, 'z' },
         { "enable-header", no_argument, NULL, 'H' },
         { "strip-header", no_argument, NULL, 's' },
+        { "sample-rate", required_argument, NULL, 3 },
+        { "center-freq", required_argument, NULL, 4 },
+        { "nchannels", required_argument, NULL, 5 },
+        { "description", required_argument, NULL, 6 },
+        { "author", required_argument, NULL, 7 },
+        { "hw", required_argument, NULL, 8 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -200,9 +254,11 @@ int main(int argc, char **argv)
 
     signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
+    memset(&sigmf_meta, 0, sizeof(sigmf_meta));
+    snprintf(sigmf_meta.recorder, sizeof(sigmf_meta.recorder), "m2sdr_record");
 
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:i:p:zqHs", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:zqHsm", options, &option_index);
         if (c == -1)
             break;
         switch(c) {
@@ -220,6 +276,9 @@ int main(int argc, char **argv)
             break;
         case 'q':
             quiet = 1;
+            break;
+        case 'm':
+            sigmf_enable = 1;
             break;
         case 'H':
             header = 1;
@@ -240,6 +299,27 @@ int main(int argc, char **argv)
         case 2:
             format = M2SDR_FORMAT_SC8_Q7;
             break;
+        case 3:
+            sigmf_meta.sample_rate = atof(optarg);
+            sigmf_meta.has_sample_rate = true;
+            break;
+        case 4:
+            sigmf_meta.center_freq = atof(optarg);
+            sigmf_meta.has_center_freq = true;
+            break;
+        case 5:
+            sigmf_meta.num_channels = (unsigned)strtoul(optarg, NULL, 0);
+            sigmf_meta.has_num_channels = true;
+            break;
+        case 6:
+            snprintf(sigmf_meta.description, sizeof(sigmf_meta.description), "%s", optarg);
+            break;
+        case 7:
+            snprintf(sigmf_meta.author, sizeof(sigmf_meta.author), "%s", optarg);
+            break;
+        case 8:
+            snprintf(sigmf_meta.hw, sizeof(sigmf_meta.hw), "%s", optarg);
+            break;
         default:
             exit(1);
         }
@@ -258,6 +338,32 @@ int main(int argc, char **argv)
     if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
 
-    m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format);
+    if (sigmf_enable) {
+        const char *datatype = m2sdr_sigmf_datatype_from_format(format);
+        if (!filename || strcmp(filename, "-") == 0) {
+            fprintf(stderr, "SigMF output requires a file path, not stdout\n");
+            return 1;
+        }
+        if (header && !strip_header) {
+            fprintf(stderr, "SigMF MVP currently requires --strip-header when --enable-header is used\n");
+            return 1;
+        }
+        if (!datatype) {
+            fprintf(stderr, "Unsupported SigMF datatype for selected format\n");
+            return 1;
+        }
+        snprintf(sigmf_meta.datatype, sizeof(sigmf_meta.datatype), "%s", datatype);
+        if (!sigmf_meta.has_num_channels) {
+            sigmf_meta.num_channels = 2;
+            sigmf_meta.has_num_channels = true;
+        }
+        if (header && strip_header) {
+            sigmf_meta.header_bytes = 0;
+            sigmf_meta.has_header_bytes = false;
+        }
+    }
+
+    m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
+                 sigmf_enable ? true : false, &sigmf_meta);
     return 0;
 }

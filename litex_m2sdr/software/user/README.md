@@ -208,10 +208,25 @@ m2sdr_record [options] filename size
 - **filename**: Destination file for captured I/Q samples (or `-` for stdout).
 - **size**: Number of samples to capture.
 
+Relevant options:
+- `--format sc16|sc8`
+- `--enable-header`
+- `--strip-header`
+- `--sigmf`
+- `--sample-rate`
+- `--center-freq`
+- `--nchannels`
+- `--description`
+- `--author`
+- `--hw`
+
 Example usage:
 ~~~~
 ./m2sdr_record --enable-header --strip-header rx_file.bin 2000000
+./m2sdr_record --sigmf --sample-rate 30720000 --center-freq 2400000000 --enable-header --strip-header capture 2000000
 ~~~~
+
+Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
 
 ---
 
