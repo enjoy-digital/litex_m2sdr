@@ -21,7 +21,7 @@
 static void help(void)
 {
     printf("M2SDR SigMF Info Utility.\n"
-           "usage: m2sdr_sigmf_info [--validate] <sigmf-meta|sigmf-data|basename>\n");
+           "usage: m2sdr_sigmf_info [--validate] [--strict] [--ci] <sigmf-meta|sigmf-data|basename>\n");
 }
 
 static void validation_message(const char *level, const char *msg)
@@ -29,38 +29,38 @@ static void validation_message(const char *level, const char *msg)
     printf("%s: %s\n", level, msg);
 }
 
-static int validate_sigmf(const struct m2sdr_sigmf_meta *meta)
+static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool ci_mode)
 {
     unsigned i;
     int errors = 0;
     int warnings = 0;
 
     if (!meta->datatype[0]) {
-        validation_message("ERROR", "missing core:datatype");
+        if (!ci_mode) validation_message("ERROR", "missing core:datatype");
         errors++;
     } else if (m2sdr_sigmf_format_from_datatype(meta->datatype) == (enum m2sdr_format)-1) {
-        validation_message("ERROR", "unsupported core:datatype for current m2sdr tools");
+        if (!ci_mode) validation_message("ERROR", "unsupported core:datatype for current m2sdr tools");
         errors++;
     }
 
     if (!meta->data_path[0]) {
-        validation_message("ERROR", "missing or unresolved core:dataset");
+        if (!ci_mode) validation_message("ERROR", "missing or unresolved core:dataset");
         errors++;
     } else if (access(meta->data_path, R_OK) != 0) {
-        validation_message("WARNING", "dataset file is not readable from current path");
+        if (!ci_mode) validation_message("WARNING", "dataset file is not readable from current path");
         warnings++;
     }
 
     if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
-        validation_message("ERROR", "core:sample_rate must be > 0");
+        if (!ci_mode) validation_message("ERROR", "core:sample_rate must be > 0");
         errors++;
     }
     if (meta->has_num_channels && meta->num_channels == 0) {
-        validation_message("ERROR", "core:num_channels must be > 0");
+        if (!ci_mode) validation_message("ERROR", "core:num_channels must be > 0");
         errors++;
     }
     if (meta->capture_count == 0) {
-        validation_message("WARNING", "no captures[] entries found");
+        if (!ci_mode) validation_message("WARNING", "no captures[] entries found");
         warnings++;
     }
 
@@ -68,12 +68,12 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta)
         const struct m2sdr_sigmf_capture *cap = &meta->captures[i];
 
         if (i > 0 && cap->sample_start < meta->captures[i - 1].sample_start) {
-            validation_message("WARNING", "captures[] are not ordered by core:sample_start");
+            if (!ci_mode) validation_message("WARNING", "captures[] are not ordered by core:sample_start");
             warnings++;
             break;
         }
         if (cap->has_header_bytes && cap->header_bytes != 0 && cap->header_bytes != 16) {
-            validation_message("ERROR", "capture core:header_bytes is unsupported by m2sdr tools");
+            if (!ci_mode) validation_message("ERROR", "capture core:header_bytes is unsupported by m2sdr tools");
             errors++;
         }
     }
@@ -83,29 +83,38 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta)
 
         if (ann->has_freq_lower_edge && ann->has_freq_upper_edge &&
             ann->freq_lower_edge > ann->freq_upper_edge) {
-            validation_message("ERROR", "annotation has freq_lower_edge > freq_upper_edge");
+            if (!ci_mode) validation_message("ERROR", "annotation has freq_lower_edge > freq_upper_edge");
             errors++;
         }
         if (ann->has_sample_count && ann->sample_count == 0) {
-            validation_message("WARNING", "annotation has zero sample_count");
+            if (!ci_mode) validation_message("WARNING", "annotation has zero sample_count");
             warnings++;
         }
     }
 
-    printf("Validation summary: %d error(s), %d warning(s)\n", errors, warnings);
-    return errors == 0 ? 0 : 1;
+    if (ci_mode)
+        printf("VALIDATION status=%s errors=%d warnings=%d strict=%d\n",
+               (errors == 0 && (!strict || warnings == 0)) ? "ok" : "fail",
+               errors, warnings, strict ? 1 : 0);
+    else
+        printf("Validation summary: %d error(s), %d warning(s)\n", errors, warnings);
+    return (errors == 0 && (!strict || warnings == 0)) ? 0 : 1;
 }
 
 int main(int argc, char **argv)
 {
     struct m2sdr_sigmf_meta meta;
     bool validate_only = false;
+    bool strict = false;
+    bool ci_mode = false;
     unsigned i;
     int c;
     int option_index = 0;
     static struct option options[] = {
         {"help", no_argument, NULL, 'h'},
         {"validate", no_argument, NULL, 'v'},
+        {"strict", no_argument, NULL, 's'},
+        {"ci", no_argument, NULL, 'c'},
         {NULL, 0, NULL, 0}
     };
 
@@ -116,7 +125,7 @@ int main(int argc, char **argv)
     opterr = 0;
 
     for (;;) {
-        c = getopt_long(argc, argv, "hv", options, &option_index);
+        c = getopt_long(argc, argv, "hvsc", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
@@ -125,6 +134,12 @@ int main(int argc, char **argv)
             return 0;
         case 'v':
             validate_only = true;
+            break;
+        case 's':
+            strict = true;
+            break;
+        case 'c':
+            ci_mode = true;
             break;
         default:
             help();
@@ -143,7 +158,7 @@ int main(int argc, char **argv)
     }
 
     if (validate_only)
-        return validate_sigmf(&meta);
+        return validate_sigmf(&meta, strict, ci_mode);
 
     printf("SigMF\n");
     printf("  Meta Path         %s\n", meta.meta_path);

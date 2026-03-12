@@ -292,13 +292,14 @@ Small text utility to inspect SigMF metadata without opening the GUI.
 
 **Usage**:
 ~~~~
-m2sdr_sigmf_info [--validate] <sigmf-meta|sigmf-data|basename>
+m2sdr_sigmf_info [--validate] [--strict] [--ci] <sigmf-meta|sigmf-data|basename>
 ~~~~
 
 Example usage:
 ~~~~
 ./m2sdr_sigmf_info capture.sigmf-meta
 ./m2sdr_sigmf_info --validate capture.sigmf-meta
+./m2sdr_sigmf_info --validate --strict --ci capture.sigmf-meta
 ~~~~
 
 ---
