@@ -50,7 +50,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
 M2SDR_SIGMF_OBJS = m2sdr_sigmf.o m2sdr_json.o
-TEST_PROGS = test_libm2sdr test_m2sdr_sigmf test_sigmf_capture_smoke
+TEST_PROGS = test_libm2sdr test_m2sdr_sigmf test_sigmf_capture_smoke test_sigmf_info_cli
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -93,6 +93,9 @@ test-sigmf: test_m2sdr_sigmf
 test-sigmf-smoke: test_sigmf_capture_smoke
 	./test_sigmf_capture_smoke
 
+test-sigmf-cli: test_sigmf_info_cli m2sdr_sigmf_info
+	./test_sigmf_info_cli
+
 test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
@@ -101,6 +104,9 @@ test_m2sdr_sigmf: test_m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS) | $(BUILD_FLAGS_FILE)
 
 test_sigmf_capture_smoke: test_sigmf_capture_smoke.o $(M2SDR_SIGMF_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_sigmf_capture_smoke.o $(M2SDR_SIGMF_OBJS) -lm
+
+test_sigmf_info_cli: test_sigmf_info_cli.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_sigmf_info_cli.o -lm
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
