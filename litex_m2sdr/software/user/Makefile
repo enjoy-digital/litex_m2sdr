@@ -38,6 +38,7 @@ endif
 
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
   BINARIES += m2sdr_check
+  BINARIES += m2sdr_lab_gui
   ifeq ($(INTERFACE),USE_LITEPCIE)
     BINARIES += m2sdr_scan
   endif
@@ -200,6 +201,9 @@ endif
 
 ifeq ($(HAVE_SDL2),1)
 m2sdr_check: kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_SIGMF_OBJS) $(M2SDR_IMGUI_OBJS)
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+
+m2sdr_lab_gui: m2sdr_lab_gui.o lib/m2sdr_json.o $(M2SDR_IMGUI_OBJS)
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $^ -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
