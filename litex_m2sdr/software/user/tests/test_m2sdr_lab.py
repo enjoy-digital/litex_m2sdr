@@ -72,6 +72,10 @@ class TestM2SDRLab(unittest.TestCase):
             run_cmd("ingest", str(lab), str(meta_b), "--name", "variant", "--copy")
             run_cmd("ingest", str(lab), str(meta_c), "--name", "baseline-copy", "--copy")
 
+            copied_meta = json.loads((lab / "captures" / "baseline.sigmf-meta").read_text(encoding="utf-8"))
+            self.assertEqual(copied_meta["global"]["core:dataset"], "baseline.sigmf-data")
+            self.assertTrue((lab / "captures" / "baseline.sigmf-data").exists())
+
             listed = run_cmd("list", str(lab)).stdout
             self.assertIn("baseline", listed)
             self.assertIn("variant", listed)

@@ -135,6 +135,13 @@ def resolve_sigmf_pair(meta_or_data):
     return meta_path, data_path
 
 
+def rewrite_sigmf_dataset(meta_path, dataset_name):
+    meta = read_json(meta_path)
+    global_meta = meta.setdefault("global", {})
+    global_meta["core:dataset"] = dataset_name
+    write_json(meta_path, meta)
+
+
 def sigmf_summary(meta_path, data_path=None):
     meta = read_json(meta_path)
     global_meta = meta.get("global", {})
@@ -319,6 +326,7 @@ def cmd_ingest(args):
         shutil.copy2(meta_src, meta_dst)
         if data_src.exists():
             shutil.copy2(data_src, data_dst)
+            rewrite_sigmf_dataset(meta_dst, data_dst.name)
         meta_path = meta_dst
         data_path = data_dst if data_dst.exists() else data_src
     else:

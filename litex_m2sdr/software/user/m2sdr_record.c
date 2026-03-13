@@ -200,24 +200,36 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
     }
 }
 
-static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
-                         uint8_t header, uint8_t strip_header, enum m2sdr_format format,
-                         bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
-                         struct m2sdr_sigmf_meta *sigmf_meta)
+static int m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
+                        uint8_t header, uint8_t strip_header, enum m2sdr_format format,
+                        bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
+                        struct m2sdr_sigmf_meta *sigmf_meta)
 {
     struct m2sdr_dev *dev = NULL;
     char sigmf_data_path[1024] = {0};
     char sigmf_meta_path[1024] = {0};
+    const char *output_path = filename;
+    int status = 0;
+
+    if (sigmf_enable && filename && strcmp(filename, "-") != 0) {
+        if (m2sdr_sigmf_derive_paths(filename, sigmf_data_path, sizeof(sigmf_data_path),
+                                     sigmf_meta_path, sizeof(sigmf_meta_path)) != 0) {
+            fprintf(stderr, "Could not derive SigMF paths from %s\n", filename);
+            return 1;
+        }
+        output_path = sigmf_data_path;
+    }
+
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
-        exit(1);
+        return 1;
     }
 
     if (header) {
         if (m2sdr_set_rx_header(dev, true, strip_header ? true : false) != 0) {
             fprintf(stderr, "m2sdr_set_rx_header failed\n");
             m2sdr_close(dev);
-            exit(1);
+            return 1;
         }
     }
 
@@ -235,19 +247,19 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                           0, samples_per_buf, 0, 1000) != 0) {
         fprintf(stderr, "m2sdr_sync_config failed\n");
         m2sdr_close(dev);
-        exit(1);
+        return 1;
     }
 
     FILE *fo = NULL;
-    if (filename != NULL) {
-        if (strcmp(filename, "-") == 0) {
+    if (output_path != NULL) {
+        if (strcmp(output_path, "-") == 0) {
             fo = stdout;
         } else {
-            fo = fopen(filename, "wb");
+            fo = fopen(output_path, "wb");
             if (!fo) {
-                perror(filename);
+                perror(output_path);
                 m2sdr_close(dev);
-                exit(1);
+                return 1;
             }
         }
     }
@@ -270,6 +282,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
         if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
             fprintf(stderr, "m2sdr_sync_rx failed\n");
+            status = 1;
             break;
         }
         if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
@@ -344,10 +357,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     if (sigmf_enable) {
         uint64_t total_samples = sample_size ? (uint64_t)(total_len / sample_size) : 0;
 
-        if (m2sdr_sigmf_derive_paths(filename, sigmf_data_path, sizeof(sigmf_data_path),
-                                     sigmf_meta_path, sizeof(sigmf_meta_path)) != 0) {
-            fprintf(stderr, "Could not derive SigMF paths from %s\n", filename);
-        } else {
+        if (sigmf_data_path[0] && sigmf_meta_path[0]) {
             snprintf(sigmf_meta->data_path, sizeof(sigmf_meta->data_path), "%s", sigmf_data_path);
             snprintf(sigmf_meta->meta_path, sizeof(sigmf_meta->meta_path), "%s", sigmf_meta_path);
             sigmf_finalize_annotation_ranges(sigmf_meta, total_samples);
@@ -361,6 +371,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     }
 
     m2sdr_close(dev);
+    return status;
 }
 
 int main(int argc, char **argv)
@@ -562,7 +573,7 @@ int main(int argc, char **argv)
         }
     }
 
-    m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
-                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct, &sigmf_meta);
-    return 0;
+    return m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
+                        sigmf_enable ? true : false, annotate_ts_jumps ? true : false,
+                        ts_jump_threshold_pct, &sigmf_meta);
 }
