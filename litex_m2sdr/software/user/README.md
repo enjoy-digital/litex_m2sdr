@@ -459,6 +459,7 @@ Headless export example:
 Notes:
 - Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
 - `F8` moves the window to the next monitor and keeps maximized mode; `Shift+F8` expands it across all monitors.
+- `F11` toggles a borderless fullscreen span across all monitors.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
 - A local `software/user/cimgui/` checkout is also required for the build.
