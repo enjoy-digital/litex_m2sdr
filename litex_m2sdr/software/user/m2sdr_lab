@@ -1,0 +1,586 @@
+#!/usr/bin/env python3
+
+# This file is part of LiteX-M2SDR.
+#
+# Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tarfile
+from pathlib import Path
+
+
+LAB_SCHEMA_VERSION = 1
+LAB_MANIFEST_NAME = "lab.json"
+
+
+def utc_now():
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sanitize_name(value):
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip().lower()).strip("-")
+    return value or "run"
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def relative_to_root(root, path):
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def read_json(path):
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path, data):
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def ensure_lab_dirs(root):
+    for dirname in ("captures", "replays", "reports", "bundles"):
+        (root / dirname).mkdir(parents=True, exist_ok=True)
+
+
+def load_lab(root):
+    manifest = root / LAB_MANIFEST_NAME
+    if not manifest.exists():
+        raise SystemExit(f"Missing {LAB_MANIFEST_NAME} in {root}")
+    lab = read_json(manifest)
+    if lab.get("schema_version") != LAB_SCHEMA_VERSION:
+        raise SystemExit(
+            f"Unsupported lab schema version: {lab.get('schema_version')} "
+            f"(expected {LAB_SCHEMA_VERSION})"
+        )
+    ensure_lab_dirs(root)
+    return lab
+
+
+def save_lab(root, lab):
+    write_json(root / LAB_MANIFEST_NAME, lab)
+
+
+def create_lab_readme(root, lab):
+    defaults = lab["defaults"]
+    lines = [
+        "# LiteX-M2SDR RF Lab",
+        "",
+        f"- Title: {lab['title']}",
+        f"- Created: {lab['created_at']}",
+        f"- Description: {lab['description'] or 'n/a'}",
+        "",
+        "## Defaults",
+        "",
+        f"- Device: {defaults.get('device') or 'n/a'}",
+        f"- Sample rate: {defaults.get('sample_rate') or 'n/a'}",
+        f"- Center frequency: {defaults.get('center_freq') or 'n/a'}",
+        f"- Format: {defaults.get('format') or 'n/a'}",
+        f"- Channels: {defaults.get('nchannels') or 'n/a'}",
+        "",
+        "## Workflow",
+        "",
+        "```bash",
+        f"./m2sdr_lab capture {shlex.quote(str(root))} --samples 2000000 --name baseline",
+        f"./m2sdr_lab replay  {shlex.quote(str(root))} baseline",
+        f"./m2sdr_lab compare {shlex.quote(str(root))} baseline baseline",
+        f"./m2sdr_lab bundle  {shlex.quote(str(root))}",
+        "```",
+        "",
+        "Each run is tracked in `lab.json` with commands, hashes, SigMF metadata, and generated reports.",
+    ]
+    (root / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def resolve_sigmf_pair(meta_or_data):
+    path = Path(meta_or_data).resolve()
+    if path.suffix == ".sigmf-meta":
+        meta_path = path
+        meta = read_json(meta_path)
+        dataset = meta.get("global", {}).get("core:dataset")
+        if dataset:
+            data_path = (meta_path.parent / dataset).resolve()
+        else:
+            data_path = meta_path.with_suffix(".sigmf-data")
+    elif path.suffix == ".sigmf-data":
+        data_path = path
+        meta_path = path.with_suffix(".sigmf-meta")
+    else:
+        meta_path = path.with_suffix(".sigmf-meta")
+        data_path = path.with_suffix(".sigmf-data")
+    if not meta_path.exists():
+        raise SystemExit(f"Missing SigMF metadata file: {meta_path}")
+    return meta_path, data_path
+
+
+def sigmf_summary(meta_path, data_path=None):
+    meta = read_json(meta_path)
+    global_meta = meta.get("global", {})
+    captures = meta.get("captures", [])
+    annotations = meta.get("annotations", [])
+    summary = {
+        "meta_path": str(meta_path),
+        "data_path": str(data_path) if data_path else None,
+        "meta_sha256": sha256_file(meta_path),
+        "meta_size": meta_path.stat().st_size,
+        "datatype": global_meta.get("core:datatype"),
+        "sample_rate": global_meta.get("core:sample_rate"),
+        "center_freq": global_meta.get("core:frequency"),
+        "num_channels": global_meta.get("core:num_channels"),
+        "author": global_meta.get("core:author"),
+        "description": global_meta.get("core:description"),
+        "hw": global_meta.get("core:hw"),
+        "version": global_meta.get("core:version"),
+        "header_bytes": global_meta.get("core:header_bytes", 0),
+        "capture_count": len(captures),
+        "annotation_count": len(annotations),
+        "capture_starts": [capture.get("core:sample_start", 0) for capture in captures],
+    }
+    if data_path and data_path.exists():
+        summary["data_sha256"] = sha256_file(data_path)
+        summary["data_size"] = data_path.stat().st_size
+    return summary
+
+
+def run_entry_index(lab, run_id):
+    for idx, run in enumerate(lab.get("runs", [])):
+        if run.get("id") == run_id:
+            return idx
+    raise SystemExit(f"Unknown run id: {run_id}")
+
+
+def add_run(lab, run):
+    runs = lab.setdefault("runs", [])
+    if any(existing.get("id") == run["id"] for existing in runs):
+        raise SystemExit(f"Run id already exists: {run['id']}")
+    runs.append(run)
+
+
+def default_run_id(name):
+    return sanitize_name(name or dt.datetime.now().strftime("run-%Y%m%d-%H%M%S"))
+
+
+def compose_record_command(args, lab, output_base):
+    defaults = lab["defaults"]
+    device = args.device or defaults.get("device")
+    sample_rate = args.sample_rate or defaults.get("sample_rate")
+    center_freq = args.center_freq or defaults.get("center_freq")
+    fmt = args.format or defaults.get("format")
+    nchannels = args.nchannels or defaults.get("nchannels")
+    description = args.description or lab.get("description") or lab["title"]
+    author = args.author or lab.get("author")
+    hw = args.hw or "LiteX-M2SDR"
+
+    cmd = [args.record_bin]
+    if device:
+        cmd += ["--device", str(device)]
+    if sample_rate:
+        cmd += ["--sample-rate", str(sample_rate)]
+    if center_freq:
+        cmd += ["--center-freq", str(center_freq)]
+    if fmt:
+        cmd += ["--format", str(fmt)]
+    if nchannels:
+        cmd += ["--nchannels", str(nchannels)]
+    cmd += ["--sigmf", "--description", description, "--hw", hw]
+    if author:
+        cmd += ["--author", author]
+    if args.enable_header:
+        cmd += ["--enable-header", "--strip-header"]
+    if args.annotation_label:
+        cmd += ["--annotation-label", args.annotation_label]
+    cmd += [str(output_base), str(args.samples)]
+    return cmd
+
+
+def execute_command(command, dry_run):
+    print("command:", shlex.join(command))
+    if dry_run:
+        return
+    subprocess.run(command, check=True)
+
+
+def create_file_record(root, path):
+    resolved = Path(path)
+    if not resolved.exists():
+        return None
+    return {
+        "path": relative_to_root(root, resolved),
+        "size": resolved.stat().st_size,
+        "sha256": sha256_file(resolved),
+    }
+
+
+def cmd_init(args):
+    root = Path(args.path).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    manifest = root / LAB_MANIFEST_NAME
+    if manifest.exists() and not args.force:
+        raise SystemExit(f"{manifest} already exists; use --force to overwrite")
+
+    lab = {
+        "schema_version": LAB_SCHEMA_VERSION,
+        "platform": "LiteX-M2SDR RF Lab",
+        "created_at": utc_now(),
+        "title": args.title,
+        "description": args.description,
+        "author": args.author,
+        "defaults": {
+            "device": args.device,
+            "sample_rate": args.sample_rate,
+            "center_freq": args.center_freq,
+            "format": args.format,
+            "nchannels": args.nchannels,
+        },
+        "runs": [],
+        "reports": [],
+    }
+    ensure_lab_dirs(root)
+    save_lab(root, lab)
+    create_lab_readme(root, lab)
+    print(f"Initialized RF lab in {root}")
+
+
+def cmd_capture(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    run_id = default_run_id(args.name)
+    output_base = root / "captures" / run_id
+    command = compose_record_command(args, lab, output_base)
+    execute_command(command, args.dry_run)
+
+    meta_path = output_base.with_suffix(".sigmf-meta")
+    data_path = output_base.with_suffix(".sigmf-data")
+    summary = sigmf_summary(meta_path, data_path) if meta_path.exists() else None
+
+    run = {
+        "id": run_id,
+        "kind": "capture",
+        "status": "planned" if args.dry_run else "complete",
+        "created_at": utc_now(),
+        "command": command,
+        "notes": args.notes,
+        "files": {
+            "meta": create_file_record(root, meta_path),
+            "data": create_file_record(root, data_path),
+        },
+        "sigmf": summary,
+    }
+    add_run(lab, run)
+    save_lab(root, lab)
+    print(f"Recorded run {run_id}")
+
+
+def cmd_ingest(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    meta_src, data_src = resolve_sigmf_pair(args.sigmf)
+    run_id = default_run_id(args.name or meta_src.stem.replace(".sigmf-meta", ""))
+    meta_dst = root / "captures" / f"{run_id}.sigmf-meta"
+    data_dst = root / "captures" / f"{run_id}.sigmf-data"
+
+    if args.copy:
+        shutil.copy2(meta_src, meta_dst)
+        if data_src.exists():
+            shutil.copy2(data_src, data_dst)
+        meta_path = meta_dst
+        data_path = data_dst if data_dst.exists() else data_src
+    else:
+        meta_path = meta_src
+        data_path = data_src
+
+    summary = sigmf_summary(meta_path, data_path if data_path.exists() else None)
+    run = {
+        "id": run_id,
+        "kind": "capture",
+        "status": "imported",
+        "created_at": utc_now(),
+        "command": None,
+        "source": {
+            "meta": str(meta_src),
+            "data": str(data_src),
+            "copied": bool(args.copy),
+        },
+        "notes": args.notes,
+        "files": {
+            "meta": create_file_record(root, meta_path),
+            "data": create_file_record(root, data_path) if data_path.exists() else None,
+        },
+        "sigmf": summary,
+    }
+    add_run(lab, run)
+    save_lab(root, lab)
+    print(f"Ingested run {run_id}")
+
+
+def cmd_replay(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    source_run = lab["runs"][run_entry_index(lab, args.run_id)]
+    meta_info = (source_run.get("files") or {}).get("meta")
+    if not meta_info:
+        raise SystemExit(f"Run {args.run_id} has no SigMF metadata reference")
+
+    meta_path = Path(meta_info["path"])
+    if not meta_path.is_absolute():
+        meta_path = (root / meta_path).resolve()
+    defaults = lab["defaults"]
+    command = [args.play_bin]
+    device = args.device or defaults.get("device")
+    if device:
+        command += ["--device", str(device)]
+    if args.capture_index is not None:
+        command += ["--capture-index", str(args.capture_index)]
+    command += [str(meta_path), str(args.loops)]
+
+    execute_command(command, args.dry_run)
+    run_id = default_run_id(args.name or f"replay-{args.run_id}")
+    run = {
+        "id": run_id,
+        "kind": "replay",
+        "status": "planned" if args.dry_run else "complete",
+        "created_at": utc_now(),
+        "command": command,
+        "source_run_id": args.run_id,
+        "capture_index": args.capture_index,
+        "loops": args.loops,
+        "notes": args.notes,
+    }
+    add_run(lab, run)
+    save_lab(root, lab)
+    print(f"Queued replay run {run_id}")
+
+
+def summarize_run(run):
+    sigmf = run.get("sigmf") or {}
+    return {
+        "id": run["id"],
+        "kind": run["kind"],
+        "status": run["status"],
+        "sample_rate": sigmf.get("sample_rate"),
+        "center_freq": sigmf.get("center_freq"),
+        "datatype": sigmf.get("datatype"),
+        "num_channels": sigmf.get("num_channels"),
+        "capture_count": sigmf.get("capture_count"),
+        "annotation_count": sigmf.get("annotation_count"),
+        "data_sha256": sigmf.get("data_sha256"),
+        "meta_sha256": sigmf.get("meta_sha256"),
+    }
+
+
+def compare_sigmf(run_a, run_b):
+    summary_a = summarize_run(run_a)
+    summary_b = summarize_run(run_b)
+    mismatches = []
+    compatibility_checks = {
+        "sample_rate": summary_a["sample_rate"] == summary_b["sample_rate"],
+        "center_freq": summary_a["center_freq"] == summary_b["center_freq"],
+        "datatype": summary_a["datatype"] == summary_b["datatype"],
+        "num_channels": summary_a["num_channels"] == summary_b["num_channels"],
+        "capture_layout": (run_a.get("sigmf") or {}).get("capture_starts") == (run_b.get("sigmf") or {}).get("capture_starts"),
+    }
+    for key, ok in compatibility_checks.items():
+        if not ok:
+            mismatches.append(key)
+    exact_match = (
+        summary_a.get("meta_sha256") == summary_b.get("meta_sha256")
+        and summary_a.get("data_sha256") == summary_b.get("data_sha256")
+    )
+    return {
+        "compatible_for_replay": not mismatches,
+        "exact_match": exact_match,
+        "checks": compatibility_checks,
+        "mismatches": mismatches,
+        "run_a": summary_a,
+        "run_b": summary_b,
+    }
+
+
+def cmd_compare(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    run_a = lab["runs"][run_entry_index(lab, args.run_a)]
+    run_b = lab["runs"][run_entry_index(lab, args.run_b)]
+    report = {
+        "id": default_run_id(f"compare-{args.run_a}-vs-{args.run_b}"),
+        "kind": "compare",
+        "created_at": utc_now(),
+        "comparison": compare_sigmf(run_a, run_b),
+    }
+    report_path = root / "reports" / f"{report['id']}.json"
+    write_json(report_path, report)
+    lab.setdefault("reports", []).append(
+        {
+            "id": report["id"],
+            "path": relative_to_root(root, report_path),
+            "runs": [args.run_a, args.run_b],
+            "created_at": report["created_at"],
+        }
+    )
+    save_lab(root, lab)
+    print(json.dumps(report["comparison"], indent=2, sort_keys=True))
+    print(f"Report written to {report_path}")
+
+
+def cmd_list(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    if not lab.get("runs"):
+        print("No runs recorded")
+        return
+    for run in lab["runs"]:
+        sigmf = run.get("sigmf") or {}
+        print(
+            f"{run['id']:24s} kind={run['kind']:7s} status={run['status']:8s} "
+            f"rate={sigmf.get('sample_rate')} freq={sigmf.get('center_freq')} "
+            f"captures={sigmf.get('capture_count')}"
+        )
+
+
+def iter_bundle_members(root, lab, include_data):
+    yield root / LAB_MANIFEST_NAME
+    readme = root / "README.md"
+    if readme.exists():
+        yield readme
+    for report in lab.get("reports", []):
+        report_path = root / report["path"]
+        if report_path.exists():
+            yield report_path
+    for run in lab.get("runs", []):
+        for key in ("meta", "data"):
+            if key == "data" and not include_data:
+                continue
+            record = (run.get("files") or {}).get(key)
+            if not record:
+                continue
+            path = Path(record["path"])
+            if not path.is_absolute():
+                path = (root / path).resolve()
+            try:
+                path.relative_to(root)
+            except ValueError:
+                continue
+            if path.exists():
+                yield path
+
+
+def cmd_bundle(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    bundle_name = args.output or f"{sanitize_name(lab['title'])}-{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}.tar.gz"
+    bundle_path = Path(bundle_name)
+    if not bundle_path.is_absolute():
+        bundle_path = (root / "bundles" / bundle_path).resolve()
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tarfile.open(bundle_path, "w:gz") as tar:
+        for member in iter_bundle_members(root, lab, include_data=not args.meta_only):
+            tar.add(member, arcname=relative_to_root(root, member))
+    print(f"Created bundle {bundle_path}")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="LiteX-M2SDR RF lab helper for reproducible SigMF-based experiments."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init = subparsers.add_parser("init", help="Initialize an RF lab directory.")
+    init.add_argument("path")
+    init.add_argument("--title", default="LiteX-M2SDR Experiment")
+    init.add_argument("--description", default="")
+    init.add_argument("--author", default="")
+    init.add_argument("--device", default="")
+    init.add_argument("--sample-rate", type=int, default=30720000)
+    init.add_argument("--center-freq", type=int, default=2400000000)
+    init.add_argument("--format", default="sc16")
+    init.add_argument("--nchannels", type=int, default=2)
+    init.add_argument("--force", action="store_true")
+    init.set_defaults(func=cmd_init)
+
+    capture = subparsers.add_parser("capture", help="Record a SigMF capture and register it in the lab.")
+    capture.add_argument("lab")
+    capture.add_argument("--name", default="")
+    capture.add_argument("--notes", default="")
+    capture.add_argument("--device", default="")
+    capture.add_argument("--sample-rate", type=int)
+    capture.add_argument("--center-freq", type=int)
+    capture.add_argument("--format", default="")
+    capture.add_argument("--nchannels", type=int)
+    capture.add_argument("--description", default="")
+    capture.add_argument("--author", default="")
+    capture.add_argument("--hw", default="")
+    capture.add_argument("--annotation-label", default="")
+    capture.add_argument("--samples", required=True, type=int)
+    capture.add_argument("--record-bin", default="./m2sdr_record")
+    capture.add_argument("--enable-header", action="store_true")
+    capture.add_argument("--dry-run", action="store_true")
+    capture.set_defaults(func=cmd_capture)
+
+    ingest = subparsers.add_parser("ingest", help="Register an existing SigMF capture.")
+    ingest.add_argument("lab")
+    ingest.add_argument("sigmf")
+    ingest.add_argument("--name", default="")
+    ingest.add_argument("--notes", default="")
+    ingest.add_argument("--copy", action="store_true")
+    ingest.set_defaults(func=cmd_ingest)
+
+    replay = subparsers.add_parser("replay", help="Replay a recorded capture through m2sdr_play.")
+    replay.add_argument("lab")
+    replay.add_argument("run_id")
+    replay.add_argument("--name", default="")
+    replay.add_argument("--notes", default="")
+    replay.add_argument("--device", default="")
+    replay.add_argument("--play-bin", default="./m2sdr_play")
+    replay.add_argument("--capture-index", type=int)
+    replay.add_argument("--loops", type=int, default=1)
+    replay.add_argument("--dry-run", action="store_true")
+    replay.set_defaults(func=cmd_replay)
+
+    compare = subparsers.add_parser("compare", help="Compare two capture runs and emit a report.")
+    compare.add_argument("lab")
+    compare.add_argument("run_a")
+    compare.add_argument("run_b")
+    compare.set_defaults(func=cmd_compare)
+
+    list_cmd = subparsers.add_parser("list", help="List lab runs.")
+    list_cmd.add_argument("lab")
+    list_cmd.set_defaults(func=cmd_list)
+
+    bundle = subparsers.add_parser("bundle", help="Export a portable lab bundle.")
+    bundle.add_argument("lab")
+    bundle.add_argument("--output", default="")
+    bundle.add_argument("--meta-only", action="store_true")
+    bundle.set_defaults(func=cmd_bundle)
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
