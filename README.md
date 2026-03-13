@@ -11,6 +11,7 @@
 ---------
 - **What?** LiteX‑based M.2 2280 SDR board featuring a Xilinx **Artix‑7 XC7A200T** FPGA and an **ADI AD9361** RFIC.
 - **Why?** Open‑source gateware/software, up to 61.44 MSPS (122.88 MSPS†) over PCIe Gen2 ×4, hack‑friendly clocking & debug.
+- **What makes it different?** It can also be used as an **open RF lab**: capture in SigMF, replay later, compare runs, and share portable experiment bundles.
 - **Who?** SDR tinkerers, FPGA devs, time‑sync enthusiasts, or anyone hitting the limits of other SDRs.
 - **How fast?** `apt install …` → `./build.py` → **stream/record IQ in ≈5 min** with our C API/tools or any SoapySDR compatible software.
 
@@ -75,7 +76,8 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 3. [PCIe SoC Design](#pcie-soc-design)
 4. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
 5. [Quick Start](#quick-start)
-6. [Contact](#contact)
+6. [RF Lab Workflow](#rf-lab-workflow)
+7. [Contact](#contact)
 
 [> Hardware Availability
 ------------------------
@@ -258,6 +260,37 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
 
 - [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
+
+[> RF Lab Workflow
+------------------
+<a id="rf-lab-workflow"></a>
+
+LiteX-M2SDR is no longer just positioned as "another AD9361 board". The software stack now supports an **RF lab** workflow aimed at reproducible experiments:
+
+- capture SigMF datasets with `m2sdr_record`
+- inspect them with `m2sdr_check` or `m2sdr_sigmf_info`
+- replay them with `m2sdr_play`
+- organize runs, comparisons, and bundles with `m2sdr_lab`
+
+The idea is simple: a bug report, demo, or experiment should be shareable as a dataset plus metadata, not only as a screenshot or loose command line.
+
+Quick example:
+
+```bash
+cd litex_m2sdr/software/user
+./m2sdr_lab init /tmp/my_rf_lab \
+  --title "2.4 GHz loopback regression" \
+  --device pcie:/dev/m2sdr0 \
+  --sample-rate 30720000 \
+  --center-freq 2400000000
+
+./m2sdr_lab capture /tmp/my_rf_lab --name baseline --samples 2000000
+./m2sdr_lab replay  /tmp/my_rf_lab baseline
+./m2sdr_lab compare /tmp/my_rf_lab baseline baseline
+./m2sdr_lab bundle  /tmp/my_rf_lab
+```
+
+See [doc/rf-lab.md](doc/rf-lab.md) and `litex_m2sdr/software/user/README.md` for more details.
 - [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
 
 ### For Software Developers

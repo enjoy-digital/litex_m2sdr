@@ -9,6 +9,13 @@
 
 The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module.
 
+The user-space stack can also be treated as an **RF lab** workflow:
+
+- `m2sdr_record` captures SigMF datasets.
+- `m2sdr_play` replays them.
+- `m2sdr_check` and `m2sdr_sigmf_info` inspect them.
+- `m2sdr_lab` organizes reproducible experiments, run comparisons, and portable bundles.
+
 ---
 
 ## Overview of utilities
@@ -307,6 +314,35 @@ Example usage:
 ./m2sdr_sigmf_info --validate --strict --ci capture.sigmf-meta
 ./m2sdr_sigmf_info --validate --strict framed_capture.sigmf-meta
 ~~~~
+
+---
+
+### m2sdr_lab
+Experiment helper that turns the existing SigMF-based tools into a reproducible RF workflow.
+
+**Usage**:
+~~~~
+m2sdr_lab <init|capture|ingest|replay|compare|list|bundle> ...
+~~~~
+
+Typical use:
+~~~~
+./m2sdr_lab init /tmp/my_rf_lab --title "2.4 GHz loopback regression" --device pcie:/dev/m2sdr0
+./m2sdr_lab capture /tmp/my_rf_lab --name baseline --samples 2000000
+./m2sdr_lab replay /tmp/my_rf_lab baseline
+./m2sdr_lab compare /tmp/my_rf_lab baseline retuned
+./m2sdr_lab bundle /tmp/my_rf_lab
+~~~~
+
+What it adds on top of the lower-level tools:
+
+- a persistent `lab.json` manifest with run history
+- default device/sample-rate/frequency settings for an experiment
+- run-level command tracking and file hashes
+- comparison reports between two SigMF-backed runs
+- export of portable bundles for sharing experiments or regressions
+
+It is also useful offline: `ingest` can register existing SigMF captures and optionally copy them into the lab before comparing or bundling them.
 
 ---
 
