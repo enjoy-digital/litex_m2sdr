@@ -277,6 +277,7 @@ LiteX-M2SDR is no longer just positioned as "another AD9361 board". The software
 - inspect capture timing metadata with `m2sdr_timecheck`
 - estimate simple calibration profiles with `m2sdr_cal`
 - automate command matrices with `m2sdr_sweep`
+- browse runs and artifacts in a native cimgui dashboard with `m2sdr_lab_gui`
 
 The idea is simple: a bug report, demo, or experiment should be shareable as a dataset plus metadata, not only as a screenshot or loose command line.
 
@@ -298,6 +299,7 @@ cd litex_m2sdr/software/user
 ./m2sdr_measure /tmp/my_rf_lab/captures/baseline.sigmf-meta --plot /tmp/my_rf_lab/reports/baseline.png
 ./m2sdr_phase   /tmp/my_rf_lab/captures/baseline.sigmf-meta
 ./m2sdr_cal     /tmp/my_rf_lab/captures/baseline.sigmf-meta --output /tmp/my_rf_lab/reports/baseline-cal.json
+./m2sdr_lab_gui /tmp/my_rf_lab
 ./m2sdr_lab bundle  /tmp/my_rf_lab
 ```
 

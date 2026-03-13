@@ -16,6 +16,7 @@ The user-space stack can also be treated as an **RF lab** workflow:
 - `m2sdr_check` and `m2sdr_sigmf_info` inspect them.
 - `m2sdr_lab` organizes reproducible experiments, verification reports, and portable bundles.
 - `m2sdr_measure`, `m2sdr_phase`, `m2sdr_timecheck`, `m2sdr_cal`, and `m2sdr_sweep` add offline RF measurement and regression tooling.
+- `m2sdr_lab_gui` adds a native dashboard on top of the lab manifest and generated JSON artifacts.
 
 ---
 
@@ -348,6 +349,25 @@ What it adds on top of the lower-level tools:
 - export of portable bundles for sharing experiments or regressions
 
 It is also useful offline: `ingest` can register existing SigMF captures and optionally copy them into the lab before comparing or bundling them.
+
+---
+
+### m2sdr_lab_gui
+Native cimgui/SDL/OpenGL dashboard for browsing an RF lab directory.
+
+It currently provides:
+
+- run browser for captures and replays tracked in `lab.json`
+- artifact browser for run reports, compare/verify reports, measurement outputs, calibration outputs, and sweep outputs
+- overview cards for run/artifact counts and default RF settings
+- detail panes for selected runs and artifacts
+
+Example:
+~~~~
+./m2sdr_lab_gui /tmp/my_rf_lab
+~~~~
+
+The dashboard is built only when SDL2/OpenGL development packages are installed and the local `software/user/cimgui/` checkout is present, following the same optional GUI build rules as `m2sdr_check` and `m2sdr_scan`.
 
 ---
 

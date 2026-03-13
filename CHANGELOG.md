@@ -31,6 +31,7 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Added the `m2sdr_lab` helper to structure SigMF captures into reproducible RF experiments with a persistent lab manifest, replay tracking, comparison reports, and portable bundles.
 - Extended `m2sdr_lab` with headless per-run reports and baseline-vs-candidate verification reports for CI-friendly replay regression checks.
 - Added host-side RF analysis helpers and new offline tools: `m2sdr_measure` for signal metrics/spectral summaries, `m2sdr_phase` for channel coherence checks, `m2sdr_timecheck` for timing-metadata inspection, `m2sdr_cal` for simple calibration profile estimation, and `m2sdr_sweep` for scripted sweep matrices.
+- Added an optional native `m2sdr_lab_gui` cimgui/SDL/OpenGL dashboard to browse RF-lab runs, reports, measurement artifacts, verification results, and sweep outputs.
 - Documented LiteX-M2SDR as an open RF lab workflow, not only a board/driver stack, and added a dedicated RF-lab guide.
 
 [> 2025 Q4 (Oct - Dec)

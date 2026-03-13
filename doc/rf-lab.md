@@ -9,6 +9,7 @@ The practical building blocks are already in-tree:
 - `m2sdr_check` and `m2sdr_sigmf_info` provide visual and CI-friendly inspection.
 - `m2sdr_lab` adds experiment-level organization, replay tracking, verification, headless reports, and portable bundles.
 - `m2sdr_measure`, `m2sdr_phase`, `m2sdr_timecheck`, `m2sdr_cal`, and `m2sdr_sweep` add offline measurement and regression tooling on top of SigMF captures.
+- `m2sdr_lab_gui` provides a native cimgui dashboard to browse runs, reports, measurements, verification results, and sweep artifacts.
 
 ## Why this matters
 
@@ -80,6 +81,8 @@ Measure the resulting capture:
 ./m2sdr_timecheck ../../../../my_rf_lab/captures/baseline.sigmf-meta
 ./m2sdr_cal ../../../../my_rf_lab/captures/baseline.sigmf-meta \
   --output ../../../../my_rf_lab/reports/baseline-cal.json
+
+./m2sdr_lab_gui ../../../../my_rf_lab
 ```
 
 Export a bundle for another user or CI job:
