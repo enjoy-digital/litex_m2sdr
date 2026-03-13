@@ -8,6 +8,7 @@ The practical building blocks are already in-tree:
 - `m2sdr_play` can replay raw or SigMF-backed captures.
 - `m2sdr_check` and `m2sdr_sigmf_info` provide visual and CI-friendly inspection.
 - `m2sdr_lab` adds experiment-level organization, replay tracking, verification, headless reports, and portable bundles.
+- `m2sdr_measure`, `m2sdr_phase`, `m2sdr_timecheck`, `m2sdr_cal`, and `m2sdr_sweep` add offline measurement and regression tooling on top of SigMF captures.
 
 ## Why this matters
 
@@ -68,6 +69,19 @@ Verify a new run against a reference:
 ./m2sdr_lab verify ../../../../my_rf_lab baseline retuned --fail-on-mismatch
 ```
 
+Measure the resulting capture:
+
+```bash
+./m2sdr_measure ../../../../my_rf_lab/captures/baseline.sigmf-meta \
+  --output ../../../../my_rf_lab/reports/baseline-measure.json \
+  --plot ../../../../my_rf_lab/reports/baseline-measure.png
+
+./m2sdr_phase ../../../../my_rf_lab/captures/baseline.sigmf-meta
+./m2sdr_timecheck ../../../../my_rf_lab/captures/baseline.sigmf-meta
+./m2sdr_cal ../../../../my_rf_lab/captures/baseline.sigmf-meta \
+  --output ../../../../my_rf_lab/reports/baseline-cal.json
+```
+
 Export a bundle for another user or CI job:
 
 ```bash
@@ -80,4 +94,5 @@ Export a bundle for another user or CI job:
 - "Compare the same capture across PCIe hosts and verify metadata/hash compatibility."
 - "Capture a timestamped burst, annotate it, replay it, and inspect the result in `m2sdr_check`."
 - "Run a replay regression in CI and fail the job when the candidate capture no longer matches the baseline expectations."
+- "Sweep sample rate / gain / frequency combinations and archive the resulting reports as open RF characterization data."
 - "Turn a bug report into a lab bundle instead of a loose screenshot and a paragraph."

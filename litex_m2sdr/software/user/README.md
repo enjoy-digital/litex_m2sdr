@@ -15,6 +15,7 @@ The user-space stack can also be treated as an **RF lab** workflow:
 - `m2sdr_play` replays them.
 - `m2sdr_check` and `m2sdr_sigmf_info` inspect them.
 - `m2sdr_lab` organizes reproducible experiments, verification reports, and portable bundles.
+- `m2sdr_measure`, `m2sdr_phase`, `m2sdr_timecheck`, `m2sdr_cal`, and `m2sdr_sweep` add offline RF measurement and regression tooling.
 
 ---
 
@@ -347,6 +348,85 @@ What it adds on top of the lower-level tools:
 - export of portable bundles for sharing experiments or regressions
 
 It is also useful offline: `ingest` can register existing SigMF captures and optionally copy them into the lab before comparing or bundling them.
+
+---
+
+### m2sdr_measure
+Offline measurement tool for SigMF captures.
+
+It computes per-channel metrics such as:
+
+- RMS / power / DC offset
+- clipping rate and crest factor
+- coarse frequency offset
+- IQ gain/phase imbalance estimates
+- FFT peak, noise floor, SFDR, and rough SNR
+
+Example:
+~~~~
+./m2sdr_measure capture.sigmf-meta --output report.json --plot report.png
+~~~~
+
+---
+
+### m2sdr_phase
+Compares two channels from the same capture and reports:
+
+- gain delta
+- phase delta
+- coherence
+
+Example:
+~~~~
+./m2sdr_phase capture.sigmf-meta --reference 0 --candidate 1
+~~~~
+
+---
+
+### m2sdr_timecheck
+Inspects SigMF capture layout and timing-oriented metadata:
+
+- capture ordering
+- sample-start deltas
+- discontinuities
+- timestamp-jump style annotations
+
+Example:
+~~~~
+./m2sdr_timecheck capture.sigmf-meta
+~~~~
+
+---
+
+### m2sdr_cal
+Estimates a simple JSON calibration profile from a capture.
+
+Current profile output focuses on:
+
+- RX IQ correction estimate for a reference channel
+- channel-to-channel gain and phase alignment estimate
+
+Example:
+~~~~
+./m2sdr_cal capture.sigmf-meta --output cal.json
+~~~~
+
+---
+
+### m2sdr_sweep
+Runs a command template over a small parameter matrix and records the results to JSON/CSV.
+
+This is useful for scripted board characterization or CI sweeps over sample rates, gains, center frequencies, and host-side tool invocations.
+
+Example:
+~~~~
+./m2sdr_sweep \
+  --var freq=2400000000,2450000000 \
+  --var gain=0,10 \
+  --command "./m2sdr_measure captures/run-{freq}-{gain}.sigmf-meta" \
+  --output sweep.json \
+  --csv sweep.csv
+~~~~
 
 ---
 
