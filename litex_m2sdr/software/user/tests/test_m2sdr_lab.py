@@ -45,12 +45,13 @@ def write_sigmf(base, sample_rate, center_freq, payload):
 
 
 class TestM2SDRLab(unittest.TestCase):
-    def test_init_ingest_compare_bundle_and_replay(self):
+    def test_init_ingest_compare_verify_report_bundle_and_replay(self):
         with tempfile.TemporaryDirectory(prefix="m2sdr_lab_test_") as tmpdir:
             root = Path(tmpdir)
             lab = root / "lab"
             source_a = root / "source_a"
             source_b = root / "source_b"
+            source_c = root / "source_c"
 
             run_cmd(
                 "init",
@@ -65,9 +66,11 @@ class TestM2SDRLab(unittest.TestCase):
 
             meta_a = write_sigmf(source_a, 30720000, 2400000000, b"\x00\x01" * 32)
             meta_b = write_sigmf(source_b, 30720000, 2450000000, b"\x02\x03" * 32)
+            meta_c = write_sigmf(source_c, 30720000, 2400000000, b"\x00\x01" * 32)
 
             run_cmd("ingest", str(lab), str(meta_a), "--name", "baseline", "--copy")
             run_cmd("ingest", str(lab), str(meta_b), "--name", "variant", "--copy")
+            run_cmd("ingest", str(lab), str(meta_c), "--name", "baseline-copy", "--copy")
 
             listed = run_cmd("list", str(lab)).stdout
             self.assertIn("baseline", listed)
@@ -76,6 +79,28 @@ class TestM2SDRLab(unittest.TestCase):
             compare = run_cmd("compare", str(lab), "baseline", "variant").stdout
             self.assertIn('"center_freq": false', compare)
             self.assertIn('"compatible_for_replay": false', compare)
+
+            report = run_cmd("report", str(lab), "baseline", "--markdown").stdout
+            self.assertIn('"sample_rate": 30720000', report)
+            self.assertTrue((lab / "reports" / "report-baseline.json").exists())
+            self.assertTrue((lab / "reports" / "report-baseline.md").exists())
+
+            verify_ok = run_cmd(
+                "verify",
+                str(lab),
+                "baseline",
+                "baseline-copy",
+            ).stdout
+            self.assertIn('"passed": true', verify_ok)
+            self.assertIn('"exact_match": false', verify_ok)
+
+            verify_fail = subprocess.run(
+                [sys.executable, str(SCRIPT), "verify", str(lab), "baseline", "baseline-copy", "--exact", "--fail-on-mismatch"],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(verify_fail.returncode, 1)
+            self.assertIn('"passed": false', verify_fail.stdout)
 
             replay = run_cmd(
                 "replay",
@@ -109,6 +134,8 @@ class TestM2SDRLab(unittest.TestCase):
                 members = tar.getnames()
             self.assertIn("lab.json", members)
             self.assertIn("captures/baseline.sigmf-meta", members)
+            self.assertIn("reports/report-baseline.json", members)
+            self.assertIn("reports/report-baseline.md", members)
             self.assertNotIn("captures/baseline.sigmf-data", members)
 
 

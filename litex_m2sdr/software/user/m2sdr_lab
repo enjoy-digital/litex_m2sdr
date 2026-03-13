@@ -9,12 +9,10 @@ import argparse
 import datetime as dt
 import hashlib
 import json
-import os
 import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tarfile
 from pathlib import Path
 
@@ -56,6 +54,10 @@ def write_json(path, data):
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
         f.write("\n")
+
+
+def write_text(path, text):
+    path.write_text(text, encoding="utf-8")
 
 
 def ensure_lab_dirs(root):
@@ -160,6 +162,20 @@ def sigmf_summary(meta_path, data_path=None):
         summary["data_sha256"] = sha256_file(data_path)
         summary["data_size"] = data_path.stat().st_size
     return summary
+
+
+def get_run(lab, run_id):
+    return lab["runs"][run_entry_index(lab, run_id)]
+
+
+def resolve_run_file(root, run, key):
+    record = (run.get("files") or {}).get(key)
+    if not record:
+        return None
+    path = Path(record["path"])
+    if not path.is_absolute():
+        path = (root / path).resolve()
+    return path
 
 
 def run_entry_index(lab, run_id):
@@ -336,14 +352,10 @@ def cmd_ingest(args):
 def cmd_replay(args):
     root = Path(args.lab).resolve()
     lab = load_lab(root)
-    source_run = lab["runs"][run_entry_index(lab, args.run_id)]
-    meta_info = (source_run.get("files") or {}).get("meta")
-    if not meta_info:
+    source_run = get_run(lab, args.run_id)
+    meta_path = resolve_run_file(root, source_run, "meta")
+    if not meta_path:
         raise SystemExit(f"Run {args.run_id} has no SigMF metadata reference")
-
-    meta_path = Path(meta_info["path"])
-    if not meta_path.is_absolute():
-        meta_path = (root / meta_path).resolve()
     defaults = lab["defaults"]
     command = [args.play_bin]
     device = args.device or defaults.get("device")
@@ -416,30 +428,208 @@ def compare_sigmf(run_a, run_b):
     }
 
 
-def cmd_compare(args):
-    root = Path(args.lab).resolve()
-    lab = load_lab(root)
-    run_a = lab["runs"][run_entry_index(lab, args.run_a)]
-    run_b = lab["runs"][run_entry_index(lab, args.run_b)]
-    report = {
-        "id": default_run_id(f"compare-{args.run_a}-vs-{args.run_b}"),
+def create_report_record(root, report):
+    reports = {
+        "json": create_file_record(root, report["json_path"]),
+    }
+    if report.get("md_path"):
+        reports["md"] = create_file_record(root, report["md_path"])
+    return reports
+
+
+def report_markdown(title, body):
+    return f"# {title}\n\n{body}\n"
+
+
+def create_run_report(root, lab, run, report_id):
+    sigmf = run.get("sigmf") or {}
+    payload = {
+        "id": report_id,
+        "kind": "run-report",
+        "created_at": utc_now(),
+        "run": {
+            "id": run["id"],
+            "kind": run["kind"],
+            "status": run["status"],
+            "notes": run.get("notes"),
+            "command": run.get("command"),
+            "sigmf": sigmf,
+            "files": run.get("files") or {},
+        },
+    }
+    json_path = root / "reports" / f"{report_id}.json"
+    md_path = root / "reports" / f"{report_id}.md"
+    write_json(json_path, payload)
+    body = "\n".join(
+        [
+            f"- Run: `{run['id']}`",
+            f"- Kind: `{run['kind']}`",
+            f"- Status: `{run['status']}`",
+            f"- Sample rate: `{sigmf.get('sample_rate')}`",
+            f"- Center frequency: `{sigmf.get('center_freq')}`",
+            f"- Datatype: `{sigmf.get('datatype')}`",
+            f"- Channels: `{sigmf.get('num_channels')}`",
+            f"- Captures: `{sigmf.get('capture_count')}`",
+            f"- Annotations: `{sigmf.get('annotation_count')}`",
+            f"- Data SHA256: `{sigmf.get('data_sha256', 'n/a')}`",
+            f"- Meta SHA256: `{sigmf.get('meta_sha256', 'n/a')}`",
+        ]
+    )
+    write_text(md_path, report_markdown(f"LiteX-M2SDR Run Report: {run['id']}", body))
+    return {
+        "id": report_id,
+        "path": relative_to_root(root, json_path),
+        "markdown_path": relative_to_root(root, md_path),
+        "run_id": run["id"],
+        "created_at": payload["created_at"],
+        "type": "run-report",
+        "json_path": json_path,
+        "md_path": md_path,
+        "payload": payload,
+    }
+
+
+def create_compare_report(root, run_a, run_b, report_id):
+    comparison = compare_sigmf(run_a, run_b)
+    payload = {
+        "id": report_id,
         "kind": "compare",
         "created_at": utc_now(),
-        "comparison": compare_sigmf(run_a, run_b),
+        "comparison": comparison,
     }
-    report_path = root / "reports" / f"{report['id']}.json"
-    write_json(report_path, report)
+    json_path = root / "reports" / f"{report_id}.json"
+    md_path = root / "reports" / f"{report_id}.md"
+    write_json(json_path, payload)
+    mismatches = ", ".join(comparison["mismatches"]) or "none"
+    body = "\n".join(
+        [
+            f"- Run A: `{run_a['id']}`",
+            f"- Run B: `{run_b['id']}`",
+            f"- Replay compatible: `{comparison['compatible_for_replay']}`",
+            f"- Exact match: `{comparison['exact_match']}`",
+            f"- Mismatches: `{mismatches}`",
+        ]
+    )
+    write_text(md_path, report_markdown(f"LiteX-M2SDR Compare Report: {run_a['id']} vs {run_b['id']}", body))
+    return {
+        "id": report_id,
+        "path": relative_to_root(root, json_path),
+        "markdown_path": relative_to_root(root, md_path),
+        "runs": [run_a["id"], run_b["id"]],
+        "created_at": payload["created_at"],
+        "type": "compare",
+        "json_path": json_path,
+        "md_path": md_path,
+        "payload": payload,
+    }
+
+
+def create_verify_report(root, reference_run, candidate_run, report_id, exact=False):
+    comparison = compare_sigmf(reference_run, candidate_run)
+    verification = {
+        "reference_run_id": reference_run["id"],
+        "candidate_run_id": candidate_run["id"],
+        "replay_compatible": comparison["compatible_for_replay"],
+        "exact_match": comparison["exact_match"],
+        "exact_required": bool(exact),
+        "passed": comparison["exact_match"] if exact else comparison["compatible_for_replay"],
+        "mismatches": comparison["mismatches"],
+        "checks": comparison["checks"],
+    }
+    payload = {
+        "id": report_id,
+        "kind": "verify",
+        "created_at": utc_now(),
+        "verification": verification,
+        "comparison": comparison,
+    }
+    json_path = root / "reports" / f"{report_id}.json"
+    md_path = root / "reports" / f"{report_id}.md"
+    write_json(json_path, payload)
+    mismatch_text = ", ".join(verification["mismatches"]) or "none"
+    body = "\n".join(
+        [
+            f"- Reference run: `{reference_run['id']}`",
+            f"- Candidate run: `{candidate_run['id']}`",
+            f"- Passed: `{verification['passed']}`",
+            f"- Replay compatible: `{verification['replay_compatible']}`",
+            f"- Exact match: `{verification['exact_match']}`",
+            f"- Exact required: `{verification['exact_required']}`",
+            f"- Mismatches: `{mismatch_text}`",
+        ]
+    )
+    write_text(md_path, report_markdown(f"LiteX-M2SDR Verify Report: {reference_run['id']} vs {candidate_run['id']}", body))
+    return {
+        "id": report_id,
+        "path": relative_to_root(root, json_path),
+        "markdown_path": relative_to_root(root, md_path),
+        "runs": [reference_run["id"], candidate_run["id"]],
+        "created_at": payload["created_at"],
+        "type": "verify",
+        "json_path": json_path,
+        "md_path": md_path,
+        "payload": payload,
+    }
+
+
+def register_report(lab, root, report):
     lab.setdefault("reports", []).append(
         {
             "id": report["id"],
-            "path": relative_to_root(root, report_path),
-            "runs": [args.run_a, args.run_b],
+            "type": report["type"],
+            "path": report["path"],
+            "markdown_path": report.get("markdown_path"),
+            "runs": report.get("runs") or ([report["run_id"]] if report.get("run_id") else []),
             "created_at": report["created_at"],
+            "files": create_report_record(root, report),
         }
     )
+
+
+def cmd_compare(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    run_a = get_run(lab, args.run_a)
+    run_b = get_run(lab, args.run_b)
+    report = create_compare_report(root, run_a, run_b, default_run_id(f"compare-{args.run_a}-vs-{args.run_b}"))
+    register_report(lab, root, report)
     save_lab(root, lab)
-    print(json.dumps(report["comparison"], indent=2, sort_keys=True))
-    print(f"Report written to {report_path}")
+    print(json.dumps(report["payload"]["comparison"], indent=2, sort_keys=True))
+    print(f"Report written to {root / report['path']}")
+
+
+def cmd_report(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    run = get_run(lab, args.run_id)
+    report = create_run_report(root, lab, run, default_run_id(args.name or f"report-{args.run_id}"))
+    register_report(lab, root, report)
+    save_lab(root, lab)
+    print(json.dumps(report["payload"]["run"], indent=2, sort_keys=True))
+    print(f"Report written to {root / report['path']}")
+    if args.markdown:
+        print(f"Markdown report written to {root / report['markdown_path']}")
+
+
+def cmd_verify(args):
+    root = Path(args.lab).resolve()
+    lab = load_lab(root)
+    reference_run = get_run(lab, args.reference_run)
+    candidate_run = get_run(lab, args.candidate_run)
+    report = create_verify_report(
+        root,
+        reference_run,
+        candidate_run,
+        default_run_id(args.name or f"verify-{args.reference_run}-vs-{args.candidate_run}"),
+        exact=args.exact,
+    )
+    register_report(lab, root, report)
+    save_lab(root, lab)
+    verification = report["payload"]["verification"]
+    print(json.dumps(verification, indent=2, sort_keys=True))
+    print(f"Report written to {root / report['path']}")
+    if args.fail_on_mismatch and not verification["passed"]:
+        raise SystemExit(1)
 
 
 def cmd_list(args):
@@ -455,6 +645,12 @@ def cmd_list(args):
             f"rate={sigmf.get('sample_rate')} freq={sigmf.get('center_freq')} "
             f"captures={sigmf.get('capture_count')}"
         )
+    if args.reports and lab.get("reports"):
+        print("")
+        print("Reports:")
+        for report in lab["reports"]:
+            runs = ",".join(report.get("runs", []))
+            print(f"{report['id']:24s} type={report.get('type', 'unknown'):10s} runs={runs}")
 
 
 def iter_bundle_members(root, lab, include_data):
@@ -463,9 +659,13 @@ def iter_bundle_members(root, lab, include_data):
     if readme.exists():
         yield readme
     for report in lab.get("reports", []):
-        report_path = root / report["path"]
-        if report_path.exists():
-            yield report_path
+        for key in ("path", "markdown_path"):
+            report_rel = report.get(key)
+            if not report_rel:
+                continue
+            report_path = root / report_rel
+            if report_path.exists():
+                yield report_path
     for run in lab.get("runs", []):
         for key in ("meta", "data"):
             if key == "data" and not include_data:
@@ -563,8 +763,25 @@ def build_parser():
     compare.add_argument("run_b")
     compare.set_defaults(func=cmd_compare)
 
+    report = subparsers.add_parser("report", help="Generate a headless report for a single run.")
+    report.add_argument("lab")
+    report.add_argument("run_id")
+    report.add_argument("--name", default="")
+    report.add_argument("--markdown", action="store_true")
+    report.set_defaults(func=cmd_report)
+
+    verify = subparsers.add_parser("verify", help="Verify a candidate run against a reference run.")
+    verify.add_argument("lab")
+    verify.add_argument("reference_run")
+    verify.add_argument("candidate_run")
+    verify.add_argument("--name", default="")
+    verify.add_argument("--exact", action="store_true")
+    verify.add_argument("--fail-on-mismatch", action="store_true")
+    verify.set_defaults(func=cmd_verify)
+
     list_cmd = subparsers.add_parser("list", help="List lab runs.")
     list_cmd.add_argument("lab")
+    list_cmd.add_argument("--reports", action="store_true")
     list_cmd.set_defaults(func=cmd_list)
 
     bundle = subparsers.add_parser("bundle", help="Export a portable lab bundle.")

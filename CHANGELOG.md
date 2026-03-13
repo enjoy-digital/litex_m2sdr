@@ -29,6 +29,7 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Expanded user-space RF diagnostics with a native `m2sdr_check` IQ inspection tool and basic OFDM waveform generation in `m2sdr_gen`, replacing earlier Python-side helpers.
 - Reorganized `software/user` by moving reusable SigMF/JSON support into dedicated `include/` and `lib/` areas and grouping SigMF regression tests under `tests/` to keep the utility root cleaner.
 - Added the `m2sdr_lab` helper to structure SigMF captures into reproducible RF experiments with a persistent lab manifest, replay tracking, comparison reports, and portable bundles.
+- Extended `m2sdr_lab` with headless per-run reports and baseline-vs-candidate verification reports for CI-friendly replay regression checks.
 - Documented LiteX-M2SDR as an open RF lab workflow, not only a board/driver stack, and added a dedicated RF-lab guide.
 
 [> 2025 Q4 (Oct - Dec)

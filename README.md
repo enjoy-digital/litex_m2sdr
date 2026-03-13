@@ -270,6 +270,7 @@ LiteX-M2SDR is no longer just positioned as "another AD9361 board". The software
 - capture SigMF datasets with `m2sdr_record`
 - inspect them with `m2sdr_check` or `m2sdr_sigmf_info`
 - replay them with `m2sdr_play`
+- verify reruns and export headless reports with `m2sdr_lab`
 - organize runs, comparisons, and bundles with `m2sdr_lab`
 
 The idea is simple: a bug report, demo, or experiment should be shareable as a dataset plus metadata, not only as a screenshot or loose command line.
@@ -286,6 +287,8 @@ cd litex_m2sdr/software/user
 
 ./m2sdr_lab capture /tmp/my_rf_lab --name baseline --samples 2000000
 ./m2sdr_lab replay  /tmp/my_rf_lab baseline
+./m2sdr_lab report  /tmp/my_rf_lab baseline --markdown
+./m2sdr_lab verify  /tmp/my_rf_lab baseline retuned --fail-on-mismatch
 ./m2sdr_lab compare /tmp/my_rf_lab baseline baseline
 ./m2sdr_lab bundle  /tmp/my_rf_lab
 ```

@@ -14,7 +14,7 @@ The user-space stack can also be treated as an **RF lab** workflow:
 - `m2sdr_record` captures SigMF datasets.
 - `m2sdr_play` replays them.
 - `m2sdr_check` and `m2sdr_sigmf_info` inspect them.
-- `m2sdr_lab` organizes reproducible experiments, run comparisons, and portable bundles.
+- `m2sdr_lab` organizes reproducible experiments, verification reports, and portable bundles.
 
 ---
 
@@ -322,7 +322,7 @@ Experiment helper that turns the existing SigMF-based tools into a reproducible 
 
 **Usage**:
 ~~~~
-m2sdr_lab <init|capture|ingest|replay|compare|list|bundle> ...
+m2sdr_lab <init|capture|ingest|replay|report|verify|compare|list|bundle> ...
 ~~~~
 
 Typical use:
@@ -330,6 +330,8 @@ Typical use:
 ./m2sdr_lab init /tmp/my_rf_lab --title "2.4 GHz loopback regression" --device pcie:/dev/m2sdr0
 ./m2sdr_lab capture /tmp/my_rf_lab --name baseline --samples 2000000
 ./m2sdr_lab replay /tmp/my_rf_lab baseline
+./m2sdr_lab report /tmp/my_rf_lab baseline --markdown
+./m2sdr_lab verify /tmp/my_rf_lab baseline retuned --fail-on-mismatch
 ./m2sdr_lab compare /tmp/my_rf_lab baseline retuned
 ./m2sdr_lab bundle /tmp/my_rf_lab
 ~~~~
@@ -339,6 +341,8 @@ What it adds on top of the lower-level tools:
 - a persistent `lab.json` manifest with run history
 - default device/sample-rate/frequency settings for an experiment
 - run-level command tracking and file hashes
+- headless JSON/Markdown reports for individual runs
+- verification reports with pass/fail semantics for CI use
 - comparison reports between two SigMF-backed runs
 - export of portable bundles for sharing experiments or regressions
 

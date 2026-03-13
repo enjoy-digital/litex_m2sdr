@@ -7,7 +7,7 @@ The practical building blocks are already in-tree:
 - `m2sdr_record` can emit SigMF captures with board metadata and annotations.
 - `m2sdr_play` can replay raw or SigMF-backed captures.
 - `m2sdr_check` and `m2sdr_sigmf_info` provide visual and CI-friendly inspection.
-- `m2sdr_lab` adds experiment-level organization, replay tracking, comparison reports, and portable bundles.
+- `m2sdr_lab` adds experiment-level organization, replay tracking, verification, headless reports, and portable bundles.
 
 ## Why this matters
 
@@ -56,6 +56,18 @@ Compare two runs:
 ./m2sdr_lab compare ../../../../my_rf_lab baseline retuned
 ```
 
+Emit a headless run report:
+
+```bash
+./m2sdr_lab report ../../../../my_rf_lab baseline --markdown
+```
+
+Verify a new run against a reference:
+
+```bash
+./m2sdr_lab verify ../../../../my_rf_lab baseline retuned --fail-on-mismatch
+```
+
 Export a bundle for another user or CI job:
 
 ```bash
@@ -67,4 +79,5 @@ Export a bundle for another user or CI job:
 - "Download this SigMF bundle and replay the exact waveform in 3 minutes."
 - "Compare the same capture across PCIe hosts and verify metadata/hash compatibility."
 - "Capture a timestamped burst, annotate it, replay it, and inspect the result in `m2sdr_check`."
+- "Run a replay regression in CI and fail the job when the candidate capture no longer matches the baseline expectations."
 - "Turn a bug report into a lab bundle instead of a loose screenshot and a paragraph."
