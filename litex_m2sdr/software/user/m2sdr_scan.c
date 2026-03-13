@@ -214,6 +214,10 @@ struct scan_state {
     double marker_b_hz;
     bool export_csv_request;
     bool export_snapshot_request;
+    bool hw_time_valid;
+    uint64_t hw_time_ns;
+    char hw_time_text[64];
+    char pc_time_text[64];
     bool lo_valid;
     int64_t lo_hz;
     bool fastlock_enable;
@@ -362,6 +366,48 @@ static void make_timestamp(char *buf, size_t buflen)
     struct tm tmv;
     localtime_r(&t, &tmv);
     strftime(buf, buflen, "%Y%m%d_%H%M%S", &tmv);
+}
+
+static void format_wallclock_time_ns(uint64_t time_ns, char *buf, size_t buflen)
+{
+    time_t seconds;
+    uint32_t ms;
+    struct tm tmv;
+
+    if (!buf || buflen == 0)
+        return;
+
+    seconds = (time_t)(time_ns / 1000000000ULL);
+    ms = (uint32_t)((time_ns % 1000000000ULL) / 1000000ULL);
+    localtime_r(&seconds, &tmv);
+    strftime(buf, buflen, "%Y-%m-%d %H:%M:%S", &tmv);
+    snprintf(buf + strlen(buf), buflen - strlen(buf), ".%03u", ms);
+}
+
+static void refresh_display_times(struct scan_state *s)
+{
+    struct timespec ts;
+    uint64_t hw_time_ns;
+
+    if (!s)
+        return;
+
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+        uint64_t pc_time_ns = (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+        format_wallclock_time_ns(pc_time_ns, s->pc_time_text, sizeof(s->pc_time_text));
+    } else {
+        snprintf(s->pc_time_text, sizeof(s->pc_time_text), "unavailable");
+    }
+
+    if (g_dev && m2sdr_get_time(g_dev, &hw_time_ns) == 0) {
+        s->hw_time_valid = true;
+        s->hw_time_ns = hw_time_ns;
+        format_wallclock_time_ns(hw_time_ns, s->hw_time_text, sizeof(s->hw_time_text));
+    } else {
+        s->hw_time_valid = false;
+        s->hw_time_ns = 0;
+        snprintf(s->hw_time_text, sizeof(s->hw_time_text), "unavailable");
+    }
 }
 
 static bool export_csv_path(struct scan_state *s, const char *path)
@@ -2738,6 +2784,8 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 6.0f);
     if (igButton("Snapshot", (ImVec2){85.0f, 0.0f}))
         s->export_snapshot_request = true;
+
+    refresh_display_times(s);
     igSameLine(0.0f, 12.0f);
     igText("Device %s", m2sdr_cli_pcie_path(&g_cli_dev));
     igSameLine(0.0f, 12.0f);
@@ -2745,6 +2793,10 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
            (double)s->lo_hz / 1e6, s->perf.retunes_per_sec, s->perf.dma_wait_per_sec, s->stitch_pct);
     igSameLine(0.0f, 12.0f);
     igText("SR %.2f MSPS / BW %.2f MHz", (double)s->sample_rate_hz / 1e6, (double)s->rf_bandwidth_hz / 1e6);
+    igSameLine(0.0f, 12.0f);
+    igText("HW %s", s->hw_time_text);
+    igSameLine(0.0f, 12.0f);
+    igText("PC %s", s->pc_time_text);
 
     igSeparatorText("Scan Range");
     igSetNextItemWidth(160.0f);
