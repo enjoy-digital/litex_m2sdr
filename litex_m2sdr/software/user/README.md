@@ -440,7 +440,7 @@ m2sdr_scan [options]
 - `--preset-save file`
 - `--no-ui`
 - `--export-csv file`
-- `--export-ppm file`
+- `--export-png file`
 
 Example:
 ~~~~
@@ -452,7 +452,7 @@ Headless export example:
 ./m2sdr_scan --preset-load fm_band.scan \\
              --no-ui \\
              --export-csv fm_band.csv \\
-             --export-ppm fm_band.ppm
+             --export-png fm_band.png
 ~~~~
 
 Notes:

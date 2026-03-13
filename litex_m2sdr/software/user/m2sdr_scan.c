@@ -23,6 +23,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include <GL/gl.h>
+#include <png.h>
 
 #define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
 #include "cimgui/cimgui.h"
@@ -406,37 +407,94 @@ static void export_current_csv(struct scan_state *s)
     (void)export_csv_path(s, path);
 }
 
-static void export_snapshot_ppm(int width, int height)
+static bool write_rgb_png(const char *path, int width, int height, const unsigned char *pixels, int stride_bytes)
+{
+    FILE *f = NULL;
+    png_structp png_ptr = NULL;
+    png_infop info_ptr = NULL;
+    int y;
+
+    if (!path || width <= 0 || height <= 0 || !pixels || stride_bytes < width * 3)
+        return false;
+
+    f = fopen(path, "wb");
+    if (!f) {
+        fprintf(stderr, "Failed to write %s\n", path);
+        return false;
+    }
+
+    png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    info_ptr = png_create_info_struct(png_ptr);
+    if (!png_ptr || !info_ptr) {
+        fprintf(stderr, "Failed to initialize PNG writer for %s\n", path);
+        fclose(f);
+        if (png_ptr)
+            png_destroy_write_struct(&png_ptr, &info_ptr);
+        return false;
+    }
+
+    if (setjmp(png_jmpbuf(png_ptr))) {
+        fprintf(stderr, "Failed to encode %s\n", path);
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        fclose(f);
+        return false;
+    }
+
+    png_init_io(png_ptr, f);
+    png_set_IHDR(png_ptr, info_ptr,
+                 (png_uint_32)width, (png_uint_32)height,
+                 8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png_ptr, info_ptr);
+    for (y = 0; y < height; y++) {
+        png_bytep row = (png_bytep)(pixels + (size_t)y * (size_t)stride_bytes);
+        png_write_row(png_ptr, row);
+    }
+    png_write_end(png_ptr, NULL);
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    fclose(f);
+
+    fprintf(stderr, "Saved %s\n", path);
+    return true;
+}
+
+static void export_snapshot_png(int width, int height)
 {
     char ts[32], path[128];
-    FILE *f;
     unsigned char *pix;
+    unsigned char *tmp;
     int y;
+    size_t stride_bytes;
 
     if (width <= 0 || height <= 0)
         return;
 
-    pix = (unsigned char *)malloc((size_t)width * (size_t)height * 3);
-    if (!pix)
+    stride_bytes = (size_t)width * 3;
+    pix = (unsigned char *)malloc((size_t)height * stride_bytes);
+    tmp = (unsigned char *)malloc(stride_bytes);
+    if (!pix || !tmp) {
+        free(tmp);
+        free(pix);
         return;
+    }
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pix);
 
+    for (y = 0; y < height / 2; y++) {
+        unsigned char *top = pix + (size_t)y * stride_bytes;
+        unsigned char *bottom = pix + (size_t)(height - 1 - y) * stride_bytes;
+        memcpy(tmp, top, stride_bytes);
+        memcpy(top, bottom, stride_bytes);
+        memcpy(bottom, tmp, stride_bytes);
+    }
+
     make_timestamp(ts, sizeof(ts));
-    snprintf(path, sizeof(path), "m2sdr_scan_%s.ppm", ts);
-    f = fopen(path, "wb");
-    if (!f) {
-        free(pix);
-        return;
-    }
-    fprintf(f, "P6\n%d %d\n255\n", width, height);
-    for (y = height - 1; y >= 0; y--) {
-        fwrite(pix + (size_t)y * (size_t)width * 3, 1, (size_t)width * 3, f);
-    }
-    fclose(f);
+    snprintf(path, sizeof(path), "m2sdr_scan_%s.png", ts);
+    (void)write_rgb_png(path, width, height, pix, (int)stride_bytes);
+
+    free(tmp);
     free(pix);
-    fprintf(stderr, "Saved %s\n", path);
 }
 
 static void waterfall_compose_view(struct scan_state *s)
@@ -477,9 +535,10 @@ static void waterfall_compose_view(struct scan_state *s)
     }
 }
 
-static bool export_waterfall_ppm_path(struct scan_state *s, const char *path)
+static bool export_waterfall_png_path(struct scan_state *s, const char *path)
 {
-    FILE *f;
+    unsigned char *rgb;
+    size_t stride_bytes;
     int x, y;
 
     if (!path || !s->waterfall_view_rgba || s->waterfall_tex_width <= 0 || s->lines <= 0)
@@ -487,27 +546,25 @@ static bool export_waterfall_ppm_path(struct scan_state *s, const char *path)
 
     waterfall_compose_view(s);
 
-    f = fopen(path, "wb");
-    if (!f) {
-        fprintf(stderr, "Failed to write %s\n", path);
+    stride_bytes = (size_t)s->waterfall_tex_width * 3;
+    rgb = (unsigned char *)malloc((size_t)s->lines * stride_bytes);
+    if (!rgb)
         return false;
-    }
 
-    fprintf(f, "P6\n%d %d\n255\n", s->waterfall_tex_width, s->lines);
     for (y = 0; y < s->lines; y++) {
         const uint32_t *row = s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width;
+        unsigned char *out = rgb + (size_t)y * stride_bytes;
         for (x = 0; x < s->waterfall_tex_width; x++) {
             uint32_t px = row[x];
-            unsigned char rgb[3];
-            rgb[0] = (unsigned char)((px >> 16) & 0xff);
-            rgb[1] = (unsigned char)((px >> 8) & 0xff);
-            rgb[2] = (unsigned char)(px & 0xff);
-            fwrite(rgb, 1, sizeof(rgb), f);
+            out[x * 3 + 0] = (unsigned char)((px >> 16) & 0xff);
+            out[x * 3 + 1] = (unsigned char)((px >> 8) & 0xff);
+            out[x * 3 + 2] = (unsigned char)(px & 0xff);
         }
     }
-    fclose(f);
-    fprintf(stderr, "Saved %s\n", path);
-    return true;
+
+    y = write_rgb_png(path, s->waterfall_tex_width, s->lines, rgb, (int)stride_bytes);
+    free(rgb);
+    return y;
 }
 
 static bool save_preset_file(const struct scan_state *s, const char *path)
@@ -2397,7 +2454,7 @@ static void help(void)
            "      --preset-save FILE Save current scan preset.\n"
            "      --no-ui            Run headless capture/export without SDL/ImGui.\n"
            "      --export-csv FILE  Export the final spectrum line to CSV.\n"
-           "      --export-ppm FILE  Export the waterfall buffer to PPM.\n"
+           "      --export-png FILE  Export the waterfall buffer to PNG.\n"
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
@@ -3103,7 +3160,7 @@ int main(int argc, char **argv)
     const char *preset_load_path = NULL;
     const char *preset_save_path = NULL;
     const char *export_csv_pathname = NULL;
-    const char *export_ppm_pathname = NULL;
+    const char *export_png_pathname = NULL;
     bool no_ui = false;
 
     static struct option options[] = {
@@ -3127,7 +3184,7 @@ int main(int argc, char **argv)
         { "preset-save", required_argument, NULL, 9 },
         { "no-ui", no_argument, NULL, 10 },
         { "export-csv", required_argument, NULL, 11 },
-        { "export-ppm", required_argument, NULL, 12 },
+        { "export-png", required_argument, NULL, 12 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -3233,7 +3290,7 @@ int main(int argc, char **argv)
             export_csv_pathname = optarg;
             break;
         case 12:
-            export_ppm_pathname = optarg;
+            export_png_pathname = optarg;
             break;
         default:
             return 1;
@@ -3320,9 +3377,9 @@ int main(int argc, char **argv)
 
         if (export_csv_pathname && !export_csv_path(&s, export_csv_pathname))
             goto fail;
-        if (export_ppm_pathname && !export_waterfall_ppm_path(&s, export_ppm_pathname))
+        if (export_png_pathname && !export_waterfall_png_path(&s, export_png_pathname))
             goto fail;
-        if (!export_csv_pathname && !export_ppm_pathname)
+        if (!export_csv_pathname && !export_png_pathname)
             fprintf(stderr, "Headless scan completed with no export requested.\n");
 
         free_scan_state(&s);
@@ -3414,7 +3471,7 @@ int main(int argc, char **argv)
             s.export_csv_request = false;
         }
         if (s.export_snapshot_request) {
-            export_snapshot_ppm((int)io->DisplaySize.x, (int)io->DisplaySize.y);
+            export_snapshot_png((int)io->DisplaySize.x, (int)io->DisplaySize.y);
             s.export_snapshot_request = false;
         }
 
@@ -3423,7 +3480,7 @@ int main(int argc, char **argv)
 
     if (export_csv_pathname && !export_csv_path(&s, export_csv_pathname))
         goto fail;
-    if (export_ppm_pathname && !export_waterfall_ppm_path(&s, export_ppm_pathname))
+    if (export_png_pathname && !export_waterfall_png_path(&s, export_png_pathname))
         goto fail;
 
     m2sdr_imgui_opengl3_shutdown();

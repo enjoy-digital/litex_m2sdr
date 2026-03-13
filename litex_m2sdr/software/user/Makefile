@@ -12,6 +12,8 @@ CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCA
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
+PNG_CFLAGS  := $(shell pkg-config --cflags libpng 2>/dev/null)
+PNG_LIBS    := $(shell pkg-config --libs libpng 2>/dev/null)
 HAVE_CIMGUI := $(shell test -f $(SCAN_CIMGUI_DIR)/cimgui.h && test -f $(SCAN_CIMGUI_DIR)/imgui/imgui.cpp && echo 1 || echo 0)
 LDFLAGS = -g
 LDFLAGS += $(EXTRA_LDFLAGS)
@@ -236,7 +238,7 @@ M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
 m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 clean:
@@ -278,22 +280,22 @@ $(BUILD_FLAGS_FILE): FORCE
 	fi
 
 %.o: %.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 liblitepcie/%.o: liblitepcie/%.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 lib/%.o: lib/%.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 tests/%.o: tests/%.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 libm2sdr/%.o: libm2sdr/%.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 ad9361/%.o: ad9361/%.c $(BUILD_FLAGS_FILE)
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 %.o: %.cpp $(BUILD_FLAGS_FILE)
 	$(CXX) -c $(CXXFLAGS) $(SDL2_CFLAGS) -o $@ $<
