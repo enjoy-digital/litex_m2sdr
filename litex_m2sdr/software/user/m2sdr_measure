@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+
+# SPDX-License-Identifier: BSD-2-Clause
+
+import argparse
+import json
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from m2sdr_analysis import measure_capture, write_json
+
+
+def create_plot(report, path):
+    capture = report["capture"]
+    freqs = []
+    peaks = []
+    for channel_name, metrics in capture["channels"].items():
+        freqs.append(channel_name)
+        peaks.append(metrics["fft"]["peak_dbfs"])
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.bar(freqs, peaks, color="#0b7285")
+    ax.set_title("Channel Peak Level")
+    ax.set_ylabel("dBFS")
+    ax.grid(True, axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Offline RF measurements from a SigMF capture.")
+    parser.add_argument("sigmf")
+    parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument("--fft-size", type=int, default=4096)
+    parser.add_argument("--output", default="")
+    parser.add_argument("--plot", default="")
+    args = parser.parse_args()
+
+    capture = measure_capture(args.sigmf, max_samples=args.max_samples, fft_size=args.fft_size)
+    report = {
+        "tool": "m2sdr_measure",
+        "capture": {
+            "meta_path": str(capture["meta_path"]),
+            "data_path": str(capture["data_path"]),
+            "datatype": capture["datatype"],
+            "sample_rate": capture["sample_rate"],
+            "center_freq": capture["center_freq"],
+            "nchannels": capture["nchannels"],
+            "duration_s": capture["duration_s"],
+            "channels": capture["measurements"],
+        },
+    }
+
+    if args.output:
+        write_json(args.output, report)
+    if args.plot:
+        create_plot(report, Path(args.plot))
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

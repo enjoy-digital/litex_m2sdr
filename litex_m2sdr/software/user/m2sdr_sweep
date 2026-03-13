@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+# SPDX-License-Identifier: BSD-2-Clause
+
+import argparse
+import csv
+import itertools
+import json
+import shlex
+import subprocess
+from pathlib import Path
+
+from m2sdr_analysis import write_json
+
+
+def parse_var(spec):
+    if "=" not in spec:
+        raise ValueError(f"Invalid --var specification: {spec}")
+    name, values = spec.split("=", 1)
+    parts = [value for value in values.split(",") if value]
+    if not name or not parts:
+        raise ValueError(f"Invalid --var specification: {spec}")
+    return name, parts
+
+
+def cartesian_points(vars_specs):
+    names = [name for name, _ in vars_specs]
+    value_lists = [values for _, values in vars_specs]
+    for combo in itertools.product(*value_lists):
+        yield dict(zip(names, combo))
+
+
+def format_command(template, point):
+    formatted = template.format(**point)
+    return shlex.split(formatted)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run small RF sweep matrices over command templates.")
+    parser.add_argument("--var", action="append", default=[], help="Sweep variable, example freq=2400000000,2450000000")
+    parser.add_argument("--command", required=True, help="Command template using Python format placeholders")
+    parser.add_argument("--output", required=True, help="JSON report path")
+    parser.add_argument("--csv", default="", help="Optional CSV summary path")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+
+    vars_specs = [parse_var(spec) for spec in args.var]
+    points = []
+    for point in cartesian_points(vars_specs):
+        command = format_command(args.command, point)
+        entry = {
+            "point": point,
+            "command": command,
+        }
+        if args.dry_run:
+            entry["returncode"] = None
+            entry["stdout"] = ""
+            entry["stderr"] = ""
+        else:
+            completed = subprocess.run(command, text=True, capture_output=True)
+            entry["returncode"] = completed.returncode
+            entry["stdout"] = completed.stdout
+            entry["stderr"] = completed.stderr
+        points.append(entry)
+
+    report = {
+        "tool": "m2sdr_sweep",
+        "command_template": args.command,
+        "variables": {name: values for name, values in vars_specs},
+        "points": points,
+    }
+    write_json(args.output, report)
+
+    if args.csv:
+        csv_path = Path(args.csv)
+        with csv_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=[name for name, _ in vars_specs] + ["returncode"])
+            writer.writeheader()
+            for point in points:
+                row = dict(point["point"])
+                row["returncode"] = point["returncode"]
+                writer.writerow(row)
+
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

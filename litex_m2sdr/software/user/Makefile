@@ -52,7 +52,7 @@ endif
 
 LIBM2SDR_SONAME = libm2sdr.so.1
 PROGS    = $(BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
-SCRIPTS  = m2sdr_lab
+SCRIPTS  = m2sdr_lab m2sdr_analysis.py m2sdr_measure m2sdr_phase m2sdr_timecheck m2sdr_cal m2sdr_sweep
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
@@ -105,6 +105,9 @@ test-sigmf-cli: tests/test_sigmf_info_cli m2sdr_sigmf_info
 
 test-rf-lab:
 	python3 tests/test_m2sdr_lab.py
+
+test-rf-analysis:
+	python3 tests/test_m2sdr_analysis_tools.py
 
 test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
