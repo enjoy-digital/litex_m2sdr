@@ -1799,12 +1799,84 @@ static int build_plot_slice_from(const struct scan_state *s, const float *src,
     return MAX_PLOT_POINTS;
 }
 
-static void format_freq_label(double hz, char *buf, size_t buflen)
+static double choose_125_step(double span, int target_ticks)
 {
-    if (hz >= 1e9)
-        snprintf(buf, buflen, "%.3fG", hz / 1e9);
-    else
-        snprintf(buf, buflen, "%.1fM", hz / 1e6);
+    static const double mults[] = { 1.0, 2.0, 5.0, 10.0 };
+    double raw;
+    double decade;
+    double norm;
+    int i;
+
+    if (span <= 0.0 || target_ticks <= 0)
+        return 1.0;
+
+    raw = span / (double)target_ticks;
+    decade = pow(10.0, floor(log10(raw)));
+    norm = raw / decade;
+
+    for (i = 0; i < (int)(sizeof(mults) / sizeof(mults[0])); i++) {
+        if (norm <= mults[i])
+            return mults[i] * decade;
+    }
+
+    return 10.0 * decade;
+}
+
+static double choose_minor_step(double major_step)
+{
+    double decade;
+    double norm;
+
+    if (major_step <= 0.0)
+        return 1.0;
+
+    decade = pow(10.0, floor(log10(major_step)));
+    norm = major_step / decade;
+    if (norm >= 5.0)
+        return decade;
+    if (norm >= 2.0)
+        return 0.5 * decade;
+    return 0.2 * decade;
+}
+
+static int decimals_for_step(double step)
+{
+    double s = fabs(step);
+
+    if (s >= 100.0)
+        return 0;
+    if (s >= 10.0)
+        return 1;
+    if (s >= 1.0)
+        return 2;
+    return 3;
+}
+
+static void format_freq_label(double hz, double step_hz, char *buf, size_t buflen)
+{
+    double abs_hz = fabs(hz);
+    double scale;
+    double scaled_step;
+    int decimals;
+    const char *unit;
+
+    if (abs_hz >= 1e9) {
+        scale = 1e9;
+        unit = "G";
+    } else if (abs_hz >= 1e6) {
+        scale = 1e6;
+        unit = "M";
+    } else if (abs_hz >= 1e3) {
+        scale = 1e3;
+        unit = "k";
+    } else {
+        scale = 1.0;
+        unit = "Hz";
+    }
+
+    scaled_step = step_hz / scale;
+    decimals = decimals_for_step(scaled_step);
+    snprintf(buf, buflen, "%.*f%s", decimals, hz / scale, unit);
 }
 
 static void draw_spectrum_with_grid(struct scan_state *s,
@@ -1828,8 +1900,6 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                                     double f1_hz)
 {
     int i;
-    int v_ticks = 10;
-    int h_ticks = 4;
     float y_min = s->db_min;
     float y_max = s->db_max;
     ImVec2 pmin, pmax;
@@ -1837,7 +1907,9 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImU32 col_bg = 0xFF131415u;
     ImU32 col_border = 0xFF3A3A3Au;
     ImU32 col_grid_v = 0xFF4A4A4Au;
+    ImU32 col_grid_v_minor = 0xFF313131u;
     ImU32 col_grid_h = 0xFF2A2A2Au;
+    ImU32 col_grid_h_minor = 0xFF232323u;
     ImU32 col_trace = 0xFF66D9FFu;
     ImU32 col_avg = 0xFF63E2A7u;
     ImU32 col_peak = 0xFFFFD166u;
@@ -1849,6 +1921,12 @@ static void draw_spectrum_with_grid(struct scan_state *s,
     ImU32 col_band_text_shadow = 0xCC000000u;
     float band_label_font_size = 11.0f;
     int b;
+    double freq_major_step;
+    double freq_minor_step;
+    double freq_tick;
+    double db_major_step;
+    double db_minor_step;
+    double db_tick;
 
     if (plot_count <= 1 || width <= 4.0f || height <= 4.0f)
         return;
@@ -1933,13 +2011,48 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         }
     }
 
-    for (i = 0; i <= v_ticks; i++) {
-        float x = pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks;
-        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_grid_v, 1.2f);
+    freq_major_step = choose_125_step(f1_hz - f0_hz, (int)(width / 110.0f));
+    freq_minor_step = choose_minor_step(freq_major_step);
+    for (freq_tick = floor(f0_hz / freq_minor_step) * freq_minor_step;
+         freq_tick <= f1_hz + 0.5 * freq_minor_step;
+         freq_tick += freq_minor_step) {
+        float x;
+        bool is_major;
+        double major_pos;
+
+        if (freq_tick < f0_hz - 0.5 * freq_minor_step)
+            continue;
+        x = pmin.x + (float)((freq_tick - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+        if (x < pmin.x - 1.0f || x > pmax.x + 1.0f)
+            continue;
+        major_pos = freq_tick / freq_major_step;
+        is_major = fabs(major_pos - round(major_pos)) < 1e-6;
+        ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y},
+                           is_major ? col_grid_v : col_grid_v_minor,
+                           is_major ? 1.2f : 0.8f);
     }
-    for (i = 0; i <= h_ticks; i++) {
-        float y = pmin.y + (pmax.y - pmin.y) * (float)i / (float)h_ticks;
-        ImDrawList_AddLine(dl, (ImVec2){pmin.x, y}, (ImVec2){pmax.x, y}, col_grid_h, 1.0f);
+
+    db_major_step = 10.0;
+    if ((y_max - y_min) <= 35.0f)
+        db_major_step = 5.0;
+    db_minor_step = db_major_step / 2.0;
+    for (db_tick = floor(y_min / db_minor_step) * db_minor_step;
+         db_tick <= y_max + 0.5 * db_minor_step;
+         db_tick += db_minor_step) {
+        float y;
+        bool is_major;
+        double major_pos;
+
+        if (db_tick < y_min - 0.5 * db_minor_step)
+            continue;
+        y = pmax.y - (float)((db_tick - y_min) / (y_max - y_min + 1e-6f)) * (pmax.y - pmin.y);
+        if (y < pmin.y - 1.0f || y > pmax.y + 1.0f)
+            continue;
+        major_pos = db_tick / db_major_step;
+        is_major = fabs(major_pos - round(major_pos)) < 1e-6;
+        ImDrawList_AddLine(dl, (ImVec2){pmin.x, y}, (ImVec2){pmax.x, y},
+                           is_major ? col_grid_h : col_grid_h_minor,
+                           is_major ? 1.0f : 0.8f);
     }
 
     for (i = 0; i < plot_count; i++) {
@@ -2170,7 +2283,7 @@ static void draw_spectrum_with_grid(struct scan_state *s,
             x = pmin.x + (pmax.x - pmin.x) * idx_f / (float)(plot_count - 1);
             ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.1f);
             freq = f0_hz + (f1_hz - f0_hz) * (double)idx_f / (double)(plot_count - 1);
-            format_freq_label(freq, txt, sizeof(txt));
+            format_freq_label(freq, freq_major_step, txt, sizeof(txt));
             tx = x + 3.0f;
             if (tx > pmax.x - 54.0f)
                 tx = pmax.x - 54.0f;
@@ -2187,13 +2300,15 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         ImDrawList_AddLine(dl, (ImVec2){xb, pmin.y}, (ImVec2){xb, pmax.y}, col_marker_b, 1.2f);
     }
 
-    for (i = 0; i <= v_ticks; i++) {
+    for (freq_tick = ceil(f0_hz / freq_major_step) * freq_major_step;
+         freq_tick <= f1_hz + 0.5 * freq_major_step;
+         freq_tick += freq_major_step) {
         char txt[32];
-        double f = f0_hz + (f1_hz - f0_hz) * (double)i / (double)v_ticks;
-        format_freq_label(f, txt, sizeof(txt));
-        ImDrawList_AddText_Vec2(dl, (ImVec2){pmin.x + (pmax.x - pmin.x) * (float)i / (float)v_ticks + 2.0f, pmax.y - 16.0f},
-                                col_text, txt, NULL);
+        float x = pmin.x + (float)((freq_tick - f0_hz) / (f1_hz - f0_hz + 1e-12)) * (pmax.x - pmin.x);
+        format_freq_label(freq_tick, freq_major_step, txt, sizeof(txt));
+        ImDrawList_AddText_Vec2(dl, (ImVec2){x + 2.0f, pmax.y - 16.0f}, col_text, txt, NULL);
     }
+
 }
 
 static bool scan_line(struct scan_state *s)
