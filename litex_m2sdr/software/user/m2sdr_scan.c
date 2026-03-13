@@ -480,6 +480,49 @@ static void cycle_window_display(SDL_Window *window, int direction)
     (void)move_window_to_display(window, next, maximize);
 }
 
+static bool span_window_all_displays(SDL_Window *window)
+{
+    SDL_Rect bounds;
+    SDL_Rect all_bounds;
+    Uint32 flags;
+    int displays;
+    int i;
+
+    if (!window)
+        return false;
+
+    displays = SDL_GetNumVideoDisplays();
+    if (displays <= 0)
+        return false;
+    if (SDL_GetDisplayBounds(0, &all_bounds) != 0)
+        return false;
+
+    for (i = 1; i < displays; i++) {
+        if (SDL_GetDisplayBounds(i, &bounds) != 0)
+            continue;
+        if (bounds.x < all_bounds.x) {
+            all_bounds.w += all_bounds.x - bounds.x;
+            all_bounds.x = bounds.x;
+        }
+        if (bounds.y < all_bounds.y) {
+            all_bounds.h += all_bounds.y - bounds.y;
+            all_bounds.y = bounds.y;
+        }
+        if (bounds.x + bounds.w > all_bounds.x + all_bounds.w)
+            all_bounds.w = (bounds.x + bounds.w) - all_bounds.x;
+        if (bounds.y + bounds.h > all_bounds.y + all_bounds.h)
+            all_bounds.h = (bounds.y + bounds.h) - all_bounds.y;
+    }
+
+    flags = SDL_GetWindowFlags(window);
+    if (flags & SDL_WINDOW_MAXIMIZED)
+        SDL_RestoreWindow(window);
+
+    SDL_SetWindowPosition(window, all_bounds.x, all_bounds.y);
+    SDL_SetWindowSize(window, all_bounds.w, all_bounds.h);
+    return true;
+}
+
 static bool export_csv_path(struct scan_state *s, const char *path)
 {
     FILE *f;
@@ -2577,7 +2620,7 @@ static void help(void)
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
             "    RX gain and dB scale.\n"
            "  - Parameters are applied live while moving sliders.\n"
-           "  - F8 cycles the window across monitors; Shift+F8 cycles backwards.\n"
+           "  - F8 cycles the window across monitors; Shift+F8 spans across all monitors.\n"
            "\n"
            "Notes:\n"
            "  - Supported samplerates are submultiples of 61.44 MSPS.\n"
@@ -3548,7 +3591,10 @@ int main(int argc, char **argv)
                 } else if (kc == SDLK_r) {
                     reset_spectrum_view(&s);
                 } else if (kc == SDLK_F8) {
-                    cycle_window_display(window, (mod & KMOD_SHIFT) ? -1 : 1);
+                    if (mod & KMOD_SHIFT)
+                        (void)span_window_all_displays(window);
+                    else
+                        cycle_window_display(window, 1);
                 }
             }
         }
