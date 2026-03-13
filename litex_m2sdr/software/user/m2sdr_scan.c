@@ -410,6 +410,76 @@ static void refresh_display_times(struct scan_state *s)
     }
 }
 
+static bool get_display_bounds_safe(int display_index, SDL_Rect *bounds)
+{
+    if (!bounds)
+        return false;
+    if (SDL_GetDisplayUsableBounds(display_index, bounds) == 0)
+        return true;
+    return SDL_GetDisplayBounds(display_index, bounds) == 0;
+}
+
+static bool move_window_to_display(SDL_Window *window, int display_index, bool maximize)
+{
+    SDL_Rect bounds;
+    Uint32 flags;
+    int width, height;
+    int x, y;
+
+    if (!window || !get_display_bounds_safe(display_index, &bounds))
+        return false;
+
+    flags = SDL_GetWindowFlags(window);
+    if (flags & SDL_WINDOW_MAXIMIZED)
+        SDL_RestoreWindow(window);
+
+    SDL_GetWindowSize(window, &width, &height);
+    if (width < 640)
+        width = 640;
+    if (height < 480)
+        height = 480;
+    if (width > bounds.w)
+        width = bounds.w;
+    if (height > bounds.h)
+        height = bounds.h;
+
+    x = bounds.x + (bounds.w - width) / 2;
+    y = bounds.y + (bounds.h - height) / 2;
+    SDL_SetWindowPosition(window, x, y);
+    SDL_SetWindowSize(window, width, height);
+
+    if (maximize)
+        SDL_MaximizeWindow(window);
+
+    return true;
+}
+
+static void cycle_window_display(SDL_Window *window, int direction)
+{
+    int displays;
+    int current;
+    int next;
+    bool maximize;
+
+    if (!window)
+        return;
+
+    displays = SDL_GetNumVideoDisplays();
+    if (displays <= 1)
+        return;
+
+    current = SDL_GetWindowDisplayIndex(window);
+    if (current < 0)
+        current = 0;
+
+    next = (current + direction) % displays;
+    if (next < 0)
+        next += displays;
+
+    maximize = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+    (void)move_window_to_display(window, next, maximize);
+}
+
 static bool export_csv_path(struct scan_state *s, const char *path)
 {
     FILE *f;
@@ -2496,6 +2566,7 @@ static void help(void)
            "      --sample-rate HZ   Scan sample rate in Hz (default: %u).\n"
            "      --fft-len N        FFT length (power of two, default: %d).\n"
            "      --lines N          Waterfall lines (default: %d).\n"
+           "      --display N        Open the UI on display N (default: current display).\n"
            "      --preset-load FILE Load scan preset before starting.\n"
            "      --preset-save FILE Save current scan preset.\n"
            "      --no-ui            Run headless capture/export without SDL/ImGui.\n"
@@ -2504,8 +2575,9 @@ static void help(void)
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
-           "    RX gain and dB scale.\n"
+            "    RX gain and dB scale.\n"
            "  - Parameters are applied live while moving sliders.\n"
+           "  - F8 cycles the window across monitors; Shift+F8 cycles backwards.\n"
            "\n"
            "Notes:\n"
            "  - Supported samplerates are submultiples of 61.44 MSPS.\n"
@@ -3214,6 +3286,7 @@ int main(int argc, char **argv)
     const char *export_csv_pathname = NULL;
     const char *export_png_pathname = NULL;
     bool no_ui = false;
+    int initial_display = -1;
 
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -3232,11 +3305,12 @@ int main(int argc, char **argv)
         { "lines", required_argument, NULL, 6 },
         { "sample-rate", required_argument, NULL, 7 },
         { "sample_rate", required_argument, NULL, 7 },
-        { "preset-load", required_argument, NULL, 8 },
-        { "preset-save", required_argument, NULL, 9 },
-        { "no-ui", no_argument, NULL, 10 },
-        { "export-csv", required_argument, NULL, 11 },
-        { "export-png", required_argument, NULL, 12 },
+        { "display", required_argument, NULL, 8 },
+        { "preset-load", required_argument, NULL, 9 },
+        { "preset-save", required_argument, NULL, 10 },
+        { "no-ui", no_argument, NULL, 11 },
+        { "export-csv", required_argument, NULL, 12 },
+        { "export-png", required_argument, NULL, 13 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -3328,20 +3402,23 @@ int main(int argc, char **argv)
             s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
             break;
         case 8:
+            initial_display = atoi(optarg);
+            break;
+        case 9:
             preset_load_path = optarg;
             if (!load_preset_file(&s, preset_load_path))
                 return 1;
             break;
-        case 9:
+        case 10:
             preset_save_path = optarg;
             break;
-        case 10:
+        case 11:
             no_ui = true;
             break;
-        case 11:
+        case 12:
             export_csv_pathname = optarg;
             break;
-        case 12:
+        case 13:
             export_png_pathname = optarg;
             break;
         default:
@@ -3368,6 +3445,15 @@ int main(int argc, char **argv)
         goto fail;
     }
 
+    if (initial_display >= 0) {
+        int displays = SDL_GetNumVideoDisplays();
+        if (initial_display >= displays) {
+            fprintf(stderr, "Invalid display index %d (available: 0..%d).\n",
+                    initial_display, displays > 0 ? displays - 1 : 0);
+            goto fail;
+        }
+    }
+
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -3377,8 +3463,8 @@ int main(int argc, char **argv)
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     window = SDL_CreateWindow("M2SDR Scan - Wideband Spectrum and Waterfall",
-                              SDL_WINDOWPOS_CENTERED,
-                              SDL_WINDOWPOS_CENTERED,
+                              initial_display >= 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(initial_display) : SDL_WINDOWPOS_CENTERED,
+                              initial_display >= 0 ? SDL_WINDOWPOS_CENTERED_DISPLAY(initial_display) : SDL_WINDOWPOS_CENTERED,
                               1400,
                               850,
                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
@@ -3452,6 +3538,7 @@ int main(int argc, char **argv)
                 quit = true;
             if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
                 SDL_Keycode kc = e.key.keysym.sym;
+                SDL_Keymod mod = SDL_GetModState();
                 if (kc == SDLK_SPACE) {
                     s.run = !s.run;
                 } else if (kc == SDLK_p) {
@@ -3460,6 +3547,8 @@ int main(int argc, char **argv)
                     s.spectrum_peak_marker = !s.spectrum_peak_marker;
                 } else if (kc == SDLK_r) {
                     reset_spectrum_view(&s);
+                } else if (kc == SDLK_F8) {
+                    cycle_window_display(window, (mod & KMOD_SHIFT) ? -1 : 1);
                 }
             }
         }
