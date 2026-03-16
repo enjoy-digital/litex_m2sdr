@@ -184,40 +184,45 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 >
 > If an error related to DKMS appears during installation, run sudo apt remove --purge xtrx-dkms dkms and then re-execute the installation command.
 
-4. **Clone the Repository:**
+3. **Clone the Repository:**
    - Clone the LiteX-M2SDR repository using the following command:
    ```
    git clone https://github.com/enjoy-digital/litex_m2sdr
    ```
 
-5. **Build and Install Software:**
+4. **Build Software:**
     Software build uses `make` and CMake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top of it to simplify development and installation:
-   - Navigate to the software directory and run the build script:
    ```
    cd litex_m2sdr/software
    ./build.py
    ```
    - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
-   - `m2sdr_check` and `m2sdr_scan` are built only when SDL2/OpenGL development packages are installed and a local `litex_m2sdr/software/user/cimgui/` checkout is present. Otherwise they are skipped and the rest of the software build still succeeds.
-   - To install the public C API headers/library for external applications:
+   - By default, `./build.py` only builds. Run `sudo ./build.py` if you also want it to install the kernel driver and the SoapySDR module.
+   - `m2sdr_check` and `m2sdr_scan` are optional SDL/OpenGL GUI tools. They are built only when SDL2/OpenGL development packages are installed and `litex_m2sdr/software/user/cimgui/` is present in your checkout. If `cimgui` is absent, only those two GUI tools are skipped; the CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
+
+5. **Install the Built Software:**
+   - Install the kernel driver:
+   ```
+   cd litex_m2sdr/software/kernel
+   sudo make install
+   sudo insmod m2sdr.ko # Optional if you do not want to reboot yet.
+   ```
+   - Install the public C API headers/library for external applications:
    ```
    cd litex_m2sdr/software/user
    make
    sudo make install_dev PREFIX=/usr/local
    sudo ldconfig
    ```
-
-6. **Load the Kernel Driver:**
-   - Load the kernel driver with the following commands:
+   - Install the SoapySDR module:
    ```
-   cd litex_m2sdr/software/kernel
-   make clean all
+   cd litex_m2sdr/software/soapysdr/build
    sudo make install
-   sudo insmod m2sdr.ko (To avoid having to reboot the machine)
    ```
+   - If you already used `sudo ./build.py`, the kernel and SoapySDR install steps above are already done. `libm2sdr` still needs `sudo make install_dev ...` if you want to develop external applications against the public C API.
    - 🚀 Ready for launch!
 
-7. **Run Your SDR Software:**
+6. **Run Your SDR Software:**
    - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
 
 ### Host Requirements & Expectations
@@ -293,9 +298,8 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    cd litex_m2sdr/software/user
    make clean all
    ./m2sdr_util info
-   ./m2sdr_rf init -samplerate=30720000
-   ./tone_gen.py tone_tx.bin
-   ./m2sdr_play tone_tx.bin 100000
+   ./m2sdr_rf --sample-rate=30720000 --tx-freq=2400000000 --rx-freq=2400000000
+   ./m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1000000 --amplitude 0.5
    ```
    - C API (libm2sdr) quick start and examples:
    ```
@@ -303,6 +307,7 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    cd litex_m2sdr/software/user
    make examples
    ../../doc/libm2sdr/example_sync_rx > /tmp/rx.iq
+   ../../doc/libm2sdr/example_tone_tx
    ```
    - `libm2sdr` is the common host interface used by the user utilities and the SoapySDR module, so example code there is the reference starting point for new host applications.
 

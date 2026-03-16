@@ -106,8 +106,6 @@ This repository includes several Python utilities to help test and demonstrate t
 ├── LiteXM2SDRDevice.hpp
 ├── LiteXM2SDRRegistration.cpp
 ├── LiteXM2SDRStreaming.cpp
-├── LiteXM2SDRUDPRx.cpp
-├── LiteXM2SDRUDPRx.hpp
 ├── test_play.py
 ├── test_record.py
 └── test_time.py
@@ -123,10 +121,7 @@ This repository includes several Python utilities to help test and demonstrate t
   Handles SoapySDR plugin registration and device enumeration.
 
 - **LiteXM2SDRStreaming.cpp**
-  Implements SoapySDR streaming methods (activateStream, readStream, writeStream…) using the PCIe DMA path.
-
-- **LiteXM2SDRUDPRx.cpp/hpp**
-  Implements optional UDP receive routines (via Etherbone or custom protocol).
+  Implements SoapySDR streaming methods (activateStream, readStream, writeStream…) using the PCIe DMA path, with the optional network receive path handled in the current driver sources.
 
 - **test_play.py, test_record.py, test_time.py**
   Python scripts to test and demonstrate transmission, recording, and hardware time functionality using the LiteXM2SDR SoapySDR driver.
