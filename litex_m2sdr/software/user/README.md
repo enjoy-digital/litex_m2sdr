@@ -49,11 +49,23 @@ Core user tools build with standard C/C++ toolchains and the RF/audio dependenci
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
-- a local `software/user/cimgui/` directory containing the `cimgui` and Dear ImGui sources
+- a populated `software/user/cimgui/` directory containing the pinned `cimgui` and Dear ImGui sources
 
 On Debian/Ubuntu:
 ~~~~
 sudo apt install pkg-config libsdl2-dev libgl1-mesa-dev
+~~~~
+
+Populate the pinned `cimgui` checkout with:
+~~~~
+cd ../
+./fetch_cimgui.py
+~~~~
+
+Or let the top-level software build do it for you:
+~~~~
+cd ../
+./build.py --fetch-cimgui
 ~~~~
 
 These dependencies are only needed for the optional GUI tools. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile`; the CLI tools, `libm2sdr`, and the SoapySDR module still build.
@@ -462,7 +474,7 @@ Notes:
 - `F11` toggles a borderless fullscreen span across all monitors.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
-- A local `software/user/cimgui/` checkout is also required for the build.
+- A populated `software/user/cimgui/` checkout is also required for the build. Use `../fetch_cimgui.py` or `../build.py --fetch-cimgui`.
 
 ---
 
