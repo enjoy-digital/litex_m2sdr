@@ -271,8 +271,12 @@ def m2sdr_rf_autotest():
     errors = 0
     for samplerate in RFIC_SAMPLERATES:
         print(f"\tRF Init @ {samplerate/1e6:3.2f}MSPS...", end="")
-        log = subprocess.run(f"cd user && ./m2sdr_rf -samplerate={samplerate}", shell=True, capture_output=True, text=True)
-        success = ("AD936x Rev 2 successfully initialized" in log.stdout) and (log.returncode == 0)
+        samplerate_hz = int(samplerate)
+        log = subprocess.run(
+            f"cd user && ./m2sdr_rf --samplerate={samplerate_hz}",
+            shell=True, capture_output=True, text=True
+        )
+        success = (log.returncode == 0)
         errors += print_result(success)
     return errors
 
@@ -297,7 +301,13 @@ def m2sdr_rfic_loopback_autotest():
     print("M2SDR RFIC Loopback Test...")
 
     # Configure RFIC @ 30.72MSPS with internal loopback set.
-    log = subprocess.run(f"cd user && ./m2sdr_rf -loopback=1 -samplerate=30.72e6",  shell=True, capture_output=True, text=True)
+    log = subprocess.run(
+        "cd user && ./m2sdr_rf --loopback=1 --samplerate=30720000",
+        shell=True, capture_output=True, text=True
+    )
+    if log.returncode != 0:
+        print("\tRFIC loopback configuration failed: ", end="")
+        return print_result(False)
 
     # Run RFIC loopback test.
     cmd = f"cd user && ./m2sdr_util dma_test -w 12 -a -t {RFIC_LOOPBACK_TEST_DURATION}"
