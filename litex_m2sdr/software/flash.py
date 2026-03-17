@@ -15,7 +15,7 @@ import shlex
 def flash_bitstream(bitstream, offset, device_num):
     print("Flashing Board over PCIe...")
     subprocess.run(
-        f"cd user && ./m2sdr_util flash_write -c {device_num} {shlex.quote('../' + bitstream)} {offset}",
+        f"cd user && ./m2sdr_util flash_write -y -c {device_num} {shlex.quote('../' + bitstream)} {offset}",
         shell=True,
         check=True,
     )

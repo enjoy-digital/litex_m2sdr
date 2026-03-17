@@ -54,6 +54,7 @@
 static struct m2sdr_cli_device g_cli_dev;
 
 sig_atomic_t keep_running = 1;
+static bool g_force_flash_write = false;
 
 void intHandler(int dummy) {
     keep_running = 0;
@@ -1498,6 +1499,7 @@ static void help(void)
            "  -d, --device DEV                 Use explicit device id.\n"
 #ifdef USE_LITEPCIE
            "  -c, --device-num N               Select the device (default: 0).\n"
+           "  -y, --force                      Skip confirmation prompts for destructive commands.\n"
            "      --zero-copy                  Enable zero-copy DMA mode.\n"
            "      --external-loopback          Use external loopback (default: internal).\n"
            "      --data-width N               Width of data bus (default: 32).\n"
@@ -1600,6 +1602,7 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
         { "data-width", required_argument, NULL, 'w' },
         { "warmup-buffers", required_argument, NULL, 'W' },
+        { "force", no_argument, NULL, 'y' },
         { "zero-copy", no_argument, NULL, 'z' },
         { "external-loopback", no_argument, NULL, 'e' },
         { "auto-rx-delay", no_argument, NULL, 'a' },
@@ -1612,7 +1615,7 @@ int main(int argc, char **argv)
     m2sdr_cli_device_init(&g_cli_dev);
     for (;;) {
 #ifdef USE_LITEPCIE
-        c = getopt_long(argc, argv, "hd:c:i:p:w:W:zeat:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:w:W:yzeat:", options, &option_index);
 #else
         c = getopt_long(argc, argv, "hd:c:i:p:", options, &option_index);
 #endif
@@ -1630,6 +1633,9 @@ int main(int argc, char **argv)
                 exit(1);
             break;
 #ifdef USE_LITEPCIE
+        case 'y':
+            g_force_flash_write = true;
+            break;
         case 'w':
             litepcie_data_width = atoi(optarg);
             break;
@@ -1752,7 +1758,7 @@ int main(int argc, char **argv)
         filename = argv[optind++];
         if (optind < argc)
             offset = strtoul(argv[optind++], NULL, 0);
-        if (!confirm_flash_write()) {
+        if (!g_force_flash_write && !confirm_flash_write()) {
             fprintf(stderr, "Aborted.\n");
             exit(1);
         }
