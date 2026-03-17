@@ -12,6 +12,7 @@
 /*----------*/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -31,6 +32,9 @@
 
 #define SPI_TIMEOUT 100000 /* in us */
 #define SPI_TRANSACTION_TIME_US  25
+#define FLASH_ERASE_TIMEOUT_US   (10 * 1000 * 1000)
+#define FLASH_PROGRAM_TIMEOUT_US (1 * 1000 * 1000)
+#define FLASH_PROGRESS_STEP_US   (250 * 1000)
 
 /* The flash bridge exposes a small shift-register style SPI engine. These
  * helpers wrap it so the higher-level write path can stay transport-agnostic. */
@@ -41,6 +45,23 @@
 static void flash_spi_cs(void *conn, uint8_t cs_n)
 {
     m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
+}
+
+static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
+{
+    uint32_t status = 0;
+
+    for (int i = 0; i < SPI_TIMEOUT; i++) {
+        status = m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR);
+        if (status & SPI_STATUS_DONE)
+            return;
+        usleep(1);
+    }
+
+    fprintf(stderr,
+        "\nTimeout waiting for SPI done during %s (cmd=0x%02x, len=%d, status=0x%08x)\n",
+        op, cmd, tx_len, status);
+    abort();
 }
 
 /* flash_spi */
@@ -67,12 +88,7 @@ static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
 
 #ifdef USE_LITEPCIE
     /* Poll SPI_STATUS_DONE for PCIe */
-    for (int i = 0; i < SPI_TIMEOUT; i++) {
-        if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
-            break;
-        }
-        usleep(1);
-    }
+    flash_wait_done(conn, "flash_spi", cmd, tx_len);
     rx = ((uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) |
           m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
 #endif
@@ -133,6 +149,36 @@ static void flash_erase_sector(void *conn, uint32_t addr)
     flash_spi(conn, 32, FLASH_SE, addr << 8);
 }
 
+static int flash_wait_while_busy(void *conn, uint32_t addr, const char *op,
+                                 unsigned timeout_us,
+                                 void (*progress_cb)(void *opaque, const char *fmt, ...),
+                                 void *opaque)
+{
+    int64_t start_ms = get_time_ms();
+    unsigned next_report_us = FLASH_PROGRESS_STEP_US;
+    uint8_t status;
+
+    while ((status = flash_read_status(conn)) & FLASH_WIP) {
+        int64_t elapsed_ms = get_time_ms() - start_ms;
+        unsigned elapsed_us = (unsigned)(elapsed_ms * 1000);
+
+        if (progress_cb && elapsed_us >= next_report_us) {
+            progress_cb(opaque, "%s @%08x... status=0x%02x elapsed=%lldms\r",
+                        op, addr, status, (long long)elapsed_ms);
+            next_report_us += FLASH_PROGRESS_STEP_US;
+        }
+        if (elapsed_us >= timeout_us) {
+            fprintf(stderr,
+                "\nTimeout waiting for flash %s @0x%08x, status=0x%02x after %lldms\n",
+                op, addr, status, (long long)elapsed_ms);
+            return 1;
+        }
+        usleep(1000);
+    }
+
+    return 0;
+}
+
 /* flash_write_buffer */
 /*--------------------*/
 
@@ -155,12 +201,7 @@ static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t
                      SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
 #ifdef USE_LITEPCIE
-        for (int j = 0; j < SPI_TIMEOUT; j++) {
-            if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
-                break;
-            }
-            usleep(1);
-        }
+        flash_wait_done(conn, "flash_write_buffer_cmd", FLASH_PP, 32);
 #endif
 #ifdef USE_LITEETH
         usleep(SPI_TRANSACTION_TIME_US);
@@ -178,12 +219,7 @@ static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t
                          SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
 #ifdef USE_LITEPCIE
-            for (int j = 0; j < SPI_TIMEOUT; j++) {
-                if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
-                    break;
-                }
-                usleep(1);
-            }
+            flash_wait_done(conn, "flash_write_buffer_data", FLASH_PP, 32);
 #endif
 #ifdef USE_LITEETH
             usleep(SPI_TRANSACTION_TIME_US);
@@ -226,12 +262,7 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
                  SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
 #ifdef USE_LITEPCIE
-    for (int j = 0; j < SPI_TIMEOUT; j++) {
-        if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
-            break;
-        }
-        usleep(1);
-    }
+    flash_wait_done(conn, "flash_read_buffer_cmd", FLASH_READ, 32);
 #endif
 #ifdef USE_LITEETH
     usleep(SPI_TRANSACTION_TIME_US);
@@ -244,12 +275,7 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
                      SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
 #ifdef USE_LITEPCIE
-        for (int j = 0; j < SPI_TIMEOUT; j++) {
-            if (m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR) & SPI_STATUS_DONE) {
-                break;
-            }
-            usleep(1);
-        }
+        flash_wait_done(conn, "flash_read_buffer_data", FLASH_READ, 32);
 #endif
 #ifdef USE_LITEETH
         usleep(SPI_TRANSACTION_TIME_US);
@@ -308,9 +334,9 @@ int m2sdr_flash_write(void *conn,
         }
         flash_write_enable(conn);
         flash_erase_sector(conn, base + i);
-        while (flash_read_status(conn) & FLASH_WIP) {
-            usleep(1000);
-        }
+        if (flash_wait_while_busy(conn, base + i, "Erasing", FLASH_ERASE_TIMEOUT_US,
+                                  progress_cb, opaque) != 0)
+            return 1;
     }
     if (progress_cb) {
         progress_cb(opaque, "\n");
@@ -326,17 +352,17 @@ int m2sdr_flash_write(void *conn,
             progress_cb(opaque, "Writing @%08x\r", base + i);
         }
 
-        while (flash_read_status(conn) & FLASH_WIP) {
-            usleep(100);
-        }
+        if (flash_wait_while_busy(conn, base + i, "Waiting", FLASH_PROGRAM_TIMEOUT_US,
+                                  progress_cb, opaque) != 0)
+            return 1;
 
         flash_write_enable(conn);
         flash_write_buffer(conn, base + i, buf + i, prog_size);
         flash_write_disable(conn);
 
-        while (flash_read_status(conn) & FLASH_WIP) {
-            usleep(100);
-        }
+        if (flash_wait_while_busy(conn, base + i, "Writing", FLASH_PROGRAM_TIMEOUT_US,
+                                  progress_cb, opaque) != 0)
+            return 1;
 
         /* Read back each page immediately so user-space callers get a simple,
          * conservative "program and verify" behavior. */

@@ -8,13 +8,22 @@
 import time
 import argparse
 import subprocess
+import shlex
 
 # Flash Utilities ----------------------------------------------------------------------------------
 
 def flash_bitstream(bitstream, offset, device_num):
     print("Flashing Board over PCIe...")
-    subprocess.run(f"cd user && ./m2sdr_util flash_write  -c {device_num} ../{bitstream} {offset}", shell=True)
-    subprocess.run(f"cd user && ./m2sdr_util flash_reload -c {device_num}", shell=True)
+    subprocess.run(
+        f"cd user && ./m2sdr_util flash_write -c {device_num} {shlex.quote('../' + bitstream)} {offset}",
+        shell=True,
+        check=True,
+    )
+    subprocess.run(
+        f"cd user && ./m2sdr_util flash_reload -c {device_num}",
+        shell=True,
+        check=True,
+    )
     time.sleep(1)
 
 # Main ---------------------------------------------------------------------------------------------
