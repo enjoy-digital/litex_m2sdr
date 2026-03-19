@@ -25,6 +25,7 @@ int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
 bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev);
+void m2sdr_cli_print_device_help(void);
 void m2sdr_cli_error(const char *fmt, ...);
 void m2sdr_cli_invalid_choice(const char *what, const char *value, const char *expected);
 void m2sdr_cli_unknown_option(const char *opt);

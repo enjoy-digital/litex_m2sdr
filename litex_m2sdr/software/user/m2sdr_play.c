@@ -61,28 +61,27 @@ static void print_time_banner(const char *label, uint64_t time_ns)
 
 static void help(void)
 {
-    printf("M2SDR I/Q Player Utility.\n"
-           "usage: m2sdr_play [options] <filename|- > [loops]\n"
-           "\n"
-           "Options:\n"
-           "  -h, --help            Show this help message.\n"
-           "  -d, --device DEV      Use explicit device id.\n"
-#ifdef USE_LITEPCIE
-           "  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n"
-#elif defined(USE_LITEETH)
-           "  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n"
-           "  -p, --port PORT       Target port (default: 1234).\n"
-#endif
-           "  -q, --quiet           Quiet mode.\n"
-           "  -t, --timed-start     Timed start (align to next second).\n"
-           "      --capture-index N SigMF capture index to use (default: 0).\n"
-           "      --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
-           "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
-           "      --8bit            Legacy alias for --format sc8.\n"
-           "\n"
-           "Arguments:\n"
-           "  filename     Raw IQ file, SigMF file/basename, or '-' for stdin.\n"
-           "  loops        Number of times to loop playback (default=1, 0 for infinite).\n");
+    puts("M2SDR I/Q Player Utility.");
+    puts("usage: m2sdr_play [options] <filename|-> [loops]");
+    puts("");
+    puts("Arguments:");
+    puts("  filename     Raw IQ file, SigMF file/basename, or '-' for stdin.");
+    puts("  loops        Number of times to loop playback (default: 1, 0 for infinite).");
+    puts("");
+    m2sdr_cli_print_device_help();
+    puts("");
+    puts("Playback options:");
+    puts("  -h, --help            Show this help message.");
+    puts("  -q, --quiet           Quiet mode.");
+    puts("  -t, --timed-start     Timed start (align to the next second).");
+    puts("      --format FMT      Sample format: sc16 or sc8 (default: sc16).");
+    puts("");
+    puts("SigMF input:");
+    puts("      --capture-index N Select capture index from SigMF metadata (default: 0).");
+    puts("");
+    puts("Compatibility:");
+    puts("      --zero-copy       Legacy compatibility flag; ignored in sync API.");
+    puts("      --8bit            Legacy alias for --format sc8.");
     exit(1);
 }
 

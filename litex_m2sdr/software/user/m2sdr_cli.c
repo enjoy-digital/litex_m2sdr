@@ -120,6 +120,18 @@ const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev)
 #endif
 }
 
+void m2sdr_cli_print_device_help(void)
+{
+    fputs("Device options:\n", stdout);
+    fputs("  -d, --device DEV      Use explicit device id.\n", stdout);
+#ifdef USE_LITEPCIE
+    fputs("  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n", stdout);
+#elif defined(USE_LITEETH)
+    fputs("  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n", stdout);
+    fputs("  -p, --port PORT       Target port (default: 1234).\n", stdout);
+#endif
+}
+
 void m2sdr_cli_error(const char *fmt, ...)
 {
     va_list ap;

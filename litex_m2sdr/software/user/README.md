@@ -203,6 +203,13 @@ m2sdr_play [options] filename [loops]
 - **filename**: Binary file of I/Q samples (or `-` for stdin).
 - **loops**: Number of times to loop playback (default=1).
 
+Common playback options:
+- `--format sc16|sc8`
+- `--timed-start`
+
+SigMF input:
+- `--capture-index`
+
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
 For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
 M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted and replayed with timestamps restored into TX metadata.
@@ -228,10 +235,12 @@ m2sdr_record [options] filename size
 - **filename**: Destination file for captured I/Q samples (or `-` for stdout).
 - **size**: Number of samples to capture.
 
-Relevant options:
+Common capture options:
 - `--format sc16|sc8`
 - `--enable-header`
 - `--strip-header`
+
+SigMF output:
 - `--sigmf`
 - `--sample-rate`
 - `--center-freq`
@@ -239,6 +248,8 @@ Relevant options:
 - `--description`
 - `--author`
 - `--hw`
+
+SigMF annotations:
 - `--annotation-label`
 - `--annotation-comment`
 - `--annotation-start`
@@ -274,7 +285,7 @@ m2sdr_check [options] filename
 For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
 M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted for inspection.
 
-**Relevant options**:
+Inspection options:
 - `--nchannels`
 - `--nbits`
 - `--sample-rate`
@@ -282,6 +293,8 @@ M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted for 
 - `--frame-header`
 - `--frame-size`
 - `--max-samples`
+
+SigMF input:
 - `--capture-index`
 
 The GUI provides:

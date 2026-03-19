@@ -35,44 +35,45 @@ void intHandler(int dummy) {
 
 static void help(void)
 {
-    printf("M2SDR I/Q Record Utility.\n"
-           "usage: m2sdr_record [options] [filename|-] [size]\n"
-           "\n"
-           "Options:\n"
-           "  -h, --help            Show this help message.\n"
-           "  -d, --device DEV      Use explicit device id.\n"
-#ifdef USE_LITEPCIE
-           "  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n"
-#elif defined(USE_LITEETH)
-           "  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n"
-           "  -p, --port PORT       Target port (default: 1234).\n"
-#endif
-           "  -q, --quiet           Quiet mode.\n"
-           "      --sigmf           Write a SigMF dataset + metadata pair.\n"
-           "      --enable-header   Enable DMA header.\n"
-           "      --strip-header    Strip DMA header from output.\n"
-           "      --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
-           "      --sample-rate HZ  SigMF sample rate metadata.\n"
-           "      --center-freq HZ  SigMF center frequency metadata.\n"
-           "      --nchannels N     SigMF channel count metadata.\n"
-           "      --description TXT SigMF description metadata.\n"
-           "      --author TXT      SigMF author metadata.\n"
-           "      --hw TXT          SigMF hardware metadata.\n"
-           "      --annotation-label TXT     SigMF annotation label.\n"
-           "      --annotation-comment TXT   SigMF annotation comment.\n"
-           "      --annotation-start N       SigMF annotation start sample.\n"
-           "      --annotation-count N       SigMF annotation sample count.\n"
-           "      --annotation-freq-low HZ   SigMF annotation lower frequency edge.\n"
-           "      --annotation-freq-high HZ  SigMF annotation upper frequency edge.\n"
-           "      --annotation-add           Finalize current SigMF annotation.\n"
-           "      --annotate-ts-jumps        Add SigMF annotations on RX timestamp jumps.\n"
-           "      --ts-jump-threshold-pct P  Relative timestamp jump threshold (default: 5).\n"
-           "      --zero-copy       Legacy compatibility flag; ignored in sync API.\n"
-           "      --8bit            Legacy alias for --format sc8.\n"
-           "\n"
-           "Arguments:\n"
-           "  filename     Output file, or '-' for stdout.\n"
-           "  size         Optional byte limit to record.\n");
+    puts("M2SDR I/Q Record Utility.");
+    puts("usage: m2sdr_record [options] [filename|-] [size]");
+    puts("");
+    puts("Arguments:");
+    puts("  filename     Output file, or '-' for stdout.");
+    puts("  size         Optional byte limit to record.");
+    puts("");
+    m2sdr_cli_print_device_help();
+    puts("");
+    puts("Capture options:");
+    puts("  -h, --help            Show this help message.");
+    puts("  -q, --quiet           Quiet mode.");
+    puts("      --format FMT      Sample format: sc16 or sc8 (default: sc16).");
+    puts("      --enable-header   Enable DMA header.");
+    puts("      --strip-header    Strip DMA header from output.");
+    puts("");
+    puts("SigMF output:");
+    puts("      --sigmf           Write a SigMF dataset + metadata pair.");
+    puts("      --sample-rate HZ  Set SigMF sample rate metadata.");
+    puts("      --center-freq HZ  Set SigMF center frequency metadata.");
+    puts("      --nchannels N     Set SigMF channel count metadata.");
+    puts("      --description TXT Set SigMF description metadata.");
+    puts("      --author TXT      Set SigMF author metadata.");
+    puts("      --hw TXT          Set SigMF hardware metadata.");
+    puts("");
+    puts("SigMF annotations:");
+    puts("      --annotation-label TXT     Set current annotation label.");
+    puts("      --annotation-comment TXT   Set current annotation comment.");
+    puts("      --annotation-start N       Set current annotation start sample.");
+    puts("      --annotation-count N       Set current annotation sample count.");
+    puts("      --annotation-freq-low HZ   Set current annotation lower frequency edge.");
+    puts("      --annotation-freq-high HZ  Set current annotation upper frequency edge.");
+    puts("      --annotation-add           Finalize the current annotation and start a new one.");
+    puts("      --annotate-ts-jumps        Add annotations on RX timestamp jumps.");
+    puts("      --ts-jump-threshold-pct P  Relative jump threshold (default: 5).");
+    puts("");
+    puts("Compatibility:");
+    puts("      --zero-copy       Legacy compatibility flag; ignored in sync API.");
+    puts("      --8bit            Legacy alias for --format sc8.");
     exit(1);
 }
 
