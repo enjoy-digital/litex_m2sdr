@@ -121,6 +121,19 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
 | GPIO                            | ✅                           | ✅                           | (always included)                             |
 
+### User LED Behavior
+
+The board exposes a single monochrome `user_led`, so the gateware uses it as a layered status indicator rather than a simple on/off flag:
+
+- **Boot / time not valid**: strong double-heartbeat.
+- **PCIe and/or Ethernet enabled but no sample transport ready yet**: softer double-heartbeat.
+  PCIe becomes ready when the link is up and DMA/PPS synchronization is established; Ethernet becomes ready when the link is up.
+- **Normal ready state**: gentle low-amplitude breathing.
+- **PPS event**: short bright accent pulse over the base animation.
+- **RF or Ethernet RX/TX activity**: bright accent pulse; simultaneous RX+TX drives the brightest activity indication.
+
+When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
+
 [> PCIe SoC Design
 ------------------
 <a id="pcie-soc-design"></a>

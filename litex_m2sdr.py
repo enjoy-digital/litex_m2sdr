@@ -25,7 +25,6 @@ from litex.soc.integration.soc      import SoCBusHandler
 from litex.soc.integration.soc      import SoCRegion
 
 from litex.soc.cores.clock     import *
-from litex.soc.cores.led       import LedChaser
 from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
@@ -57,6 +56,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
 from litex_m2sdr.gateware.header      import TXRXHeader
+from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
@@ -342,12 +342,6 @@ class BaseSoC(SoCMini):
 
         if with_jtagbone:
             self.add_jtagbone()
-
-        # Leds -------------------------------------------------------------------------------------
-
-        led_pad = platform.request("user_led")
-        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
-        self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -656,6 +650,26 @@ class BaseSoC(SoCMini):
                 self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
         if with_sata:
             self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
+
+        # Leds -------------------------------------------------------------------------------------
+
+        led_pad = platform.request("user_led")
+        self.leds = StatusLed(sys_clk_freq=sys_clk_freq)
+        self.comb += [
+            self.leds.time_running.eq(   self.time_gen.enable),
+            self.leds.time_valid.eq(     self.time_gen.time != 0),
+            self.leds.pcie_present.eq(   int(with_pcie)),
+            self.leds.pcie_link_up.eq(   self.pcie_phy._link_status.fields.status if with_pcie else 0),
+            self.leds.dma_synced.eq(     self.pcie_dma0.synchronizer.synced if with_pcie else 0),
+            self.leds.eth_present.eq(    int(with_eth)),
+            self.leds.eth_link_up.eq(    self.eth_phy.link_up if with_eth else 0),
+            self.leds.tx_activity.eq(    self.ad9361.sink.valid & self.ad9361.sink.ready),
+            self.leds.rx_activity.eq(    self.ad9361.source.valid & self.ad9361.source.ready),
+            self.leds.eth_tx_activity.eq(self.eth_rx_streamer.source.valid & self.eth_rx_streamer.source.ready if with_eth else 0),
+            self.leds.eth_rx_activity.eq(self.eth_tx_streamer.source.valid & self.eth_tx_streamer.source.ready if with_eth else 0),
+            self.leds.pps_pulse.eq(      self.pps_gen.pps_pulse),
+            led_pad.eq(                  self.leds.output),
+        ]
 
         # GPIO -------------------------------------------------------------------------------------
 
