@@ -16,8 +16,24 @@
 
 ## C API (libm2sdr)
 
-- Docs: `litex_m2sdr/doc/libm2sdr/README.md`
-- Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
+A minimal RX session in C:
+```c
+#include "m2sdr.h"
+
+struct m2sdr_dev *dev;
+m2sdr_open(&dev, "pcie:/dev/m2sdr0");
+
+struct m2sdr_config cfg;
+m2sdr_config_init(&cfg);
+cfg.rx_freq = 100000000; /* 100 MHz */
+m2sdr_apply_config(dev, &cfg);
+
+m2sdr_sync_config(dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11, 0, nsamples, 0, 1000);
+m2sdr_sync_rx(dev, buf, nsamples, NULL, 1000);
+m2sdr_close(dev);
+```
+
+- Full docs & examples: [`litex_m2sdr/doc/libm2sdr/`](litex_m2sdr/doc/libm2sdr/README.md)
 - Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
 - Current public library version: `1.0.0` (ABI `1`)
 - Recent API additions: backend accessors `m2sdr_get_transport()` / `m2sdr_get_eb_handle()` and finer-grained `parse`/`range`/`state` error classes.
@@ -72,10 +88,21 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 
 1. [Hardware Availability](#hardware-availability)
 2. [Capabilities Overview](#capabilities-overview)
-3. [PCIe SoC Design](#pcie-soc-design)
-4. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
-5. [Quick Start](#quick-start)
-6. [Contact](#contact)
+3. [Supported SDR Software](#supported-sdr-software)
+4. [Project Structure](#project-structure)
+5. [Software Stack](#software-stack)
+6. [PCIe SoC Design](#pcie-soc-design)
+7. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
+8. [Getting Started](#quick-start)
+   - [For SDR Enthusiasts](#for-sdr-enthusiasts)
+   - [Host Requirements & Expectations](#host-requirements--expectations)
+   - [Platform Tutorials](#platform-tutorials)
+   - [For Software Developers](#for-software-developers)
+   - [For Software & FPGA Developers](#for-software--fpga-developers)
+9. [Testing](#testing)
+10. [Troubleshooting](#troubleshooting)
+11. [Contributing](#contributing)
+12. [Contact](#contact)
 
 [> Hardware Availability
 ------------------------
@@ -120,6 +147,103 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | **System Features**             |                              |                              |                                               |
 | Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
 | GPIO                            | ✅                           | ✅                           | (always included)                             |
+
+### User LED Behavior
+
+The board exposes a single monochrome `user_led`, so the gateware uses it as a layered status indicator rather than a simple on/off flag:
+
+- **Boot / time not valid**: strong double-heartbeat.
+- **PCIe and/or Ethernet enabled but no sample transport ready yet**: softer double-heartbeat.
+  PCIe becomes ready when the link is up and DMA/PPS synchronization is established; Ethernet becomes ready when the link is up.
+- **Normal ready state**: gentle low-amplitude breathing.
+- **PPS event**: short bright accent pulse over the base animation.
+- **RF or Ethernet RX/TX activity**: bright accent pulse; simultaneous RX+TX drives the brightest activity indication.
+
+When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
+
+[> Supported SDR Software
+--------------------------
+<a id="supported-sdr-software"></a>
+
+The LiteX-M2SDR works with any application that supports [SoapySDR](https://github.com/pothosware/SoapySDR). The following have been tested:
+
+| Application                                                     | Notes                          |
+|-----------------------------------------------------------------|--------------------------------|
+| [GQRX](https://gqrx.dk/)                                       | Recommended for quick RX tests |
+| [GNU Radio](https://www.gnuradio.org/)                          | Via `gr-soapy` block           |
+| [CubicSDR](https://cubicsdr.com/)                               | Wideband spectrum explorer     |
+| [SDR++](https://www.sdrpp.org/)                                 | Modern multi-platform receiver |
+| [SDRangel](https://github.com/f4exb/sdrangel)                  | TX & RX capable                |
+
+You can also use the board directly through the **libm2sdr C API** or the bundled **CLI utilities** (`m2sdr_record`, `m2sdr_play`, `m2sdr_gen`, etc.) without SoapySDR.
+
+[> Project Structure
+---------------------
+<a id="project-structure"></a>
+
+```
+litex_m2sdr/
+├── litex_m2sdr.py              # Main gateware build script (SoC definition)
+├── litex_m2sdr_platform.py     # FPGA platform (pin mappings, I/O constraints)
+├── litex_m2sdr/
+│   ├── gateware/               # FPGA HDL modules (LiteX/Migen)
+│   │   ├── ad9361/             #   AD9361 RFIC core, PHY, SPI, AGC, PRBS
+│   │   ├── rfic.py             #   Data packetization
+│   │   ├── vrt.py              #   VITA-49 (VRT) protocol
+│   │   ├── pcie.py             #   PCIe link management
+│   │   ├── si5351.py           #   Clock generator control
+│   │   ├── time.py, pps.py     #   Timing & PPS
+│   │   └── ...                 #   GPIO, loopback, LED, measurement, etc.
+│   ├── software/
+│   │   ├── build.py            #   One-command build orchestrator
+│   │   ├── kernel/             #   Linux kernel driver (m2sdr.ko)
+│   │   ├── user/               #   CLI tools + libm2sdr C API
+│   │   │   ├── libm2sdr/       #     Public C library (libm2sdr.so)
+│   │   │   ├── m2sdr_util.c    #     Board info, flash, tests
+│   │   │   ├── m2sdr_rf.c      #     RF configuration
+│   │   │   ├── m2sdr_record.c  #     IQ recording (+ SigMF support)
+│   │   │   ├── m2sdr_play.c    #     IQ playback
+│   │   │   ├── m2sdr_gen.c     #     Waveform generation
+│   │   │   ├── m2sdr_scan.c    #     Wideband spectrum scanner (GUI)
+│   │   │   ├── m2sdr_check.c   #     IQ inspector (GUI)
+│   │   │   └── ...             #     GPIO, SATA, FM, selftest, SigMF tools
+│   │   └── soapysdr/           #   SoapySDR driver module (CMake/C++)
+│   └── doc/                    # Documentation
+│       ├── libm2sdr/           #   C API docs & example code
+│       └── hosts/              #   Platform-specific tutorials
+├── test/                       # CI-safe simulation tests (pytest, no hardware)
+├── scripts/                    # Hardware-dependent debug/monitoring scripts
+└── CHANGELOG.md                # Quarterly release notes
+```
+
+[> Software Stack
+------------------
+<a id="software-stack"></a>
+
+```
+┌─────────────────────────────────────────────────┐
+│  User Applications (GQRX, GNU Radio, SDR++, …)  │
+└───────────────────────┬─────────────────────────┘
+                        │
+┌───────────────────────┴─────────────────────────┐
+│  SoapySDR Module (libSoapyLiteXM2SDR.so)        │
+└───────────────────────┬─────────────────────────┘
+                        │
+┌───────────────────────┴─────────────────────────┐
+│  libm2sdr  —  Public C API  (v1.0.0, ABI 1)    │
+│  Device / RF control  │  Streaming / Metadata   │
+└───────────┬───────────┴──────────┬──────────────┘
+            │                      │
+┌───────────┴──────────┐ ┌────────┴──────────────┐
+│  PCIe DMA            │ │  Ethernet / Etherbone  │
+│  (liblitepcie)       │ │  (libliteeth)          │
+└───────────┬──────────┘ └────────┬──────────────┘
+            │                      │
+┌───────────┴──────────────────────┴──────────────┐
+│  Linux Kernel Driver  (m2sdr.ko)                │
+│  DMA engine  ·  /dev/m2sdrN  ·  SATA support   │
+└─────────────────────────────────────────────────┘
+```
 
 [> PCIe SoC Design
 ------------------
@@ -167,7 +291,7 @@ The Ethernet SoC design is RX capable only for now. TX support will come soon.
 If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
 
 1. **Install Prerequisite Packages:**
-   - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software:
+   - On a fresh Ubuntu 24.04 system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software:
    ```bash
    sudo apt install build-essential cmake git \
      pkg-config libsdl2-dev libgl1-mesa-dev \
@@ -175,7 +299,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
      gnuradio gnuradio-dev libgnuradio-soapy3.10.9t64 gqrx-sdr \
      libsndfile1-dev libsamplerate0-dev
    ```
-   - **Note**: For non-Ubuntu Linux distributions (e.g., Fedora, Arch), install the equivalent packages using your distribution's package manager (e.g., `dnf` for Fedora or `pacman` for Arch).
+   - **Note**: The versioned package names above (e.g. `libsoapysdr0.8`, `libgnuradio-soapy3.10.9t64`) target **Ubuntu 24.04 LTS**. For other Ubuntu releases or distributions (Fedora, Arch, etc.), install the equivalent packages using your distribution's package manager and adjust version suffixes as needed.
 
 2. **Connect the Board:**
    - Insert the LiteX-M2SDR board into an available M2 slot on your Linux computer and connect your antennas.
@@ -242,33 +366,8 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA (WIP)**: Ethernet SoC is RX-only for now; TX support is in development. SATA support is in development. Both require the LiteX Acorn Baseboard Mini.
 
-> [!TIP]
-> If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
->
-> **x86/PC**:
-> ```bash
-> # Add to GRUB config (/etc/default/grub):
-> GRUB_CMDLINE_LINUX="iommu=pt"
-> sudo update-grub && sudo reboot
-> ```
->
-> **ARM (ex NVIDIA Jetson/Orin)**:
-> ```bash
-> # Add to extlinux.conf (/boot/extlinux/extlinux.conf):
-> APPEND ... iommu.passthrough=1 arm-smmu.disable=1
-> sudo reboot
-> ```
-
-> [!WARNING]
-> For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
-> add `intel_iommu=off` to `GRUB_CMDLINE_LINUX`. (This has been observed on
-> an *11th Gen Intel(R) Core(TM) i7-11700B @ 3.20GHz*)
-
-### Tutorials for your platform
-
-> [!WARNING]
->
-> **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
+### Platform Tutorials
+<a id="platform-tutorials"></a>
 
 For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
 
@@ -279,23 +378,7 @@ For some platforms we created detailed tutorials. For everything else, please fo
 
 For those who want to dive deeper into development with the LiteX-M2SDR board, follow these additional steps after completing the SDR enthusiast steps:
 
-1. **Test Structure (CI-safe vs hardware scripts):**
-   - Gateware simulation/unit tests live in `test/` and are CI-safe (no hardware needed):
-   ```
-   pytest -v test
-   ```
-   - Board control/debug scripts live in `scripts/` and require a running board/server:
-   ```
-   python3 scripts/test_xadc.py
-   python3 scripts/test_dashboard.py
-   ```
-   - CI runs both software build checks and simulation tests with:
-   ```
-   # Software build checks (kernel/user/SoapySDR) are run in CI.
-   python3 -m pytest -v test
-   ```
-
-2. **Run Software Tests:**
+1. **Run Software Tests:**
    - Test the kernel:
    ```
    cd litex_m2sdr/software/kernel
@@ -321,19 +404,19 @@ For those who want to dive deeper into development with the LiteX-M2SDR board, f
    ```
    - `libm2sdr` is the common host interface used by the user utilities and the SoapySDR module, so example code there is the reference starting point for new host applications.
 
-3. **SoapySDR Detection/Probe:**
+2. **SoapySDR Detection/Probe:**
    - Detect the LiteX-M2SDR board:
    ```
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
 
-4. **Run GNU Radio FM Test:**
+3. **Run GNU Radio FM Test:**
    - Open and run the GNU Radio FM test:
    ```
    gnuradio-companion litex_m2sdr/software/gnuradio/test_fm_rx.grc
    ```
 
-5. **Enable Debugging in Kernel:**
+4. **Enable Debugging in Kernel:**
     - Enable debugging:
     ```
     sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
@@ -402,6 +485,110 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
     echo 1 | sudo tee /sys/bus/pci/devices/0000\:0X\:00.0/remove # Replace X with actual value
     echo 1 | sudo tee /sys/bus/pci/rescan
     ```
+
+[> Testing
+-----------
+<a id="testing"></a>
+
+### CI-Safe Simulation Tests (no hardware needed)
+
+Gateware simulation and unit tests live in `test/` and run in CI without any board connected:
+
+```
+python3 -m pytest -v test
+```
+
+These cover: AD9361 core, AGC, GPIO, headers, loopback, VRT protocol, SI5351 clocking, PPS, QPLL, PCIe workarounds, timing, measurement, capability reporting, and White Rabbit helpers.
+
+### Hardware-Dependent Debug Scripts
+
+Board control and monitoring scripts live in `scripts/` and require a running board with an active LiteX server:
+
+```
+python3 scripts/test_xadc.py        # XADC temperature & voltage monitoring
+python3 scripts/test_clks.py        # Clock frequency measurements
+python3 scripts/test_time.py        # Time coherency checks
+python3 scripts/test_dashboard.py   # Live dashboard UI
+python3 scripts/test_agc.py         # AGC diagnostics
+python3 scripts/test_pcie_ltssm.py  # PCIe link state machine
+python3 scripts/test_header.py      # Sample header inspection
+```
+
+### Software Build Verification
+
+CI also verifies that all software components compile cleanly:
+
+```
+cd litex_m2sdr/software && ./build.py   # Kernel + user tools + libm2sdr + SoapySDR
+```
+
+[> Troubleshooting
+-------------------
+<a id="troubleshooting"></a>
+
+### No I/Q Data in SDR Application
+
+Most commonly caused by IOMMU not being in passthrough mode.
+
+**x86/PC:**
+```bash
+# Add to GRUB config (/etc/default/grub):
+GRUB_CMDLINE_LINUX="iommu=pt"
+sudo update-grub && sudo reboot
+```
+
+**ARM (e.g. NVIDIA Jetson/Orin):**
+```bash
+# Add to extlinux.conf (/boot/extlinux/extlinux.conf):
+APPEND ... iommu.passthrough=1 arm-smmu.disable=1
+sudo reboot
+```
+
+### Kernel Panic: "Corrupted page table at address" (Intel CPUs)
+
+Add `intel_iommu=off` to `GRUB_CMDLINE_LINUX`. This has been observed on 11th Gen Intel Core i7-11700B @ 3.20GHz.
+
+### DKMS Conflict During Installation
+
+If an error related to DKMS appears, remove conflicting packages first:
+```bash
+sudo apt remove --purge xtrx-dkms dkms
+```
+Then re-execute the installation command.
+
+### GUI Tools (m2sdr_check / m2sdr_scan) Not Building
+
+These require both SDL2/OpenGL development packages (`libsdl2-dev`, `libgl1-mesa-dev`) **and** a populated `cimgui` checkout:
+```bash
+cd litex_m2sdr/software
+./fetch_cimgui.py   # or: ./build.py --fetch-cimgui
+```
+If `cimgui` is absent, only the GUI tools are skipped; all CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
+
+[> Contributing
+----------------
+<a id="contributing"></a>
+
+Contributions are welcome! Here's how to get started:
+
+1. **Run the test suite before submitting changes:**
+   ```
+   python3 -m pytest -v test
+   ```
+   All CI-safe simulation tests must pass. If you add or modify gateware, add corresponding tests in `test/`.
+
+2. **Build and verify software compiles:**
+   ```
+   cd litex_m2sdr/software && ./build.py
+   ```
+
+3. **Open an issue or pull request** on [GitHub](https://github.com/enjoy-digital/litex_m2sdr).
+
+4. **Code organization**:
+   - Gateware (FPGA HDL) goes in `litex_m2sdr/gateware/`
+   - Kernel driver changes in `litex_m2sdr/software/kernel/`
+   - User-space tools and libm2sdr in `litex_m2sdr/software/user/`
+   - SoapySDR driver in `litex_m2sdr/software/soapysdr/`
 
 [> Contact
 ----------
