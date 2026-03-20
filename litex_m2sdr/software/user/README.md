@@ -7,7 +7,27 @@
 - **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
 - **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
-The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module.
+The public `libm2sdr` C API is documented in [`../../doc/libm2sdr/README.md`](../../doc/libm2sdr/README.md) and is now the common device/streaming layer used by the user tools and the SoapySDR module.
+
+---
+
+## Utility Summary
+
+| Tool | Description | GUI |
+|------|-------------|-----|
+| [`m2sdr_util`](#m2sdr_util) | Board info, register access, DMA/clock tests, SPI flash | |
+| [`m2sdr_rf`](#m2sdr_rf) | AD9361 RF front-end configuration | |
+| [`m2sdr_gen`](#m2sdr_gen) | Waveform generator (tone, noise, PRBS, OFDM) | |
+| [`m2sdr_play`](#m2sdr_play) | TX playback from file/stdin (+ SigMF support) | |
+| [`m2sdr_record`](#m2sdr_record) | RX capture to file/stdout (+ SigMF support) | |
+| [`m2sdr_check`](#m2sdr_check) | IQ file inspector with time/spectrum/constellation views | ✅ |
+| [`m2sdr_scan`](#m2sdr_scan) | Wideband RF spectrum scanner with waterfall display | ✅ |
+| [`m2sdr_sigmf_info`](#m2sdr_sigmf_info) | SigMF metadata inspector (text) | |
+| [`m2sdr_selftest`](#m2sdr_selftest) | Automated self-test suite (sync, loopback, time) | |
+| [`m2sdr_gpio`](#m2sdr_gpio) | GPIO control (output, input, loopback, CSR/DMA mode) | |
+| [`m2sdr_sata`](#m2sdr_sata) | SATA streamer and crossbar routing control | |
+| [`m2sdr_fm_tx`](#m2sdr_fm_tx) | FM modulator (WAV/PCM to IQ) | |
+| [`m2sdr_fm_rx`](#m2sdr_fm_rx) | FM demodulator (IQ to WAV/PCM) | |
 
 ---
 
@@ -27,7 +47,7 @@ If you want to understand or extend the host stack, start with:
 - `libm2sdr/m2sdr_stream.c` for sync streaming and metadata/header handling.
 - `libm2sdr/m2sdr_rf.c` for RF configuration helpers built around the AD9361 code.
 
-For application development, prefer starting from `../../doc/libm2sdr/example_sync_rx.c`, `../../doc/libm2sdr/example_sync_tx.c`, or the higher-level wrappers below rather than adding new direct CSR access.
+For application development, prefer starting from [`../../doc/libm2sdr/example_sync_rx.c`](../../doc/libm2sdr/example_sync_rx.c), [`../../doc/libm2sdr/example_sync_tx.c`](../../doc/libm2sdr/example_sync_tx.c), or the higher-level wrappers below rather than adding new direct CSR access.
 
 ## CLI conventions
 
@@ -69,6 +89,8 @@ cd ../
 ~~~~
 
 These dependencies are only needed for the optional GUI tools. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile`; the CLI tools, `libm2sdr`, and the SoapySDR module still build.
+
+---
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
@@ -134,11 +156,11 @@ m2sdr_rf [options] cmd [args...]
 
 Example usage:
 ~~~~
-./m2sdr_rf --sample-rate=30720000 \\
-           --bandwidth=20000000 \\
-           --tx-freq=2400000000 \\
-           --rx-freq=2400000000 \\
-           --tx-att=10 \\
+./m2sdr_rf --sample-rate=30720000 \
+           --bandwidth=20000000 \
+           --tx-freq=2400000000 \
+           --rx-freq=2400000000 \
+           --tx-att=10 \
            --rx-gain=10
 ~~~~
 
@@ -150,7 +172,7 @@ External 10MHz synchronization example:
 ---
 
 ### m2sdr_gen
-Generates and streams a tone, white noise, PRBS, or basic OFDM signal directly to the FPGA’s TX path in real-time (DMA TX).
+Generates and streams a tone, white noise, PRBS, or basic OFDM signal directly to the FPGA's TX path in real-time (DMA TX).
 Also supports GPIO/PPS (pulse-per-second) toggling on a selected GPIO pin.
 
 **Usage**:
@@ -193,7 +215,7 @@ Example usage with PPS on GPIO pin 0:
 ---
 
 ### m2sdr_play
-Streams an I/Q samples file to the FPGA’s TX path (DMA TX). Supports piping from stdin with filename as `-`.
+Streams an I/Q samples file to the FPGA's TX path (DMA TX). Supports piping from stdin with filename as `-`.
 This is the simplest utility to read when you want a file-backed `libm2sdr` TX example.
 
 **Usage**:
@@ -225,7 +247,7 @@ Example usage:
 ---
 
 ### m2sdr_record
-Streams samples from the FPGA’s RX path back to a file on the host (DMA RX). Supports piping to stdout with filename as `-`.
+Streams samples from the FPGA's RX path back to a file on the host (DMA RX). Supports piping to stdout with filename as `-`.
 This is the matching `libm2sdr` RX example, including optional timestamp/header handling.
 
 **Usage**:
@@ -315,6 +337,59 @@ Example usage:
 ./m2sdr_check --capture-index 1 capture.sigmf-meta
 ~~~~
 
+> [!Note]
+> Requires SDL2, OpenGL, and a populated `cimgui/` checkout. See [Build dependencies](#build-dependencies) above.
+
+---
+
+### m2sdr_scan
+Interactive wideband RF scanner with real-time spectrum + waterfall display (Dear ImGui UI).
+
+**Usage**:
+~~~~
+m2sdr_scan [options]
+~~~~
+
+**Key options**:
+- `--device <dev-id>` or `--device-num N`
+- `--refclk-freq hz`
+- `--start-freq hz`
+- `--stop-freq hz`
+- `--sample-rate hz`
+- `--fft-len n`
+- `--lines n`
+- `--display N`
+- `--rx-gain db`
+- `--preset-load file`
+- `--preset-save file`
+- `--no-ui`
+- `--export-csv file`
+- `--export-png file`
+
+Example:
+~~~~
+./m2sdr_scan --start-freq 88000000 --stop-freq 108000000 --sample-rate 15360000 --fft-len 16384
+~~~~
+
+Headless export example:
+~~~~
+./m2sdr_scan --preset-load fm_band.scan \
+             --no-ui \
+             --export-csv fm_band.csv \
+             --export-png fm_band.png
+~~~~
+
+Notes:
+- Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
+- `F8` moves the window to the next monitor and keeps maximized mode; `Shift+F8` expands it across all monitors.
+- `F11` toggles a borderless fullscreen span across all monitors.
+- `--preset-save` writes a simple text preset file containing the current scan settings.
+- In headless/non-GUI build environments without SDL2, this binary is not built.
+- A populated `software/user/cimgui/` checkout is also required for the build. Use `../fetch_cimgui.py` or `../build.py --fetch-cimgui`.
+
+> [!Note]
+> Requires SDL2, OpenGL, and a populated `cimgui/` checkout. See [Build dependencies](#build-dependencies) above.
+
 ---
 
 ### m2sdr_sigmf_info
@@ -331,6 +406,29 @@ Example usage:
 ./m2sdr_sigmf_info --validate capture.sigmf-meta
 ./m2sdr_sigmf_info --validate --strict --ci capture.sigmf-meta
 ./m2sdr_sigmf_info --validate --strict framed_capture.sigmf-meta
+~~~~
+
+---
+
+### m2sdr_selftest
+Automated self-test suite that exercises device connectivity, DMA, loopback, and timing through the `libm2sdr` API.
+
+**Usage**:
+~~~~
+m2sdr_selftest [options]
+~~~~
+
+**Options**:
+- `--time` — run time/PPS coherency tests
+- `--loopback` — run RF loopback tests
+- `--stream-loopback` — run DMA stream loopback tests
+
+Example usage:
+~~~~
+./m2sdr_selftest
+./m2sdr_selftest --time
+./m2sdr_selftest --loopback
+./m2sdr_selftest --stream-loopback
 ~~~~
 
 ---
@@ -444,53 +542,6 @@ Example:
 
 ---
 
-### m2sdr_scan
-Interactive wideband RF scanner with real-time spectrum + waterfall display (Dear ImGui UI).
-
-**Usage**:
-~~~~
-m2sdr_scan [options]
-~~~~
-
-**Key options**:
-- `--device <dev-id>` or `--device-num N`
-- `--refclk-freq hz`
-- `--start-freq hz`
-- `--stop-freq hz`
-- `--sample-rate hz`
-- `--fft-len n`
-- `--lines n`
-- `--display N`
-- `--rx-gain db`
-- `--preset-load file`
-- `--preset-save file`
-- `--no-ui`
-- `--export-csv file`
-- `--export-png file`
-
-Example:
-~~~~
-./m2sdr_scan --start-freq 88000000 --stop-freq 108000000 --sample-rate 15360000 --fft-len 16384
-~~~~
-
-Headless export example:
-~~~~
-./m2sdr_scan --preset-load fm_band.scan \\
-             --no-ui \\
-             --export-csv fm_band.csv \\
-             --export-png fm_band.png
-~~~~
-
-Notes:
-- Runtime controls (range, sample rate, FFT, overlap, gain, settle, palettes, peak tools) are available directly in the UI.
-- `F8` moves the window to the next monitor and keeps maximized mode; `Shift+F8` expands it across all monitors.
-- `F11` toggles a borderless fullscreen span across all monitors.
-- `--preset-save` writes a simple text preset file containing the current scan settings.
-- In headless/non-GUI build environments without SDL2, this binary is not built.
-- A populated `software/user/cimgui/` checkout is also required for the build. Use `../fetch_cimgui.py` or `../build.py --fetch-cimgui`.
-
----
-
 ## Example End-to-End Workflow
 
 Below is a quick guide to **generate** a tone, **initialize** the RF, **record** samples back, and **analyze** the captured data.
@@ -502,12 +553,12 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **record**
 
 2. **Initialize the RF**
    ~~~~
-   ./m2sdr_rf --sample-rate=30720000 \\
-              --bandwidth=40000000 \\
-              --tx-freq=2400000000 \\
-              --rx-freq=2400000000 \\
-              --tx-att=10 \\
-              --rx-gain=10 \\
+   ./m2sdr_rf --sample-rate=30720000 \
+              --bandwidth=40000000 \
+              --tx-freq=2400000000 \
+              --rx-freq=2400000000 \
+              --tx-att=10 \
+              --rx-gain=10 \
               --loopback=1
    ~~~~
    *(Here `--loopback=1` enables internal loopback for testing.)*
@@ -522,7 +573,7 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **record**
    ~~~~
    ./m2sdr_check rx_file.bin --nchannels 2 --nbits 12 --sample-rate 30720000
    ~~~~
-   If loopback is active (or you have an over-the-air setup), you’ll see the received waveform in the time-domain, constellation, and spectrum views.
+   If loopback is active (or you have an over-the-air setup), you'll see the received waveform in the time-domain, constellation, and spectrum views.
 
 ---
 

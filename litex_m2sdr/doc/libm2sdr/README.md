@@ -8,6 +8,20 @@ Note on TX control semantics: TX control uses positive attenuation values across
 both native tools and the SoapySDR layer. Use the `tx_att` config field and
 `m2sdr_set_tx_att()` helper.
 
+## Contents
+
+1. [Build](#build)
+2. [Getting started](#getting-started)
+3. [Quick Start (SC16)](#quick-start-sc16)
+4. [Quick Start (SC8)](#quick-start-sc8)
+5. [Example programs](#example-programs)
+6. [Device identifiers](#device-identifiers)
+7. [API overview](#api-overview)
+8. [Error model](#error-model)
+9. [Library versioning](#library-versioning)
+10. [Troubleshooting](#troubleshooting)
+11. [Migration (utilities to C API)](#migration-utilities-to-c-api)
+
 ## Build
 
 From `litex_m2sdr/software/user`:
@@ -133,12 +147,21 @@ int main(void)
 }
 ```
 
-## Example program
+## Example programs
 
-See `doc/libm2sdr/example_sync_rx.c` for a minimal SC16 RX capture example.
-See `doc/libm2sdr/example_sync_tx.c` for a minimal SC16 TX example.
-See `doc/libm2sdr/example_tone_tx.c` for a tone TX example (SC16/SC8).
-See `doc/libm2sdr/example_rx_n.c` for RX N buffers with metadata.
+Full working examples are provided in this directory:
+
+| File | Description |
+|------|-------------|
+| [`example_sync_rx.c`](example_sync_rx.c) | Minimal SC16 RX capture to stdout |
+| [`example_sync_tx.c`](example_sync_tx.c) | Minimal SC16 TX from stdin |
+| [`example_tone_tx.c`](example_tone_tx.c) | Tone TX example (SC16/SC8) |
+| [`example_rx_n.c`](example_rx_n.c) | RX N buffers with metadata |
+
+Build from `litex_m2sdr/software/user`:
+```
+make examples
+```
 
 ## Device identifiers
 
@@ -149,15 +172,44 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 
 ## API overview
 
-- Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
-- Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
-- Capabilities: `m2sdr_get_capabilities`
-- Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_att`
-  - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
-- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
-- Time: `m2sdr_get_time`, `m2sdr_set_time`
-- Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
+### Device lifecycle
+- `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
+
+### Backend selection/interop
+- `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
+
+### Capabilities
+- `m2sdr_get_capabilities`
+
+### Control
+- `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
+
+### RF configuration
+- `m2sdr_config_init`, `m2sdr_apply_config`
+- `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`
+- `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`
+- `m2sdr_set_rx_gain`, `m2sdr_set_tx_att` (positive-dB TX attenuation)
+
+### Streaming
+- `m2sdr_stream_config_init`, `m2sdr_stream_configure`
+- `m2sdr_sync_rx`, `m2sdr_sync_tx`
+
+### Time
+- `m2sdr_get_time`, `m2sdr_set_time`
+
+### Sensors
+- `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
+
+### Capabilities example
+
+```c
+struct m2sdr_capabilities caps;
+if (m2sdr_get_capabilities(dev, &caps) == 0) {
+    int major = caps.api_version >> 16;
+    int minor = caps.api_version & 0xffff;
+    printf("API %d.%d, features=0x%08x\n", major, minor, caps.features);
+}
+```
 
 ## Error model
 
@@ -179,21 +231,13 @@ Use `m2sdr_strerror()` for concise error text in logs.
 
 This is the first intentionally versioned public C API for the project, so the library compatibility series starts at ABI 1.
 
-## Capabilities example
-
-```c
-struct m2sdr_capabilities caps;
-if (m2sdr_get_capabilities(dev, &caps) == 0) {
-    int major = caps.api_version >> 16;
-    int minor = caps.api_version & 0xffff;
-    printf("API %d.%d, features=0x%08x\n", major, minor, caps.features);
-}
-```
-
 ## Notes
 
 - Streaming supports SC16/Q11 and SC8/Q7.
 - Use `m2sdr_bytes_to_samples()` / `m2sdr_samples_to_bytes()` instead of hard-coding sample sizes in applications.
+- RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
+- Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
+- RF helper logs are enabled by default; define `M2SDR_LOG_ENABLED=0` at build time to mute them.
 
 ## Troubleshooting
 
@@ -213,9 +257,6 @@ limits to improve streaming stability, for example:
 sudo sysctl -w net.core.rmem_max=67108864
 sudo sysctl -w net.core.wmem_max=67108864
 ```
-- RX/TX DMA headers can be enabled via `m2sdr_set_rx_header` / `m2sdr_set_tx_header`.
-- Utilities now use `m2sdr_reg_read` / `m2sdr_reg_write` instead of direct CSR access.
-- RF helper logs are enabled by default; define `M2SDR_LOG_ENABLED=0` at build time to mute them.
 
 ## Migration (utilities to C API)
 

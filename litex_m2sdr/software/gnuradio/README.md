@@ -5,6 +5,39 @@
 
 ---
 
+## Prerequisites
+
+Before using these flowcharts, make sure you have:
+
+1. **GNU Radio** installed (tested with GNU Radio 3.10+):
+   ```bash
+   sudo apt install gnuradio gnuradio-dev
+   ```
+2. **SoapySDR** and the **gr-soapy** block installed:
+   ```bash
+   sudo apt install libsoapysdr-dev soapysdr-tools libgnuradio-soapy3.10.9t64
+   ```
+3. **LiteX-M2SDR SoapySDR driver** built and installed (see [`../soapysdr/README.md`](../soapysdr/README.md))
+4. **Board detected** by SoapySDR:
+   ```bash
+   SoapySDRUtil --find="driver=LiteXM2SDR"
+   ```
+
+---
+
+## Flowcharts
+
+| Flowchart | Description |
+|-----------|-------------|
+| `test_tx_rx.grc` | Two-channel RX with display and file recording |
+| `test_tx.grc` | Two-channel TX with switchable sources |
+| `test_rx.grc` | Single-channel TX/RX external loopback test |
+| `test_fm_rx.grc` | FM radio receiver with waterfall and audio output |
+| `test_fm_tx.grc` | FM radio transmitter |
+| `test_video_5ghz_rx.grc` | 5 GHz video receiver |
+
+---
+
 ## Intro
 
 The provided flowcharts illustrate different usage scenarios:

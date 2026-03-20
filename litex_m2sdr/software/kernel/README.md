@@ -14,6 +14,14 @@ Its lightweight design aims to be simple to maintain and straightforward to cust
 
 ---
 
+## Prerequisites
+
+- Linux kernel headers for your running kernel (e.g. `linux-headers-$(uname -r)`)
+- Standard build tools (`build-essential` / `gcc`, `make`)
+- The board must be inserted in a PCIe M.2 slot or baseboard before loading the driver
+
+---
+
 ## Building, Installing & Uninstalling
 
 ### 1. Build the driver
@@ -60,7 +68,7 @@ This removes:
 - **Multiple /dev entries**
   Each DMA channel appears as its own `/dev/m2sdrX` device (e.g., `/dev/m2sdr0`, `/dev/m2sdr1`, etc.).
 - **User-Space Tools**
-  You can use `m2sdr_util`, `m2sdr_play`, or `m2sdr_record` to test DMA, or create custom applications interfacing with `/dev/m2sdrX`.
+  You can use `m2sdr_util`, `m2sdr_play`, or `m2sdr_record` to test DMA, or create custom applications using the [libm2sdr C API](../../doc/libm2sdr/README.md).
 - **Debug Logging**
   To enable detailed logs:
 ```
@@ -68,19 +76,20 @@ sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
 ```
   This helps diagnose data flow or interrupt issues. 🔎
 - **Host Requirements**
-  For IOMMU/DMA settings and PCIe expectations, see the top-level README.
+  For IOMMU/DMA settings and PCIe expectations, see the [top-level README](../../../README.md#troubleshooting).
 
 ---
 
 ## File Structure
 
-- **main.c**
-  The core driver logic, including:
-  - PCI enumeration (probe/remove)
-  - BAR0 memory mapping
-  - DMA buffer allocation
-  - Interrupt registration
-  - `/dev/m2sdrX` char device operations
+```
+kernel/
+├── main.c       # Core driver: PCI probe/remove, BAR0 mapping, DMA, IRQs, chardev ops
+├── csr.h        # Auto-generated CSR register definitions
+├── soc.h        # SoC-level constants
+├── mem.h        # Memory map definitions
+└── Makefile     # Kernel module build rules + install/uninstall targets
+```
 
 ---
 

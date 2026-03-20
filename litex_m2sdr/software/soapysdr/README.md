@@ -1,18 +1,51 @@
 # LiteX M2SDR SoapySDR Driver
 
 > [!Note]
-> This directory contains a [SoapySDR](https://github.com/pothosware/SoapySDR) hardware driver for the **LiteX-M2SDR** board. It provides a straightforward way to discover, configure, and stream data from M2SDR devices within SoapySDR-compatible applications (GNU Radio, GQRX, etc.).
+> This directory contains a [SoapySDR](https://github.com/pothosware/SoapySDR) hardware driver for the **LiteX-M2SDR** board. It provides a straightforward way to discover, configure, and stream data from M2SDR devices within SoapySDR-compatible applications (GNU Radio, GQRX, SDR++, CubicSDR, SDRangel, etc.).
 
 ---
 
 ## Overview
 
 The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating with:
+- **[libm2sdr](../../doc/libm2sdr/README.md)** — public C API for device control and streaming.
 - **`litepcie`** kernel driver for DMA-based streaming over PCIe.
 - **Etherbone** routines for optional remote or UDP-based data transfer.
 - M2SDR board-specific controls (sample rate, frequency, gains, etc.).
 
-For building and installing instructions, **refer to the main LiteX-M2SDR README** which covers the general software setup. Once you have all dependencies and environment ready, simply build this module with your usual CMake workflow.
+---
+
+## Build & Install
+
+### Prerequisites
+
+- [SoapySDR](https://github.com/pothosware/SoapySDR) development libraries (`libsoapysdr-dev` on Debian/Ubuntu)
+- CMake ≥ 3.0
+- `libm2sdr` and the kernel driver must be built first (see the [top-level README](../../../README.md#quick-start))
+
+### Using the top-level build script (recommended)
+
+```bash
+cd litex_m2sdr/software
+./build.py              # builds everything including the SoapySDR module
+sudo ./build.py         # builds and installs (kernel + SoapySDR)
+```
+
+### Manual build
+
+```bash
+cd litex_m2sdr/software/soapysdr
+mkdir -p build && cd build
+cmake ..
+make
+sudo make install
+```
+
+### Verify installation
+
+```bash
+SoapySDRUtil --find="driver=LiteXM2SDR"
+```
 
 ---
 
@@ -29,6 +62,7 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 2. **Run SoapySDR Applications**
    - **GNU Radio**: Load `Soapy` blocks in GRC or run `gnuradio-companion`. Select `SoapySDR` source/sink blocks with `driver=LiteXM2SDR`.
    - **GQRX**: Configure Soapy as the input device, specifying the `LiteXM2SDR` driver if multiple Soapy devices are present.
+   - **SDR++**: Select `SoapySDR` source and pick the LiteXM2SDR device.
    - **Custom Tools**: Use the standard SoapySDR C++/Python API to open the `LiteXM2SDR` device, set parameters, and read/write streams.
 
 ---
@@ -68,7 +102,7 @@ SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50,eth_mode=vrt,vrt_por
 
 ## Test Utilities
 
-This repository includes several Python utilities to help test and demonstrate the capabilities of the LiteX-M2SDR SoapySDR driver:
+This directory includes several Python utilities to help test and demonstrate the capabilities of the LiteXM2SDR SoapySDR driver:
 
 - **test_time.py**
   Sets and reads the LiteXM2SDR hardware time (in nanoseconds). It can set the hardware time to the current time (or a specified value) and then repeatedly read and display the hardware time along with its local date/time representation.
@@ -95,36 +129,21 @@ This repository includes several Python utilities to help test and demonstrate t
   ```bash
   ./test_record.py --samplerate 4e6 --bandwidth 56e6 --freq 2.4e9 --gain 20 --channel 0 --secs 5 --check-ts output.bin
   ```
+
 ---
 
 ## File Structure
 
 ```
-./
-├── CMakeLists.txt
-├── LiteXM2SDRDevice.cpp
-├── LiteXM2SDRDevice.hpp
-├── LiteXM2SDRRegistration.cpp
-├── LiteXM2SDRStreaming.cpp
-├── test_play.py
-├── test_record.py
-└── test_time.py
+soapysdr/
+├── CMakeLists.txt                # Build configuration and dependencies
+├── LiteXM2SDRDevice.cpp/hpp      # Main SoapySDR device class (config, RF, gains)
+├── LiteXM2SDRRegistration.cpp    # Plugin registration and device enumeration
+├── LiteXM2SDRStreaming.cpp       # Streaming (activateStream, readStream, writeStream)
+├── test_play.py                  # Python TX test utility
+├── test_record.py                # Python RX test utility
+└── test_time.py                  # Python hardware time test utility
 ```
-
-- **CMakeLists.txt**
-  Defines the build steps and dependencies for the SoapySDR module.
-
-- **LiteXM2SDRDevice.cpp/hpp**
-  Main SoapySDR device class, providing sample rate/frequency/gain setups, device controls, etc.
-
-- **LiteXM2SDRRegistration.cpp**
-  Handles SoapySDR plugin registration and device enumeration.
-
-- **LiteXM2SDRStreaming.cpp**
-  Implements SoapySDR streaming methods (activateStream, readStream, writeStream…) using the PCIe DMA path, with the optional network receive path handled in the current driver sources.
-
-- **test_play.py, test_record.py, test_time.py**
-  Python scripts to test and demonstrate transmission, recording, and hardware time functionality using the LiteXM2SDR SoapySDR driver.
 
 ---
 
@@ -132,6 +151,7 @@ This repository includes several Python utilities to help test and demonstrate t
 
 - **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates each. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,device=1`).
 - **Ethernet/Etherbone**: For network-based streaming, confirm the appropriate IP or addresses if you plan to use Etherbone.
+- **TX Attenuation**: TX control uses positive attenuation values (`ATT` gain element in SoapySDR), consistent with the CLI tools (`--tx-att`).
 
 ---
 
