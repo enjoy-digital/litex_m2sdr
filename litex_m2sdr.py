@@ -60,6 +60,7 @@ from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
+from litex_m2sdr.gateware.custom_processing import TXRXCustomProcessing
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
@@ -218,6 +219,7 @@ class BaseSoC(SoCMini):
         with_jtagbone          = True,
         with_gpio              = False,
         with_rfic_oversampling = False,
+        with_custom_processing_example = False,
     ):
         # Platform ---------------------------------------------------------------------------------
 
@@ -601,21 +603,32 @@ class BaseSoC(SoCMini):
         # TX/RX Datapath ---------------------------------------------------------------------------
 
 
-        # AD9361 <-> Loopback <-> Header.
-        # -------------------------------
+        # AD9361 <-> Optional Custom Processing <-> Loopback <-> Header.
+        # --------------------------------------------------------------
         self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+        if with_custom_processing_example:
+            self.custom_processing = TXRXCustomProcessing(platform, data_width=64)
 
-        # Header TX -> Loopback -> RFIC TX.
-        self.comb += [
-            self.header.tx.source.connect(self.txrx_loopback.tx_sink),
-            self.txrx_loopback.tx_source.connect(self.ad9361.sink),
-        ]
+        # Header TX -> Loopback -> Optional Custom Processing -> RFIC TX.
+        # RFIC RX -> Optional Custom Processing -> Loopback -> Header RX.
+        if with_custom_processing_example:
+            self.comb += [
+                self.header.tx.source.connect(self.txrx_loopback.tx_sink),
+                self.txrx_loopback.tx_source.connect(self.custom_processing.tx_sink),
+                self.custom_processing.tx_source.connect(self.ad9361.sink),
 
-        # RFIC RX -> Loopback -> Header RX.
-        self.comb += [
-            self.ad9361.source.connect(self.txrx_loopback.rx_sink),
-            self.txrx_loopback.rx_source.connect(self.header.rx.sink),
-        ]
+                self.ad9361.source.connect(self.custom_processing.rx_sink),
+                self.custom_processing.rx_source.connect(self.txrx_loopback.rx_sink),
+                self.txrx_loopback.rx_source.connect(self.header.rx.sink),
+            ]
+        else:
+            self.comb += [
+                self.header.tx.source.connect(self.txrx_loopback.tx_sink),
+                self.txrx_loopback.tx_source.connect(self.ad9361.sink),
+
+                self.ad9361.source.connect(self.txrx_loopback.rx_sink),
+                self.txrx_loopback.rx_source.connect(self.header.rx.sink),
+            ]
 
         # Crossbar.
         # ---------
@@ -1035,6 +1048,8 @@ def main():
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
+    parser.add_argument("--with-custom-processing-example", action="store_true",
+        help="Insert an AXI-Stream custom processing example between the DMA path and the RFIC.")
 
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit",   action="store_true",                    help="Enable White-Rabbit Support.")
@@ -1107,6 +1122,7 @@ def main():
 
         # GPIOs.
         with_gpio     = args.with_gpio,
+        with_custom_processing_example = args.with_custom_processing_example,
 
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
@@ -1146,6 +1162,8 @@ def main():
             r += f"_sata"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
+        if args.with_custom_processing_example:
+            r += "_custom_processing"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
