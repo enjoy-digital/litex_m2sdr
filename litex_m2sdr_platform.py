@@ -10,6 +10,15 @@ from litex.build.generic_platform import *
 from litex.build.xilinx           import Xilinx7SeriesPlatform
 from litex.build.openfpgaloader   import OpenFPGALoader
 
+# Schematic R02 voltage summary:
+# - Bank 13 / 14 / 15 / 16: 3.3V.
+# - Bank 34 / 35: 1.8V.
+#
+# M.2 low-speed sideband notes:
+# - The platform-exposed M.2 GPIO/sync sideband signals below are 3.3V on LiteX-M2SDR.
+# - M.2 pin 10 (LEDn) is not routed to the FPGA on LiteX-M2SDR.
+# - M.2 pin 52 (CLKREQn) has a 4.7k pull-up to 3V3_PCIe and is not routed to the FPGA.
+#
 # IOs ----------------------------------------------------------------------------------------------
 
 _io = [
@@ -118,7 +127,7 @@ _io = [
     ),
 
     # GPIOs.
-    ("gpios", 0, Pins("E22 D22"), IOStandard("LVCMOS33")), # TP1-2.
+    ("gpios", 0, Pins("E22 D22"), IOStandard("LVCMOS33")), # TP1-2 / Bank16 / 3.3V.
 ]
 
 _io_baseboard = [ # Note: These IOs are only available when the board is plugged in Acorn Baseboard Mini.
@@ -170,20 +179,20 @@ _connectors = [
         "PERp0"   : " D9", # 49 / PCIe_RX0_N.
         "REFClkn" : " E6", # 53 / PCIe_REF_CLK_N.
         "REFClkp" : " F6", # 55 / PCIe_REF_CLK_N.
-        "PERSTn"  : "A15", # 50 / PCIe_PERST.
+        "PERSTn"  : "A15", # 50 / PCIe_PERST / Bank16 / 3.3V.
 
         # SMB.
-        "SMB_CLK" : "A13", # 40 / PCIe_SMCLK. /!\ Requires 0 Ohm on R82, not mounted by default /!\.
-        "SMB_DAT" : "A14", # 40 / PCIe_SMDAT. /!\ Requures 0 Ohm on R83, not mounted by default /!\.
+        "SMB_CLK" : "A13", # 40 / PCIe_SMCLK / Bank16 / 3.3V. /!\ Requires 0 Ohm on R82, not mounted by default /!\.
+        "SMB_DAT" : "A14", # 42 / PCIe_SMDAT / Bank16 / 3.3V. /!\ Requires 0 Ohm on R83, not mounted by default /!\.
 
         # Synchro.
-        "NC22"    : "K18", # 22 / PPS_IN.
-        "NC24"    : "Y18", # 24 / PPS_OUT.
-        "NC28"    : "A19", # 28 / Synchro_GPIO1.
-        "NC30"    : "A18", # 30 / Synchro_GPIO2.
-        "NC32"    : "A21", # 32 / Synchro_GPIO3.
-        "NC34"    : "A20", # 34 / Synchro_GPIO4.
-        "NC36"    : "B20", # 36 / Synchro_GPIO5.
+        "NC22"    : "K18", # 22 / PPS_IN / Bank15 / 3.3V.
+        "NC24"    : "Y18", # 24 / PPS_OUT / Bank14 / 3.3V.
+        "NC28"    : "A19", # 28 / Synchro_GPIO1 / Bank16 / 3.3V.
+        "NC30"    : "A18", # 30 / Synchro_GPIO2 / Bank16 / 3.3V.
+        "NC32"    : "A21", # 32 / Synchro_GPIO3 / Bank16 / 3.3V.
+        "NC34"    : "A20", # 34 / Synchro_GPIO4 / Bank16 / 3.3V.
+        "NC36"    : "B20", # 36 / Synchro_GPIO5 / Bank16 / 3.3V.
     })
 ]
 
