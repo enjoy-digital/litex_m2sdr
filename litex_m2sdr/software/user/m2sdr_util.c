@@ -1486,6 +1486,100 @@ static void vcxo_test(void)
 
 #endif
 
+#ifdef CSR_LEDS_BASE
+
+/* LEDs */
+/*------*/
+
+static uint32_t csr_field_get(uint32_t value, unsigned int offset, unsigned int size)
+{
+    uint32_t mask;
+
+    if (size >= 32)
+        mask = 0xffffffffu;
+    else
+        mask = (1u << size) - 1u;
+
+    return (value >> offset) & mask;
+}
+
+static void led_print_control(uint32_t control)
+{
+    printf("control raw        0x%08" PRIx32 "\n", control);
+    printf("  manual_enable    %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_MANUAL_ENABLE_OFFSET, CSR_LEDS_CONTROL_MANUAL_ENABLE_SIZE));
+    printf("  time_running     %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_TIME_RUNNING_OFFSET, CSR_LEDS_CONTROL_TIME_RUNNING_SIZE));
+    printf("  time_valid       %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_TIME_VALID_OFFSET, CSR_LEDS_CONTROL_TIME_VALID_SIZE));
+    printf("  pcie_present     %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_PCIE_PRESENT_OFFSET, CSR_LEDS_CONTROL_PCIE_PRESENT_SIZE));
+    printf("  pcie_link_up     %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_PCIE_LINK_UP_OFFSET, CSR_LEDS_CONTROL_PCIE_LINK_UP_SIZE));
+    printf("  dma_synced       %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_DMA_SYNCED_OFFSET, CSR_LEDS_CONTROL_DMA_SYNCED_SIZE));
+    printf("  eth_present      %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_ETH_PRESENT_OFFSET, CSR_LEDS_CONTROL_ETH_PRESENT_SIZE));
+    printf("  eth_link_up      %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_ETH_LINK_UP_OFFSET, CSR_LEDS_CONTROL_ETH_LINK_UP_SIZE));
+    printf("  tx_activity      %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_TX_ACTIVITY_OFFSET, CSR_LEDS_CONTROL_TX_ACTIVITY_SIZE));
+    printf("  rx_activity      %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_RX_ACTIVITY_OFFSET, CSR_LEDS_CONTROL_RX_ACTIVITY_SIZE));
+    printf("  pps_level        %" PRIu32 "\n", csr_field_get(control, CSR_LEDS_CONTROL_PPS_LEVEL_OFFSET, CSR_LEDS_CONTROL_PPS_LEVEL_SIZE));
+}
+
+static void led_print_status(uint32_t status)
+{
+    printf("status raw         0x%08" PRIx32 "\n", status);
+    printf("  level            %" PRIu32 "\n", csr_field_get(status, CSR_LEDS_STATUS_LEVEL_OFFSET, CSR_LEDS_STATUS_LEVEL_SIZE));
+    printf("  output           %" PRIu32 "\n", csr_field_get(status, CSR_LEDS_STATUS_OUTPUT_OFFSET, CSR_LEDS_STATUS_OUTPUT_SIZE));
+}
+
+static void led_status(void)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t control = m2sdr_read32(conn, CSR_LEDS_CONTROL_ADDR);
+    uint32_t status  = m2sdr_read32(conn, CSR_LEDS_STATUS_ADDR);
+
+    printf("\e[1m[> LED Status:\e[0m\n");
+    printf("-------------\n");
+    led_print_control(control);
+    led_print_status(status);
+
+    m2sdr_close_dev(conn);
+}
+
+static void led_control(uint32_t control)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t status;
+
+    m2sdr_write32(conn, CSR_LEDS_CONTROL_ADDR, control);
+    status = m2sdr_read32(conn, CSR_LEDS_STATUS_ADDR);
+
+    printf("LED control written.\n");
+    led_print_control(control);
+    led_print_status(status);
+
+    m2sdr_close_dev(conn);
+}
+
+static void led_pulse(uint32_t pulse)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t status;
+
+    m2sdr_write32(conn, CSR_LEDS_PULSE_ADDR, pulse);
+    status = m2sdr_read32(conn, CSR_LEDS_STATUS_ADDR);
+
+    printf("LED pulse written.\n");
+    printf("pulse raw          0x%08" PRIx32 "\n", pulse);
+    printf("  tx_activity      %" PRIu32 "\n", csr_field_get(pulse, CSR_LEDS_PULSE_TX_ACTIVITY_OFFSET, CSR_LEDS_PULSE_TX_ACTIVITY_SIZE));
+    printf("  rx_activity      %" PRIu32 "\n", csr_field_get(pulse, CSR_LEDS_PULSE_RX_ACTIVITY_OFFSET, CSR_LEDS_PULSE_RX_ACTIVITY_SIZE));
+    printf("  pps              %" PRIu32 "\n", csr_field_get(pulse, CSR_LEDS_PULSE_PPS_OFFSET, CSR_LEDS_PULSE_PPS_SIZE));
+    led_print_status(status);
+
+    m2sdr_close_dev(conn);
+}
+
+static void led_release(void)
+{
+    led_control(0);
+}
+
+#endif
+
 /* Help */
 /*------*/
 
@@ -1528,6 +1622,16 @@ static void help(void)
            "      Test the scratch register.\n"
            "  clk-test [COUNT] [DELAY]\n"
            "      Measure on-board clock frequencies.\n"
+#ifdef CSR_LEDS_BASE
+           "  led-status\n"
+           "      Read and decode LED control/status CSRs.\n"
+           "  led-control VALUE\n"
+           "      Write raw LED control bits.\n"
+           "  led-pulse VALUE\n"
+           "      Trigger raw LED pulse bits.\n"
+           "  led-release\n"
+           "      Return LED ownership to the design (control=0).\n"
+#endif
 #ifdef  CSR_SI5351_BASE
            "  vcxo-test\n"
            "      Measure VCXO frequency variation.\n"
@@ -1701,6 +1805,24 @@ int main(int argc, char **argv)
 
         clk_test(num_measurements, delay_between_tests);
     }
+
+#ifdef CSR_LEDS_BASE
+    /* LED cmds. */
+    else if (cmd_is(cmd, "led_status", "led-status"))
+        led_status();
+    else if (cmd_is(cmd, "led_control", "led-control")) {
+        if (optind + 1 > argc) goto show_help;
+        uint32_t control = strtoul(argv[optind++], NULL, 0);
+        led_control(control);
+    }
+    else if (cmd_is(cmd, "led_pulse", "led-pulse")) {
+        if (optind + 1 > argc) goto show_help;
+        uint32_t pulse = strtoul(argv[optind++], NULL, 0);
+        led_pulse(pulse);
+    }
+    else if (cmd_is(cmd, "led_release", "led-release"))
+        led_release();
+#endif
 
 #ifdef  CSR_SI5351_BASE
     /* VCXO test cmd. */
