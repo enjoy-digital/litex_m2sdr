@@ -139,15 +139,18 @@ When PCIe is not enabled in the build, the PCIe-specific states are naturally sk
 <a id="m2-gpio-voltage-levels"></a>
 
 LiteX-M2SDR does **not** use a single M.2 I/O voltage:
-- FPGA banks **13/14/15/16** are **3.3V**.
-- FPGA banks **34/35** are **1.8V**.
-- The M.2 low-speed sideband signals exposed by the platform (`PPS`, `Synchro_GPIO`, `SMBus`, `PERST#`) are on **3.3V** banks on the SDR side.
+- FPGA banks **13/14/15/16** on the SDR are powered at **3.3V**.
+- FPGA banks **34/35** on the SDR are powered at **1.8V**.
+- The general-purpose sideband signals routed directly from the M.2 connector to the FPGA on LiteX-M2SDR (`PPS`, `Synchro_GPIO`, `PERST#`, optional `PEWAKE#`, `SUSCLK`, `PEDET`) sit on **3.3V FPGA banks on the SDR side**.
+- The M.2 `SMB_CLK` / `SMB_DATA` pins are a special case: on LiteX-M2SDR r02 they reach the FPGA bank-16 pins through optional resistors `R82` / `R83`, which are **not mounted by default**.
 - PCIe lanes and the PCIe reference clock are transceiver signals, not single-ended 1.8V/3.3V GPIOs.
 
 Additional notes:
+- M.2 pin **44** (`ALERT#` / `SMB_ALERT#`) is currently **not routed to the FPGA** on LiteX-M2SDR r02.
 - M.2 pin **52** (`CLKREQ#`) is pulled up to `3V3_PCIe` and is **not** routed to the FPGA.
 - M.2 pin **10** (`LED#`) is **not connected** on the FPGA side.
 - The dedicated FPGA JTAG/config pins and the Acorn JTAG header are separate **3.3V** JTAG paths.
+- When discussing M.2 sideband voltages, distinguish the **FPGA bank voltage on the SDR** from the **connector-side voltage expected by a host/baseboard**. For example, the Acorn baseboard implements the M.2 SMBus pins as a **1.8V SMBus domain** with translation to **3.3V** for the SFP modules.
 
 | Signal | Connector Location | FPGA Pin | Bank | Voltage On SDR Side | Notes |
 |--------|--------------------|----------|------|---------------------|-------|
@@ -160,8 +163,9 @@ Additional notes:
 | `Synchro_GPIO3` | M.2 pin 32 (`NC32`) | `A21` | 16 | 3.3V | Routed to the FPGA. |
 | `Synchro_GPIO4` | M.2 pin 34 (`NC34`) | `A20` | 16 | 3.3V | Routed to the FPGA. |
 | `Synchro_GPIO5` | M.2 pin 36 (`NC36`) | `B20` | 16 | 3.3V | Routed to the FPGA. |
-| `SMB_CLK` | M.2 pin 40 | `A13` | 16 | 3.3V | Connected through `R82`, not mounted by default. |
-| `SMB_DATA` | M.2 pin 42 | `A14` | 16 | 3.3V | Connected through `R83`, not mounted by default. |
+| `SMB_CLK` | M.2 pin 40 | `A13` | 16 | 3.3V FPGA bank on SDR | Optional path through `R82`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
+| `SMB_DATA` | M.2 pin 42 | `A14` | 16 | 3.3V FPGA bank on SDR | Optional path through `R83`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
+| `ALERT#` / `SMB_ALERT#` | M.2 pin 44 | - | - | Host-defined sideband | Not routed to the FPGA on LiteX-M2SDR r02. |
 | `PERST#` | M.2 pin 50 | `A15` | 16 | 3.3V | Routed to the FPGA. |
 | `CLKREQ#` | M.2 pin 52 | - | - | 3.3V | Pulled up to `3V3_PCIe` with `R59`; not routed to the FPGA. |
 | `PEWAKE#` | M.2 pin 54 | `B16` | 16 | 3.3V | Optional path through `R88`, not mounted by default. |
