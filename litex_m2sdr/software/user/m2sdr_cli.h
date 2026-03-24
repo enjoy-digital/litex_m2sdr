@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 struct m2sdr_cli_device {
     char device_id[128];
@@ -25,6 +26,7 @@ int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
 bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev);
+int m2sdr_cli_parse_int64(const char *text, int64_t *value);
 void m2sdr_cli_print_device_help(void);
 void m2sdr_cli_error(const char *fmt, ...);
 void m2sdr_cli_invalid_choice(const char *what, const char *value, const char *expected);

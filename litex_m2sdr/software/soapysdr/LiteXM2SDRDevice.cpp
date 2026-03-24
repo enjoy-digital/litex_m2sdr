@@ -112,39 +112,6 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
     return it->second;
 }
 
-std::vector<std::string> split_list(const std::string &value)
-{
-    std::vector<std::string> out;
-    std::string token;
-    auto trim_token = [](const std::string &s) {
-        size_t start = 0;
-        size_t end = s.size();
-        while (start < end && std::isspace(static_cast<unsigned char>(s[start])))
-            start++;
-        while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1])))
-            end--;
-        return s.substr(start, end - start);
-    };
-    for (char ch : value) {
-        if (ch == ',') {
-            if (!token.empty()) {
-                std::string trimmed = trim_token(token);
-                if (!trimmed.empty())
-                    out.push_back(trimmed);
-            }
-            token.clear();
-            continue;
-        }
-        token.push_back(ch);
-    }
-    if (!token.empty()) {
-        std::string trimmed = trim_token(token);
-        if (!trimmed.empty())
-            out.push_back(trimmed);
-    }
-    return out;
-}
-
 uint8_t parse_agc_mode(const std::string &mode)
 {
     if (mode == "slow" || mode == "slowattack")
@@ -556,12 +523,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     _ad9361_fir_profile = fir_profile_canonical;
     SoapySDR::logf(SOAPY_SDR_INFO, "AD9361 1x FIR profile: %s", _ad9361_fir_profile.c_str());
 
+    /* Expose only the board-connected RF ports. The broader AD9361 antenna
+     * enum remains available in the lower-level driver, but those names do not
+     * map cleanly to user-facing M2SDR connectors here. */
     _rx_antennas = {"A_BALANCED"};
     _tx_antennas = {"A"};
-    if (args.count("rx_antenna_list") > 0)
-        _rx_antennas = split_list(args.at("rx_antenna_list"));
-    if (args.count("tx_antenna_list") > 0)
-        _tx_antennas = split_list(args.at("tx_antenna_list"));
+    if (args.count("rx_antenna_list") > 0 || args.count("tx_antenna_list") > 0) {
+        throw std::runtime_error(
+            "Custom antenna lists are not supported; use RX=A_BALANCED and TX=A");
+    }
 
     _rx_agc_mode = RF_GAIN_SLOWATTACK_AGC;
     if (args.count("rx_agc_mode") > 0)
@@ -870,14 +840,17 @@ void SoapyLiteXM2SDR::setAntenna(
     const size_t channel,
     const std::string &name) {
     std::lock_guard<std::mutex> lock(_mutex);
+
+    /* Keep the Soapy-facing API aligned with the board RF connectors rather
+     * than exposing the full AD9361 port enum. */
     if (direction == SOAPY_SDR_RX) {
         if (!antenna_allowed(_rx_antennas, name))
-            throw std::runtime_error("Unsupported RX antenna: " + name);
+            throw std::runtime_error("Unsupported RX antenna: " + name + " (supported: A_BALANCED)");
         _rx_stream.antenna[channel] = name;
     }
     if (direction == SOAPY_SDR_TX) {
         if (!antenna_allowed(_tx_antennas, name))
-            throw std::runtime_error("Unsupported TX antenna: " + name);
+            throw std::runtime_error("Unsupported TX antenna: " + name + " (supported: A)");
         _tx_stream.antenna[channel] = name;
     }
 }

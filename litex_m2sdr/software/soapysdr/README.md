@@ -38,8 +38,9 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
-- **Antenna lists**: `rx_antenna_list=A_BALANCED,B_BALANCED` and `tx_antenna_list=A,B`
-- **Per-channel antenna**: `rx_antenna0=...`, `rx_antenna1=...`, `tx_antenna0=...`, `tx_antenna1=...`
+- **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`
+  The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
+- **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
 - **Bit mode**: `bitmode=8|16`
 - **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
@@ -51,7 +52,7 @@ You can pass device arguments to configure the driver. These are most useful whe
 
 Example:
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,rx_antenna_list=A_BALANCED,tx_antenna_list=A,bitmode=8,oversampling=1"
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8,oversampling=1"
 ```
 
 Example (122.88 MSPS edge-flatness A/B test):

@@ -53,7 +53,7 @@ static void help(void)
            "      --sync MODE        Clock source: internal or external.\n"
            "\n"
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
-           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d).\n"
+           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6 or 20M).\n"
            "      --bandwidth HZ     Set the RF bandwidth in Hz (default: %d).\n"
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
@@ -82,6 +82,17 @@ static void help(void)
 
 /* Main */
 /*------*/
+
+static int parse_i64_option(const char *name, const char *value, int64_t *out)
+{
+    if (m2sdr_cli_parse_int64(value, out) == 0)
+        return 0;
+
+    m2sdr_cli_error("invalid %s '%s' (expected integer, scientific notation, or K/M/G suffix)",
+                    name ? name : "value",
+                    value ? value : "(null)");
+    return -1;
+}
 
 int main(int argc, char **argv)
 {
@@ -188,32 +199,41 @@ int main(int argc, char **argv)
             }
             break;
         case 6:
-            cfg.refclk_freq = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("refclk frequency", optarg, &cfg.refclk_freq) != 0)
+                return 1;
             break;
         case 7:
-            cfg.sample_rate = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("sample rate", optarg, &cfg.sample_rate) != 0)
+                return 1;
             break;
         case 8:
-            cfg.bandwidth = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("bandwidth", optarg, &cfg.bandwidth) != 0)
+                return 1;
             break;
         case 9:
-            cfg.tx_freq = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("TX frequency", optarg, &cfg.tx_freq) != 0)
+                return 1;
             break;
         case 10:
-            cfg.rx_freq = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("RX frequency", optarg, &cfg.rx_freq) != 0)
+                return 1;
             break;
         case 11:
-            cfg.tx_att = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("TX attenuation", optarg, &cfg.tx_att) != 0)
+                return 1;
             break;
         case 12:
-            cfg.rx_gain1 = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("RX gain", optarg, &cfg.rx_gain1) != 0)
+                return 1;
             cfg.rx_gain2 = cfg.rx_gain1;
             break;
         case 13:
-            cfg.rx_gain1 = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("RX gain 1", optarg, &cfg.rx_gain1) != 0)
+                return 1;
             break;
         case 14:
-            cfg.rx_gain2 = strtoll(optarg, NULL, 0);
+            if (parse_i64_option("RX gain 2", optarg, &cfg.rx_gain2) != 0)
+                return 1;
             break;
         case 15:
             cfg.loopback = (uint8_t)strtoul(optarg, NULL, 0);

@@ -104,8 +104,8 @@ test-sigmf-smoke: tests/test_sigmf_capture_smoke
 test-sigmf-cli: tests/test_sigmf_info_cli m2sdr_sigmf_info
 	./tests/test_sigmf_info_cli
 
-test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a test_libm2sdr.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
+test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) test_libm2sdr.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
 
 tests/test_m2sdr_sigmf: tests/test_m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS) -lm
