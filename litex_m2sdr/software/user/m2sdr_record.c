@@ -266,12 +266,26 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     uint8_t buf[DMA_BUFFER_SIZE];
     while (keep_running) {
         struct m2sdr_metadata meta;
+        const void *rx_data = buf;
         if (size > 0 && total_len >= size)
             break;
 
-        if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
-            fprintf(stderr, "m2sdr_sync_rx failed\n");
-            break;
+#ifdef USE_LITEPCIE
+        if (!header) {
+            unsigned rx_samples = samples_per_buf;
+            void *dma_buf = NULL;
+            if (m2sdr_get_buffer(dev, M2SDR_RX, &dma_buf, &rx_samples, 0) != 0) {
+                fprintf(stderr, "m2sdr_get_buffer failed\n");
+                break;
+            }
+            rx_data = dma_buf;
+        } else
+#endif
+        {
+            if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
+                fprintf(stderr, "m2sdr_sync_rx failed\n");
+                break;
+            }
         }
         if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
             last_timestamp = meta.timestamp;
@@ -296,14 +310,21 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             to_write = size - total_len;
 
         if (fo) {
-            if (fwrite(buf, 1, to_write, fo) != to_write) {
+            if (fwrite(rx_data, 1, to_write, fo) != to_write) {
                 perror("fwrite");
+#ifdef USE_LITEPCIE
+                if (!header)
+                    (void)m2sdr_release_buffer(dev, M2SDR_RX, (void *)rx_data);
+#endif
                 break;
             }
         }
+#ifdef USE_LITEPCIE
+        if (!header)
+            (void)m2sdr_release_buffer(dev, M2SDR_RX, (void *)rx_data);
+#endif
         total_len += to_write;
         total_buffers++;
-
         int64_t duration = get_time_ms() - last_time;
         if (!quiet && duration > 200) {
             double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
