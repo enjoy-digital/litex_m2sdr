@@ -655,6 +655,18 @@ class BaseSoC(SoCMini):
 
         led_pad = platform.request("user_led")
         self.leds = StatusLed(sys_clk_freq=sys_clk_freq)
+
+        led_tx_activity = Signal()
+        led_rx_activity = Signal()
+        self.comb += [
+            led_tx_activity.eq((self.pcie_dma0.source.valid & self.pcie_dma0.source.ready if with_pcie else 0) |
+                               (self.eth_tx_streamer.source.valid & self.eth_tx_streamer.source.ready if with_eth else 0) |
+                               (self.sata_tx_streamer.source.valid & self.sata_tx_streamer.source.ready if with_sata else 0)),
+            led_rx_activity.eq((self.pcie_dma0.sink.valid & self.pcie_dma0.sink.ready if with_pcie else 0) |
+                               (self.eth_rx_streamer.sink.valid & self.eth_rx_streamer.sink.ready if with_eth else 0) |
+                               (self.sata_rx_streamer.sink.valid & self.sata_rx_streamer.sink.ready if with_sata else 0)),
+        ]
+
         self.comb += [
             self.leds.time_running.eq( self.time_gen.enable),
             self.leds.time_valid.eq(   self.time_gen.time != 0),
@@ -663,10 +675,8 @@ class BaseSoC(SoCMini):
             self.leds.dma_synced.eq(   self.pcie_dma0.synchronizer.synced if with_pcie else 0),
             self.leds.eth_present.eq(  int(with_eth)),
             self.leds.eth_link_up.eq(  self.eth_phy.link_up if with_eth else 0),
-            self.leds.tx_activity.eq((self.ad9361.sink.valid   & self.ad9361.sink.ready) |
-                                     (self.eth_rx_streamer.source.valid & self.eth_rx_streamer.source.ready if with_eth else 0)),
-            self.leds.rx_activity.eq((self.ad9361.source.valid & self.ad9361.source.ready) |
-                                     (self.eth_tx_streamer.source.valid & self.eth_tx_streamer.source.ready if with_eth else 0)),
+            self.leds.tx_activity.eq(  led_tx_activity),
+            self.leds.rx_activity.eq(  led_rx_activity),
             self.leds.pps_pulse.eq(    self.pps_gen.pps_pulse),
             led_pad.eq(                self.leds.output),
         ]

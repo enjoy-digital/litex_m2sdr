@@ -203,7 +203,7 @@ class StatusLed(LiteXModule):
 
         self.pcie_present = pcie_present = Signal() # PCIe feature compiled in.
         self.pcie_link_up = pcie_link_up = Signal() # PCIe link is trained.
-        self.dma_synced   = dma_synced   = Signal() # PCIe DMA synchronizer aligned to PPS.
+        self.dma_synced   = dma_synced   = Signal() # PCIe DMA synchronizer aligned to PPS (readback/debug only).
 
         self.eth_present  = eth_present  = Signal() # Ethernet feature compiled in.
         self.eth_link_up  = eth_link_up  = Signal() # Ethernet link is trained.
@@ -326,9 +326,9 @@ class StatusLed(LiteXModule):
             rx_blink.trigger.eq(rx_activity_sel),
             pps_hold.trigger.eq(pps_pulse_sel),
 
-            # Transport presence and readiness drive the not-ready/idle base layer.
+            # Transport presence and link readiness drive the not-ready/idle base layer.
             transport_present.eq(pcie_present_sel | eth_present_sel),
-            pcie_ready.eq(pcie_present_sel & pcie_link_up_sys & dma_synced_sel),
+            pcie_ready.eq(pcie_present_sel & pcie_link_up_sys),
             eth_ready.eq(eth_present_sel  & eth_link_up_sys),
             transport_ready.eq(pcie_ready | eth_ready),
 

@@ -158,6 +158,29 @@ def test_status_led_ready_transport_breathes():
     assert max(samples) > min(samples)
 
 
+def test_status_led_pcie_link_up_breathes_without_dma_sync():
+    """Check PCIe link-up alone is enough to enter the idle breathing state."""
+    dut = StatusLed(sys_clk_freq=1_000)
+    samples = []
+
+    def gen():
+        yield dut.time_running.eq(1)
+        yield dut.time_valid.eq(1)
+        yield dut.pcie_present.eq(1)
+        yield dut.pcie_link_up.eq(1)
+        for _ in range(4):
+            yield
+
+        for _ in range(160):
+            samples.append((yield dut.level))
+            yield
+
+    run_simulation(dut, gen())
+
+    assert max(samples) < STATUS_LED_NOT_READY_LEVEL
+    assert max(samples) > min(samples)
+
+
 def test_status_led_activity_overlay_is_visible():
     """Check sustained TX activity creates repeated bright accents rather than a constant bright state."""
     dut = StatusLed(sys_clk_freq=1_000)
