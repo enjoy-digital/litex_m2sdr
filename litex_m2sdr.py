@@ -1178,7 +1178,7 @@ def main():
             r += f"_white_rabbit"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
