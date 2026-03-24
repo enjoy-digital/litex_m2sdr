@@ -268,8 +268,16 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 {
     int64_t start = get_time_ms();
     for (;;) {
-        litepcie_dma_process(&dev->rx_dma);
+        /* Drain any buffers already staged in userspace before polling the DMA
+         * helper again. Re-running litepcie_dma_process() too early refreshes
+         * the batch counters and drops the unread remainder. */
         char *b = litepcie_dma_next_read_buffer(&dev->rx_dma);
+        if (b) {
+            *buf = b;
+            return M2SDR_ERR_OK;
+        }
+        litepcie_dma_process(&dev->rx_dma);
+        b = litepcie_dma_next_read_buffer(&dev->rx_dma);
         if (b) {
             *buf = b;
             return M2SDR_ERR_OK;
@@ -283,8 +291,15 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 {
     int64_t start = get_time_ms();
     for (;;) {
-        litepcie_dma_process(&dev->tx_dma);
+        /* Mirror the RX-side batching behavior for TX so partially-consumed
+         * userspace batches are not overwritten by a fresh DMA poll. */
         char *b = litepcie_dma_next_write_buffer(&dev->tx_dma);
+        if (b) {
+            *buf = b;
+            return M2SDR_ERR_OK;
+        }
+        litepcie_dma_process(&dev->tx_dma);
+        b = litepcie_dma_next_write_buffer(&dev->tx_dma);
         if (b) {
             *buf = b;
             return M2SDR_ERR_OK;

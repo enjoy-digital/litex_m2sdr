@@ -16,15 +16,15 @@
 #include <signal.h>
 #include <time.h>
 #include <getopt.h>
+#include <stdbool.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_sigmf.h"
 #include "config.h"
 
-#include "litepcie_helpers.h"
+#include "liblitepcie.h"
 
-#define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 
 sig_atomic_t keep_running = 1;
@@ -47,6 +47,14 @@ static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
     return 1;
 }
 
+static void write_m2sdr_dma_header(uint8_t *buf, uint64_t timestamp)
+{
+    const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
+
+    memcpy(buf, &sync_word, sizeof(sync_word));
+    memcpy(buf + 8, &timestamp, sizeof(timestamp));
+}
+
 static void print_time_banner(const char *label, uint64_t time_ns)
 {
     time_t seconds = (time_t)(time_ns / 1000000000ULL);
@@ -57,6 +65,78 @@ static void print_time_banner(const char *label, uint64_t time_ns)
     localtime_r(&seconds, &tm);
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm);
     printf("%s %s.%03u\n", label, time_str, ms);
+}
+
+static int read_next_play_frame(FILE *fi, int close_fi, uint32_t *current_loop, uint32_t loops,
+                                uint64_t start_offset_bytes, uint64_t end_offset_bytes,
+                                uint8_t *raw_buf, size_t frame_bytes)
+{
+    uint64_t current_pos;
+    size_t to_read = frame_bytes;
+    size_t len;
+
+    if (close_fi && end_offset_bytes > 0) {
+        current_pos = (uint64_t)ftello(fi);
+        if (current_pos >= end_offset_bytes) {
+            (*current_loop)++;
+            if (loops != 0 && *current_loop >= loops)
+                return 1;
+            if (fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
+                perror("fseeko");
+                return -1;
+            }
+            current_pos = start_offset_bytes;
+        }
+        if (current_pos + to_read > end_offset_bytes)
+            to_read = (size_t)(end_offset_bytes - current_pos);
+    }
+
+    len = fread(raw_buf, 1, to_read, fi);
+    if (ferror(fi)) {
+        perror("fread");
+        return -1;
+    }
+    if (feof(fi)) {
+        (*current_loop)++;
+        if (loops != 0 && *current_loop >= loops)
+            return 1;
+        if (close_fi) {
+            if (fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
+                perror("fseeko");
+                return -1;
+            }
+            clearerr(fi);
+            len += fread(raw_buf + len, 1, frame_bytes - len, fi);
+            if (ferror(fi)) {
+                perror("fread");
+                return -1;
+            }
+        }
+    }
+
+    if (len < frame_bytes)
+        memset(raw_buf + len, 0, frame_bytes - len);
+
+    return 0;
+}
+
+static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes,
+                            unsigned header_bytes, struct m2sdr_metadata *meta)
+{
+    memset(dst, 0, frame_bytes);
+
+    if (header_bytes > 0) {
+        uint64_t timestamp = 0;
+
+        if (parse_m2sdr_dma_header(src, &timestamp)) {
+            meta->timestamp = timestamp;
+            meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+        }
+        memcpy(dst + header_bytes, src + header_bytes, frame_bytes - header_bytes);
+        write_m2sdr_dma_header(dst, (meta->flags & M2SDR_META_FLAG_HAS_TIME) ? meta->timestamp : 0);
+    } else {
+        memcpy(dst, src, frame_bytes);
+    }
 }
 
 static void help(void)
@@ -90,27 +170,75 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                        uint64_t start_offset_bytes, uint64_t end_offset_bytes)
 {
     struct m2sdr_dev *dev = NULL;
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+#ifdef USE_LITEPCIE
+    struct litepcie_dma_ctrl dma = {0};
+    bool use_pcie_dma = false;
+    int64_t hw_count_stop = 0;
+#endif
+    FILE *fi = NULL;
+    int close_fi = 0;
+    unsigned sample_size;
+    unsigned samples_per_buf;
     size_t frame_bytes;
+    int i = 0;
+    uint32_t current_loop = 0;
+    int64_t last_time;
+    uint64_t total_buffers = 0;
+    uint64_t last_buffers  = 0;
+    uint64_t sw_underflows = 0;
+    int exit_status = 1;
+    uint8_t raw_buf[DMA_BUFFER_SIZE];
+    uint8_t payload_buf[DMA_BUFFER_SIZE];
+
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
     }
-
-    unsigned sample_size = m2sdr_format_size(format);
-    unsigned samples_per_buf = (DMA_BUFFER_SIZE - header_bytes) / sample_size;
-    frame_bytes = (size_t)samples_per_buf * sample_size + header_bytes;
-    if (header_bytes > 0) {
-        if (m2sdr_set_tx_header(dev, true) != 0) {
-            fprintf(stderr, "m2sdr_set_tx_header failed\n");
-            m2sdr_close(dev);
-            exit(1);
-        }
+    if (m2sdr_get_transport(dev, &transport) != 0) {
+        fprintf(stderr, "m2sdr_get_transport failed\n");
+        goto cleanup;
     }
-    if (m2sdr_sync_config(dev, M2SDR_TX, format,
-                          0, samples_per_buf, 0, 1000) != 0) {
-        fprintf(stderr, "m2sdr_sync_config failed\n");
-        m2sdr_close(dev);
-        exit(1);
+
+    sample_size = m2sdr_format_size(format);
+    samples_per_buf = (DMA_BUFFER_SIZE - header_bytes) / sample_size;
+    frame_bytes = (size_t)samples_per_buf * sample_size + header_bytes;
+
+    if (m2sdr_set_tx_header(dev, header_bytes > 0) != 0) {
+        fprintf(stderr, "m2sdr_set_tx_header failed\n");
+        goto cleanup;
+    }
+
+#ifdef USE_LITEPCIE
+    if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        int fd = m2sdr_get_fd(dev);
+
+        if (fd < 0) {
+            fprintf(stderr, "m2sdr_get_fd failed\n");
+            goto cleanup;
+        }
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
+            fprintf(stderr, "CROSSBAR TX select failed\n");
+            goto cleanup;
+        }
+
+        dma.use_reader = 1;
+        dma.shared_fd  = 1;
+        dma.fds.fd     = fd;
+        if (litepcie_dma_init(&dma, NULL, 0) != 0) {
+            fprintf(stderr, "litepcie_dma_init failed\n");
+            goto cleanup;
+        }
+        dma.reader_enable = 1;
+        use_pcie_dma = true;
+    } else
+#endif
+    {
+        if (m2sdr_sync_config(dev, M2SDR_TX, format,
+                              0, samples_per_buf, 0, 1000) != 0) {
+            fprintf(stderr, "m2sdr_sync_config failed\n");
+            goto cleanup;
+        }
     }
 
     if (timed_start) {
@@ -129,112 +257,130 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         }
     }
 
-    FILE *fi;
-    int close_fi = 0;
     if (strcmp(filename, "-") == 0) {
         fi = stdin;
     } else {
         fi = fopen(filename, "rb");
         if (!fi) {
             perror(filename);
-            m2sdr_close(dev);
-            exit(1);
+            goto cleanup;
         }
         if (start_offset_bytes > 0 && fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
             perror("fseeko");
-            fclose(fi);
-            m2sdr_close(dev);
-            exit(1);
+            goto cleanup;
         }
         close_fi = 1;
     }
 
-    int i = 0;
-    uint32_t current_loop = 0;
-    int64_t last_time = get_time_ms();
-    uint64_t total_buffers = 0;
-    uint64_t last_buffers  = 0;
-    uint64_t sw_underflows = 0;
+    last_time = get_time_ms();
+    while (1) {
+#ifdef USE_LITEPCIE
+        if (use_pcie_dma) {
+            litepcie_dma_process(&dma);
 
-    uint8_t raw_buf[DMA_BUFFER_SIZE];
-    uint8_t payload_buf[DMA_BUFFER_SIZE];
-    while (keep_running) {
-        uint64_t current_pos;
-        size_t to_read = frame_bytes;
-        size_t len;
-        struct m2sdr_metadata meta = {0};
+            if (!keep_running) {
+                hw_count_stop = dma.reader_sw_count + 16;
+                break;
+            }
 
-        if (close_fi && end_offset_bytes > 0) {
-            current_pos = (uint64_t)ftello(fi);
-            if (current_pos >= end_offset_bytes) {
-                current_loop++;
-                if (loops != 0 && current_loop >= loops)
+            while (keep_running) {
+                int rc;
+                struct m2sdr_metadata meta = {0};
+                char *dma_buf = litepcie_dma_next_write_buffer(&dma);
+
+                if (!dma_buf)
                     break;
-                if (fseeko(fi, (off_t)start_offset_bytes, SEEK_SET) != 0) {
-                    perror("fseeko");
+                if (dma.reader_sw_count - dma.reader_hw_count < 0)
+                    sw_underflows += (uint64_t)(dma.reader_hw_count - dma.reader_sw_count);
+
+                rc = read_next_play_frame(fi, close_fi, &current_loop, loops,
+                                          start_offset_bytes, end_offset_bytes,
+                                          raw_buf, frame_bytes);
+                if (rc < 0)
+                    goto cleanup;
+                if (rc > 0) {
+                    keep_running = 0;
                     break;
                 }
-                current_pos = start_offset_bytes;
-            }
-            if (current_pos + to_read > end_offset_bytes)
-                to_read = (size_t)(end_offset_bytes - current_pos);
-        }
 
-        len = fread(raw_buf, 1, to_read, fi);
-        if (ferror(fi)) {
-            perror("fread");
-            break;
-        }
-        if (feof(fi)) {
-            current_loop++;
-            if (loops != 0 && current_loop >= loops)
+                fill_play_frame((uint8_t *)dma_buf, raw_buf, frame_bytes, header_bytes, &meta);
+            }
+            total_buffers = (uint64_t)dma.reader_sw_count;
+        } else
+#endif
+        {
+            int rc;
+            struct m2sdr_metadata meta = {0};
+
+            if (!keep_running)
                 break;
-            if (strcmp(filename, "-") != 0) {
-                fseeko(fi, (off_t)start_offset_bytes, SEEK_SET);
-                clearerr(fi);
-                len += fread(raw_buf + len, 1, frame_bytes - len, fi);
+
+            rc = read_next_play_frame(fi, close_fi, &current_loop, loops,
+                                      start_offset_bytes, end_offset_bytes,
+                                      raw_buf, frame_bytes);
+            if (rc < 0)
+                goto cleanup;
+            if (rc > 0)
+                break;
+
+            if (header_bytes > 0) {
+                if (parse_m2sdr_dma_header(raw_buf, &meta.timestamp))
+                    meta.flags |= M2SDR_META_FLAG_HAS_TIME;
+                memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
+            } else {
+                memcpy(payload_buf, raw_buf, frame_bytes);
             }
+
+            if (m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
+                              header_bytes > 0 ? &meta : NULL, 0) != 0) {
+                fprintf(stderr, "m2sdr_sync_tx failed\n");
+                goto cleanup;
+            }
+            total_buffers++;
         }
 
-        if (len < frame_bytes)
-            memset(raw_buf + len, 0, frame_bytes - len);
+        {
+            int64_t duration = get_time_ms() - last_time;
+            if (!quiet && duration > 200) {
+                double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
+                uint64_t size = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
 
-        if (header_bytes > 0) {
-            if (len >= M2SDR_DMA_HEADER_SIZE && parse_m2sdr_dma_header(raw_buf, &meta.timestamp))
-                meta.flags |= M2SDR_META_FLAG_HAS_TIME;
-            memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
-        } else {
-            memcpy(payload_buf, raw_buf, frame_bytes);
-        }
+                if (i % 10 == 0)
+                    fprintf(stderr, "\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");
+                i++;
 
-        if (m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
-                          header_bytes > 0 ? &meta : NULL, 0) != 0) {
-            fprintf(stderr, "m2sdr_sync_tx failed\n");
-            break;
-        }
-        total_buffers++;
+                fprintf(stderr, "%10.2f %10" PRIu64 " %10" PRIu64 " %6u %10" PRIu64 "\n",
+                        speed, total_buffers, size, current_loop, sw_underflows);
 
-        int64_t duration = get_time_ms() - last_time;
-        if (!quiet && duration > 200) {
-            double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
-            uint64_t size = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
-
-            if (i % 10 == 0)
-                fprintf(stderr, "\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");
-            i++;
-
-            fprintf(stderr, "%10.2f %10" PRIu64 " %10" PRIu64 " %6u %10" PRIu64 "\n",
-                    speed, total_buffers, size, current_loop, sw_underflows);
-
-            last_time = get_time_ms();
-            last_buffers = total_buffers;
-            sw_underflows = 0;
+                last_time = get_time_ms();
+                last_buffers = total_buffers;
+                sw_underflows = 0;
+            }
         }
     }
 
-    if (close_fi)
+#ifdef USE_LITEPCIE
+    if (use_pcie_dma) {
+        while (dma.reader_hw_count < hw_count_stop) {
+            dma.reader_enable = 1;
+            litepcie_dma_process(&dma);
+        }
+    }
+#endif
+
+    exit_status = 0;
+
+cleanup:
+#ifdef USE_LITEPCIE
+    if (use_pcie_dma)
+        litepcie_dma_cleanup(&dma);
+#endif
+    if (fi && close_fi)
         fclose(fi);
-    m2sdr_close(dev);
+    if (dev)
+        m2sdr_close(dev);
+    if (exit_status != 0)
+        exit(1);
 }
 
 int main(int argc, char **argv)
@@ -347,7 +493,7 @@ int main(int argc, char **argv)
             capture = &sigmf_meta.captures[capture_index];
         }
         if (capture && capture->has_header_bytes) {
-            if (capture->header_bytes == M2SDR_DMA_HEADER_SIZE) {
+            if (capture->header_bytes == M2SDR_HEADER_BYTES) {
                 sigmf_header_bytes = capture->header_bytes;
             } else if (capture->header_bytes != 0) {
                 fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",
@@ -355,7 +501,7 @@ int main(int argc, char **argv)
                 return 1;
             }
         } else if (sigmf_meta.has_header_bytes) {
-            if (sigmf_meta.header_bytes == M2SDR_DMA_HEADER_SIZE) {
+            if (sigmf_meta.header_bytes == M2SDR_HEADER_BYTES) {
                 sigmf_header_bytes = sigmf_meta.header_bytes;
             } else if (sigmf_meta.header_bytes != 0) {
                 fprintf(stderr, "SigMF playback does not currently support header_bytes=%u datasets\n",

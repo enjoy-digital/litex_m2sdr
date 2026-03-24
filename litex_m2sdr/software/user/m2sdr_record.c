@@ -24,13 +24,27 @@
 #include "m2sdr_sigmf.h"
 #include "config.h"
 
-#include "litepcie_helpers.h"
+#include "liblitepcie.h"
 
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     (void)dummy;
     keep_running = 0;
+}
+
+static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
+{
+    uint64_t sync_word = 0;
+    uint64_t ts = 0;
+
+    memcpy(&sync_word, buf, sizeof(sync_word));
+    if (sync_word != 0x5aa55aa55aa55aa5ULL)
+        return 0;
+
+    memcpy(&ts, buf + 8, sizeof(ts));
+    *timestamp = ts;
+    return 1;
 }
 
 static void help(void)
@@ -207,39 +221,54 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                          struct m2sdr_sigmf_meta *sigmf_meta)
 {
     struct m2sdr_dev *dev = NULL;
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+#ifdef USE_LITEPCIE
+    struct litepcie_dma_ctrl dma = {0};
+    bool use_pcie_dma = false;
+#endif
+    FILE *fo = NULL;
     char sigmf_data_path[1024] = {0};
     char sigmf_meta_path[1024] = {0};
+    unsigned sample_size;
+    unsigned samples_per_buf;
+    size_t payload_bytes_per_buf;
+    int i = 0;
+    size_t total_len = 0;
+    int64_t last_time;
+    uint64_t total_buffers = 0;
+    uint64_t last_buffers  = 0;
+    uint64_t last_timestamp = 0;
+    uint64_t first_timestamp = 0;
+    uint64_t prev_timestamp = 0;
+    uint64_t nominal_dt = 0;
+    bool stop = false;
+    int exit_status = 1;
+    uint8_t buf[DMA_BUFFER_SIZE];
+
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
     }
-
-    if (header) {
-        if (m2sdr_set_rx_header(dev, true, strip_header ? true : false) != 0) {
-            fprintf(stderr, "m2sdr_set_rx_header failed\n");
-            m2sdr_close(dev);
-            exit(1);
-        }
+    if (m2sdr_get_transport(dev, &transport) != 0) {
+        fprintf(stderr, "m2sdr_get_transport failed\n");
+        goto cleanup;
+    }
+    if (m2sdr_set_rx_header(dev, header ? true : false, (header && strip_header) ? true : false) != 0) {
+        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        goto cleanup;
     }
 
     if (sigmf_enable)
         sigmf_fill_defaults_from_device(dev, sigmf_meta);
 
-    unsigned sample_size = m2sdr_format_size(format);
-    unsigned samples_per_buf = DMA_BUFFER_SIZE / sample_size;
-    size_t payload_bytes_per_buf = DMA_BUFFER_SIZE;
-    if (header && strip_header)
+    sample_size = m2sdr_format_size(format);
+    samples_per_buf = DMA_BUFFER_SIZE / sample_size;
+    payload_bytes_per_buf = DMA_BUFFER_SIZE;
+    if (header && strip_header) {
         payload_bytes_per_buf = DMA_BUFFER_SIZE - 16;
-    if (header && strip_header)
-        samples_per_buf = (DMA_BUFFER_SIZE - 16) / sample_size;
-    if (m2sdr_sync_config(dev, M2SDR_RX, format,
-                          0, samples_per_buf, 0, 1000) != 0) {
-        fprintf(stderr, "m2sdr_sync_config failed\n");
-        m2sdr_close(dev);
-        exit(1);
+        samples_per_buf = payload_bytes_per_buf / sample_size;
     }
 
-    FILE *fo = NULL;
     if (filename != NULL) {
         if (strcmp(filename, "-") == 0) {
             fo = stdout;
@@ -247,84 +276,146 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             fo = fopen(filename, "wb");
             if (!fo) {
                 perror(filename);
-                m2sdr_close(dev);
-                exit(1);
+                goto cleanup;
             }
         }
     }
 
-    int i = 0;
-    size_t total_len = 0;
-    int64_t last_time = get_time_ms();
-    uint64_t total_buffers = 0;
-    uint64_t last_buffers  = 0;
-    uint64_t last_timestamp = 0;
-    uint64_t first_timestamp = 0;
-    uint64_t prev_timestamp = 0;
-    uint64_t nominal_dt = 0;
-
-    uint8_t buf[DMA_BUFFER_SIZE];
-    while (keep_running) {
-        struct m2sdr_metadata meta;
-        const void *rx_data = buf;
-        if (size > 0 && total_len >= size)
-            break;
-
 #ifdef USE_LITEPCIE
-        if (!header) {
-            unsigned rx_samples = samples_per_buf;
-            void *dma_buf = NULL;
-            if (m2sdr_get_buffer(dev, M2SDR_RX, &dma_buf, &rx_samples, 0) != 0) {
-                fprintf(stderr, "m2sdr_get_buffer failed\n");
-                break;
+    if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        int fd = m2sdr_get_fd(dev);
+
+        if (fd < 0) {
+            fprintf(stderr, "m2sdr_get_fd failed\n");
+            goto cleanup;
+        }
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0) {
+            fprintf(stderr, "CROSSBAR RX select failed\n");
+            goto cleanup;
+        }
+
+        dma.use_writer = 1;
+        dma.shared_fd  = 1;
+        dma.fds.fd     = fd;
+        if (litepcie_dma_init(&dma, NULL, 0) != 0) {
+            fprintf(stderr, "litepcie_dma_init failed\n");
+            goto cleanup;
+        }
+        dma.writer_enable = 1;
+        use_pcie_dma = true;
+    } else
+#endif
+    {
+        if (m2sdr_sync_config(dev, M2SDR_RX, format,
+                              0, samples_per_buf, 0, 1000) != 0) {
+            fprintf(stderr, "m2sdr_sync_config failed\n");
+            goto cleanup;
+        }
+    }
+
+    last_time = get_time_ms();
+    while (keep_running && !stop) {
+#ifdef USE_LITEPCIE
+        if (use_pcie_dma) {
+            litepcie_dma_process(&dma);
+            while (!stop) {
+                const uint8_t *rx_data;
+                size_t to_write = payload_bytes_per_buf;
+                char *dma_buf = litepcie_dma_next_read_buffer(&dma);
+
+                if (!dma_buf)
+                    break;
+                if (size > 0 && total_len >= size) {
+                    stop = true;
+                    break;
+                }
+
+                rx_data = (const uint8_t *)dma_buf;
+                if (header) {
+                    uint64_t ts = 0;
+
+                    if (parse_m2sdr_dma_header((const uint8_t *)dma_buf, &ts)) {
+                        last_timestamp = ts;
+                        if (first_timestamp == 0)
+                            first_timestamp = ts;
+                        if (sigmf_enable && annotate_ts_jumps) {
+                            if (prev_timestamp != 0) {
+                                uint64_t dt_ns = ts - prev_timestamp;
+
+                                if (nominal_dt == 0) {
+                                    nominal_dt = dt_ns;
+                                } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
+                                    uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+                                    sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
+                                }
+                            }
+                            prev_timestamp = ts;
+                        }
+                    }
+                    if (strip_header)
+                        rx_data += 16;
+                }
+
+                if (size > 0 && to_write > size - total_len)
+                    to_write = size - total_len;
+                if (fo && fwrite(rx_data, 1, to_write, fo) != to_write) {
+                    perror("fwrite");
+                    stop = true;
+                    break;
+                }
+
+                total_len += to_write;
+                total_buffers = (uint64_t)dma.writer_sw_count;
+                if (size > 0 && total_len >= size) {
+                    stop = true;
+                    break;
+                }
             }
-            rx_data = dma_buf;
+            total_buffers = (uint64_t)dma.writer_sw_count;
         } else
 #endif
         {
+            struct m2sdr_metadata meta;
+            const void *rx_data = buf;
+
+            if (size > 0 && total_len >= size)
+                break;
+
             if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
                 fprintf(stderr, "m2sdr_sync_rx failed\n");
                 break;
             }
-        }
-        if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
-            last_timestamp = meta.timestamp;
-        if (first_timestamp == 0 && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
-            first_timestamp = meta.timestamp;
-        if (sigmf_enable && annotate_ts_jumps && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
-            if (prev_timestamp != 0) {
-                uint64_t dt_ns = meta.timestamp - prev_timestamp;
+            if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
+                last_timestamp = meta.timestamp;
+            if (first_timestamp == 0 && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
+                first_timestamp = meta.timestamp;
+            if (sigmf_enable && annotate_ts_jumps && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
+                if (prev_timestamp != 0) {
+                    uint64_t dt_ns = meta.timestamp - prev_timestamp;
 
-                if (nominal_dt == 0) {
-                    nominal_dt = dt_ns;
-                } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
-                    uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
-                    sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
+                    if (nominal_dt == 0) {
+                        nominal_dt = dt_ns;
+                    } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
+                        uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+                        sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
+                    }
                 }
+                prev_timestamp = meta.timestamp;
             }
-            prev_timestamp = meta.timestamp;
-        }
 
-        size_t to_write = payload_bytes_per_buf;
-        if (size > 0 && to_write > size - total_len)
-            to_write = size - total_len;
+            size_t to_write = payload_bytes_per_buf;
+            if (size > 0 && to_write > size - total_len)
+                to_write = size - total_len;
 
-        if (fo) {
-            if (fwrite(rx_data, 1, to_write, fo) != to_write) {
+            if (fo && fwrite(rx_data, 1, to_write, fo) != to_write) {
                 perror("fwrite");
-#ifdef USE_LITEPCIE
-                if (!header)
-                    (void)m2sdr_release_buffer(dev, M2SDR_RX, (void *)rx_data);
-#endif
                 break;
             }
+
+            total_len += to_write;
+            total_buffers++;
         }
-#ifdef USE_LITEPCIE
-        if (!header)
-            (void)m2sdr_release_buffer(dev, M2SDR_RX, (void *)rx_data);
-#endif
-        total_len += to_write;
-        total_buffers++;
+
         int64_t duration = get_time_ms() - last_time;
         if (!quiet && duration > 200) {
             double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
@@ -360,9 +451,6 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         }
     }
 
-    if (fo && fo != stdout)
-        fclose(fo);
-
     if (sigmf_enable) {
         uint64_t total_samples = sample_size ? (uint64_t)(total_len / sample_size) : 0;
 
@@ -382,7 +470,19 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
         }
     }
 
-    m2sdr_close(dev);
+    exit_status = 0;
+
+cleanup:
+#ifdef USE_LITEPCIE
+    if (use_pcie_dma)
+        litepcie_dma_cleanup(&dma);
+#endif
+    if (fo && fo != stdout)
+        fclose(fo);
+    if (dev)
+        m2sdr_close(dev);
+    if (exit_status != 0)
+        exit(1);
 }
 
 int main(int argc, char **argv)
