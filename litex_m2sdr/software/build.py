@@ -27,6 +27,14 @@ def build_driver(path, cmake_options=None, prefix="/usr", do_install=False):
 def fetch_cimgui(base_dir):
     run_command(["./fetch_cimgui.py"], cwd=base_dir)
 
+
+def install_user_software(base_dir, prefix):
+    user_dir = os.path.join(base_dir, "user")
+    run_command(["make", f"PREFIX={prefix}", "install"], cwd=user_dir)
+    run_command(["make", f"PREFIX={prefix}", "install_dev"], cwd=user_dir)
+    if prefix == "/usr":
+        run_command(["ldconfig"])
+
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
@@ -67,6 +75,8 @@ def main():
 
     # Utilities compilation.
     run_command(["make", "clean", f"INTERFACE={interface}", "all"], cwd=os.path.join(base_dir, "user"))
+    if do_install:
+        install_user_software(base_dir, args.prefix)
 
     # SoapySDR Driver compilation.
     build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install)
