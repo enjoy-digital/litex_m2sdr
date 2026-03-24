@@ -841,11 +841,11 @@ class BaseSoC(SoCMini):
         # JTAG TCK and Async Crossing to sys.
         if with_jtagbone:
             platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
-            add_guarded_async_clock_groups("*crg_clkout0*", "jtag_clk")
+            add_guarded_async_clock_groups("*crg*clkout0*", "jtag_clk")
 
         # Async Crossings to External RF/PPS Clocks (CDC-only paths).
         for ext_clk in ["clk100", "si5351_clk0", "si5351_clk1", "sync_clk_in", "rfic_clk", "ad9361_rfic_rx_clk_p"]:
-            add_guarded_async_clock_groups("*crg_clkout0*", ext_clk)
+            add_guarded_async_clock_groups("*crg*clkout0*", ext_clk)
 
         # External Async Inputs (CDC/UART/reset/status paths only).
         platform.add_platform_command(
@@ -882,7 +882,7 @@ class BaseSoC(SoCMini):
         # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
         if with_pcie:
             false_paths = [
-                ("*crg_clkout0*",  "*s7pciephy_clkout3*"),
+                ("*crg*clkout0*",  "*s7pciephy_clkout3*"),
                 ("*s7pciephy_clkout0*", "*s7pciephy_clkout1*"),
             ]
             for clk0, clk1 in false_paths:
