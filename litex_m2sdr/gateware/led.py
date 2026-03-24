@@ -28,7 +28,7 @@ STATUS_LED_ACTIVITY_LEVEL        = 208
 STATUS_LED_DUPLEX_LEVEL          = 255
 STATUS_LED_PPS_LEVEL             = 224
 
-# Led Tick -----------------------------------------------------------------------------------------
+# LED Tick -----------------------------------------------------------------------------------------
 
 class LedTick(LiteXModule):
     def __init__(self, sys_clk_freq, period_s=STATUS_LED_TICK_PERIOD_S):
@@ -46,7 +46,7 @@ class LedTick(LiteXModule):
             count.eq(count + 1)
         )
 
-# Led Breather -------------------------------------------------------------------------------------
+# LED Breather -------------------------------------------------------------------------------------
 
 class LedBreather(LiteXModule):
     def __init__(self, width=STATUS_LED_BREATH_BITS, reset=STATUS_LED_BREATH_RESET):
@@ -76,7 +76,7 @@ class LedBreather(LiteXModule):
             )
         )
 
-# Led Double Pulse ---------------------------------------------------------------------------------
+# LED Double Pulse ---------------------------------------------------------------------------------
 
 class LedDoublePulse(LiteXModule):
     def __init__(self,
@@ -103,7 +103,7 @@ class LedDoublePulse(LiteXModule):
             )
         )
 
-# Led Event Hold -----------------------------------------------------------------------------------
+# LED Event Hold -----------------------------------------------------------------------------------
 
 class LedEventHold(LiteXModule):
     def __init__(self, hold_ticks):
@@ -132,7 +132,7 @@ class LedEventHold(LiteXModule):
             )
         ]
 
-# Led Activity Blink -------------------------------------------------------------------------------
+# LED Activity Blink -------------------------------------------------------------------------------
 
 class LedActivityBlink(LiteXModule):
     def __init__(self, period_ticks=STATUS_LED_ACTIVITY_PERIOD_TICKS, width_ticks=STATUS_LED_ACTIVITY_WIDTH_TICKS):
@@ -177,7 +177,7 @@ class LedActivityBlink(LiteXModule):
             )
         ]
 
-# Led PWM ------------------------------------------------------------------------------------------
+# LED PWM ------------------------------------------------------------------------------------------
 
 class LedPwm(LiteXModule):
     def __init__(self, width=8):
@@ -192,8 +192,11 @@ class LedPwm(LiteXModule):
         self.sync += count.eq(count + 1)
         self.comb += output.eq(count < level)
 
-# Status Led ---------------------------------------------------------------------------------------
+# Status LED ---------------------------------------------------------------------------------------
 
+# One physical LED is used to expose coarse bring-up state and momentary runtime
+# activity. The composition is intentionally simple: a base animation for system
+# readiness, a PPS accent, then TX/RX accents on top.
 class StatusLed(LiteXModule):
     def __init__(self, sys_clk_freq):
         # IOs.
@@ -207,13 +210,18 @@ class StatusLed(LiteXModule):
         self.eth_present  = eth_present  = Signal() # Ethernet feature compiled in.
         self.eth_link_up  = eth_link_up  = Signal() # Ethernet link is trained.
 
-        self.tx_activity = tx_activity = Signal() # Transmit activity pulse.
-        self.rx_activity = rx_activity = Signal() # Receive activity pulse.
+        self.tx_activity = tx_activity = Signal() # Generic transmit activity pulse (RF and/or Ethernet).
+        self.rx_activity = rx_activity = Signal() # Generic receive activity pulse (RF and/or Ethernet).
         self.pps_pulse   = pps_pulse   = Signal() # PPS accent pulse.
 
         self.output = output = Signal()
         self.level  = level  = Signal(8)
 
+        # Software-visible override path.
+        #
+        # By default the LED follows live design signals. Manual mode swaps those
+        # inputs for CSR-controlled values so the effect can be exercised from a
+        # remote script without rebuilding the design.
         self.control = control = CSRStorage(fields=[
             CSRField("manual_enable", size=1, offset=0,  description="Override LED inputs from software instead of the design."),
             CSRField("time_running",  size=1, offset=1,  description="Drive the time_running input when manual mode is enabled."),
@@ -223,17 +231,19 @@ class StatusLed(LiteXModule):
             CSRField("dma_synced",    size=1, offset=5,  description="Drive the dma_synced input when manual mode is enabled."),
             CSRField("eth_present",   size=1, offset=6,  description="Drive the eth_present input when manual mode is enabled."),
             CSRField("eth_link_up",   size=1, offset=7,  description="Drive the eth_link_up input when manual mode is enabled."),
-            CSRField("tx_activity",   size=1, offset=8,  description="Continuously assert transmit activity when manual mode is enabled."),
-            CSRField("rx_activity",   size=1, offset=9,  description="Continuously assert receive activity when manual mode is enabled."),
+            CSRField("tx_activity",   size=1, offset=8,  description="Continuously assert generic transmit activity when manual mode is enabled."),
+            CSRField("rx_activity",   size=1, offset=9,  description="Continuously assert generic receive activity when manual mode is enabled."),
             CSRField("pps_level",     size=1, offset=10, description="Continuously assert the PPS accent input when manual mode is enabled."),
         ], description="LED control inputs. Leave manual_enable cleared to follow the design.")
 
+        # One-shot triggers used for manual effect testing.
         self.pulse = pulse = CSRStorage(fields=[
-            CSRField("tx_activity", size=1, offset=0, pulse=True, description="Inject a one-shot transmit activity trigger in manual mode."),
-            CSRField("rx_activity", size=1, offset=1, pulse=True, description="Inject a one-shot receive activity trigger in manual mode."),
+            CSRField("tx_activity", size=1, offset=0, pulse=True, description="Inject a one-shot generic transmit activity trigger in manual mode."),
+            CSRField("rx_activity", size=1, offset=1, pulse=True, description="Inject a one-shot generic receive activity trigger in manual mode."),
             CSRField("pps",         size=1, offset=2, pulse=True, description="Inject a one-shot PPS accent trigger in manual mode."),
         ], description="One-shot LED test triggers.")
 
+        # Readback is useful when tuning effect levels over Etherbone/JTAGBone.
         self.status = status = CSRStatus(fields=[
             CSRField("level",  size=8, offset=0, description="Current LED PWM level."),
             CSRField("output", size=1, offset=8, description="Current PWM output state."),
@@ -241,8 +251,10 @@ class StatusLed(LiteXModule):
 
         # # #
 
-        # Input selection.
+        # Input Selection.
         # ----------------
+        # Manual mode selects CSR values. Normal mode follows the live design
+        # signals presented by the surrounding SoC.
         time_running_sel = Signal()
         time_valid_sel   = Signal()
         pcie_present_sel = Signal()
@@ -278,6 +290,8 @@ class StatusLed(LiteXModule):
 
         # Helpers.
         # --------
+        # All effect helpers operate in sys_clk and share a low-rate tick so the
+        # visible animation remains stable when the system clock changes.
         self.tick = tick = LedTick(sys_clk_freq=sys_clk_freq)
         self.breather  = breather  = LedBreather()
         self.heartbeat = heartbeat = LedDoublePulse()
@@ -288,6 +302,10 @@ class StatusLed(LiteXModule):
 
         # State Decode.
         # -------------
+        # The LED exposes three layers of information:
+        # 1) A base transport/system state animation.
+        # 2) A PPS accent.
+        # 3) Generic TX/RX activity accents.
         booting           = Signal()
         transport_present = Signal()
         pcie_ready        = Signal()
@@ -311,12 +329,13 @@ class StatusLed(LiteXModule):
             rx_blink.trigger.eq(rx_activity_sel),
             pps_hold.trigger.eq(pps_pulse_sel),
 
+            # Transport presence and readiness drive the boot/discovery/idle base layer.
             transport_present.eq(pcie_present_sel | eth_present_sel),
-            pcie_ready.eq(     pcie_present_sel & pcie_link_up_sys & dma_synced_sel),
-            eth_ready.eq(      eth_present_sel  & eth_link_up_sys),
+            pcie_ready.eq(pcie_present_sel & pcie_link_up_sys & dma_synced_sel),
+            eth_ready.eq(eth_present_sel  & eth_link_up_sys),
             transport_ready.eq(pcie_ready | eth_ready),
 
-            booting.eq(          ~time_running_sel | ~time_valid_sel),
+            booting.eq(~time_running_sel | ~time_valid_sel),
             waiting_transport.eq(transport_present & ~transport_ready),
         ]
 
