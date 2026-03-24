@@ -72,10 +72,11 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 
 1. [Hardware Availability](#hardware-availability)
 2. [Capabilities Overview](#capabilities-overview)
-3. [PCIe SoC Design](#pcie-soc-design)
-4. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
-5. [Quick Start](#quick-start)
-6. [Contact](#contact)
+3. [M.2 / GPIO Voltage Levels](#m2-gpio-voltage-levels)
+4. [PCIe SoC Design](#pcie-soc-design)
+5. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
+6. [Quick Start](#quick-start)
+7. [Contact](#contact)
 
 [> Hardware Availability
 ------------------------
@@ -132,6 +133,41 @@ The board exposes a single monochrome `user_led`, so the gateware uses it as a l
 - **RF or Ethernet RX/TX activity**: bright accent pulse.
 
 When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
+
+[> M.2 / GPIO Voltage Levels
+----------------------------
+<a id="m2-gpio-voltage-levels"></a>
+
+LiteX-M2SDR does **not** use a single M.2 I/O voltage:
+- FPGA banks **13/14/15/16** are **3.3V**.
+- FPGA banks **34/35** are **1.8V**.
+- The M.2 low-speed sideband signals exposed by the platform (`PPS`, `Synchro_GPIO`, `SMBus`, `PERST#`) are on **3.3V** banks on the SDR side.
+- PCIe lanes and the PCIe reference clock are transceiver signals, not single-ended 1.8V/3.3V GPIOs.
+
+Additional notes:
+- M.2 pin **52** (`CLKREQ#`) is pulled up to `3V3_PCIe` and is **not** routed to the FPGA.
+- M.2 pin **10** (`LED#`) is **not connected** on the FPGA side.
+- The dedicated FPGA JTAG/config pins and the Acorn JTAG header are separate **3.3V** JTAG paths.
+
+| Signal | Connector Location | FPGA Pin | Bank | Voltage On SDR Side | Notes |
+|--------|--------------------|----------|------|---------------------|-------|
+| `GPIO0` | `TP1` | `E22` | 16 | 3.3V | General-purpose test point (`FPGA_GPIO0`). |
+| `GPIO1` | `TP2` | `D22` | 16 | 3.3V | General-purpose test point (`FPGA_GPIO1`). |
+| `PPS_IN` | M.2 pin 22 (`NC22`) | `K18` | 15 | 3.3V | Routed to the FPGA. |
+| `PPS_OUT` | M.2 pin 24 (`NC24`) | `Y18` | 14 | 3.3V | Routed to the FPGA. |
+| `Synchro_GPIO1` | M.2 pin 28 (`NC28`) | `A19` | 16 | 3.3V | Routed to the FPGA. |
+| `Synchro_GPIO2` | M.2 pin 30 (`NC30`) | `A18` | 16 | 3.3V | Routed to the FPGA. |
+| `Synchro_GPIO3` | M.2 pin 32 (`NC32`) | `A21` | 16 | 3.3V | Routed to the FPGA. |
+| `Synchro_GPIO4` | M.2 pin 34 (`NC34`) | `A20` | 16 | 3.3V | Routed to the FPGA. |
+| `Synchro_GPIO5` | M.2 pin 36 (`NC36`) | `B20` | 16 | 3.3V | Routed to the FPGA. |
+| `SMB_CLK` | M.2 pin 40 | `A13` | 16 | 3.3V | Connected through `R82`, not mounted by default. |
+| `SMB_DATA` | M.2 pin 42 | `A14` | 16 | 3.3V | Connected through `R83`, not mounted by default. |
+| `PERST#` | M.2 pin 50 | `A15` | 16 | 3.3V | Routed to the FPGA. |
+| `CLKREQ#` | M.2 pin 52 | - | - | 3.3V | Pulled up to `3V3_PCIe` with `R59`; not routed to the FPGA. |
+| `PEWAKE#` | M.2 pin 54 | `B16` | 16 | 3.3V | Optional path through `R88`, not mounted by default. |
+| `SUSCLK` | M.2 pin 68 | `B17` | 16 | 3.3V | Routed through `R84` (0R). |
+| `PEDET` / `PRESENT` | M.2 pin 69 | `A16` | 16 | 3.3V | Routed through `R85` (0R). |
+| `LED#` | M.2 pin 10 | - | - | Host-defined sideband | Not connected on LiteX-M2SDR. |
 
 [> PCIe SoC Design
 ------------------
