@@ -340,16 +340,21 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
 /* Apply TX attenuation and per-channel RX gains. */
 static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
+    M2SDR_LOGF("Setting TX Attenuation to %ld dB.\n", (long)cfg->tx_att);
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(cfg->tx_att * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    if (!cfg->program_rx_gains) {
+        M2SDR_LOGF("Leaving RX gain mode and gains at AD9361 defaults.\n");
+        return M2SDR_ERR_OK;
+    }
+
     /* The AD9361 only accepts explicit RX gain writes in manual gain-control
-     * mode. Ensure both channels are in MGC before applying the requested
-     * gains so the standalone m2sdr_rf flow remains compatible. */
+     * mode. Only switch to MGC when the caller explicitly requested manual RX
+     * gains through the standalone RF configuration interface. */
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
-    M2SDR_LOGF("Setting TX Attenuation to %ld dB.\n", (long)cfg->tx_att);
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(cfg->tx_att * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
@@ -489,6 +494,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->tx_att            = DEFAULT_TX_ATT;
     cfg->rx_gain1          = DEFAULT_RX_GAIN;
     cfg->rx_gain2          = DEFAULT_RX_GAIN;
+    cfg->program_rx_gains  = false;
     cfg->loopback          = DEFAULT_LOOPBACK;
     cfg->bist_tone_freq    = DEFAULT_BIST_TONE_FREQ;
     cfg->bist_tx_tone      = false;

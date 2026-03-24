@@ -133,7 +133,7 @@ m2sdr_rf [options] cmd [args...]
 - `--tx-freq freq` (default=`2400000000`)
 - `--rx-freq freq` (default=`2400000000`)
 - `--tx-att att` (default=`20` dB, preferred positive TX attenuation)
-- `--rx-gain gain` (default=`0` dB)
+- `--rx-gain gain` force manual RX gain mode and apply the requested gain
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)
 - `--format sc16|sc8`

@@ -58,9 +58,9 @@ static void help(void)
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
            "      --tx-att DB        Set TX attenuation in dB (default: %d).\n"
-           "      --rx-gain DB       Set both RX gains in dB (default: %d).\n"
-           "      --rx-gain1 DB      Set RX gain 1 in dB (default: %d).\n"
-           "      --rx-gain2 DB      Set RX gain 2 in dB (default: %d).\n"
+           "      --rx-gain DB       Set both RX gains in dB and force manual gain mode.\n"
+           "      --rx-gain1 DB      Set RX gain 1 in dB and force manual gain mode.\n"
+           "      --rx-gain2 DB      Set RX gain 2 in dB and force manual gain mode.\n"
            "      --loopback N       Set internal loopback (default: %d).\n"
            "      --bist-tx-tone     Run TX tone test.\n"
            "      --bist-rx-tone     Run RX tone test.\n"
@@ -72,9 +72,6 @@ static void help(void)
            DEFAULT_TX_FREQ,
            DEFAULT_RX_FREQ,
            DEFAULT_TX_ATT,
-           DEFAULT_RX_GAIN,
-           DEFAULT_RX_GAIN,
-           DEFAULT_RX_GAIN,
            DEFAULT_LOOPBACK,
            DEFAULT_BIST_TONE_FREQ);
     exit(1);
@@ -226,14 +223,17 @@ int main(int argc, char **argv)
             if (parse_i64_option("RX gain", optarg, &cfg.rx_gain1) != 0)
                 return 1;
             cfg.rx_gain2 = cfg.rx_gain1;
+            cfg.program_rx_gains = true;
             break;
         case 13:
             if (parse_i64_option("RX gain 1", optarg, &cfg.rx_gain1) != 0)
                 return 1;
+            cfg.program_rx_gains = true;
             break;
         case 14:
             if (parse_i64_option("RX gain 2", optarg, &cfg.rx_gain2) != 0)
                 return 1;
+            cfg.program_rx_gains = true;
             break;
         case 15:
             cfg.loopback = (uint8_t)strtoul(optarg, NULL, 0);
@@ -264,10 +264,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (m2sdr_apply_config(dev, &cfg) != 0) {
-        fprintf(stderr, "m2sdr_apply_config failed\n");
-        m2sdr_close(dev);
-        return 1;
+    {
+        int rc = m2sdr_apply_config(dev, &cfg);
+        if (rc != 0) {
+            fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+            m2sdr_close(dev);
+            return 1;
+        }
     }
 
     m2sdr_close(dev);
