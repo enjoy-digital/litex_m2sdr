@@ -89,6 +89,9 @@ m2sdr_util [options] cmd [args...]
   Check scratch register for basic read/write.
 - **clk-test**
   Measure on-board clock frequencies.
+- **led-status**, **led-control**, **led-pulse**, **led-release**
+  Inspect or override the user LED CSR block from the host side.
+  `led-control` and `led-pulse` take raw bitmasks from `software/kernel/csr.h`.
 - **vcxo-test**
   Test/characterize the VCXO output frequency.
 - **si5351-init**, **si5351-dump**, **si5351-read**, **si5351-write**
@@ -105,6 +108,9 @@ Example usage:
 ./m2sdr_util info
 ./m2sdr_util dma-test
 ./m2sdr_util scratch-test
+./m2sdr_util led-status
+./m2sdr_util led-control 0x407
+./m2sdr_util led-pulse 0x4
 ./m2sdr_util flash-read backup.bin 0x100000
 ~~~~
 

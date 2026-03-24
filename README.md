@@ -122,6 +122,18 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
 | GPIO                            | ✅                           | ✅                           | (always included)                             |
 
+### User LED Behavior
+
+The board exposes a single monochrome `user_led`, so the gateware uses it as a layered status indicator rather than a simple on/off flag:
+
+- **Not ready yet**: double-heartbeat while time is still invalid or while an enabled PCIe/Ethernet transport is not ready.
+  PCIe becomes ready when the link is up and DMA/PPS synchronization is established; Ethernet becomes ready when the link is up.
+- **Idle / ready state**: gentle low-amplitude breathing.
+- **PPS event**: short bright accent pulse over the base animation.
+- **RF or Ethernet RX/TX activity**: bright accent pulse.
+
+When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
+
 [> M.2 / GPIO Voltage Levels
 ----------------------------
 <a id="m2-gpio-voltage-levels"></a>

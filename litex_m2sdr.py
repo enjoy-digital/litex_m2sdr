@@ -25,7 +25,6 @@ from litex.soc.integration.soc      import SoCBusHandler
 from litex.soc.integration.soc      import SoCRegion
 
 from litex.soc.cores.clock     import *
-from litex.soc.cores.led       import LedChaser
 from litex.soc.cores.icap      import ICAP
 from litex.soc.cores.xadc      import XADC
 from litex.soc.cores.dna       import DNA
@@ -57,6 +56,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
 from litex_m2sdr.gateware.header      import TXRXHeader
+from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
@@ -342,12 +342,6 @@ class BaseSoC(SoCMini):
 
         if with_jtagbone:
             self.add_jtagbone()
-
-        # Leds -------------------------------------------------------------------------------------
-
-        led_pad = platform.request("user_led")
-        self.leds = LedChaser(pads=Signal(), sys_clk_freq=sys_clk_freq)
-        self.sync += led_pad.eq(self.leds.pads)
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -657,6 +651,26 @@ class BaseSoC(SoCMini):
         if with_sata:
             self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
 
+        # Leds -------------------------------------------------------------------------------------
+
+        led_pad = platform.request("user_led")
+        self.leds = StatusLed(sys_clk_freq=sys_clk_freq)
+        self.comb += [
+            self.leds.time_running.eq( self.time_gen.enable),
+            self.leds.time_valid.eq(   self.time_gen.time != 0),
+            self.leds.pcie_present.eq( int(with_pcie)),
+            self.leds.pcie_link_up.eq( self.pcie_phy._link_status.fields.status if with_pcie else 0),
+            self.leds.dma_synced.eq(   self.pcie_dma0.synchronizer.synced if with_pcie else 0),
+            self.leds.eth_present.eq(  int(with_eth)),
+            self.leds.eth_link_up.eq(  self.eth_phy.link_up if with_eth else 0),
+            self.leds.tx_activity.eq((self.ad9361.sink.valid   & self.ad9361.sink.ready) |
+                                     (self.eth_rx_streamer.source.valid & self.eth_rx_streamer.source.ready if with_eth else 0)),
+            self.leds.rx_activity.eq((self.ad9361.source.valid & self.ad9361.source.ready) |
+                                     (self.eth_tx_streamer.source.valid & self.eth_tx_streamer.source.ready if with_eth else 0)),
+            self.leds.pps_pulse.eq(    self.pps_gen.pps_pulse),
+            led_pad.eq(                self.leds.output),
+        ]
+
         # GPIO -------------------------------------------------------------------------------------
 
         if with_gpio:
@@ -802,24 +816,36 @@ class BaseSoC(SoCMini):
         # Timing Constraints -----------------------------------------------------------------------
         # Explicit root/board clock constraints are handled in Platform.do_finalize().
 
-        # JTAG TCK and Async Crossing to sys.
-        if with_jtagbone:
-            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+        def add_guarded_async_clock_groups(clk0, clk1):
+            clk0 = "{{" + clk0 + "}}"
+            clk1 = "{{" + clk1 + "}}"
             platform.toolchain.pre_placement_commands += [
-                "set _sys_clk  [get_clocks -quiet *crg_clkout0]",
-                "set _jtag_clk [get_clocks -quiet jtag_clk]",
-                "if {{[llength $_sys_clk] && [llength $_jtag_clk]}} {{",
-                "    set_clock_groups -asynchronous -group $_sys_clk -group $_jtag_clk",
+                f"set _clk0 [get_clocks -quiet {clk0}]",
+                f"set _clk1 [get_clocks -quiet {clk1}]",
+                "if {{[llength $_clk0] && [llength $_clk1]}} {{",
+                "    set_clock_groups -asynchronous -group $_clk0 -group $_clk1",
                 "}}",
             ]
 
+        def add_guarded_false_path(clk0, clk1):
+            clk0 = "{{" + clk0 + "}}"
+            clk1 = "{{" + clk1 + "}}"
+            platform.toolchain.pre_placement_commands += [
+                f"set _clk0 [get_clocks -quiet {clk0}]",
+                f"set _clk1 [get_clocks -quiet {clk1}]",
+                "if {{[llength $_clk0] && [llength $_clk1]}} {{",
+                "    set_false_path -from $_clk0 -to $_clk1",
+                "}}",
+            ]
+
+        # JTAG TCK and Async Crossing to sys.
+        if with_jtagbone:
+            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+            add_guarded_async_clock_groups("*crg*clkout0*", "jtag_clk")
+
         # Async Crossings to External RF/PPS Clocks (CDC-only paths).
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "clk100")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk0")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk1")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "sync_clk_in")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "rfic_clk")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "ad9361_rfic_rx_clk_p")
+        for ext_clk in ["clk100", "si5351_clk0", "si5351_clk1", "sync_clk_in", "rfic_clk", "ad9361_rfic_rx_clk_p"]:
+            add_guarded_async_clock_groups("*crg*clkout0*", ext_clk)
 
         # External Async Inputs (CDC/UART/reset/status paths only).
         platform.add_platform_command(
@@ -834,6 +860,10 @@ class BaseSoC(SoCMini):
             "ad9361_spi_miso flash_miso"
             "}}]"
         )
+
+        # SI5351 10MHz clock select only feeds the external ssen_clkin DDR output, so a
+        # non-dedicated BUFG cascade route is acceptable here.
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -quiet clk10_clk]")
 
         # Low-Speed Peripheral Control Outputs (registered/static outputs, no external timing budget modeled).
         platform.add_platform_command(
@@ -852,12 +882,12 @@ class BaseSoC(SoCMini):
         # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
         if with_pcie:
             false_paths = [
-                ("{{*crg_clkout0}}",      "{{*s7pciephy_clkout3}}"),
-                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}"),
+                ("*crg*clkout0*",  "*s7pciephy_clkout3*"),
+                ("*s7pciephy_clkout0*", "*s7pciephy_clkout1*"),
             ]
             for clk0, clk1 in false_paths:
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
+                add_guarded_false_path(clk0, clk1)
+                add_guarded_false_path(clk1, clk0)
 
         # Ethernet transceiver clocks.
         if with_eth:
@@ -1148,7 +1178,7 @@ def main():
             r += f"_white_rabbit"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="test/csr.csv")
+    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
