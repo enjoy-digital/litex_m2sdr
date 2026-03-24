@@ -8,6 +8,7 @@ from migen import *
 from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
+from litex.soc.interconnect.csr import *
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -300,4 +301,62 @@ class StatusLed(LiteXModule):
 
             pwm.level.eq(level),
             output.eq(  pwm.output),
+        ]
+
+
+class StatusLedTester(LiteXModule):
+    def __init__(self, sys_clk_freq):
+        self.output = output = Signal()
+        self.level  = level  = Signal(8)
+
+        # # #
+
+        self.status_led = status_led = StatusLed(sys_clk_freq=sys_clk_freq)
+
+        self.control = CSRStorage(fields=[
+            CSRField("time_running",    size=1, offset=0, description="Drive the time_running input."),
+            CSRField("time_valid",      size=1, offset=1, description="Drive the time_valid input."),
+            CSRField("pcie_present",    size=1, offset=2, description="Drive the pcie_present input."),
+            CSRField("pcie_link_up",    size=1, offset=3, description="Drive the pcie_link_up input."),
+            CSRField("dma_synced",      size=1, offset=4, description="Drive the dma_synced input."),
+            CSRField("eth_present",     size=1, offset=5, description="Drive the eth_present input."),
+            CSRField("eth_link_up",     size=1, offset=6, description="Drive the eth_link_up input."),
+            CSRField("tx_activity",     size=1, offset=7, description="Continuously assert TX activity."),
+            CSRField("rx_activity",     size=1, offset=8, description="Continuously assert RX activity."),
+            CSRField("eth_tx_activity", size=1, offset=9, description="Continuously assert Ethernet TX activity."),
+            CSRField("eth_rx_activity", size=1, offset=10, description="Continuously assert Ethernet RX activity."),
+            CSRField("pps_level",       size=1, offset=11, description="Continuously assert the PPS accent input."),
+        ], description="Static LED test control inputs.")
+
+        self.pulse = CSRStorage(fields=[
+            CSRField("tx_activity",     size=1, offset=0, pulse=True, description="Inject a one-shot TX activity trigger."),
+            CSRField("rx_activity",     size=1, offset=1, pulse=True, description="Inject a one-shot RX activity trigger."),
+            CSRField("eth_tx_activity", size=1, offset=2, pulse=True, description="Inject a one-shot Ethernet TX activity trigger."),
+            CSRField("eth_rx_activity", size=1, offset=3, pulse=True, description="Inject a one-shot Ethernet RX activity trigger."),
+            CSRField("pps",             size=1, offset=4, pulse=True, description="Inject a one-shot PPS accent trigger."),
+        ], description="One-shot LED test triggers.")
+
+        self.status = CSRStatus(fields=[
+            CSRField("level",  size=8, offset=0, description="Current LED PWM level."),
+            CSRField("output", size=1, offset=8, description="Current PWM output state."),
+        ], description="Observed LED output status.")
+
+        self.comb += [
+            status_led.time_running.eq(   self.control.fields.time_running),
+            status_led.time_valid.eq(     self.control.fields.time_valid),
+            status_led.pcie_present.eq(   self.control.fields.pcie_present),
+            status_led.pcie_link_up.eq(   self.control.fields.pcie_link_up),
+            status_led.dma_synced.eq(     self.control.fields.dma_synced),
+            status_led.eth_present.eq(    self.control.fields.eth_present),
+            status_led.eth_link_up.eq(    self.control.fields.eth_link_up),
+            status_led.tx_activity.eq(    self.control.fields.tx_activity     | self.pulse.fields.tx_activity),
+            status_led.rx_activity.eq(    self.control.fields.rx_activity     | self.pulse.fields.rx_activity),
+            status_led.eth_tx_activity.eq(self.control.fields.eth_tx_activity | self.pulse.fields.eth_tx_activity),
+            status_led.eth_rx_activity.eq(self.control.fields.eth_rx_activity | self.pulse.fields.eth_rx_activity),
+            status_led.pps_pulse.eq(      self.control.fields.pps_level       | self.pulse.fields.pps),
+
+            level.eq(status_led.level),
+            output.eq(status_led.output),
+            self.status.fields.level.eq(level),
+            self.status.fields.output.eq(output),
         ]
