@@ -816,24 +816,36 @@ class BaseSoC(SoCMini):
         # Timing Constraints -----------------------------------------------------------------------
         # Explicit root/board clock constraints are handled in Platform.do_finalize().
 
-        # JTAG TCK and Async Crossing to sys.
-        if with_jtagbone:
-            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+        def add_guarded_async_clock_groups(clk0, clk1):
+            clk0 = "{{" + clk0 + "}}"
+            clk1 = "{{" + clk1 + "}}"
             platform.toolchain.pre_placement_commands += [
-                "set _sys_clk  [get_clocks -quiet *crg_clkout0]",
-                "set _jtag_clk [get_clocks -quiet jtag_clk]",
-                "if {{[llength $_sys_clk] && [llength $_jtag_clk]}} {{",
-                "    set_clock_groups -asynchronous -group $_sys_clk -group $_jtag_clk",
+                f"set _clk0 [get_clocks -quiet {clk0}]",
+                f"set _clk1 [get_clocks -quiet {clk1}]",
+                "if {{[llength $_clk0] && [llength $_clk1]}} {{",
+                "    set_clock_groups -asynchronous -group $_clk0 -group $_clk1",
                 "}}",
             ]
 
+        def add_guarded_false_path(clk0, clk1):
+            clk0 = "{{" + clk0 + "}}"
+            clk1 = "{{" + clk1 + "}}"
+            platform.toolchain.pre_placement_commands += [
+                f"set _clk0 [get_clocks -quiet {clk0}]",
+                f"set _clk1 [get_clocks -quiet {clk1}]",
+                "if {{[llength $_clk0] && [llength $_clk1]}} {{",
+                "    set_false_path -from $_clk0 -to $_clk1",
+                "}}",
+            ]
+
+        # JTAG TCK and Async Crossing to sys.
+        if with_jtagbone:
+            platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
+            add_guarded_async_clock_groups("*crg_clkout0*", "jtag_clk")
+
         # Async Crossings to External RF/PPS Clocks (CDC-only paths).
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "clk100")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk0")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "si5351_clk1")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "sync_clk_in")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "rfic_clk")
-        platform.add_false_path_constraints_by_name("*crg_clkout0", "ad9361_rfic_rx_clk_p")
+        for ext_clk in ["clk100", "si5351_clk0", "si5351_clk1", "sync_clk_in", "rfic_clk", "ad9361_rfic_rx_clk_p"]:
+            add_guarded_async_clock_groups("*crg_clkout0*", ext_clk)
 
         # External Async Inputs (CDC/UART/reset/status paths only).
         platform.add_platform_command(
@@ -848,6 +860,10 @@ class BaseSoC(SoCMini):
             "ad9361_spi_miso flash_miso"
             "}}]"
         )
+
+        # SI5351 10MHz clock select only feeds the external ssen_clkin DDR output, so a
+        # non-dedicated BUFG cascade route is acceptable here.
+        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -quiet clk10_clk]")
 
         # Low-Speed Peripheral Control Outputs (registered/static outputs, no external timing budget modeled).
         platform.add_platform_command(
@@ -866,12 +882,12 @@ class BaseSoC(SoCMini):
         # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
         if with_pcie:
             false_paths = [
-                ("{{*crg_clkout0}}",      "{{*s7pciephy_clkout3}}"),
-                ("{{*s7pciephy_clkout0}}", "{{*s7pciephy_clkout1}}"),
+                ("*crg_clkout0*",  "*s7pciephy_clkout3*"),
+                ("*s7pciephy_clkout0*", "*s7pciephy_clkout1*"),
             ]
             for clk0, clk1 in false_paths:
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk0}] -to [get_clocks {clk1}]")
-                platform.toolchain.pre_placement_commands.append(f"set_false_path -from [get_clocks {clk1}] -to [get_clocks {clk0}]")
+                add_guarded_false_path(clk0, clk1)
+                add_guarded_false_path(clk1, clk0)
 
         # Ethernet transceiver clocks.
         if with_eth:
