@@ -28,8 +28,7 @@ STATUS_LED_ACTIVITY_LEVEL        = 208
 STATUS_LED_DUPLEX_LEVEL          = 255
 STATUS_LED_PPS_LEVEL             = 224
 
-# Helpers ------------------------------------------------------------------------------------------
-
+# Led Tick -----------------------------------------------------------------------------------------
 
 class LedTick(LiteXModule):
     def __init__(self, sys_clk_freq, period_s=STATUS_LED_TICK_PERIOD_S):
@@ -47,6 +46,7 @@ class LedTick(LiteXModule):
             count.eq(count + 1)
         )
 
+# Led Breather -------------------------------------------------------------------------------------
 
 class LedBreather(LiteXModule):
     def __init__(self, width=STATUS_LED_BREATH_BITS, reset=STATUS_LED_BREATH_RESET):
@@ -76,6 +76,7 @@ class LedBreather(LiteXModule):
             )
         )
 
+# Led Double Pulse ---------------------------------------------------------------------------------
 
 class LedDoublePulse(LiteXModule):
     def __init__(self,
@@ -102,6 +103,7 @@ class LedDoublePulse(LiteXModule):
             )
         )
 
+# Led Event Hold -----------------------------------------------------------------------------------
 
 class LedEventHold(LiteXModule):
     def __init__(self, hold_ticks):
@@ -130,6 +132,7 @@ class LedEventHold(LiteXModule):
             )
         ]
 
+# Led Activity Blink -------------------------------------------------------------------------------
 
 class LedActivityBlink(LiteXModule):
     def __init__(self, period_ticks=STATUS_LED_ACTIVITY_PERIOD_TICKS, width_ticks=STATUS_LED_ACTIVITY_WIDTH_TICKS):
@@ -174,6 +177,7 @@ class LedActivityBlink(LiteXModule):
             )
         ]
 
+# Led PWM ------------------------------------------------------------------------------------------
 
 class LedPwm(LiteXModule):
     def __init__(self, width=8):
@@ -190,7 +194,6 @@ class LedPwm(LiteXModule):
 
 # Status Led ---------------------------------------------------------------------------------------
 
-
 class StatusLed(LiteXModule):
     def __init__(self, sys_clk_freq):
         # IOs.
@@ -204,37 +207,31 @@ class StatusLed(LiteXModule):
         self.eth_present  = eth_present  = Signal() # Ethernet feature compiled in.
         self.eth_link_up  = eth_link_up  = Signal() # Ethernet link is trained.
 
-        self.tx_activity     = tx_activity     = Signal() # RF transmit activity pulse.
-        self.rx_activity     = rx_activity     = Signal() # RF receive activity pulse.
-        self.eth_tx_activity = eth_tx_activity = Signal() # Ethernet transmit activity pulse.
-        self.eth_rx_activity = eth_rx_activity = Signal() # Ethernet receive activity pulse.
-        self.pps_pulse       = pps_pulse       = Signal() # PPS accent pulse.
+        self.tx_activity = tx_activity = Signal() # Transmit activity pulse.
+        self.rx_activity = rx_activity = Signal() # Receive activity pulse.
+        self.pps_pulse   = pps_pulse   = Signal() # PPS accent pulse.
 
         self.output = output = Signal()
         self.level  = level  = Signal(8)
 
         self.control = control = CSRStorage(fields=[
-            CSRField("manual_enable",   size=1, offset=0,  description="Override LED inputs from software instead of the design."),
-            CSRField("time_running",    size=1, offset=1,  description="Drive the time_running input when manual mode is enabled."),
-            CSRField("time_valid",      size=1, offset=2,  description="Drive the time_valid input when manual mode is enabled."),
-            CSRField("pcie_present",    size=1, offset=3,  description="Drive the pcie_present input when manual mode is enabled."),
-            CSRField("pcie_link_up",    size=1, offset=4,  description="Drive the pcie_link_up input when manual mode is enabled."),
-            CSRField("dma_synced",      size=1, offset=5,  description="Drive the dma_synced input when manual mode is enabled."),
-            CSRField("eth_present",     size=1, offset=6,  description="Drive the eth_present input when manual mode is enabled."),
-            CSRField("eth_link_up",     size=1, offset=7,  description="Drive the eth_link_up input when manual mode is enabled."),
-            CSRField("tx_activity",     size=1, offset=8,  description="Continuously assert TX activity when manual mode is enabled."),
-            CSRField("rx_activity",     size=1, offset=9,  description="Continuously assert RX activity when manual mode is enabled."),
-            CSRField("eth_tx_activity", size=1, offset=10, description="Continuously assert Ethernet TX activity when manual mode is enabled."),
-            CSRField("eth_rx_activity", size=1, offset=11, description="Continuously assert Ethernet RX activity when manual mode is enabled."),
-            CSRField("pps_level",       size=1, offset=12, description="Continuously assert the PPS accent input when manual mode is enabled."),
+            CSRField("manual_enable", size=1, offset=0,  description="Override LED inputs from software instead of the design."),
+            CSRField("time_running",  size=1, offset=1,  description="Drive the time_running input when manual mode is enabled."),
+            CSRField("time_valid",    size=1, offset=2,  description="Drive the time_valid input when manual mode is enabled."),
+            CSRField("pcie_present",  size=1, offset=3,  description="Drive the pcie_present input when manual mode is enabled."),
+            CSRField("pcie_link_up",  size=1, offset=4,  description="Drive the pcie_link_up input when manual mode is enabled."),
+            CSRField("dma_synced",    size=1, offset=5,  description="Drive the dma_synced input when manual mode is enabled."),
+            CSRField("eth_present",   size=1, offset=6,  description="Drive the eth_present input when manual mode is enabled."),
+            CSRField("eth_link_up",   size=1, offset=7,  description="Drive the eth_link_up input when manual mode is enabled."),
+            CSRField("tx_activity",   size=1, offset=8,  description="Continuously assert transmit activity when manual mode is enabled."),
+            CSRField("rx_activity",   size=1, offset=9,  description="Continuously assert receive activity when manual mode is enabled."),
+            CSRField("pps_level",     size=1, offset=10, description="Continuously assert the PPS accent input when manual mode is enabled."),
         ], description="LED control inputs. Leave manual_enable cleared to follow the design.")
 
         self.pulse = pulse = CSRStorage(fields=[
-            CSRField("tx_activity",     size=1, offset=0, pulse=True, description="Inject a one-shot TX activity trigger in manual mode."),
-            CSRField("rx_activity",     size=1, offset=1, pulse=True, description="Inject a one-shot RX activity trigger in manual mode."),
-            CSRField("eth_tx_activity", size=1, offset=2, pulse=True, description="Inject a one-shot Ethernet TX activity trigger in manual mode."),
-            CSRField("eth_rx_activity", size=1, offset=3, pulse=True, description="Inject a one-shot Ethernet RX activity trigger in manual mode."),
-            CSRField("pps",             size=1, offset=4, pulse=True, description="Inject a one-shot PPS accent trigger in manual mode."),
+            CSRField("tx_activity", size=1, offset=0, pulse=True, description="Inject a one-shot transmit activity trigger in manual mode."),
+            CSRField("rx_activity", size=1, offset=1, pulse=True, description="Inject a one-shot receive activity trigger in manual mode."),
+            CSRField("pps",         size=1, offset=2, pulse=True, description="Inject a one-shot PPS accent trigger in manual mode."),
         ], description="One-shot LED test triggers.")
 
         self.status = status = CSRStatus(fields=[
@@ -246,32 +243,28 @@ class StatusLed(LiteXModule):
 
         # Input selection.
         # ----------------
-        time_running_sel    = Signal()
-        time_valid_sel      = Signal()
-        pcie_present_sel    = Signal()
-        pcie_link_up_raw    = Signal()
-        dma_synced_sel      = Signal()
-        eth_present_sel     = Signal()
-        eth_link_up_raw     = Signal()
-        tx_activity_sel     = Signal()
-        rx_activity_sel     = Signal()
-        eth_tx_activity_sel = Signal()
-        eth_rx_activity_sel = Signal()
-        pps_pulse_sel       = Signal()
+        time_running_sel = Signal()
+        time_valid_sel   = Signal()
+        pcie_present_sel = Signal()
+        pcie_link_up_raw = Signal()
+        dma_synced_sel   = Signal()
+        eth_present_sel  = Signal()
+        eth_link_up_raw  = Signal()
+        tx_activity_sel  = Signal()
+        rx_activity_sel  = Signal()
+        pps_pulse_sel    = Signal()
 
         self.comb += [
-            time_running_sel.eq(   Mux(control.fields.manual_enable, control.fields.time_running,    time_running)),
-            time_valid_sel.eq(     Mux(control.fields.manual_enable, control.fields.time_valid,      time_valid)),
-            pcie_present_sel.eq(   Mux(control.fields.manual_enable, control.fields.pcie_present,    pcie_present)),
-            pcie_link_up_raw.eq(   Mux(control.fields.manual_enable, control.fields.pcie_link_up,    pcie_link_up)),
-            dma_synced_sel.eq(     Mux(control.fields.manual_enable, control.fields.dma_synced,      dma_synced)),
-            eth_present_sel.eq(    Mux(control.fields.manual_enable, control.fields.eth_present,     eth_present)),
-            eth_link_up_raw.eq(    Mux(control.fields.manual_enable, control.fields.eth_link_up,     eth_link_up)),
-            tx_activity_sel.eq(    Mux(control.fields.manual_enable, control.fields.tx_activity     | pulse.fields.tx_activity,     tx_activity)),
-            rx_activity_sel.eq(    Mux(control.fields.manual_enable, control.fields.rx_activity     | pulse.fields.rx_activity,     rx_activity)),
-            eth_tx_activity_sel.eq(Mux(control.fields.manual_enable, control.fields.eth_tx_activity | pulse.fields.eth_tx_activity, eth_tx_activity)),
-            eth_rx_activity_sel.eq(Mux(control.fields.manual_enable, control.fields.eth_rx_activity | pulse.fields.eth_rx_activity, eth_rx_activity)),
-            pps_pulse_sel.eq(      Mux(control.fields.manual_enable, control.fields.pps_level       | pulse.fields.pps,             pps_pulse)),
+            time_running_sel.eq(Mux(control.fields.manual_enable, control.fields.time_running, time_running)),
+            time_valid_sel.eq(  Mux(control.fields.manual_enable, control.fields.time_valid,   time_valid)),
+            pcie_present_sel.eq(Mux(control.fields.manual_enable, control.fields.pcie_present, pcie_present)),
+            pcie_link_up_raw.eq(Mux(control.fields.manual_enable, control.fields.pcie_link_up, pcie_link_up)),
+            dma_synced_sel.eq(  Mux(control.fields.manual_enable, control.fields.dma_synced,   dma_synced)),
+            eth_present_sel.eq( Mux(control.fields.manual_enable, control.fields.eth_present,  eth_present)),
+            eth_link_up_raw.eq( Mux(control.fields.manual_enable, control.fields.eth_link_up,  eth_link_up)),
+            tx_activity_sel.eq( Mux(control.fields.manual_enable, control.fields.tx_activity | pulse.fields.tx_activity, tx_activity)),
+            rx_activity_sel.eq( Mux(control.fields.manual_enable, control.fields.rx_activity | pulse.fields.rx_activity, rx_activity)),
+            pps_pulse_sel.eq(   Mux(control.fields.manual_enable, control.fields.pps_level   | pulse.fields.pps,         pps_pulse)),
         ]
 
         # Synchronizers.
@@ -286,12 +279,12 @@ class StatusLed(LiteXModule):
         # Helpers.
         # --------
         self.tick = tick = LedTick(sys_clk_freq=sys_clk_freq)
-        self.breather   = breather   = LedBreather()
-        self.heartbeat  = heartbeat  = LedDoublePulse()
-        self.tx_blink   = tx_blink   = LedActivityBlink()
-        self.rx_blink   = rx_blink   = LedActivityBlink()
-        self.pps_hold   = pps_hold   = LedEventHold(hold_ticks=STATUS_LED_PPS_HOLD_TICKS)
-        self.pwm        = pwm        = LedPwm()
+        self.breather  = breather  = LedBreather()
+        self.heartbeat = heartbeat = LedDoublePulse()
+        self.tx_blink  = tx_blink  = LedActivityBlink()
+        self.rx_blink  = rx_blink  = LedActivityBlink()
+        self.pps_hold  = pps_hold  = LedEventHold(hold_ticks=STATUS_LED_PPS_HOLD_TICKS)
+        self.pwm       = pwm       = LedPwm()
 
         # State Decode.
         # -------------
@@ -314,8 +307,8 @@ class StatusLed(LiteXModule):
             rx_blink.tick.eq( tick.tick),
             pps_hold.tick.eq( tick.tick),
 
-            tx_blink.trigger.eq(tx_activity_sel     | eth_tx_activity_sel),
-            rx_blink.trigger.eq(rx_activity_sel     | eth_rx_activity_sel),
+            tx_blink.trigger.eq(tx_activity_sel),
+            rx_blink.trigger.eq(rx_activity_sel),
             pps_hold.trigger.eq(pps_pulse_sel),
 
             transport_present.eq(pcie_present_sel | eth_present_sel),

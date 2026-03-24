@@ -17,41 +17,39 @@ from litex import RemoteClient
 MANUAL_ENABLE_BIT = 0
 
 CONTROL_BITS = {
-    "time_running"    : 1,
-    "time_valid"      : 2,
-    "pcie_present"    : 3,
-    "pcie_link_up"    : 4,
-    "dma_synced"      : 5,
-    "eth_present"     : 6,
-    "eth_link_up"     : 7,
-    "tx_activity"     : 8,
-    "rx_activity"     : 9,
-    "eth_tx_activity" : 10,
-    "eth_rx_activity" : 11,
-    "pps_level"       : 12,
+    "time_running" : 1,
+    "time_valid"   : 2,
+    "pcie_present" : 3,
+    "pcie_link_up" : 4,
+    "dma_synced"   : 5,
+    "eth_present"  : 6,
+    "eth_link_up"  : 7,
+    "tx_activity"  : 8,
+    "rx_activity"  : 9,
+    "pps_level"    : 10,
 }
 
 CONTROL_ALIASES = {
     "pps"    : "pps_level",
-    "rf-tx"  : "tx_activity",
-    "rf-rx"  : "rx_activity",
     "tx"     : "tx_activity",
     "rx"     : "rx_activity",
-    "eth-tx" : "eth_tx_activity",
-    "eth-rx" : "eth_rx_activity",
+    "rf-tx"  : "tx_activity",
+    "rf-rx"  : "rx_activity",
+    "eth-tx" : "tx_activity",
+    "eth-rx" : "rx_activity",
 }
 
 PULSE_BITS = {
-    "rf-tx"  : 0,
-    "rf-rx"  : 1,
-    "eth-tx" : 2,
-    "eth-rx" : 3,
-    "pps"    : 4,
+    "tx"  : 0,
+    "rx"  : 1,
+    "pps" : 2,
 }
 
 PULSE_ALIASES = {
-    "tx" : "rf-tx",
-    "rx" : "rf-rx",
+    "rf-tx"  : "tx",
+    "rf-rx"  : "rx",
+    "eth-tx" : "tx",
+    "eth-rx" : "rx",
 }
 
 PRESETS = {
@@ -75,36 +73,27 @@ PRESETS = {
         "bits"        : ["time_running", "time_valid", "eth_present", "eth_link_up"],
         "description" : "Ethernet-ready state with link up.",
     },
-    "rf-tx"     : {
+    "tx"        : {
         "bits"        : ["time_running", "time_valid", "tx_activity"],
-        "description" : "RF TX activity accent.",
+        "description" : "Transmit activity accent.",
     },
-    "rf-rx"     : {
+    "rx"        : {
         "bits"        : ["time_running", "time_valid", "rx_activity"],
-        "description" : "RF RX activity accent.",
+        "description" : "Receive activity accent.",
     },
-    "rf-duplex" : {
+    "duplex"    : {
         "bits"        : ["time_running", "time_valid", "tx_activity", "rx_activity"],
-        "description" : "RF TX+RX duplex activity accent.",
-    },
-    "eth-tx"    : {
-        "bits"        : ["time_running", "time_valid", "eth_tx_activity"],
-        "description" : "Ethernet TX activity accent.",
-    },
-    "eth-rx"    : {
-        "bits"        : ["time_running", "time_valid", "eth_rx_activity"],
-        "description" : "Ethernet RX activity accent.",
-    },
-    "eth-duplex": {
-        "bits"        : ["time_running", "time_valid", "eth_tx_activity", "eth_rx_activity"],
-        "description" : "Ethernet TX+RX duplex activity accent.",
+        "description" : "Transmit and receive activity accents together.",
     },
 }
 
 PRESET_ALIASES = {
-    "tx"     : "rf-tx",
-    "rx"     : "rf-rx",
-    "duplex" : "rf-duplex",
+    "rf-tx"      : "tx",
+    "rf-rx"      : "rx",
+    "rf-duplex"  : "duplex",
+    "eth-tx"     : "tx",
+    "eth-rx"     : "rx",
+    "eth-duplex" : "duplex",
 }
 
 # Helpers ------------------------------------------------------------------------------------------
@@ -141,7 +130,6 @@ def get_preset(name):
 
 def format_names(names):
     return ",".join(names) if names else "<none>"
-
 
 # LED Driver ---------------------------------------------------------------------------------------
 
@@ -220,7 +208,6 @@ def list_controls():
         for alias, target in sorted(PULSE_ALIASES.items()):
             print(f"  {alias:10s} -> {target}")
 
-
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
@@ -230,19 +217,19 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--csr-csv",       default=default_csr_csv,         help="CSR definition file")
-    parser.add_argument("--host",          default="localhost",             help="Remote host")
+    parser.add_argument("--host",          default="localhost",            help="Remote host")
     parser.add_argument("--port",          default=1234, type=int,          help="Remote port")
-    parser.add_argument("--list-presets",  action="store_true",             help="List named presets and exit")
-    parser.add_argument("--list-controls", action="store_true",             help="List control and pulse names and exit")
-    parser.add_argument("--preset",        default=None,                    help="Apply a named LED preset in manual mode (canonical names from --list-presets; legacy aliases tx/rx/duplex are still accepted)")
+    parser.add_argument("--list-presets",  action="store_true",            help="List named presets and exit")
+    parser.add_argument("--list-controls", action="store_true",            help="List control and pulse names and exit")
+    parser.add_argument("--preset",        default=None,                    help="Apply a named LED preset in manual mode (canonical names from --list-presets; RF/Ethernet aliases are still accepted)")
     parser.add_argument("--set",           default="",                      help="Comma-separated control names to set in manual mode")
     parser.add_argument("--clear",         default="",                      help="Comma-separated control names to clear from the preset in manual mode")
     parser.add_argument("--raw-control",   default=None,                    help="Write raw LED control bits; manual mode is added automatically")
-    parser.add_argument("--pulse",         default="",                      help="Comma-separated one-shot pulse names: rf-tx,rf-rx,eth-tx,eth-rx,pps")
+    parser.add_argument("--pulse",         default="",                      help="Comma-separated one-shot pulse names: tx,rx,pps")
     parser.add_argument("--count",         default=1, type=int,             help="Pulse repetition count")
     parser.add_argument("--period",        default=0.5, type=float,         help="Delay between repeated pulses in seconds")
-    parser.add_argument("--release",       action="store_true",             help="Disable manual override and return LED control to the design")
-    parser.add_argument("--read-status",   action="store_true",             help="Read back LED level/output after applying changes")
+    parser.add_argument("--release",       action="store_true",            help="Disable manual override and return LED control to the design")
+    parser.add_argument("--read-status",   action="store_true",            help="Read back LED level/output after applying changes")
     args = parser.parse_args()
 
     if args.list_presets:
