@@ -21,11 +21,9 @@ STATUS_LED_HEARTBEAT_PULSE1      = (12, 18)
 STATUS_LED_PPS_HOLD_TICKS        = 8
 STATUS_LED_ACTIVITY_PERIOD_TICKS = 4
 STATUS_LED_ACTIVITY_WIDTH_TICKS  = 1
-STATUS_LED_BOOT_LEVEL            = 140
-STATUS_LED_DISCOVERY_LEVEL       = 96
+STATUS_LED_NOT_READY_LEVEL       = 140
 STATUS_LED_IDLE_BASE_LEVEL       = 10
 STATUS_LED_ACTIVITY_LEVEL        = 208
-STATUS_LED_DUPLEX_LEVEL          = 255
 STATUS_LED_PPS_LEVEL             = 224
 
 # LED Tick -----------------------------------------------------------------------------------------
@@ -88,7 +86,7 @@ class LedDoublePulse(LiteXModule):
 
         # # #
 
-        # Generates a periodic double-pulse envelope for "boot/discovery" states.
+        # Generates a periodic double-pulse envelope for not-ready states.
         step = Signal(max=period)
 
         self.comb += active.eq(
@@ -195,8 +193,8 @@ class LedPwm(LiteXModule):
 # Status LED ---------------------------------------------------------------------------------------
 
 # One physical LED is used to expose coarse bring-up state and momentary runtime
-# activity. The composition is intentionally simple: a base animation for system
-# readiness, a PPS accent, then TX/RX accents on top.
+# activity. The composition is intentionally simple: one base state for "not
+# ready yet", one base state for idle/ready, a PPS accent, then TX/RX accents.
 class StatusLed(LiteXModule):
     def __init__(self, sys_clk_freq):
         # IOs.
@@ -303,15 +301,14 @@ class StatusLed(LiteXModule):
         # State Decode.
         # -------------
         # The LED exposes three layers of information:
-        # 1) A base transport/system state animation.
+        # 1) A base readiness animation.
         # 2) A PPS accent.
         # 3) Generic TX/RX activity accents.
-        booting           = Signal()
+        not_ready         = Signal()
         transport_present = Signal()
         pcie_ready        = Signal()
         eth_ready         = Signal()
         transport_ready   = Signal()
-        waiting_transport = Signal()
         base_level        = Signal(8)
         pps_level         = Signal(8)
         activity_level    = Signal(8)
@@ -329,39 +326,34 @@ class StatusLed(LiteXModule):
             rx_blink.trigger.eq(rx_activity_sel),
             pps_hold.trigger.eq(pps_pulse_sel),
 
-            # Transport presence and readiness drive the boot/discovery/idle base layer.
+            # Transport presence and readiness drive the not-ready/idle base layer.
             transport_present.eq(pcie_present_sel | eth_present_sel),
             pcie_ready.eq(pcie_present_sel & pcie_link_up_sys & dma_synced_sel),
             eth_ready.eq(eth_present_sel  & eth_link_up_sys),
             transport_ready.eq(pcie_ready | eth_ready),
 
-            booting.eq(~time_running_sel | ~time_valid_sel),
-            waiting_transport.eq(transport_present & ~transport_ready),
+            not_ready.eq((~time_running_sel | ~time_valid_sel) | (transport_present & ~transport_ready)),
         ]
 
         # Intensity Selection.
         # --------------------
         # Priority is:
-        # 1) Base state animation (boot / transport-wait / idle)
+        # 1) Base state animation (not-ready / idle)
         # 2) PPS accent
         # 3) TX/RX activity accent
         #
         # Using max() composition keeps each concern independent and easy to retune.
         self.comb += [
             base_level.eq(0),
-            If(booting,
-                base_level.eq(Mux(heartbeat.active, STATUS_LED_BOOT_LEVEL, 0)),
-            ).Elif(waiting_transport,
-                base_level.eq(Mux(heartbeat.active, STATUS_LED_DISCOVERY_LEVEL, 0)),
+            If(not_ready,
+                base_level.eq(Mux(heartbeat.active, STATUS_LED_NOT_READY_LEVEL, 0)),
             ).Else(
                 # Low-amplitude breathing in the normal "ready" state.
                 base_level.eq(STATUS_LED_IDLE_BASE_LEVEL + (breather.level >> 1)),
             ),
 
             pps_level.eq(Mux(pps_hold.active, STATUS_LED_PPS_LEVEL, 0)),
-            If(tx_blink.active & rx_blink.active,
-                activity_level.eq(STATUS_LED_DUPLEX_LEVEL),
-            ).Elif(tx_blink.active | rx_blink.active,
+            If(tx_blink.active | rx_blink.active,
                 activity_level.eq(STATUS_LED_ACTIVITY_LEVEL),
             ).Else(
                 activity_level.eq(0),

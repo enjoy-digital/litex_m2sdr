@@ -7,7 +7,15 @@
 
 from litex.gen.sim import run_simulation
 
-from litex_m2sdr.gateware.led import LedActivityBlink, LedDoublePulse, LedEventHold, StatusLed
+from litex_m2sdr.gateware.led import (
+    STATUS_LED_ACTIVITY_LEVEL,
+    STATUS_LED_NOT_READY_LEVEL,
+    STATUS_LED_PPS_LEVEL,
+    LedActivityBlink,
+    LedDoublePulse,
+    LedEventHold,
+    StatusLed,
+)
 
 # Status LED Tests -------------------------------------------------------------------------------
 
@@ -101,11 +109,11 @@ def test_status_led_ready_mode_breathes_and_pps_overlays():
     run_simulation(dut, gen())
 
     assert max(samples["idle"]) > min(samples["idle"])
-    assert max(samples["pps"]) >= 224
+    assert max(samples["pps"]) >= STATUS_LED_PPS_LEVEL
 
 
-def test_status_led_pcie_discovery_uses_double_heartbeat():
-    """Check PCIe-not-linked state produces two pulses followed by a dark gap."""
+def test_status_led_not_ready_uses_double_heartbeat():
+    """Check the common not-ready state produces the heartbeat pattern."""
     dut = StatusLed(sys_clk_freq=1_000)
     steps = []
 
@@ -122,38 +130,13 @@ def test_status_led_pcie_discovery_uses_double_heartbeat():
 
     run_simulation(dut, gen())
 
-    assert all(level == 96 for level in steps[0:6])
-    assert all(level == 96 for level in steps[12:18])
+    assert all(level == STATUS_LED_NOT_READY_LEVEL for level in steps[0:6])
+    assert all(level == STATUS_LED_NOT_READY_LEVEL for level in steps[12:18])
     assert all(level == 0 for level in steps[24:40])
 
 
-def test_status_led_pcie_unsynced_keeps_transport_wait_pattern():
-    """Check PCIe link-up without DMA sync still looks like transport-not-ready."""
-    dut = StatusLed(sys_clk_freq=1_000)
-    steps = []
-
-    def gen():
-        yield dut.time_running.eq(1)
-        yield dut.time_valid.eq(1)
-        yield dut.pcie_present.eq(1)
-        yield dut.pcie_link_up.eq(1)
-        for _ in range(4):
-            yield
-
-        for cycle in range(500):
-            if cycle % 10 == 0:
-                steps.append((yield dut.level))
-            yield
-
-    run_simulation(dut, gen())
-
-    assert all(level == 96 for level in steps[0:6])
-    assert all(level == 96 for level in steps[12:18])
-    assert all(level == 0 for level in steps[24:40])
-
-
-def test_status_led_eth_link_skips_transport_discovery_pattern():
-    """Check an active Ethernet link suppresses the transport-discovery heartbeat."""
+def test_status_led_ready_transport_breathes():
+    """Check a ready transport uses the idle breathing pattern instead of the heartbeat."""
     dut = StatusLed(sys_clk_freq=1_000)
     samples = []
 
@@ -171,7 +154,7 @@ def test_status_led_eth_link_skips_transport_discovery_pattern():
 
     run_simulation(dut, gen())
 
-    assert max(samples) < 96
+    assert max(samples) < STATUS_LED_NOT_READY_LEVEL
     assert max(samples) > min(samples)
 
 
@@ -195,24 +178,20 @@ def test_status_led_activity_overlay_is_visible():
 
     run_simulation(dut, gen())
 
-    assert max(samples["after"]) >= 208
+    assert max(samples["after"]) >= STATUS_LED_ACTIVITY_LEVEL
     assert max(samples["after"]) > max(samples["before"])
     assert min(samples["after"]) < max(samples["after"])
 
 
-def test_status_led_eth_activity_contributes_to_visible_accents():
-    """Check Ethernet traffic also contributes to the visible activity overlay."""
+def test_status_led_rx_activity_contributes_to_visible_accents():
+    """Check sustained RX activity also contributes to the visible activity overlay."""
     dut = StatusLed(sys_clk_freq=1_000)
     samples = []
 
     def gen():
         yield dut.time_running.eq(1)
         yield dut.time_valid.eq(1)
-        yield dut.eth_present.eq(1)
-        yield dut.eth_link_up.eq(1)
-        yield dut.eth_rx_activity.eq(1)
-        for _ in range(4):
-            yield
+        yield dut.rx_activity.eq(1)
 
         for _ in range(160):
             samples.append((yield dut.level))
@@ -220,5 +199,5 @@ def test_status_led_eth_activity_contributes_to_visible_accents():
 
     run_simulation(dut, gen())
 
-    assert max(samples) >= 208
+    assert max(samples) >= STATUS_LED_ACTIVITY_LEVEL
     assert min(samples) < max(samples)

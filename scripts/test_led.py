@@ -30,13 +30,9 @@ CONTROL_BITS = {
 }
 
 CONTROL_ALIASES = {
-    "pps"    : "pps_level",
-    "tx"     : "tx_activity",
-    "rx"     : "rx_activity",
-    "rf-tx"  : "tx_activity",
-    "rf-rx"  : "rx_activity",
-    "eth-tx" : "tx_activity",
-    "eth-rx" : "rx_activity",
+    "pps" : "pps_level",
+    "tx"  : "tx_activity",
+    "rx"  : "rx_activity",
 }
 
 PULSE_BITS = {
@@ -45,56 +41,28 @@ PULSE_BITS = {
     "pps" : 2,
 }
 
-PULSE_ALIASES = {
-    "rf-tx"  : "tx",
-    "rf-rx"  : "rx",
-    "eth-tx" : "tx",
-    "eth-rx" : "rx",
-}
+PULSE_ALIASES = {}
 
 PRESETS = {
-    "boot"      : {
+    "boot" : {
         "bits"        : [],
-        "description" : "Boot animation: time domain still stopped or invalid.",
+        "description" : "Common not-ready heartbeat: time invalid or transport not ready.",
     },
-    "discovery" : {
-        "bits"        : ["time_running", "time_valid", "pcie_present"],
-        "description" : "Discovery animation while a transport is present but not yet ready.",
-    },
-    "idle"      : {
-        "bits"        : ["time_running", "time_valid"],
-        "description" : "Base idle breathing with no transport or traffic accents.",
-    },
-    "pcie-ready": {
-        "bits"        : ["time_running", "time_valid", "pcie_present", "pcie_link_up", "dma_synced"],
-        "description" : "PCIe-ready state with DMA time synchronization complete.",
-    },
-    "eth-ready" : {
+    "idle" : {
         "bits"        : ["time_running", "time_valid", "eth_present", "eth_link_up"],
-        "description" : "Ethernet-ready state with link up.",
+        "description" : "Idle breathing with a transport marked ready and no activity accents.",
     },
-    "tx"        : {
-        "bits"        : ["time_running", "time_valid", "tx_activity"],
-        "description" : "Transmit activity accent.",
+    "tx"   : {
+        "bits"        : ["time_running", "time_valid", "eth_present", "eth_link_up", "tx_activity"],
+        "description" : "Transmit activity accent over the idle state.",
     },
-    "rx"        : {
-        "bits"        : ["time_running", "time_valid", "rx_activity"],
-        "description" : "Receive activity accent.",
-    },
-    "duplex"    : {
-        "bits"        : ["time_running", "time_valid", "tx_activity", "rx_activity"],
-        "description" : "Transmit and receive activity accents together.",
+    "rx"   : {
+        "bits"        : ["time_running", "time_valid", "eth_present", "eth_link_up", "rx_activity"],
+        "description" : "Receive activity accent over the idle state.",
     },
 }
 
-PRESET_ALIASES = {
-    "rf-tx"      : "tx",
-    "rf-rx"      : "rx",
-    "rf-duplex"  : "duplex",
-    "eth-tx"     : "tx",
-    "eth-rx"     : "rx",
-    "eth-duplex" : "duplex",
-}
+PRESET_ALIASES = {}
 
 # Helpers ------------------------------------------------------------------------------------------
 
@@ -221,7 +189,7 @@ def main():
     parser.add_argument("--port",          default=1234, type=int,  help="Remote port")
     parser.add_argument("--list-presets",  action="store_true",     help="List named presets and exit")
     parser.add_argument("--list-controls", action="store_true",     help="List control and pulse names and exit")
-    parser.add_argument("--preset",        default=None,            help="Apply a named LED preset in manual mode (canonical names from --list-presets; RF/Ethernet aliases are still accepted)")
+    parser.add_argument("--preset",        default=None,            help="Apply a named LED preset in manual mode")
     parser.add_argument("--set",           default="",              help="Comma-separated control names to set in manual mode")
     parser.add_argument("--clear",         default="",              help="Comma-separated control names to clear from the preset in manual mode")
     parser.add_argument("--raw-control",   default=None,            help="Write raw LED control bits; manual mode is added automatically")
