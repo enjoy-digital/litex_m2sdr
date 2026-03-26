@@ -7,3 +7,6 @@
 /m2sdr_rf
 /m2sdr_sata
 /m2sdr_util
+/m2sdr_selftest
+/m2sdr_sigmf_info
+/.build-flags-*
