@@ -411,17 +411,17 @@ m2sdr_fm_tx [options] input output
 - **output**: I/Q bin file or `-` for stdout.
 
 **Options**:
-- `-s samplerate` (default=1000000)
-- `-d deviation` (default=75000)
-- `-b bits` (default=12)
-- `-e emphasis` (us/eu/none, default=eu)
-- `-m mode` (mono/stereo, default=mono)
-- `-i input-channels` (for stdin)
-- `-f input-samplerate` (for stdin)
+- `--sample-rate` (short: `-s`, default=1000000)
+- `--deviation` (short: `-d`, default=75000)
+- `--bits` (short: `-b`, default=12)
+- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
+- `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
+- `--input-channels` (short: `-i`, for stdin)
+- `--input-sample-rate` (short: `-f`, for stdin)
 
 Example:
 ~~~~
-ffmpeg -i music.mp3 -f s16le -ac 2 -ar 44100 - | ./m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 2 -f 44100 - - | ./m2sdr_play -
+ffmpeg -i music.mp3 -f s16le -ac 2 -ar 44100 - | ./m2sdr_fm_tx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo --input-channels 2 --input-sample-rate 44100 - - | ./m2sdr_play -
 ~~~~
 
 ---
@@ -437,15 +437,15 @@ m2sdr_fm_rx [options] input output
 - **output**: WAV file or `-` for stdout (pipe to ffplay/ffmpeg for playback).
 
 **Options**:
-- `-s samplerate` (default=1000000)
-- `-d deviation` (default=75000)
-- `-b bits` (default=12)
-- `-e emphasis` (us/eu/none, default=eu)
-- `-m mode` (mono/stereo, default=mono)
+- `--sample-rate` (short: `-s`, default=1000000)
+- `--deviation` (short: `-d`, default=75000)
+- `--bits` (short: `-b`, default=12)
+- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
+- `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
 
 Example:
 ~~~~
-./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -e eu -m stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
+./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
 ~~~~
 
 ---

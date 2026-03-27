@@ -16,9 +16,9 @@
  *     ffmpeg -i input.mp3 input.wav
  *
  * Usage Example:
- *     ./m2sdr_rf -samplerate 1e6 -tx_freq 100e6 -tx-att 10 -chan 1t1r
- *     ./m2sdr_fm_tx -s 1000000 -b 12 music.wav - | ./m2sdr_play -
- *     ffmpeg -i music.mp3 -f s16le -ac 1 -ar 44100 - | ./m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 1 -f 44100 - - | ./m2sdr_play -
+ *     ./m2sdr_rf --sample-rate 1e6 --tx-freq 100e6 --tx-att 10 --chan 1t1r
+ *     ./m2sdr_fm_tx --sample-rate 1000000 --bits 12 music.wav - | ./m2sdr_play -
+ *     ffmpeg -i music.mp3 -f s16le -ac 1 -ar 44100 - | ./m2sdr_fm_tx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo --input-channels 1 --input-sample-rate 44100 - - | ./m2sdr_play -
  *
  */
 
@@ -351,22 +351,22 @@ static void help(void) {
            "\n"
            "Options:\n"
            "-h, --help            Display this help message.\n"
-           "-s, --samplerate sps  Set sample rate in SPS (default: 500000).\n"
+           "-s, --sample-rate sps  Set sample rate in SPS (default: 500000).\n"
            "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
            "-8, --sc8             Output 8-bit I/Q samples (SC8 Q7).\n"
            "-e, --emphasis type   Set pre-emphasis to us, eu or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
            "-i, --input-channels channels  Set input channels for stdin (1 or 2).\n"
-           "-f, --input-samplerate sps  Set input sample rate for stdin (default to samplerate).\n"
+           "-f, --input-sample-rate sps  Set input sample rate for stdin (default to samplerate).\n"
            "\n"
            "Arguments:\n"
            "input                 Input WAV file or '-' for raw PCM from stdin (MP3 not supported; convert using: ffmpeg -i input.mp3 input.wav).\n"
            "output                Output file for I/Q samples ('-' for stdout).\n"
            "\n"
            "Example:\n"
-           "m2sdr_fm_tx -s 500000 -d 75000 -b 12 input.wav output.bin\n"
-           "ffmpeg -i input.mp3 -f s16le -ac 2 -ar 44100 - | m2sdr_fm_tx -s 1000000 -d 75000 -b 12 -e eu -m stereo -i 2 -f 44100 - - | m2sdr_play -\n"
+           "m2sdr_fm_tx --sample-rate 500000 --deviation 75000 --bits 12 input.wav output.bin\n"
+           "ffmpeg -i input.mp3 -f s16le -ac 2 -ar 44100 - | m2sdr_fm_tx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo --input-channels 2 --input-sample-rate 44100 - - | m2sdr_play -\n"
            "Note: Convert MP3 to WAV using: ffmpeg -i input.mp3 input.wav\n"
            "Note: This version processes in streaming mode without global normalization, assuming audio is normalized to full scale.\n");
     exit(1);
@@ -377,6 +377,7 @@ static void help(void) {
 
 static struct option options[] = {
     { "help",       no_argument,       NULL, 'h' },
+    { "sample-rate", required_argument, NULL, 's' },
     { "samplerate", required_argument, NULL, 's' },
     { "deviation",  required_argument, NULL, 'd' },
     { "bits",       required_argument, NULL, 'b' },
@@ -384,6 +385,7 @@ static struct option options[] = {
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
     { "input-channels", required_argument, NULL, 'i' },
+    { "input-sample-rate", required_argument, NULL, 'f' },
     { "input-samplerate", required_argument, NULL, 'f' },
     { NULL,         0,                 NULL, 0 }
 };

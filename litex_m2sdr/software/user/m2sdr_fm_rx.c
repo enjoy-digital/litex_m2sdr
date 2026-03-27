@@ -11,9 +11,9 @@
  * It reads I/Q samples from an input file or stdin, applies FM demodulation, and writes the audio samples to an output file or stdout.
  *
  * Usage Example:
- *     ./m2sdr_rf -samplerate 1e6 -rx_freq 100e6 -rx_gain 20 -chan 1t1r
- *     ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -o music.wav
- *     ./m2sdr_record - | ./m2sdr_fm_rx -s 1000000 -d 75000 -b 12 -e eu -m stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
+ *     ./m2sdr_rf --sample-rate 1e6 --rx-freq 100e6 --rx-gain 20 --chan 1t1r
+ *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 - music.wav
+ *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
  *
  */
 
@@ -232,7 +232,7 @@ static void help(void) {
            "\n"
            "Options:\n"
            "-h, --help            Display this help message.\n"
-           "-s, --samplerate sps  Set I/Q sample rate in SPS (default: 500000).\n"
+           "-s, --sample-rate sps  Set I/Q sample rate in SPS (default: 500000).\n"
            "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
            "-8, --sc8             Input is 8-bit I/Q samples (SC8 Q7).\n"
@@ -244,7 +244,7 @@ static void help(void) {
            "output                Output WAV file ('-' for stdout).\n"
            "\n"
            "Example:\n"
-           "m2sdr_fm_rx -s 500000 -d 75000 -b 12 input.bin output.wav\n"
+           "m2sdr_fm_rx --sample-rate 500000 --deviation 75000 --bits 12 input.bin output.wav\n"
            "Note: This version processes in streaming mode without global normalization.\n");
     exit(1);
 }
@@ -254,6 +254,7 @@ static void help(void) {
 
 static struct option options[] = {
     { "help",       no_argument,       NULL, 'h' },
+    { "sample-rate", required_argument, NULL, 's' },
     { "samplerate", required_argument, NULL, 's' },
     { "deviation",  required_argument, NULL, 'd' },
     { "bits",       required_argument, NULL, 'b' },
