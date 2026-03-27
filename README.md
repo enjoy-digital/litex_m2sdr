@@ -259,7 +259,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    cd litex_m2sdr/software
    ./build.py --fetch-cimgui
    ```
-   - By default, `./build.py` only builds. Run `sudo ./build.py` if you also want it to install the kernel driver and the SoapySDR module.
+   - By default, `./build.py` builds incrementally; use `./build.py --clean` when you want a full rebuild. Run `sudo ./build.py` if you also want it to install the kernel driver and the SoapySDR module.
    - `m2sdr_check` and `m2sdr_scan` are optional SDL/OpenGL GUI tools. They are built only when SDL2/OpenGL development packages are installed and `litex_m2sdr/software/user/cimgui/` has been populated. If `cimgui` is absent, only those two GUI tools are skipped; the CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
 
 5. **Install the Built Software:**

@@ -68,6 +68,8 @@ cd ../
 ./build.py --fetch-cimgui
 ~~~~
 
+Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
+
 These dependencies are only needed for the optional GUI tools. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile`; the CLI tools, `libm2sdr`, and the SoapySDR module still build.
 
 ### m2sdr_util

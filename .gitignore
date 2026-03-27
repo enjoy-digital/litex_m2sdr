@@ -16,3 +16,15 @@ modules.order
 *.order.cmd
 __pycache__
 *.csv
+
+# Local fetched dependencies and generated host-side binaries
+/wr-cores/
+/litex_m2sdr/software/user/cimgui/
+/litex_m2sdr/software/user/m2sdr_*
+!/litex_m2sdr/software/user/*.c
+!/litex_m2sdr/software/user/*.h
+!/litex_m2sdr/software/user/*.py
+/litex_m2sdr/software/user/test_*
+!/litex_m2sdr/software/user/*.c
+/litex_m2sdr/software/user/tests/test_*
+!/litex_m2sdr/software/user/tests/*.c

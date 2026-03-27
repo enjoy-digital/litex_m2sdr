@@ -14,13 +14,15 @@ import subprocess
 def run_command(command, cwd=None):
     subprocess.run(command, cwd=cwd, check=True)
 
-def build_driver(path, cmake_options=None, prefix="/usr", do_install=False):
+def build_driver(path, cmake_options=None, prefix="/usr", do_install=False, clean_first=False):
     base_dir   = os.path.dirname(os.path.abspath(__file__))
     build_path = os.path.join(base_dir, path, 'build')
     os.makedirs(build_path, exist_ok=True)
     cmake_options = cmake_options or []
     run_command(["cmake", "..", f"-DCMAKE_INSTALL_PREFIX={prefix}", *cmake_options], cwd=build_path)
-    run_command(["make", "clean", "all"], cwd=build_path)
+    if clean_first:
+        run_command(["make", "clean"], cwd=build_path)
+    run_command(["make", "all"], cwd=build_path)
     if do_install:
         run_command(["make", "install"], cwd=build_path)
 
@@ -45,6 +47,7 @@ def main():
     parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
     parser.add_argument("--no-install",  action="store_true", help="Build only; do not run install steps.")
     parser.add_argument("--skip-kernel", action="store_true", help="Skip kernel driver build/install.")
+    parser.add_argument("--clean",       action="store_true", help="Run clean targets before building.")
 
     args = parser.parse_args()
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,17 +72,23 @@ def main():
 
     # Kernel compilation.
     if (args.interface == "litepcie") and (not args.skip_kernel):
-        run_command(["make", "clean", "all"], cwd=os.path.join(base_dir, "kernel"))
+        kernel_dir = os.path.join(base_dir, "kernel")
+        if args.clean:
+            run_command(["make", "clean"], cwd=kernel_dir)
+        run_command(["make", "all"], cwd=kernel_dir)
         if do_install:
-            run_command(["make", "install"], cwd=os.path.join(base_dir, "kernel"))
+            run_command(["make", "install"], cwd=kernel_dir)
 
     # Utilities compilation.
-    run_command(["make", "clean", f"INTERFACE={interface}", "all"], cwd=os.path.join(base_dir, "user"))
+    user_dir = os.path.join(base_dir, "user")
+    if args.clean:
+        run_command(["make", f"INTERFACE={interface}", "clean"], cwd=user_dir)
+    run_command(["make", f"INTERFACE={interface}", "all"], cwd=user_dir)
     if do_install:
         install_user_software(base_dir, args.prefix)
 
     # SoapySDR Driver compilation.
-    build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install)
+    build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install, clean_first=args.clean)
 
 if __name__ == "__main__":
     main()
