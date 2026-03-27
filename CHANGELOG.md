@@ -25,7 +25,7 @@ The LiteX M2 SDR project is actively under development and does not yet have for
 - Refined `libm2sdr` RF and streaming internals with per-device RF state ownership, safer DMA header access, and documented 16-byte wire header layout.
 - Added focused `libm2sdr` unit coverage and CI lanes for unit checks, LiteEth-mode checks, sanitizers, and `cppcheck`.
 - Added SigMF support across the user-space record/play/check workflow: `m2sdr_record` can emit `.sigmf-data` / `.sigmf-meta`, `m2sdr_play` can replay SigMF datasets with capture selection, and `m2sdr_check` can auto-load SigMF metadata, captures, and annotations.
-- Introduced the `m2sdr_sigmf_info` utility with validation modes for quick SigMF inspection and CI-friendly metadata checks.
+- Introduced the `m2sdr_sigmf` utility with validation modes for quick SigMF inspection and CI-friendly metadata checks.
 - Expanded user-space RF diagnostics with a native `m2sdr_check` IQ inspection tool and basic OFDM waveform generation in `m2sdr_gen`, replacing earlier Python-side helpers.
 - Reorganized `software/user` by moving reusable SigMF/JSON support into dedicated `include/` and `lib/` areas and grouping SigMF regression tests under `tests/` to keep the utility root cleaner.
 

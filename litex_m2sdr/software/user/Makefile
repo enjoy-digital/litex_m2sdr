@@ -31,9 +31,9 @@ FORCE:
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
@@ -58,7 +58,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o
 M2SDR_SIGMF_OBJS = lib/m2sdr_sigmf.o lib/m2sdr_json.o
-TEST_PROGS = test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_info_cli
+TEST_PROGS = test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -101,8 +101,8 @@ test-sigmf: tests/test_m2sdr_sigmf
 test-sigmf-smoke: tests/test_sigmf_capture_smoke
 	./tests/test_sigmf_capture_smoke
 
-test-sigmf-cli: tests/test_sigmf_info_cli m2sdr_sigmf_info
-	./tests/test_sigmf_info_cli
+test-sigmf-cli: tests/test_sigmf_cli m2sdr_sigmf
+	./tests/test_sigmf_cli
 
 test_libm2sdr: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) test_libm2sdr.o -Llibm2sdr -lm2sdr -Lliblitepcie -llitepcie -lm
@@ -113,8 +113,8 @@ tests/test_m2sdr_sigmf: tests/test_m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS) | $(BUILD_F
 tests/test_sigmf_capture_smoke: tests/test_sigmf_capture_smoke.o $(M2SDR_SIGMF_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_capture_smoke.o $(M2SDR_SIGMF_OBJS) -lm
 
-tests/test_sigmf_info_cli: tests/test_sigmf_info_cli.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_info_cli.o -lm
+tests/test_sigmf_cli: tests/test_sigmf_cli.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_cli.o -lm
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
@@ -179,7 +179,7 @@ m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.
 m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_record.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o $(M2SDR_SIGMF_OBJS)
+m2sdr_sigmf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_gpio.o
@@ -216,7 +216,7 @@ m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_play
 m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_record.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
-m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info.o $(M2SDR_SIGMF_OBJS)
+m2sdr_sigmf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf.o $(M2SDR_SIGMF_OBJS)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_sata.o
@@ -242,7 +242,7 @@ clean:
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f lib/*.o lib/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
-	rm -f tests/*.o tests/*.d tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_info_cli
+	rm -f tests/*.o tests/*.d tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
 	rm -f kissfft/*.o kissfft/*.d
@@ -260,7 +260,7 @@ $(BUILD_FLAGS_FILE): FORCE
 		rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d; \
 		rm -f lib/*.o lib/*.d; \
 		rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d; \
-		rm -f tests/*.o tests/*.d tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_info_cli; \
+		rm -f tests/*.o tests/*.d tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli; \
 		rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d; \
 		rm -f ad9361/*.o ad9361/*.d; \
 		rm -f kissfft/*.o kissfft/*.d; \

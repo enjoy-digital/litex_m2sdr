@@ -150,30 +150,30 @@ int main(void)
         return 1;
     }
 
-    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf_info --validate --strict --ci %s", ok_meta);
+    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf --validate --strict --ci %s", ok_meta);
     if (run_and_check(cmd, "VALIDATION status=ok", 0) != 0) {
         fprintf(stderr, "ok validation CLI check failed\n");
         return 1;
     }
 
-    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf_info --validate --strict --ci %s", bad_meta);
+    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf --validate --strict --ci %s", bad_meta);
     if (run_and_check(cmd, "VALIDATION status=fail", 1) != 0) {
         fprintf(stderr, "bad validation CLI check failed\n");
         return 1;
     }
 
-    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf_info --validate --strict --ci %s", freq_meta);
+    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf --validate --strict --ci %s", freq_meta);
     if (run_and_check(cmd, "VALIDATION status=fail", 1) != 0) {
         fprintf(stderr, "freq validation CLI check failed\n");
         return 1;
     }
 
-    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf_info --validate --strict --ci %s", dup_meta);
+    snprintf(cmd, sizeof(cmd), "./m2sdr_sigmf --validate --strict --ci %s", dup_meta);
     if (run_and_check(cmd, "VALIDATION status=fail", 1) != 0) {
         fprintf(stderr, "duplicate capture validation CLI check failed\n");
         return 1;
     }
 
-    printf("test_sigmf_info_cli: ok\n");
+    printf("test_sigmf_cli: ok\n");
     return 0;
 }

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR SigMF Info Utility.
+ * M2SDR SigMF Utility.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -21,7 +21,7 @@
 static void help(void)
 {
     printf("M2SDR SigMF Info Utility.\n"
-           "usage: m2sdr_sigmf_info [--validate] [--strict] [--ci] <sigmf-meta|sigmf-data|basename>\n");
+           "usage: m2sdr_sigmf [--validate] [--strict] [--ci] <sigmf-meta|sigmf-data|basename>\n");
 }
 
 static void validation_message(const char *level, const char *msg)
