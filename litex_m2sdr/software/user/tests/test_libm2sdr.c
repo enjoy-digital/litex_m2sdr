@@ -4,9 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "libm2sdr/m2sdr.h"
-#include "libm2sdr/m2sdr_internal.h"
-#include "m2sdr_cli.h"
+#include "m2sdr.h"
+#include "m2sdr_internal.h"
+#include "../m2sdr_cli.h"
 
 static int test_parse_identifier_invalid_ports(void)
 {
