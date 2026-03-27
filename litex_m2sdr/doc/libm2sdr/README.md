@@ -37,15 +37,15 @@ sudo ldconfig
 2) Run a quick sanity check:
 
 ```
-m2sdr_selftest
+m2sdr_util info
 ```
 
 Optional checks:
 
 ```
-m2sdr_selftest --time
-m2sdr_selftest --loopback
-m2sdr_selftest --stream-loopback
+m2sdr_util scratch-test
+m2sdr_util clk-test
+m2sdr_util dma-test
 ```
 
 3) If you use SoapySDR, (re)install the module after updating libm2sdr:

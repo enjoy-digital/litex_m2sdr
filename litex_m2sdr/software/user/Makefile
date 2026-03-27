@@ -31,9 +31,9 @@ FORCE:
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_sata m2sdr_selftest
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata m2sdr_selftest
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf_info m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
 endif
@@ -188,9 +188,6 @@ m2sdr_gpio: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_gpio
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_sata.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
-m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_selftest.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
-
 endif
 
 ifeq ($(HAVE_SDL2),1)
@@ -223,9 +220,6 @@ m2sdr_sigmf_info: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf_info
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_sata.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
-
-m2sdr_selftest: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_selftest.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
