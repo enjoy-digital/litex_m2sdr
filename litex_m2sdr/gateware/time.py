@@ -28,6 +28,15 @@ class TimeGenerator(LiteXModule):
         # Time increment in ns per tick (Q8.24 fixed-point). Allows fractional ns.
         self.time_inc        = Signal(32, reset=time_inc_reset)
 
+        # Time Discipline Interface (time domain).
+        self.discipline_enable      = Signal()
+        self.discipline_time_inc    = Signal(32, reset=time_inc_reset)
+        self.discipline_write       = Signal()
+        self.discipline_write_time  = Signal(64)
+        self.discipline_adjust      = Signal()
+        self.discipline_adjust_sign = Signal()
+        self.discipline_adjustment  = Signal(64)
+
         # Time Sync Interface.
         self.time_sync    = Signal()
         self.time_seconds = Signal(40)
@@ -42,25 +51,48 @@ class TimeGenerator(LiteXModule):
         self.cd_time = ClockDomain()
         self.comb += self.cd_time.clk.eq(clk)
 
+        # Helpers.
+        effective_time_inc  = Signal(32)
+        adjust_with_underflow = Signal()
+        self._time_adjust_change = Signal()
+        self.comb += [
+            effective_time_inc.eq(Mux(self.discipline_enable, self.discipline_time_inc, self.time_inc)),
+            adjust_with_underflow.eq(self.discipline_adjust_sign & (time < self.discipline_adjustment)),
+        ]
+
         # Time Handling (Q8.24 fractional ns).
         self.sync.time += [
-            # Disable: Reset Time to 0.
             If(~self.enable,
                 time.eq(init),
                 frac.eq(0),
-            # Software Write.
-            ).Elif(self.write,
-                time.eq(self.write_time),
+            # Software / external coarse write.
+            ).Elif(self.write | self.discipline_write,
+                time.eq(Mux(self.discipline_write, self.discipline_write_time, self.write_time)),
                 frac.eq(0),
             # Time Sync.
             ).Elif(self.sync_enable & self.time_sync,
-                time.eq(((self.time_seconds + 1)* int(1e9))),
+                time.eq(((self.time_seconds + 1) * int(1e9))),
                 frac.eq(0),
+            # External phase trim.
+            ).Elif(self.discipline_adjust,
+                If(adjust_with_underflow,
+                    time.eq(0),
+                ).Elif(self.discipline_adjust_sign,
+                    time.eq(time - self.discipline_adjustment),
+                ).Else(
+                    time.eq(time + self.discipline_adjustment),
+                ),
             # Increment (fractional).
             ).Else(
-                Cat(frac, time).eq(Cat(frac, time) + self.time_inc),
+                Cat(frac, time).eq(Cat(frac, time) + effective_time_inc),
             ),
-            self.time.eq(time + self.time_adjustment)
+            self.time.eq(time + self.time_adjustment),
+            self.time_change.eq(
+                self.write |
+                self.discipline_write |
+                self._time_adjust_change |
+                (self.sync_enable & self.time_sync)
+            )
         ]
 
         # CSRs.
@@ -110,12 +142,10 @@ class TimeGenerator(LiteXModule):
 
         # Time Adjust (SW -> FPGA).
         self.specials += MultiReg(self._time_adjustment.storage, self.time_adjustment, "time")
-
-        # Time Change.
-        time_change_ps = PulseSynchronizer("sys", "time")
-        self.submodules += time_change_ps
-        self.comb += time_change_ps.i.eq(self._control.fields.write | self._time_adjustment.re)
-        self.comb += self.time_change.eq(time_change_ps.o)
+        time_adjust_ps = PulseSynchronizer("sys", "time")
+        self.submodules += time_adjust_ps
+        self.comb += time_adjust_ps.i.eq(self._time_adjustment.re)
+        self.comb += self._time_adjust_change.eq(time_adjust_ps.o)
 
         # Time Increment.
         self.specials += MultiReg(self._time_inc.storage, self.time_inc, "time")
@@ -128,9 +158,9 @@ class TimeGenerator(LiteXModule):
             ("change",  1),
         ]
         self.cdc = cdc = stream.ClockDomainCrossing(
-            layout     = cdc_layout,
-            cd_from    = "time",
-            cd_to      = "sys",
+            layout          = cdc_layout,
+            cd_from         = "time",
+            cd_to           = "sys",
             with_common_rst = True,
         )
         self.comb += [
@@ -140,8 +170,8 @@ class TimeGenerator(LiteXModule):
             cdc.source.ready.eq(1),
         ]
         self.sync += If(cdc.source.valid,
-            time.eq(        cdc.source.time),
-            time_change.eq( cdc.source.change),
+            time.eq(       cdc.source.time),
+            time_change.eq(cdc.source.change),
         )
         self.time        = time
         self.time_change = time_change

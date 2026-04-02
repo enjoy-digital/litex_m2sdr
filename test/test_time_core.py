@@ -105,3 +105,39 @@ def test_time_generator_reenable_restarts_from_init():
     assert samples["running"] > 77
     assert samples["disabled"] <= samples["running"]
     assert samples["reenabled"] >= 77
+
+
+def test_time_generator_external_discipline_write_and_adjust():
+    """Validate external discipline can steer time without disturbing the CSR ABI."""
+    dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, with_csr=False)
+    samples = {}
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.discipline_enable.eq(1)
+        yield dut.discipline_time_inc.eq(20 << 24)
+        for _ in range(6):
+            yield
+        samples["faster"] = (yield dut.time)
+
+        yield dut.discipline_write_time.eq(1_000_000)
+        yield dut.discipline_write.eq(1)
+        yield
+        yield dut.discipline_write.eq(0)
+        for _ in range(2):
+            yield
+        samples["written"] = (yield dut.time)
+
+        yield dut.discipline_adjust_sign.eq(1)
+        yield dut.discipline_adjustment.eq(250)
+        yield dut.discipline_adjust.eq(1)
+        yield
+        yield dut.discipline_adjust.eq(0)
+        for _ in range(2):
+            yield
+        samples["adjusted"] = (yield dut.time)
+
+    run_simulation(dut, gen(), clocks={"sys": 10, "time": 10})
+    assert samples["faster"] > 60
+    assert samples["written"] >= 1_000_000
+    assert samples["adjusted"] <= samples["written"] - 200
