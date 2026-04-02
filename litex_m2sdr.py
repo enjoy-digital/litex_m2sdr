@@ -49,8 +49,9 @@ from litescope import LiteScopeAnalyzer
 from litex_m2sdr import Platform, _io_baseboard
 from litex_m2sdr.wr_helper import prepare_wr_environment
 
-from litex_m2sdr.gateware.capability  import Capability
-from litex_m2sdr.gateware.si5351      import SI5351
+from litex_m2sdr.gateware.capability       import Capability
+from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline
+from litex_m2sdr.gateware.si5351           import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
@@ -103,7 +104,13 @@ class CRG(LiteXModule):
         pll.register_clkin(clk100, 100e6)
         pll.create_clkout(self.cd_sys,    sys_clk_freq)
         if not with_white_rabbit:
-            pll.create_clkout(self.cd_clk10, 10e6)
+            # Keep clk10 on a dedicated MMCM so the SI5351C FPGA CLKIN path can be phase-steered later.
+            self.clk10_mmcm = clk10_mmcm = S7MMCM(speedgrade=-3, fractional=False)
+            self.comb += clk10_mmcm.reset.eq(self.rst)
+            clk10_mmcm.register_clkin(clk100, 100e6)
+            clk10_mmcm.expose_dps("clk200", with_csr=False)
+            clk10_mmcm.create_clkout(self.cd_clk10, 10e6, margin=0)
+            clk10_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
         pll.create_clkout(self.cd_idelay, 200e6)
         self.comb += [
             self.cd_clk200.clk.eq(self.cd_idelay.clk),
@@ -201,6 +208,7 @@ class BaseSoC(SoCMini):
 
         # SDR.
         "si5351"           : 20,
+        "clk10_discipline" : 40,
         "header"           : 23,
         "ad9361"           : 24,
         "crossbar"         : 25,
@@ -324,6 +332,16 @@ class BaseSoC(SoCMini):
         # SI5351 ClkIn/Out.
         si5351_clk0   = platform.request("si5351_clk0")
         si5351_clk1   = platform.request("si5351_clk1")
+
+        # Clk10 Phase Discipline ----------------------------------------------------------------
+
+        if not with_white_rabbit:
+            self.clk10_discipline = MMCMPhaseDiscipline(sys_clk_freq=sys_clk_freq)
+            self.comb += [
+                self.crg.clk10_mmcm.psen.eq(self.clk10_discipline.psen),
+                self.crg.clk10_mmcm.psincdec.eq(self.clk10_discipline.psincdec),
+                self.clk10_discipline.psdone.eq(self.crg.clk10_mmcm.psdone),
+            ]
 
         # Time Generator ---------------------------------------------------------------------------
 
