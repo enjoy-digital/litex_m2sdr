@@ -363,6 +363,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /***********************************************************************************************
     *                                    Clocking API
     ***********************************************************************************************/
+    std::vector<std::string> listTimeSources(void) const override;
+    void setTimeSource(const std::string &source) override;
+    std::string getTimeSource(void) const override;
 
     /***********************************************************************************************
     *                                     Time API

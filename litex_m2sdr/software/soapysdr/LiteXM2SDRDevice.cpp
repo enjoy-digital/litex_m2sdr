@@ -12,11 +12,13 @@
 #include <sys/mman.h>
 #include <arpa/inet.h>
 #include <stdint.h>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
+#include <inttypes.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -130,6 +132,54 @@ bool antenna_allowed(const std::vector<std::string> &ants, const std::string &na
     if (ants.empty())
         return true;
     return std::find(ants.begin(), ants.end(), name) != ants.end();
+}
+
+bool has_eth_ptp_support(struct m2sdr_dev *dev)
+{
+    struct m2sdr_capabilities caps;
+
+    if (!dev)
+        return false;
+    if (m2sdr_get_capabilities(dev, &caps) != 0)
+        return false;
+
+    return (caps.features & M2SDR_FEATURE_ETH_PTP_MASK) != 0;
+}
+
+std::string ptp_state_to_string(uint8_t state)
+{
+    switch (state) {
+    case 0: return "manual";
+    case 1: return "acquire";
+    case 2: return "locked";
+    case 3: return "holdover";
+    default: return "unknown";
+    }
+}
+
+std::string ptp_ipv4_to_string(uint32_t ip)
+{
+    char buf[32];
+
+    std::snprintf(buf, sizeof(buf), "%u.%u.%u.%u",
+                  (ip >> 24) & 0xffu,
+                  (ip >> 16) & 0xffu,
+                  (ip >>  8) & 0xffu,
+                  (ip >>  0) & 0xffu);
+    return std::string(buf);
+}
+
+std::string ptp_port_identity_to_string(const struct m2sdr_ptp_port_identity &port)
+{
+    char buf[64];
+
+    if ((port.clock_id == 0) && (port.port_number == 0))
+        return "n/a";
+
+    std::snprintf(buf, sizeof(buf), "%016" PRIx64 ":%u",
+                  port.clock_id,
+                  static_cast<unsigned>(port.port_number));
+    return std::string(buf);
 }
 
 void fir_set_64_taps(int16_t *dst, const int16_t *src)
@@ -1490,6 +1540,53 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
  *                                   Clocking API
  **************************************************************************************************/
 
+std::vector<std::string> SoapyLiteXM2SDR::listTimeSources(void) const
+{
+    std::vector<std::string> sources = {"internal"};
+
+    if (has_eth_ptp_support(_dev))
+        sources.push_back("ptp");
+
+    return sources;
+}
+
+void SoapyLiteXM2SDR::setTimeSource(const std::string &source)
+{
+    if (source == "internal") {
+        if (!has_eth_ptp_support(_dev))
+            return;
+    } else if (source != "ptp") {
+        throw std::runtime_error("Unsupported time source: " + source);
+    }
+
+    if (!has_eth_ptp_support(_dev))
+        throw std::runtime_error("PTP time source is not available on this bitstream");
+
+    struct m2sdr_ptp_discipline_config cfg;
+    int rc = m2sdr_get_ptp_discipline_config(_dev, &cfg);
+    if (rc != 0)
+        throw std::runtime_error("m2sdr_get_ptp_discipline_config() failed: " + std::string(m2sdr_strerror(rc)));
+
+    cfg.enable = (source == "ptp");
+
+    rc = m2sdr_set_ptp_discipline_config(_dev, &cfg);
+    if (rc != 0)
+        throw std::runtime_error("m2sdr_set_ptp_discipline_config() failed: " + std::string(m2sdr_strerror(rc)));
+}
+
+std::string SoapyLiteXM2SDR::getTimeSource(void) const
+{
+    if (!has_eth_ptp_support(_dev))
+        return "internal";
+
+    struct m2sdr_ptp_status status;
+    int rc = m2sdr_get_ptp_status(_dev, &status);
+    if (rc != 0)
+        throw std::runtime_error("m2sdr_get_ptp_status() failed: " + std::string(m2sdr_strerror(rc)));
+
+    return status.enabled ? "ptp" : "internal";
+}
+
 /***************************************************************************************************
  *                                    Time API
  **************************************************************************************************/
@@ -1500,43 +1597,24 @@ bool SoapyLiteXM2SDR::hasHardwareTime(const std::string &) const {
 
 long long SoapyLiteXM2SDR::getHardwareTime(const std::string &) const
 {
-    uint32_t control_reg = 0;
-    int64_t time_ns = 0;
+    uint64_t time_ns = 0;
+    int rc = m2sdr_get_time(_dev, &time_ns);
 
-    /* Latch the 64-bit Time (ns) by pulsing READ bit of Control Register. */
-    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
-    control_reg |= (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET);
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
-    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
+    if (rc != 0)
+        throw std::runtime_error("m2sdr_get_time() failed: " + std::string(m2sdr_strerror(rc)));
 
-    /* Read the upper/lower 32 bits of the 64-bit Time (ns). */
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 0)) << 32);
-    time_ns |= (static_cast<int64_t>(litex_m2sdr_readl(_dev, CSR_TIME_GEN_READ_TIME_ADDR + 4)) <<  0);
-
-    /* Debug log the hardware time in nanoseconds. */
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", (long long)time_ns);
-
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time (ns): %lld", static_cast<long long>(time_ns));
     return static_cast<long long>(time_ns);
 }
 
 void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string &)
 {
-    uint32_t control_reg = 0;
+    int rc = m2sdr_set_time(_dev, static_cast<uint64_t>(timeNs));
 
-    /* Write the 64-bit Time (ns). */
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, static_cast<uint32_t>((timeNs >> 32) & 0xffffffff));
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 4, static_cast<uint32_t>((timeNs >>  0) & 0xffffffff));
+    if (rc != 0)
+        throw std::runtime_error("m2sdr_set_time() failed: " + std::string(m2sdr_strerror(rc)));
 
-    /* Pulse the WRITE bit Control Register. */
-    control_reg = litex_m2sdr_readl(_dev, CSR_TIME_GEN_CONTROL_ADDR);
-    control_reg |= (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET);
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
-    control_reg = (1 << CSR_TIME_GEN_CONTROL_ENABLE_OFFSET);
-    litex_m2sdr_writel(_dev, CSR_TIME_GEN_CONTROL_ADDR, control_reg);
-
-    /* Optional debug log. */
-    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time set to (ns): %lld", (long long)timeNs);
+    SoapySDR::logf(SOAPY_SDR_DEBUG, "Hardware time set to (ns): %lld", timeNs);
 }
 
 /***************************************************************************************************
@@ -1552,6 +1630,17 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("fpga_vccbram");
 #endif
     sensors.push_back("ad9361_temp");
+    if (has_eth_ptp_support(_dev)) {
+        sensors.push_back("ptp_locked");
+        sensors.push_back("ptp_time_locked");
+        sensors.push_back("ptp_holdover");
+        sensors.push_back("ptp_state");
+        sensors.push_back("ptp_master_ip");
+        sensors.push_back("ptp_master_clock_id");
+        sensors.push_back("ptp_master_port");
+        sensors.push_back("ptp_master_port_id");
+        sensors.push_back("ptp_last_error_ns");
+    }
     return sensors;
 }
 
@@ -1616,6 +1705,58 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 
+        if (deviceStr == "ptp") {
+            if (sensorStr == "locked") {
+                info.key         = "locked";
+                info.value       = "false";
+                info.description = "LiteEth PTP core locked to a master";
+                info.type        = SoapySDR::ArgInfo::BOOL;
+            } else if (sensorStr == "time_locked") {
+                info.key         = "time_locked";
+                info.value       = "false";
+                info.description = "Board time within the PTP lock window";
+                info.type        = SoapySDR::ArgInfo::BOOL;
+            } else if (sensorStr == "holdover") {
+                info.key         = "holdover";
+                info.value       = "false";
+                info.description = "PTP discipline running in holdover";
+                info.type        = SoapySDR::ArgInfo::BOOL;
+            } else if (sensorStr == "state") {
+                info.key         = "state";
+                info.value       = "manual";
+                info.description = "PTP discipline state machine";
+                info.type        = SoapySDR::ArgInfo::STRING;
+            } else if (sensorStr == "master_ip") {
+                info.key         = "master_ip";
+                info.value       = "0.0.0.0";
+                info.description = "Current PTP master IPv4 address";
+                info.type        = SoapySDR::ArgInfo::STRING;
+            } else if (sensorStr == "master_clock_id") {
+                info.key         = "master_clock_id";
+                info.value       = "0000000000000000";
+                info.description = "Current PTP master clockIdentity";
+                info.type        = SoapySDR::ArgInfo::STRING;
+            } else if (sensorStr == "master_port") {
+                info.key         = "master_port";
+                info.value       = "0";
+                info.description = "Current PTP master portNumber";
+                info.type        = SoapySDR::ArgInfo::INT;
+            } else if (sensorStr == "master_port_id") {
+                info.key         = "master_port_id";
+                info.value       = "0000000000000000:0";
+                info.description = "Current PTP master sourcePortIdentity";
+                info.type        = SoapySDR::ArgInfo::STRING;
+            } else if (sensorStr == "last_error_ns") {
+                info.key         = "last_error_ns";
+                info.value       = "0";
+                info.description = "Last signed PTP minus board-time error in nanoseconds";
+                info.type        = SoapySDR::ArgInfo::INT;
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return info;
+        }
+
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
@@ -1660,6 +1801,37 @@ std::string SoapyLiteXM2SDR::readSensor(
             /* Temp. */
             if (sensorStr == "temp") {
                 sensorValue = std::to_string(ad9361_get_temp(ad9361_phy)/1000); /* FIXME/CHECKME*/
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return sensorValue;
+        }
+
+        if (deviceStr == "ptp") {
+            struct m2sdr_ptp_status status;
+            if (m2sdr_get_ptp_status(_dev, &status) != 0)
+                throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") failed");
+
+            if (sensorStr == "locked") {
+                sensorValue = status.ptp_locked ? "true" : "false";
+            } else if (sensorStr == "time_locked") {
+                sensorValue = status.time_locked ? "true" : "false";
+            } else if (sensorStr == "holdover") {
+                sensorValue = status.holdover ? "true" : "false";
+            } else if (sensorStr == "state") {
+                sensorValue = ptp_state_to_string(status.state);
+            } else if (sensorStr == "master_ip") {
+                sensorValue = ptp_ipv4_to_string(status.master_ip);
+            } else if (sensorStr == "master_clock_id") {
+                char buf[32];
+                std::snprintf(buf, sizeof(buf), "%016" PRIx64, status.master_port.clock_id);
+                sensorValue = buf;
+            } else if (sensorStr == "master_port") {
+                sensorValue = std::to_string(status.master_port.port_number);
+            } else if (sensorStr == "master_port_id") {
+                sensorValue = ptp_port_identity_to_string(status.master_port);
+            } else if (sensorStr == "last_error_ns") {
+                sensorValue = std::to_string(status.last_error_ns);
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }

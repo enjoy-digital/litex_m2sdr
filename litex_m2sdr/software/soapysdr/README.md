@@ -65,6 +65,17 @@ Example (Etherbone control + Soapy RX over FPGA VRT):
 SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50,eth_mode=vrt,vrt_port=4991"
 ```
 
+When the bitstream was built with `--with-eth --with-eth-ptp`, the Soapy driver also exposes:
+
+- Time sources: `internal`, `ptp`
+- Device sensors: `ptp_locked`, `ptp_time_locked`, `ptp_holdover`, `ptp_state`, `ptp_master_ip`, `ptp_master_clock_id`, `ptp_master_port`, `ptp_master_port_id`, `ptp_last_error_ns`
+
+Example:
+```bash
+SoapySDRUtil --probe="driver=LiteXM2SDR"
+```
+The probe output will list the available time sources and the additional PTP sensors when Ethernet PTP support is present in the FPGA image.
+
 ---
 
 ## Test Utilities
