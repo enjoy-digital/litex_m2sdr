@@ -614,7 +614,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                     si5351_xo_38p4m_config,
                     sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
             }
-        } else {
+        } else if (clock_source == "external") {
             /* SI5351C, external 10 MHz CLKIN from u.FL */
             litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                   SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
@@ -628,6 +628,25 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                     si5351_clkin_10m_38p4m_config,
                     sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
             }
+        } else if ((clock_source == "fpga") ||
+                   (clock_source == "si5351c-fpga") ||
+                   (clock_source == "si5351c_fpga") ||
+                   (clock_source == "pll")) {
+            /* SI5351C, 10 MHz CLKIN regenerated from the FPGA clk10 path. */
+            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
+                  SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+                  SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
+            if (refclk_hz == 40000000) {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_clkin_10m_40m_config,
+                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+            } else {
+                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                    si5351_clkin_10m_38p4m_config,
+                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+            }
+        } else {
+            throw std::runtime_error("Unsupported clock_source '" + clock_source + "' (supported: internal, external, fpga)");
         }
 #endif
 

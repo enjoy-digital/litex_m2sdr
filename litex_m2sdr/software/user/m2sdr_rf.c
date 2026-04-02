@@ -50,7 +50,7 @@ static void help(void)
            "      --8bit             Legacy alias for --format sc8.\n"
            "      --oversample       Enable oversample mode.\n"
            "      --channel-layout M Channel mode: 1t1r or 2t2r (default: 2t2r).\n"
-           "      --sync MODE        Clock source: internal or external.\n"
+           "      --sync MODE        Clock source: internal, external, or fpga.\n"
            "\n"
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
            "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6 or 20M).\n"
@@ -190,8 +190,13 @@ int main(int argc, char **argv)
                 cfg.clock_source = M2SDR_CLOCK_SOURCE_INTERNAL;
             else if (strcmp(optarg, "external") == 0)
                 cfg.clock_source = M2SDR_CLOCK_SOURCE_EXTERNAL;
+            else if ((strcmp(optarg, "fpga") == 0) ||
+                     (strcmp(optarg, "si5351c-fpga") == 0) ||
+                     (strcmp(optarg, "si5351c_fpga") == 0) ||
+                     (strcmp(optarg, "pll") == 0))
+                cfg.clock_source = M2SDR_CLOCK_SOURCE_SI5351C_FPGA;
             else {
-                m2sdr_cli_invalid_choice("sync mode", optarg, "internal or external");
+                m2sdr_cli_invalid_choice("sync mode", optarg, "internal, external, or fpga");
                 return 1;
             }
             break;

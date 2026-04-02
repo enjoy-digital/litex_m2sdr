@@ -290,8 +290,9 @@ enum m2sdr_channel_layout {
 };
 
 enum m2sdr_clock_source {
-    M2SDR_CLOCK_SOURCE_INTERNAL = 0,
-    M2SDR_CLOCK_SOURCE_EXTERNAL = 1,
+    M2SDR_CLOCK_SOURCE_INTERNAL      = 0,
+    M2SDR_CLOCK_SOURCE_EXTERNAL      = 1,
+    M2SDR_CLOCK_SOURCE_SI5351C_FPGA  = 2,
 };
 
 /* RF configuration (matches existing utilities defaults) */
@@ -326,7 +327,7 @@ struct m2sdr_config {
     enum m2sdr_clock_source clock_source;
     /* Legacy string overrides kept for compatibility with old utilities. */
     const char *chan_mode; /* legacy string override: "2t2r" or "1t1r" */
-    const char *sync_mode; /* legacy string override: "internal" or "external" */
+    const char *sync_mode; /* legacy string override: "internal", "external", or "fpga" */
 };
 
 struct m2sdr_dev;

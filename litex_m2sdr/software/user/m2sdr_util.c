@@ -994,6 +994,13 @@ static void info(void)
         printf("SI5351 Presence  : %s\n", si5351_present ? "Yes" : "No");
         if (si5351_present) {
             uint8_t status;
+            uint32_t control = m2sdr_read32(conn, CSR_SI5351_CONTROL_ADDR);
+            bool si5351c = ((control >> CSR_SI5351_CONTROL_VERSION_OFFSET) & ((1u << CSR_SI5351_CONTROL_VERSION_SIZE) - 1u)) != 0;
+            bool clkin_ufl = ((control >> CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET) & ((1u << CSR_SI5351_CONTROL_CLKIN_SRC_SIZE) - 1u)) != 0;
+            const char *configured_mode = si5351c ? (clkin_ufl ? "SI5351C / 10MHz from uFL" : "SI5351C / 10MHz from FPGA") : "SI5351B / internal XO";
+
+            printf("Configured Mode  : %s\n", configured_mode);
+
             m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, 0x00, &status, 1, true);
             printf("Device Status    : 0x%02x\n", status);
             printf("  SYS_INIT       : %s\n", (status & 0x80) ? "Initializing"   : "Ready");

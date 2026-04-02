@@ -158,11 +158,25 @@ static int m2sdr_clock_source_from_config(const struct m2sdr_config *cfg,
             *source = M2SDR_CLOCK_SOURCE_EXTERNAL;
             return M2SDR_ERR_OK;
         }
+        if ((strcmp(cfg->sync_mode, "fpga") == 0) ||
+            (strcmp(cfg->sync_mode, "si5351c-fpga") == 0) ||
+            (strcmp(cfg->sync_mode, "si5351c_fpga") == 0) ||
+            (strcmp(cfg->sync_mode, "pll") == 0)) {
+            *source = M2SDR_CLOCK_SOURCE_SI5351C_FPGA;
+            return M2SDR_ERR_OK;
+        }
         return M2SDR_ERR_INVAL;
     }
 
-    *source = cfg->clock_source;
-    return M2SDR_ERR_OK;
+    switch (cfg->clock_source) {
+    case M2SDR_CLOCK_SOURCE_INTERNAL:
+    case M2SDR_CLOCK_SOURCE_EXTERNAL:
+    case M2SDR_CLOCK_SOURCE_SI5351C_FPGA:
+        *source = cfg->clock_source;
+        return M2SDR_ERR_OK;
+    default:
+        return M2SDR_ERR_INVAL;
+    }
 }
 
 /* Resolve the requested RF channel layout, again accepting the legacy
@@ -246,10 +260,26 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                 sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]));
         }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_EXTERNAL) {
-        M2SDR_LOGF("Using external 10MHz as SI5351 CLKIN source...\n");
+        M2SDR_LOGF("Using external 10MHz from uFL as SI5351C CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)) != 0)
+            return M2SDR_ERR_IO;
+
+        if (cfg->refclk_freq == 40000000) {
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_40m_config,
+                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0]));
+        } else {
+            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+                si5351_clkin_10m_38p4m_config,
+                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0]));
+        }
+    } else if (clock_source == M2SDR_CLOCK_SOURCE_SI5351C_FPGA) {
+        M2SDR_LOGF("Using FPGA 10MHz as SI5351C CLKIN source...\n");
+        if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
+              SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+              SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)) != 0)
             return M2SDR_ERR_IO;
 
         if (cfg->refclk_freq == 40000000) {

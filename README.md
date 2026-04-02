@@ -86,7 +86,7 @@ The LiteX-M2SDR board is now fully commercialized and available for purchase fro
 The hardware has been thoroughly tested with several SDR softwares compatible with SoapySDR as well as with our Bare metal C utilities.
 
 *We offer two variants:*
-- **SI5351C Variant** – Uses the SI5351C clock generator with flexible clocking (local XO or external 10MHz via FPGA/uFL). **Recommended for general usage.** [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
+- **SI5351C Variant** – Uses the SI5351C clock generator with flexible clocking (local XO or external 10MHz via FPGA/uFL). Host-side selection now exposes the dedicated SI5351C FPGA `10MHz` CLKIN path (`--sync fpga` / `clock_source=fpga`) in addition to the uFL `10MHz` input mode. **Recommended for general usage.** [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
 - **SI5351B Variant** – Uses the SI5351B clock generator, clocked from the local XO with FPGA-controlled VCXO for software-regulated loops. [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
 
 *Note: The differences between the variants are relevant only for specific use cases. The SI5351B variant is mostly intended for advanced users with specialized clock control requirements.*
