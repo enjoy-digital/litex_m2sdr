@@ -40,6 +40,8 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - TX control uses positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR.
 - Streaming-oriented tools that support both SC16 and SC8 expose `--format sc16|sc8`. Older `--8bit` / `-8` forms are kept as compatibility aliases where applicable.
 - Some tools still accept `-z` / `--zero-copy` for compatibility, but the current sync API hides transport-specific zero-copy behavior.
+- On gateware builds that enable Ethernet PTP time discipline (`--with-eth --with-eth-ptp`), `m2sdr_util info` reports the current PTP lock/holdover state and the public `libm2sdr` API exposes `m2sdr_get_ptp_status()`.
+- When Ethernet PTP actively owns the board clock, host-side absolute time writes are rejected to avoid conflicting masters.
 
 ## Build dependencies
 

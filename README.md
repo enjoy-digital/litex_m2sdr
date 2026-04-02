@@ -112,6 +112,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 |                                 |                              |                              |                                               |
 | **Timing & Sync**               |                              |                              |                                               |
 | PTM (Precision Time Measurement)| ✅ (PCIe Gen2 x1 only)       | ✅ (PCIe Gen2 x1 only)       | `--with-pcie --pcie-lanes=1 --with-pcie-ptm`  |
+| Ethernet PTP Time Discipline    | ❌                           | ✅                           | `--with-eth --with-eth-ptp`                   |
 | White Rabbit Support            | ❌                           | ✅                           | `--with-white-rabbit`                         |
 | External Clocking               | ✅ (SI5351C: ext. 10MHz)     | ✅ (SI5351C: ext. 10MHz)     | (SI5351B VCXO mode in dev for PTM regulation) |
 |                                 |                              |                              |                                               |
@@ -210,6 +211,8 @@ In this design, the PCIe core will then be replaced with [LiteEth](https://githu
 
 The Ethernet SoC design is RX capable only for now. TX support will come soon.
 
+When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. In this first implementation, Ethernet PTP and White Rabbit are mutually exclusive, and the RF/sample clocks themselves are not yet steered from PTP.
+
 [> Getting Started
 ------------------
 <a id="quick-start"></a>
@@ -300,6 +303,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA (WIP)**: Ethernet SoC is RX-only for now; TX support is in development. SATA support is in development. Both require the LiteX Acorn Baseboard Mini.
+- **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info` reports the current lock/holdover state. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
 
 > [!TIP]
 > If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
@@ -412,6 +416,14 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --with-eth --eth-sfp=0 --build --load
    ping 192.168.1.50
    ```
+   - For Ethernet PTP time-discipline tests on the baseboard:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
+   sudo ptp4l -i <host-eth-iface> -2 -m
+   cd litex_m2sdr/software/user
+   ./m2sdr_util info
+   ```
+   - `m2sdr_util info` reports whether the LiteEth PTP core is locked, whether the board time is locked to PTP, and whether the clock is in holdover.
    - For PCIe tests, if the board is mounted directly in an M2 slot:
    ```
    ./litex_m2sdr.py --with-pcie --variant=m2 --build --load

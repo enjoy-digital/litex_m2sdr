@@ -156,7 +156,7 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
-- Time: `m2sdr_get_time`, `m2sdr_set_time`
+- Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
 
 ## Error model
@@ -168,6 +168,7 @@ uses:
 - `M2SDR_ERR_PARSE` for malformed strings/identifiers.
 - `M2SDR_ERR_RANGE` for out-of-range numeric values.
 - `M2SDR_ERR_STATE` for invalid call sequencing (for example, streaming before configuration).
+  On Ethernet PTP-disciplined builds, `m2sdr_set_time()` also returns this when PTP already owns the board clock.
 
 Use `m2sdr_strerror()` for concise error text in logs.
 
@@ -193,6 +194,8 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 ## Notes
 
 - Streaming supports SC16/Q11 and SC8/Q7.
+- `m2sdr_get_ptp_status()` reports the LiteEth PTP lock state, current discipline mode, master IPv4, and the regulator error/increment when the FPGA bitstream was built with `--with-eth --with-eth-ptp`.
+- Read-side time APIs continue to operate on the same logical board clock regardless of whether it is free-running, manually set, or disciplined from Ethernet PTP.
 - Use `m2sdr_bytes_to_samples()` / `m2sdr_samples_to_bytes()` instead of hard-coding sample sizes in applications.
 
 ## Troubleshooting
