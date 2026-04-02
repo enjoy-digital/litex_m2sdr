@@ -55,6 +55,7 @@ from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
+from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
 from litex_m2sdr.gateware.header      import TXRXHeader
@@ -184,6 +185,7 @@ class BaseSoC(SoCMini):
         "eth_tx_streamer"  : 16,
         "eth_ptp"          : 37,
         "ptp_discipline"   : 38,
+        "ptp_identity"     : 39,
 
         # SATA.
         "sata_phy"         : 18,
@@ -510,6 +512,7 @@ class BaseSoC(SoCMini):
 
             if with_eth_ptp:
                 nominal_time_inc = int(round((1e9/100e6) * (1 << 24)))
+                eth_ptp_clock_id = Cat(Constant(eth_sfp + 1, 16), self.dna._id.status)
 
                 self.eth_ptp_event_port   = self.ethcore_etherbone.udp.crossbar.get_port(319, dw=8, cd="sys")
                 self.eth_ptp_general_port = self.ethcore_etherbone.udp.crossbar.get_port(320, dw=8, cd="sys")
@@ -524,8 +527,9 @@ class BaseSoC(SoCMini):
                     nominal_time_inc  = nominal_time_inc,
                 )
                 self.ptp_discipline_cdc = TimeDisciplineCDC(self.time_gen)
+                self.ptp_identity = PTPIdentityTracker()
                 self.comb += [
-                    self.eth_ptp.clock_id.eq(Cat(Constant(eth_sfp, 16), self.dna._id.status, Constant(0, 7))),
+                    self.eth_ptp.clock_id.eq(eth_ptp_clock_id),
                     self.eth_ptp.p2p_mode.eq(1 if eth_ptp_p2p else 0),
                     self.ptp_discipline.local_time.eq(self.time_gen.time),
                     self.ptp_discipline.ptp_seconds.eq(self.eth_ptp.tsu.seconds),
@@ -538,6 +542,17 @@ class BaseSoC(SoCMini):
                     self.ptp_discipline_cdc.adjust.eq(self.ptp_discipline.discipline_adjust),
                     self.ptp_discipline_cdc.adjust_sign.eq(self.ptp_discipline.discipline_adjust_sign),
                     self.ptp_discipline_cdc.adjustment.eq(self.ptp_discipline.discipline_adjustment),
+                    self.ptp_identity.clear.eq(self.ptp_discipline.clear_counters),
+                    self.ptp_identity.local_port_id.eq(eth_ptp_clock_id),
+                    self.ptp_identity.master_ip.eq(self.eth_ptp.master_ip),
+                    self.ptp_identity.event_valid.eq(self.eth_ptp.rx_event.present),
+                    self.ptp_identity.event_msg_type.eq(self.eth_ptp.rx_event.msg_type),
+                    self.ptp_identity.event_ip.eq(self.eth_ptp_event_port.source.ip_address),
+                    self.ptp_identity.event_source_port_id.eq(self.eth_ptp.rx_event.depacketizer.source.source_port_id),
+                    self.ptp_identity.general_valid.eq(self.eth_ptp.rx_general.present),
+                    self.ptp_identity.general_msg_type.eq(self.eth_ptp.rx_general.msg_type),
+                    self.ptp_identity.general_ip.eq(self.eth_ptp_general_port.source.ip_address),
+                    self.ptp_identity.general_source_port_id.eq(self.eth_ptp.rx_general.depacketizer.source.source_port_id),
                 ]
 
             # UDP Streamer.
