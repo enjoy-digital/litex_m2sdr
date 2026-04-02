@@ -5,20 +5,41 @@
 # Copyright (c) 2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
 from migen import *
 from migen.sim import passive
 
-import sys
-import types
-
 from litex.gen.sim import run_simulation
 
-if "litei2c" not in sys.modules:
+
+def _load_si5351_module():
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "litex_m2sdr_gateware_si5351_test",
+        root / "litex_m2sdr/gateware/si5351.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+
+    litei2c_prev = sys.modules.get("litei2c")
     litei2c_stub = types.ModuleType("litei2c")
     litei2c_stub.LiteI2C = object
     sys.modules["litei2c"] = litei2c_stub
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if litei2c_prev is None:
+            sys.modules.pop("litei2c", None)
+        else:
+            sys.modules["litei2c"] = litei2c_prev
+    return module
 
-from litex_m2sdr.gateware.si5351 import LiteI2CSequencer
+
+LiteI2CSequencer = _load_si5351_module().LiteI2CSequencer
 
 
 def test_litei2c_sequencer_writes_full_sequence_and_finishes():
