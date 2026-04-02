@@ -536,6 +536,11 @@ static void info(void)
     bool gpio_enabled = (caps.features >> CSR_CAPABILITY_FEATURES_GPIO_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_GPIO_SIZE) - 1);
     bool wr_enabled   = (caps.features >> CSR_CAPABILITY_FEATURES_WR_OFFSET)   & ((1 << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1);
     bool jtagbone_enabled = (caps.features >> CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1);
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET
+    bool eth_ptp_enabled = (caps.features >> CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1);
+#else
+    bool eth_ptp_enabled = false;
+#endif
 
     {
         int variant = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
@@ -552,6 +557,7 @@ static void info(void)
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
+    printf("  Ethernet PTP   : %s\n", eth_ptp_enabled ? "Yes" : "No");
 
     if (pcie_enabled) {
         int pcie_speed = (caps.pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
@@ -571,6 +577,22 @@ static void info(void)
         {
             int eth_sfp  = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
             printf("  Ethernet SFP   : %d\n", eth_sfp);
+        }
+        if (eth_ptp_enabled) {
+            struct m2sdr_ptp_status ptp_status;
+            if (m2sdr_get_ptp_status(conn, &ptp_status) == 0) {
+                printf("  PTP Locked     : %s\n", ptp_status.ptp_locked ? "Yes" : "No");
+                printf("  Time Locked    : %s\n", ptp_status.time_locked ? "Yes" : "No");
+                printf("  Time Owner     : %s\n", ptp_status.active ? "PTP" : "Host/Free-run");
+                printf("  Holdover       : %s\n", ptp_status.holdover ? "Yes" : "No");
+                printf("  Master IP      : %" PRIu32 ".%" PRIu32 ".%" PRIu32 ".%" PRIu32 "\n",
+                    (ptp_status.master_ip >> 24) & 0xffu,
+                    (ptp_status.master_ip >> 16) & 0xffu,
+                    (ptp_status.master_ip >>  8) & 0xffu,
+                    (ptp_status.master_ip >>  0) & 0xffu);
+                printf("  Time Inc       : 0x%08" PRIx32 "\n", ptp_status.time_inc);
+                printf("  Last Error     : %" PRId64 " ns\n", ptp_status.last_error_ns);
+            }
         }
     }
 

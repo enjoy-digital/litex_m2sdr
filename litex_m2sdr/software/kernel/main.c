@@ -1083,9 +1083,48 @@ static void litepcie_free_chdev(struct litepcie_device *s)
 #define TIME_CONTROL_READ         (1 << CSR_TIME_GEN_CONTROL_READ_OFFSET)
 #define TIME_CONTROL_WRITE        (1 << CSR_TIME_GEN_CONTROL_WRITE_OFFSET)
 #define TIME_CONTROL_SYNC_ENABLE  (1 << CSR_TIME_GEN_CONTROL_SYNC_ENABLE_OFFSET)
+#define TIME_CONTROL_INC_NOMINAL  0x0A000000U
 
 /* PTM Offset in Nanoseconds (Adjust based on calibration) */
 static s64 ptm_offset_ns = -500;
+
+#if defined(CSR_CAPABILITY_FEATURES_ADDR) && \
+    defined(CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET) && \
+    defined(CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE)
+static bool litepcie_has_eth_ptp(struct litepcie_device *dev)
+{
+	u32 features = litepcie_readl(dev, CSR_CAPABILITY_FEATURES_ADDR);
+
+	return ((features >> CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET) &
+		((1U << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1U)) != 0;
+}
+#else
+static bool litepcie_has_eth_ptp(struct litepcie_device *dev)
+{
+	(void)dev;
+	return false;
+}
+#endif
+
+#ifdef CSR_PTP_DISCIPLINE_STATUS_ADDR
+static bool litepcie_time_owned_by_eth_ptp(struct litepcie_device *dev)
+{
+	u32 status;
+
+	if (!litepcie_has_eth_ptp(dev))
+		return false;
+
+	status = litepcie_readl(dev, CSR_PTP_DISCIPLINE_STATUS_ADDR);
+	return ((status >> CSR_PTP_DISCIPLINE_STATUS_ACTIVE_OFFSET) &
+		((1U << CSR_PTP_DISCIPLINE_STATUS_ACTIVE_SIZE) - 1U)) != 0;
+}
+#else
+static bool litepcie_time_owned_by_eth_ptp(struct litepcie_device *dev)
+{
+	(void)dev;
+	return false;
+}
+#endif
 
 static int param_set_s64(const char *val, const struct kernel_param *kp)
 {
@@ -1218,6 +1257,11 @@ static int litepcie_ptp_settime(struct ptp_clock_info *ptp, const struct timespe
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
 
+	if (litepcie_time_owned_by_eth_ptp(dev)) {
+		spin_unlock_irqrestore(&dev->tmreg_lock, flags);
+		return -EBUSY;
+	}
+
 	/* Write the new time to the device */
 	litepcie_write_time(dev, ts);
 
@@ -1240,8 +1284,13 @@ static int litepcie_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 	/* Convert scaled_ppm (Q16.16) to signed ppb */
 	int64_t ppb = (scaled_ppm * 1000LL) >> 16; /* *1000 / 65536 */
 
-	/* Nominal step = 8 ns << 24 */
-	uint32_t add_nom = 0x08000000U;
+	if (litepcie_time_owned_by_eth_ptp(dev)) {
+		spin_unlock_irqrestore(&dev->tmreg_lock, flags);
+		return -EBUSY;
+	}
+
+	/* Nominal step = 10 ns << 24 for the 100MHz SI5351-backed time domain. */
+	uint32_t add_nom = TIME_CONTROL_INC_NOMINAL;
 
 	/* Compute add_new = add_nom * (1 + ppb / 1e9) */
 	uint64_t add_new = div64_u64((uint64_t)add_nom * (1000000000LL + ppb), 1000000000LL);
@@ -1265,6 +1314,11 @@ static int litepcie_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
+
+	if (litepcie_time_owned_by_eth_ptp(dev)) {
+		spin_unlock_irqrestore(&dev->tmreg_lock, flags);
+		return -EBUSY;
+	}
 
 	/* Read current time, add delta, and write back */
 	litepcie_read_time(dev, &now);

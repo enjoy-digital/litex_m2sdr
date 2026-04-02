@@ -161,6 +161,59 @@ static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *va
     return M2SDR_ERR_OK;
 }
 
+static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
+{
+    struct m2sdr_capabilities caps;
+
+    if (!dev || !present)
+        return M2SDR_ERR_INVAL;
+
+    *present = false;
+    if (m2sdr_get_capabilities(dev, &caps) != 0)
+        return M2SDR_ERR_IO;
+
+    *present = (caps.features & M2SDR_FEATURE_ETH_PTP_MASK) != 0;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_time_owned_by_ptp(struct m2sdr_dev *dev, bool *owned)
+{
+    bool has_eth_ptp = false;
+    int ret = 0;
+
+    if (!owned)
+        return M2SDR_ERR_INVAL;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    ret = m2sdr_has_eth_ptp(dev, &has_eth_ptp);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (!has_eth_ptp) {
+        *owned = false;
+        return M2SDR_ERR_OK;
+    }
+
+#if defined(CSR_PTP_DISCIPLINE_STATUS_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_STATUS_ACTIVE_OFFSET) && \
+    defined(CSR_PTP_DISCIPLINE_STATUS_ACTIVE_SIZE)
+    {
+        uint32_t status = 0;
+
+        if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_STATUS_ADDR, &status) != 0)
+            return M2SDR_ERR_IO;
+
+        *owned = ((status >> CSR_PTP_DISCIPLINE_STATUS_ACTIVE_OFFSET) &
+            ((1u << CSR_PTP_DISCIPLINE_STATUS_ACTIVE_SIZE) - 1u)) != 0;
+        return M2SDR_ERR_OK;
+    }
+#else
+    *owned = false;
+    return M2SDR_ERR_OK;
+#endif
+}
+
 /* Read the board identifier memory into a caller-provided string buffer. */
 static int m2sdr_read_identifier_mem(struct m2sdr_dev *dev, char *buf, size_t len)
 {
@@ -559,6 +612,57 @@ int m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info)
     return M2SDR_ERR_UNSUPPORTED;
 }
 
+/* Read the current Ethernet PTP and time-discipline status when available. */
+int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
+{
+#if defined(CSR_ETH_PTP_MASTER_IP_ADDR) && defined(CSR_PTP_DISCIPLINE_STATUS_ADDR)
+    bool has_eth_ptp = false;
+    uint32_t reg = 0;
+    uint64_t last_error = 0;
+    int ret = 0;
+
+    if (!dev || !status)
+        return M2SDR_ERR_INVAL;
+
+    memset(status, 0, sizeof(*status));
+
+    ret = m2sdr_has_eth_ptp(dev, &has_eth_ptp);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (!has_eth_ptp)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_STATUS_ADDR, &reg) != 0)
+        return M2SDR_ERR_IO;
+    status->enabled = ((reg >> CSR_PTP_DISCIPLINE_STATUS_ENABLE_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_ENABLE_SIZE) - 1u)) != 0;
+    status->active = ((reg >> CSR_PTP_DISCIPLINE_STATUS_ACTIVE_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_ACTIVE_SIZE) - 1u)) != 0;
+    status->ptp_locked = ((reg >> CSR_PTP_DISCIPLINE_STATUS_PTP_LOCKED_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_PTP_LOCKED_SIZE) - 1u)) != 0;
+    status->time_locked = ((reg >> CSR_PTP_DISCIPLINE_STATUS_TIME_LOCKED_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_TIME_LOCKED_SIZE) - 1u)) != 0;
+    status->holdover = ((reg >> CSR_PTP_DISCIPLINE_STATUS_HOLDOVER_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_HOLDOVER_SIZE) - 1u)) != 0;
+    status->state = (uint8_t)((reg >> CSR_PTP_DISCIPLINE_STATUS_STATE_OFFSET) &
+        ((1u << CSR_PTP_DISCIPLINE_STATUS_STATE_SIZE) - 1u));
+
+    if (m2sdr_reg_read(dev, CSR_ETH_PTP_MASTER_IP_ADDR, &status->master_ip) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_TIME_INC_ADDR, &status->time_inc) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR, &last_error) != 0)
+        return M2SDR_ERR_IO;
+    status->last_error_ns = (int64_t)last_error;
+
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)status;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
 /* Latch and read the current hardware time in nanoseconds. */
 int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 {
@@ -584,8 +688,17 @@ int m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns)
 /* Program the hardware time generator with an absolute time value. */
 int m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns)
 {
+    bool ptp_owned = false;
+    int ret = 0;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
+
+    ret = m2sdr_time_owned_by_ptp(dev, &ptp_owned);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (ptp_owned)
+        return M2SDR_ERR_STATE;
 
     if (m2sdr_reg_write(dev, CSR_TIME_GEN_WRITE_TIME_ADDR + 0, (uint32_t)(time_ns >> 32)) != 0)
         return M2SDR_ERR_IO;

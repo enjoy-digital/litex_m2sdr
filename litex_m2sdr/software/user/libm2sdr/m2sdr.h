@@ -156,6 +156,18 @@ struct m2sdr_clock_info {
     uint64_t sysclk_hz;
 };
 
+struct m2sdr_ptp_status {
+    bool enabled;
+    bool active;
+    bool ptp_locked;
+    bool time_locked;
+    bool holdover;
+    uint8_t state;
+    uint32_t master_ip;
+    uint32_t time_inc;
+    int64_t last_error_ns;
+};
+
 enum m2sdr_feature_flag {
 #ifdef CSR_CAPABILITY_FEATURES_PCIE_OFFSET
     M2SDR_FEATURE_PCIE = 1u << CSR_CAPABILITY_FEATURES_PCIE_OFFSET,
@@ -186,6 +198,11 @@ enum m2sdr_feature_flag {
     M2SDR_FEATURE_JTAGBONE = 1u << CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET,
 #else
     M2SDR_FEATURE_JTAGBONE = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET
+    M2SDR_FEATURE_ETH_PTP = 1u << CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_PTP = 0,
 #endif
 };
 
@@ -219,6 +236,11 @@ enum m2sdr_feature_mask {
     M2SDR_FEATURE_JTAGBONE_MASK = ((1u << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET,
 #else
     M2SDR_FEATURE_JTAGBONE_MASK = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE
+    M2SDR_FEATURE_ETH_PTP_MASK = ((1u << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_PTP_MASK = 0,
 #endif
 };
 
@@ -338,6 +360,7 @@ int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 /* Time */
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
+int  m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
