@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
@@ -20,6 +21,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <getopt.h>
 
 #include "ad9361/util.h"
@@ -112,6 +114,362 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
         fprintf(stderr, "CSR write failed @0x%08x\n", addr);
         exit(1);
     }
+}
+
+static const char *ptp_yes_no(bool value)
+{
+    return value ? "Yes" : "No";
+}
+
+static const char *ptp_state_name(uint8_t state)
+{
+    switch (state) {
+    case 0: return "manual";
+    case 1: return "acquire";
+    case 2: return "locked";
+    case 3: return "holdover";
+    default: return "unknown";
+    }
+}
+
+static void ptp_format_ipv4(char *buf, size_t len, uint32_t ip)
+{
+    snprintf(buf, len, "%" PRIu32 ".%" PRIu32 ".%" PRIu32 ".%" PRIu32,
+        (ip >> 24) & 0xffu,
+        (ip >> 16) & 0xffu,
+        (ip >>  8) & 0xffu,
+        (ip >>  0) & 0xffu);
+}
+
+static void ptp_format_port_identity(char *buf, size_t len, const struct m2sdr_ptp_port_identity *port)
+{
+    if (!port || ((port->clock_id == 0) && (port->port_number == 0))) {
+        snprintf(buf, len, "n/a");
+        return;
+    }
+
+    snprintf(buf, len, "%016" PRIx64 ":%u",
+        port->clock_id,
+        (unsigned)port->port_number);
+}
+
+static int parse_bool_arg(const char *arg, bool *value)
+{
+    if (!arg || !value)
+        return -1;
+
+    if ((strcasecmp(arg, "1") == 0) ||
+        (strcasecmp(arg, "true") == 0) ||
+        (strcasecmp(arg, "yes") == 0) ||
+        (strcasecmp(arg, "on") == 0) ||
+        (strcasecmp(arg, "enable") == 0) ||
+        (strcasecmp(arg, "enabled") == 0)) {
+        *value = true;
+        return 0;
+    }
+
+    if ((strcasecmp(arg, "0") == 0) ||
+        (strcasecmp(arg, "false") == 0) ||
+        (strcasecmp(arg, "no") == 0) ||
+        (strcasecmp(arg, "off") == 0) ||
+        (strcasecmp(arg, "disable") == 0) ||
+        (strcasecmp(arg, "disabled") == 0)) {
+        *value = false;
+        return 0;
+    }
+
+    return -1;
+}
+
+static int parse_u32_arg(const char *arg, uint32_t *value)
+{
+    char *end = NULL;
+    unsigned long parsed = 0;
+
+    if (!arg || !value)
+        return -1;
+
+    errno = 0;
+    parsed = strtoul(arg, &end, 0);
+    if ((errno != 0) || (end == arg) || (*end != '\0') || (parsed > 0xfffffffful))
+        return -1;
+
+    *value = (uint32_t)parsed;
+    return 0;
+}
+
+static int parse_double_arg(const char *arg, double *value)
+{
+    char *end = NULL;
+    double parsed = 0.0;
+
+    if (!arg || !value)
+        return -1;
+
+    errno = 0;
+    parsed = strtod(arg, &end);
+    if ((errno != 0) || (end == arg) || (*end != '\0'))
+        return -1;
+
+    *value = parsed;
+    return 0;
+}
+
+static void sleep_seconds(double seconds)
+{
+    struct timespec req;
+    struct timespec rem;
+
+    if (seconds <= 0.0)
+        return;
+
+    req.tv_sec  = (time_t)seconds;
+    req.tv_nsec = (long)((seconds - (double)req.tv_sec) * 1e9);
+    if (req.tv_nsec < 0)
+        req.tv_nsec = 0;
+
+    while ((nanosleep(&req, &rem) != 0) && (errno == EINTR) && keep_running)
+        req = rem;
+}
+
+static void ptp_print_status_summary(const struct m2sdr_ptp_status *status)
+{
+    char master_ip[32];
+    char master_port[48];
+
+    ptp_format_ipv4(master_ip, sizeof(master_ip), status->master_ip);
+    ptp_format_port_identity(master_port, sizeof(master_port), &status->master_port);
+
+    printf("  PTP Locked     : %s\n", ptp_yes_no(status->ptp_locked));
+    printf("  Time Locked    : %s\n", ptp_yes_no(status->time_locked));
+    printf("  Time Owner     : %s\n", status->active ? "PTP" : "Host/Free-run");
+    printf("  Holdover       : %s\n", ptp_yes_no(status->holdover));
+    printf("  State          : %s\n", ptp_state_name(status->state));
+    printf("  Master IP      : %s\n", master_ip);
+    printf("  Master Port    : %s\n", master_port);
+    printf("  Time Inc       : 0x%08" PRIx32 "\n", status->time_inc);
+    printf("  Last Error     : %" PRId64 " ns\n", status->last_error_ns);
+    printf("  Lock Losses    : PTP=%" PRIu32 " Time=%" PRIu32 "\n",
+        status->ptp_lock_losses,
+        status->time_lock_losses);
+}
+
+static void ptp_print_status_details(const struct m2sdr_ptp_status *status)
+{
+    char master_ip[32];
+    char local_port[48];
+    char master_port[48];
+
+    ptp_format_ipv4(master_ip, sizeof(master_ip), status->master_ip);
+    ptp_format_port_identity(local_port, sizeof(local_port), &status->local_port);
+    ptp_format_port_identity(master_port, sizeof(master_port), &status->master_port);
+
+    printf("Discipline Enable: %s\n", ptp_yes_no(status->enabled));
+    printf("Time Owner       : %s\n", status->active ? "PTP" : "Host/Free-run");
+    printf("PTP Locked       : %s\n", ptp_yes_no(status->ptp_locked));
+    printf("Time Locked      : %s\n", ptp_yes_no(status->time_locked));
+    printf("Holdover         : %s\n", ptp_yes_no(status->holdover));
+    printf("State            : %s (%u)\n", ptp_state_name(status->state), status->state);
+    printf("Master IP        : %s\n", master_ip);
+    printf("Local Port       : %s\n", local_port);
+    printf("Master Port      : %s\n", master_port);
+    printf("Identity Updates : %" PRIu32 "\n", status->identity_updates);
+    printf("Time Inc         : 0x%08" PRIx32 "\n", status->time_inc);
+    printf("Last Error       : %" PRId64 " ns\n", status->last_error_ns);
+    printf("Last PTP Time    : %" PRIu64 " ns\n", status->last_ptp_time_ns);
+    printf("Last Local Time  : %" PRIu64 " ns\n", status->last_local_time_ns);
+    printf("Coarse Steps     : %" PRIu32 "\n", status->coarse_steps);
+    printf("Phase Steps      : %" PRIu32 "\n", status->phase_steps);
+    printf("Rate Updates     : %" PRIu32 "\n", status->rate_updates);
+    printf("PTP Lock Losses  : %" PRIu32 "\n", status->ptp_lock_losses);
+    printf("Time Lock Losses : %" PRIu32 "\n", status->time_lock_losses);
+    printf("Invalid Header   : %" PRIu32 "\n", status->invalid_header_count);
+    printf("Wrong Peer       : %" PRIu32 "\n", status->wrong_peer_count);
+    printf("Wrong Requester  : %" PRIu32 "\n", status->wrong_requester_count);
+    printf("RX Timeout       : %" PRIu32 "\n", status->rx_timeout_count);
+    printf("Announce Expiry  : %" PRIu32 "\n", status->announce_expiry_count);
+}
+
+static void ptp_print_discipline_config(const struct m2sdr_ptp_discipline_config *cfg)
+{
+    printf("Enable           : %s\n", ptp_yes_no(cfg->enable));
+    printf("Holdover         : %s\n", ptp_yes_no(cfg->holdover));
+    printf("Update Cycles    : %" PRIu32 "\n", cfg->update_cycles);
+    printf("Coarse Threshold : %" PRIu32 " ns\n", cfg->coarse_threshold_ns);
+    printf("Phase Threshold  : %" PRIu32 " ns\n", cfg->phase_threshold_ns);
+    printf("Lock Window      : %" PRIu32 " ns\n", cfg->lock_window_ns);
+    printf("Phase Step Shift : %u\n", cfg->phase_step_shift);
+    printf("Phase Step Max   : %" PRIu32 " ns\n", cfg->phase_step_max_ns);
+    printf("Trim Limit       : %" PRIu32 "\n", cfg->trim_limit);
+    printf("P Gain           : %u\n", cfg->p_gain);
+}
+
+static void ptp_status(bool watch, double watch_interval)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+
+    keep_running = 1;
+    signal(SIGINT, intHandler);
+
+    do {
+        struct m2sdr_ptp_status status;
+        char refresh_time[64];
+        time_t now;
+        struct tm tm;
+        int ret;
+
+        ret = m2sdr_get_ptp_status(conn, &status);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to read PTP status: %s\n", m2sdr_strerror(ret));
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+
+        now = time(NULL);
+        localtime_r(&now, &tm);
+        strftime(refresh_time, sizeof(refresh_time), "%Y-%m-%d %H:%M:%S", &tm);
+
+        if (watch && isatty(STDOUT_FILENO))
+            printf("\033[H\033[J");
+
+        printf("\e[1m[> PTP Status:\e[0m\n");
+        printf("--------------\n");
+        printf("Refresh Time     : %s\n", refresh_time);
+        ptp_print_status_details(&status);
+        printf("\n");
+        fflush(stdout);
+
+        if (!watch)
+            break;
+        sleep_seconds(watch_interval);
+    } while (keep_running);
+
+    m2sdr_close_dev(conn);
+}
+
+static void ptp_config(const char *field, const char *value)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct m2sdr_ptp_discipline_config cfg;
+    int ret;
+
+    if (field && ((strcmp(field, "clear-counters") == 0) || (strcmp(field, "clear_counters") == 0))) {
+        ret = m2sdr_clear_ptp_counters(conn);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to clear PTP counters: %s\n", m2sdr_strerror(ret));
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+        printf("PTP counters cleared.\n");
+        m2sdr_close_dev(conn);
+        return;
+    }
+
+    ret = m2sdr_get_ptp_discipline_config(conn, &cfg);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to read PTP discipline config: %s\n", m2sdr_strerror(ret));
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    if (!field) {
+        printf("\e[1m[> PTP Discipline Config:\e[0m\n");
+        printf("------------------------\n");
+        ptp_print_discipline_config(&cfg);
+        printf("\n");
+        m2sdr_close_dev(conn);
+        return;
+    }
+
+    if (!value) {
+        fprintf(stderr, "ptp-config requires a value for '%s'\n", field);
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    if ((strcmp(field, "enable") == 0)) {
+        if (parse_bool_arg(value, &cfg.enable) != 0) {
+            fprintf(stderr, "Invalid boolean value '%s' for enable\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "holdover") == 0)) {
+        if (parse_bool_arg(value, &cfg.holdover) != 0) {
+            fprintf(stderr, "Invalid boolean value '%s' for holdover\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "update-cycles") == 0) || (strcmp(field, "update_cycles") == 0)) {
+        if (parse_u32_arg(value, &cfg.update_cycles) != 0) {
+            fprintf(stderr, "Invalid value '%s' for update-cycles\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "coarse-threshold") == 0) || (strcmp(field, "coarse_threshold") == 0)) {
+        if (parse_u32_arg(value, &cfg.coarse_threshold_ns) != 0) {
+            fprintf(stderr, "Invalid value '%s' for coarse-threshold\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "phase-threshold") == 0) || (strcmp(field, "phase_threshold") == 0)) {
+        if (parse_u32_arg(value, &cfg.phase_threshold_ns) != 0) {
+            fprintf(stderr, "Invalid value '%s' for phase-threshold\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "lock-window") == 0) || (strcmp(field, "lock_window") == 0)) {
+        if (parse_u32_arg(value, &cfg.lock_window_ns) != 0) {
+            fprintf(stderr, "Invalid value '%s' for lock-window\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "phase-step-shift") == 0) || (strcmp(field, "phase_step_shift") == 0)) {
+        uint32_t parsed = 0;
+        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 63u)) {
+            fprintf(stderr, "Invalid value '%s' for phase-step-shift\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+        cfg.phase_step_shift = (uint8_t)parsed;
+    } else if ((strcmp(field, "phase-step-max") == 0) || (strcmp(field, "phase_step_max") == 0)) {
+        if (parse_u32_arg(value, &cfg.phase_step_max_ns) != 0) {
+            fprintf(stderr, "Invalid value '%s' for phase-step-max\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "trim-limit") == 0) || (strcmp(field, "trim_limit") == 0)) {
+        if (parse_u32_arg(value, &cfg.trim_limit) != 0) {
+            fprintf(stderr, "Invalid value '%s' for trim-limit\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+    } else if ((strcmp(field, "p-gain") == 0) || (strcmp(field, "p_gain") == 0)) {
+        uint32_t parsed = 0;
+        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 0xffffu)) {
+            fprintf(stderr, "Invalid value '%s' for p-gain\n", value);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+        cfg.p_gain = (uint16_t)parsed;
+    } else {
+        fprintf(stderr, "Unknown ptp-config field '%s'\n", field);
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    ret = m2sdr_set_ptp_discipline_config(conn, &cfg);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to update PTP discipline config: %s\n", m2sdr_strerror(ret));
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    printf("\e[1m[> PTP Discipline Config:\e[0m\n");
+    printf("------------------------\n");
+    ptp_print_discipline_config(&cfg);
+    printf("\n");
+
+    m2sdr_close_dev(conn);
 }
 
 /* SI5351 */
@@ -580,19 +938,8 @@ static void info(void)
         }
         if (eth_ptp_enabled) {
             struct m2sdr_ptp_status ptp_status;
-            if (m2sdr_get_ptp_status(conn, &ptp_status) == 0) {
-                printf("  PTP Locked     : %s\n", ptp_status.ptp_locked ? "Yes" : "No");
-                printf("  Time Locked    : %s\n", ptp_status.time_locked ? "Yes" : "No");
-                printf("  Time Owner     : %s\n", ptp_status.active ? "PTP" : "Host/Free-run");
-                printf("  Holdover       : %s\n", ptp_status.holdover ? "Yes" : "No");
-                printf("  Master IP      : %" PRIu32 ".%" PRIu32 ".%" PRIu32 ".%" PRIu32 "\n",
-                    (ptp_status.master_ip >> 24) & 0xffu,
-                    (ptp_status.master_ip >> 16) & 0xffu,
-                    (ptp_status.master_ip >>  8) & 0xffu,
-                    (ptp_status.master_ip >>  0) & 0xffu);
-                printf("  Time Inc       : 0x%08" PRIx32 "\n", ptp_status.time_inc);
-                printf("  Last Error     : %" PRId64 " ns\n", ptp_status.last_error_ns);
-            }
+            if (m2sdr_get_ptp_status(conn, &ptp_status) == 0)
+                ptp_print_status_summary(&ptp_status);
         }
     }
 
@@ -1613,6 +1960,8 @@ static void help(void)
            "options:\n"
            "  -h, --help                       Show this help message.\n"
            "  -d, --device DEV                 Use explicit device id.\n"
+           "      --watch                      Refresh supported status commands until Ctrl-C.\n"
+           "      --watch-interval SEC         Refresh interval for --watch (default: 1.0).\n"
 #ifdef USE_LITEPCIE
            "  -c, --device-num N               Select the device (default: 0).\n"
            "  -y, --force                      Skip confirmation prompts for destructive commands.\n"
@@ -1634,6 +1983,16 @@ static void help(void)
            "      Read an FPGA register.\n"
            "  reg-write OFFSET VALUE\n"
            "      Write an FPGA register.\n"
+           "\n"
+           "ptp commands:\n"
+           "  ptp-status\n"
+           "      Show Ethernet PTP lock, identity, and counter status.\n"
+           "  ptp-config\n"
+           "      Show PTP discipline configuration.\n"
+           "  ptp-config FIELD VALUE\n"
+           "      Update one PTP discipline field (enable, holdover, update-cycles, ...).\n"
+           "  ptp-config clear-counters\n"
+           "      Clear PTP discipline and identity counters.\n"
            "\n"
 #ifdef USE_LITEPCIE
            "test commands:\n"
@@ -1708,9 +2067,15 @@ static bool cmd_is(const char *cmd, const char *name, const char *alias)
 
 int main(int argc, char **argv)
 {
+    enum {
+        OPTION_WATCH = 256,
+        OPTION_WATCH_INTERVAL,
+    };
     const char *cmd;
     int c;
     int option_index = 0;
+    bool ptp_watch = false;
+    double ptp_watch_interval = 1.0;
 #ifdef USE_LITEPCIE
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
@@ -1725,6 +2090,8 @@ int main(int argc, char **argv)
         { "device-num", required_argument, NULL, 'c' },
         { "ip", required_argument, NULL, 'i' },
         { "port", required_argument, NULL, 'p' },
+        { "watch", no_argument, NULL, OPTION_WATCH },
+        { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
 #ifdef USE_LITEPCIE
         { "data-width", required_argument, NULL, 'w' },
         { "warmup-buffers", required_argument, NULL, 'W' },
@@ -1757,6 +2124,15 @@ int main(int argc, char **argv)
         case 'p':
             if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
                 exit(1);
+            break;
+        case OPTION_WATCH:
+            ptp_watch = true;
+            break;
+        case OPTION_WATCH_INTERVAL:
+            if ((parse_double_arg(optarg, &ptp_watch_interval) != 0) || (ptp_watch_interval <= 0.0)) {
+                fprintf(stderr, "Invalid --watch-interval value '%s'\n", optarg);
+                exit(1);
+            }
             break;
 #ifdef USE_LITEPCIE
         case 'y':
@@ -1797,6 +2173,22 @@ int main(int argc, char **argv)
     /* Info cmds. */
     if (cmd_is(cmd, "info", "show-info"))
         info();
+
+    /* PTP cmds. */
+    else if (cmd_is(cmd, "ptp_status", "ptp-status"))
+        ptp_status(ptp_watch, ptp_watch_interval);
+    else if (cmd_is(cmd, "ptp_config", "ptp-config")) {
+        const char *field = NULL;
+        const char *value = NULL;
+
+        if (optind < argc)
+            field = argv[optind++];
+        if (optind < argc)
+            value = argv[optind++];
+        if (optind < argc)
+            goto show_help;
+        ptp_config(field, value);
+    }
 
     /* Reg cmds. */
     else if (cmd_is(cmd, "reg_write", "reg-write")) {

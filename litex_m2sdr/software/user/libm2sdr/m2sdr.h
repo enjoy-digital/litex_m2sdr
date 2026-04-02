@@ -156,6 +156,24 @@ struct m2sdr_clock_info {
     uint64_t sysclk_hz;
 };
 
+struct m2sdr_ptp_port_identity {
+    uint64_t clock_id;
+    uint16_t port_number;
+};
+
+struct m2sdr_ptp_discipline_config {
+    bool enable;
+    bool holdover;
+    uint32_t update_cycles;
+    uint32_t coarse_threshold_ns;
+    uint32_t phase_threshold_ns;
+    uint32_t lock_window_ns;
+    uint8_t phase_step_shift;
+    uint32_t phase_step_max_ns;
+    uint32_t trim_limit;
+    uint16_t p_gain;
+};
+
 struct m2sdr_ptp_status {
     bool enabled;
     bool active;
@@ -166,6 +184,21 @@ struct m2sdr_ptp_status {
     uint32_t master_ip;
     uint32_t time_inc;
     int64_t last_error_ns;
+    uint64_t last_ptp_time_ns;
+    uint64_t last_local_time_ns;
+    struct m2sdr_ptp_port_identity local_port;
+    struct m2sdr_ptp_port_identity master_port;
+    uint32_t identity_updates;
+    uint32_t coarse_steps;
+    uint32_t phase_steps;
+    uint32_t rate_updates;
+    uint32_t ptp_lock_losses;
+    uint32_t time_lock_losses;
+    uint32_t invalid_header_count;
+    uint32_t wrong_peer_count;
+    uint32_t wrong_requester_count;
+    uint32_t rx_timeout_count;
+    uint32_t announce_expiry_count;
 };
 
 enum m2sdr_feature_flag {
@@ -361,6 +394,9 @@ int  m2sdr_gpio_read(struct m2sdr_dev *dev, uint8_t *value);
 int  m2sdr_get_time(struct m2sdr_dev *dev, uint64_t *time_ns);
 int  m2sdr_set_time(struct m2sdr_dev *dev, uint64_t time_ns);
 int  m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status);
+int  m2sdr_get_ptp_discipline_config(struct m2sdr_dev *dev, struct m2sdr_ptp_discipline_config *cfg);
+int  m2sdr_set_ptp_discipline_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_discipline_config *cfg);
+int  m2sdr_clear_ptp_counters(struct m2sdr_dev *dev);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
