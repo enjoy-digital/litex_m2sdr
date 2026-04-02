@@ -4,30 +4,27 @@
 
 The LiteX M2 SDR project is actively under development and does not yet have formal releases. However, we maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. The updates below are summarized by quarter, highlighting major advancements to provide a clear overview of the project's evolution.
 
+[> 2026 Q2 (Apr - Jun)
+----------------------
+**Ethernet PTP Board Time Discipline and SI5351C Clocking Preparation**
+- Added Ethernet PTP board-time discipline for baseboard Ethernet builds while keeping `time_gen` as the single exported logical hardware clock for timestamps, PPS, and host-visible time.
+- Exposed the PTP feature cleanly across gateware and host software with capability bits, runtime status/tuning controls, learned master identity reporting, and host-side time ownership rules to prevent manual PHC writes from fighting the servo.
+- Extended `libm2sdr`, `m2sdr_util`, and SoapySDR with PTP monitoring/control support, time-source reporting, and updated host-side documentation for the new workflow.
+- Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend, preparing the SI5351C path for later physical clock steering without changing the default non-PTP operating mode.
+- Expanded regression coverage around PTP, `clk10` discipline, and SI5351/LiteI2C interactions, including test-isolation fixes so SoC build tests remain stable regardless of execution order.
+
 [> 2026 Q1 (Jan - Mar)
 ----------------------
-**CI Hardening, Broader Simulation Coverage, and PCIe Reliability**
-- Expanded gateware simulation coverage with additional edge cases, randomized backpressure, mode toggles, and framing invariants.
-- Consolidated CI simulation execution into a single gateware test suite for simpler maintenance and reporting.
-- Added CI software build checks for Linux kernel driver, user-space utilities, and SoapySDR module compilation.
-- Improved test organization by moving board-dependent scripts to `scripts/` and keeping CI-safe simulations in `test/`.
-- Added per-test docstrings and aligned test separators/comments with the project code style.
-- Integrated optional PCIe link reset workaround logic to improve link bring-up robustness on some host platforms.
-- Refreshed README and kernel documentation (CI badge, paths, module naming, and test structure clarifications).
-- Introduced the public `libm2sdr` C API, including shared library/pkg-config packaging, example programs, and integration as the common host layer for user utilities and the SoapySDR module.
-- Introduced the `m2sdr_scan` wideband scanner utility with an ImGui/SDL/OpenGL UI, then reorganized its UI support files under `software/user/scan_ui/` to keep the user utility root cleaner.
-- Introduced a shared user-space CLI/device handling layer so utilities now build device identifiers consistently across PCIe and Etherbone modes.
-- Harmonized option naming across RF/streaming/control utilities around shared long-form arguments such as `--device`, `--sample-rate`, `--rx-freq`, `--tx-freq`, and `--format`.
-- Extended `m2sdr_scan` with preset save/load support and a headless export mode for CSV/PPM capture without launching the SDL/ImGui interface.
-- Removed the White Rabbit patch-preflight flow from gateware build scripts, simplifying setup for the current clocking-first White Rabbit usage.
-- Hardened `libm2sdr` API validation and error reporting with stricter device parsing/stream checks and new public error categories (`parse`, `range`, `state`).
-- Improved `libm2sdr` backend integration with explicit transport/handle accessors (`m2sdr_get_transport`, `m2sdr_get_eb_handle`) while preserving legacy handle compatibility.
-- Refined `libm2sdr` RF and streaming internals with per-device RF state ownership, safer DMA header access, and documented 16-byte wire header layout.
-- Added focused `libm2sdr` unit coverage and CI lanes for unit checks, LiteEth-mode checks, sanitizers, and `cppcheck`.
-- Added SigMF support across the user-space record/play/check workflow: `m2sdr_record` can emit `.sigmf-data` / `.sigmf-meta`, `m2sdr_play` can replay SigMF datasets with capture selection, and `m2sdr_check` can auto-load SigMF metadata, captures, and annotations.
-- Introduced the `m2sdr_sigmf` utility with validation modes for quick SigMF inspection and CI-friendly metadata checks.
-- Expanded user-space RF diagnostics with a native `m2sdr_check` IQ inspection tool and basic OFDM waveform generation in `m2sdr_gen`, replacing earlier Python-side helpers.
-- Reorganized `software/user` by moving reusable SigMF/JSON support into `libm2sdr/` and grouping related regression tests under `tests/` to keep the utility root cleaner.
+**CI Hardening, Host API Consolidation, and Diagnostic Tooling**
+- Expanded gateware simulation and CI coverage with broader edge-case/backpressure testing, consolidated gateware test execution, and software build checks for the kernel driver, user utilities, and SoapySDR module.
+- Reorganized CI-safe simulations under `test/`, moved board-dependent helpers under `scripts/`, and refreshed the top-level, kernel, and software documentation to match the updated workflows.
+- Introduced the public `libm2sdr` C API as the common host layer for user utilities and the SoapySDR module, including shared-library/pkg-config packaging, examples, and build/install integration.
+- Hardened `libm2sdr` with stricter validation and error reporting, explicit backend/transport accessors, per-device RF state ownership, safer DMA header helpers, and dedicated unit/sanitizer/cppcheck coverage.
+- Unified user-space CLI/device handling across PCIe and Etherbone modes and standardized common long-form options such as `--device`, `--sample-rate`, `--rx-freq`, `--tx-freq`, and `--format`.
+- Added the `m2sdr_scan` wideband scanner with an ImGui/SDL/OpenGL UI, preset save/load support, headless CSV/PPM export, and cleaner UI support file organization.
+- Added native RF diagnostics and generation utilities with `m2sdr_check` for IQ inspection and `m2sdr_gen` basic OFDM waveform support.
+- Added SigMF support across `m2sdr_record`, `m2sdr_play`, and `m2sdr_check`, introduced the `m2sdr_sigmf` inspection/validation utility, and moved the shared SigMF/JSON support into `libm2sdr`.
+- Integrated an optional PCIe link reset workaround to improve bring-up robustness on some host platforms.
 
 [> 2025 Q4 (Oct - Dec)
 ----------------------
