@@ -39,6 +39,7 @@ from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
+from liteeth.core.ptp         import LiteEthPTP
 
 from litesata.phy import LiteSATAPHY
 from litesata.frontend.stream import LiteSATAStream2Sectors, LiteSATASectors2Stream
@@ -53,6 +54,7 @@ from litex_m2sdr.gateware.si5351      import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
+from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.pps         import PPSGenerator
 from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
 from litex_m2sdr.gateware.header      import TXRXHeader
@@ -180,6 +182,8 @@ class BaseSoC(SoCMini):
         "eth_phy"          : 14,
         "eth_rx_streamer"  : 15,
         "eth_tx_streamer"  : 16,
+        "eth_ptp"          : 37,
+        "ptp_discipline"   : 38,
 
         # SATA.
         "sata_phy"         : 18,
@@ -210,6 +214,7 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
+        with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_debug=False,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
@@ -237,6 +242,10 @@ class BaseSoC(SoCMini):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
         if with_white_rabbit and (wr_sfp is None):
             raise ValueError("White Rabbit SFP must be resolved before BaseSoC initialization.")
+        if with_eth_ptp and not with_eth:
+            raise ValueError("Ethernet PTP requires --with-eth.")
+        if with_eth_ptp and with_white_rabbit:
+            raise ValueError("Ethernet PTP and White Rabbit cannot both own the board time generator in the same build yet.")
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -280,6 +289,7 @@ class BaseSoC(SoCMini):
             # Ethernet Capabilities.
             eth_enabled     = with_eth,
             eth_speed       = eth_phy,
+            eth_ptp         = with_eth_ptp,
 
             # SATA Capabilities.
             sata_enabled    = with_sata,
@@ -481,7 +491,54 @@ class BaseSoC(SoCMini):
 
             # Core + MMAP (Etherbone).
             # ------------------------
-            self.add_etherbone(phy=self.eth_phy, ip_address=eth_local_ip, data_width=32, arp_entries=4)
+            eth_etherbone_kwargs = dict(
+                phy        = self.eth_phy,
+                ip_address = eth_local_ip,
+                data_width = 32,
+                arp_entries = 4,
+            )
+            if with_eth_ptp:
+                ptp_igmp_groups = [0xE0000181, 0xE0000182]  # 224.0.1.129, 224.0.1.130.
+                if eth_ptp_p2p:
+                    ptp_igmp_groups.append(0xE000006B)     # 224.0.0.107.
+                eth_etherbone_kwargs.update(
+                    with_igmp     = True,
+                    igmp_groups   = ptp_igmp_groups,
+                    igmp_interval = 2,
+                )
+            self.add_etherbone(**eth_etherbone_kwargs)
+
+            if with_eth_ptp:
+                nominal_time_inc = int(round((1e9/100e6) * (1 << 24)))
+
+                self.eth_ptp_event_port   = self.ethcore_etherbone.udp.crossbar.get_port(319, dw=8, cd="sys")
+                self.eth_ptp_general_port = self.ethcore_etherbone.udp.crossbar.get_port(320, dw=8, cd="sys")
+                self.eth_ptp = LiteEthPTP(
+                    self.eth_ptp_event_port,
+                    self.eth_ptp_general_port,
+                    sys_clk_freq,
+                    monitor_debug = eth_ptp_debug,
+                )
+                self.ptp_discipline = PTPTimeDiscipline(
+                    sys_clk_freq      = sys_clk_freq,
+                    nominal_time_inc  = nominal_time_inc,
+                )
+                self.ptp_discipline_cdc = TimeDisciplineCDC(self.time_gen)
+                self.comb += [
+                    self.eth_ptp.clock_id.eq(Cat(Constant(eth_sfp, 16), self.dna._id.status, Constant(0, 7))),
+                    self.eth_ptp.p2p_mode.eq(1 if eth_ptp_p2p else 0),
+                    self.ptp_discipline.local_time.eq(self.time_gen.time),
+                    self.ptp_discipline.ptp_seconds.eq(self.eth_ptp.tsu.seconds),
+                    self.ptp_discipline.ptp_nanoseconds.eq(self.eth_ptp.tsu.nanoseconds),
+                    self.ptp_discipline.ptp_locked.eq(self.eth_ptp.locked),
+                    self.ptp_discipline_cdc.enable.eq(self.ptp_discipline.discipline_enable),
+                    self.ptp_discipline_cdc.time_inc.eq(self.ptp_discipline.discipline_time_inc),
+                    self.ptp_discipline_cdc.write.eq(self.ptp_discipline.discipline_write),
+                    self.ptp_discipline_cdc.write_time.eq(self.ptp_discipline.discipline_write_time),
+                    self.ptp_discipline_cdc.adjust.eq(self.ptp_discipline.discipline_adjust),
+                    self.ptp_discipline_cdc.adjust_sign.eq(self.ptp_discipline.discipline_adjust_sign),
+                    self.ptp_discipline_cdc.adjustment.eq(self.ptp_discipline.discipline_adjustment),
+                ]
 
             # UDP Streamer.
             # -------------
@@ -1065,6 +1122,9 @@ def main():
     parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
+    parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
+    parser.add_argument("--eth-ptp-p2p",     action="store_true",     help="Use PTP peer-to-peer delay mode instead of end-to-end.")
+    parser.add_argument("--eth-ptp-debug",   action="store_true",     help="Expose the verbose LiteEth PTP monitor CSRs.")
     parser.add_argument("--with-eth-vrt",    action="store_true",     help="Enable Ethernet RX VRT UDP streamer path.")
     parser.add_argument("--vrt-dst-ip",      default="239.168.1.100", help="VRT destination IP address (when --with-eth-vrt).")
     parser.add_argument("--vrt-dst-port",    default=4991, type=int,  help="VRT destination UDP port (when --with-eth-vrt).")
@@ -1137,6 +1197,9 @@ def main():
         eth_phy       = args.eth_phy,
         eth_local_ip  = args.eth_local_ip,
         eth_udp_port  = args.eth_udp_port,
+        with_eth_ptp  = args.with_eth_ptp,
+        eth_ptp_p2p   = args.eth_ptp_p2p,
+        eth_ptp_debug = args.eth_ptp_debug,
         with_eth_vrt  = args.with_eth_vrt,
         vrt_dst_ip    = args.vrt_dst_ip,
         vrt_dst_port  = args.vrt_dst_port,
@@ -1180,6 +1243,12 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+            if args.with_eth_ptp:
+                r += "_ptp"
+                if args.eth_ptp_p2p:
+                    r += "_p2p"
+                if args.eth_ptp_debug:
+                    r += "_debug"
             if args.with_eth_vrt:
                 r += "_vrt"
         if args.with_sata:

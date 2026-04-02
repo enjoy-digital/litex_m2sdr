@@ -20,6 +20,7 @@ def test_capability_builds_with_valid_configuration():
         pcie_ptm=True,
         eth_enabled=True,
         eth_speed="1000basex",
+        eth_ptp=True,
         sata_enabled=True,
         sata_gen="gen2",
         sata_mode="read+write",

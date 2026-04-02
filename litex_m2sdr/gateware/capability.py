@@ -25,6 +25,7 @@ class Capability(LiteXModule):
     - pcie_ptm (bool)       : PCIe Precision Time Measurement enable status (True if PTM is enabled).
     - eth_enabled (bool)    : Indicates if Ethernet is present.
     - eth_speed (str)       : Ethernet speed (e.g., "1000basex" for 1Gbps).
+    - eth_ptp (bool)        : Indicates if Ethernet PTP time discipline is present.
     - sata_enabled (bool)   : Indicates if SATA is present.
     - sata_gen (str)        : SATA generation (e.g., "gen2").
     - sata_mode (str)       : SATA mode (e.g., "read+write").
@@ -39,7 +40,7 @@ class Capability(LiteXModule):
         # PCIe.
         pcie_enabled, pcie_speed, pcie_lanes, pcie_ptm,
         # Ethernet.
-        eth_enabled, eth_speed,
+        eth_enabled, eth_speed, eth_ptp,
         # SATA.
         sata_enabled, sata_gen, sata_mode,
         # GPIO.
@@ -66,6 +67,7 @@ class Capability(LiteXModule):
             CSRField("gpio",     size=1, offset=3, reset=int(gpio_enabled), description="GPIO     is present."),
             CSRField("wr",       size=1, offset=4, reset=int(wr_enabled),   description="White Rabbit is present."),
             CSRField("jtagbone", size=1, offset=5, reset=int(jtagbone),     description="JTAGBone is present."),
+            CSRField("eth_ptp",  size=1, offset=6, reset=int(eth_ptp),      description="Ethernet PTP time discipline is present."),
             # Reserved bits for future features
         ], description="Hardware feature presence bitfield.")
 
@@ -104,6 +106,7 @@ class Capability(LiteXModule):
                 ("``0b10``", "Reserved"),
                 ("``0b11``", "Reserved"),
             ], description="Ethernet speed configuration."),
+            CSRField("ptp", size=1, offset=2, reset=int(eth_ptp), description="Ethernet PTP time discipline build support."),
             # Reserved bits
         ], description="Ethernet configuration. Valid only if features.eth is set.")
 
