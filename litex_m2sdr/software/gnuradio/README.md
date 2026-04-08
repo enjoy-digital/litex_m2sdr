@@ -17,7 +17,7 @@ The provided flowcharts illustrate different usage scenarios:
 
 ## Test RX
 
-**Flowchart:** `test_tx_rx.grc`
+**Flowchart:** `test_rx.grc`
 
 This flowchart implements a two-channel receiver (RX1 and RX2). Each channel's stream is simultaneously displayed and saved to a file (e.g., */tmp/chanA.bin* and */tmp/chanB.bin*). The files are standard binary files with interleaved float complex samples.
 
@@ -48,7 +48,7 @@ Two sliders let you adjust:
 
 ## Test RX TX (External Loopback)
 
-**Flowchart:** `test_rx.grc`
+**Flowchart:** `test_tx_rx.grc`
 
 This flowchart provides a loopback test using a single channel. It verifies both transmission and reception:
 - **TX Path**: Driven by a constant source (emitting only the carrier).
