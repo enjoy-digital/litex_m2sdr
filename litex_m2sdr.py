@@ -1133,14 +1133,19 @@ class BaseSoC(SoCMini):
 def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
-    parser.add_argument("--variant",         default="m2",        help="Design variant.", choices=["m2", "baseboard"])
-    parser.add_argument("--reset",           action="store_true", help="Reset the device.")
-    parser.add_argument("--build",           action="store_true", help="Build bitstream.")
-    parser.add_argument("--load",            action="store_true", help="Load bitstream.")
-    parser.add_argument("--flash",           action="store_true", help="Flash bitstream.")
-    parser.add_argument("--flash-multiboot", action="store_true", help="Flash multiboot bitstreams.")
-    parser.add_argument("--rescan",          action="store_true", help="Execute PCIe Rescan while Loading/Flashing.")
-    parser.add_argument("--driver",          action="store_true", help="Generate PCIe driver from LitePCIe (override local version).")
+    parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
+    parser.add_argument("--sys-clk-freq",     default=125e6, type=float, help="System clock frequency in Hz.")
+    parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
+    parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
+    parser.add_argument("--load",             action="store_true",       help="Load bitstream.")
+    parser.add_argument("--flash",            action="store_true",       help="Flash bitstream.")
+    parser.add_argument("--flash-multiboot",  action="store_true",       help="Flash multiboot bitstreams.")
+    parser.add_argument("--rescan",           action="store_true",       help="Execute PCIe Rescan while Loading/Flashing.")
+    parser.add_argument("--driver",           action="store_true",       help="Generate PCIe driver from LitePCIe (override local version).")
+    parser.add_argument("--without-jtagbone", action="store_true",       help="Disable JTAGBone support.")
+
+    # RFIC parameters.
+    parser.add_argument("--with-rfic-oversampling", action="store_true", help="Double the RFIC clock to enable the oversampling mode.")
 
     # PCIe parameters.
     parser.add_argument("--with-pcie",       action="store_true", help="Enable PCIe Communication.")
@@ -1216,6 +1221,10 @@ def main():
     soc = BaseSoC(
         # Generic.
         variant       = args.variant,
+        sys_clk_freq  = int(args.sys_clk_freq),
+
+        # RFIC.
+        with_rfic_oversampling = args.with_rfic_oversampling,
 
         # PCIe.
         with_pcie     = args.with_pcie,
@@ -1243,6 +1252,7 @@ def main():
 
         # GPIOs.
         with_gpio     = args.with_gpio,
+        with_jtagbone = not args.without_jtagbone,
 
         # White Rabbit.
         with_white_rabbit = args.with_white_rabbit,
@@ -1272,6 +1282,8 @@ def main():
     # Builder.
     def get_build_name():
         r = f"litex_m2sdr_{args.variant}"
+        if int(args.sys_clk_freq) != int(125e6):
+            r += f"_sysclk_{int(args.sys_clk_freq)}"
         if args.with_pcie:
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
@@ -1288,6 +1300,10 @@ def main():
             r += f"_sata"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
+        if args.with_rfic_oversampling:
+            r += "_rfic_oversampling"
+        if args.without_jtagbone:
+            r += "_no_jtagbone"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
