@@ -214,7 +214,7 @@ static int m2sdr_time_owned_by_ptp(struct m2sdr_dev *dev, bool *owned)
 #endif
 }
 
-static int m2sdr_get_ptp_discipline_control(struct m2sdr_dev *dev, uint32_t *control)
+static __attribute__((unused)) int m2sdr_get_ptp_discipline_control(struct m2sdr_dev *dev, uint32_t *control)
 {
 #if defined(CSR_PTP_DISCIPLINE_CONTROL_ADDR)
     if (!dev || !control)
@@ -231,7 +231,7 @@ static int m2sdr_get_ptp_discipline_control(struct m2sdr_dev *dev, uint32_t *con
 #endif
 }
 
-static int m2sdr_write_ptp_discipline_control(struct m2sdr_dev *dev, bool enable, bool holdover)
+static __attribute__((unused)) int m2sdr_write_ptp_discipline_control(struct m2sdr_dev *dev, bool enable, bool holdover)
 {
 #if defined(CSR_PTP_DISCIPLINE_CONTROL_ADDR) && \
     defined(CSR_PTP_DISCIPLINE_CONTROL_ENABLE_OFFSET) && \

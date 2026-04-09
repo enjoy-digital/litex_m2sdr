@@ -95,7 +95,7 @@ static __attribute__((unused)) void msleep(unsigned ms)
     usleep(ms * 1000);
 }
 
-static int64_t m2sdr_sata_get_time_ms(void)
+static __attribute__((unused)) int64_t m2sdr_sata_get_time_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -125,7 +125,7 @@ static void m2sdr_close_dev(struct m2sdr_dev *dev)
 
 /* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4) -------- */
 
-static void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
+static __attribute__((unused)) void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
 {
     m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
     m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
@@ -172,8 +172,10 @@ enum {
     RXDST_SATA = 2,
 };
 
-#ifdef CSR_TXRX_LOOPBACK_BASE
+#if defined(CSR_SATA_PHY_BASE) // defined together with optional TXRX loopback support
+#if defined(CSR_TXRX_LOOPBACK_BASE)
 static void txrx_loopback_set(void *conn, int enable);
+#endif
 #endif
 
 static int parse_txsrc(const char *s)
@@ -226,6 +228,7 @@ static void crossbar_set(void *conn, int txsrc, int rxdst)
 #endif
 }
 
+#ifdef CSR_SATA_PHY_BASE
 struct sata_route_state {
     bool crossbar_valid;
     bool loopback_valid;
@@ -277,6 +280,7 @@ enum sata_wait_result {
     SATA_WAIT_TIMEOUT = 1,
     SATA_WAIT_INTERRUPTED = 2,
 };
+#endif /* CSR_SATA_PHY_BASE */
 
 /* Optional header raw control ---------------------------------------------- */
 
@@ -766,6 +770,7 @@ int main(int argc, char **argv)
 
 #ifndef CSR_SATA_PHY_BASE
     (void)timeout_ms;
+    (void)dry_run;
 #endif
 
     cmd = argv[optind++];
