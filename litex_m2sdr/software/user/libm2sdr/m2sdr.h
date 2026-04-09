@@ -321,6 +321,8 @@ struct m2sdr_config {
     bool    bist_prbs;
     /* Scan/program FPGA <-> AD9361 interface delays using the PRBS path. */
     bool    calibrate_interface_delay;
+    /* Use the FPGA PHY loopback for the TX PRBS diagnostic phase. */
+    bool    calibrate_tx_fpga_loopback;
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
     bool    enable_oversample;

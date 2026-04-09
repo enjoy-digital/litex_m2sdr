@@ -513,6 +513,23 @@ static uint32_t m2sdr_compose_prbs_tx_ctrl(bool enable, bool rx_reset)
            ((rx_reset ? 1u : 0u) << CSR_AD9361_PRBS_TX_RX_RESET_OFFSET);
 }
 
+static int m2sdr_set_phy_loopback(struct m2sdr_dev *dev, bool enable)
+{
+    uint32_t control = 0;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PHY_CONTROL_ADDR, &control) != 0)
+        return M2SDR_ERR_IO;
+
+    control &= ~(m2sdr_csr_field_mask(CSR_AD9361_PHY_CONTROL_LOOPBACK_SIZE) <<
+                 CSR_AD9361_PHY_CONTROL_LOOPBACK_OFFSET);
+    control |= (enable ? 1u : 0u) << CSR_AD9361_PHY_CONTROL_LOOPBACK_OFFSET;
+
+    return (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, control) == 0) ?
+        M2SDR_ERR_OK : M2SDR_ERR_IO;
+}
+
 static int m2sdr_write_prbs_tx_state(struct m2sdr_dev *dev, bool enable, bool rx_reset)
 {
     return m2sdr_write_prbs_tx_ctrl(dev, m2sdr_compose_prbs_tx_ctrl(enable, rx_reset));
@@ -629,7 +646,7 @@ static int m2sdr_scan_delay_matrix(struct m2sdr_dev *dev, struct ad9361_rf_phy *
 
             if (tx) {
                 /* TX tuning uses the FPGA PRBS generator/checker across the
-                 * AD9361 loopback path, so keep the previously selected RX
+                 * selected loopback path, so keep the previously selected RX
                  * delay fixed while sweeping the TX interface. */
                 rc = m2sdr_program_delay_reg(phy, false, rx_clk_delay, rx_data_delay, data_delay == 0);
                 if (rc != M2SDR_ERR_OK)
@@ -651,6 +668,19 @@ static int m2sdr_scan_delay_matrix(struct m2sdr_dev *dev, struct ad9361_rf_phy *
     }
 
     return M2SDR_ERR_OK;
+}
+
+static unsigned m2sdr_count_valid_points(const unsigned valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS])
+{
+    unsigned count = 0;
+    unsigned clk_delay;
+    unsigned data_delay;
+
+    for (clk_delay = 0; clk_delay < M2SDR_DELAY_TAPS; clk_delay++)
+        for (data_delay = 0; data_delay < M2SDR_DELAY_TAPS; data_delay++)
+            count += valid[clk_delay][data_delay] ? 1u : 0u;
+
+    return count;
 }
 
 static bool m2sdr_pick_delay_midpoint(const unsigned valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS],
@@ -700,7 +730,8 @@ static bool m2sdr_pick_delay_midpoint(const unsigned valid[M2SDR_DELAY_TAPS][M2S
     return true;
 }
 
-static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy,
+                                           bool tx_use_fpga_loopback)
 {
     unsigned rx_valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS] = {{0}};
     unsigned tx_valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS] = {{0}};
@@ -713,6 +744,8 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     struct m2sdr_prbs_status rx_fixed_status = {0};
     struct m2sdr_prbs_status tx_fixed_status = {0};
     uint32_t saved_prbs_tx_ctrl = 0;
+    uint32_t saved_phy_control = 0;
+    unsigned tx_valid_points = 0;
     int32_t saved_loopback = 0;
     enum ad9361_bist_mode saved_prbs_mode = BIST_DISABLE;
     uint8_t saved_rx_delay = 0;
@@ -723,6 +756,8 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
         return M2SDR_ERR_INVAL;
     if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_TX_ADDR, &saved_prbs_tx_ctrl) != 0)
         return M2SDR_ERR_IO;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PHY_CONTROL_ADDR, &saved_phy_control) != 0)
+        return M2SDR_ERR_IO;
 
     ad9361_get_bist_loopback(phy, &saved_loopback);
     ad9361_get_bist_prbs(phy, &saved_prbs_mode);
@@ -732,6 +767,9 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     printf("Calibrating FPGA <-> AD9361 digital interface with PRBS...\n");
 
     rc = m2sdr_write_prbs_tx_ctrl(dev, 0);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    rc = m2sdr_set_phy_loopback(dev, false);
     if (rc != M2SDR_ERR_OK)
         goto restore;
     if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, BIST_INJ_RX)) != M2SDR_ERR_OK) {
@@ -763,9 +801,24 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
         rc = M2SDR_ERR_IO;
         goto restore;
     }
-    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, 1)) != M2SDR_ERR_OK) {
-        rc = M2SDR_ERR_IO;
-        goto restore;
+    if (tx_use_fpga_loopback) {
+        printf("TX PRBS diagnostic source: FPGA internal loopback.\n");
+        if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, 0)) != M2SDR_ERR_OK) {
+            rc = M2SDR_ERR_IO;
+            goto restore;
+        }
+        rc = m2sdr_set_phy_loopback(dev, true);
+        if (rc != M2SDR_ERR_OK)
+            goto restore;
+    } else {
+        printf("TX PRBS diagnostic source: AD9361 internal loopback.\n");
+        rc = m2sdr_set_phy_loopback(dev, false);
+        if (rc != M2SDR_ERR_OK)
+            goto restore;
+        if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, 1)) != M2SDR_ERR_OK) {
+            rc = M2SDR_ERR_IO;
+            goto restore;
+        }
     }
     rc = m2sdr_write_prbs_tx_state(dev, true, false);
     if (rc != M2SDR_ERR_OK)
@@ -780,6 +833,22 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     rc = m2sdr_scan_delay_matrix(dev, phy, true, best_rx_clk, best_rx_data, tx_valid);
     if (rc != M2SDR_ERR_OK)
         goto restore;
+    tx_valid_points = m2sdr_count_valid_points(tx_valid);
+    if (tx_use_fpga_loopback) {
+        if (tx_valid_points == 0) {
+            fprintf(stderr, "No valid TX PRBS observations found with FPGA internal loopback.\n");
+            rc = M2SDR_ERR_IO;
+            goto restore;
+        }
+        printf("TX FPGA-loopback diagnostic observed %u/%u clean points.\n",
+            tx_valid_points, M2SDR_DELAY_TAPS * M2SDR_DELAY_TAPS);
+        printf("\nCalibration completed:\n");
+        printf("----------------------\n");
+        printf("RX Clk:%u/Dat:%u, TX unchanged (FPGA loopback diagnostic)\n",
+            best_rx_clk, best_rx_data);
+        rc = M2SDR_ERR_OK;
+        goto restore;
+    }
     if (!m2sdr_pick_delay_midpoint(tx_valid, &best_tx_clk, &best_tx_data, &best_tx_run)) {
         fprintf(stderr, "No valid TX Clk/Dat delay settings found, keeping calibrated RX delay and restoring previous TX delay.\n");
         (void)ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, saved_tx_delay);
@@ -806,6 +875,8 @@ restore:
         (void)ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, saved_tx_delay);
     }
     if (m2sdr_write_prbs_tx_ctrl(dev, saved_prbs_tx_ctrl) != M2SDR_ERR_OK)
+        rc = M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, saved_phy_control) != 0)
         rc = M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, saved_prbs_mode)) != M2SDR_ERR_OK)
         rc = M2SDR_ERR_IO;
@@ -929,6 +1000,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->bist_rx_tone      = false;
     cfg->bist_prbs         = false;
     cfg->calibrate_interface_delay = false;
+    cfg->calibrate_tx_fpga_loopback = false;
     cfg->enable_8bit_mode  = false;
     cfg->enable_oversample = false;
     cfg->channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
@@ -1035,7 +1107,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (rc != M2SDR_ERR_OK)
         return rc;
     if (cfg->calibrate_interface_delay) {
-        rc = m2sdr_calibrate_interface_delay(dev, phy);
+        rc = m2sdr_calibrate_interface_delay(dev, phy, cfg->calibrate_tx_fpga_loopback);
         if (rc != M2SDR_ERR_OK)
             return rc;
     }

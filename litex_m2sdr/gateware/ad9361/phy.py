@@ -195,15 +195,22 @@ class AD9361PHY(LiteXModule):
 
         # RX Source Interface.
         # --------------------
-        # Outputs assembled RX samples when valid (rx_count == 0).
+        # Build the RX and loopback source values first, then drive `source`
+        # from a single muxed synchronous process. This avoids multiple writers
+        # to the same stream signals when internal loopback is enabled.
+        rx_source_valid = Signal()
+        rx_source_ia    = Signal(12)
+        rx_source_qa    = Signal(12)
+        rx_source_ib    = Signal(12)
+        rx_source_qb    = Signal(12)
         self.sync.rfic += [
-            source.valid.eq(0),
+            rx_source_valid.eq(0),
             If(rx_count == 0,
-                source.valid.eq(1),
-                source.ia.eq(rx_data_ia),
-                source.qa.eq(rx_data_qa),
-                source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb),
+                rx_source_valid.eq(1),
+                rx_source_ia.eq(rx_data_ia),
+                rx_source_qa.eq(rx_data_qa),
+                rx_source_ib.eq(rx_data_ib),
+                rx_source_qb.eq(rx_data_qb),
             )
         ]
 
@@ -217,6 +224,12 @@ class AD9361PHY(LiteXModule):
                 source.qa.eq(sink.qa),
                 source.ib.eq(sink.ib),
                 source.qb.eq(sink.qb),
+            ).Else(
+                source.valid.eq(rx_source_valid),
+                source.ia.eq(rx_source_ia),
+                source.qa.eq(rx_source_qa),
+                source.ib.eq(rx_source_ib),
+                source.qb.eq(rx_source_qb),
             )
         ]
 
