@@ -168,6 +168,8 @@ Explicit FPGA<->AD9361 interface delay calibration example:
 ~~~~
 This calibrates RX first and then attempts TX with the calibrated RX delay kept active.
 If the TX scan does not find a valid window, `m2sdr_rf` still keeps the new RX delay and leaves TX at its previous value.
+The scan legend is `##`=synced, `[]`=clean observation window accepted for calibration, `::`=activity seen but not enough clean samples yet, `xx`=mismatches seen, `..`=no valid samples observed. The calibration logic now accepts either a full PRBS sync or a clean observation window with at least 1024 valid samples and no errors.
+The richer PRBS status output relies on the updated gateware PRBS CSRs, so rebuild and reload the FPGA bitstream before relying on the new counters and sticky error flag. The CSR reset pulse clears observation state only; it does not restart the PRBS checker phase.
 
 ---
 

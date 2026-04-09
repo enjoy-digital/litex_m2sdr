@@ -35,6 +35,7 @@
 #define M2SDR_RX_GAIN_MAX_DB  76
 #define M2SDR_DELAY_TAPS      16
 #define M2SDR_DELAY_SETTLE_MS 10
+#define M2SDR_PRBS_OBSERVE_MIN_VALID 1024
 
 #ifndef M2SDR_LOG_ENABLED
 #define M2SDR_LOG_ENABLED 1
@@ -433,18 +434,154 @@ static int m2sdr_write_prbs_tx_ctrl(struct m2sdr_dev *dev, uint32_t value)
     return (m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR, value) == 0) ? M2SDR_ERR_OK : M2SDR_ERR_IO;
 }
 
-static int m2sdr_read_prbs_synced(struct m2sdr_dev *dev, bool *synced)
+#ifndef CSR_AD9361_PRBS_TX_RX_RESET_OFFSET
+#define CSR_AD9361_PRBS_TX_RX_RESET_OFFSET 1
+#define CSR_AD9361_PRBS_TX_RX_RESET_SIZE   1
+#endif
+#ifndef CSR_AD9361_PRBS_RX_ERROR_OFFSET
+#define CSR_AD9361_PRBS_RX_ERROR_OFFSET 1
+#define CSR_AD9361_PRBS_RX_ERROR_SIZE   1
+#endif
+#ifndef CSR_AD9361_PRBS_RX_VALID_COUNT_OFFSET
+#define CSR_AD9361_PRBS_RX_VALID_COUNT_OFFSET 2
+#define CSR_AD9361_PRBS_RX_VALID_COUNT_SIZE   15
+#endif
+#ifndef CSR_AD9361_PRBS_RX_ERROR_COUNT_OFFSET
+#define CSR_AD9361_PRBS_RX_ERROR_COUNT_OFFSET 17
+#define CSR_AD9361_PRBS_RX_ERROR_COUNT_SIZE   15
+#endif
+
+struct m2sdr_prbs_status {
+    bool synced;
+    bool error;
+    uint32_t valid_count;
+    uint32_t error_count;
+};
+
+static uint32_t m2sdr_csr_field_mask(unsigned int size)
+{
+    return (size >= 32) ? UINT32_MAX : ((1u << size) - 1u);
+}
+
+static uint32_t m2sdr_csr_field_extract(uint32_t value, unsigned int offset, unsigned int size)
+{
+    return (value >> offset) & m2sdr_csr_field_mask(size);
+}
+
+static bool m2sdr_prbs_status_good(const struct m2sdr_prbs_status *status)
+{
+    if (!status)
+        return false;
+    return status->synced ||
+           (!status->error && (status->error_count == 0) &&
+            (status->valid_count >= M2SDR_PRBS_OBSERVE_MIN_VALID));
+}
+
+static const char *m2sdr_prbs_status_glyph(const struct m2sdr_prbs_status *status)
+{
+    if (!status)
+        return "??";
+    if (status->synced)
+        return "##";
+    if (status->valid_count == 0)
+        return "..";
+    if (status->error || status->error_count != 0)
+        return "xx";
+    if (m2sdr_prbs_status_good(status))
+        return "[]";
+    return "::";
+}
+
+static void m2sdr_print_prbs_fixed_check(const char *label, unsigned int clk_delay,
+                                         unsigned int data_delay,
+                                         const struct m2sdr_prbs_status *status)
+{
+    if (!label || !status)
+        return;
+
+    printf("%s fixed check @ Clk:%u Dat:%u -> obs:%s accept:%u synced:%u sticky_error:%u valid:%lu errors:%lu\n",
+        label, clk_delay, data_delay, m2sdr_prbs_status_glyph(status),
+        m2sdr_prbs_status_good(status) ? 1u : 0u,
+        status->synced ? 1u : 0u, status->error ? 1u : 0u,
+        (unsigned long)status->valid_count,
+        (unsigned long)status->error_count);
+}
+
+static uint32_t m2sdr_compose_prbs_tx_ctrl(bool enable, bool rx_reset)
+{
+    return ((enable ? 1u : 0u) << CSR_AD9361_PRBS_TX_ENABLE_OFFSET) |
+           ((rx_reset ? 1u : 0u) << CSR_AD9361_PRBS_TX_RX_RESET_OFFSET);
+}
+
+static int m2sdr_write_prbs_tx_state(struct m2sdr_dev *dev, bool enable, bool rx_reset)
+{
+    return m2sdr_write_prbs_tx_ctrl(dev, m2sdr_compose_prbs_tx_ctrl(enable, rx_reset));
+}
+
+static int m2sdr_reset_prbs_rx_observation(struct m2sdr_dev *dev)
+{
+    int rc;
+
+    rc = m2sdr_write_prbs_tx_state(dev, false, true);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    mdelay(1);
+    return m2sdr_write_prbs_tx_state(dev, false, false);
+}
+
+static int m2sdr_restart_prbs_tx_observation(struct m2sdr_dev *dev)
+{
+    int rc;
+
+    rc = m2sdr_write_prbs_tx_state(dev, false, true);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    mdelay(1);
+    rc = m2sdr_write_prbs_tx_state(dev, true, true);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    mdelay(1);
+    return m2sdr_write_prbs_tx_state(dev, true, false);
+}
+
+static int m2sdr_read_prbs_status(struct m2sdr_dev *dev, struct m2sdr_prbs_status *status)
 {
     uint32_t value = 0;
 
-    if (!dev || !synced)
+    if (!dev || !status)
         return M2SDR_ERR_INVAL;
     if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_RX_ADDR, &value) != 0)
         return M2SDR_ERR_IO;
 
-    *synced = ((value >> CSR_AD9361_PRBS_RX_SYNCED_OFFSET) &
-        ((1u << CSR_AD9361_PRBS_RX_SYNCED_SIZE) - 1u)) != 0;
+    status->synced = m2sdr_csr_field_extract(value,
+        CSR_AD9361_PRBS_RX_SYNCED_OFFSET,
+        CSR_AD9361_PRBS_RX_SYNCED_SIZE) != 0;
+    status->error = m2sdr_csr_field_extract(value,
+        CSR_AD9361_PRBS_RX_ERROR_OFFSET,
+        CSR_AD9361_PRBS_RX_ERROR_SIZE) != 0;
+    status->valid_count = m2sdr_csr_field_extract(value,
+        CSR_AD9361_PRBS_RX_VALID_COUNT_OFFSET,
+        CSR_AD9361_PRBS_RX_VALID_COUNT_SIZE);
+    status->error_count = m2sdr_csr_field_extract(value,
+        CSR_AD9361_PRBS_RX_ERROR_COUNT_OFFSET,
+        CSR_AD9361_PRBS_RX_ERROR_COUNT_SIZE);
     return M2SDR_ERR_OK;
+}
+
+static int m2sdr_capture_prbs_status(struct m2sdr_dev *dev, bool tx,
+                                     struct m2sdr_prbs_status *status)
+{
+    int rc;
+
+    if (tx)
+        rc = m2sdr_restart_prbs_tx_observation(dev);
+    else
+        rc = m2sdr_reset_prbs_rx_observation(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    mdelay(M2SDR_DELAY_SETTLE_MS);
+    return m2sdr_read_prbs_status(dev, status);
 }
 
 static int m2sdr_program_delay_reg(struct ad9361_rf_phy *phy, bool tx, unsigned clk_delay, unsigned data_delay, bool clock_changed)
@@ -481,12 +618,13 @@ static int m2sdr_scan_delay_matrix(struct m2sdr_dev *dev, struct ad9361_rf_phy *
 
     printf("\n%s Clk/Dat delays scan...\n", label);
     printf("-------------------------\n");
+    printf("Legend  |  ##=synced  []=clean-window  ::=activity  xx=errors  ..=no-valid\n");
     printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
 
     for (clk_delay = 0; clk_delay < M2SDR_DELAY_TAPS; clk_delay++) {
         printf(" %2u     |", clk_delay);
         for (data_delay = 0; data_delay < M2SDR_DELAY_TAPS; data_delay++) {
-            bool synced = false;
+            struct m2sdr_prbs_status status = {0};
             int rc;
 
             if (tx) {
@@ -502,27 +640,12 @@ static int m2sdr_scan_delay_matrix(struct m2sdr_dev *dev, struct ad9361_rf_phy *
             if (rc != M2SDR_ERR_OK)
                 return rc;
 
-            /* For TX tuning we rely on the FPGA PRBS generator and FPGA checker.
-             * Restart the generator for each point so the checker can reacquire
-             * from a known seed/phase after the delay change. */
-            if (tx) {
-                rc = m2sdr_write_prbs_tx_ctrl(dev, 0);
-                if (rc != M2SDR_ERR_OK)
-                    return rc;
-                mdelay(1);
-                rc = m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
-                if (rc != M2SDR_ERR_OK)
-                    return rc;
-            }
-
-            mdelay(M2SDR_DELAY_SETTLE_MS);
-
-            rc = m2sdr_read_prbs_synced(dev, &synced);
+            rc = m2sdr_capture_prbs_status(dev, tx, &status);
             if (rc != M2SDR_ERR_OK)
                 return rc;
 
-            valid[clk_delay][data_delay] = synced ? 1u : 0u;
-            printf(" %2u", valid[clk_delay][data_delay]);
+            valid[clk_delay][data_delay] = m2sdr_prbs_status_good(&status) ? 1u : 0u;
+            printf(" %2s", m2sdr_prbs_status_glyph(&status));
         }
         printf("\n");
     }
@@ -587,6 +710,8 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     unsigned best_tx_data = 0;
     unsigned best_rx_run = 0;
     unsigned best_tx_run = 0;
+    struct m2sdr_prbs_status rx_fixed_status = {0};
+    struct m2sdr_prbs_status tx_fixed_status = {0};
     uint32_t saved_prbs_tx_ctrl = 0;
     int32_t saved_loopback = 0;
     enum ad9361_bist_mode saved_prbs_mode = BIST_DISABLE;
@@ -614,6 +739,12 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
         goto restore;
     }
 
+    rc = m2sdr_capture_prbs_status(dev, false, &rx_fixed_status);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    m2sdr_print_prbs_fixed_check("RX", (saved_rx_delay >> 4) & 0xfu,
+        saved_rx_delay & 0xfu, &rx_fixed_status);
+
     rc = m2sdr_scan_delay_matrix(dev, phy, false, 0, 0, rx_valid);
     if (rc != M2SDR_ERR_OK)
         goto restore;
@@ -636,10 +767,15 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
         rc = M2SDR_ERR_IO;
         goto restore;
     }
-    rc = m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+    rc = m2sdr_write_prbs_tx_state(dev, true, false);
     if (rc != M2SDR_ERR_OK)
         goto restore;
-    mdelay(M2SDR_DELAY_SETTLE_MS);
+
+    rc = m2sdr_capture_prbs_status(dev, true, &tx_fixed_status);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    m2sdr_print_prbs_fixed_check("TX", (saved_tx_delay >> 4) & 0xfu,
+        saved_tx_delay & 0xfu, &tx_fixed_status);
 
     rc = m2sdr_scan_delay_matrix(dev, phy, true, best_rx_clk, best_rx_data, tx_valid);
     if (rc != M2SDR_ERR_OK)

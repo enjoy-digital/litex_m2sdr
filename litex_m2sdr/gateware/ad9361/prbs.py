@@ -37,10 +37,9 @@ class AD9361PRBSChecker(LiteXModule):
         self.ce     = Signal(reset=1)
         self.i      = Signal(12)
         self.synced = Signal()
+        self.error  = Signal()
 
         # # #
-
-        error = Signal()
 
         # # #
 
@@ -51,13 +50,13 @@ class AD9361PRBSChecker(LiteXModule):
 
         # PRBS re-synchronization.
         self.comb += prbs.ce.eq(self.ce)
-        self.comb += prbs.reset.eq(error)
+        self.comb += prbs.reset.eq(self.error)
 
         # Error generation.
-        self.comb += If(self.ce, error.eq(self.i != prbs.o[:12]))
+        self.comb += If(self.ce, self.error.eq(self.i != prbs.o[:12]))
 
 
         # Sync generation.
         self.sync_timer = WaitTimer(1024)
-        self.comb += self.sync_timer.wait.eq(~error)
+        self.comb += self.sync_timer.wait.eq(self.ce & ~self.error)
         self.comb += self.synced.eq(self.sync_timer.done)

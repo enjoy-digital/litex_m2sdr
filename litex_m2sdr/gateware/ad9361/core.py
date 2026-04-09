@@ -220,15 +220,27 @@ class AD9361RFIC(LiteXModule):
 
     def add_prbs(self):
         self.prbs_tx = CSRStorage(fields=[
-            CSRField("enable", size=1, offset= 0, values=[
+            CSRField("enable", size=1, offset=0, values=[
                 ("``0b0``", "Disable PRBS TX."),
                 ("``0b1``", "Enable  PRBS TX."),
-            ])])
+            ]),
+            CSRField("rx_reset", size=1, offset=1, values=[
+                ("``0b0``", "Run PRBS RX observation."),
+                ("``0b1``", "Clear PRBS RX observation counters and sticky error."),
+            ]),
+        ])
         self.prbs_rx = CSRStatus(fields=[
-            CSRField("synced", size=1, offset= 0, values=[
+            CSRField("synced", size=1, offset=0, values=[
                 ("``0b0``", "PRBS RX Out-of-Sync."),
-                ("``0b1``", "PRBS_RX Synchronized."),
-            ])])
+                ("``0b1``", "PRBS RX Synchronized."),
+            ]),
+            CSRField("error", size=1, offset=1, values=[
+                ("``0b0``", "No PRBS mismatch seen since last reset."),
+                ("``0b1``", "At least one PRBS mismatch was seen since last reset."),
+            ]),
+            CSRField("valid_count", size=15, offset=2, description="Number of valid PRBS RX samples observed since last reset (saturating)."),
+            CSRField("error_count", size=15, offset=17, description="Number of PRBS RX mismatches observed since last reset (saturating)."),
+        ])
 
         # # #
 
@@ -254,18 +266,50 @@ class AD9361RFIC(LiteXModule):
 
         # PRBS RX.
         # --------
-        self.comb += self.prbs_rx.fields.synced.eq(1)
+        prbs_all_synced  = Signal()
+        prbs_any_error   = Signal()
+        prbs_error_seen  = Signal()
+        prbs_valid_count = Signal(15)
+        prbs_error_count = Signal(15)
+        prbs_checker_synced = []
+        prbs_checker_error  = []
         for data in [phy.source.ia, phy.source.ib]:
             prbs_checker = AD9361PRBSChecker()
             prbs_checker = ClockDomainsRenamer("rfic")(prbs_checker)
             self.submodules += prbs_checker
+            prbs_checker_synced.append(prbs_checker.synced)
+            prbs_checker_error.append(prbs_checker.error)
             self.comb += [
                 prbs_checker.i.eq(data),
                 prbs_checker.ce.eq(phy.source.valid),
-                If(~prbs_checker.synced,
-                    self.prbs_rx.fields.synced.eq(0)
-                ),
             ]
+        self.comb += [
+            prbs_all_synced.eq(prbs_checker_synced[0] & prbs_checker_synced[1]),
+            prbs_any_error.eq(prbs_checker_error[0] | prbs_checker_error[1]),
+            self.prbs_rx.fields.synced.eq(prbs_all_synced),
+            self.prbs_rx.fields.error.eq(prbs_error_seen),
+            self.prbs_rx.fields.valid_count.eq(prbs_valid_count),
+            self.prbs_rx.fields.error_count.eq(prbs_error_count),
+        ]
+        self.sync.rfic += [
+            If(self.prbs_tx.fields.rx_reset,
+                prbs_error_seen.eq(0),
+                prbs_valid_count.eq(0),
+                prbs_error_count.eq(0),
+            ).Else(
+                If(prbs_any_error,
+                    prbs_error_seen.eq(1),
+                    If(prbs_error_count != (2**len(prbs_error_count) - 1),
+                        prbs_error_count.eq(prbs_error_count + 1)
+                    )
+                ),
+                If(phy.source.valid,
+                    If(prbs_valid_count != (2**len(prbs_valid_count) - 1),
+                        prbs_valid_count.eq(prbs_valid_count + 1)
+                    )
+                )
+            )
+        ]
 
     def add_agc(self):
         rx_cdc = self.rx_cdc
