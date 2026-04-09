@@ -314,6 +314,15 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2
     if (cfg->enable_oversample)
         actual_samplerate /= 2;
 
+    if (actual_samplerate > 61440000U) {
+        fprintf(stderr, "Requested sample rate %.3f MSPS exceeds the AD9361 clock-chain limit of 61.440 MSPS",
+            actual_samplerate / 1e6);
+        if (!cfg->enable_oversample)
+            fprintf(stderr, "; use --oversample for 122.88 MSPS effective FPGA rate");
+        fprintf(stderr, ".\n");
+        return M2SDR_ERR_INVAL;
+    }
+
     /* Match the historical utility behavior: for the lowest rates, switch the
      * AD9361 FIRs to x4 interpolation/decimation before programming clocks. */
     if (actual_samplerate < 2500000) {
