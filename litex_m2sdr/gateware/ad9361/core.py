@@ -246,7 +246,9 @@ class AD9361RFIC(LiteXModule):
             If(self.prbs_tx.fields.enable,
                 phy.sink.valid.eq(1),
                 phy.sink.ia.eq(prbs_generator.o),
+                phy.sink.qa.eq(prbs_generator.o),
                 phy.sink.ib.eq(prbs_generator.o),
+                phy.sink.qb.eq(prbs_generator.o),
             )
         ]
 

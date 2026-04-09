@@ -142,6 +142,8 @@ m2sdr_rf [options] cmd [args...]
 - `--rx-gain gain` force manual RX gain mode and apply the requested gain
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)
+- `--calibrate-delay` scan and program the FPGA<->AD9361 RX clock-data delay using PRBS, then attempt the TX delay scan
+  If no valid TX window is found, the calibrated RX delay is kept and the previous TX delay is left unchanged.
 - `--format sc16|sc8`
 
 Example usage:
@@ -158,6 +160,13 @@ External 10MHz synchronization example:
 ~~~~
 ./m2sdr_rf --sync=external --refclk-freq=38400000
 ~~~~
+
+Explicit FPGA<->AD9361 interface delay calibration example:
+~~~~
+./m2sdr_rf --calibrate-delay --sample-rate=30720000
+~~~~
+This calibrates RX first and then attempts TX with the calibrated RX delay kept active.
+If the TX scan does not find a valid window, `m2sdr_rf` still keeps the new RX delay and leaves TX at its previous value.
 
 ---
 

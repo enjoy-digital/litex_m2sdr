@@ -319,6 +319,8 @@ struct m2sdr_config {
     bool    bist_tx_tone;
     bool    bist_rx_tone;
     bool    bist_prbs;
+    /* Scan/program FPGA <-> AD9361 interface delays using the PRBS path. */
+    bool    calibrate_interface_delay;
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
     bool    enable_oversample;

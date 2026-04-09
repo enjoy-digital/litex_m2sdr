@@ -65,6 +65,7 @@ static void help(void)
            "      --bist-tx-tone     Run TX tone test.\n"
            "      --bist-rx-tone     Run RX tone test.\n"
            "      --bist-prbs        Run PRBS test.\n"
+           "      --calibrate-delay  Scan and program FPGA <-> AD9361 RX/TX clock/data delays using PRBS.\n"
            "      --bist-tone-freq HZ Set the BIST tone frequency in Hz (default: %d).\n",
            DEFAULT_REFCLK_FREQ,
            DEFAULT_SAMPLERATE,
@@ -133,6 +134,10 @@ int main(int argc, char **argv)
         { "bist_rx_tone", no_argument, NULL, 17 },
         { "bist-prbs", no_argument, NULL, 18 },
         { "bist_prbs", no_argument, NULL, 18 },
+        { "calibrate-delay", no_argument, NULL, 20 },
+        { "calibrate_delay", no_argument, NULL, 20 },
+        { "dig-tune-prbs", no_argument, NULL, 20 },
+        { "dig_tune_prbs", no_argument, NULL, 20 },
         { "bist-tone-freq", required_argument, NULL, 19 },
         { "bist_tone_freq", required_argument, NULL, 19 },
         { NULL, 0, NULL, 0 }
@@ -254,6 +259,9 @@ int main(int argc, char **argv)
             break;
         case 19:
             cfg.bist_tone_freq = (int32_t)strtoul(optarg, NULL, 0);
+            break;
+        case 20:
+            cfg.calibrate_interface_delay = true;
             break;
         default:
             exit(1);

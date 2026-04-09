@@ -33,6 +33,8 @@
 #define M2SDR_TX_ATT_MAX_DB   89
 #define M2SDR_RX_GAIN_MIN_DB   0
 #define M2SDR_RX_GAIN_MAX_DB  76
+#define M2SDR_DELAY_TAPS      16
+#define M2SDR_DELAY_SETTLE_MS 10
 
 #ifndef M2SDR_LOG_ENABLED
 #define M2SDR_LOG_ENABLED 1
@@ -417,6 +419,248 @@ static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *ph
 }
 
 /* Run the optional AD9361 built-in test modes requested by the config. */
+static int m2sdr_write_prbs_tx_ctrl(struct m2sdr_dev *dev, uint32_t value)
+{
+    return (m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR, value) == 0) ? M2SDR_ERR_OK : M2SDR_ERR_IO;
+}
+
+static int m2sdr_read_prbs_synced(struct m2sdr_dev *dev, bool *synced)
+{
+    uint32_t value = 0;
+
+    if (!dev || !synced)
+        return M2SDR_ERR_INVAL;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_RX_ADDR, &value) != 0)
+        return M2SDR_ERR_IO;
+
+    *synced = ((value >> CSR_AD9361_PRBS_RX_SYNCED_OFFSET) &
+        ((1u << CSR_AD9361_PRBS_RX_SYNCED_SIZE) - 1u)) != 0;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_program_delay_reg(struct ad9361_rf_phy *phy, bool tx, unsigned clk_delay, unsigned data_delay)
+{
+    uint8_t reg_value;
+
+    if (!phy || clk_delay >= M2SDR_DELAY_TAPS || data_delay >= M2SDR_DELAY_TAPS)
+        return M2SDR_ERR_INVAL;
+
+    reg_value = tx ? (uint8_t)(FB_CLK_DELAY(clk_delay) | TX_DATA_DELAY(data_delay))
+                   : (uint8_t)(DATA_CLK_DELAY(clk_delay) | RX_DATA_DELAY(data_delay));
+
+    return m2sdr_from_ad9361_rc(ad9361_spi_write(phy->spi,
+        tx ? REG_TX_CLOCK_DATA_DELAY : REG_RX_CLOCK_DATA_DELAY,
+        reg_value));
+}
+
+static int m2sdr_scan_delay_matrix(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy,
+                                   bool tx, unsigned rx_clk_delay, unsigned rx_data_delay,
+                                   unsigned valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS])
+{
+    const char *label = tx ? "TX" : "RX";
+    unsigned clk_delay;
+    unsigned data_delay;
+
+    printf("\n%s Clk/Dat delays scan...\n", label);
+    printf("-------------------------\n");
+    printf("Clk/Dat |  0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15\n");
+
+    for (clk_delay = 0; clk_delay < M2SDR_DELAY_TAPS; clk_delay++) {
+        printf(" %2u     |", clk_delay);
+        for (data_delay = 0; data_delay < M2SDR_DELAY_TAPS; data_delay++) {
+            bool synced = false;
+            int rc;
+
+            if (tx) {
+                /* TX tuning uses the FPGA PRBS generator/checker across the
+                 * AD9361 loopback path, so keep the previously selected RX
+                 * delay fixed while sweeping the TX interface. */
+                rc = m2sdr_program_delay_reg(phy, false, rx_clk_delay, rx_data_delay);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+            }
+
+            rc = m2sdr_program_delay_reg(phy, tx, clk_delay, data_delay);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+
+            /* For TX tuning we rely on the FPGA PRBS generator and FPGA checker.
+             * Restart the generator for each point so the checker can reacquire
+             * from a known seed/phase after the delay change. */
+            if (tx) {
+                rc = m2sdr_write_prbs_tx_ctrl(dev, 0);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+                mdelay(1);
+                rc = m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+            }
+
+            mdelay(M2SDR_DELAY_SETTLE_MS);
+
+            rc = m2sdr_read_prbs_synced(dev, &synced);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+
+            valid[clk_delay][data_delay] = synced ? 1u : 0u;
+            printf(" %2u", valid[clk_delay][data_delay]);
+        }
+        printf("\n");
+    }
+
+    return M2SDR_ERR_OK;
+}
+
+static bool m2sdr_pick_delay_midpoint(const unsigned valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS],
+                                      unsigned *best_clk, unsigned *best_data, unsigned *best_run)
+{
+    unsigned clk_delay;
+    unsigned data_delay;
+    unsigned longest = 0;
+    unsigned chosen_clk = 0;
+    unsigned chosen_data = 0;
+    bool found = false;
+
+    for (clk_delay = 0; clk_delay < M2SDR_DELAY_TAPS; clk_delay++) {
+        data_delay = 0;
+        while (data_delay < M2SDR_DELAY_TAPS) {
+            unsigned start;
+            unsigned run;
+
+            while (data_delay < M2SDR_DELAY_TAPS && !valid[clk_delay][data_delay])
+                data_delay++;
+            if (data_delay >= M2SDR_DELAY_TAPS)
+                break;
+
+            start = data_delay;
+            while (data_delay < M2SDR_DELAY_TAPS && valid[clk_delay][data_delay])
+                data_delay++;
+            run = data_delay - start;
+
+            if (run > longest) {
+                longest = run;
+                chosen_clk = clk_delay;
+                chosen_data = start + run / 2;
+                found = true;
+            }
+        }
+    }
+
+    if (!found)
+        return false;
+
+    if (best_clk)
+        *best_clk = chosen_clk;
+    if (best_data)
+        *best_data = chosen_data;
+    if (best_run)
+        *best_run = longest;
+    return true;
+}
+
+static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+{
+    unsigned rx_valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS] = {{0}};
+    unsigned tx_valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS] = {{0}};
+    unsigned best_rx_clk = 0;
+    unsigned best_rx_data = 0;
+    unsigned best_tx_clk = 0;
+    unsigned best_tx_data = 0;
+    unsigned best_rx_run = 0;
+    unsigned best_tx_run = 0;
+    uint32_t saved_prbs_tx_ctrl = 0;
+    int32_t saved_loopback = 0;
+    enum ad9361_bist_mode saved_prbs_mode = BIST_DISABLE;
+    uint8_t saved_rx_delay = 0;
+    uint8_t saved_tx_delay = 0;
+    int rc = M2SDR_ERR_OK;
+
+    if (!dev || !phy)
+        return M2SDR_ERR_INVAL;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_TX_ADDR, &saved_prbs_tx_ctrl) != 0)
+        return M2SDR_ERR_IO;
+
+    ad9361_get_bist_loopback(phy, &saved_loopback);
+    ad9361_get_bist_prbs(phy, &saved_prbs_mode);
+    saved_rx_delay = ad9361_spi_read(phy->spi, REG_RX_CLOCK_DATA_DELAY);
+    saved_tx_delay = ad9361_spi_read(phy->spi, REG_TX_CLOCK_DATA_DELAY);
+
+    printf("Calibrating FPGA <-> AD9361 digital interface with PRBS...\n");
+
+    rc = m2sdr_write_prbs_tx_ctrl(dev, 0);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, BIST_INJ_RX)) != M2SDR_ERR_OK) {
+        rc = M2SDR_ERR_IO;
+        goto restore;
+    }
+
+    rc = m2sdr_scan_delay_matrix(dev, phy, false, 0, 0, rx_valid);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    if (!m2sdr_pick_delay_midpoint(rx_valid, &best_rx_clk, &best_rx_data, &best_rx_run)) {
+        fprintf(stderr, "No valid RX Clk/Dat delay settings found.\n");
+        rc = M2SDR_ERR_IO;
+        goto restore;
+    }
+    rc = m2sdr_program_delay_reg(phy, false, best_rx_clk, best_rx_data);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    printf("Selected RX Clk Delay: %u, RX Dat Delay: %u (window: %u)\n",
+        best_rx_clk, best_rx_data, best_rx_run);
+
+    if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, BIST_DISABLE)) != M2SDR_ERR_OK) {
+        rc = M2SDR_ERR_IO;
+        goto restore;
+    }
+    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, 1)) != M2SDR_ERR_OK) {
+        rc = M2SDR_ERR_IO;
+        goto restore;
+    }
+    rc = m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    mdelay(M2SDR_DELAY_SETTLE_MS);
+
+    rc = m2sdr_scan_delay_matrix(dev, phy, true, best_rx_clk, best_rx_data, tx_valid);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    if (!m2sdr_pick_delay_midpoint(tx_valid, &best_tx_clk, &best_tx_data, &best_tx_run)) {
+        fprintf(stderr, "No valid TX Clk/Dat delay settings found, keeping calibrated RX delay and restoring previous TX delay.\n");
+        (void)ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, saved_tx_delay);
+        printf("\nCalibration completed:\n");
+        printf("----------------------\n");
+        printf("RX Clk:%u/Dat:%u, TX unchanged\n", best_rx_clk, best_rx_data);
+        rc = M2SDR_ERR_OK;
+        goto restore;
+    }
+    rc = m2sdr_program_delay_reg(phy, true, best_tx_clk, best_tx_data);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    printf("Selected TX Clk Delay: %u, TX Dat Delay: %u (window: %u)\n",
+        best_tx_clk, best_tx_data, best_tx_run);
+
+    printf("\nCalibration completed:\n");
+    printf("----------------------\n");
+    printf("RX Clk:%u/Dat:%u, TX Clk:%u/Dat:%u\n",
+        best_rx_clk, best_rx_data, best_tx_clk, best_tx_data);
+
+restore:
+    if (rc != M2SDR_ERR_OK) {
+        (void)ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, saved_rx_delay);
+        (void)ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, saved_tx_delay);
+    }
+    if (m2sdr_write_prbs_tx_ctrl(dev, saved_prbs_tx_ctrl) != M2SDR_ERR_OK)
+        rc = M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_bist_prbs(phy, saved_prbs_mode)) != M2SDR_ERR_OK)
+        rc = M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, saved_loopback)) != M2SDR_ERR_OK)
+        rc = M2SDR_ERR_IO;
+
+    return rc;
+}
+
 static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
 {
     if (cfg->bist_tx_tone) {
@@ -530,6 +774,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->bist_tx_tone      = false;
     cfg->bist_rx_tone      = false;
     cfg->bist_prbs         = false;
+    cfg->calibrate_interface_delay = false;
     cfg->enable_8bit_mode  = false;
     cfg->enable_oversample = false;
     cfg->channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
@@ -635,6 +880,11 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     rc = m2sdr_configure_modes(dev, phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
+    if (cfg->calibrate_interface_delay) {
+        rc = m2sdr_calibrate_interface_delay(dev, phy);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
     rc = m2sdr_run_bist(cfg, dev, phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
