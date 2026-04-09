@@ -72,7 +72,7 @@ from litex_m2sdr.software import generate_litepcie_software
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, with_eth=False, with_sata=False, with_white_rabbit=False):
+    def __init__(self, platform, sys_clk_freq, with_eth=False, eth_refclk_freq=125e6, with_sata=False, with_white_rabbit=False):
         self.rst              = Signal()
         self.cd_sys           = ClockDomain()
         self.cd_clk10         = ClockDomain()
@@ -126,7 +126,7 @@ class CRG(LiteXModule):
         if with_eth or with_sata or with_white_rabbit:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
-            eth_pll.create_clkout(self.cd_refclk_eth, 125e6, margin=0)
+            eth_pll.create_clkout(self.cd_refclk_eth, eth_refclk_freq, margin=0)
 
         # SATA PLL.
         # ---------
@@ -267,9 +267,12 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
+        eth_refclk_freq = 156.25e6 if (with_eth and eth_phy == "2500basex") else 125e6
+
         # General.
         self.crg = CRG(platform, sys_clk_freq,
             with_eth          = with_eth,
+            eth_refclk_freq   = eth_refclk_freq,
             with_sata         = with_sata,
             with_white_rabbit = with_white_rabbit,
         )
@@ -279,7 +282,7 @@ class BaseSoC(SoCMini):
             with_pcie       = with_pcie,
             with_eth        = with_eth | with_white_rabbit,
             eth_phy         = eth_phy,
-            eth_refclk_freq = 125e6,
+            eth_refclk_freq = eth_refclk_freq,
             with_sata       = with_sata,
         )
 
