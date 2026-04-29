@@ -257,13 +257,28 @@ class BaseSoC(SoCMini):
         if with_eth_ptp and with_white_rabbit:
             raise ValueError("Ethernet PTP and White Rabbit cannot both own the board time generator in the same build yet.")
 
-        # SoCMini ----------------------------------------------------------------------------------
+        # SoC Init ---------------------------------------------------------------------------------
 
-        SoCMini.__init__(self, platform, sys_clk_freq,
-            ident             = f"LiteX-M2SDR SoC / {variant} variant / built on",
-            ident_version     = True,
-            csr_address_width = 15,
+        soc_kwargs = dict(
+            ident=f"LiteX-M2SDR SoC / {variant} variant / built on",
+            ident_version=True,
+            csr_address_width=15,
         )
+        if with_cpu:
+            SoCCore.__init__(
+                self,
+                platform,
+                sys_clk_freq,
+                cpu_type="vexriscv",
+                cpu_variant=cpu_variant,
+                integrated_rom_size=0x10000,
+                integrated_sram_size=0x10000,
+                uart_name="crossover",
+                bus_interconnect="crossbar",
+                **soc_kwargs,
+            )
+        else:
+            SoCMini.__init__(self, platform, sys_clk_freq, **soc_kwargs)
 
         # Clocking ---------------------------------------------------------------------------------
 
@@ -373,8 +388,10 @@ class BaseSoC(SoCMini):
 
         # JTAGBone ---------------------------------------------------------------------------------
 
-        if with_jtagbone:
+        if with_jtagbone and not with_cpu:
             self.add_jtagbone()
+        elif with_jtagbone and with_cpu:
+            print("NOTE: JTAGBone disabled (conflicts with VexRiscv debug JTAG).")
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -687,7 +704,6 @@ class BaseSoC(SoCMini):
 
         # TX/RX Datapath ---------------------------------------------------------------------------
 
-
         # AD9361 <-> Loopback <-> Header.
         # -------------------------------
         self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
@@ -747,7 +763,7 @@ class BaseSoC(SoCMini):
         # Leds -------------------------------------------------------------------------------------
 
         led_pad = platform.request("user_led")
-        self.leds = StatusLed(sys_clk_freq=sys_clk_freq)
+        self.status_leds = StatusLed(sys_clk_freq=sys_clk_freq)
 
         led_tx_activity = Signal()
         led_rx_activity = Signal()
@@ -761,17 +777,21 @@ class BaseSoC(SoCMini):
         ]
 
         self.comb += [
-            self.leds.time_running.eq( self.time_gen.enable),
-            self.leds.time_valid.eq(   self.time_gen.time != 0),
-            self.leds.pcie_present.eq( int(with_pcie)),
-            self.leds.pcie_link_up.eq( self.pcie_phy._link_status.fields.status if with_pcie else 0),
-            self.leds.dma_synced.eq(   self.pcie_dma0.synchronizer.synced if with_pcie else 0),
-            self.leds.eth_present.eq(  int(with_eth)),
-            self.leds.eth_link_up.eq(  self.eth_phy.link_up if with_eth else 0),
-            self.leds.tx_activity.eq(  led_tx_activity),
-            self.leds.rx_activity.eq(  led_rx_activity),
-            self.leds.pps_pulse.eq(    self.pps_gen.pps_pulse),
-            led_pad.eq(                self.leds.output),
+            self.status_leds.time_running.eq(self.time_gen.enable),
+            self.status_leds.time_valid.eq(self.time_gen.time != 0),
+            self.status_leds.pcie_present.eq(int(with_pcie)),
+            self.status_leds.pcie_link_up.eq(
+                self.pcie_phy._link_status.fields.status if with_pcie else 0
+            ),
+            self.status_leds.dma_synced.eq(
+                self.pcie_dma0.synchronizer.synced if with_pcie else 0
+            ),
+            self.status_leds.eth_present.eq(int(with_eth)),
+            self.status_leds.eth_link_up.eq(self.eth_phy.link_up if with_eth else 0),
+            self.status_leds.tx_activity.eq(led_tx_activity),
+            self.status_leds.rx_activity.eq(led_rx_activity),
+            self.status_leds.pps_pulse.eq(self.pps_gen.pps_pulse),
+            led_pad.eq(self.status_leds.output),
         ]
 
         # GPIO -------------------------------------------------------------------------------------
@@ -942,7 +962,7 @@ class BaseSoC(SoCMini):
             ]
 
         # JTAG TCK and Async Crossing to sys.
-        if with_jtagbone:
+        if with_jtagbone and hasattr(self, "jtagbone"):
             platform.add_period_constraint(self.jtagbone.phy.cd_jtag.clk, 1e9/20e6)
             add_guarded_async_clock_groups("*crg*clkout0*", "jtag_clk")
 
@@ -1146,6 +1166,17 @@ def main():
     parser.add_argument("--rescan",           action="store_true",       help="Execute PCIe Rescan while Loading/Flashing.")
     parser.add_argument("--driver",           action="store_true",       help="Generate PCIe driver from LitePCIe (override local version).")
     parser.add_argument("--without-jtagbone", action="store_true",       help="Disable JTAGBone support.")
+    parser.add_argument(
+        "--with-cpu",
+        action="store_true",
+        help="Integrate VexRiscv soft CPU with BIOS + crossover console.",
+    )
+    parser.add_argument(
+        "--cpu-variant",
+        default="standard",
+        choices=["minimal", "lite", "lite+debug", "standard", "full"],
+        help="VexRiscv CPU variant.",
+    )
 
     # RFIC parameters.
     parser.add_argument("--with-rfic-oversampling", action="store_true", help="Double the RFIC clock to enable the oversampling mode.")
@@ -1307,6 +1338,8 @@ def main():
             r += "_rfic_oversampling"
         if args.without_jtagbone:
             r += "_no_jtagbone"
+        if args.with_cpu:
+            r += f"_cpu_{args.cpu_variant.replace('+', '_')}"
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
