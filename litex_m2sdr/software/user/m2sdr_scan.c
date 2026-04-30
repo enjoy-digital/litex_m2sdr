@@ -2007,7 +2007,7 @@ static float waterfall_sample_level(const struct scan_state *s, int row, int col
     return (float)acc / (255.0f * (float)samples);
 }
 
-static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col0, int col1, int alpha)
+static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col0, int col1)
 {
     const uint32_t *line;
     int n;
@@ -2018,9 +2018,9 @@ static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col
     unsigned int b_acc = 0;
 
     if (!s || !s->waterfall_rgba || s->waterfall_tex_width <= 0)
-        return color_with_alpha(colormap_turbo_idx(0), alpha);
+        return color_with_alpha(colormap_turbo_idx(0), 255);
     if (row < 0 || row >= s->waterfall_history_lines)
-        return color_with_alpha(colormap_turbo_idx(0), alpha);
+        return color_with_alpha(colormap_turbo_idx(0), 255);
 
     if (col0 < 0)
         col0 = 0;
@@ -2048,15 +2048,118 @@ static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col
                 idx = col1 - 1;
         }
         px = line[idx];
-        r_acc += (px >> 0) & 0xff;
+        /* Match the 2D waterfall path, which uploads/exports these pixels as BGRA. */
+        r_acc += (px >> 16) & 0xff;
         g_acc += (px >> 8) & 0xff;
-        b_acc += (px >> 16) & 0xff;
+        b_acc += (px >> 0) & 0xff;
     }
 
     return color_with_alpha(pack_rgba_u8((int)(r_acc / (unsigned int)samples),
                                          (int)(g_acc / (unsigned int)samples),
                                          (int)(b_acc / (unsigned int)samples)),
-                            alpha);
+                            255);
+}
+
+static int waterfall_visible_history_lines(const struct scan_state *s)
+{
+    int visible_lines;
+
+    if (!s)
+        return 0;
+
+    visible_lines = s->lines;
+    if (visible_lines < 1)
+        visible_lines = 1;
+    if (s->waterfall_history_lines > 0 && visible_lines > s->waterfall_history_lines)
+        visible_lines = s->waterfall_history_lines;
+    return visible_lines;
+}
+
+static void waterfall_3d_trace_age_span(const struct scan_state *s,
+                                        int trace,
+                                        int trace_count,
+                                        int visible_lines,
+                                        int *age0,
+                                        int *age1)
+{
+    int trace_from_newest;
+    int a0;
+    int a1;
+
+    if (trace_count < 1)
+        trace_count = 1;
+    if (visible_lines < 1)
+        visible_lines = 1;
+
+    trace_from_newest = trace_count - 1 - trace;
+    if (trace_from_newest < 0)
+        trace_from_newest = 0;
+    if (trace_from_newest >= trace_count)
+        trace_from_newest = trace_count - 1;
+
+    a0 = s->waterfall_scroll + (int)((int64_t)trace_from_newest * visible_lines / trace_count);
+    a1 = s->waterfall_scroll + (int)((int64_t)(trace_from_newest + 1) * visible_lines / trace_count);
+    if (a1 <= a0)
+        a1 = a0 + 1;
+
+    *age0 = a0;
+    *age1 = a1;
+}
+
+static float waterfall_sample_level_age_span(const struct scan_state *s,
+                                             int age0,
+                                             int age1,
+                                             int col0,
+                                             int col1)
+{
+    float acc = 0.0f;
+    int samples = 0;
+    int age;
+
+    for (age = age0; age < age1; age++) {
+        int row = waterfall_history_row_from_age(s, age);
+        if (row < 0)
+            continue;
+        acc += waterfall_sample_level(s, row, col0, col1);
+        samples++;
+    }
+
+    if (samples < 1)
+        return 0.0f;
+    return acc / (float)samples;
+}
+
+static ImU32 waterfall_sample_color_age_span(const struct scan_state *s,
+                                             int age0,
+                                             int age1,
+                                             int col0,
+                                             int col1)
+{
+    int age;
+    int row;
+    int span;
+    int mid;
+    int radius;
+
+    if (age1 <= age0)
+        age1 = age0 + 1;
+
+    age = age0 + (age1 - age0) / 2;
+    row = waterfall_history_row_from_age(s, age);
+    if (row < 0)
+        return color_with_alpha(colormap_turbo_idx(0), 255);
+
+    span = col1 - col0;
+    if (span < 1)
+        span = 1;
+    mid = col0 + span / 2;
+    radius = span / 8;
+    if (radius < 1)
+        radius = 1;
+    if (radius > 4)
+        radius = 4;
+
+    return waterfall_sample_color(s, row, mid - radius, mid + radius + 1);
 }
 
 struct waterfall_3d_projector {
@@ -2173,6 +2276,8 @@ static void draw_waterfall_3d(struct scan_state *s,
     struct waterfall_3d_projector pr;
     ImVec2 front_l, front_r, back_l, back_r, axis_top;
     int depth_lines;
+    int visible_lines;
+    int max_scroll;
     int max_depth_by_height;
     int col_span;
     int x_samples;
@@ -2229,11 +2334,20 @@ static void draw_waterfall_3d(struct scan_state *s,
     if (depth_lines > max_depth_by_height)
         depth_lines = max_depth_by_height;
 
-    x_samples = (int)(width / 7.0f);
+    visible_lines = waterfall_visible_history_lines(s);
+    max_scroll = s->waterfall_history_lines - visible_lines;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    if (s->waterfall_scroll < 0)
+        s->waterfall_scroll = 0;
+    if (s->waterfall_scroll > max_scroll)
+        s->waterfall_scroll = max_scroll;
+
+    x_samples = (int)(width / 4.0f);
     if (x_samples < 32)
         x_samples = 32;
-    if (x_samples > 220)
-        x_samples = 220;
+    if (x_samples > 512)
+        x_samples = 512;
     if (x_samples > col_span)
         x_samples = col_span;
     if (x_samples > MAX_PLOT_POINTS)
@@ -2273,32 +2387,26 @@ static void draw_waterfall_3d(struct scan_state *s,
 
     for (d = 0; d < depth_lines; d++) {
         int x;
-        int hist_row;
-        int age_from_newest;
+        int age0;
+        int age1;
         float depth_t = (float)d / (float)(depth_lines - 1);
-        int alpha_base = 52 + (int)(150.0f * depth_t);
 
-        age_from_newest = (depth_lines - 1 - d) + s->waterfall_scroll;
-        hist_row = waterfall_history_row_from_age(s, age_from_newest);
-        if (hist_row < 0)
-            continue;
+        waterfall_3d_trace_age_span(s, d, depth_lines, visible_lines, &age0, &age1);
 
         for (x = 0; x < x_samples; x++) {
             int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
             int c1 = tex_col0 + (int)((int64_t)(x + 1) * col_span / x_samples);
             float freq_t = (x_samples > 1) ? (float)x / (float)(x_samples - 1) : 0.0f;
-            float v = waterfall_sample_level(s, hist_row, c0, c1);
+            float v = waterfall_sample_level_age_span(s, age0, age1, c0, c1);
 
             s->plot_db[x] = v;
             waterfall_3d_project_point(&pr, freq_t, depth_t, v, &s->plot_points[x]);
         }
 
         for (x = 0; x < x_samples - 1; x++) {
-            float v = 0.5f * (s->plot_db[x] + s->plot_db[x + 1]);
-            int alpha = alpha_base + (int)(44.0f * v);
             int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
             int c1 = tex_col0 + (int)((int64_t)(x + 2) * col_span / x_samples);
-            ImU32 col = waterfall_sample_color(s, hist_row, c0, c1, alpha);
+            ImU32 col = waterfall_sample_color_age_span(s, age0, age1, c0, c1);
             float thickness = 0.75f + 0.55f * depth_t;
             ImDrawList_AddLine(dl, s->plot_points[x], s->plot_points[x + 1], col, thickness);
         }
@@ -3667,7 +3775,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         igSliderFloat("Tilt", &s->waterfall_3d_pitch, 15.0f, 75.0f, "%.0f", 0);
         igSameLine(0.0f, 8.0f);
         igSetNextItemWidth(90.0f);
-        igSliderInt("History", &s->waterfall_3d_depth, 16, 128, "%d", 0);
+        igSliderInt("Traces", &s->waterfall_3d_depth, 16, 128, "%d", 0);
         igSameLine(0.0f, 8.0f);
         if (igSmallButton("Fit"))
             s->waterfall_3d_zoom = 1.00f;
