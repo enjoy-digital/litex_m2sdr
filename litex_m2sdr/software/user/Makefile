@@ -234,7 +234,7 @@ M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
 m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr.a $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
-	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) -Lliblitepcie -Llibm2sdr -Lad9361 -llitepcie -lm2sdr -lad9361_m2sdr -lm $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
+	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) ad9361/libad9361_m2sdr.a -Lliblitepcie -Llibm2sdr -llitepcie -lm2sdr -lm $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
 clean:

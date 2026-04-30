@@ -63,6 +63,14 @@
 #define FASTLOCK_PROFILE_BYTES 16
 #define FASTLOCK_MAX_SW_CACHE 4096
 
+#define WATERFALL_VIEW_2D 0
+#define WATERFALL_VIEW_3D 1
+#define DEFAULT_WATERFALL_3D_DEPTH 96
+#define DEFAULT_WATERFALL_3D_LIFT 0.75f
+#define DEFAULT_WATERFALL_3D_ZOOM 1.65f
+#define DEFAULT_WATERFALL_3D_YAW 25.0f
+#define DEFAULT_WATERFALL_3D_PITCH 42.0f
+
 static const uint32_t k_scan_samplerates_hz[] = {
     61440000U,
     30720000U,
@@ -188,12 +196,18 @@ struct scan_state {
     bool run;
     int display_rows;
     int waterfall_palette;
+    int waterfall_view_mode;
     int spectrum_autoscale_mode;
     bool waterfall_pause;
     int waterfall_speed_div;
     int waterfall_speed_ctr;
     float waterfall_contrast;
     float waterfall_gamma;
+    int waterfall_3d_depth;
+    float waterfall_3d_lift;
+    float waterfall_3d_zoom;
+    float waterfall_3d_yaw;
+    float waterfall_3d_pitch;
     int waterfall_history_lines;
     int waterfall_scroll;
     int waterfall_write_row;
@@ -280,6 +294,7 @@ struct scan_state {
     ImVec2 *plot_points;
     uint32_t *waterfall_rgba;
     uint32_t *waterfall_view_rgba;
+    uint8_t *waterfall_level;
 
     GLuint waterfall_tex;
 
@@ -710,12 +725,35 @@ static void export_snapshot_png(int width, int height)
     free(pix);
 }
 
+static int waterfall_history_row_from_age(const struct scan_state *s, int age_from_newest)
+{
+    int hist_lines;
+    int newest_row;
+    int src_row;
+
+    if (!s)
+        return -1;
+
+    hist_lines = s->waterfall_history_lines;
+    if (hist_lines < 1)
+        return -1;
+
+    newest_row = s->waterfall_write_row - 1;
+    if (newest_row < 0)
+        newest_row += hist_lines;
+
+    src_row = newest_row - age_from_newest;
+    src_row %= hist_lines;
+    if (src_row < 0)
+        src_row += hist_lines;
+    return src_row;
+}
+
 static void waterfall_compose_view(struct scan_state *s)
 {
     int y;
     int hist_lines = s->waterfall_history_lines;
     int max_scroll;
-    int newest_row;
 
     if (!s->waterfall_rgba || !s->waterfall_view_rgba)
         return;
@@ -730,18 +768,11 @@ static void waterfall_compose_view(struct scan_state *s)
     if (s->waterfall_scroll > max_scroll)
         s->waterfall_scroll = max_scroll;
 
-    newest_row = s->waterfall_write_row - 1;
-    if (newest_row < 0)
-        newest_row += hist_lines;
-
     for (y = 0; y < s->lines; y++) {
         int age_from_newest = (s->lines - 1 - y) + s->waterfall_scroll;
-        int src_row = newest_row - age_from_newest;
-        if (hist_lines > 0) {
-            src_row %= hist_lines;
-            if (src_row < 0)
-                src_row += hist_lines;
-        }
+        int src_row = waterfall_history_row_from_age(s, age_from_newest);
+        if (src_row < 0)
+            continue;
         memcpy(s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width,
                s->waterfall_rgba + (size_t)src_row * (size_t)s->waterfall_tex_width,
                (size_t)s->waterfall_tex_width * sizeof(uint32_t));
@@ -807,6 +838,12 @@ static bool save_preset_file(const struct scan_state *s, const char *path)
     fprintf(f, "db_max=%.3f\n", s->db_max);
     fprintf(f, "display_rows=%d\n", s->display_rows);
     fprintf(f, "waterfall_palette=%d\n", s->waterfall_palette);
+    fprintf(f, "waterfall_view_mode=%d\n", s->waterfall_view_mode);
+    fprintf(f, "waterfall_3d_depth=%d\n", s->waterfall_3d_depth);
+    fprintf(f, "waterfall_3d_lift=%.3f\n", s->waterfall_3d_lift);
+    fprintf(f, "waterfall_3d_zoom=%.3f\n", s->waterfall_3d_zoom);
+    fprintf(f, "waterfall_3d_yaw=%.3f\n", s->waterfall_3d_yaw);
+    fprintf(f, "waterfall_3d_pitch=%.3f\n", s->waterfall_3d_pitch);
     fclose(f);
     fprintf(stderr, "Saved preset %s\n", path);
     return true;
@@ -862,9 +899,33 @@ static bool load_preset_file(struct scan_state *s, const char *path)
             s->display_rows = atoi(eq);
         else if (!strcmp(line, "waterfall_palette"))
             s->waterfall_palette = atoi(eq);
+        else if (!strcmp(line, "waterfall_view_mode"))
+            s->waterfall_view_mode = atoi(eq);
+        else if (!strcmp(line, "waterfall_3d_depth"))
+            s->waterfall_3d_depth = atoi(eq);
+        else if (!strcmp(line, "waterfall_3d_lift"))
+            s->waterfall_3d_lift = strtof(eq, NULL);
+        else if (!strcmp(line, "waterfall_3d_zoom"))
+            s->waterfall_3d_zoom = strtof(eq, NULL);
+        else if (!strcmp(line, "waterfall_3d_yaw"))
+            s->waterfall_3d_yaw = strtof(eq, NULL);
+        else if (!strcmp(line, "waterfall_3d_pitch"))
+            s->waterfall_3d_pitch = strtof(eq, NULL);
     }
     fclose(f);
     s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(s->sample_rate_hz);
+    if (s->waterfall_view_mode < WATERFALL_VIEW_2D || s->waterfall_view_mode > WATERFALL_VIEW_3D)
+        s->waterfall_view_mode = WATERFALL_VIEW_2D;
+    if (s->waterfall_3d_depth < 16)
+        s->waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
+    if (s->waterfall_3d_lift < 0.10f || s->waterfall_3d_lift > 1.20f)
+        s->waterfall_3d_lift = DEFAULT_WATERFALL_3D_LIFT;
+    if (s->waterfall_3d_zoom < 0.50f || s->waterfall_3d_zoom > 4.00f)
+        s->waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
+    if (s->waterfall_3d_yaw < -80.0f || s->waterfall_3d_yaw > 80.0f)
+        s->waterfall_3d_yaw = DEFAULT_WATERFALL_3D_YAW;
+    if (s->waterfall_3d_pitch < 15.0f || s->waterfall_3d_pitch > 75.0f)
+        s->waterfall_3d_pitch = DEFAULT_WATERFALL_3D_PITCH;
     return true;
 }
 
@@ -1675,6 +1736,7 @@ static void waterfall_push_line(struct scan_state *s)
 {
     int x;
     uint32_t *dst_row;
+    uint8_t *dst_level;
     int hist_lines = s->waterfall_history_lines;
     int row = s->waterfall_write_row;
     float contrast = s->waterfall_contrast;
@@ -1682,9 +1744,12 @@ static void waterfall_push_line(struct scan_state *s)
 
     if (hist_lines < 1)
         return;
+    if (!s->waterfall_rgba || !s->waterfall_level)
+        return;
     if (row < 0 || row >= hist_lines)
         row = 0;
     dst_row = s->waterfall_rgba + (size_t)row * (size_t)s->waterfall_tex_width;
+    dst_level = s->waterfall_level + (size_t)row * (size_t)s->waterfall_tex_width;
     for (x = 0; x < s->waterfall_tex_width; x++) {
         int start = (int)((int64_t)x * s->waterfall_width / s->waterfall_tex_width);
         int stop  = (int)((int64_t)(x + 1) * s->waterfall_width / s->waterfall_tex_width);
@@ -1703,6 +1768,7 @@ static void waterfall_push_line(struct scan_state *s)
         if (t > 1.0f) t = 1.0f;
         if (gamma > 0.01f)
             t = powf(t, gamma);
+        dst_level[x] = (uint8_t)(t * 255.0f + 0.5f);
         dst_row[x] = colormap_apply(s->waterfall_palette, t);
     }
 
@@ -1765,6 +1831,7 @@ static void free_scan_state(struct scan_state *s)
     free(s->plot_points);
     free(s->waterfall_rgba);
     free(s->waterfall_view_rgba);
+    free(s->waterfall_level);
     free(s->fastlock_sw);
 }
 
@@ -1877,6 +1944,390 @@ static void format_freq_label(double hz, double step_hz, char *buf, size_t bufle
     scaled_step = step_hz / scale;
     decimals = decimals_for_step(scaled_step);
     snprintf(buf, buflen, "%.*f%s", decimals, hz / scale, unit);
+}
+
+static float clamp_float(float v, float v_min, float v_max)
+{
+    if (v < v_min)
+        return v_min;
+    if (v > v_max)
+        return v_max;
+    return v;
+}
+
+static ImU32 color_with_alpha(ImU32 color, int alpha)
+{
+    if (alpha < 0)
+        alpha = 0;
+    if (alpha > 255)
+        alpha = 255;
+    return (color & 0x00FFFFFFu) | ((ImU32)alpha << 24);
+}
+
+static float waterfall_sample_level(const struct scan_state *s, int row, int col0, int col1)
+{
+    const uint8_t *line;
+    int n;
+    int samples;
+    int i;
+    unsigned int acc = 0;
+
+    if (!s || !s->waterfall_level || s->waterfall_tex_width <= 0)
+        return 0.0f;
+    if (row < 0 || row >= s->waterfall_history_lines)
+        return 0.0f;
+
+    if (col0 < 0)
+        col0 = 0;
+    if (col1 > s->waterfall_tex_width)
+        col1 = s->waterfall_tex_width;
+    if (col0 >= s->waterfall_tex_width)
+        col0 = s->waterfall_tex_width - 1;
+    if (col1 <= col0)
+        col1 = col0 + 1;
+
+    line = s->waterfall_level + (size_t)row * (size_t)s->waterfall_tex_width;
+    n = col1 - col0;
+    samples = n;
+    if (samples > 16)
+        samples = 16;
+
+    for (i = 0; i < samples; i++) {
+        int idx;
+        if (samples == n) {
+            idx = col0 + i;
+        } else {
+            idx = col0 + (int)(((float)i + 0.5f) * (float)n / (float)samples);
+            if (idx >= col1)
+                idx = col1 - 1;
+        }
+        acc += line[idx];
+    }
+
+    return (float)acc / (255.0f * (float)samples);
+}
+
+static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col0, int col1, int alpha)
+{
+    const uint32_t *line;
+    int n;
+    int samples;
+    int i;
+    unsigned int r_acc = 0;
+    unsigned int g_acc = 0;
+    unsigned int b_acc = 0;
+
+    if (!s || !s->waterfall_rgba || s->waterfall_tex_width <= 0)
+        return color_with_alpha(colormap_turbo_idx(0), alpha);
+    if (row < 0 || row >= s->waterfall_history_lines)
+        return color_with_alpha(colormap_turbo_idx(0), alpha);
+
+    if (col0 < 0)
+        col0 = 0;
+    if (col1 > s->waterfall_tex_width)
+        col1 = s->waterfall_tex_width;
+    if (col0 >= s->waterfall_tex_width)
+        col0 = s->waterfall_tex_width - 1;
+    if (col1 <= col0)
+        col1 = col0 + 1;
+
+    line = s->waterfall_rgba + (size_t)row * (size_t)s->waterfall_tex_width;
+    n = col1 - col0;
+    samples = n;
+    if (samples > 16)
+        samples = 16;
+
+    for (i = 0; i < samples; i++) {
+        int idx;
+        uint32_t px;
+        if (samples == n) {
+            idx = col0 + i;
+        } else {
+            idx = col0 + (int)(((float)i + 0.5f) * (float)n / (float)samples);
+            if (idx >= col1)
+                idx = col1 - 1;
+        }
+        px = line[idx];
+        r_acc += (px >> 0) & 0xff;
+        g_acc += (px >> 8) & 0xff;
+        b_acc += (px >> 16) & 0xff;
+    }
+
+    return color_with_alpha(pack_rgba_u8((int)(r_acc / (unsigned int)samples),
+                                         (int)(g_acc / (unsigned int)samples),
+                                         (int)(b_acc / (unsigned int)samples)),
+                            alpha);
+}
+
+struct waterfall_3d_projector {
+    float cx;
+    float cy;
+    float scale;
+    float yaw_c;
+    float yaw_s;
+    float pitch_s;
+    float amp_scale;
+};
+
+static void waterfall_3d_raw_point(const struct waterfall_3d_projector *pr,
+                                   float freq_t,
+                                   float depth_t,
+                                   float amp,
+                                   float *x_out,
+                                   float *y_out)
+{
+    float x = freq_t * 2.0f - 1.0f;
+    float z = (1.0f - depth_t) - 0.5f;
+    float xr = x * pr->yaw_c - z * pr->yaw_s;
+    float zr = x * pr->yaw_s + z * pr->yaw_c;
+
+    *x_out = xr;
+    *y_out = zr * pr->pitch_s - amp * pr->amp_scale;
+}
+
+static void waterfall_3d_project_point(const struct waterfall_3d_projector *pr,
+                                       float freq_t,
+                                       float depth_t,
+                                       float amp,
+                                       ImVec2 *out)
+{
+    float x, y;
+    waterfall_3d_raw_point(pr, freq_t, depth_t, amp, &x, &y);
+    out->x = pr->cx + x * pr->scale;
+    out->y = pr->cy + y * pr->scale;
+}
+
+static void waterfall_3d_projector_init(const struct scan_state *s,
+                                        ImVec2 pmin,
+                                        ImVec2 pmax,
+                                        struct waterfall_3d_projector *pr)
+{
+    float yaw_rad;
+    float pitch_rad;
+    float raw_min_x = 1e30f, raw_max_x = -1e30f;
+    float raw_min_y = 1e30f, raw_max_y = -1e30f;
+    float plot_min_x = pmin.x + 42.0f;
+    float plot_max_x = pmax.x - 16.0f;
+    float plot_min_y = pmin.y + 8.0f;
+    float plot_max_y = pmax.y - 24.0f;
+    float avail_w;
+    float avail_h;
+    float raw_w;
+    float raw_h;
+    int fi, di, ai;
+
+    yaw_rad = clamp_float(s->waterfall_3d_yaw, -80.0f, 80.0f) * (float)M_PI / 180.0f;
+    pitch_rad = clamp_float(s->waterfall_3d_pitch, 15.0f, 75.0f) * (float)M_PI / 180.0f;
+    pr->yaw_c = cosf(yaw_rad);
+    pr->yaw_s = sinf(yaw_rad);
+    pr->pitch_s = sinf(pitch_rad);
+    pr->amp_scale = clamp_float(s->waterfall_3d_lift, 0.10f, 1.20f);
+
+    for (fi = 0; fi < 2; fi++) {
+        for (di = 0; di < 2; di++) {
+            for (ai = 0; ai < 2; ai++) {
+                float x, y;
+                waterfall_3d_raw_point(pr, (float)fi, (float)di, (float)ai, &x, &y);
+                if (x < raw_min_x) raw_min_x = x;
+                if (x > raw_max_x) raw_max_x = x;
+                if (y < raw_min_y) raw_min_y = y;
+                if (y > raw_max_y) raw_max_y = y;
+            }
+        }
+    }
+
+    avail_w = plot_max_x - plot_min_x;
+    avail_h = plot_max_y - plot_min_y;
+    if (avail_w < 8.0f)
+        avail_w = 8.0f;
+    if (avail_h < 8.0f)
+        avail_h = 8.0f;
+
+    raw_w = raw_max_x - raw_min_x;
+    raw_h = raw_max_y - raw_min_y;
+    if (raw_w < 1e-6f)
+        raw_w = 1.0f;
+    if (raw_h < 1e-6f)
+        raw_h = 1.0f;
+
+    pr->scale = avail_w / raw_w;
+    if (avail_h / raw_h < pr->scale)
+        pr->scale = avail_h / raw_h;
+    pr->scale *= clamp_float(s->waterfall_3d_zoom, 0.50f, 4.00f);
+    pr->cx = 0.5f * (plot_min_x + plot_max_x) - 0.5f * (raw_min_x + raw_max_x) * pr->scale;
+    pr->cy = 0.5f * (plot_min_y + plot_max_y) - 0.5f * (raw_min_y + raw_max_y) * pr->scale;
+}
+
+static void draw_waterfall_3d(struct scan_state *s,
+                              const char *id,
+                              float width,
+                              float height,
+                              int tex_col0,
+                              int tex_col1,
+                              double f0_hz,
+                              double f1_hz)
+{
+    ImVec2 pmin, pmax;
+    ImDrawList *dl;
+    ImGuiIO *io;
+    struct waterfall_3d_projector pr;
+    ImVec2 front_l, front_r, back_l, back_r, axis_top;
+    int depth_lines;
+    int max_depth_by_height;
+    int col_span;
+    int x_samples;
+    int d;
+    int g;
+    double freq_step;
+
+    if (width <= 8.0f || height <= 8.0f)
+        return;
+
+    igInvisibleButton(id, (ImVec2){width, height}, 0);
+    igGetItemRectMin(&pmin);
+    igGetItemRectMax(&pmax);
+    dl = igGetWindowDrawList();
+    io = igGetIO();
+
+    if (igIsItemActive() && igIsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+        s->waterfall_3d_yaw += io->MouseDelta.x * 0.35f;
+        s->waterfall_3d_pitch -= io->MouseDelta.y * 0.25f;
+        s->waterfall_3d_yaw = clamp_float(s->waterfall_3d_yaw, -80.0f, 80.0f);
+        s->waterfall_3d_pitch = clamp_float(s->waterfall_3d_pitch, 15.0f, 75.0f);
+    }
+    if (igIsItemHovered(0) && fabsf(io->MouseWheel) > 0.0f) {
+        s->waterfall_3d_zoom *= powf(1.12f, io->MouseWheel);
+        s->waterfall_3d_zoom = clamp_float(s->waterfall_3d_zoom, 0.50f, 4.00f);
+    }
+
+    ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF111315u, 2.0f, 0);
+    ImDrawList_AddRect(dl, pmin, pmax, 0xFF3A3A3Au, 2.0f, 0, 1.0f);
+
+    if (!s->waterfall_level || s->waterfall_history_lines <= 0 || s->waterfall_tex_width <= 1)
+        return;
+
+    if (tex_col0 < 0)
+        tex_col0 = 0;
+    if (tex_col1 > s->waterfall_tex_width)
+        tex_col1 = s->waterfall_tex_width;
+    if (tex_col1 <= tex_col0)
+        tex_col1 = tex_col0 + 1;
+
+    col_span = tex_col1 - tex_col0;
+    depth_lines = s->waterfall_3d_depth;
+    if (depth_lines < 8)
+        depth_lines = 8;
+    if (depth_lines > s->lines)
+        depth_lines = s->lines;
+    if (depth_lines > s->waterfall_history_lines)
+        depth_lines = s->waterfall_history_lines;
+    max_depth_by_height = (int)(height / 3.0f);
+    if (max_depth_by_height < 8)
+        max_depth_by_height = 8;
+    if (max_depth_by_height > 128)
+        max_depth_by_height = 128;
+    if (depth_lines > max_depth_by_height)
+        depth_lines = max_depth_by_height;
+
+    x_samples = (int)(width / 7.0f);
+    if (x_samples < 32)
+        x_samples = 32;
+    if (x_samples > 220)
+        x_samples = 220;
+    if (x_samples > col_span)
+        x_samples = col_span;
+    if (x_samples > MAX_PLOT_POINTS)
+        x_samples = MAX_PLOT_POINTS;
+    if (depth_lines < 2 || x_samples < 2)
+        return;
+
+    waterfall_3d_projector_init(s, pmin, pmax, &pr);
+    waterfall_3d_project_point(&pr, 0.0f, 1.0f, 0.0f, &front_l);
+    waterfall_3d_project_point(&pr, 1.0f, 1.0f, 0.0f, &front_r);
+    waterfall_3d_project_point(&pr, 0.0f, 0.0f, 0.0f, &back_l);
+    waterfall_3d_project_point(&pr, 1.0f, 0.0f, 0.0f, &back_r);
+    waterfall_3d_project_point(&pr, 0.0f, 1.0f, 1.0f, &axis_top);
+
+    ImDrawList_PushClipRect(dl, pmin, pmax, true);
+
+    ImDrawList_AddLine(dl, back_l, back_r, 0x66343A40u, 1.0f);
+    ImDrawList_AddLine(dl, back_l, front_l, 0x66343A40u, 1.0f);
+    ImDrawList_AddLine(dl, back_r, front_r, 0x66343A40u, 1.0f);
+    ImDrawList_AddLine(dl, front_l, front_r, 0x994D5660u, 1.2f);
+    ImDrawList_AddLine(dl, front_l, axis_top, 0x775D6670u, 1.0f);
+
+    for (g = 1; g < 5; g++) {
+        float t = (float)g / 5.0f;
+        ImVec2 b, f;
+        waterfall_3d_project_point(&pr, t, 0.0f, 0.0f, &b);
+        waterfall_3d_project_point(&pr, t, 1.0f, 0.0f, &f);
+        ImDrawList_AddLine(dl, b, f, 0x44303840u, 0.8f);
+    }
+    for (g = 1; g < 4; g++) {
+        float t = (float)g / 4.0f;
+        ImVec2 l, r;
+        waterfall_3d_project_point(&pr, 0.0f, t, 0.0f, &l);
+        waterfall_3d_project_point(&pr, 1.0f, t, 0.0f, &r);
+        ImDrawList_AddLine(dl, l, r, 0x44303840u, 0.8f);
+    }
+
+    for (d = 0; d < depth_lines; d++) {
+        int x;
+        int hist_row;
+        int age_from_newest;
+        float depth_t = (float)d / (float)(depth_lines - 1);
+        int alpha_base = 52 + (int)(150.0f * depth_t);
+
+        age_from_newest = (depth_lines - 1 - d) + s->waterfall_scroll;
+        hist_row = waterfall_history_row_from_age(s, age_from_newest);
+        if (hist_row < 0)
+            continue;
+
+        for (x = 0; x < x_samples; x++) {
+            int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
+            int c1 = tex_col0 + (int)((int64_t)(x + 1) * col_span / x_samples);
+            float freq_t = (x_samples > 1) ? (float)x / (float)(x_samples - 1) : 0.0f;
+            float v = waterfall_sample_level(s, hist_row, c0, c1);
+
+            s->plot_db[x] = v;
+            waterfall_3d_project_point(&pr, freq_t, depth_t, v, &s->plot_points[x]);
+        }
+
+        for (x = 0; x < x_samples - 1; x++) {
+            float v = 0.5f * (s->plot_db[x] + s->plot_db[x + 1]);
+            int alpha = alpha_base + (int)(44.0f * v);
+            int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
+            int c1 = tex_col0 + (int)((int64_t)(x + 2) * col_span / x_samples);
+            ImU32 col = waterfall_sample_color(s, hist_row, c0, c1, alpha);
+            float thickness = 0.75f + 0.55f * depth_t;
+            ImDrawList_AddLine(dl, s->plot_points[x], s->plot_points[x + 1], col, thickness);
+        }
+    }
+
+    freq_step = choose_125_step(f1_hz - f0_hz, 4);
+    for (g = 0; g <= 4; g += 2) {
+        char txt[32];
+        float t = (float)g / 4.0f;
+        double hz = f0_hz + (f1_hz - f0_hz) * (double)t;
+        ImVec2 label_pos;
+        waterfall_3d_project_point(&pr, t, 1.0f, 0.0f, &label_pos);
+        format_freq_label(hz, freq_step, txt, sizeof(txt));
+        if (g == 4)
+            label_pos.x -= 46.0f;
+        ImDrawList_AddText_Vec2(dl, (ImVec2){label_pos.x + 2.0f, label_pos.y + 4.0f},
+                                0xB8D8DEE9u, txt, NULL);
+    }
+    {
+        char txt[32];
+        snprintf(txt, sizeof(txt), "%.0f dB", s->db_max);
+        ImDrawList_AddText_Vec2(dl, (ImVec2){axis_top.x + 4.0f, axis_top.y - 8.0f},
+                                0xA8D8DEE9u, txt, NULL);
+        snprintf(txt, sizeof(txt), "%.0f", s->db_min);
+        ImDrawList_AddText_Vec2(dl, (ImVec2){front_l.x + 4.0f, front_l.y - 14.0f},
+                                0x88D8DEE9u, txt, NULL);
+    }
+
+    ImDrawList_PopClipRect(dl);
 }
 
 static void draw_spectrum_with_grid(struct scan_state *s,
@@ -2606,6 +3057,7 @@ static bool resize_buffers(struct scan_state *s)
     free(s->plot_points);
     free(s->waterfall_rgba);
     free(s->waterfall_view_rgba);
+    free(s->waterfall_level);
 
     s->in_re = NULL;
     s->in_im = NULL;
@@ -2628,6 +3080,7 @@ static bool resize_buffers(struct scan_state *s)
     s->plot_points = NULL;
     s->waterfall_rgba = NULL;
     s->waterfall_view_rgba = NULL;
+    s->waterfall_level = NULL;
 
     s->in_re = (float *)calloc((size_t)s->fft_len, sizeof(float));
     s->in_im = (float *)calloc((size_t)s->fft_len, sizeof(float));
@@ -2655,13 +3108,14 @@ static bool resize_buffers(struct scan_state *s)
         hist_lines = 4096;
     s->waterfall_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)hist_lines, sizeof(uint32_t));
     s->waterfall_view_rgba = (uint32_t *)calloc((size_t)tex_width * (size_t)s->lines, sizeof(uint32_t));
+    s->waterfall_level = (uint8_t *)calloc((size_t)tex_width * (size_t)hist_lines, sizeof(uint8_t));
 
     if (!s->in_re || !s->in_im || !s->fft_job_re || !s->fft_job_im || !s->fft_in || !s->fft_out ||
         !s->out_re || !s->out_im ||
         !s->window || !s->line_db || !s->line_peak_db || !s->line_peak_seen_s || !s->line_avg_db ||
         !s->line_pow_accum || !s->line_w_accum ||
         !s->plot_db || !s->plot_avg || !s->plot_peak || !s->plot_points ||
-        !s->waterfall_rgba || !s->waterfall_view_rgba) {
+        !s->waterfall_rgba || !s->waterfall_view_rgba || !s->waterfall_level) {
         fprintf(stderr, "Out of memory allocating scan buffers.\n");
         return false;
     }
@@ -2787,8 +3241,9 @@ static void help(void)
            "\n"
            "Runtime controls in UI:\n"
            "  - Scan start/stop (MHz), sample rate, stitch mode, settle time, FFT length, line count,\n"
-            "    RX gain and dB scale.\n"
+            "    RX gain, dB scale, colormap, and 2D/3D waterfall view.\n"
            "  - Parameters are applied live while moving sliders.\n"
+           "  - Press 3 to toggle the waterfall view mode; drag/wheel the 3D view to rotate/zoom.\n"
            "  - F8 cycles the window across monitors; Shift+F8 spans across all monitors.\n"
            "  - F11 toggles borderless fullscreen spanning all monitors.\n"
            "\n"
@@ -3000,6 +3455,10 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         "White Hot",
         "Black Hot"
     };
+    static const char *view_items[] = {
+        "2D",
+        "3D"
+    };
     static const char *autoscale_items[] = {
         "Off",
         "Slow",
@@ -3007,6 +3466,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     };
     const float min_span_mhz = 1.0f;
     int p = s->waterfall_palette;
+    int view_mode = s->waterfall_view_mode;
     bool changed = false;
     bool changed_start = false;
     bool changed_stop = false;
@@ -3140,10 +3600,16 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSetNextItemWidth(120.0f);
     igSliderInt("Rows", &s->display_rows, 1, 8, "%d", 0);
     igSameLine(0.0f, 10.0f);
+    igSetNextItemWidth(80.0f);
+    if (view_mode < WATERFALL_VIEW_2D || view_mode > WATERFALL_VIEW_3D)
+        view_mode = WATERFALL_VIEW_2D;
+    if (igCombo_Str_arr("View", &view_mode, view_items, 2, 2))
+        s->waterfall_view_mode = view_mode;
+    igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(170.0f);
     if (p < 0 || p > 5)
         p = 0;
-    if (igCombo_Str_arr("Palette", &p, palette_items, 6, 6)) {
+    if (igCombo_Str_arr("Colormap", &p, palette_items, 6, 6)) {
         s->waterfall_palette = p;
     }
     igSameLine(0.0f, 10.0f);
@@ -3186,6 +3652,37 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
     igSameLine(0.0f, 8.0f);
     igSetNextItemWidth(80.0f);
     igSliderInt("Speed", &s->waterfall_speed_div, 1, 8, "%dx", 0);
+    if (s->waterfall_view_mode == WATERFALL_VIEW_3D) {
+        igNewLine();
+        igSetNextItemWidth(90.0f);
+        igSliderFloat("Zoom", &s->waterfall_3d_zoom, 0.50f, 4.00f, "%.2f", 0);
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(90.0f);
+        igSliderFloat("Height", &s->waterfall_3d_lift, 0.10f, 1.20f, "%.2f", 0);
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(90.0f);
+        igSliderFloat("Angle", &s->waterfall_3d_yaw, -80.0f, 80.0f, "%.0f", 0);
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(90.0f);
+        igSliderFloat("Tilt", &s->waterfall_3d_pitch, 15.0f, 75.0f, "%.0f", 0);
+        igSameLine(0.0f, 8.0f);
+        igSetNextItemWidth(90.0f);
+        igSliderInt("History", &s->waterfall_3d_depth, 16, 128, "%d", 0);
+        igSameLine(0.0f, 8.0f);
+        if (igSmallButton("Fit"))
+            s->waterfall_3d_zoom = 1.00f;
+        igSameLine(0.0f, 4.0f);
+        if (igSmallButton("Fill"))
+            s->waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
+        igSameLine(0.0f, 8.0f);
+        if (igSmallButton("Reset")) {
+            s->waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
+            s->waterfall_3d_yaw = DEFAULT_WATERFALL_3D_YAW;
+            s->waterfall_3d_pitch = DEFAULT_WATERFALL_3D_PITCH;
+            s->waterfall_3d_lift = DEFAULT_WATERFALL_3D_LIFT;
+            s->waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
+        }
+    }
     if (s->waterfall_pause) {
         int max_scroll = s->waterfall_history_lines - s->lines;
         if (max_scroll < 0)
@@ -3238,17 +3735,21 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
 
             tex_ref._TexData = NULL;
             tex_ref._TexID = (ImTextureID)(uintptr_t)s->waterfall_tex;
-            waterfall_update_view_texture(s);
+            if (s->waterfall_view_mode == WATERFALL_VIEW_2D)
+                waterfall_update_view_texture(s);
 
             for (row = 0; row < rows; row++) {
                 double bin_hz = (s->fft_len > 0) ?
                     ((double)s->sample_rate_hz / (double)s->fft_len) : 0.0;
                 int bin0 = (int)((int64_t)row * s->waterfall_width / rows);
                 int bin1 = (int)((int64_t)(row + 1) * s->waterfall_width / rows);
+                int tex_col0 = (int)((int64_t)bin0 * s->waterfall_tex_width / s->waterfall_width);
+                int tex_col1 = (int)((int64_t)bin1 * s->waterfall_tex_width / s->waterfall_width);
                 int plot_count = build_plot_slice_from(s, s->line_db, s->plot_db, bin0, bin1);
                 double f0_hz = (double)s->scan_start_hz + (double)bin0 * bin_hz;
                 double f1_hz = (double)s->scan_start_hz + (double)(bin1 - 1) * bin_hz;
                 char plot_id[32];
+                char wf_id[32];
                 float u0 = (float)row / (float)rows;
                 float u1 = (float)(row + 1) / (float)rows;
 
@@ -3269,7 +3770,13 @@ static void draw_view_panel(struct scan_state *s, float mid_h)
                                         s->marker_a_enable, s->marker_b_enable,
                                         s->marker_a_hz, s->marker_b_hz,
                                         f0_hz, f1_hz);
-                igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1.0f}, (ImVec2){u1, 0.0f});
+                snprintf(wf_id, sizeof(wf_id), "##waterfall3d_row_%d", row);
+                if (s->waterfall_view_mode == WATERFALL_VIEW_3D) {
+                    draw_waterfall_3d(s, wf_id, avail.x, waterfall_row_h,
+                                      tex_col0, tex_col1, f0_hz, f1_hz);
+                } else {
+                    igImage(tex_ref, (ImVec2){avail.x, waterfall_row_h}, (ImVec2){u0, 1.0f}, (ImVec2){u1, 0.0f});
+                }
 
                 if (row != rows - 1)
                     igSeparator();
@@ -3547,12 +4054,18 @@ int main(int argc, char **argv)
     s.lo_hz = 0;
     s.display_rows = 1;
     s.waterfall_palette = 0;
+    s.waterfall_view_mode = WATERFALL_VIEW_2D;
     s.spectrum_autoscale_mode = 0;
     s.waterfall_pause = false;
     s.waterfall_speed_div = 1;
     s.waterfall_speed_ctr = 0;
     s.waterfall_contrast = 1.0f;
     s.waterfall_gamma = 1.0f;
+    s.waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
+    s.waterfall_3d_lift = DEFAULT_WATERFALL_3D_LIFT;
+    s.waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
+    s.waterfall_3d_yaw = DEFAULT_WATERFALL_3D_YAW;
+    s.waterfall_3d_pitch = DEFAULT_WATERFALL_3D_PITCH;
     s.waterfall_history_lines = s.lines;
     s.waterfall_scroll = 0;
     s.waterfall_write_row = 0;
@@ -3758,6 +4271,9 @@ int main(int argc, char **argv)
                     s.spectrum_show_peak = !s.spectrum_show_peak;
                 } else if (kc == SDLK_m) {
                     s.spectrum_peak_marker = !s.spectrum_peak_marker;
+                } else if (kc == SDLK_3) {
+                    s.waterfall_view_mode =
+                        (s.waterfall_view_mode == WATERFALL_VIEW_3D) ? WATERFALL_VIEW_2D : WATERFALL_VIEW_3D;
                 } else if (kc == SDLK_r) {
                     reset_spectrum_view(&s);
                 } else if (kc == SDLK_F8) {
