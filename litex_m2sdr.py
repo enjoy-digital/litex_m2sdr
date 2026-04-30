@@ -222,6 +222,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
+        with_cpu               = False, cpu_variant="standard",
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_debug=False,
@@ -1177,6 +1178,7 @@ def main():
         choices=["minimal", "lite", "lite+debug", "standard", "full"],
         help="VexRiscv CPU variant.",
     )
+    parser.add_argument("--no-integrated-rom-auto-size", action="store_true", help="Keep integrated ROM at the size declared in SoC construction instead of shrinking it to the BIOS binary size.")
 
     # RFIC parameters.
     parser.add_argument("--with-rfic-oversampling", action="store_true", help="Double the RFIC clock to enable the oversampling mode.")
@@ -1256,6 +1258,10 @@ def main():
         # Generic.
         variant       = args.variant,
         sys_clk_freq  = int(args.sys_clk_freq),
+
+        # CPU.
+        with_cpu      = args.with_cpu,
+        cpu_variant   = args.cpu_variant,
 
         # RFIC.
         with_rfic_oversampling = args.with_rfic_oversampling,
@@ -1342,7 +1348,11 @@ def main():
             r += f"_cpu_{args.cpu_variant.replace('+', '_')}"
         return r
 
-    builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
+    builder = Builder(soc,
+        output_dir               = os.path.join("build", get_build_name()),
+        csr_csv                  = "scripts/csr.csv",
+        integrated_rom_auto_size = not args.no_integrated_rom_auto_size,
+    )
     builder.build(build_name=get_build_name(), run=args.build)
 
     # Generate LitePCIe Driver.
