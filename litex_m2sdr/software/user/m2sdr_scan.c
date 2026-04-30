@@ -19,9 +19,13 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stddef.h>
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES
+#endif
 #include <GL/gl.h>
 #include <png.h>
 
@@ -75,7 +79,14 @@
 #define DEFAULT_WATERFALL_3D_YAW 25.0f
 #define DEFAULT_WATERFALL_3D_PITCH 42.0f
 #define DEFAULT_WATERFALL_3D_RENDER_MODE WATERFALL_3D_RENDER_LINES
+#define MAX_WATERFALL_3D_DEPTH 128
 #define MAX_WATERFALL_3D_SAMPLES 512
+#define MAX_WATERFALL_3D_CELLS ((MAX_WATERFALL_3D_DEPTH - 1) * (MAX_WATERFALL_3D_SAMPLES - 1))
+#define MAX_WATERFALL_3D_TRIANGLES (2 * MAX_WATERFALL_3D_CELLS)
+#define MAX_WATERFALL_3D_LINE_VERTICES (2 * MAX_WATERFALL_3D_DEPTH * (MAX_WATERFALL_3D_SAMPLES - 1))
+#define MAX_WATERFALL_3D_GL_VERTICES (3 * MAX_WATERFALL_3D_TRIANGLES + MAX_WATERFALL_3D_LINE_VERTICES)
+#define WATERFALL_3D_SURFACE_MAX_ROW_STEP 0.055f
+#define WATERFALL_3D_SURFACE_MAX_X_STEP 0.035f
 
 static const uint32_t k_scan_samplerates_hz[] = {
     61440000U,
@@ -1990,6 +2001,13 @@ static ImU32 color_with_alpha(ImU32 color, int alpha)
     return (color & 0x00FFFFFFu) | ((ImU32)alpha << 24);
 }
 
+static ImU32 waterfall_draw_color_from_pixel(uint32_t px)
+{
+    return pack_rgba_u8((int)((px >> 16) & 0xff),
+                        (int)((px >> 8) & 0xff),
+                        (int)(px & 0xff));
+}
+
 static float waterfall_sample_level(const struct scan_state *s, int row, int col0, int col1)
 {
     const uint8_t *line;
@@ -2073,11 +2091,10 @@ static ImU32 waterfall_sample_color(const struct scan_state *s, int row, int col
             if (idx >= col1)
                 idx = col1 - 1;
         }
-        px = line[idx];
-        /* Match the 2D waterfall path, which uploads/exports these pixels as BGRA. */
-        r_acc += (px >> 16) & 0xff;
+        px = waterfall_draw_color_from_pixel(line[idx]);
+        r_acc += (px >> 0) & 0xff;
         g_acc += (px >> 8) & 0xff;
-        b_acc += (px >> 0) & 0xff;
+        b_acc += (px >> 16) & 0xff;
     }
 
     return color_with_alpha(pack_rgba_u8((int)(r_acc / (unsigned int)samples),
@@ -2161,31 +2178,61 @@ static ImU32 waterfall_sample_color_age_span(const struct scan_state *s,
                                              int col0,
                                              int col1)
 {
-    int age;
-    int row;
-    int span;
-    int mid;
-    int radius;
+    unsigned int r_acc = 0;
+    unsigned int g_acc = 0;
+    unsigned int b_acc = 0;
+    int age_span;
+    int age_samples;
+    int samples = 0;
+    int i;
 
     if (age1 <= age0)
         age1 = age0 + 1;
 
-    age = age0 + (age1 - age0) / 2;
-    row = waterfall_history_row_from_age(s, age);
-    if (row < 0)
+    age_span = age1 - age0;
+    age_samples = age_span;
+    if (age_samples > 8)
+        age_samples = 8;
+
+    for (i = 0; i < age_samples; i++) {
+        int age = age0 + (int)(((int64_t)i * age_span + age_span / 2) / age_samples);
+        int row;
+        ImU32 col;
+
+        if (age >= age1)
+            age = age1 - 1;
+        row = waterfall_history_row_from_age(s, age);
+        if (row < 0)
+            continue;
+
+        col = waterfall_sample_color(s, row, col0, col1);
+        r_acc += (col >> 0) & 0xff;
+        g_acc += (col >> 8) & 0xff;
+        b_acc += (col >> 16) & 0xff;
+        samples++;
+    }
+
+    if (samples < 1)
         return color_with_alpha(colormap_turbo_idx(0), 255);
 
-    span = col1 - col0;
-    if (span < 1)
-        span = 1;
-    mid = col0 + span / 2;
-    radius = span / 8;
-    if (radius < 1)
-        radius = 1;
-    if (radius > 4)
-        radius = 4;
+    return color_with_alpha(pack_rgba_u8((int)(r_acc / (unsigned int)samples),
+                                         (int)(g_acc / (unsigned int)samples),
+                                         (int)(b_acc / (unsigned int)samples)),
+                            255);
+}
 
-    return waterfall_sample_color(s, row, mid - radius, mid + radius + 1);
+static ImU32 waterfall_3d_surface_color(const struct scan_state *s,
+                                        float v00,
+                                        float v10,
+                                        float v11,
+                                        float v01)
+{
+    float v = 0.25f * (v00 + v10 + v11 + v01);
+
+    return color_with_alpha(waterfall_draw_color_from_pixel(
+                                colormap_apply(s->waterfall_palette,
+                                               clamp_float(v, 0.0f, 1.0f))),
+                            255);
 }
 
 struct waterfall_3d_projector {
@@ -2195,8 +2242,36 @@ struct waterfall_3d_projector {
     float yaw_c;
     float yaw_s;
     float pitch_s;
+    float pitch_c;
     float amp_scale;
 };
+
+struct waterfall_3d_gl_vertex {
+    float x;
+    float y;
+    float z;
+    ImU32 col;
+};
+
+struct waterfall_3d_gl_callback_data {
+    ImVec2 pmin;
+    ImVec2 pmax;
+    ImVec2 display_size;
+    ImVec2 framebuffer_scale;
+};
+
+struct waterfall_3d_gl_state {
+    GLuint program;
+    GLuint vbo;
+    bool initialized;
+    bool failed;
+};
+
+static struct waterfall_3d_gl_vertex g_waterfall_3d_gl_vertices[MAX_WATERFALL_3D_GL_VERTICES];
+static int g_waterfall_3d_gl_vertex_count;
+static int g_waterfall_3d_gl_line_start;
+static int g_waterfall_3d_gl_line_count;
+static struct waterfall_3d_gl_state g_waterfall_3d_gl_state;
 
 static void waterfall_3d_raw_point(const struct waterfall_3d_projector *pr,
                                    float freq_t,
@@ -2226,6 +2301,19 @@ static void waterfall_3d_project_point(const struct waterfall_3d_projector *pr,
     out->y = pr->cy + y * pr->scale;
 }
 
+static float waterfall_3d_view_depth(const struct waterfall_3d_projector *pr,
+                                     float freq_t,
+                                     float depth_t,
+                                     float amp)
+{
+    float x = freq_t * 2.0f - 1.0f;
+    float z = (1.0f - depth_t) - 0.5f;
+    float zr = x * pr->yaw_s + z * pr->yaw_c;
+    float y = amp * pr->amp_scale;
+
+    return zr * pr->pitch_c + y * pr->pitch_s;
+}
+
 static void waterfall_3d_projector_init(const struct scan_state *s,
                                         ImVec2 pmin,
                                         ImVec2 pmax,
@@ -2250,6 +2338,7 @@ static void waterfall_3d_projector_init(const struct scan_state *s,
     pr->yaw_c = cosf(yaw_rad);
     pr->yaw_s = sinf(yaw_rad);
     pr->pitch_s = sinf(pitch_rad);
+    pr->pitch_c = cosf(pitch_rad);
     pr->amp_scale = clamp_float(s->waterfall_3d_lift, 0.10f, 1.20f);
 
     for (fi = 0; fi < 2; fi++) {
@@ -2285,6 +2374,326 @@ static void waterfall_3d_projector_init(const struct scan_state *s,
     pr->scale *= clamp_float(s->waterfall_3d_zoom, 0.50f, 4.00f);
     pr->cx = 0.5f * (plot_min_x + plot_max_x) - 0.5f * (raw_min_x + raw_max_x) * pr->scale;
     pr->cy = 0.5f * (plot_min_y + plot_max_y) - 0.5f * (raw_min_y + raw_max_y) * pr->scale;
+}
+
+static float imvec2_tri_area2(ImVec2 a, ImVec2 b, ImVec2 c)
+{
+    return fabsf((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+}
+
+static void waterfall_3d_filter_surface_heights(float *dst,
+                                                const float *src,
+                                                const float *prev,
+                                                int n,
+                                                bool have_prev)
+{
+    int i;
+
+    if (!dst || !src || n <= 0)
+        return;
+
+    /* Damp only the filled mesh geometry; colors and line overlays stay raw. */
+    for (i = 0; i < n; i++) {
+        float v = src[i];
+
+        if (n >= 5) {
+            int i0 = i - 2;
+            int i1 = i - 1;
+            int i3 = i + 1;
+            int i4 = i + 2;
+
+            if (i0 < 0) i0 = 0;
+            if (i1 < 0) i1 = 0;
+            if (i3 >= n) i3 = n - 1;
+            if (i4 >= n) i4 = n - 1;
+
+            v = 0.0625f * src[i0] + 0.2500f * src[i1] +
+                0.3750f * v       + 0.2500f * src[i3] +
+                0.0625f * src[i4];
+        } else if (n >= 3) {
+            float left = src[(i > 0) ? i - 1 : i];
+            float right = src[(i + 1 < n) ? i + 1 : i];
+
+            v = 0.25f * left + 0.50f * v + 0.25f * right;
+        }
+
+        if (have_prev && prev) {
+            float lo = prev[i] - WATERFALL_3D_SURFACE_MAX_ROW_STEP;
+            float hi = prev[i] + WATERFALL_3D_SURFACE_MAX_ROW_STEP;
+            v = clamp_float(v, lo, hi);
+        }
+
+        dst[i] = clamp_float(v, 0.0f, 1.0f);
+    }
+
+    for (i = 1; i < n; i++)
+        dst[i] = clamp_float(dst[i],
+                             dst[i - 1] - WATERFALL_3D_SURFACE_MAX_X_STEP,
+                             dst[i - 1] + WATERFALL_3D_SURFACE_MAX_X_STEP);
+    for (i = n - 2; i >= 0; i--)
+        dst[i] = clamp_float(dst[i],
+                             dst[i + 1] - WATERFALL_3D_SURFACE_MAX_X_STEP,
+                             dst[i + 1] + WATERFALL_3D_SURFACE_MAX_X_STEP);
+}
+
+static bool waterfall_3d_gl_compile_shader(GLuint shader, const char *src, const char *name)
+{
+    GLint ok = GL_FALSE;
+
+    glShaderSource(shader, 1, &src, NULL);
+    glCompileShader(shader);
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    if (ok != GL_TRUE) {
+        char log[1024];
+        GLsizei len = 0;
+        glGetShaderInfoLog(shader, sizeof(log), &len, log);
+        fprintf(stderr, "3D waterfall %s shader compile failed: %.*s\n", name, (int)len, log);
+        return false;
+    }
+    return true;
+}
+
+static bool waterfall_3d_gl_init(void)
+{
+    static const char *vs_src =
+        "#version 130\n"
+        "in vec3 Position;\n"
+        "in vec4 Color;\n"
+        "out vec4 FragColor;\n"
+        "void main() {\n"
+        "    FragColor = Color;\n"
+        "    gl_Position = vec4(Position.xy, Position.z * 2.0 - 1.0, 1.0);\n"
+        "}\n";
+    static const char *fs_src =
+        "#version 130\n"
+        "in vec4 FragColor;\n"
+        "out vec4 OutColor;\n"
+        "void main() {\n"
+        "    OutColor = FragColor;\n"
+        "}\n";
+    GLuint vs;
+    GLuint fs;
+    GLint ok = GL_FALSE;
+
+    if (g_waterfall_3d_gl_state.initialized)
+        return true;
+    if (g_waterfall_3d_gl_state.failed)
+        return false;
+
+    vs = glCreateShader(GL_VERTEX_SHADER);
+    fs = glCreateShader(GL_FRAGMENT_SHADER);
+    g_waterfall_3d_gl_state.program = glCreateProgram();
+    if (!vs || !fs || !g_waterfall_3d_gl_state.program)
+        goto fail;
+
+    if (!waterfall_3d_gl_compile_shader(vs, vs_src, "vertex") ||
+        !waterfall_3d_gl_compile_shader(fs, fs_src, "fragment"))
+        goto fail;
+
+    glAttachShader(g_waterfall_3d_gl_state.program, vs);
+    glAttachShader(g_waterfall_3d_gl_state.program, fs);
+    glBindAttribLocation(g_waterfall_3d_gl_state.program, 0, "Position");
+    glBindAttribLocation(g_waterfall_3d_gl_state.program, 1, "Color");
+    glLinkProgram(g_waterfall_3d_gl_state.program);
+    glGetProgramiv(g_waterfall_3d_gl_state.program, GL_LINK_STATUS, &ok);
+    if (ok != GL_TRUE) {
+        char log[1024];
+        GLsizei len = 0;
+        glGetProgramInfoLog(g_waterfall_3d_gl_state.program, sizeof(log), &len, log);
+        fprintf(stderr, "3D waterfall shader link failed: %.*s\n", (int)len, log);
+        goto fail;
+    }
+
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    glGenBuffers(1, &g_waterfall_3d_gl_state.vbo);
+    if (!g_waterfall_3d_gl_state.vbo)
+        goto fail;
+
+    g_waterfall_3d_gl_state.initialized = true;
+    return true;
+
+fail:
+    if (vs)
+        glDeleteShader(vs);
+    if (fs)
+        glDeleteShader(fs);
+    if (g_waterfall_3d_gl_state.program) {
+        glDeleteProgram(g_waterfall_3d_gl_state.program);
+        g_waterfall_3d_gl_state.program = 0;
+    }
+    g_waterfall_3d_gl_state.failed = true;
+    return false;
+}
+
+static void waterfall_3d_gl_add_vertex(int *vertex_count,
+                                       ImVec2 p,
+                                       float depth,
+                                       ImU32 col,
+                                       float display_w,
+                                       float display_h,
+                                       float *depth_min,
+                                       float *depth_max)
+{
+    struct waterfall_3d_gl_vertex *v;
+
+    if (!vertex_count || *vertex_count >= MAX_WATERFALL_3D_GL_VERTICES ||
+        display_w <= 1.0f || display_h <= 1.0f)
+        return;
+
+    v = &g_waterfall_3d_gl_vertices[(*vertex_count)++];
+    v->x = 2.0f * p.x / display_w - 1.0f;
+    v->y = 1.0f - 2.0f * p.y / display_h;
+    v->z = depth;
+    v->col = col;
+
+    if (depth < *depth_min)
+        *depth_min = depth;
+    if (depth > *depth_max)
+        *depth_max = depth;
+}
+
+static void waterfall_3d_gl_add_triangle(int *vertex_count,
+                                         ImVec2 a,
+                                         ImVec2 b,
+                                         ImVec2 c,
+                                         float da,
+                                         float db,
+                                         float dc,
+                                         ImU32 col,
+                                         float display_w,
+                                         float display_h,
+                                         float *depth_min,
+                                         float *depth_max)
+{
+    if (imvec2_tri_area2(a, b, c) < 0.001f)
+        return;
+
+    waterfall_3d_gl_add_vertex(vertex_count, a, da, col, display_w, display_h, depth_min, depth_max);
+    waterfall_3d_gl_add_vertex(vertex_count, b, db, col, display_w, display_h, depth_min, depth_max);
+    waterfall_3d_gl_add_vertex(vertex_count, c, dc, col, display_w, display_h, depth_min, depth_max);
+}
+
+static void waterfall_3d_gl_add_line(int *vertex_count,
+                                     ImVec2 a,
+                                     ImVec2 b,
+                                     float da,
+                                     float db,
+                                     ImU32 col,
+                                     float display_w,
+                                     float display_h,
+                                     float *depth_min,
+                                     float *depth_max)
+{
+    waterfall_3d_gl_add_vertex(vertex_count, a, da, col, display_w, display_h, depth_min, depth_max);
+    waterfall_3d_gl_add_vertex(vertex_count, b, db, col, display_w, display_h, depth_min, depth_max);
+}
+
+static void waterfall_3d_gl_add_cell(int *vertex_count,
+                                     ImVec2 p00,
+                                     ImVec2 p10,
+                                     ImVec2 p11,
+                                     ImVec2 p01,
+                                     float d00,
+                                     float d10,
+                                     float d11,
+                                     float d01,
+                                     ImU32 col,
+                                     float display_w,
+                                     float display_h,
+                                     float *depth_min,
+                                     float *depth_max)
+{
+    waterfall_3d_gl_add_triangle(vertex_count, p00, p10, p11, d00, d10, d11, col,
+                                 display_w, display_h, depth_min, depth_max);
+    waterfall_3d_gl_add_triangle(vertex_count, p00, p11, p01, d00, d11, d01, col,
+                                 display_w, display_h, depth_min, depth_max);
+}
+
+static void waterfall_3d_gl_normalize_depth(int line_start,
+                                            int line_count,
+                                            float depth_min,
+                                            float depth_max)
+{
+    float range = depth_max - depth_min;
+    float inv_range;
+    int i;
+
+    if (range < 1e-6f)
+        range = 1.0f;
+    inv_range = 1.0f / range;
+
+    for (i = 0; i < g_waterfall_3d_gl_vertex_count; i++) {
+        float z = (g_waterfall_3d_gl_vertices[i].z - depth_min) * inv_range;
+        if (i >= line_start && i < line_start + line_count)
+            z -= 0.0008f;
+        g_waterfall_3d_gl_vertices[i].z = clamp_float(z, 0.0f, 1.0f);
+    }
+}
+
+static void waterfall_3d_gl_callback(const ImDrawList *parent_list, const ImDrawCmd *cmd)
+{
+    const struct waterfall_3d_gl_callback_data *cb =
+        (const struct waterfall_3d_gl_callback_data *)cmd->UserCallbackData;
+    int fb_w;
+    int fb_h;
+    int sx;
+    int sy;
+    int sw;
+    int sh;
+
+    (void)parent_list;
+
+    if (!cb || g_waterfall_3d_gl_vertex_count <= 0 || !waterfall_3d_gl_init())
+        return;
+
+    fb_w = (int)(cb->display_size.x * cb->framebuffer_scale.x);
+    fb_h = (int)(cb->display_size.y * cb->framebuffer_scale.y);
+    if (fb_w <= 0 || fb_h <= 0)
+        return;
+
+    sx = (int)floorf(cb->pmin.x * cb->framebuffer_scale.x);
+    sy = (int)floorf((cb->display_size.y - cb->pmax.y) * cb->framebuffer_scale.y);
+    sw = (int)ceilf((cb->pmax.x - cb->pmin.x) * cb->framebuffer_scale.x);
+    sh = (int)ceilf((cb->pmax.y - cb->pmin.y) * cb->framebuffer_scale.y);
+    if (sw <= 0 || sh <= 0)
+        return;
+
+    glViewport(0, 0, fb_w, fb_h);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(sx, sy, sw, sh);
+    glClearDepth(1.0);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glUseProgram(g_waterfall_3d_gl_state.program);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, g_waterfall_3d_gl_state.vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 (GLsizeiptr)((size_t)g_waterfall_3d_gl_vertex_count * sizeof(g_waterfall_3d_gl_vertices[0])),
+                 g_waterfall_3d_gl_vertices,
+                 GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(g_waterfall_3d_gl_vertices[0]),
+                          (const GLvoid *)offsetof(struct waterfall_3d_gl_vertex, x));
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE,
+                          sizeof(g_waterfall_3d_gl_vertices[0]),
+                          (const GLvoid *)offsetof(struct waterfall_3d_gl_vertex, col));
+    if (g_waterfall_3d_gl_line_start > 0)
+        glDrawArrays(GL_TRIANGLES, 0, g_waterfall_3d_gl_line_start);
+    if (g_waterfall_3d_gl_line_count > 0) {
+        glDepthMask(GL_FALSE);
+        glLineWidth(1.1f);
+        glDrawArrays(GL_LINES, g_waterfall_3d_gl_line_start, g_waterfall_3d_gl_line_count);
+        glDepthMask(GL_TRUE);
+    }
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
 }
 
 static void waterfall_3d_reset_view(struct scan_state *s)
@@ -2385,7 +2794,17 @@ static void draw_waterfall_3d(struct scan_state *s,
     bool draw_surface;
     bool draw_lines;
     ImVec2 prev_points[MAX_WATERFALL_3D_SAMPLES];
+    float prev_depth[MAX_WATERFALL_3D_SAMPLES];
+    float curr_depth[MAX_WATERFALL_3D_SAMPLES];
+    float raw_height[MAX_WATERFALL_3D_SAMPLES];
+    float geom_height[MAX_WATERFALL_3D_SAMPLES];
+    float prev_geom_height[MAX_WATERFALL_3D_SAMPLES];
     bool prev_valid;
+    int vertex_count;
+    float depth_min;
+    float depth_max;
+    float display_w;
+    float display_h;
     double freq_step;
 
     if (width <= 8.0f || height <= 8.0f)
@@ -2396,6 +2815,8 @@ static void draw_waterfall_3d(struct scan_state *s,
     igGetItemRectMax(&pmax);
     dl = igGetWindowDrawList();
     io = igGetIO();
+    display_w = io->DisplaySize.x;
+    display_h = io->DisplaySize.y;
 
     if (igIsItemActive() && igIsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
         s->waterfall_3d_yaw += io->MouseDelta.x * 0.35f;
@@ -2412,7 +2833,6 @@ static void draw_waterfall_3d(struct scan_state *s,
 
     ImDrawList_AddRectFilled(dl, pmin, pmax, 0xFF111315u, 2.0f, 0);
     ImDrawList_AddRect(dl, pmin, pmax, 0xFF3A3A3Au, 2.0f, 0, 1.0f);
-    draw_waterfall_3d_hint(s, dl, pmin, pmax);
 
     if (!s->waterfall_level || s->waterfall_history_lines <= 0 || s->waterfall_tex_width <= 1)
         return;
@@ -2435,8 +2855,8 @@ static void draw_waterfall_3d(struct scan_state *s,
     max_depth_by_height = (int)(height / 3.0f);
     if (max_depth_by_height < 8)
         max_depth_by_height = 8;
-    if (max_depth_by_height > 128)
-        max_depth_by_height = 128;
+    if (max_depth_by_height > MAX_WATERFALL_3D_DEPTH)
+        max_depth_by_height = MAX_WATERFALL_3D_DEPTH;
     if (depth_lines > max_depth_by_height)
         depth_lines = max_depth_by_height;
 
@@ -2510,8 +2930,14 @@ static void draw_waterfall_3d(struct scan_state *s,
     draw_lines = (render_mode == WATERFALL_3D_RENDER_LINES ||
                   render_mode == WATERFALL_3D_RENDER_SOLID_LINES);
 
-    prev_valid = false;
-    if (draw_surface) {
+    vertex_count = 0;
+    depth_min = 1e30f;
+    depth_max = -1e30f;
+    g_waterfall_3d_gl_vertex_count = 0;
+    g_waterfall_3d_gl_line_start = 0;
+    g_waterfall_3d_gl_line_count = 0;
+    if (draw_surface && display_w > 1.0f && display_h > 1.0f) {
+        prev_valid = false;
         for (d = 0; d < depth_lines; d++) {
             int x;
             int age0;
@@ -2533,34 +2959,129 @@ static void draw_waterfall_3d(struct scan_state *s,
             for (x = 0; x < x_samples; x++) {
                 int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
                 int c1 = tex_col0 + (int)((int64_t)(x + 1) * col_span / x_samples);
-                float freq_t = (x_samples > 1) ? (float)x / (float)(x_samples - 1) : 0.0f;
-                float v = waterfall_sample_level_age_span(s, age0, age1, c0, c1);
 
+                raw_height[x] = waterfall_sample_level_age_span(s, age0, age1, c0, c1);
+            }
+
+            waterfall_3d_filter_surface_heights(geom_height, raw_height,
+                                                prev_geom_height, x_samples,
+                                                prev_valid);
+
+            for (x = 0; x < x_samples; x++) {
+                float freq_t = (x_samples > 1) ? (float)x / (float)(x_samples - 1) : 0.0f;
+                float v = geom_height[x];
+
+                curr_depth[x] = waterfall_3d_view_depth(&pr, freq_t, depth_t, v);
                 waterfall_3d_project_point(&pr, freq_t, depth_t, v, &s->plot_points[x]);
             }
 
             if (prev_valid) {
                 for (x = 0; x < x_samples - 1; x++) {
-                    int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
-                    int c1 = tex_col0 + (int)((int64_t)(x + 2) * col_span / x_samples);
-                    ImU32 col = waterfall_sample_color_age_span(s, age0, age1, c0, c1);
-                    int alpha = (render_mode == WATERFALL_3D_RENDER_SOLID_LINES) ? 170 : 220;
-                    col = color_with_alpha(col, alpha);
-                    ImDrawList_AddQuadFilled(dl,
+                    ImU32 col = waterfall_3d_surface_color(s,
+                                                            prev_geom_height[x],
+                                                            prev_geom_height[x + 1],
+                                                            geom_height[x + 1],
+                                                            geom_height[x]);
+
+                    if (vertex_count >= MAX_WATERFALL_3D_GL_VERTICES)
+                        break;
+
+                    waterfall_3d_gl_add_cell(&vertex_count,
                                              prev_points[x],
                                              prev_points[x + 1],
                                              s->plot_points[x + 1],
                                              s->plot_points[x],
-                                             col);
+                                             prev_depth[x],
+                                             prev_depth[x + 1],
+                                             curr_depth[x + 1],
+                                             curr_depth[x],
+                                             color_with_alpha(col, 255),
+                                             display_w,
+                                             display_h,
+                                             &depth_min,
+                                             &depth_max);
                 }
             }
 
             memcpy(prev_points, s->plot_points, (size_t)x_samples * sizeof(ImVec2));
+            memcpy(prev_depth, curr_depth, (size_t)x_samples * sizeof(float));
+            memcpy(prev_geom_height, geom_height, (size_t)x_samples * sizeof(float));
             prev_valid = true;
+        }
+
+        if (render_mode == WATERFALL_3D_RENDER_SOLID_LINES) {
+            g_waterfall_3d_gl_line_start = vertex_count;
+            for (d = 0; d < depth_lines; d++) {
+                int x;
+                int age0;
+                int age1;
+                float depth_t = (float)d / (float)(depth_lines - 1);
+
+                waterfall_3d_trace_age_span(s, d, depth_lines, visible_lines, &age0, &age1);
+                if (age0 >= valid_lines)
+                    continue;
+                if (age1 > valid_lines)
+                    age1 = valid_lines;
+                if (age1 <= age0)
+                    continue;
+
+                for (x = 0; x < x_samples; x++) {
+                    int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
+                    int c1 = tex_col0 + (int)((int64_t)(x + 1) * col_span / x_samples);
+                    float freq_t = (x_samples > 1) ? (float)x / (float)(x_samples - 1) : 0.0f;
+                    float v = waterfall_sample_level_age_span(s, age0, age1, c0, c1);
+
+                    curr_depth[x] = waterfall_3d_view_depth(&pr, freq_t, depth_t, v);
+                    waterfall_3d_project_point(&pr, freq_t, depth_t, v, &s->plot_points[x]);
+                }
+
+                for (x = 0; x < x_samples - 1; x++) {
+                    int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
+                    int c1 = tex_col0 + (int)((int64_t)(x + 2) * col_span / x_samples);
+                    ImU32 col = waterfall_sample_color_age_span(s, age0, age1, c0, c1);
+
+                    if (vertex_count >= MAX_WATERFALL_3D_GL_VERTICES)
+                        break;
+
+                    waterfall_3d_gl_add_line(&vertex_count,
+                                             s->plot_points[x],
+                                             s->plot_points[x + 1],
+                                             curr_depth[x],
+                                             curr_depth[x + 1],
+                                             color_with_alpha(col, 255),
+                                             display_w,
+                                             display_h,
+                                             &depth_min,
+                                             &depth_max);
+                }
+            }
+            g_waterfall_3d_gl_line_count = vertex_count - g_waterfall_3d_gl_line_start;
+        } else {
+            g_waterfall_3d_gl_line_start = vertex_count;
+            g_waterfall_3d_gl_line_count = 0;
+        }
+
+        if (vertex_count > 0 && waterfall_3d_gl_init()) {
+            struct waterfall_3d_gl_callback_data cb;
+
+            g_waterfall_3d_gl_vertex_count = vertex_count;
+            waterfall_3d_gl_normalize_depth(g_waterfall_3d_gl_line_start,
+                                            g_waterfall_3d_gl_line_count,
+                                            depth_min,
+                                            depth_max);
+            cb.pmin = pmin;
+            cb.pmax = pmax;
+            cb.display_size = io->DisplaySize;
+            cb.framebuffer_scale = io->DisplayFramebufferScale;
+            ImDrawList_AddCallback(dl, waterfall_3d_gl_callback, &cb, sizeof(cb));
+            ImDrawList_AddCallback(dl, ImDrawCallback_ResetRenderState, NULL, 0);
+        } else {
+            draw_lines = true;
+            draw_surface = false;
         }
     }
 
-    if (draw_lines) {
+    if (draw_lines && !draw_surface) {
         for (d = 0; d < depth_lines; d++) {
             int x;
             int age0;
@@ -2617,6 +3138,9 @@ static void draw_waterfall_3d(struct scan_state *s,
         ImDrawList_AddText_Vec2(dl, (ImVec2){front_l.x + 4.0f, front_l.y - 14.0f},
                                 0x88D8DEE9u, txt, NULL);
     }
+
+    ImDrawList_AddRect(dl, pmin, pmax, 0xFF3A3A3Au, 2.0f, 0, 1.0f);
+    draw_waterfall_3d_hint(s, dl, pmin, pmax);
 
     ImDrawList_PopClipRect(dl);
 }
