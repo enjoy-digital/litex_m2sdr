@@ -211,6 +211,7 @@ struct scan_state {
     int waterfall_history_lines;
     int waterfall_scroll;
     int waterfall_write_row;
+    int waterfall_valid_lines;
     bool waterfall_view_dirty;
     bool spectrum_show_peak;
     bool spectrum_show_avg;
@@ -737,6 +738,8 @@ static int waterfall_history_row_from_age(const struct scan_state *s, int age_fr
     hist_lines = s->waterfall_history_lines;
     if (hist_lines < 1)
         return -1;
+    if (age_from_newest < 0 || age_from_newest >= s->waterfall_valid_lines)
+        return -1;
 
     newest_row = s->waterfall_write_row - 1;
     if (newest_row < 0)
@@ -760,7 +763,12 @@ static void waterfall_compose_view(struct scan_state *s)
     if (hist_lines < 1 || s->lines < 1 || s->waterfall_tex_width < 1)
         return;
 
-    max_scroll = hist_lines - s->lines;
+    if (s->waterfall_valid_lines < 0)
+        s->waterfall_valid_lines = 0;
+    if (s->waterfall_valid_lines > hist_lines)
+        s->waterfall_valid_lines = hist_lines;
+
+    max_scroll = s->waterfall_valid_lines - s->lines;
     if (max_scroll < 0)
         max_scroll = 0;
     if (s->waterfall_scroll < 0)
@@ -771,8 +779,11 @@ static void waterfall_compose_view(struct scan_state *s)
     for (y = 0; y < s->lines; y++) {
         int age_from_newest = (s->lines - 1 - y) + s->waterfall_scroll;
         int src_row = waterfall_history_row_from_age(s, age_from_newest);
-        if (src_row < 0)
+        if (src_row < 0) {
+            uint32_t *dst = s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width;
+            memset(dst, 0, (size_t)s->waterfall_tex_width * sizeof(uint32_t));
             continue;
+        }
         memcpy(s->waterfall_view_rgba + (size_t)y * (size_t)s->waterfall_tex_width,
                s->waterfall_rgba + (size_t)src_row * (size_t)s->waterfall_tex_width,
                (size_t)s->waterfall_tex_width * sizeof(uint32_t));
@@ -1773,6 +1784,8 @@ static void waterfall_push_line(struct scan_state *s)
     }
 
     s->waterfall_write_row = (row + 1) % hist_lines;
+    if (s->waterfall_valid_lines < hist_lines)
+        s->waterfall_valid_lines++;
     s->waterfall_view_dirty = true;
 }
 
@@ -2277,6 +2290,7 @@ static void draw_waterfall_3d(struct scan_state *s,
     ImVec2 front_l, front_r, back_l, back_r, axis_top;
     int depth_lines;
     int visible_lines;
+    int valid_lines;
     int max_scroll;
     int max_depth_by_height;
     int col_span;
@@ -2335,7 +2349,18 @@ static void draw_waterfall_3d(struct scan_state *s,
         depth_lines = max_depth_by_height;
 
     visible_lines = waterfall_visible_history_lines(s);
-    max_scroll = s->waterfall_history_lines - visible_lines;
+    if (visible_lines < 2)
+        return;
+    valid_lines = s->waterfall_valid_lines;
+    if (valid_lines < 0)
+        valid_lines = 0;
+    if (valid_lines > s->waterfall_history_lines)
+        valid_lines = s->waterfall_history_lines;
+    if (valid_lines < 1)
+        return;
+    if (depth_lines > visible_lines)
+        depth_lines = visible_lines;
+    max_scroll = valid_lines - visible_lines;
     if (max_scroll < 0)
         max_scroll = 0;
     if (s->waterfall_scroll < 0)
@@ -2392,6 +2417,12 @@ static void draw_waterfall_3d(struct scan_state *s,
         float depth_t = (float)d / (float)(depth_lines - 1);
 
         waterfall_3d_trace_age_span(s, d, depth_lines, visible_lines, &age0, &age1);
+        if (age0 >= valid_lines)
+            continue;
+        if (age1 > valid_lines)
+            age1 = valid_lines;
+        if (age1 <= age0)
+            continue;
 
         for (x = 0; x < x_samples; x++) {
             int c0 = tex_col0 + (int)((int64_t)x * col_span / x_samples);
@@ -3257,6 +3288,7 @@ static bool resize_buffers(struct scan_state *s)
     s->waterfall_history_lines = hist_lines;
     s->waterfall_scroll = 0;
     s->waterfall_write_row = 0;
+    s->waterfall_valid_lines = 0;
     s->waterfall_view_dirty = true;
 
     if (!s->waterfall_tex)
@@ -3799,7 +3831,13 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         }
     }
     if (s->waterfall_pause) {
-        int max_scroll = s->waterfall_history_lines - s->lines;
+        int valid_lines = s->waterfall_valid_lines;
+        int max_scroll;
+        if (valid_lines < 0)
+            valid_lines = 0;
+        if (valid_lines > s->waterfall_history_lines)
+            valid_lines = s->waterfall_history_lines;
+        max_scroll = valid_lines - s->lines;
         if (max_scroll < 0)
             max_scroll = 0;
         igSameLine(0.0f, 8.0f);
@@ -4184,6 +4222,7 @@ int main(int argc, char **argv)
     s.waterfall_history_lines = s.lines;
     s.waterfall_scroll = 0;
     s.waterfall_write_row = 0;
+    s.waterfall_valid_lines = 0;
     s.waterfall_view_dirty = true;
     s.spectrum_show_peak = true;
     s.spectrum_show_avg = false;
