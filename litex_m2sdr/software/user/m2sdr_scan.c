@@ -2660,6 +2660,7 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         int min_sep;
         int lock_bins;
         int assign_sep;
+        int edge_guard;
         bool row_ok = (row_idx >= 0 && row_idx < MAX_DISPLAY_ROWS);
         if (pm < 1)
             pm = 1;
@@ -2678,8 +2679,15 @@ static void draw_spectrum_with_grid(struct scan_state *s,
         assign_sep = min_sep;
         if (assign_sep < 3)
             assign_sep = 3;
+        edge_guard = plot_count / 160;
+        if (edge_guard < 2)
+            edge_guard = 2;
+        if (edge_guard > 16)
+            edge_guard = 16;
+        if (plot_count < 2 * edge_guard + 3)
+            edge_guard = 1;
 
-        for (i = 1; i < plot_count - 1; i++) {
+        for (i = edge_guard; i < plot_count - edge_guard; i++) {
             int j, k;
             bool is_local_max = (plot_main[i] >= plot_main[i - 1] && plot_main[i] >= plot_main[i + 1]);
             if (!is_local_max)
@@ -2707,20 +2715,6 @@ static void draw_spectrum_with_grid(struct scan_state *s,
             }
         }
 
-        if (picked == 0) {
-            int idx_max = 0;
-            top_idx[0] = 0;
-            top_val[0] = plot_main[0];
-            for (i = 1; i < plot_count; i++) {
-                if (plot_main[i] > top_val[0]) {
-                    top_val[0] = plot_main[i];
-                    top_idx[0] = i;
-                    idx_max = i;
-                }
-            }
-            (void)idx_max;
-            picked = 1;
-        }
         for (i = 0; i < pm; i++)
             top_used[i] = false;
 
@@ -2732,11 +2726,22 @@ static void draw_spectrum_with_grid(struct scan_state *s,
             int idx = (i < picked) ? top_idx[i] : -1;
             float idx_f = (float)idx;
 
+            if (picked == 0) {
+                if (row_ok) {
+                    s->marker_track_pos[row_idx][i] = -1.0f;
+                    s->marker_track_val[row_idx][i] = -1e30f;
+                    s->marker_track_miss[row_idx][i] = 255;
+                }
+                continue;
+            }
+
             if (row_ok) {
                 float prev_pos = s->marker_track_pos[row_idx][i];
                 float prev_val = s->marker_track_val[row_idx][i];
                 uint8_t miss = s->marker_track_miss[row_idx][i];
-                bool have_prev = (prev_pos >= 0.0f && miss < 255);
+                bool have_prev = (prev_pos >= (float)edge_guard &&
+                                  prev_pos <= (float)(plot_count - edge_guard - 1) &&
+                                  miss < 255);
                 int j, near_j = -1, best_j = -1;
                 float near_val = -1e30f;
                 float best_val = -1e30f;
@@ -2838,6 +2843,8 @@ static void draw_spectrum_with_grid(struct scan_state *s,
                 idx_f = (float)(plot_count - 1);
             if (idx_f < 0.0f)
                 idx_f = 0.0f;
+            if (idx_f < (float)edge_guard || idx_f > (float)(plot_count - edge_guard - 1))
+                continue;
 
             x = pmin.x + (pmax.x - pmin.x) * idx_f / (float)(plot_count - 1);
             ImDrawList_AddLine(dl, (ImVec2){x, pmin.y}, (ImVec2){x, pmax.y}, col_marker_peak, 1.1f);
