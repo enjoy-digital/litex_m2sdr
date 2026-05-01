@@ -528,7 +528,11 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 #if USE_LITEPCIE
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
     /* Enable Synchronizer */
+#ifdef CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR
     litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+#else
+    SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
+#endif
 
     /* DMA RX Header */
     #if defined(_RX_DMA_HEADER_TEST)

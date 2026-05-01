@@ -14,15 +14,26 @@ import subprocess
 def run_command(command, cwd=None):
     subprocess.run(command, cwd=cwd, check=True)
 
-def build_driver(path, cmake_options=None, prefix="/usr", do_install=False, clean_first=False):
+def build_driver(path, cmake_options=None, prefix="/usr", do_install=False, clean_first=False, interface=None):
     base_dir   = os.path.dirname(os.path.abspath(__file__))
     build_path = os.path.join(base_dir, path, 'build')
     os.makedirs(build_path, exist_ok=True)
     cmake_options = cmake_options or []
     run_command(["cmake", "..", f"-DCMAKE_INSTALL_PREFIX={prefix}", *cmake_options], cwd=build_path)
+    marker_path = os.path.join(build_path, ".build-interface")
+    if interface is not None:
+        try:
+            previous_interface = open(marker_path, "r", encoding="utf-8").read().strip()
+        except FileNotFoundError:
+            previous_interface = None
+        if previous_interface and previous_interface != interface:
+            clean_first = True
     if clean_first:
         run_command(["make", "clean"], cwd=build_path)
     run_command(["make", "all"], cwd=build_path)
+    if interface is not None:
+        with open(marker_path, "w", encoding="utf-8") as f:
+            f.write(interface + "\n")
     if do_install:
         run_command(["make", "install"], cwd=build_path)
 
@@ -30,10 +41,10 @@ def fetch_cimgui(base_dir):
     run_command(["./fetch_cimgui.py"], cwd=base_dir)
 
 
-def install_user_software(base_dir, prefix):
+def install_user_software(base_dir, prefix, interface):
     user_dir = os.path.join(base_dir, "user")
-    run_command(["make", f"PREFIX={prefix}", "install"], cwd=user_dir)
-    run_command(["make", f"PREFIX={prefix}", "install_dev"], cwd=user_dir)
+    run_command(["make", f"INTERFACE={interface}", f"PREFIX={prefix}", "install"], cwd=user_dir)
+    run_command(["make", f"INTERFACE={interface}", f"PREFIX={prefix}", "install_dev"], cwd=user_dir)
     if prefix == "/usr":
         run_command(["ldconfig"])
 
@@ -85,10 +96,10 @@ def main():
         run_command(["make", f"INTERFACE={interface}", "clean"], cwd=user_dir)
     run_command(["make", f"INTERFACE={interface}", "all"], cwd=user_dir)
     if do_install:
-        install_user_software(base_dir, args.prefix)
+        install_user_software(base_dir, args.prefix, interface)
 
     # SoapySDR Driver compilation.
-    build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install, clean_first=args.clean)
+    build_driver("soapysdr", cmake_options=flags, prefix=args.prefix, do_install=do_install, clean_first=args.clean, interface=interface)
 
 if __name__ == "__main__":
     main()
