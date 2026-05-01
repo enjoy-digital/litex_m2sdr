@@ -87,6 +87,20 @@ static int m2sdr_from_ad9361_rc(int32_t rc)
     return (rc == 0) ? M2SDR_ERR_OK : M2SDR_ERR_IO;
 }
 
+static int m2sdr_transport_error(struct m2sdr_dev *dev)
+{
+#ifdef USE_LITEETH
+    if (dev && dev->eb) {
+        int err = eb_get_last_error(dev->eb);
+
+        if (err == EB_ERR_TIMEOUT || err == EB_ERR_INTERRUPTED)
+            return M2SDR_ERR_TIMEOUT;
+    }
+#endif
+    (void)dev;
+    return M2SDR_ERR_IO;
+}
+
 static int m2sdr_select_rf_dev(struct m2sdr_dev *dev)
 {
     if (!dev)
@@ -253,13 +267,15 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
 
         if (cfg->refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_xo_40m_config,
-                sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0]));
+                sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0])))
+                return m2sdr_transport_error(dev);
         } else {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_xo_38p4m_config,
-                sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]));
+                sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0])))
+                return m2sdr_transport_error(dev);
         }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_EXTERNAL) {
         M2SDR_LOGF("Using external 10MHz from uFL as SI5351C CLKIN source...\n");
@@ -269,13 +285,15 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
 
         if (cfg->refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0]));
+                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0])))
+                return m2sdr_transport_error(dev);
         } else {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0]));
+                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0])))
+                return m2sdr_transport_error(dev);
         }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_SI5351C_FPGA) {
         M2SDR_LOGF("Using FPGA 10MHz as SI5351C CLKIN source...\n");
@@ -285,13 +303,15 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
 
         if (cfg->refclk_freq == 40000000) {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0]));
+                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0])))
+                return m2sdr_transport_error(dev);
         } else {
-            m2sdr_si5351_i2c_config(conn, SI5351_I2C_ADDR,
+            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
                 si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0]));
+                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0])))
+                return m2sdr_transport_error(dev);
         }
     }
 #else

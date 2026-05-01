@@ -308,9 +308,11 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     } else
 #endif
     {
-        if (m2sdr_sync_config(dev, M2SDR_RX, format,
-                              0, samples_per_buf, 0, 1000) != 0) {
-            fprintf(stderr, "m2sdr_sync_config failed\n");
+        int rc = m2sdr_sync_config(dev, M2SDR_RX, format,
+                                   0, samples_per_buf, 0, 1000);
+
+        if (rc != 0) {
+            fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
             goto cleanup;
         }
     }
@@ -383,9 +385,11 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             if (size > 0 && total_len >= size)
                 break;
 
-            if (m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0) != 0) {
-                fprintf(stderr, "m2sdr_sync_rx failed\n");
-                break;
+            int rc = m2sdr_sync_rx(dev, buf, samples_per_buf, header ? &meta : NULL, 0);
+
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup;
             }
             if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
                 last_timestamp = meta.timestamp;

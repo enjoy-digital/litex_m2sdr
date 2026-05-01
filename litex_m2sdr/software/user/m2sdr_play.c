@@ -236,9 +236,11 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     } else
 #endif
     {
-        if (m2sdr_sync_config(dev, M2SDR_TX, format,
-                              0, samples_per_buf, 0, 1000) != 0) {
-            fprintf(stderr, "m2sdr_sync_config failed\n");
+        int rc = m2sdr_sync_config(dev, M2SDR_TX, format,
+                                   0, samples_per_buf, 0, 1000);
+
+        if (rc != 0) {
+            fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
             goto cleanup;
         }
     }
@@ -333,9 +335,10 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                 memcpy(payload_buf, raw_buf, frame_bytes);
             }
 
-            if (m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
-                              header_bytes > 0 ? &meta : NULL, 0) != 0) {
-                fprintf(stderr, "m2sdr_sync_tx failed\n");
+            rc = m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
+                               header_bytes > 0 ? &meta : NULL, 0);
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
                 goto cleanup;
             }
             total_buffers++;

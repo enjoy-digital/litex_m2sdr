@@ -21,16 +21,33 @@
 
 #include "etherbone.h"
 
+/* Defines */
+/*---------*/
+
+#define SI5351_I2C_DRAIN_LIMIT 256
+
 /* Functions */
 /*-----------*/
 
 /* The LiteI2C controller is used in a polling mode here so the same helper can
  * be shared by PCIe and Etherbone builds without any interrupt dependency. */
 
+static bool m2sdr_si5351_bus_ok(void *conn)
+{
+#ifdef USE_LITEETH
+    return eb_get_last_error(m2sdr_conn_cast(conn)) == EB_ERR_OK;
+#else
+    (void)conn;
+    return true;
+#endif
+}
+
 /* m2sdr_si5351_i2c_reset */
 /*------------------------*/
 
 void m2sdr_si5351_i2c_reset(void *conn) {
+    unsigned drain_count = 0;
+
     /* Reset Active. */
     m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 0);
 
@@ -39,8 +56,16 @@ void m2sdr_si5351_i2c_reset(void *conn) {
 
     /* Always drain stale RX bytes so the next transaction starts from a known
      * empty state, which matters when switching between reads and writes. */
-    while (m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR) & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)) {
+    while (drain_count++ < SI5351_I2C_DRAIN_LIMIT) {
+        uint32_t status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+
+        if (!m2sdr_si5351_bus_ok(conn))
+            break;
+        if (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)))
+            break;
         m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn))
+            break;
     }
 }
 
@@ -73,6 +98,9 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
     timeout = 100000;
     do {
         status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         if (timeout-- <= 0) {
             return false;
         }
@@ -91,6 +119,9 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
     timeout = 100000;
     do {
         status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         if (timeout-- <= 0) {
             return false;
         }
@@ -134,6 +165,9 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
     timeout = 100000;
     do {
         status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         if (timeout-- <= 0) {
             return false;
         }
@@ -152,6 +186,9 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
     timeout = 100000;
     do {
         status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         if (timeout-- <= 0) {
             return false;
         }
@@ -165,6 +202,9 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
 
     /* Read Data. */
     *data = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR) & 0xFF;
+    if (!m2sdr_si5351_bus_ok(conn)) {
+        return false;
+    }
 
     return true;
 }
@@ -183,24 +223,36 @@ bool m2sdr_si5351_i2c_poll(void *conn, uint8_t slave_addr) {
 /*--------------------------------*/
 
 bool m2sdr_si5351_i2c_check_litei2c(void *conn) {
-    return m2sdr_readl(conn, CSR_SI5351_BASE) != 0x5;
+    uint32_t value = m2sdr_readl(conn, CSR_SI5351_BASE);
+
+    if (!m2sdr_si5351_bus_ok(conn)) {
+        return false;
+    }
+
+    return value != 0x5;
 }
 
 /* m2sdr_si5351_i2c_config */
 /*-------------------------*/
 
-void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
+bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     int i;
     uint8_t data;
 
     /* Check for LiteI2C. */
     if (m2sdr_si5351_i2c_check_litei2c(conn) == false) {
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         printf("Old gateware detected: SI5351 Software I2C access is not supported. Please update gateware.\n");
-        return;
+        return true;
     }
 
     /* Reset I2C Line */
     m2sdr_si5351_i2c_reset(conn);
+    if (!m2sdr_si5351_bus_ok(conn)) {
+        return false;
+    }
     usleep(100);
 
     /* Wait for the SI5351 internal SYS_INIT flag to clear before pushing the
@@ -210,36 +262,44 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
         if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &data, 1, false) && (data & 0x80) == 0) {
             break;
         }
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         usleep(1000);
     }
     if (timeout <= 0) {
-        return;
+        return false;
     }
 
     /* Disable all outputs */
     data = 0xFF;
-    m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1);
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1))
+        return false;
 
     /* Power down all output drivers */
     data = 0x80;
     for (i = 16; i <= 23; i++) {
-        m2sdr_si5351_i2c_write(conn, i2c_addr, i, &data, 1);
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, i, &data, 1))
+            return false;
     }
 
     /* Set interrupt masks */
     data = 0x00;
-    m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1);
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1))
+        return false;
 
     /* Apply the selected precomputed register table verbatim. */
     for (i = 0; i < i2c_length; i++) {
         uint8_t reg = i2c_config[i][0];
         uint8_t val = i2c_config[i][1];
-        m2sdr_si5351_i2c_write(conn, i2c_addr, reg, &val, 1);
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, reg, &val, 1))
+            return false;
     }
 
     /* Apply PLLA and PLLB soft reset */
     data = 0xAC;
-    m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1);
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1))
+        return false;
 
     /* Do not re-enable outputs until both PLLs report locked. */
     timeout = 100;
@@ -247,13 +307,23 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
         if (m2sdr_si5351_i2c_read(conn, i2c_addr, 1, &data, 1, false) && (data & 0x60) == 0) {
             break;
         }
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
         usleep(1000);
     }
     if (timeout <= 0) {
-        return;
+        return false;
     }
 
     /* Enable all outputs */
     data = 0x00;
-    m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1);
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1))
+        return false;
+
+    return true;
+}
+
+void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
+    (void)m2sdr_si5351_i2c_config_checked(conn, i2c_addr, i2c_config, i2c_length);
 }

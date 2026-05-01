@@ -21,18 +21,76 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
 #include "etherbone.h"
 
+#define EB_DEFAULT_TIMEOUT_MS 1000
+
 struct eb_connection {
     int fd;
     int read_fd;
     int is_direct;
+    int timeout_ms;
+    int last_error;
     struct addrinfo* addr;
 };
+
+static int eb_fail(struct eb_connection *conn, int err)
+{
+    if (conn)
+        conn->last_error = err;
+    return err;
+}
+
+static int eb_wait_fd(struct eb_connection *conn, int fd, short events)
+{
+    struct pollfd pfd;
+    int ret;
+
+    if (!conn || fd < 0)
+        return eb_fail(conn, EB_ERR_IO);
+
+    memset(&pfd, 0, sizeof(pfd));
+    pfd.fd = fd;
+    pfd.events = events;
+
+    do {
+        ret = poll(&pfd, 1, conn->timeout_ms);
+    } while (ret < 0 && errno == EAGAIN);
+
+    if (ret == 0)
+        return eb_fail(conn, EB_ERR_TIMEOUT);
+    if (ret < 0) {
+        if (errno == EINTR)
+            return eb_fail(conn, EB_ERR_INTERRUPTED);
+        fprintf(stderr, "socket poll error: %s\n", strerror(errno));
+        return eb_fail(conn, EB_ERR_IO);
+    }
+    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+        return eb_fail(conn, EB_ERR_IO);
+    if ((pfd.revents & events) == 0)
+        return eb_fail(conn, EB_ERR_IO);
+
+    return EB_ERR_OK;
+}
+
+int eb_set_timeout(struct eb_connection *conn, int timeout_ms)
+{
+    if (!conn || timeout_ms < 0)
+        return EB_ERR_IO;
+
+    conn->timeout_ms = timeout_ms;
+    return EB_ERR_OK;
+}
+
+int eb_get_last_error(struct eb_connection *conn)
+{
+    return conn ? conn->last_error : EB_ERR_IO;
+}
 
 int eb_unfill_read32(uint8_t wb_buffer[20]) {
     int buffer;
@@ -88,30 +146,45 @@ int eb_send(struct eb_connection *conn, const void *bytes, size_t len) {
     if (conn->is_direct) {
         int ret;
         do {
+            if (eb_wait_fd(conn, conn->fd, POLLOUT) != EB_ERR_OK)
+                return -1;
             ret = sendto(conn->fd, bytes, len, 0, conn->addr->ai_addr, conn->addr->ai_addrlen);
-        } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
+        } while (ret < 0 && errno == EAGAIN);
         if (ret < 0) {
+            if (errno == EINTR) {
+                eb_fail(conn, EB_ERR_INTERRUPTED);
+                return ret;
+            }
             fprintf(stderr, "socket send error: %s\n", strerror(errno));
+            eb_fail(conn, EB_ERR_IO);
             return ret;
         }
         if ((size_t)ret != len) {
             fprintf(stderr, "short UDP send: %d/%zu\n", ret, len);
+            eb_fail(conn, EB_ERR_IO);
             return -1;
         }
+        conn->last_error = EB_ERR_OK;
         return ret;
     }
 
     size_t sent = 0;
     while (sent < len) {
+        if (eb_wait_fd(conn, conn->fd, POLLOUT) != EB_ERR_OK)
+            return -1;
         int ret = write(conn->fd, (const uint8_t *)bytes + sent, len - sent);
         if (ret < 0) {
-            if (errno == EINTR || errno == EAGAIN)
+            if (errno == EAGAIN)
                 continue;
+            if (errno == EINTR)
+                return eb_fail(conn, EB_ERR_INTERRUPTED);
             fprintf(stderr, "socket send error: %s\n", strerror(errno));
+            eb_fail(conn, EB_ERR_IO);
             return ret;
         }
         sent += (size_t)ret;
     }
+    conn->last_error = EB_ERR_OK;
     return (int)sent;
 }
 
@@ -119,44 +192,71 @@ int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
     int ret;
     if (conn->is_direct) {
         do {
+            if (eb_wait_fd(conn, conn->read_fd, POLLIN) != EB_ERR_OK)
+                return -1;
             ret = recvfrom(conn->read_fd, bytes, max_len, 0, NULL, NULL);
-        } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
-        if (ret < 0)
+        } while (ret < 0 && errno == EAGAIN);
+        if (ret < 0) {
+            if (errno == EINTR)
+                return eb_fail(conn, EB_ERR_INTERRUPTED);
             fprintf(stderr, "socket recv error: %s\n", strerror(errno));
+            eb_fail(conn, EB_ERR_IO);
+        } else {
+            conn->last_error = EB_ERR_OK;
+        }
         return ret;
     }
 
     do {
+        if (eb_wait_fd(conn, conn->fd, POLLIN) != EB_ERR_OK)
+            return -1;
         ret = read(conn->fd, bytes, max_len);
-    } while (ret < 0 && (errno == EINTR || errno == EAGAIN));
-    if (ret < 0)
+    } while (ret < 0 && errno == EAGAIN);
+    if (ret < 0) {
+        if (errno == EINTR)
+            return eb_fail(conn, EB_ERR_INTERRUPTED);
         fprintf(stderr, "socket recv error: %s\n", strerror(errno));
+        eb_fail(conn, EB_ERR_IO);
+    } else {
+        conn->last_error = EB_ERR_OK;
+    }
     return ret;
 }
 
-void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr) {
+int eb_write32_checked(struct eb_connection *conn, uint32_t val, uint32_t addr) {
     uint8_t raw_pkt[20];
     eb_fill_write32(raw_pkt, val, addr);
-    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0)
+    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
         fprintf(stderr, "eb_write32: send failed\n");
+        return eb_get_last_error(conn);
+    }
+    return EB_ERR_OK;
 }
 
-uint32_t eb_read32(struct eb_connection *conn, uint32_t addr) {
+void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr) {
+    (void)eb_write32_checked(conn, val, addr);
+}
+
+int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) {
     uint8_t raw_pkt[20];
+
+    if (!val)
+        return eb_fail(conn, EB_ERR_IO);
+
     eb_fill_read32(raw_pkt, addr);
 
     if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
         fprintf(stderr, "eb_read32: send failed\n");
-        return -1;
+        return eb_get_last_error(conn);
     }
 
     if (conn->is_direct) {
         int count = eb_recv(conn, raw_pkt, sizeof(raw_pkt));
         if (count < 0)
-            return -1;
+            return eb_get_last_error(conn);
         if (count != sizeof(raw_pkt)) {
             fprintf(stderr, "unexpected read length: %d\n", count);
-            return -1;
+            return eb_fail(conn, EB_ERR_IO);
         }
     } else {
         // If we are connected via TCP we need to take into account any size
@@ -169,21 +269,32 @@ uint32_t eb_read32(struct eb_connection *conn, uint32_t addr) {
             ret = eb_recv(conn, p, end - p);
 
             if (ret < 0) {
-                switch (errno) {
-                    case EINTR:
-                    case EAGAIN:
-                        continue;
-                    default:
-                        fprintf(stderr, "socket read error: %s\n", strerror(errno));
-                        return -1;
-                }
+                int err = eb_get_last_error(conn);
+
+                if (err == EB_ERR_TIMEOUT || err == EB_ERR_INTERRUPTED)
+                    return err;
+                fprintf(stderr, "socket read error: %s\n", strerror(errno));
+                return eb_fail(conn, EB_ERR_IO);
             }
+            if (ret == 0)
+                return eb_fail(conn, EB_ERR_IO);
 
             p += ret;
         }
     }
 
-    return eb_unfill_read32(raw_pkt);
+    *val = eb_unfill_read32(raw_pkt);
+    conn->last_error = EB_ERR_OK;
+    return EB_ERR_OK;
+}
+
+uint32_t eb_read32(struct eb_connection *conn, uint32_t addr) {
+    uint32_t val = 0xffffffffu;
+
+    if (eb_read32_checked(conn, addr, &val) != EB_ERR_OK)
+        return 0xffffffffu;
+
+    return val;
 }
 
 struct eb_connection *eb_connect(const char *addr, const char *port, int is_direct) {
@@ -203,6 +314,8 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     memset(conn, 0, sizeof(*conn));
     conn->fd = -1;
     conn->read_fd = -1;
+    conn->timeout_ms = EB_DEFAULT_TIMEOUT_MS;
+    conn->last_error = EB_ERR_OK;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;

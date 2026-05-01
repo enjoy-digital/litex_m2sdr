@@ -179,7 +179,7 @@ m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
 
 m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a libliteeth/libliteeth.a $(CLI_OBJS) m2sdr_record.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -Llibliteeth -lm -lm2sdr -llitepcie -lliteeth
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_record.o libm2sdr/libm2sdr.a liblitepcie/liblitepcie.a libliteeth/libliteeth.a -lm
 
 m2sdr_sigmf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o libm2sdr/libm2sdr.a liblitepcie/liblitepcie.a -lm
@@ -216,7 +216,7 @@ m2sdr_play: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_play
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
 
 m2sdr_record: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_record.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_record.o libm2sdr/libm2sdr.a liblitepcie/liblitepcie.a -lm
 
 m2sdr_sigmf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o libm2sdr/libm2sdr.a liblitepcie/liblitepcie.a -lm

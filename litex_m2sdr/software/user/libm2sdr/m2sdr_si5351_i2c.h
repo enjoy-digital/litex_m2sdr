@@ -11,6 +11,7 @@
 #define M2SDR_LIB_SI5351_I2C_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "csr.h"
 #include "soc.h"
@@ -38,6 +39,7 @@ bool m2sdr_si5351_i2c_poll(void *conn,  uint8_t slave_addr);
 /* Detect whether the current gateware includes the required LiteI2C block. */
 bool m2sdr_si5351_i2c_check_litei2c(void *conn);
 /* Apply one of the predefined SI5351 register tables from m2sdr_config.h. */
+bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
 void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
 
 #endif /* M2SDR_LIB_SI5351_I2C_H */

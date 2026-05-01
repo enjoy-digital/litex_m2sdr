@@ -28,8 +28,20 @@
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
+#define AD9361_SPI_TIMEOUT_US 100000
+
 /* Helpers */
 /*---------*/
+
+static bool m2sdr_ad9361_bus_ok(void *conn)
+{
+#ifdef USE_LITEETH
+    return eb_get_last_error(m2sdr_conn_cast(conn)) == EB_ERR_OK;
+#else
+    (void)conn;
+    return true;
+#endif
+}
 
 /* m2sdr_ad9361_spi_init */
 /*-----------------------*/
@@ -71,7 +83,13 @@ void m2sdr_ad9361_spi_xfer(void *conn, uint8_t len, uint8_t *mosi, uint8_t *miso
 #ifdef AD9361_SPI_WAIT_DONE
     /* Keep the helper synchronous so the caller sees a simple register-style
      * interface even though the FPGA block is command based. */
-    while ((m2sdr_readl(conn, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) != SPI_STATUS_DONE);
+    for (int timeout = AD9361_SPI_TIMEOUT_US; timeout > 0; timeout--) {
+        if ((m2sdr_readl(conn, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) == SPI_STATUS_DONE)
+            break;
+        if (!m2sdr_ad9361_bus_ok(conn))
+            break;
+        usleep(1);
+    }
 #endif
 
     /* Read MISO if read. */

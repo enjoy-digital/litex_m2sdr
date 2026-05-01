@@ -70,12 +70,21 @@ The same type of record is returned, so your data is at offset 16.
 
 struct eb_connection;
 
+#define EB_ERR_OK          0
+#define EB_ERR_IO         -1
+#define EB_ERR_TIMEOUT    -2
+#define EB_ERR_INTERRUPTED -3
+
 int eb_unfill_read32(uint8_t wb_buffer[20]);
 int eb_fill_write32(uint8_t wb_buffer[20], uint32_t data, uint32_t address);
 int eb_fill_read32(uint8_t wb_buffer[20], uint32_t address);
 
 struct eb_connection *eb_connect(const char *addr, const char *port, int is_direct);
 void eb_disconnect(struct eb_connection **conn);
+int eb_set_timeout(struct eb_connection *conn, int timeout_ms);
+int eb_get_last_error(struct eb_connection *conn);
+int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val);
+int eb_write32_checked(struct eb_connection *conn, uint32_t val, uint32_t addr);
 uint32_t eb_read32(struct eb_connection *conn, uint32_t addr);
 void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr);
 
