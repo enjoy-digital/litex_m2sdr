@@ -28,12 +28,13 @@
 #include "liteeth_udp.h"
 #endif
 
-/* Parse Soapy-style "channels" argument: "0", "1", "0,1", "[0,1]", "0 1". */
+/* Parse Soapy/gr-osmosdr channel arguments:
+ * "0", "1", "0,1", "[0,1]", "{0}", "{0,1}", "0 1". */
 static std::vector<size_t> parse_channel_list(const std::string &channels_str)
 {
     std::string s = channels_str;
     for (char &c : s) {
-        if (c == '[' || c == ']')
+        if (c == '[' || c == ']' || c == '{' || c == '}')
             c = ' ';
         if (c == ',')
             c = ' ';
