@@ -33,6 +33,7 @@ void intHandler(int dummy) {
     keep_running = 0;
 }
 
+#ifdef USE_LITEPCIE
 static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
 {
     uint64_t sync_word = 0;
@@ -46,6 +47,7 @@ static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
     *timestamp = ts;
     return 1;
 }
+#endif
 
 static void help(void)
 {

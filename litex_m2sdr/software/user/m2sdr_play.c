@@ -47,14 +47,6 @@ static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
     return 1;
 }
 
-static void write_m2sdr_dma_header(uint8_t *buf, uint64_t timestamp)
-{
-    const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
-
-    memcpy(buf, &sync_word, sizeof(sync_word));
-    memcpy(buf + 8, &timestamp, sizeof(timestamp));
-}
-
 static void print_time_banner(const char *label, uint64_t time_ns)
 {
     time_t seconds = (time_t)(time_ns / 1000000000ULL);
@@ -120,6 +112,15 @@ static int read_next_play_frame(FILE *fi, int close_fi, uint32_t *current_loop, 
     return 0;
 }
 
+#ifdef USE_LITEPCIE
+static void write_m2sdr_dma_header(uint8_t *buf, uint64_t timestamp)
+{
+    const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
+
+    memcpy(buf, &sync_word, sizeof(sync_word));
+    memcpy(buf + 8, &timestamp, sizeof(timestamp));
+}
+
 static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes,
                             unsigned header_bytes, struct m2sdr_metadata *meta)
 {
@@ -138,6 +139,7 @@ static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes
         memcpy(dst, src, frame_bytes);
     }
 }
+#endif
 
 static void help(void)
 {

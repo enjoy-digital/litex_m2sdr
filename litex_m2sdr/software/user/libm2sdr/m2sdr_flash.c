@@ -47,6 +47,7 @@ static void flash_spi_cs(void *conn, uint8_t cs_n)
     m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
 }
 
+#ifdef USE_LITEPCIE
 static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
 {
     uint32_t status = 0;
@@ -63,6 +64,7 @@ static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
         op, cmd, tx_len, status);
     abort();
 }
+#endif
 
 /* flash_spi */
 /*-----------*/
