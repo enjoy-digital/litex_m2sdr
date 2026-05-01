@@ -9,4 +9,5 @@
 /m2sdr_util
 /m2sdr_selftest
 /m2sdr_sigmf_info
+/.build-flags
 /.build-flags-*

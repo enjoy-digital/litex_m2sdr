@@ -353,12 +353,17 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
     if (dev->tx_configured)
         litepcie_dma_cleanup(&dev->tx_dma);
 #elif defined(USE_LITEETH)
+    if (dev->rx_configured) {
 #ifdef CSR_ETH_RX_MODE_ADDR
-    /* Raw streamer enable is not a safe stop on all bitstreams: when present,
-     * use the Ethernet RX mode flush branch, matching the Soapy path. */
-    if (dev->rx_configured)
+        /* Raw streamer enable is not a safe stop on all bitstreams: when
+         * present, use the Ethernet RX mode flush branch, matching the Soapy
+         * path. */
         (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
 #endif
+        /* Legacy raw LiteEth streamers do not expose eth_rx_mode, so route RX
+         * away from Ethernet to stop UDP samples without toggling enable. */
+        (void)m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    }
 #endif
 
     dev->rx_configured = 0;

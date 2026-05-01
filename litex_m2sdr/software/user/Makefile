@@ -21,14 +21,17 @@ SANITIZER_FLAGS := $(sort $(filter -fsanitize=% -fno-sanitize-recover=%,$(CFLAGS
 LDFLAGS += $(SANITIZER_FLAGS)
 LINK_CFLAGS := $(filter-out -MMD,$(CFLAGS))
 LINK_CXXFLAGS := $(filter-out -MMD,$(CXXFLAGS))
-BUILD_FLAGS_FILE := .build-flags-$(INTERFACE)
-BUILD_FLAGS_CONTENT := INTERFACE=$(INTERFACE)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXFLAGS)\nLDFLAGS=$(LDFLAGS)
+BUILD_FLAGS_FILE := .build-flags
+BUILD_FLAGS_CONTENT := BUILD_FLAGS_SCHEMA=2\nINTERFACE=$(INTERFACE)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXFLAGS)\nLDFLAGS=$(LDFLAGS)
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
 .PHONY: FORCE
+
+ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
+                m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
@@ -238,9 +241,9 @@ m2sdr_scan: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a ad9361/libad9361_m2sdr
 endif
 
 clean:
-	rm -f $(PROGS) *.o *.a *.d *~
+	rm -f $(PROGS) $(ALL_BINARIES) *.o *.a *.d *~
 	rm -f $(EXAMPLES)
-	rm -f .build-flags-*
+	rm -f .build-flags .build-flags-*
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f tests/*.o tests/*.d tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli
@@ -257,6 +260,7 @@ clean:
 $(BUILD_FLAGS_FILE): FORCE
 	@printf '%b\n' "$(BUILD_FLAGS_CONTENT)" > $@.tmp
 	@if ! cmp -s $@.tmp $@ 2>/dev/null; then \
+		rm -f $(ALL_BINARIES); \
 		rm -f *.o *.a *.d; \
 		rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d; \
 		rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d; \

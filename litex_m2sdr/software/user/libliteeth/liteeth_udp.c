@@ -132,8 +132,11 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
 
     /* poll fd */
     u->pfd.fd     = u->sock;
-    u->pfd.events = (u->rx_enable ? POLLIN  : 0) |
-                    (u->tx_enable ? POLLOUT : 0);
+    /* TX buffer ownership is user-driven and sendto() handles writability when
+     * buffers are submitted. Polling POLLOUT here wakes RX users immediately on
+     * an empty socket and makes them report a false timeout before packets
+     * arrive. */
+    u->pfd.events = u->rx_enable ? POLLIN : 0;
 
     return 0;
 
