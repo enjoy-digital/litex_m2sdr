@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <stdexcept>
 #include <unordered_map>
 #include <algorithm>
@@ -301,11 +302,21 @@ int spi_write_then_read(struct spi_device *spi,
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, txbuf[0] << 8 | txbuf[1]);
+        uint16_t reg = txbuf[0] << 8 | txbuf[1];
+
+        if (!m2sdr_ad9361_spi_read_checked(conn, reg, &rxbuf[0])) {
+            fprintf(stderr, "spi_write_then_read(): AD9361 SPI read failed @0x%03x\n", reg);
+            return -EIO;
+        }
 
     /* Single Byte Write. */
     } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(conn, txbuf[0] << 8 | txbuf[1], txbuf[2]);
+        uint16_t reg = txbuf[0] << 8 | txbuf[1];
+
+        if (!m2sdr_ad9361_spi_write_checked(conn, reg, txbuf[2])) {
+            fprintf(stderr, "spi_write_then_read(): AD9361 SPI write failed @0x%03x\n", reg);
+            return -EIO;
+        }
 
     /* Unsupported. */
     } else {
@@ -606,13 +617,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
                 SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
             if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_xo_40m_config,
-                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0]));
+                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0])))
+                    throw std::runtime_error("SI5351 internal-XO 40MHz config failed");
             } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_xo_38p4m_config,
-                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0]));
+                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0])))
+                    throw std::runtime_error("SI5351 internal-XO 38.4MHz config failed");
             }
         } else if (clock_source == "external") {
             /* SI5351C, external 10 MHz CLKIN from u.FL */
@@ -620,13 +633,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                   SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
                   SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
             if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
+                    throw std::runtime_error("SI5351 external 10MHz/40MHz config failed");
             } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
+                    throw std::runtime_error("SI5351 external 10MHz/38.4MHz config failed");
             }
         } else if ((clock_source == "fpga") ||
                    (clock_source == "si5351c-fpga") ||
@@ -637,13 +652,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                   SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
                   SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
             if (refclk_hz == 40000000) {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0]));
+                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
+                    throw std::runtime_error("SI5351 FPGA 10MHz/40MHz config failed");
             } else {
-                m2sdr_si5351_i2c_config((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
                     si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0]));
+                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
+                    throw std::runtime_error("SI5351 FPGA 10MHz/38.4MHz config failed");
             }
         } else {
             throw std::runtime_error("Unsupported clock_source '" + clock_source + "' (supported: internal, external, fpga)");
@@ -695,7 +712,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         /* TX1/RX1. */
         _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
         _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[0]  = false;
+        _rx_stream.gainMode[0]  = true;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
         _rx_stream.iqbalance[0] = 1.0;
@@ -707,7 +724,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         /* TX2/RX2. */
         _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
         _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[1]  = false;
+        _rx_stream.gainMode[1]  = true;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
         _rx_stream.iqbalance[1] = 1.0;
@@ -824,7 +841,8 @@ void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channe
         this->setFrequency(SOAPY_SDR_RX,  channel, "RF", _rx_stream.frequency);
         this->setBandwidth(SOAPY_SDR_RX,  channel, _rx_stream.bandwidth);
         this->setGainMode(SOAPY_SDR_RX,   channel, _rx_stream.gainMode[channel]);
-        this->setGain(SOAPY_SDR_RX,       channel, _rx_stream.gain[channel]);
+        if (!_rx_stream.gainMode[channel])
+            this->setGain(SOAPY_SDR_RX, channel, _rx_stream.gain[channel]);
         this->setIQBalance(SOAPY_SDR_RX,  channel, _rx_stream.iqbalance[channel]);
     }
 

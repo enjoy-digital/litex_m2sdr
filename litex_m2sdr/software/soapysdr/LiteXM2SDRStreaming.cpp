@@ -194,6 +194,15 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                       : 4096) * _bytesPerComplex * selected_channels.size());
         const size_t buf_count = 2;
 
+        if (!is_vrt) {
+#ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
+            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, port);
+#endif
+#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
+            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
+#endif
+        }
+
         if (liteeth_udp_init(&_udp,
                              /*listen_ip*/  nullptr, /*listen_port*/  port,
                              /*remote_ip*/  ip.c_str(), /*remote_port*/ port,
@@ -423,9 +432,9 @@ int SoapyLiteXM2SDR::activateStream(
 
     /* RX */
     if (stream == RX_STREAM) {
+#if USE_LITEPCIE
         for (size_t i = 0; i < _rx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
-#if USE_LITEPCIE
         /* Crossbar Demux: Select PCIe streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
         /* Configure the DMA engine for RX, but don't enable it yet. */
@@ -454,9 +463,9 @@ int SoapyLiteXM2SDR::activateStream(
 
     /* TX */
     } else if (stream == TX_STREAM) {
+#if USE_LITEPCIE
         for (size_t i = 0; i < _tx_stream.channels.size(); i++)
             channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
-#if USE_LITEPCIE
         /* Crossbar Mux: Select PCIe streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
         /* Configure the DMA engine for TX, but don't enable it yet. */
@@ -492,8 +501,9 @@ int SoapyLiteXM2SDR::deactivateStream(
 #elif USE_LITEETH
         /* Flush/disable Ethernet RX branch when available. */
 #ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_fd, CSR_ETH_RX_MODE_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 0);
 #endif
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 #endif
         /* set burst_end: if readStream is called after this point SOAPY_SDR_END_BURST
          * will be set
