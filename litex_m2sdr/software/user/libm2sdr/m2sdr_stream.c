@@ -21,6 +21,13 @@
 #include "litepcie_helpers.h"
 #endif
 
+#ifdef USE_LITEETH
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
 #define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 
@@ -112,6 +119,71 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
     }
 }
 
+#if defined(USE_LITEETH) && \
+    defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+static int m2sdr_liteeth_get_local_ip(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
+{
+    struct sockaddr_in remote_addr;
+    struct sockaddr_in local_addr;
+    socklen_t local_addr_len = sizeof(local_addr);
+    int sock = -1;
+    int ret = M2SDR_ERR_IO;
+
+    if (!remote_ip || !local_ip)
+        return M2SDR_ERR_INVAL;
+
+    memset(&remote_addr, 0, sizeof(remote_addr));
+    remote_addr.sin_family = AF_INET;
+    remote_addr.sin_port = htons(remote_port);
+    if (inet_pton(AF_INET, remote_ip, &remote_addr.sin_addr) != 1)
+        return M2SDR_ERR_INVAL;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0)
+        return M2SDR_ERR_IO;
+
+    /* UDP connect performs the kernel route lookup without sending traffic. */
+    if (connect(sock, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) < 0)
+        goto out;
+
+    memset(&local_addr, 0, sizeof(local_addr));
+    if (getsockname(sock, (struct sockaddr *)&local_addr, &local_addr_len) < 0)
+        goto out;
+    if (local_addr.sin_family != AF_INET)
+        goto out;
+
+    *local_ip = ntohl(local_addr.sin_addr.s_addr);
+    ret = M2SDR_ERR_OK;
+
+out:
+    close(sock);
+    return ret;
+}
+
+static int m2sdr_liteeth_configure_rx_streamer(struct m2sdr_dev *dev, uint16_t listen_port)
+{
+    uint32_t local_ip = 0;
+    int rc;
+
+    rc = m2sdr_liteeth_get_local_ip(dev->eth_ip, dev->eth_port, &local_ip);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, local_ip) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, listen_port) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1) != 0)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+#endif
+
 /* Public API */
 /*------------*/
 
@@ -172,8 +244,9 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
 #elif defined(USE_LITEETH)
+    const uint16_t listen_port = 2345;
+
     if (!dev->udp_inited) {
-        uint16_t listen_port = 2345;
         int rx_enable = 1;
         int tx_enable = 1;
         /* The UDP helper owns the packet ring. libm2sdr maps one UDP payload
@@ -192,6 +265,14 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
 
     if (direction == M2SDR_RX) {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
+
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+        rc = m2sdr_liteeth_configure_rx_streamer(dev, listen_port);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+#endif
 
         if (!dev->rx_header_enable) {
             if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
