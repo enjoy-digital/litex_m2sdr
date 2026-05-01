@@ -171,8 +171,6 @@ static int m2sdr_liteeth_configure_rx_streamer(struct m2sdr_dev *dev, uint16_t l
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0) != 0)
-        return M2SDR_ERR_IO;
     if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, local_ip) != 0)
         return M2SDR_ERR_IO;
     if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, listen_port) != 0)
@@ -246,6 +244,27 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
 #elif defined(USE_LITEETH)
     const uint16_t listen_port = 2345;
 
+    if (direction == M2SDR_RX) {
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
+
+        if (!dev->rx_header_enable) {
+            if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
+                (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+                return M2SDR_ERR_IO;
+        }
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+        rc = m2sdr_liteeth_configure_rx_streamer(dev, listen_port);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+#endif
+    }
+
     if (!dev->udp_inited) {
         int rx_enable = 1;
         int tx_enable = 1;
@@ -263,26 +282,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         dev->udp_inited = 1;
     }
 
-    if (direction == M2SDR_RX) {
-        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
-
-#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
-        rc = m2sdr_liteeth_configure_rx_streamer(dev, listen_port);
-        if (rc != M2SDR_ERR_OK)
-            return rc;
-#endif
-
-        if (!dev->rx_header_enable) {
-            if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
-                (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
-                (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
-                return M2SDR_ERR_IO;
-        }
-        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
-            return M2SDR_ERR_IO;
-    } else {
+    if (direction == M2SDR_TX) {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
 #else
@@ -340,6 +340,29 @@ int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *
 int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *config)
 {
     return m2sdr_sync_config_ex(dev, config);
+}
+
+void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return;
+
+#ifdef USE_LITEPCIE
+    if (dev->rx_configured)
+        litepcie_dma_cleanup(&dev->rx_dma);
+    if (dev->tx_configured)
+        litepcie_dma_cleanup(&dev->tx_dma);
+#elif defined(USE_LITEETH)
+#ifdef CSR_ETH_RX_MODE_ADDR
+    /* Raw streamer enable is not a safe stop on all bitstreams: when present,
+     * use the Ethernet RX mode flush branch, matching the Soapy path. */
+    if (dev->rx_configured)
+        (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
+#endif
+#endif
+
+    dev->rx_configured = 0;
+    dev->tx_configured = 0;
 }
 
 #ifdef USE_LITEPCIE

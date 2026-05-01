@@ -426,12 +426,14 @@ void m2sdr_close(struct m2sdr_dev *dev)
         return;
 
 #ifdef USE_LITEPCIE
+    m2sdr_stream_cleanup(dev);
     if (dev->fd >= 0)
         close(dev->fd);
     dev->fd = -1;
 #endif
 
 #ifdef USE_LITEETH
+    m2sdr_stream_cleanup(dev);
     if (dev->udp_inited) {
         liteeth_udp_cleanup(&dev->udp);
         dev->udp_inited = 0;
