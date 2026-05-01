@@ -66,6 +66,9 @@ static struct axiadc_chip_info axiadc_chip_info_tbl[] = {
 
 extern struct gain_table_info ad9361_adi_gt_info[];
 
+#define AD9361_PRODUCT_ID_RETRIES 5
+#define AD9361_PRODUCT_ID_RETRY_DELAY_MS 5
+
 static int ad9361_verbose_init_enabled(void)
 {
 	static int cached = -1;
@@ -552,11 +555,33 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	}
 
 	AD9361_INIT_TRACE("%s: read product id\n", __func__);
-	ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
+	int32_t product_id_reads[AD9361_PRODUCT_ID_RETRIES];
+	int product_id_attempt;
+	for (product_id_attempt = 0;
+	     product_id_attempt < AD9361_PRODUCT_ID_RETRIES;
+	     product_id_attempt++) {
+		ret = ad9361_spi_read(phy->spi, REG_PRODUCT_ID);
+		product_id_reads[product_id_attempt] = ret;
+		if ((ret & PRODUCT_ID_MASK) == PRODUCT_ID_9361)
+			break;
+		if (product_id_attempt + 1 < AD9361_PRODUCT_ID_RETRIES)
+			mdelay(AD9361_PRODUCT_ID_RETRY_DELAY_MS);
+	}
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
-		printf("%s : Unsupported PRODUCT_ID 0x%X", __func__, (unsigned int)ret);
+		printf("%s : Unsupported PRODUCT_ID 0x%X (reads:",
+		       __func__, (unsigned int)ret);
+		for (int i = 0; i <= product_id_attempt; i++)
+			printf(" 0x%X", (unsigned int)product_id_reads[i]);
+		printf(")\n");
 		ret = -ENODEV;
 		goto out;
+	}
+	if (product_id_attempt > 0) {
+		printf("%s : PRODUCT_ID recovered after %d retries (reads:",
+		       __func__, product_id_attempt);
+		for (int i = 0; i <= product_id_attempt; i++)
+			printf(" 0x%X", (unsigned int)product_id_reads[i]);
+		printf(")\n");
 	}
 	rev = ret & REV_MASK;
 
@@ -579,8 +604,10 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	if (do_init) {
 		AD9361_INIT_TRACE("%s: setup\n", __func__);
 		ret = ad9361_setup(phy);
-		if (ret < 0)
+		if (ret < 0) {
+			printf("%s : AD936x setup error %d\n", __func__, (int)ret);
 			goto out;
+		}
 	}
 
 #ifndef AXI_ADC_NOT_PRESENT

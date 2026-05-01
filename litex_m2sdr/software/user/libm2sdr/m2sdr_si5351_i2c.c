@@ -25,6 +25,9 @@
 /*---------*/
 
 #define SI5351_I2C_DRAIN_LIMIT 256
+#define SI5351_STATUS_SYS_INIT 0x80
+#define SI5351_STATUS_LOL_B    0x40
+#define SI5351_CONFIG_TIMEOUT_MS 100
 
 /* Functions */
 /*-----------*/
@@ -251,75 +254,94 @@ bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t
     /* Reset I2C Line */
     m2sdr_si5351_i2c_reset(conn);
     if (!m2sdr_si5351_bus_ok(conn)) {
+        fprintf(stderr, "SI5351 I2C reset failed during config.\n");
         return false;
     }
     usleep(100);
 
     /* Wait for the SI5351 internal SYS_INIT flag to clear before pushing the
      * full clock tree configuration. */
-    int timeout = 100;
+    int timeout = SI5351_CONFIG_TIMEOUT_MS;
     while (timeout--) {
         if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &data, 1, false) && (data & 0x80) == 0) {
             break;
         }
         if (!m2sdr_si5351_bus_ok(conn)) {
+            fprintf(stderr, "SI5351 SYS_INIT poll failed during config.\n");
             return false;
         }
         usleep(1000);
     }
     if (timeout <= 0) {
+        fprintf(stderr, "SI5351 SYS_INIT did not clear during config (status 0x%02x).\n", data);
         return false;
     }
 
     /* Disable all outputs */
     data = 0xFF;
-    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1))
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1)) {
+        fprintf(stderr, "SI5351 failed to disable outputs during config.\n");
         return false;
+    }
 
     /* Power down all output drivers */
     data = 0x80;
     for (i = 16; i <= 23; i++) {
-        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, i, &data, 1))
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, i, &data, 1)) {
+            fprintf(stderr, "SI5351 failed to power down output %d during config.\n", i - 16);
             return false;
+        }
     }
 
     /* Set interrupt masks */
     data = 0x00;
-    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1))
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 2, &data, 1)) {
+        fprintf(stderr, "SI5351 failed to set interrupt masks during config.\n");
         return false;
+    }
 
     /* Apply the selected precomputed register table verbatim. */
     for (i = 0; i < i2c_length; i++) {
         uint8_t reg = i2c_config[i][0];
         uint8_t val = i2c_config[i][1];
-        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, reg, &val, 1))
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, reg, &val, 1)) {
+            fprintf(stderr, "SI5351 config write failed at table index %d, reg 0x%02x.\n", i, reg);
             return false;
+        }
     }
 
     /* Apply PLLA and PLLB soft reset */
     data = 0xAC;
-    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1))
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 177, &data, 1)) {
+        fprintf(stderr, "SI5351 failed to reset PLLs during config.\n");
         return false;
+    }
 
-    /* Do not re-enable outputs until both PLLs report locked. */
-    timeout = 100;
+    /* The shipped clock tables drive all active outputs from PLLB. PLLA may
+     * remain unlocked in normal internal-XO operation, so only gate on PLLB. */
+    timeout = SI5351_CONFIG_TIMEOUT_MS;
     while (timeout--) {
-        if (m2sdr_si5351_i2c_read(conn, i2c_addr, 1, &data, 1, false) && (data & 0x60) == 0) {
+        if (m2sdr_si5351_i2c_read(conn, i2c_addr, 0, &data, 1, false) &&
+            (data & (SI5351_STATUS_SYS_INIT | SI5351_STATUS_LOL_B)) == 0) {
             break;
         }
         if (!m2sdr_si5351_bus_ok(conn)) {
+            fprintf(stderr, "SI5351 PLLB lock poll failed during config.\n");
             return false;
         }
         usleep(1000);
     }
     if (timeout <= 0) {
+        fprintf(stderr, "SI5351 PLLB did not lock during config (status 0x%02x).\n", data);
         return false;
     }
 
     /* Enable all outputs */
     data = 0x00;
-    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1))
+    if (!m2sdr_si5351_i2c_write(conn, i2c_addr, 3, &data, 1)) {
+        fprintf(stderr, "SI5351 failed to enable outputs during config.\n");
         return false;
+    }
 
     return true;
 }

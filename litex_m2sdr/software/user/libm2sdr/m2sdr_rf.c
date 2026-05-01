@@ -35,6 +35,11 @@
 #define M2SDR_RX_GAIN_MAX_DB  76
 #define M2SDR_DELAY_TAPS      16
 #define M2SDR_DELAY_SETTLE_MS 10
+#define SI5351_STATUS_SYS_INIT 0x80
+#define SI5351_STATUS_LOL_B    0x40
+#define SI5351_STATUS_LOL_A    0x20
+#define SI5351_STATUS_LOS      0x10
+#define SI5351_READY_TIMEOUT_MS 100
 
 #ifndef M2SDR_LOG_ENABLED
 #define M2SDR_LOG_ENABLED 1
@@ -249,6 +254,36 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
+#ifdef CSR_SI5351_BASE
+static int m2sdr_wait_si5351_ready(struct m2sdr_dev *dev, void *conn)
+{
+    uint8_t status = 0xff;
+
+    if (!m2sdr_si5351_i2c_check_litei2c(conn))
+        return M2SDR_ERR_OK;
+
+    /* All shipped M2SDR SI5351 tables use PLLB for the active outputs. PLLA
+     * and CLKIN LOS can legitimately remain asserted with the internal-XO
+     * profile, so gate the AD9361 handoff on SYS_INIT and PLLB only. */
+    for (int timeout = SI5351_READY_TIMEOUT_MS; timeout > 0; timeout--) {
+        if (!m2sdr_si5351_i2c_read(conn, SI5351_I2C_ADDR, 0x00, &status, 1, true))
+            return m2sdr_transport_error(dev);
+
+        if ((status & (SI5351_STATUS_SYS_INIT | SI5351_STATUS_LOL_B)) == 0) {
+            if (status & (SI5351_STATUS_LOL_A | SI5351_STATUS_LOS))
+                M2SDR_LOGF("SI5351 status after clocking: 0x%02x (continuing; PLLB is locked).\n", status);
+            mdelay(M2SDR_DELAY_SETTLE_MS);
+            return M2SDR_ERR_OK;
+        }
+
+        usleep(1000);
+    }
+
+    M2SDR_LOGF("SI5351 did not report ready before AD9361 init (status 0x%02x).\n", status);
+    return M2SDR_ERR_IO;
+}
+#endif
+
 /* Program the SI5351 clock generator for the selected reference topology. */
 static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                                      void *conn,
@@ -314,6 +349,8 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                 return m2sdr_transport_error(dev);
         }
     }
+
+    return m2sdr_wait_si5351_ready(dev, conn);
 #else
     (void)dev;
     (void)conn;
@@ -745,9 +782,17 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
     /* The imported AD9361 driver only uses the 2-byte-address/1-byte-read and
      * 2-byte-address+1-byte-write transactions on this platform. */
     if (n_tx == 2 && n_rx == 1) {
-        rxbuf[0] = m2sdr_ad9361_spi_read(conn, (txbuf[0] << 8) | txbuf[1]);
+        uint16_t reg = (txbuf[0] << 8) | txbuf[1];
+        if (!m2sdr_ad9361_spi_read_checked(conn, reg, &rxbuf[0])) {
+            M2SDR_LOGF("AD9361 SPI read 0x%03x failed.\n", reg);
+            return -1;
+        }
     } else if (n_tx == 3 && n_rx == 0) {
-        m2sdr_ad9361_spi_write(conn, (txbuf[0] << 8) | txbuf[1], txbuf[2]);
+        uint16_t reg = (txbuf[0] << 8) | txbuf[1];
+        if (!m2sdr_ad9361_spi_write_checked(conn, reg, txbuf[2])) {
+            M2SDR_LOGF("AD9361 SPI write 0x%03x failed.\n", reg);
+            return -1;
+        }
     } else {
         return -1;
     }
@@ -889,8 +934,9 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     rc = m2sdr_apply_channel_layout(dev, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    if (m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy, &default_init_param, 1)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    rc = m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy, &default_init_param, 1));
+    if (rc != M2SDR_ERR_OK)
+        return m2sdr_transport_error(dev);
     phy = m2sdr_current_phy(dev);
     if (!phy)
         return M2SDR_ERR_STATE;
