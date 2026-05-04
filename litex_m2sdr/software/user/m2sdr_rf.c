@@ -13,7 +13,6 @@
 #include <string.h>
 #include <inttypes.h>
 #include <unistd.h>
-#include <signal.h>
 #include <stdbool.h>
 #include <getopt.h>
 #include <stdint.h>
@@ -21,13 +20,6 @@
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_config.h"
-
-sig_atomic_t keep_running = 1;
-
-void intHandler(int dummy) {
-    (void)dummy;
-    keep_running = 0;
-}
 
 /* Help */
 /*------*/
@@ -144,7 +136,6 @@ int main(int argc, char **argv)
     };
     m2sdr_config_init(&cfg);
 
-    signal(SIGINT, intHandler);
     m2sdr_cli_device_init(&cli_dev);
 
     for (;;) {
