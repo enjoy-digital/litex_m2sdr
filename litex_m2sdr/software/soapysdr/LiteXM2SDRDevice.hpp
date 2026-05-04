@@ -472,6 +472,21 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     std::vector<std::string> _tx_antennas;
     int _rx_agc_mode = 0;
     std::string _ad9361_fir_profile = "legacy"; /* legacy | bypass | match | wide */
+    bool _sampleRateHwApplied = false;
+    int64_t _sampleRateHw = 0;
+    uint32_t _sampleRateHwBitMode = 0;
+    uint32_t _sampleRateHwOversampling = 0;
+    std::string _sampleRateHwFirProfile;
+    bool _bandwidthHwApplied = false;
+    uint32_t _bandwidthHw = 0;
+    bool _rxFrequencyHwApplied = false;
+    bool _txFrequencyHwApplied = false;
+    uint64_t _rxFrequencyHw = 0;
+    uint64_t _txFrequencyHw = 0;
+    bool _txAttHwApplied = false;
+    int64_t _txAttHw = 0;
+    bool _bitModeHwApplied = false;
+    uint32_t _bitModeHw = 0;
 
     void interleaveCF32(
         const void *src,

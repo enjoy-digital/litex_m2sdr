@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cctype>
 #include <inttypes.h>
+#include <time.h>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -280,6 +281,78 @@ bool select_ad9361_fir_profile_1x(const std::string &name,
     }
     return false;
 }
+
+#if USE_LITEETH
+constexpr unsigned SOAPY_LITEETH_RF_OP_TIMEOUT_MS = 5000;
+thread_local uint64_t soapy_rf_op_deadline_us = 0;
+thread_local bool soapy_rf_op_timed_out = false;
+thread_local unsigned soapy_rf_op_depth = 0;
+
+uint64_t monotonic_time_us()
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+
+    return static_cast<uint64_t>(ts.tv_sec) * 1000000u +
+           static_cast<uint64_t>(ts.tv_nsec) / 1000u;
+}
+
+class LiteEthRfOpTimeout {
+public:
+    explicit LiteEthRfOpTimeout(
+        const char *operation,
+        unsigned timeout_ms = SOAPY_LITEETH_RF_OP_TIMEOUT_MS) :
+        _operation(operation),
+        _timeout_ms(timeout_ms),
+        _owner(soapy_rf_op_depth == 0)
+    {
+        soapy_rf_op_depth++;
+
+        if (_owner) {
+            uint64_t now = monotonic_time_us();
+
+            soapy_rf_op_timed_out = false;
+            soapy_rf_op_deadline_us = now ?
+                now + static_cast<uint64_t>(_timeout_ms) * 1000u : 0;
+        }
+    }
+
+    ~LiteEthRfOpTimeout()
+    {
+        if (soapy_rf_op_depth)
+            soapy_rf_op_depth--;
+
+        if (_owner)
+            soapy_rf_op_deadline_us = 0;
+    }
+
+    void throw_if_timed_out() const
+    {
+        if (soapy_rf_op_timed_out) {
+            throw std::runtime_error(std::string(_operation) + " timed out after " +
+                std::to_string(_timeout_ms) + " ms");
+        }
+    }
+
+private:
+    const char *_operation;
+    unsigned _timeout_ms;
+    bool _owner;
+};
+
+bool soapy_rf_op_timeout_expired()
+{
+    uint64_t now;
+
+    if (!soapy_rf_op_deadline_us)
+        return false;
+
+    now = monotonic_time_us();
+    return now && now >= soapy_rf_op_deadline_us;
+}
+#endif
 } // namespace
 
 //#define AD9361_SPI_WRITE_DEBUG
@@ -297,6 +370,15 @@ int spi_write_then_read(struct spi_device *spi,
 #else
     if (!fd)
         throw std::runtime_error("spi_write_then_read(): invalid SPI device");
+    if (soapy_rf_op_timeout_expired()) {
+        if (!soapy_rf_op_timed_out) {
+            SoapySDR::logf(SOAPY_SDR_ERROR,
+                "AD9361 SPI transaction aborted after %u ms RF operation timeout",
+                SOAPY_LITEETH_RF_OP_TIMEOUT_MS);
+        }
+        soapy_rf_op_timed_out = true;
+        return -ETIMEDOUT;
+    }
     void *conn = fd;
 #endif
 
@@ -688,7 +770,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
     default_init_param.id_no = _spi_id;
+#if USE_LITEETH
+    LiteEthRfOpTimeout ad9361_init_timeout("ad9361_init");
+#endif
     int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
+#if USE_LITEETH
+    ad9361_init_timeout.throw_if_timed_out();
+#endif
     if (ad9361_rc != 0 || ad9361_phy == nullptr) {
         throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
     }
@@ -1010,8 +1098,14 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
         return;
 
     _rx_stream.gainMode[channel] = automatic;
+#if USE_LITEETH
+    LiteEthRfOpTimeout timeout("setGainMode");
+#endif
     ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
         (automatic ? _rx_agc_mode : RF_GAIN_MGC));
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 }
 
 bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) const
@@ -1024,7 +1118,13 @@ bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) con
     /* RX */
     if (direction == SOAPY_SDR_RX) {
         uint8_t gc_mode;
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getGainMode");
+#endif
         ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
         return (gc_mode != RF_GAIN_MGC);
     }
 
@@ -1048,9 +1148,21 @@ void SoapyLiteXM2SDR::setGain(
         _tx_stream.gain[channel] = value;
         SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: %.3f dB Attenuation", channel, value);
 
-        int rc = m2sdr_set_tx_att(_dev, value);
-        if (rc != 0) {
-            SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
+        int64_t att = static_cast<int64_t>(value);
+        if (!_txAttHwApplied || _txAttHw != att) {
+#if USE_LITEETH
+            LiteEthRfOpTimeout timeout("setGain(TX)");
+#endif
+            int rc = m2sdr_set_tx_att(_dev, att);
+            if (rc != 0) {
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
+            } else {
+                _txAttHwApplied = true;
+                _txAttHw = att;
+            }
+#if USE_LITEETH
+            timeout.throw_if_timed_out();
+#endif
         }
     }
 
@@ -1058,6 +1170,9 @@ void SoapyLiteXM2SDR::setGain(
     if (SOAPY_SDR_RX == direction) {
         uint8_t gc_mode = RF_GAIN_MGC;
         _rx_stream.gain[channel] = value;
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("setGain(RX)");
+#endif
         ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
         if (gc_mode != RF_GAIN_MGC) {
             ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
@@ -1068,6 +1183,9 @@ void SoapyLiteXM2SDR::setGain(
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
     }
 }
 
@@ -1082,9 +1200,21 @@ void SoapyLiteXM2SDR::setGain(
         if (name == "ATT") {
             _tx_stream.gain[channel] = value;
             SoapySDR::logf(SOAPY_SDR_DEBUG, "TX ch%zu: ATT %.3f dB Attenuation", channel, value);
-            int rc = m2sdr_set_tx_att(_dev, value);
-            if (rc != 0) {
-                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
+            int64_t att = static_cast<int64_t>(value);
+            if (!_txAttHwApplied || _txAttHw != att) {
+#if USE_LITEETH
+                LiteEthRfOpTimeout timeout("setGain(TX)");
+#endif
+                int rc = m2sdr_set_tx_att(_dev, att);
+                if (rc != 0) {
+                    SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_tx_att(TX) failed: %s", m2sdr_strerror(rc));
+                } else {
+                    _txAttHwApplied = true;
+                    _txAttHw = att;
+                }
+#if USE_LITEETH
+                timeout.throw_if_timed_out();
+#endif
             }
             return;
         }
@@ -1094,6 +1224,9 @@ void SoapyLiteXM2SDR::setGain(
     if (name == "PGA" || name == "RF" || name == "GAIN") {
         uint8_t gc_mode = RF_GAIN_MGC;
         _rx_stream.gain[channel] = value;
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("setGain(RX)");
+#endif
         ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
         if (gc_mode != RF_GAIN_MGC) {
             ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
@@ -1104,6 +1237,9 @@ void SoapyLiteXM2SDR::setGain(
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
         return;
     }
 
@@ -1120,13 +1256,25 @@ double SoapyLiteXM2SDR::getGain(
     /* TX */
     if (direction == SOAPY_SDR_TX) {
         uint32_t atten_mdb = 0;
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getGain(TX)");
+#endif
         ad9361_get_tx_attenuation(ad9361_phy, channel, &atten_mdb);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
         gain = (int32_t)(atten_mdb / 1000);
     }
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getGain(RX)");
+#endif
         ad9361_get_rx_rf_gain(ad9361_phy, channel, &gain);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
     }
 
     return static_cast<double>(gain);
@@ -1140,7 +1288,13 @@ double SoapyLiteXM2SDR::getGain(
     /* TX */
     if (direction == SOAPY_SDR_TX) {
         uint32_t atten_mdb = 0;
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getGain(TX)");
+#endif
         ad9361_get_tx_attenuation(ad9361_phy, channel, &atten_mdb);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
         double atten_db = atten_mdb / 1000.0;
         if (name == "ATT")
             return atten_db;
@@ -1238,18 +1392,34 @@ void SoapyLiteXM2SDR::setFrequency(
 
     uint64_t lo_freq = static_cast<uint64_t>(frequency);
 
+#if USE_LITEETH
+    LiteEthRfOpTimeout timeout("setFrequency");
+#endif
     if (direction == SOAPY_SDR_TX) {
+        if (_txFrequencyHwApplied && _txFrequencyHw == lo_freq)
+            return;
         int rc = m2sdr_set_frequency(_dev, M2SDR_TX, lo_freq);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(TX) failed: %s", m2sdr_strerror(rc));
+        } else {
+            _txFrequencyHwApplied = true;
+            _txFrequencyHw = lo_freq;
         }
     }
     if (direction == SOAPY_SDR_RX) {
+        if (_rxFrequencyHwApplied && _rxFrequencyHw == lo_freq)
+            return;
         int rc = m2sdr_set_frequency(_dev, M2SDR_RX, lo_freq);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_frequency(RX) failed: %s", m2sdr_strerror(rc));
+        } else {
+            _rxFrequencyHwApplied = true;
+            _rxFrequencyHw = lo_freq;
         }
     }
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 }
 
 double SoapyLiteXM2SDR::getFrequency(
@@ -1278,11 +1448,25 @@ double SoapyLiteXM2SDR::getFrequency(
 
     uint64_t lo_freq = 0;
 
-    if (direction == SOAPY_SDR_TX)
+    if (direction == SOAPY_SDR_TX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getFrequency(TX)");
+#endif
         ad9361_get_tx_lo_freq(ad9361_phy, &lo_freq);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
 
-    if (direction == SOAPY_SDR_RX)
+    if (direction == SOAPY_SDR_RX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getFrequency(RX)");
+#endif
         ad9361_get_rx_lo_freq(ad9361_phy, &lo_freq);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
 
     return static_cast<double>(lo_freq);
 }
@@ -1321,19 +1505,36 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
 /* listFrequencies now exposes RF and BB; BB currently aliases RF. */
 
 void SoapyLiteXM2SDR::setSampleMode() {
+    uint32_t bit_mode = (_bitMode == 8) ? 8 : 16;
+
     /* 8-bit mode */
     if (_bitMode == 8) {
         _bytesPerSample  = 1;
         _bytesPerComplex = 2;
         _samplesScaling  = 127.0; /* Normalize 8-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, true);
     /* 16-bit mode */
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
         _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
-        m2sdr_set_bitmode(_dev, false);
     }
+
+    if (_bitModeHwApplied && _bitModeHw == bit_mode)
+        return;
+
+#if USE_LITEETH
+    LiteEthRfOpTimeout timeout("setSampleMode");
+#endif
+    int rc = m2sdr_set_bitmode(_dev, bit_mode == 8);
+    if (rc != 0) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_bitmode failed: %s", m2sdr_strerror(rc));
+    } else {
+        _bitModeHwApplied = true;
+        _bitModeHw = bit_mode;
+    }
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 }
 
 void SoapyLiteXM2SDR::setSampleRate(
@@ -1385,6 +1586,34 @@ void SoapyLiteXM2SDR::setSampleRate(
         _rateMult = 2.0;
     }
 
+    int64_t hw_sample_rate = static_cast<int64_t>(sample_rate / _rateMult);
+
+    if (direction == SOAPY_SDR_TX) {
+        _tx_stream.samplerate = rate;
+    }
+    if (direction == SOAPY_SDR_RX) {
+        _rx_stream.samplerate = rate;
+    }
+
+    if (_sampleRateHwApplied &&
+        _sampleRateHw == hw_sample_rate &&
+        _sampleRateHwBitMode == _bitMode &&
+        _sampleRateHwOversampling == _oversampling &&
+        _sampleRateHwFirProfile == _ad9361_fir_profile) {
+        setSampleMode();
+        if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
+            _rx_stream.time0_ns = this->getHardwareTime("");
+            _rx_stream.time0_count = _rx_stream.user_count;
+            _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
+            _rx_stream.last_time_ns = _rx_stream.time0_ns;
+            _rx_stream.time_warned = false;
+        }
+        return;
+    }
+
+#if USE_LITEETH
+    LiteEthRfOpTimeout timeout("setSampleRate");
+#endif
     /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
     double actual_rate = rate / _rateMult;
     if (actual_rate < 1250000.0) {
@@ -1434,24 +1663,32 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 
-    /* Set the sample rate for the TX and configure the hardware accordingly. */
-    if (direction == SOAPY_SDR_TX) {
-        _tx_stream.samplerate = rate;
-    }
-    if (direction == SOAPY_SDR_RX) {
-        _rx_stream.samplerate = rate;
-    }
     {
-        int rc = m2sdr_set_sample_rate(_dev, (int64_t)(sample_rate/_rateMult));
+        int rc = m2sdr_set_sample_rate(_dev, hw_sample_rate);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_sample_rate failed: %s", m2sdr_strerror(rc));
+        } else {
+            _sampleRateHwApplied = true;
+            _sampleRateHw = hw_sample_rate;
+            _sampleRateHwBitMode = _bitMode;
+            _sampleRateHwOversampling = _oversampling;
+            _sampleRateHwFirProfile = _ad9361_fir_profile;
         }
     }
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 
     /* If oversampling is enabled, enable oversampling on the hardware. */
     if (_oversampling) {
         ad9361_enable_oversampling(ad9361_phy);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
     }
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
@@ -1473,10 +1710,24 @@ double SoapyLiteXM2SDR::getSampleRate(
 
     uint32_t sample_rate = 0;
 
-    if (direction == SOAPY_SDR_TX)
+    if (direction == SOAPY_SDR_TX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getSampleRate(TX)");
+#endif
         ad9361_get_tx_sampling_freq(ad9361_phy, &sample_rate);
-    if (direction == SOAPY_SDR_RX)
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
+    if (direction == SOAPY_SDR_RX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getSampleRate(RX)");
+#endif
         ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
 
     return static_cast<double>(_rateMult*sample_rate);
 }
@@ -1548,10 +1799,22 @@ void SoapyLiteXM2SDR::setBandwidth(
     if (direction == SOAPY_SDR_RX)
         _rx_stream.bandwidth = bw;
 
+    if (_bandwidthHwApplied && _bandwidthHw == bwi)
+        return;
+
+#if USE_LITEETH
+    LiteEthRfOpTimeout timeout("setBandwidth");
+#endif
     int rc = m2sdr_set_bandwidth(_dev, bwi);
     if (rc != 0) {
         SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_bandwidth failed: %s", m2sdr_strerror(rc));
+    } else {
+        _bandwidthHwApplied = true;
+        _bandwidthHw = bwi;
     }
+#if USE_LITEETH
+    timeout.throw_if_timed_out();
+#endif
 }
 
 double SoapyLiteXM2SDR::getBandwidth(
@@ -1560,10 +1823,24 @@ double SoapyLiteXM2SDR::getBandwidth(
 
     uint32_t bw = 0;
 
-    if (direction == SOAPY_SDR_TX)
+    if (direction == SOAPY_SDR_TX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getBandwidth(TX)");
+#endif
         ad9361_get_tx_rf_bandwidth(ad9361_phy, &bw);
-    if (direction == SOAPY_SDR_RX)
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
+    if (direction == SOAPY_SDR_RX) {
+#if USE_LITEETH
+        LiteEthRfOpTimeout timeout("getBandwidth(RX)");
+#endif
         ad9361_get_rx_rf_bandwidth(ad9361_phy, &bw);
+#if USE_LITEETH
+        timeout.throw_if_timed_out();
+#endif
+    }
 
     return static_cast<double>(bw);
 }
