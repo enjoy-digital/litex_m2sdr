@@ -486,6 +486,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
             (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
         if (tx_enable)
             (void)liteeth_udp_set_so_sndbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
+        if (rx_enable)
+            (void)liteeth_udp_set_rx_source_filter(&dev->udp, dev->eth_ip, 0);
         dev->udp_inited = 1;
     }
 

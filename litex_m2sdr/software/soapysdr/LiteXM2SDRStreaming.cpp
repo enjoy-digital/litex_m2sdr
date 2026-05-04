@@ -86,6 +86,18 @@ static inline uint64_t read_be64(const uint8_t *p)
            (static_cast<uint64_t>(read_be32(p + 4)) <<  0);
 }
 
+static void log_liteeth_socket_buffer(const char *name, int requested, int actual)
+{
+    SoapySDR::logf(SOAPY_SDR_INFO,
+        "LiteEth UDP %s: requested=%d actual=%d",
+        name, requested, actual);
+    if (requested > 0 && actual > 0 && actual < requested) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "LiteEth UDP %s capped by Linux; increase net.core.%s_max for more headroom",
+            name, std::strcmp(name, "SO_RCVBUF") == 0 ? "rmem" : "wmem");
+    }
+}
+
 struct m2sdr_liteeth_rx_stream_config SoapyLiteXM2SDR::makeLiteEthRxStreamConfig() const
 {
     struct m2sdr_liteeth_rx_stream_config config;
@@ -226,15 +238,16 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                              /*nonblock*/    0) < 0) {
             throw std::runtime_error("UDP init failed.");
         }
+        if (liteeth_udp_set_rx_source_filter(&_udp, _eth_ip.c_str(), 0) != 0) {
+            throw std::runtime_error("LiteEth UDP RX source filter setup failed.");
+        }
         if (rcvbuf_bytes > 0 && liteeth_udp_set_so_rcvbuf(&_udp, rcvbuf_bytes) != 0) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "Failed to set LiteEth UDP SO_RCVBUF to %d bytes", rcvbuf_bytes);
         }
         int actual_rcvbuf_bytes = 0;
         if (liteeth_udp_get_so_rcvbuf(&_udp, &actual_rcvbuf_bytes) == 0) {
-            SoapySDR::logf(SOAPY_SDR_INFO,
-                "LiteEth UDP SO_RCVBUF: requested=%d actual=%d",
-                rcvbuf_bytes, actual_rcvbuf_bytes);
+            log_liteeth_socket_buffer("SO_RCVBUF", rcvbuf_bytes, actual_rcvbuf_bytes);
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth %s init: remote=%s:%u",
@@ -381,15 +394,16 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                              /*nonblock*/    0) < 0) {
             throw std::runtime_error("UDP init failed.");
         }
+        if (liteeth_udp_set_rx_source_filter(&_udp, _eth_ip.c_str(), 0) != 0) {
+            throw std::runtime_error("LiteEth UDP RX source filter setup failed.");
+        }
         if (sndbuf_bytes > 0 && liteeth_udp_set_so_sndbuf(&_udp, sndbuf_bytes) != 0) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "Failed to set LiteEth UDP SO_SNDBUF to %d bytes", sndbuf_bytes);
         }
         int actual_sndbuf_bytes = 0;
         if (liteeth_udp_get_so_sndbuf(&_udp, &actual_sndbuf_bytes) == 0) {
-            SoapySDR::logf(SOAPY_SDR_INFO,
-                "LiteEth UDP SO_SNDBUF: requested=%d actual=%d",
-                sndbuf_bytes, actual_sndbuf_bytes);
+            log_liteeth_socket_buffer("SO_SNDBUF", sndbuf_bytes, actual_sndbuf_bytes);
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);

@@ -228,12 +228,15 @@ static void print_liteeth_udp_summary(struct m2sdr_dev *dev, uint8_t quiet)
 
     fprintf(stderr,
             "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
-            " rx_ring_full=%" PRIu64 " rx_flushes=%" PRIu64
+            " rx_source_drops=%" PRIu64 " rx_ring_full=%" PRIu64
+            " rx_flushes=%" PRIu64 " rx_recoveries=%" PRIu64
             " rx_recv_errors=%" PRIu64 "\n",
             stats.rx_buffers,
             stats.rx_kernel_drops,
+            stats.rx_source_drops,
             stats.rx_ring_full_events,
             stats.rx_flushes,
+            stats.rx_timeout_recoveries,
             stats.rx_recv_errors);
     if (stats.so_rcvbuf_requested > 0) {
         fprintf(stderr,

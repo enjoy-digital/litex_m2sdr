@@ -409,6 +409,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
     SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
+    std::string _eth_ip;
     uint16_t _liteeth_rx_port = 2345;
     struct m2sdr_liteeth_rx_stream_config makeLiteEthRxStreamConfig() const;
 #endif

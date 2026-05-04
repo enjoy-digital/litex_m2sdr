@@ -66,6 +66,27 @@ static int refresh_socket_buffer(struct liteeth_udp_ctrl *u, int optname, int *d
     return 0;
 }
 
+static int rx_source_allowed(const struct liteeth_udp_ctrl *u,
+                             const struct sockaddr_storage *src,
+                             socklen_t src_len)
+{
+    const struct sockaddr_in *sin;
+
+    if (!u || !u->rx_source_filter_enable)
+        return 1;
+    if (!src || src->ss_family != AF_INET || src_len < sizeof(*sin))
+        return 0;
+
+    sin = (const struct sockaddr_in *)src;
+    if (sin->sin_addr.s_addr != u->rx_source.sin_addr.s_addr)
+        return 0;
+    if (u->rx_source_port_filter_enable &&
+        sin->sin_port != u->rx_source.sin_port)
+        return 0;
+
+    return 1;
+}
+
 static int64_t get_time_ms(void)
 {
     struct timespec ts;
@@ -75,44 +96,60 @@ static int64_t get_time_ms(void)
 
 static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t len)
 {
+    for (;;) {
+        struct sockaddr_storage src_addr;
+        socklen_t src_len = sizeof(src_addr);
 #ifdef SO_RXQ_OVFL
-    char cmsgbuf[CMSG_SPACE(sizeof(uint32_t))];
-    struct iovec iov;
-    struct msghdr msg;
-    ssize_t nb;
+        char cmsgbuf[CMSG_SPACE(sizeof(uint32_t))];
+        struct iovec iov;
+        struct msghdr msg;
+        ssize_t nb;
 
-    memset(&iov, 0, sizeof(iov));
-    memset(&msg, 0, sizeof(msg));
-    memset(cmsgbuf, 0, sizeof(cmsgbuf));
+        memset(&src_addr, 0, sizeof(src_addr));
+        memset(&iov, 0, sizeof(iov));
+        memset(&msg, 0, sizeof(msg));
+        memset(cmsgbuf, 0, sizeof(cmsgbuf));
 
-    iov.iov_base = dst;
-    iov.iov_len = len;
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = cmsgbuf;
-    msg.msg_controllen = sizeof(cmsgbuf);
+        iov.iov_base = dst;
+        iov.iov_len = len;
+        msg.msg_name = &src_addr;
+        msg.msg_namelen = src_len;
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = cmsgbuf;
+        msg.msg_controllen = sizeof(cmsgbuf);
 
-    nb = recvmsg(u->sock, &msg, MSG_DONTWAIT);
-    if (nb >= 0) {
-        struct cmsghdr *cmsg;
-        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-            if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_RXQ_OVFL) {
-                uint32_t dropped = 0;
-                memcpy(&dropped, CMSG_DATA(cmsg), sizeof(dropped));
-                if (u->rxq_ovfl_valid) {
-                    u->rx_kernel_drops += (uint32_t)(dropped - u->rxq_ovfl_last);
-                } else {
-                    u->rx_kernel_drops += dropped;
-                    u->rxq_ovfl_valid = 1;
+        nb = recvmsg(u->sock, &msg, MSG_DONTWAIT);
+        src_len = msg.msg_namelen;
+        if (nb >= 0) {
+            struct cmsghdr *cmsg;
+            for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+                if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_RXQ_OVFL) {
+                    uint32_t dropped = 0;
+                    memcpy(&dropped, CMSG_DATA(cmsg), sizeof(dropped));
+                    if (u->rxq_ovfl_valid) {
+                        u->rx_kernel_drops += (uint32_t)(dropped - u->rxq_ovfl_last);
+                    } else {
+                        u->rx_kernel_drops += dropped;
+                        u->rxq_ovfl_valid = 1;
+                    }
+                    u->rxq_ovfl_last = dropped;
                 }
-                u->rxq_ovfl_last = dropped;
             }
         }
-    }
-    return nb;
 #else
-    return recvfrom(u->sock, dst, len, MSG_DONTWAIT, NULL, NULL);
+        ssize_t nb;
+
+        memset(&src_addr, 0, sizeof(src_addr));
+        nb = recvfrom(u->sock, dst, len, MSG_DONTWAIT,
+                      (struct sockaddr *)&src_addr, &src_len);
 #endif
+        if (nb >= 0 && !rx_source_allowed(u, &src_addr, src_len)) {
+            u->rx_source_drops++;
+            continue;
+        }
+        return nb;
+    }
 }
 
 /* Public API */
@@ -394,6 +431,30 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
     u->tx_buffers++;
 
     /* keep ring flowing; writer reuses slots indefinitely */
+    return 0;
+}
+
+int liteeth_udp_set_rx_source_filter(struct liteeth_udp_ctrl *u,
+                                     const char *ip,
+                                     uint16_t port)
+{
+    if (!u)
+        return -1;
+    if (!ip || !*ip) {
+        memset(&u->rx_source, 0, sizeof(u->rx_source));
+        u->rx_source_filter_enable = 0;
+        u->rx_source_port_filter_enable = 0;
+        return 0;
+    }
+
+    memset(&u->rx_source, 0, sizeof(u->rx_source));
+    u->rx_source.sin_family = AF_INET;
+    u->rx_source.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &u->rx_source.sin_addr) != 1)
+        return -1;
+
+    u->rx_source_filter_enable = 1;
+    u->rx_source_port_filter_enable = port ? 1 : 0;
     return 0;
 }
 

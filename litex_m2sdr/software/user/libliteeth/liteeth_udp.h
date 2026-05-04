@@ -40,6 +40,9 @@ struct liteeth_udp_ctrl {
     struct pollfd pfd;
     struct sockaddr_in remote;   /* TX destination */
     int           have_remote;
+    struct sockaddr_in rx_source;
+    int           rx_source_filter_enable;
+    int           rx_source_port_filter_enable;
 
     /* RX ring */
     uint8_t      *buf_rd;
@@ -96,6 +99,10 @@ void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u);
 uint8_t *liteeth_udp_next_read_buffer (struct liteeth_udp_ctrl *u);
 uint8_t *liteeth_udp_next_write_buffer(struct liteeth_udp_ctrl *u);
 int      liteeth_udp_write_submit     (struct liteeth_udp_ctrl *u);
+
+int liteeth_udp_set_rx_source_filter(struct liteeth_udp_ctrl *u,
+                                     const char *ip,
+                                     uint16_t port);
 
 static inline int    liteeth_udp_buffers_available_read (struct liteeth_udp_ctrl *u){ return u->buffers_available_read;  }
 static inline int    liteeth_udp_buffers_available_write(struct liteeth_udp_ctrl *u){ return u->buffers_available_write; }
