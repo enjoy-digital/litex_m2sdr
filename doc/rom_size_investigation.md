@@ -49,3 +49,45 @@ Result on hardware:
 Timing note:
 
 - This local default-directive build completed bitstream generation but did not meet timing: final WNS was `-1.590 ns`, WHS was `+0.063 ns`.
+
+## ROM Readback Probes
+
+The generated ROM initialization files for both sizes start with the same BIOS words:
+
+```text
+0b00006f
+00000013
+00000013
+00000013
+```
+
+The expected first 32-bit word on the Wishbone bus is therefore `0x0b00006f`.
+
+`0x8000` result:
+
+- `ctrl_scratch` read back `0x12345678`.
+- Reading `0x00000000..0x0000003f` over Etherbone returned the expected BIOS words:
+  `0x0b00006f`, `0x00000013`, ..., `0xfe112e23`, ...
+- A subsequent `ctrl_scratch` read still returned `0x12345678`, so the ROM read did not disturb Etherbone access.
+
+`0x10000` result:
+
+- `ctrl_scratch` read back `0x12345678` before the ROM access.
+- A single-word read at `0x00000000` returned `0x00000000` instead of `0x0b00006f` and caused `litex_server` to report a UDP read timeout.
+- After that ROM access, subsequent CSR reads returned `0x00000000` and caused additional UDP read timeouts until the FPGA was reloaded.
+- Repeating the test with the CPU held in reset through `ctrl_reset=0x00000002` did not change the result: reading `0x00000000` still returned `0x00000000` and timed out the Etherbone path.
+
+Interpretation:
+
+- The ROM initialization data generated for the larger image appears correct.
+- The failing behavior is visible from an external Etherbone bus master, not only from the VexRiscv instruction path.
+- Since the failure persists while the CPU reset bit is held, it is less likely to be only the CPU monopolizing the ROM slave after a bad fetch.
+- The generated RTL for the ROM is structurally the same except for depth/address width: `8192` words with `basesoc_basesoc_adr[12:0]` versus `16384` words with `basesoc_basesoc_adr[13:0]`; the acknowledge logic remains the same.
+
+Useful next checks:
+
+- Sweep sizes just above the boundary, such as `0x9000`, `0xc000`, and `0x10000`, to see whether the issue is tied to inferred BRAM depth, power-of-two decode size, or a specific implementation layout.
+- Add a short LiteScope capture on the ROM Wishbone port and CPU instruction bus: `cyc`, `stb`, `ack`, `adr`, and `dat_r` immediately after reset.
+- Try a deliberately banked ROM implementation made from two 32 KiB memories selected by address bit 13. If that boots, the issue is probably in the single `16384x32` inferred memory implementation or its physical placement/timing.
+- Try adding one explicit extra read latency cycle to the integrated ROM path. The larger BRAM tree may be returning invalid data when acknowledged with the current one-cycle SRAM wrapper.
+- Build a reduced SoC with only CPU, integrated ROM/SRAM, crossover UART, and Etherbone to remove unrelated placement pressure before debugging the full design.
