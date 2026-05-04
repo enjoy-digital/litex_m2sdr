@@ -1485,7 +1485,6 @@ std::vector<std::string> SoapyLiteXM2SDR::listFrequencies(
     const size_t /*channel*/) const {
     std::vector<std::string> opts;
     opts.push_back("RF");
-    opts.push_back("BB");
     return opts;
 }
 
@@ -1507,11 +1506,18 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getFrequencyRange(
     return(SoapySDR::RangeList(1, SoapySDR::Range(0, 0)));
 }
 
+SoapySDR::ArgInfoList SoapyLiteXM2SDR::getFrequencyArgsInfo(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
+    /* No baseband NCO is exposed by the current FPGA path, so do not advertise
+     * Soapy's OFFSET/BB compensation knobs. Applications should tune the RF LO
+     * directly to the requested center frequency. */
+    return {};
+}
+
 /***************************************************************************************************
  *                                        Sample Rate API
  **************************************************************************************************/
-
-/* listFrequencies now exposes RF and BB; BB currently aliases RF. */
 
 void SoapyLiteXM2SDR::setSampleMode() {
     uint32_t bit_mode = (_bitMode == 8) ? 8 : 16;

@@ -193,7 +193,16 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                  : ((searchArgs.count("udp_buf_complex")
                                       ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
                                       : 4096) * _bytesPerComplex * selected_channels.size());
-        const size_t buf_count = 2;
+        const size_t buf_count = searchArgs.count("udp_buf_count")
+                                 ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_count")))
+                                 : (_deviceArgs.count("udp_buf_count")
+                                    ? static_cast<size_t>(std::stoul(_deviceArgs.at("udp_buf_count")))
+                                    : 64);
+        const int rcvbuf_bytes = searchArgs.count("udp_rcvbuf")
+                                 ? static_cast<int>(std::stoul(searchArgs.at("udp_rcvbuf")))
+                                 : (_deviceArgs.count("udp_rcvbuf")
+                                    ? static_cast<int>(std::stoul(_deviceArgs.at("udp_rcvbuf")))
+                                    : 8 * 1024 * 1024);
 
         if (!is_vrt) {
 #ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
@@ -212,6 +221,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                              /*buffer_count*/buf_count,
                              /*nonblock*/    0) < 0) {
             throw std::runtime_error("UDP init failed.");
+        }
+        if (rcvbuf_bytes > 0 && liteeth_udp_set_so_rcvbuf(&_udp, rcvbuf_bytes) != 0) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Failed to set LiteEth UDP SO_RCVBUF to %d bytes", rcvbuf_bytes);
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth %s init: remote=%s:%u",
@@ -330,7 +343,16 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         const size_t chs       = selected_channels.size();
         const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
-        const size_t buf_count = 2;
+        const size_t buf_count = searchArgs.count("udp_buf_count")
+                                 ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_count")))
+                                 : (_deviceArgs.count("udp_buf_count")
+                                    ? static_cast<size_t>(std::stoul(_deviceArgs.at("udp_buf_count")))
+                                    : 64);
+        const int sndbuf_bytes = searchArgs.count("udp_sndbuf")
+                                 ? static_cast<int>(std::stoul(searchArgs.at("udp_sndbuf")))
+                                 : (_deviceArgs.count("udp_sndbuf")
+                                    ? static_cast<int>(std::stoul(_deviceArgs.at("udp_sndbuf")))
+                                    : 8 * 1024 * 1024);
 
         if (liteeth_udp_init(&_udp,
                              /*listen_ip*/  nullptr, /*listen_port*/  port,
@@ -340,6 +362,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                              /*buffer_count*/buf_count,
                              /*nonblock*/    0) < 0) {
             throw std::runtime_error("UDP init failed.");
+        }
+        if (sndbuf_bytes > 0 && liteeth_udp_set_so_sndbuf(&_udp, sndbuf_bytes) != 0) {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Failed to set LiteEth UDP SO_SNDBUF to %d bytes", sndbuf_bytes);
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);

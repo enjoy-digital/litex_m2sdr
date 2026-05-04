@@ -320,6 +320,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const size_t,
         const std::string &) const override;
 
+    SoapySDR::ArgInfoList getFrequencyArgsInfo(
+        const int direction,
+        const size_t channel) const override;
+
     std::map<int, std::map<size_t, std::map<std::string, double>>> _cachedFreqValues;
 
     /***********************************************************************************************

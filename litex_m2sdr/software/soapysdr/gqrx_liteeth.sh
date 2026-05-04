@@ -6,9 +6,15 @@ SOFTWARE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${LITEX_M2SDR_SOAPY_BUILD:-/tmp/litex_m2sdr_soapy_liteeth}"
 CONFIG_FILE="${LITEX_M2SDR_GQRX_CONFIG:-/tmp/gqrx_litex_m2sdr_liteeth.conf}"
 ETH_IP="${LITEX_M2SDR_ETH_IP:-192.168.1.50}"
-SAMPLE_RATE="${LITEX_M2SDR_SAMPLE_RATE:-10000000}"
-BANDWIDTH="${LITEX_M2SDR_BANDWIDTH:-10000000}"
-FREQUENCY="${LITEX_M2SDR_FREQUENCY:-2400000000}"
+SAMPLE_RATE="${LITEX_M2SDR_SAMPLE_RATE:-2000000}"
+BANDWIDTH="${LITEX_M2SDR_BANDWIDTH:-1500000}"
+FREQUENCY="${LITEX_M2SDR_FREQUENCY:-100000000}"
+DEMOD="${LITEX_M2SDR_GQRX_DEMOD:-WFM (mono)}"
+FILTER_HIGH="${LITEX_M2SDR_GQRX_FILTER_HIGH:-80000}"
+FILTER_LOW="${LITEX_M2SDR_GQRX_FILTER_LOW:--80000}"
+OFFSET="${LITEX_M2SDR_GQRX_OFFSET:-0}"
+UDP_BUF_COUNT="${LITEX_M2SDR_UDP_BUF_COUNT:-128}"
+UDP_RCVBUF="${LITEX_M2SDR_UDP_RCVBUF:-16777216}"
 
 cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DUSE_LITEETH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build "$BUILD_DIR" -j"$(nproc)"
@@ -33,15 +39,15 @@ waterfall_min_db=-140
 
 [input]
 bandwidth=$BANDWIDTH
-device="soapy=0,driver=LiteXM2SDR,eth_ip=$ETH_IP,channels={0}"
+device="soapy=0,driver=LiteXM2SDR,eth_ip=$ETH_IP,channels={0},udp_buf_count=$UDP_BUF_COUNT,udp_rcvbuf=$UDP_RCVBUF"
 frequency=$FREQUENCY
 sample_rate=$SAMPLE_RATE
 
 [receiver]
-demod=AM
-filter_high_cut=5000
-filter_low_cut=-5000
-offset=0
+demod=$DEMOD
+filter_high_cut=$FILTER_HIGH
+filter_low_cut=$FILTER_LOW
+offset=$OFFSET
 
 [remote_control]
 allowed_hosts=127.0.0.1
