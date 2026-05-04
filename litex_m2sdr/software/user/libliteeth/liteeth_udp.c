@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -52,6 +53,13 @@ static void *alloc_aligned(size_t size)
     void *p = NULL;
     if (posix_memalign(&p, 64, size) != 0) return NULL;
     return p;
+}
+
+static int64_t get_time_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 /* Public API */
@@ -168,13 +176,17 @@ static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
     while (u->rx_assembling_bytes < u->buf_size) {
         ssize_t nb = recvfrom(u->sock, dst,
                               u->buf_size - u->rx_assembling_bytes,
-                              0, NULL, NULL);
+                              MSG_DONTWAIT, NULL, NULL);
         if (nb < 0) {
+            if (errno == EINTR)
+                continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return 0; /* try later */
             perror("liteeth_udp: recvfrom");
             return -1;
         }
+        if (nb == 0)
+            return 0;
         u->rx_assembling_bytes += (size_t)nb;
         dst += nb;
     }
@@ -186,26 +198,71 @@ static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms)
 {
     if (!u) return;
+    if (!u->rx_enable) return;
 
-    int ret = poll(&u->pfd, 1, timeout_ms);
-    if (ret < 0) {
-        perror("liteeth_udp: poll");
-        return;
-    } else if (ret == 0) {
-        /* timeout */
-        return;
-    }
+    int produced = 0;
+    const int wait_forever = timeout_ms < 0;
+    const int64_t deadline = wait_forever ? 0 : get_time_ms() + timeout_ms;
 
-    if (u->rx_enable && (u->pfd.revents & POLLIN)) {
-        while (u->buffers_available_read < (int)u->buf_count) {
-            size_t slot = (u->writer_sw_count + u->buffers_available_read) % u->buf_count;
-            int f = rx_fill_slot(u, slot);
-            if (f <= 0) break; /* 0: not enough yet, -1: error already reported */
+    while (u->buffers_available_read < (int)u->buf_count) {
+        size_t slot = (u->writer_sw_count + u->buffers_available_read) % u->buf_count;
+        int f = rx_fill_slot(u, slot);
+        if (f < 0)
+            return;
+        if (f > 0) {
             u->buffers_available_read++;
+            produced = 1;
+            continue;
         }
+
+        if (produced || timeout_ms == 0)
+            return;
+
+        int remaining_ms = -1;
+        if (!wait_forever) {
+            int64_t now = get_time_ms();
+            if (now >= deadline)
+                return;
+            remaining_ms = (int)(deadline - now);
+        }
+
+        int ret = poll(&u->pfd, 1, remaining_ms);
+        if (ret < 0) {
+            if (errno == EINTR)
+                continue;
+            perror("liteeth_udp: poll");
+            return;
+        } else if (ret == 0) {
+            return;
+        }
+
+        if (u->pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+            return;
+        if (!(u->pfd.revents & POLLIN))
+            return;
     }
 
     /* TX: user-driven via liteeth_udp_next_write_buffer + liteeth_udp_write_submit() */
+}
+
+void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u)
+{
+    uint8_t tmp[2048];
+
+    if (!u || !u->rx_enable)
+        return;
+
+    u->writer_hw_count = 0;
+    u->writer_sw_count = 0;
+    u->buffers_available_read = 0;
+    u->usr_read_buf_offset = 0;
+    u->rx_assembling_bytes = 0;
+
+    if (u->sock < 0)
+        return;
+
+    while (recvfrom(u->sock, tmp, sizeof(tmp), MSG_DONTWAIT, NULL, NULL) > 0)
+        ;
 }
 
 uint8_t *liteeth_udp_next_read_buffer(struct liteeth_udp_ctrl *u)

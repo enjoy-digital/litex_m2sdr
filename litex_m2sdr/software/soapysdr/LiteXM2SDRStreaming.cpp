@@ -508,6 +508,11 @@ int SoapyLiteXM2SDR::activateStream(
         /* Configure the DMA engine for RX, but don't enable it yet. */
         litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
+        if (_udp_inited)
+            liteeth_udp_flush_rx(&_udp);
+        _rx_stream.remainderHandle = -1;
+        _rx_stream.remainderSamps = 0;
+        _rx_stream.remainderOffset = 0;
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
 #ifdef CSR_ETH_RX_MODE_ADDR
@@ -705,6 +710,13 @@ static inline long long samples_to_ns(double sample_rate, long long samples)
     return static_cast<long long>(std::llround(ns));
 }
 
+static inline int timeout_us_to_ms(long timeout_us)
+{
+    if (timeout_us <= 0)
+        return 0;
+    return static_cast<int>((timeout_us + 999) / 1000);
+}
+
 /* Acquire a buffer for reading. */
 int SoapyLiteXM2SDR::acquireReadBuffer(
     SoapySDR::Stream *stream,
@@ -722,7 +734,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
 #if USE_LITEETH
     /* Pump UDP helper once with caller timeout (ms). */
-    liteeth_udp_process(&_udp, static_cast<int>(timeoutUs / 1000));
+    liteeth_udp_process(&_udp, timeout_us_to_ms(timeoutUs));
 
     int avail = liteeth_udp_buffers_available_read(&_udp);
     if (avail <= 0) {

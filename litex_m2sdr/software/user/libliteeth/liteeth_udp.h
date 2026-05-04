@@ -73,6 +73,7 @@ int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u);
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms);
+void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u);
 
 uint8_t *liteeth_udp_next_read_buffer (struct liteeth_udp_ctrl *u);
 uint8_t *liteeth_udp_next_write_buffer(struct liteeth_udp_ctrl *u);
