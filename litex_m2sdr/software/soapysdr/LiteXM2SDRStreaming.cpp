@@ -203,15 +203,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                  : (_deviceArgs.count("udp_rcvbuf")
                                     ? static_cast<int>(std::stoul(_deviceArgs.at("udp_rcvbuf")))
                                     : 8 * 1024 * 1024);
-
-        if (!is_vrt) {
-#ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
-            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, port);
-#endif
-#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
-            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
-#endif
-        }
+        _liteeth_rx_port = port;
 
         if (liteeth_udp_init(&_udp,
                              /*listen_ip*/  nullptr, /*listen_port*/  port,
@@ -513,6 +505,14 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.remainderHandle = -1;
         _rx_stream.remainderSamps = 0;
         _rx_stream.remainderOffset = 0;
+        if (_eth_mode == SoapyLiteXM2SDREthernetMode::UDP) {
+#ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
+            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, _liteeth_rx_port);
+#endif
+#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
+            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
+#endif
+        }
         /* Crossbar Demux: Select Ethernet streaming */
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
 #ifdef CSR_ETH_RX_MODE_ADDR
