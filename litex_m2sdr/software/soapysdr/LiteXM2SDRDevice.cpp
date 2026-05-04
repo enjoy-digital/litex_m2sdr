@@ -1992,6 +1992,9 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("liteeth_udp_rcvbuf_actual");
     sensors.push_back("liteeth_udp_sndbuf_requested");
     sensors.push_back("liteeth_udp_sndbuf_actual");
+    sensors.push_back("liteeth_vrt_packets");
+    sensors.push_back("liteeth_vrt_sequence_gaps");
+    sensors.push_back("liteeth_vrt_packets_lost");
 #endif
     return sensors;
 }
@@ -2134,6 +2137,12 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.description = "Requested LiteEth UDP SO_SNDBUF size in bytes";
             } else if (sensorStr == "udp_sndbuf_actual") {
                 info.description = "Actual Linux LiteEth UDP SO_SNDBUF size in bytes";
+            } else if (sensorStr == "vrt_packets") {
+                info.description = "LiteEth VRT RX packets accepted by the Soapy parser";
+            } else if (sensorStr == "vrt_sequence_gaps") {
+                info.description = "LiteEth VRT RX packet-count discontinuities";
+            } else if (sensorStr == "vrt_packets_lost") {
+                info.description = "Modulo-16 LiteEth VRT RX packets skipped across sequence gaps";
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
@@ -2248,6 +2257,12 @@ std::string SoapyLiteXM2SDR::readSensor(
                 int value = 0;
                 (void)liteeth_udp_get_so_sndbuf(const_cast<struct liteeth_udp_ctrl *>(&_udp), &value);
                 sensorValue = std::to_string(value);
+            } else if (sensorStr == "vrt_packets") {
+                sensorValue = std::to_string(_rx_stream.vrt_packets);
+            } else if (sensorStr == "vrt_sequence_gaps") {
+                sensorValue = std::to_string(_rx_stream.vrt_sequence_gaps);
+            } else if (sensorStr == "vrt_packets_lost") {
+                sensorValue = std::to_string(_rx_stream.vrt_packets_lost);
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }

@@ -454,6 +454,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long remainderTimeNs = 0;
         long long last_time_ns = 0;
         bool time_warned = false;
+        bool vrt_sequence_valid = false;
+        uint8_t vrt_sequence_last = 0;
+        uint64_t vrt_packets = 0;
+        uint64_t vrt_sequence_gaps = 0;
+        uint64_t vrt_packets_lost = 0;
     };
 
     struct TXStream: Stream {

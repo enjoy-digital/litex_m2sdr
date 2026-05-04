@@ -517,6 +517,7 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.remainderHandle = -1;
         _rx_stream.remainderSamps = 0;
         _rx_stream.remainderOffset = 0;
+        _rx_stream.vrt_sequence_valid = false;
         if (_eth_mode == SoapyLiteXM2SDREthernetMode::UDP) {
 #ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
             litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, _liteeth_rx_port);
@@ -764,6 +765,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         }
         const uint32_t common = read_be32(src + 0);
         const uint32_t packet_type = (common >> 28) & 0xF;
+        const uint32_t packet_count = (common >> 16) & 0xF;
         const uint32_t packet_words = (common & 0xFFFF);
         if (packet_type != 0x1 || packet_words < 5) {
             SoapySDR_logf(SOAPY_SDR_WARNING, "Invalid/unsupported VRT RX packet (type=%u words=%u)",
@@ -784,6 +786,25 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
             timeNs = static_cast<long long>(tsi * 1000000000ULL + (tsf / 1000ULL));
             flags |= SOAPY_SDR_HAS_TIME;
         }
+
+        if (_rx_stream.vrt_sequence_valid) {
+            const uint8_t expected =
+                static_cast<uint8_t>((_rx_stream.vrt_sequence_last + 1) & 0xF);
+            if (packet_count != expected) {
+                const uint8_t lost =
+                    static_cast<uint8_t>((packet_count - expected) & 0xF);
+                if (_rx_stream.vrt_sequence_gaps < 8) {
+                    SoapySDR_logf(SOAPY_SDR_WARNING,
+                        "LiteEth VRT RX packet sequence gap: expected=%u got=%u lost_mod16=%u",
+                        expected, packet_count, lost);
+                }
+                _rx_stream.vrt_sequence_gaps++;
+                _rx_stream.vrt_packets_lost += lost;
+            }
+        }
+        _rx_stream.vrt_sequence_last = static_cast<uint8_t>(packet_count);
+        _rx_stream.vrt_sequence_valid = true;
+        _rx_stream.vrt_packets++;
 
         std::memcpy(_rx_stream.buf, src + VRT_SIGNAL_HEADER_BYTES, payload_bytes);
         buffs[0] = _rx_stream.buf;
