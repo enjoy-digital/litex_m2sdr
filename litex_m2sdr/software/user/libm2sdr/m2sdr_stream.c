@@ -511,25 +511,20 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
     if (!dev->udp_inited) {
-        int rx_enable = 1;
-        int tx_enable = 1;
         /* The UDP helper owns the packet ring. libm2sdr maps one UDP payload
          * to one public sync buffer. */
         if (liteeth_udp_init(&dev->udp,
                              NULL, listen_port,
                              dev->eth_ip, dev->eth_port,
-                             rx_enable, tx_enable,
+                             1, 1,
                              buffer_size * m2sdr_sample_size(format),
                              num_buffers ? num_buffers : 0,
                              0) < 0) {
             return M2SDR_ERR_IO;
         }
-        if (rx_enable)
-            (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
-        if (tx_enable)
-            (void)liteeth_udp_set_so_sndbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
-        if (rx_enable)
-            (void)liteeth_udp_set_rx_source_filter(&dev->udp, dev->eth_ip, 0);
+        (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
+        (void)liteeth_udp_set_so_sndbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
+        (void)liteeth_udp_set_rx_source_filter(&dev->udp, dev->eth_ip, 0);
         dev->udp_inited = 1;
     }
 
@@ -711,7 +706,7 @@ static int m2sdr_liteeth_wait_rx_buffer(struct m2sdr_dev *dev,
         return rc;
 
     unsigned retry_ms = timeout_ms;
-    if (retry_ms == 0 || retry_ms > M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS)
+    if (retry_ms > M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS)
         retry_ms = M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS;
 
     liteeth_udp_process(&dev->udp, retry_ms);
