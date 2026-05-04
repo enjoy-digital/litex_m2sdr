@@ -139,10 +139,46 @@ python3 -m litescope.software.litescope_cli \
 
 Then issue a single external ROM read through the normal LiteX remote path. The key first check in the waveform is whether the Etherbone Wishbone read reaches `rom.bus`, whether `rom.bus.ack` pulses, and whether `rom.bus.dat_r` contains `0x0b00006f` at address zero.
 
+### Probe Hardware Test
+
+A `0x10000` ROM probe build was generated and loaded with:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --with-rom-bus-probe --rom-bus-probe-depth=512 --build
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --with-rom-bus-probe --rom-bus-probe-depth=512 --load
+```
+
+The generated analyzer remained below the practical LiteScope width limit: `data_width=114`, `depth=512`.
+The probe build completed bitstream generation, but did not meet timing: post-route WNS was `-1.593 ns`, so the hardware traces are diagnostic rather than a timing-clean proof.
+
+Hardware result:
+
+- The bitstream loaded successfully over FT4232.
+- `ctrl_scratch` read back `0x12345678`, confirming that Etherbone CSR access was alive after load.
+- The crossover UART stayed silent: no BIOS banner and no response to `help`.
+- With the CPU reset bit asserted through `ctrl_reset=0x00000002`, an external Etherbone read from `0x00000000` returned `0x00000000` instead of `0x0b00006f`.
+- That external ROM read caused `litex_server` UDP read timeouts; after the read, `ctrl_scratch` also read back `0x00000000` until the FPGA was reloaded.
+- A LiteScope capture was armed on the Etherbone ROM-access trigger, but the same external ROM read broke the remote path before the completed capture could be drained back over CSR.
+
+A second capture was taken around CPU reset release, without doing an external ROM read. This capture could be drained successfully. It showed:
+
+- `ctrl.cpu_rst` and `cpu.reset` asserted, then deasserted as expected.
+- The integrated ROM slave port remained active with `cyc=1`, `stb=1`, `we=0`.
+- `rom.bus.ack` pulsed repeatedly.
+- `rom.bus.adr[15:0]` stayed at `0x2805`, and `rom.bus.dat_r` stayed at `0x00000000`.
+- `0x2805` is in the zero-padded area of the generated ROM initialization file, so the observed read data at that word is consistent with the image contents.
+
+This points away from missing ROM initialization and toward the bus/mux/arbiter side of the failure. The ROM slave is acknowledging a stale or unexpected read in the larger-ROM design, and an external ROM read can wedge the Etherbone path badly enough that LiteScope cannot be read back afterward.
+
 Useful next checks:
 
 - Sweep sizes just above the boundary, such as `0x9000`, `0xc000`, and `0x10000`, to see whether the issue is tied to inferred BRAM depth, power-of-two decode size, or a specific implementation layout.
 - Use the ROM bus LiteScope probe to compare a known-good `0x8000` ROM read with a failing `0x10000` ROM read.
+- Revise the probe to include the SI5351 sequencer Wishbone master and/or the ROM arbiter grant. The observed `0x2805` low address matches the SI5351 status CSR low word address (`0xf000a014 >> 2`), so this is worth ruling out explicitly.
 - Try a deliberately banked ROM implementation made from two 32 KiB memories selected by address bit 13. If that boots, the issue is probably in the single `16384x32` inferred memory implementation or its physical placement/timing.
 - Try adding one explicit extra read latency cycle to the integrated ROM path. The larger BRAM tree may be returning invalid data when acknowledged with the current one-cycle SRAM wrapper.
 - Build a reduced SoC with only CPU, integrated ROM/SRAM, crossover UART, and Etherbone to remove unrelated placement pressure before debugging the full design.
