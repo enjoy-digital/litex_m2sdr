@@ -58,6 +58,16 @@ struct liteeth_udp_ctrl {
     /* Internal RX assemble state */
     size_t        rx_assembling_bytes;
 
+    /* RX diagnostics */
+    uint64_t      rx_buffers;
+    uint64_t      rx_ring_full_events;
+    uint64_t      rx_flushes;
+    uint64_t      rx_flush_bytes;
+    uint64_t      rx_kernel_drops;
+    uint64_t      rx_recv_errors;
+    uint32_t      rxq_ovfl_last;
+    int           rxq_ovfl_valid;
+
     /* Options */
     int           nonblock;
     int           so_rcvbuf_bytes;

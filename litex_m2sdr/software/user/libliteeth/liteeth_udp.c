@@ -62,6 +62,48 @@ static int64_t get_time_ms(void)
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t len)
+{
+#ifdef SO_RXQ_OVFL
+    char cmsgbuf[CMSG_SPACE(sizeof(uint32_t))];
+    struct iovec iov;
+    struct msghdr msg;
+    ssize_t nb;
+
+    memset(&iov, 0, sizeof(iov));
+    memset(&msg, 0, sizeof(msg));
+    memset(cmsgbuf, 0, sizeof(cmsgbuf));
+
+    iov.iov_base = dst;
+    iov.iov_len = len;
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = cmsgbuf;
+    msg.msg_controllen = sizeof(cmsgbuf);
+
+    nb = recvmsg(u->sock, &msg, MSG_DONTWAIT);
+    if (nb >= 0) {
+        struct cmsghdr *cmsg;
+        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SO_RXQ_OVFL) {
+                uint32_t dropped = 0;
+                memcpy(&dropped, CMSG_DATA(cmsg), sizeof(dropped));
+                if (u->rxq_ovfl_valid) {
+                    u->rx_kernel_drops += (uint32_t)(dropped - u->rxq_ovfl_last);
+                } else {
+                    u->rx_kernel_drops += dropped;
+                    u->rxq_ovfl_valid = 1;
+                }
+                u->rxq_ovfl_last = dropped;
+            }
+        }
+    }
+    return nb;
+#else
+    return recvfrom(u->sock, dst, len, MSG_DONTWAIT, NULL, NULL);
+#endif
+}
+
 /* Public API */
 
 int liteeth_udp_init(struct liteeth_udp_ctrl *u,
@@ -110,6 +152,9 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
 
     int yes = 1;
     (void)setsockopt(u->sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+#ifdef SO_RXQ_OVFL
+    (void)setsockopt(u->sock, SOL_SOCKET, SO_RXQ_OVFL, &yes, sizeof(yes));
+#endif
 
     if (u->nonblock) {
         if (set_nonblock(u->sock, 1) < 0) {
@@ -174,14 +219,13 @@ static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
     uint8_t *dst = u->buf_rd + slot * u->buf_size + u->rx_assembling_bytes;
 
     while (u->rx_assembling_bytes < u->buf_size) {
-        ssize_t nb = recvfrom(u->sock, dst,
-                              u->buf_size - u->rx_assembling_bytes,
-                              MSG_DONTWAIT, NULL, NULL);
+        ssize_t nb = udp_recv_dontwait(u, dst, u->buf_size - u->rx_assembling_bytes);
         if (nb < 0) {
             if (errno == EINTR)
                 continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 return 0; /* try later */
+            u->rx_recv_errors++;
             perror("liteeth_udp: recvfrom");
             return -1;
         }
@@ -211,6 +255,7 @@ void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms)
             return;
         if (f > 0) {
             u->buffers_available_read++;
+            u->rx_buffers++;
             produced = 1;
             continue;
         }
@@ -242,15 +287,21 @@ void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms)
             return;
     }
 
+    if (u->buffers_available_read >= (int)u->buf_count)
+        u->rx_ring_full_events++;
+
     /* TX: user-driven via liteeth_udp_next_write_buffer + liteeth_udp_write_submit() */
 }
 
 void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u)
 {
     uint8_t tmp[2048];
+    uint64_t flushed = 0;
 
     if (!u || !u->rx_enable)
         return;
+
+    flushed = (uint64_t)u->buffers_available_read * u->buf_size + u->rx_assembling_bytes;
 
     u->writer_hw_count = 0;
     u->writer_sw_count = 0;
@@ -261,8 +312,21 @@ void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u)
     if (u->sock < 0)
         return;
 
-    while (recvfrom(u->sock, tmp, sizeof(tmp), MSG_DONTWAIT, NULL, NULL) > 0)
-        ;
+    while (1) {
+        ssize_t nb = udp_recv_dontwait(u, tmp, sizeof(tmp));
+        if (nb > 0) {
+            flushed += (uint64_t)nb;
+            continue;
+        }
+        if (nb < 0 && errno == EINTR)
+            continue;
+        break;
+    }
+
+    if (flushed > 0) {
+        u->rx_flushes++;
+        u->rx_flush_bytes += flushed;
+    }
 }
 
 uint8_t *liteeth_udp_next_read_buffer(struct liteeth_udp_ctrl *u)

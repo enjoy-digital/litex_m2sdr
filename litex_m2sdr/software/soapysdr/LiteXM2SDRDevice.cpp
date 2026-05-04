@@ -1981,6 +1981,14 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
         sensors.push_back("ptp_master_port_id");
         sensors.push_back("ptp_last_error_ns");
     }
+#if USE_LITEETH
+    sensors.push_back("liteeth_rx_buffers");
+    sensors.push_back("liteeth_rx_ring_full_events");
+    sensors.push_back("liteeth_rx_flushes");
+    sensors.push_back("liteeth_rx_flush_bytes");
+    sensors.push_back("liteeth_rx_kernel_drops");
+    sensors.push_back("liteeth_rx_recv_errors");
+#endif
     return sensors;
 }
 
@@ -2097,6 +2105,30 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 
+#if USE_LITEETH
+        if (deviceStr == "liteeth") {
+            info.key = sensorStr;
+            info.value = "0";
+            info.type = SoapySDR::ArgInfo::INT;
+            if (sensorStr == "rx_buffers") {
+                info.description = "Complete LiteEth UDP RX buffers assembled in userspace";
+            } else if (sensorStr == "rx_ring_full_events") {
+                info.description = "LiteEth UDP RX process calls that found the userspace ring full";
+            } else if (sensorStr == "rx_flushes") {
+                info.description = "LiteEth UDP RX stale-data flush events";
+            } else if (sensorStr == "rx_flush_bytes") {
+                info.description = "Bytes discarded by LiteEth UDP RX stale-data flushes";
+            } else if (sensorStr == "rx_kernel_drops") {
+                info.description = "Kernel-reported UDP RX queue drops from SO_RXQ_OVFL";
+            } else if (sensorStr == "rx_recv_errors") {
+                info.description = "LiteEth UDP RX socket receive errors";
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return info;
+        }
+#endif
+
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
@@ -2177,6 +2209,27 @@ std::string SoapyLiteXM2SDR::readSensor(
             }
             return sensorValue;
         }
+
+#if USE_LITEETH
+        if (deviceStr == "liteeth") {
+            if (sensorStr == "rx_buffers") {
+                sensorValue = std::to_string(_udp.rx_buffers);
+            } else if (sensorStr == "rx_ring_full_events") {
+                sensorValue = std::to_string(_udp.rx_ring_full_events);
+            } else if (sensorStr == "rx_flushes") {
+                sensorValue = std::to_string(_udp.rx_flushes);
+            } else if (sensorStr == "rx_flush_bytes") {
+                sensorValue = std::to_string(_udp.rx_flush_bytes);
+            } else if (sensorStr == "rx_kernel_drops") {
+                sensorValue = std::to_string(_udp.rx_kernel_drops);
+            } else if (sensorStr == "rx_recv_errors") {
+                sensorValue = std::to_string(_udp.rx_recv_errors);
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return sensorValue;
+        }
+#endif
 
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
