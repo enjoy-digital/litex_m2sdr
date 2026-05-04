@@ -1056,6 +1056,19 @@ class BaseSoC(SoCMini):
         self.rom_probe_dbus_rom_access = Signal()
         self.rom_probe_rom_read        = Signal()
         self.rom_probe_rom_ack         = Signal()
+        self.rom_probe_eth_adr         = Signal(16)
+        self.rom_probe_eth_dat_r       = Signal(32)
+        self.rom_probe_eth_cyc         = Signal()
+        self.rom_probe_eth_stb         = Signal()
+        self.rom_probe_eth_ack         = Signal()
+        self.rom_probe_eth_we          = Signal()
+        self.rom_probe_eth_err         = Signal()
+        self.rom_probe_rom_adr         = Signal(16)
+        self.rom_probe_rom_dat_r       = Signal(32)
+        self.rom_probe_rom_cyc         = Signal()
+        self.rom_probe_rom_stb         = Signal()
+        self.rom_probe_rom_we          = Signal()
+        self.rom_probe_rom_err         = Signal()
         self.comb += [
             self.rom_probe_sys_reset.eq(ResetSignal("sys")),
             self.rom_probe_eth_rom_access.eq(
@@ -1075,6 +1088,19 @@ class BaseSoC(SoCMini):
             ),
             self.rom_probe_rom_read.eq(rom_wb.cyc & rom_wb.stb & ~rom_wb.we),
             self.rom_probe_rom_ack.eq(rom_wb.ack),
+            self.rom_probe_eth_adr.eq(eth_wb.adr[:16]),
+            self.rom_probe_eth_dat_r.eq(eth_wb.dat_r),
+            self.rom_probe_eth_cyc.eq(eth_wb.cyc),
+            self.rom_probe_eth_stb.eq(eth_wb.stb),
+            self.rom_probe_eth_ack.eq(eth_wb.ack),
+            self.rom_probe_eth_we.eq(eth_wb.we),
+            self.rom_probe_eth_err.eq(eth_wb.err),
+            self.rom_probe_rom_adr.eq(rom_wb.adr[:16]),
+            self.rom_probe_rom_dat_r.eq(rom_wb.dat_r),
+            self.rom_probe_rom_cyc.eq(rom_wb.cyc),
+            self.rom_probe_rom_stb.eq(rom_wb.stb),
+            self.rom_probe_rom_we.eq(rom_wb.we),
+            self.rom_probe_rom_err.eq(rom_wb.err),
         ]
 
         analyzer_signals = [
@@ -1089,11 +1115,21 @@ class BaseSoC(SoCMini):
             self.rom_probe_rom_read,
             self.rom_probe_rom_ack,
 
-            # Wishbone requesters and integrated ROM slave port.
-            eth_wb,
-            ibus_wb,
-            dbus_wb,
-            rom_wb,
+            # Etherbone requester and integrated ROM slave port, trimmed to
+            # keep the capture width below 128 bits.
+            self.rom_probe_eth_adr,
+            self.rom_probe_eth_dat_r,
+            self.rom_probe_eth_cyc,
+            self.rom_probe_eth_stb,
+            self.rom_probe_eth_ack,
+            self.rom_probe_eth_we,
+            self.rom_probe_eth_err,
+            self.rom_probe_rom_adr,
+            self.rom_probe_rom_dat_r,
+            self.rom_probe_rom_cyc,
+            self.rom_probe_rom_stb,
+            self.rom_probe_rom_we,
+            self.rom_probe_rom_err,
         ]
         self.analyzer = LiteScopeAnalyzer(analyzer_signals,
             depth        = depth,

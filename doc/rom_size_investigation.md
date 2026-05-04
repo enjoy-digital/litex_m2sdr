@@ -119,15 +119,13 @@ Vivado emits the same class of optional output register merge warnings for the R
 
 The probe captures:
 
-- `etherbone.wishbone.bus`
-- `cpu.ibus`
-- `cpu.dbus`
-- `rom.bus`
+- Etherbone Wishbone address low 16 bits, read data, and `cyc/stb/ack/we/err`.
+- Integrated ROM slave address low 16 bits, read data, and `cyc/stb/ack/we/err`.
 - `ctrl.cpu_rst`, `ctrl.bus_error`, CPU reset, and sys reset mirror
 - decoded ROM-access flags for Etherbone, ibus, and dbus
 - decoded ROM slave read/ack flags
 
-A generated probe was elaborated successfully without running Vivado. `test/analyzer.csv` reported a 441-bit capture group; the default depth is 512 samples and can be reduced with `--rom-bus-probe-depth`.
+The probe is intentionally trimmed to stay below the usual LiteScope practical width limit. A generated probe was elaborated successfully without running Vivado. `test/analyzer.csv` reported a 114-bit capture group; the default depth is 512 samples and can be reduced with `--rom-bus-probe-depth`.
 
 Example capture flow after loading a probe bitstream:
 
