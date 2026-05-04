@@ -84,10 +84,67 @@ Interpretation:
 - Since the failure persists while the CPU reset bit is held, it is less likely to be only the CPU monopolizing the ROM slave after a bad fetch.
 - The generated RTL for the ROM is structurally the same except for depth/address width: `8192` words with `basesoc_basesoc_adr[12:0]` versus `16384` words with `basesoc_basesoc_adr[13:0]`; the acknowledge logic remains the same.
 
+## RTL and Vivado Log Review
+
+The crossbar decoder change at the `0x8000` to `0x10000` boundary looks like the expected word-addressed decode change:
+
+- `0x8000`: ROM select checks requester address bits `[29:13] == 0`.
+- `0x10000`: ROM select checks requester address bits `[29:14] == 0`.
+
+That matches `0x8000/4 = 8192` words and `0x10000/4 = 16384` words. The integrated ROM local address also grows as expected from 13 to 14 bits.
+
+The generated ROM logic is otherwise unchanged:
+
+- `0x8000`: `reg [31:0] rom[0:8191]`
+- `0x10000`: `reg [31:0] rom[0:16383]`
+- both use `$readmemh(...)`, one synchronous read data register, and the same Wishbone acknowledge equation.
+
+The Vivado logs do not show a ROM-specific critical warning or error. The notable implementation change is the BRAM inference cliff:
+
+- `0x8000`: `8192x32` Block RAM, 8 `rom_dat0_reg_*` instances.
+- `0x10000`: `16384x32` Block RAM, 16 `rom_dat0_reg_*` instances.
+- Overall RAMB36 usage increases by 8; RAMB18 usage stays unchanged.
+
+Vivado emits the same class of optional output register merge warnings for the ROM BRAMs in both builds, with twice as many instances in the larger build. I do not see an obvious RTL decoder overlap, bad base address, or missing ROM initialization in the generated files.
+
+## ROM Bus LiteScope Probe
+
+`--with-rom-bus-probe` adds a LiteScope analyzer focused on the integrated ROM read path. Example debug build:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --with-rom-bus-probe --rom-bus-probe-depth=512 --build
+```
+
+The probe captures:
+
+- `etherbone.wishbone.bus`
+- `cpu.ibus`
+- `cpu.dbus`
+- `rom.bus`
+- `ctrl.cpu_rst`, `ctrl.bus_error`, CPU reset, and sys reset mirror
+- decoded ROM-access flags for Etherbone, ibus, and dbus
+- decoded ROM slave read/ack flags
+
+A generated probe was elaborated successfully without running Vivado. `test/analyzer.csv` reported a 441-bit capture group; the default depth is 512 samples and can be reduced with `--rom-bus-probe-depth`.
+
+Example capture flow after loading a probe bitstream:
+
+```sh
+litex_server --udp --udp-ip 192.168.1.50
+python3 -m litescope.software.litescope_cli \
+    --csv test/analyzer.csv --csr-csv scripts/csr.csv \
+    --rising-edge basesoc_rom_probe_eth_rom_access \
+    --dump rom_read.vcd
+```
+
+Then issue a single external ROM read through the normal LiteX remote path. The key first check in the waveform is whether the Etherbone Wishbone read reaches `rom.bus`, whether `rom.bus.ack` pulses, and whether `rom.bus.dat_r` contains `0x0b00006f` at address zero.
+
 Useful next checks:
 
 - Sweep sizes just above the boundary, such as `0x9000`, `0xc000`, and `0x10000`, to see whether the issue is tied to inferred BRAM depth, power-of-two decode size, or a specific implementation layout.
-- Add a short LiteScope capture on the ROM Wishbone port and CPU instruction bus: `cyc`, `stb`, `ack`, `adr`, and `dat_r` immediately after reset.
+- Use the ROM bus LiteScope probe to compare a known-good `0x8000` ROM read with a failing `0x10000` ROM read.
 - Try a deliberately banked ROM implementation made from two 32 KiB memories selected by address bit 13. If that boots, the issue is probably in the single `16384x32` inferred memory implementation or its physical placement/timing.
 - Try adding one explicit extra read latency cycle to the integrated ROM path. The larger BRAM tree may be returning invalid data when acknowledged with the current one-cycle SRAM wrapper.
 - Build a reduced SoC with only CPU, integrated ROM/SRAM, crossover UART, and Etherbone to remove unrelated placement pressure before debugging the full design.

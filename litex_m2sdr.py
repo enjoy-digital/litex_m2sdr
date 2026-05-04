@@ -1034,6 +1034,74 @@ class BaseSoC(SoCMini):
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
+    # Integrated ROM.
+    def add_rom_bus_probe(self, depth=512):
+        assert hasattr(self, "rom")
+        assert hasattr(self, "cpu")
+        assert hasattr(self, "etherbone")
+
+        rom_region       = self.bus.regions["rom"]
+        bus_word_bytes   = self.bus.data_width//8
+        rom_origin_words = rom_region.origin//bus_word_bytes
+        rom_end_words    = rom_origin_words + rom_region.size//bus_word_bytes
+
+        eth_wb  = self.etherbone.wishbone.bus
+        rom_wb  = self.rom.bus
+        ibus_wb = self.cpu.ibus
+        dbus_wb = self.cpu.dbus
+
+        self.rom_probe_sys_reset       = Signal()
+        self.rom_probe_eth_rom_access  = Signal()
+        self.rom_probe_ibus_rom_access = Signal()
+        self.rom_probe_dbus_rom_access = Signal()
+        self.rom_probe_rom_read        = Signal()
+        self.rom_probe_rom_ack         = Signal()
+        self.comb += [
+            self.rom_probe_sys_reset.eq(ResetSignal("sys")),
+            self.rom_probe_eth_rom_access.eq(
+                eth_wb.cyc & eth_wb.stb &
+                (eth_wb.adr >= rom_origin_words) &
+                (eth_wb.adr <  rom_end_words)
+            ),
+            self.rom_probe_ibus_rom_access.eq(
+                ibus_wb.cyc & ibus_wb.stb &
+                (ibus_wb.adr >= rom_origin_words) &
+                (ibus_wb.adr <  rom_end_words)
+            ),
+            self.rom_probe_dbus_rom_access.eq(
+                dbus_wb.cyc & dbus_wb.stb &
+                (dbus_wb.adr >= rom_origin_words) &
+                (dbus_wb.adr <  rom_end_words)
+            ),
+            self.rom_probe_rom_read.eq(rom_wb.cyc & rom_wb.stb & ~rom_wb.we),
+            self.rom_probe_rom_ack.eq(rom_wb.ack),
+        ]
+
+        analyzer_signals = [
+            # Summary flags / status.
+            self.rom_probe_sys_reset,
+            self.cpu.reset,
+            self.ctrl.cpu_rst,
+            self.ctrl.bus_error,
+            self.rom_probe_eth_rom_access,
+            self.rom_probe_ibus_rom_access,
+            self.rom_probe_dbus_rom_access,
+            self.rom_probe_rom_read,
+            self.rom_probe_rom_ack,
+
+            # Wishbone requesters and integrated ROM slave port.
+            eth_wb,
+            ibus_wb,
+            dbus_wb,
+            rom_wb,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
     # PCIe.
     def add_pcie_probe(self, depth=4096):
         self.pcie_phy.add_ltssm_tracer()
@@ -1231,6 +1299,8 @@ def main():
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
+    probeopts.add_argument("--with-rom-bus-probe",     action="store_true", help="Enable integrated ROM Wishbone Probe.")
+    parser.add_argument("--rom-bus-probe-depth", default=512, type=int, help="Integrated ROM Wishbone Probe capture depth.")
 
     args = parser.parse_args()
 
@@ -1320,6 +1390,8 @@ def main():
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
         soc.add_ad9361_data_probe()
+    if args.with_rom_bus_probe:
+        soc.add_rom_bus_probe(depth=args.rom_bus_probe_depth)
 
     # Builder.
     def get_build_name():
