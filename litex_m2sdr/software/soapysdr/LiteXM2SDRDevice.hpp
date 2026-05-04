@@ -487,6 +487,12 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     int64_t _txAttHw = 0;
     bool _bitModeHwApplied = false;
     uint32_t _bitModeHw = 0;
+    bool _channelModeHwApplied = false;
+    uint32_t _channelModeHw = 0;
+    uint32_t _rxChannelMaskHw = 0;
+    uint32_t _txChannelMaskHw = 0;
+
+    void invalidateRfHardwareCache();
 
     void interleaveCF32(
         const void *src,

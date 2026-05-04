@@ -940,6 +940,15 @@ void SoapyLiteXM2SDR::channel_configure(const int direction, const size_t channe
 
 }
 
+void SoapyLiteXM2SDR::invalidateRfHardwareCache() {
+    _sampleRateHwApplied = false;
+    _bandwidthHwApplied = false;
+    _rxFrequencyHwApplied = false;
+    _txFrequencyHwApplied = false;
+    _txAttHwApplied = false;
+    _bitModeHwApplied = false;
+}
+
 /***************************************************************************************************
  *                                  Identification API
  **************************************************************************************************/

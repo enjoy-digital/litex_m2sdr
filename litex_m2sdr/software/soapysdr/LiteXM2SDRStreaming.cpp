@@ -107,7 +107,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const std::string &format,
     const std::vector<size_t> &channels,
     const SoapySDR::Kwargs &args) {
-    std::lock_guard<std::mutex> lock(_mutex);
+    std::unique_lock<std::mutex> lock(_mutex);
 
     SoapySDR::Kwargs searchArgs = args;
     if (searchArgs.empty())
@@ -253,6 +253,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         _rx_stream.channels = selected_channels;
         _nChannels = _rx_stream.channels.size();
+        SoapySDR_logf(SOAPY_SDR_DEBUG,
+            "RX setupStream: buf_size=%zu channels=%u bytes_per_complex=%u mtu=%zu",
+            _rx_buf_size, _nChannels, _bytesPerComplex, this->getStreamMTU(RX_STREAM));
     } else if (direction == SOAPY_SDR_TX) {
         if (_tx_stream.opened) {
             throw std::runtime_error("TX stream already opened.");
@@ -371,30 +374,64 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         throw std::runtime_error("Invalid direction.");
     }
 
-    /* Configure 2T2R/1T1R mode (PHY) */
-    litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
+    auto channelMask = [](const std::vector<size_t> &chans) {
+        uint32_t mask = 0;
+        for (size_t chan : chans)
+            mask |= 1u << chan;
+        return mask;
+    };
+    const uint32_t rx_channel_mask = _rx_stream.opened ? channelMask(_rx_stream.channels) : 0;
+    const uint32_t tx_channel_mask = _tx_stream.opened ? channelMask(_tx_stream.channels) : 0;
+    const bool channel_mode_changed = !_channelModeHwApplied ||
+        _channelModeHw != _nChannels ||
+        _rxChannelMaskHw != rx_channel_mask ||
+        _txChannelMaskHw != tx_channel_mask;
+    if (channel_mode_changed) {
+        /* Configure 2T2R/1T1R mode (PHY). ad9361_set_no_ch_mode() resets and
+         * re-runs AD9361 setup, so the active Soapy settings must be reapplied. */
+        litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
 
-    /* AD9361 Channel en/dis */
-    ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
-    if (_nChannels == 1) {
-        if (direction == SOAPY_SDR_RX)
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
-        else if (direction == SOAPY_SDR_TX)
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _tx_stream.channels[0] == 0 ? TX_1 : TX_2;
-    } else {
-        if (direction == SOAPY_SDR_RX)
+        /* AD9361 Channel en/dis */
+        ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
+        if (_nChannels == 1) {
+            if (_rx_stream.opened && !_rx_stream.channels.empty())
+                ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
+            if (_tx_stream.opened && !_tx_stream.channels.empty())
+                ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _tx_stream.channels[0] == 0 ? TX_1 : TX_2;
+        } else {
             ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-        else if (direction == SOAPY_SDR_TX)
             ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+        }
+
+        /* AD9361 Port Control 2t2r timing enable */
+        struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
+        pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
+        if (_nChannels == 2)
+            pd->port_ctrl.pp_conf[0] |= (1 << 2);
+
+        int rc = ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
+        if (rc != 0)
+            throw std::runtime_error("ad9361_set_no_ch_mode failed (rc=" + std::to_string(rc) + ")");
+
+        _channelModeHwApplied = true;
+        _channelModeHw = _nChannels;
+        _rxChannelMaskHw = rx_channel_mask;
+        _txChannelMaskHw = tx_channel_mask;
+        invalidateRfHardwareCache();
     }
 
-    /* AD9361 Port Control 2t2r timing enable */
-    struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
-    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-    if (_nChannels == 2)
-        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+    lock.unlock();
 
-    ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
+    if (channel_mode_changed) {
+        if (_rx_stream.opened) {
+            for (size_t chan : _rx_stream.channels)
+                channel_configure(SOAPY_SDR_RX, chan);
+        }
+        if (_tx_stream.opened) {
+            for (size_t chan : _tx_stream.channels)
+                channel_configure(SOAPY_SDR_TX, chan);
+        }
+    }
 
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }
@@ -641,11 +678,6 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     int avail = liteeth_udp_buffers_available_read(&_udp);
     if (avail <= 0) {
         return SOAPY_SDR_TIMEOUT;
-    }
-    /* Drop older buffers under load to keep the most recent samples. */
-    while (avail > 1) {
-        (void)liteeth_udp_next_read_buffer(&_udp);
-        avail--;
     }
 
     uint8_t *src = liteeth_udp_next_read_buffer(&_udp);
