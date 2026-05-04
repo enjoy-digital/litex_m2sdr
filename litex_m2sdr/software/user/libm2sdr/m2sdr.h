@@ -127,6 +127,20 @@ struct m2sdr_sync_params {
 
 typedef struct m2sdr_sync_params m2sdr_stream_config_t;
 
+enum m2sdr_liteeth_rx_mode {
+    M2SDR_LITEETH_RX_MODE_DISABLED = 0,
+    M2SDR_LITEETH_RX_MODE_UDP      = 1,
+    M2SDR_LITEETH_RX_MODE_VRT      = 2,
+};
+
+struct m2sdr_liteeth_rx_stream_config {
+    enum m2sdr_liteeth_rx_mode mode;
+    /* Host UDP listen port for raw UDP or VRT RX. */
+    uint16_t udp_port;
+    /* Host IPv4 address in host byte order. Use 0 for route auto-detection. */
+    uint32_t local_ip;
+};
+
 struct m2sdr_devinfo {
     /* Stable serial string when available. */
     char serial[M2SDR_SERIAL_MAX];
@@ -461,6 +475,19 @@ void m2sdr_stream_config_init(m2sdr_stream_config_t *config);
 int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params);
 /* Alias of m2sdr_sync_config_ex() for the public stream-config name. */
 int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *config);
+
+/* LiteEth stream-control helpers.
+ *
+ * These functions are additive helpers for integrations that need explicit
+ * setup/activate/deactivate control instead of the blocking sync API.
+ */
+void m2sdr_liteeth_rx_stream_config_init(struct m2sdr_liteeth_rx_stream_config *config);
+int m2sdr_liteeth_get_local_ip(struct m2sdr_dev *dev, uint32_t *local_ip);
+int m2sdr_liteeth_rx_stream_prepare(struct m2sdr_dev *dev,
+                                    const struct m2sdr_liteeth_rx_stream_config *config);
+int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
+                                     const struct m2sdr_liteeth_rx_stream_config *config);
+int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev);
 
 /* Blocking sync receive/transmit helpers. */
 int m2sdr_sync_rx(struct m2sdr_dev *dev,

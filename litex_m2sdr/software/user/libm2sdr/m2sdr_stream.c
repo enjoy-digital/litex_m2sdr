@@ -119,11 +119,8 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
     }
 }
 
-#if defined(USE_LITEETH) && \
-    defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
-static int m2sdr_liteeth_get_local_ip(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
+#ifdef USE_LITEETH
+static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
 {
     struct sockaddr_in remote_addr;
     struct sockaddr_in local_addr;
@@ -162,23 +159,190 @@ out:
     return ret;
 }
 
-static int m2sdr_liteeth_configure_rx_streamer(struct m2sdr_dev *dev, uint16_t listen_port)
+void m2sdr_liteeth_rx_stream_config_init(struct m2sdr_liteeth_rx_stream_config *config)
+{
+    if (!config)
+        return;
+
+    memset(config, 0, sizeof(*config));
+    config->mode = M2SDR_LITEETH_RX_MODE_UDP;
+    config->udp_port = 2345;
+}
+
+int m2sdr_liteeth_get_local_ip(struct m2sdr_dev *dev, uint32_t *local_ip)
+{
+    if (!dev || !local_ip)
+        return M2SDR_ERR_INVAL;
+
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return m2sdr_liteeth_get_local_ip_for_route(dev->eth_ip, dev->eth_port, local_ip);
+}
+
+int m2sdr_liteeth_rx_stream_prepare(struct m2sdr_dev *dev,
+                                    const struct m2sdr_liteeth_rx_stream_config *config)
 {
     uint32_t local_ip = 0;
     int rc;
 
-    rc = m2sdr_liteeth_get_local_ip(dev->eth_ip, dev->eth_port, &local_ip);
+    if (!dev || !config)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    local_ip = config->local_ip;
+    if (local_ip == 0) {
+        rc = m2sdr_liteeth_get_local_ip(dev, &local_ip);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+
+    switch (config->mode) {
+    case M2SDR_LITEETH_RX_MODE_UDP:
+#if defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, local_ip) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, config->udp_port) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+
+    case M2SDR_LITEETH_RX_MODE_VRT:
+#if defined(CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR)
+    if (m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, local_ip) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR, config->udp_port) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+
+    case M2SDR_LITEETH_RX_MODE_DISABLED:
+        return M2SDR_ERR_OK;
+
+    default:
+        return M2SDR_ERR_INVAL;
+    }
+}
+
+int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
+                                     const struct m2sdr_liteeth_rx_stream_config *config)
+{
+    int rc;
+
+    if (!dev || !config)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_liteeth_rx_stream_prepare(dev, config);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, local_ip) != 0)
-        return M2SDR_ERR_IO;
-    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, listen_port) != 0)
-        return M2SDR_ERR_IO;
-    if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1) != 0)
+    switch (config->mode) {
+    case M2SDR_LITEETH_RX_MODE_UDP:
+#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+#else
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
+#ifdef CSR_ETH_RX_MODE_ADDR
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+#endif
+        break;
+
+    case M2SDR_LITEETH_RX_MODE_VRT:
+#ifdef CSR_ETH_RX_MODE_ADDR
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 2) != 0)
+            return M2SDR_ERR_IO;
+#else
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
+#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
+        if (m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+#else
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
+        break;
+
+    case M2SDR_LITEETH_RX_MODE_DISABLED:
+        return m2sdr_liteeth_rx_stream_deactivate(dev);
+
+    default:
+        return M2SDR_ERR_INVAL;
+    }
+
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
 
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+#ifdef CSR_ETH_RX_MODE_ADDR
+    /* Raw streamer enable is not a safe stop on all bitstreams. Use the
+     * Ethernet RX mode flush branch when present, then route RX away. */
+    (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
+#endif
+#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
+    (void)m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
+#endif
+    (void)m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    return M2SDR_ERR_OK;
+}
+#else
+void m2sdr_liteeth_rx_stream_config_init(struct m2sdr_liteeth_rx_stream_config *config)
+{
+    if (!config)
+        return;
+    memset(config, 0, sizeof(*config));
+    config->mode = M2SDR_LITEETH_RX_MODE_UDP;
+    config->udp_port = 2345;
+}
+
+int m2sdr_liteeth_get_local_ip(struct m2sdr_dev *dev, uint32_t *local_ip)
+{
+    (void)dev;
+    (void)local_ip;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_rx_stream_prepare(struct m2sdr_dev *dev,
+                                    const struct m2sdr_liteeth_rx_stream_config *config)
+{
+    (void)dev;
+    (void)config;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
+                                     const struct m2sdr_liteeth_rx_stream_config *config)
+{
+    (void)dev;
+    (void)config;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
 }
 #endif
 
@@ -243,6 +407,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
 
 #elif defined(USE_LITEETH)
     const uint16_t listen_port = 2345;
+    struct m2sdr_liteeth_rx_stream_config eth_rx_config;
+    int eth_rx_needs_activate = 0;
 
     if (direction == M2SDR_RX) {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
@@ -253,16 +419,14 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                 (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
                 return M2SDR_ERR_IO;
         }
-        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
-            return M2SDR_ERR_IO;
 
-#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
-    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
-        rc = m2sdr_liteeth_configure_rx_streamer(dev, listen_port);
+        m2sdr_liteeth_rx_stream_config_init(&eth_rx_config);
+        eth_rx_config.mode = M2SDR_LITEETH_RX_MODE_UDP;
+        eth_rx_config.udp_port = listen_port;
+        rc = m2sdr_liteeth_rx_stream_prepare(dev, &eth_rx_config);
         if (rc != M2SDR_ERR_OK)
             return rc;
-#endif
+        eth_rx_needs_activate = 1;
     }
 
     if (!dev->udp_inited) {
@@ -280,6 +444,12 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
         }
         dev->udp_inited = 1;
+    }
+
+    if (eth_rx_needs_activate) {
+        rc = m2sdr_liteeth_rx_stream_activate(dev, &eth_rx_config);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
     }
 
     if (direction == M2SDR_TX) {
@@ -354,15 +524,7 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
         litepcie_dma_cleanup(&dev->tx_dma);
 #elif defined(USE_LITEETH)
     if (dev->rx_configured) {
-#ifdef CSR_ETH_RX_MODE_ADDR
-        /* Raw streamer enable is not a safe stop on all bitstreams: when
-         * present, use the Ethernet RX mode flush branch, matching the Soapy
-         * path. */
-        (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
-#endif
-        /* Legacy raw LiteEth streamers do not expose eth_rx_mode, so route RX
-         * away from Ethernet to stop UDP samples without toggling enable. */
-        (void)m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+        (void)m2sdr_liteeth_rx_stream_deactivate(dev);
     }
 #endif
 
