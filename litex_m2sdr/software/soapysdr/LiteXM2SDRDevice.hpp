@@ -461,6 +461,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         uint64_t vrt_packets = 0;
         uint64_t vrt_sequence_gaps = 0;
         uint64_t vrt_packets_lost = 0;
+#if USE_LITEETH
+        bool rx_timeout_recovery_armed = false;
+        uint64_t rx_timeout_recoveries = 0;
+#endif
     };
 
     struct TXStream: Stream {

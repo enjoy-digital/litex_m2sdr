@@ -1918,6 +1918,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("liteeth_rx_flush_bytes");
     sensors.push_back("liteeth_rx_kernel_drops");
     sensors.push_back("liteeth_rx_source_drops");
+    sensors.push_back("liteeth_rx_timeout_recoveries");
     sensors.push_back("liteeth_rx_recv_errors");
     sensors.push_back("liteeth_udp_rcvbuf_requested");
     sensors.push_back("liteeth_udp_rcvbuf_actual");
@@ -2060,6 +2061,8 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.description = "Kernel-reported UDP RX queue drops from SO_RXQ_OVFL";
             } else if (sensorStr == "rx_source_drops") {
                 info.description = "LiteEth UDP RX packets discarded by source-IP filtering";
+            } else if (sensorStr == "rx_timeout_recoveries") {
+                info.description = "LiteEth RX timeout recovery cycles";
             } else if (sensorStr == "rx_recv_errors") {
                 info.description = "LiteEth UDP RX socket receive errors";
             } else if (sensorStr == "udp_rcvbuf_requested") {
@@ -2178,6 +2181,8 @@ std::string SoapyLiteXM2SDR::readSensor(
                 sensorValue = std::to_string(_udp.rx_kernel_drops);
             } else if (sensorStr == "rx_source_drops") {
                 sensorValue = std::to_string(_udp.rx_source_drops);
+            } else if (sensorStr == "rx_timeout_recoveries") {
+                sensorValue = std::to_string(_rx_stream.rx_timeout_recoveries);
             } else if (sensorStr == "rx_recv_errors") {
                 sensorValue = std::to_string(_udp.rx_recv_errors);
             } else if (sensorStr == "udp_rcvbuf_requested") {

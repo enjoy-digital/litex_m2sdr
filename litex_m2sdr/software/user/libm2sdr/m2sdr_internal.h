@@ -51,6 +51,9 @@ struct m2sdr_dev {
     uint16_t eth_port;
     int udp_inited;
     struct liteeth_udp_ctrl udp;
+    struct m2sdr_liteeth_rx_stream_config liteeth_rx_config;
+    int liteeth_rx_config_valid;
+    int liteeth_rx_timeout_recovery_armed;
 #endif
 
     int rx_configured;

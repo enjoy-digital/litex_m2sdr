@@ -31,6 +31,7 @@
 #define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
+#define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
 
 /* Helpers */
 /*---------*/
@@ -495,6 +496,9 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         rc = m2sdr_liteeth_rx_stream_activate(dev, &eth_rx_config);
         if (rc != M2SDR_ERR_OK)
             return rc;
+        dev->liteeth_rx_config = eth_rx_config;
+        dev->liteeth_rx_config_valid = 1;
+        dev->liteeth_rx_timeout_recovery_armed = 1;
     }
 
     if (direction == M2SDR_TX) {
@@ -571,6 +575,8 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
     if (dev->rx_configured) {
         (void)m2sdr_liteeth_rx_stream_deactivate(dev);
     }
+    dev->liteeth_rx_config_valid = 0;
+    dev->liteeth_rx_timeout_recovery_armed = 0;
 #endif
 
     dev->rx_configured = 0;
@@ -626,6 +632,52 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 }
 #endif
 
+#ifdef USE_LITEETH
+static int m2sdr_liteeth_wait_rx_buffer(struct m2sdr_dev *dev,
+                                        unsigned timeout_ms,
+                                        uint8_t **buf)
+{
+    if (!dev || !buf)
+        return M2SDR_ERR_INVAL;
+
+    liteeth_udp_process(&dev->udp, timeout_ms);
+    *buf = liteeth_udp_next_read_buffer(&dev->udp);
+    if (*buf) {
+        dev->liteeth_rx_timeout_recovery_armed = 1;
+        return M2SDR_ERR_OK;
+    }
+
+    if (!dev->liteeth_rx_config_valid ||
+        !dev->liteeth_rx_timeout_recovery_armed ||
+        timeout_ms == 0) {
+        return M2SDR_ERR_TIMEOUT;
+    }
+
+    dev->liteeth_rx_timeout_recovery_armed = 0;
+    dev->udp.rx_timeout_recoveries++;
+
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    liteeth_udp_flush_rx(&dev->udp);
+
+    int rc = m2sdr_liteeth_rx_stream_activate(dev, &dev->liteeth_rx_config);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    unsigned retry_ms = timeout_ms;
+    if (retry_ms == 0 || retry_ms > M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS)
+        retry_ms = M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS;
+
+    liteeth_udp_process(&dev->udp, retry_ms);
+    *buf = liteeth_udp_next_read_buffer(&dev->udp);
+    if (*buf) {
+        dev->liteeth_rx_timeout_recovery_armed = 1;
+        return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_TIMEOUT;
+}
+#endif
+
 int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   void *samples,
                   unsigned num_samples,
@@ -670,10 +722,12 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
         memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
         copied += to_copy;
 #elif defined(USE_LITEETH)
-        liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
-        const uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
-        if (!buf)
-            return M2SDR_ERR_TIMEOUT;
+        uint8_t *buf = NULL;
+        int rc = m2sdr_liteeth_wait_rx_buffer(dev,
+                                              (timeout_ms ? timeout_ms : dev->rx_timeout_ms),
+                                              &buf);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
         unsigned to_copy = dev->rx_buffer_size * sample_sz;
         unsigned payload_off = 0;
         if (dev->rx_header_enable && dev->rx_strip_header) {
@@ -816,10 +870,12 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
     }
 #elif defined(USE_LITEETH)
     if (direction == M2SDR_RX) {
-        liteeth_udp_process(&dev->udp, (timeout_ms ? timeout_ms : dev->rx_timeout_ms));
-        uint8_t *buf = liteeth_udp_next_read_buffer(&dev->udp);
-        if (!buf)
-            return M2SDR_ERR_TIMEOUT;
+        uint8_t *buf = NULL;
+        int rc = m2sdr_liteeth_wait_rx_buffer(dev,
+                                              (timeout_ms ? timeout_ms : dev->rx_timeout_ms),
+                                              &buf);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
         *buffer = buf + payload_off;
     } else {
         uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);

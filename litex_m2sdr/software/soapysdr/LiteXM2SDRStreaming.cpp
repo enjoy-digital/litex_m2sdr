@@ -552,6 +552,7 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.remainderSamps = 0;
         _rx_stream.remainderOffset = 0;
         _rx_stream.vrt_sequence_valid = false;
+        _rx_stream.rx_timeout_recovery_armed = true;
         {
             struct m2sdr_liteeth_rx_stream_config rx_config = makeLiteEthRxStreamConfig();
             int rc = m2sdr_liteeth_rx_stream_activate(_dev, &rx_config);
@@ -778,6 +779,27 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     liteeth_udp_process(&_udp, timeout_us_to_ms(timeoutUs));
 
     int avail = liteeth_udp_buffers_available_read(&_udp);
+    if (avail <= 0 && timeoutUs != 0 && _rx_stream.rx_timeout_recovery_armed) {
+        _rx_stream.rx_timeout_recovery_armed = false;
+        _rx_stream.rx_timeout_recoveries++;
+        _udp.rx_timeout_recoveries++;
+
+        (void)m2sdr_liteeth_rx_stream_deactivate(_dev);
+        liteeth_udp_flush_rx(&_udp);
+
+        struct m2sdr_liteeth_rx_stream_config rx_config = makeLiteEthRxStreamConfig();
+        int rc = m2sdr_liteeth_rx_stream_activate(_dev, &rx_config);
+        if (rc == M2SDR_ERR_OK) {
+            int retry_ms = timeout_us_to_ms(timeoutUs);
+            if (retry_ms <= 0 || retry_ms > 50)
+                retry_ms = 50;
+            liteeth_udp_process(&_udp, retry_ms);
+            avail = liteeth_udp_buffers_available_read(&_udp);
+        } else {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "LiteEth RX timeout recovery activation failed: %s", m2sdr_strerror(rc));
+        }
+    }
     if (avail <= 0) {
         return SOAPY_SDR_TIMEOUT;
     }
@@ -786,6 +808,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     if (!src) {
         return SOAPY_SDR_TIMEOUT;
     }
+    _rx_stream.rx_timeout_recovery_armed = true;
 
     if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
         if (_udp.buf_size < VRT_SIGNAL_HEADER_BYTES) {
@@ -834,15 +857,12 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         _rx_stream.vrt_sequence_valid = true;
         _rx_stream.vrt_packets++;
 
-        std::memcpy(_rx_stream.buf, src + VRT_SIGNAL_HEADER_BYTES, payload_bytes);
-        buffs[0] = _rx_stream.buf;
+        buffs[0] = src + VRT_SIGNAL_HEADER_BYTES;
         handle   = 0;
         return static_cast<int>(payload_bytes / (_nChannels * _bytesPerComplex));
     }
 
-    /* Stage into RX buffer; remainder/deinterleave pipeline expects a flat buffer. */
-    std::memcpy(_rx_stream.buf, src, _rx_buf_size);
-    buffs[0] = _rx_stream.buf;
+    buffs[0] = src;
     handle   = 0; /* dummy for LiteEth path */
     return getStreamMTU(stream);
 #elif USE_LITEPCIE
