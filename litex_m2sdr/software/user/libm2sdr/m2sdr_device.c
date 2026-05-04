@@ -26,6 +26,8 @@
 
 #ifdef USE_LITEETH
 #define M2SDR_LITEETH_CONTROL_TIMEOUT_MS 500
+#define M2SDR_LITEETH_OPEN_PROBE_ATTEMPTS 3
+#define M2SDR_LITEETH_OPEN_PROBE_DELAY_US 1000
 #endif
 
 /* Helpers */
@@ -149,6 +151,47 @@ int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out)
         *port_out = port;
     return rc;
 }
+
+#ifdef USE_LITEETH
+static int m2sdr_liteeth_from_eb_error(int err)
+{
+    switch (err) {
+    case EB_ERR_OK:
+        return M2SDR_ERR_OK;
+    case EB_ERR_TIMEOUT:
+    case EB_ERR_INTERRUPTED:
+        return M2SDR_ERR_TIMEOUT;
+    default:
+        return M2SDR_ERR_IO;
+    }
+}
+
+static int m2sdr_liteeth_probe_control(struct m2sdr_dev *dev)
+{
+#ifdef CSR_IDENTIFIER_MEM_BASE
+    int rc = M2SDR_ERR_IO;
+
+    if (!dev || !dev->eb)
+        return M2SDR_ERR_INVAL;
+
+    for (int attempt = 0; attempt < M2SDR_LITEETH_OPEN_PROBE_ATTEMPTS; attempt++) {
+        uint32_t value = 0;
+        int err = eb_read32_checked(dev->eb, CSR_IDENTIFIER_MEM_BASE, &value);
+
+        rc = m2sdr_liteeth_from_eb_error(err);
+        if (rc == M2SDR_ERR_OK && (value & 0xffu) == 'L')
+            return M2SDR_ERR_OK;
+        if (rc == M2SDR_ERR_TIMEOUT)
+            usleep(M2SDR_LITEETH_OPEN_PROBE_DELAY_US);
+    }
+
+    return rc == M2SDR_ERR_OK ? M2SDR_ERR_IO : rc;
+#else
+    (void)dev;
+    return M2SDR_ERR_OK;
+#endif
+}
+#endif
 
 /* Read one logical 64-bit CSR value stored as hi/lo 32-bit words. */
 static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *value)
@@ -393,6 +436,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         char ip[64] = {0};
         char port_str[16];
         uint16_t port = 1234;
+        int rc;
 
         dev->transport = M2SDR_TRANSPORT_LITEETH;
 
@@ -417,6 +461,12 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
             eb_disconnect(&dev->eb);
             free(dev);
             return M2SDR_ERR_IO;
+        }
+        rc = m2sdr_liteeth_probe_control(dev);
+        if (rc != M2SDR_ERR_OK) {
+            eb_disconnect(&dev->eb);
+            free(dev);
+            return rc;
         }
 
         snprintf(dev->eth_ip, sizeof(dev->eth_ip), "%s", ip);

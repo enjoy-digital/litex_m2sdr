@@ -14,6 +14,7 @@
 #include <endian.h>
 #endif
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -30,6 +31,9 @@
 
 #define EB_DEFAULT_TIMEOUT_MS 1000
 #define EB_DIRECT_RX_SETTLE_US 20000
+#define EB_READ_ATTEMPTS 3
+#define EB_MAX_DISCARDS 32
+#define EB_MAX_INVALID_READ_REPLIES 8
 
 struct eb_connection {
     int fd;
@@ -45,6 +49,49 @@ static int eb_fail(struct eb_connection *conn, int err)
     if (conn)
         conn->last_error = err;
     return err;
+}
+
+static bool eb_sockaddr_matches(const struct eb_connection *conn,
+                                const struct sockaddr *addr,
+                                socklen_t addr_len)
+{
+    const struct sockaddr *peer;
+
+    if (!conn || !conn->addr || !conn->addr->ai_addr || !addr)
+        return false;
+
+    peer = conn->addr->ai_addr;
+    if (addr->sa_family != peer->sa_family)
+        return false;
+
+    if (addr->sa_family == AF_INET) {
+        const struct sockaddr_in *a = (const struct sockaddr_in *)addr;
+        const struct sockaddr_in *b = (const struct sockaddr_in *)peer;
+
+        if (addr_len < sizeof(*a) || conn->addr->ai_addrlen < sizeof(*b))
+            return false;
+
+        return a->sin_port == b->sin_port &&
+               a->sin_addr.s_addr == b->sin_addr.s_addr;
+    }
+
+    return false;
+}
+
+static bool eb_validate_read_reply(const uint8_t *pkt, size_t len)
+{
+    if (!pkt || len != 20)
+        return false;
+    if (pkt[0] != 0x4e || pkt[1] != 0x6f)
+        return false;
+    if (pkt[2] != 0x10 || pkt[3] != 0x44)
+        return false;
+    if (pkt[4] != 0 || pkt[5] != 0 || pkt[6] != 0 || pkt[7] != 0)
+        return false;
+    if (pkt[9] != 0x0f)
+        return false;
+
+    return true;
 }
 
 static int eb_wait_fd(struct eb_connection *conn, int fd, short events)
@@ -214,11 +261,27 @@ int eb_send(struct eb_connection *conn, const void *bytes, size_t len) {
 int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
     int ret;
     if (conn->is_direct) {
-        do {
+        int discarded = 0;
+
+        for (;;) {
+            struct sockaddr_storage src;
+            socklen_t src_len = sizeof(src);
+
             if (eb_wait_fd(conn, conn->read_fd, POLLIN) != EB_ERR_OK)
                 return -1;
-            ret = recvfrom(conn->read_fd, bytes, max_len, 0, NULL, NULL);
-        } while (ret < 0 && errno == EAGAIN);
+            ret = recvfrom(conn->read_fd, bytes, max_len, 0,
+                           (struct sockaddr *)&src, &src_len);
+            if (ret < 0 && errno == EAGAIN)
+                continue;
+            if (ret < 0)
+                break;
+            if (ret >= 0 && !eb_sockaddr_matches(conn, (struct sockaddr *)&src, src_len)) {
+                if (++discarded >= EB_MAX_DISCARDS)
+                    return eb_fail(conn, EB_ERR_TIMEOUT);
+                continue;
+            }
+            break;
+        }
         if (ret < 0) {
             if (errno == EINTR)
                 return eb_fail(conn, EB_ERR_INTERRUPTED);
@@ -260,36 +323,27 @@ void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr) {
     (void)eb_write32_checked(conn, val, addr);
 }
 
-int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) {
-    uint8_t raw_pkt[20];
-
-    if (!val)
-        return eb_fail(conn, EB_ERR_IO);
-
-    eb_fill_read32(raw_pkt, addr);
-
-    if (conn->is_direct)
-        eb_drain_direct_rx(conn);
-
-    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
-        fprintf(stderr, "eb_read32: send failed\n");
-        return eb_get_last_error(conn);
-    }
-
+static int eb_recv_read_reply(struct eb_connection *conn, uint8_t raw_pkt[20])
+{
     if (conn->is_direct) {
-        int count = eb_recv(conn, raw_pkt, sizeof(raw_pkt));
-        if (count < 0)
-            return eb_get_last_error(conn);
-        if (count != sizeof(raw_pkt)) {
-            fprintf(stderr, "unexpected read length: %d\n", count);
-            return eb_fail(conn, EB_ERR_IO);
+        int invalid = 0;
+
+        for (;;) {
+            int count = eb_recv(conn, raw_pkt, 20);
+
+            if (count < 0)
+                return eb_get_last_error(conn);
+            if (eb_validate_read_reply(raw_pkt, (size_t)count))
+                return EB_ERR_OK;
+            if (++invalid >= EB_MAX_INVALID_READ_REPLIES)
+                return eb_fail(conn, EB_ERR_IO);
         }
     } else {
         // If we are connected via TCP we need to take into account any size
         // read because it is a stream oriented protocol.
         int ret;
         uint8_t *p   = raw_pkt;
-        uint8_t *end = raw_pkt + sizeof(raw_pkt);
+        uint8_t *end = raw_pkt + 20;
 
         while (p < end) {
             ret = eb_recv(conn, p, end - p);
@@ -307,11 +361,55 @@ int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) 
 
             p += ret;
         }
+
+        if (!eb_validate_read_reply(raw_pkt, 20))
+            return eb_fail(conn, EB_ERR_IO);
+    }
+
+    return EB_ERR_OK;
+}
+
+static int eb_read32_once(struct eb_connection *conn, uint32_t addr, uint32_t *val)
+{
+    uint8_t raw_pkt[20];
+
+    if (!val)
+        return eb_fail(conn, EB_ERR_IO);
+
+    eb_fill_read32(raw_pkt, addr);
+
+    if (conn->is_direct)
+        eb_drain_direct_rx(conn);
+
+    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
+        fprintf(stderr, "eb_read32: send failed\n");
+        return eb_get_last_error(conn);
+    }
+
+    {
+        int err = eb_recv_read_reply(conn, raw_pkt);
+        if (err != EB_ERR_OK)
+            return err;
     }
 
     *val = eb_unfill_read32(raw_pkt);
     conn->last_error = EB_ERR_OK;
     return EB_ERR_OK;
+}
+
+int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) {
+    int err = EB_ERR_IO;
+    int attempts = (conn && conn->is_direct) ? EB_READ_ATTEMPTS : 1;
+
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        err = eb_read32_once(conn, addr, val);
+        if (err == EB_ERR_OK || err == EB_ERR_INTERRUPTED)
+            return err;
+        if (conn && conn->is_direct)
+            eb_drain_direct_rx(conn);
+    }
+
+    return eb_fail(conn, err);
 }
 
 uint32_t eb_read32(struct eb_connection *conn, uint32_t addr) {
