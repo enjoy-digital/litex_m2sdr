@@ -85,6 +85,18 @@ static inline uint64_t read_be64(const uint8_t *p)
     return (static_cast<uint64_t>(read_be32(p + 0)) << 32) |
            (static_cast<uint64_t>(read_be32(p + 4)) <<  0);
 }
+
+struct m2sdr_liteeth_rx_stream_config SoapyLiteXM2SDR::makeLiteEthRxStreamConfig() const
+{
+    struct m2sdr_liteeth_rx_stream_config config;
+
+    m2sdr_liteeth_rx_stream_config_init(&config);
+    config.mode = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT)
+        ? M2SDR_LITEETH_RX_MODE_VRT
+        : M2SDR_LITEETH_RX_MODE_UDP;
+    config.udp_port = _liteeth_rx_port;
+    return config;
+}
 #endif
 
 /* RX DMA Header */
@@ -176,17 +188,18 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
 #elif USE_LITEETH
     /* Lazy-init UDP helper (enable RX+TX to mirror DMA symmetry). */
+    const bool is_vrt = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT);
+    const uint16_t port = is_vrt
+        ? static_cast<uint16_t>(searchArgs.count("vrt_port")
+              ? std::stoul(searchArgs.at("vrt_port"))
+              : (_deviceArgs.count("vrt_port") ? std::stoul(_deviceArgs.at("vrt_port")) : 4991))
+        : static_cast<uint16_t>(searchArgs.count("udp_port")
+              ? std::stoul(searchArgs.at("udp_port"))
+              : (_deviceArgs.count("udp_port") ? std::stoul(_deviceArgs.at("udp_port")) : 2345));
+    _liteeth_rx_port = port;
     if (!_udp_inited) {
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
-        const bool is_vrt = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT);
-        const uint16_t port = is_vrt
-            ? static_cast<uint16_t>(searchArgs.count("vrt_port")
-                  ? std::stoul(searchArgs.at("vrt_port"))
-                  : (_deviceArgs.count("vrt_port") ? std::stoul(_deviceArgs.at("vrt_port")) : 4991))
-            : static_cast<uint16_t>(searchArgs.count("udp_port")
-                  ? std::stoul(searchArgs.at("udp_port"))
-                  : (_deviceArgs.count("udp_port") ? std::stoul(_deviceArgs.at("udp_port")) : 2345));
 
         const size_t buf_bytes = is_vrt
                                  ? VRT_RX_PACKET_BYTES_DEFAULT
@@ -203,7 +216,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                                  : (_deviceArgs.count("udp_rcvbuf")
                                     ? static_cast<int>(std::stoul(_deviceArgs.at("udp_rcvbuf")))
                                     : 8 * 1024 * 1024);
-        _liteeth_rx_port = port;
 
         if (liteeth_udp_init(&_udp,
                              /*listen_ip*/  nullptr, /*listen_port*/  port,
@@ -230,6 +242,14 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     } else {
         if (_nChannels && selected_channels.size() != _nChannels) {
             throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
+        }
+    }
+    {
+        struct m2sdr_liteeth_rx_stream_config rx_config = makeLiteEthRxStreamConfig();
+        int rc = m2sdr_liteeth_rx_stream_prepare(_dev, &rx_config);
+        if (rc != M2SDR_ERR_OK) {
+            throw std::runtime_error(
+                "LiteEth RX stream prepare failed: " + std::string(m2sdr_strerror(rc)));
         }
     }
 
@@ -518,20 +538,15 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.remainderSamps = 0;
         _rx_stream.remainderOffset = 0;
         _rx_stream.vrt_sequence_valid = false;
-        if (_eth_mode == SoapyLiteXM2SDREthernetMode::UDP) {
-#ifdef CSR_ETH_RX_STREAMER_UDP_PORT_ADDR
-            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_UDP_PORT_ADDR, _liteeth_rx_port);
-#endif
-#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
-            litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
-#endif
+        {
+            struct m2sdr_liteeth_rx_stream_config rx_config = makeLiteEthRxStreamConfig();
+            int rc = m2sdr_liteeth_rx_stream_activate(_dev, &rx_config);
+            if (rc != M2SDR_ERR_OK) {
+                SoapySDR::logf(SOAPY_SDR_ERROR,
+                    "LiteEth RX stream activation failed: %s", m2sdr_strerror(rc));
+                return SOAPY_SDR_STREAM_ERROR;
+            }
         }
-        /* Crossbar Demux: Select Ethernet streaming */
-        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
-#ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR,
-                           (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) ? 2 : 1);
-#endif
         /* UDP helper is ready; nothing to start explicitly. */
 #endif
         _rx_stream.user_count = 0;
@@ -604,12 +619,11 @@ void SoapyLiteXM2SDR::stopRxStreamUnlocked()
     /* Disable the DMA engine for RX. */
     litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
 #elif USE_LITEETH
-#ifdef CSR_ETH_RX_MODE_ADDR
-    /* Raw streamer enable is not a safe stop on all bitstreams. Use the
-     * Ethernet RX mode flush branch when present, matching libm2sdr. */
-    litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 0);
-#endif
-    litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    int rc = m2sdr_liteeth_rx_stream_deactivate(_dev);
+    if (rc != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "LiteEth RX stream deactivation failed: %s", m2sdr_strerror(rc));
+    }
 #endif
     _rx_stream.burst_end = true;
 }

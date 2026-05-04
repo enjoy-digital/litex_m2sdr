@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <memory>
 #include <sys/mman.h>
-#include <arpa/inet.h>
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
@@ -445,46 +444,6 @@ bool gpio_is_valid(int number)
 
 void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 
-/***************************************************************************************************
- *                                     Constructor
- **************************************************************************************************/
-
-#if USE_LITEETH
-static std::string getLocalIPAddressToReach(const std::string &remote_ip, uint16_t remote_port)
-{
-    struct sockaddr_in remote_addr;
-    memset(&remote_addr, 0, sizeof(remote_addr));
-    remote_addr.sin_family = AF_INET;
-    remote_addr.sin_port = htons(remote_port);
-    if (inet_pton(AF_INET, remote_ip.c_str(), &remote_addr.sin_addr) != 1)
-        throw std::runtime_error("Invalid remote IP address");
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-        throw std::runtime_error("Failed to create socket");
-
-    if (connect(sock, (struct sockaddr*)&remote_addr, sizeof(remote_addr)) < 0) {
-        close(sock);
-        throw std::runtime_error("Failed to connect socket");
-    }
-
-    struct sockaddr_in local_addr;
-    socklen_t addr_len = sizeof(local_addr);
-    if (getsockname(sock, (struct sockaddr*)&local_addr, &addr_len) < 0) {
-        close(sock);
-        throw std::runtime_error("getsockname() failed");
-    }
-
-    close(sock);
-
-    char buf[INET_ADDRSTRLEN];
-    if (!inet_ntop(AF_INET, &local_addr.sin_addr, buf, sizeof(buf)))
-        throw std::runtime_error("inet_ntop failed");
-
-    return std::string(buf);
-}
-#endif
-
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
 
@@ -495,6 +454,10 @@ void dma_set_loopback(int fd, bool loopback_enable) {
     checked_ioctl(fd, LITEPCIE_IOCTL_DMA, &m);
 }
 #endif
+
+/***************************************************************************************************
+ *                                     Constructor
+ **************************************************************************************************/
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _deviceArgs(args), _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
@@ -562,44 +525,15 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     else
         throw std::runtime_error("Invalid eth_mode: " + eth_mode + " (supported: udp, vrt)");
 
-    /* Ethernet FPGA streamer configuration */
-
-    /* Determine the local IP that the board sees */
-    std::string local_ip = getLocalIPAddressToReach(eth_ip, 1234);
-
-    struct in_addr ip_addr_struct;
-    if (inet_pton(AF_INET, local_ip.c_str(), &ip_addr_struct) != 1) {
-        throw std::runtime_error("Invalid local IP address determined");
+    uint32_t local_ip = 0;
+    rc = m2sdr_liteeth_get_local_ip(_dev, &local_ip);
+    if (rc != M2SDR_ERR_OK) {
+        throw std::runtime_error(
+            "Could not determine local IP for LiteEth streaming (" +
+            std::string(m2sdr_strerror(rc)) + ")");
     }
-
-    uint32_t ip_addr_val = ntohl(ip_addr_struct.s_addr);
-
-    /* Write the PC's IP to the FPGA's ETH_STREAMER IP register */
-    litex_m2sdr_writel(_dev, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
-
-    SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming", local_ip.c_str());
-
-    if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
-        /* Route RX to Ethernet on the main crossbar. */
-        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1);
-#ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 2); /* Ethernet RX branch -> VRT */
-#else
-        throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks eth_rx_mode CSR (rebuild with --with-eth-vrt)");
-#endif
-#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
-        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
-        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_IP_ADDRESS_ADDR, ip_addr_val);
-        if (args.count("vrt_port") > 0) {
-            litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_UDP_PORT_ADDR,
-                static_cast<uint32_t>(std::stoul(args.at("vrt_port"))));
-        }
-        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 1);
-#else
-        throw std::runtime_error("eth_mode=vrt requested, but FPGA bitstream lacks vrt_streamer CSR (rebuild with --with-eth-vrt)");
-#endif
-        SoapySDR::logf(SOAPY_SDR_INFO, "Enabled FPGA VRT RX streaming");
-    }
+    SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming",
+                   ptp_ipv4_to_string(local_ip).c_str());
 #endif
 
     /* Configure Mode based on _bitMode */
@@ -903,11 +837,6 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         liteeth_udp_cleanup(&_udp);
         _udp_inited = false;
     }
-#ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
-    if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
-        litex_m2sdr_writel(_dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
-    }
-#endif
     if (_dev) {
         m2sdr_rf_bind(_dev, nullptr);
         m2sdr_close(_dev);
