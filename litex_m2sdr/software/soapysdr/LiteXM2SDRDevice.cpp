@@ -1988,6 +1988,10 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("liteeth_rx_flush_bytes");
     sensors.push_back("liteeth_rx_kernel_drops");
     sensors.push_back("liteeth_rx_recv_errors");
+    sensors.push_back("liteeth_udp_rcvbuf_requested");
+    sensors.push_back("liteeth_udp_rcvbuf_actual");
+    sensors.push_back("liteeth_udp_sndbuf_requested");
+    sensors.push_back("liteeth_udp_sndbuf_actual");
 #endif
     return sensors;
 }
@@ -2122,6 +2126,14 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.description = "Kernel-reported UDP RX queue drops from SO_RXQ_OVFL";
             } else if (sensorStr == "rx_recv_errors") {
                 info.description = "LiteEth UDP RX socket receive errors";
+            } else if (sensorStr == "udp_rcvbuf_requested") {
+                info.description = "Requested LiteEth UDP SO_RCVBUF size in bytes";
+            } else if (sensorStr == "udp_rcvbuf_actual") {
+                info.description = "Actual Linux LiteEth UDP SO_RCVBUF size in bytes";
+            } else if (sensorStr == "udp_sndbuf_requested") {
+                info.description = "Requested LiteEth UDP SO_SNDBUF size in bytes";
+            } else if (sensorStr == "udp_sndbuf_actual") {
+                info.description = "Actual Linux LiteEth UDP SO_SNDBUF size in bytes";
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
@@ -2224,6 +2236,18 @@ std::string SoapyLiteXM2SDR::readSensor(
                 sensorValue = std::to_string(_udp.rx_kernel_drops);
             } else if (sensorStr == "rx_recv_errors") {
                 sensorValue = std::to_string(_udp.rx_recv_errors);
+            } else if (sensorStr == "udp_rcvbuf_requested") {
+                sensorValue = std::to_string(_udp.so_rcvbuf_bytes);
+            } else if (sensorStr == "udp_rcvbuf_actual") {
+                int value = 0;
+                (void)liteeth_udp_get_so_rcvbuf(const_cast<struct liteeth_udp_ctrl *>(&_udp), &value);
+                sensorValue = std::to_string(value);
+            } else if (sensorStr == "udp_sndbuf_requested") {
+                sensorValue = std::to_string(_udp.so_sndbuf_bytes);
+            } else if (sensorStr == "udp_sndbuf_actual") {
+                int value = 0;
+                (void)liteeth_udp_get_so_sndbuf(const_cast<struct liteeth_udp_ctrl *>(&_udp), &value);
+                sensorValue = std::to_string(value);
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }

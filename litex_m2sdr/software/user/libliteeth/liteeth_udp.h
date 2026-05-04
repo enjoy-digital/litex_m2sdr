@@ -72,6 +72,8 @@ struct liteeth_udp_ctrl {
     int           nonblock;
     int           so_rcvbuf_bytes;
     int           so_sndbuf_bytes;
+    int           so_rcvbuf_actual_bytes;
+    int           so_sndbuf_actual_bytes;
 };
 
 int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
@@ -96,6 +98,8 @@ static inline size_t liteeth_udp_buffer_count           (struct liteeth_udp_ctrl
 
 int liteeth_udp_set_so_rcvbuf(struct liteeth_udp_ctrl *u, int bytes);
 int liteeth_udp_set_so_sndbuf(struct liteeth_udp_ctrl *u, int bytes);
+int liteeth_udp_get_so_rcvbuf(struct liteeth_udp_ctrl *u, int *bytes);
+int liteeth_udp_get_so_sndbuf(struct liteeth_udp_ctrl *u, int *bytes);
 
 #ifdef __cplusplus
 }

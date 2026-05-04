@@ -55,6 +55,17 @@ static void *alloc_aligned(size_t size)
     return p;
 }
 
+static int refresh_socket_buffer(struct liteeth_udp_ctrl *u, int optname, int *dst)
+{
+    socklen_t len = sizeof(*dst);
+
+    if (!u || !dst || u->sock < 0)
+        return -1;
+    if (getsockopt(u->sock, SOL_SOCKET, optname, dst, &len) < 0)
+        return -1;
+    return 0;
+}
+
 static int64_t get_time_ms(void)
 {
     struct timespec ts;
@@ -166,6 +177,8 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
         (void)setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, &u->so_rcvbuf_bytes, sizeof(int));
     if (u->so_sndbuf_bytes > 0)
         (void)setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, &u->so_sndbuf_bytes, sizeof(int));
+    (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
+    (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
 
     if (bind_any(u->sock, listen_ip, listen_port) < 0) {
         perror("liteeth_udp: bind");
@@ -387,15 +400,41 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
 int liteeth_udp_set_so_rcvbuf(struct liteeth_udp_ctrl *u, int bytes)
 {
     u->so_rcvbuf_bytes = bytes;
-    if (u->sock >= 0)
-        return setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(int));
+    if (u->sock >= 0) {
+        int rc = setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(int));
+        (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
+        return rc;
+    }
     return 0;
 }
 
 int liteeth_udp_set_so_sndbuf(struct liteeth_udp_ctrl *u, int bytes)
 {
     u->so_sndbuf_bytes = bytes;
+    if (u->sock >= 0) {
+        int rc = setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(int));
+        (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
+        return rc;
+    }
+    return 0;
+}
+
+int liteeth_udp_get_so_rcvbuf(struct liteeth_udp_ctrl *u, int *bytes)
+{
+    if (!u || !bytes)
+        return -1;
     if (u->sock >= 0)
-        return setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(int));
+        (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
+    *bytes = u->so_rcvbuf_actual_bytes;
+    return 0;
+}
+
+int liteeth_udp_get_so_sndbuf(struct liteeth_udp_ctrl *u, int *bytes)
+{
+    if (!u || !bytes)
+        return -1;
+    if (u->sock >= 0)
+        (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
+    *bytes = u->so_sndbuf_actual_bytes;
     return 0;
 }

@@ -218,6 +218,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "Failed to set LiteEth UDP SO_RCVBUF to %d bytes", rcvbuf_bytes);
         }
+        int actual_rcvbuf_bytes = 0;
+        if (liteeth_udp_get_so_rcvbuf(&_udp, &actual_rcvbuf_bytes) == 0) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "LiteEth UDP SO_RCVBUF: requested=%d actual=%d",
+                rcvbuf_bytes, actual_rcvbuf_bytes);
+        }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth %s init: remote=%s:%u",
                        is_vrt ? "VRT/UDP" : "UDP", ip.c_str(), port);
@@ -358,6 +364,12 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (sndbuf_bytes > 0 && liteeth_udp_set_so_sndbuf(&_udp, sndbuf_bytes) != 0) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "Failed to set LiteEth UDP SO_SNDBUF to %d bytes", sndbuf_bytes);
+        }
+        int actual_sndbuf_bytes = 0;
+        if (liteeth_udp_get_so_sndbuf(&_udp, &actual_sndbuf_bytes) == 0) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "LiteEth UDP SO_SNDBUF: requested=%d actual=%d",
+                sndbuf_bytes, actual_sndbuf_bytes);
         }
         _udp_inited = true;
         SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
