@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cerrno>
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
 #include <algorithm>
@@ -861,6 +862,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
     spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
+        stopRxStreamUnlocked();
 #if USE_LITEPCIE
          /* Release the DMA engine. */
         if (_rx_stream.dma.buf_rd != NULL) {
@@ -868,21 +870,26 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         }
         _rx_stream.buf = NULL;
 #elif USE_LITEETH
-        /* nothing to stop explicitly in UDP helper */
+        std::free(_rx_stream.buf);
+        _rx_stream.buf = NULL;
 #endif
         _rx_stream.opened = false;
     }
 
-#if USE_LITEPCIE
     if (_tx_stream.opened) {
+        stopTxStreamUnlocked();
+#if USE_LITEPCIE
         /* Release the DMA engine. */
         if (_tx_stream.dma.buf_wr) {
             litepcie_dma_cleanup(&_tx_stream.dma);
         }
-        _rx_stream.buf = NULL;
+#elif USE_LITEETH
+        std::free(_tx_stream.buf);
+#endif
+        _tx_stream.buf = NULL;
         _tx_stream.opened = false;
     }
-#endif
+    cleanupLiteEthUdpIfIdleUnlocked();
 
     /* Crossbar Mux/Demux : Select PCIe streaming */
     litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);

@@ -497,6 +497,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _txChannelMaskHw = 0;
 
     void invalidateRfHardwareCache();
+    void stopRxStreamUnlocked();
+    void stopTxStreamUnlocked();
+    void cleanupLiteEthUdpIfIdleUnlocked();
 
     void interleaveCF32(
         const void *src,

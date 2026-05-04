@@ -467,6 +467,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (stream == RX_STREAM) {
+        stopRxStreamUnlocked();
 #if USE_LITEPCIE
         litepcie_dma_cleanup(&_rx_stream.dma);
         _rx_stream.buf = NULL;
@@ -476,6 +477,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 #endif
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
+        stopTxStreamUnlocked();
 #if USE_LITEPCIE
         litepcie_dma_cleanup(&_tx_stream.dma);
         _tx_stream.buf = NULL;
@@ -485,6 +487,8 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 #endif
         _tx_stream.opened = false;
     }
+
+    cleanupLiteEthUdpIfIdleUnlocked();
 }
 
 /* Activate the specified stream (configure the DMA engines). */
@@ -559,32 +563,14 @@ int SoapyLiteXM2SDR::deactivateStream(
     const int flags,
     const long long timeNs) {
     if (stream == RX_STREAM) {
-        /* Disable the DMA engine for RX. */
-#if USE_LITEPCIE
-        litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
-#elif USE_LITEETH
-        /* Flush/disable Ethernet RX branch when available. */
-#ifdef CSR_ETH_RX_MODE_ADDR
-        litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 0);
-#endif
-        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
-#endif
-        /* set burst_end: if readStream is called after this point SOAPY_SDR_END_BURST
-         * will be set
-         */
-        _rx_stream.burst_end = true;
+        stopRxStreamUnlocked();
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "RX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
                 (long long)timeNs);
         }
     } else if (stream == TX_STREAM) {
-#if USE_LITEPCIE
-        /* Disable the DMA engine for TX. */
-        litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
-#elif USE_LITEETH
-        /* No-op for UDP helper. */
-#endif
+        stopTxStreamUnlocked();
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "TX timed deactivation requested for %lld ns; timing not supported, stopping immediately",
@@ -592,6 +578,43 @@ int SoapyLiteXM2SDR::deactivateStream(
         }
     }
     return 0;
+}
+
+void SoapyLiteXM2SDR::stopRxStreamUnlocked()
+{
+#if USE_LITEPCIE
+    /* Disable the DMA engine for RX. */
+    litepcie_dma_writer(_fd, 0, &_rx_stream.hw_count, &_rx_stream.sw_count);
+#elif USE_LITEETH
+#ifdef CSR_ETH_RX_MODE_ADDR
+    /* Raw streamer enable is not a safe stop on all bitstreams. Use the
+     * Ethernet RX mode flush branch when present, matching libm2sdr. */
+    litex_m2sdr_writel(_dev, CSR_ETH_RX_MODE_ADDR, 0);
+#endif
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+#endif
+    _rx_stream.burst_end = true;
+}
+
+void SoapyLiteXM2SDR::stopTxStreamUnlocked()
+{
+#if USE_LITEPCIE
+    /* Disable the DMA engine for TX. */
+    litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
+#elif USE_LITEETH
+    litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+#endif
+}
+
+void SoapyLiteXM2SDR::cleanupLiteEthUdpIfIdleUnlocked()
+{
+#if USE_LITEETH
+    if (_udp_inited && !_rx_stream.opened && !_tx_stream.opened) {
+        liteeth_udp_cleanup(&_udp);
+        _udp_inited = false;
+        _nChannels = 0;
+    }
+#endif
 }
 
 /*******************************************************************
