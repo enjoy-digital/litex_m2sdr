@@ -507,6 +507,8 @@ int m2sdr_liteeth_rx_stream_prepare(struct m2sdr_dev *dev,
 int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
                                      const struct m2sdr_liteeth_rx_stream_config *config);
 int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev);
+int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev);
+int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats);
 

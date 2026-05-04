@@ -588,8 +588,12 @@ int SoapyLiteXM2SDR::activateStream(
         litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
         _tx_stream.user_count = 0;
 #elif USE_LITEETH
-        /* Crossbar Mux: Select Ethernet streaming */
-        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1);
+        int rc = m2sdr_liteeth_tx_stream_activate(_dev);
+        if (rc != M2SDR_ERR_OK) {
+            SoapySDR::logf(SOAPY_SDR_ERROR,
+                "LiteEth TX stream activation failed: %s", m2sdr_strerror(rc));
+            return SOAPY_SDR_STREAM_ERROR;
+        }
         /* No explicit start; pacing handled by client cadence if needed. */
         _tx_stream.user_count = 0;
 #endif
@@ -649,7 +653,11 @@ void SoapyLiteXM2SDR::stopTxStreamUnlocked()
     /* Disable the DMA engine for TX. */
     litepcie_dma_reader(_fd, 0, &_tx_stream.hw_count, &_tx_stream.sw_count);
 #elif USE_LITEETH
-    litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+    int rc = m2sdr_liteeth_tx_stream_deactivate(_dev);
+    if (rc != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "LiteEth TX stream deactivation failed: %s", m2sdr_strerror(rc));
+    }
 #endif
 }
 

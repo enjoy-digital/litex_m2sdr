@@ -309,6 +309,35 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    (void)m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+#endif
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats)
 {
@@ -372,6 +401,18 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 }
 
 int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
+{
+    (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
 {
     (void)dev;
     return M2SDR_ERR_UNSUPPORTED;
@@ -502,6 +543,9 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
     if (direction == M2SDR_TX) {
+        rc = m2sdr_liteeth_tx_stream_activate(dev);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
     }
 #else
@@ -574,6 +618,9 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
 #elif defined(USE_LITEETH)
     if (dev->rx_configured) {
         (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    }
+    if (dev->tx_configured) {
+        (void)m2sdr_liteeth_tx_stream_deactivate(dev);
     }
     dev->liteeth_rx_config_valid = 0;
     dev->liteeth_rx_timeout_recovery_armed = 0;
