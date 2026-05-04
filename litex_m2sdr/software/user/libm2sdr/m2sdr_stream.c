@@ -30,6 +30,7 @@
 
 #define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
+#define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 
 /* Helpers */
 /*---------*/
@@ -306,6 +307,36 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
     (void)m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
     return M2SDR_ERR_OK;
 }
+
+int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
+                                struct m2sdr_liteeth_udp_stats *stats)
+{
+    if (!dev || !stats)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+    if (!dev->udp_inited)
+        return M2SDR_ERR_STATE;
+
+    memset(stats, 0, sizeof(*stats));
+    stats->buffer_size           = dev->udp.buf_size;
+    stats->buffer_count          = dev->udp.buf_count;
+    stats->rx_buffers            = dev->udp.rx_buffers;
+    stats->rx_ring_full_events   = dev->udp.rx_ring_full_events;
+    stats->rx_flushes            = dev->udp.rx_flushes;
+    stats->rx_flush_bytes        = dev->udp.rx_flush_bytes;
+    stats->rx_kernel_drops       = dev->udp.rx_kernel_drops;
+    stats->rx_source_drops       = dev->udp.rx_source_drops;
+    stats->rx_timeout_recoveries = dev->udp.rx_timeout_recoveries;
+    stats->rx_recv_errors        = dev->udp.rx_recv_errors;
+    stats->tx_buffers            = dev->udp.tx_buffers;
+    stats->tx_send_errors        = dev->udp.tx_send_errors;
+    stats->so_rcvbuf_requested   = dev->udp.so_rcvbuf_bytes;
+    stats->so_rcvbuf_actual      = dev->udp.so_rcvbuf_actual_bytes;
+    stats->so_sndbuf_requested   = dev->udp.so_sndbuf_bytes;
+    stats->so_sndbuf_actual      = dev->udp.so_sndbuf_actual_bytes;
+    return M2SDR_ERR_OK;
+}
 #else
 void m2sdr_liteeth_rx_stream_config_init(struct m2sdr_liteeth_rx_stream_config *config)
 {
@@ -342,6 +373,14 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
 {
     (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
+                                struct m2sdr_liteeth_udp_stats *stats)
+{
+    (void)dev;
+    (void)stats;
     return M2SDR_ERR_UNSUPPORTED;
 }
 #endif
@@ -443,6 +482,10 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                              0) < 0) {
             return M2SDR_ERR_IO;
         }
+        if (rx_enable)
+            (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
+        if (tx_enable)
+            (void)liteeth_udp_set_so_sndbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
         dev->udp_inited = 1;
     }
 

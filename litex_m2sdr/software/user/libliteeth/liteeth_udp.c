@@ -381,6 +381,7 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
         if (nb < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 continue; /* retry */
+            u->tx_send_errors++;
             perror("liteeth_udp: sendto");
             return -1;
         }
@@ -390,6 +391,7 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
 
     u->usr_write_buf_offset = (u->usr_write_buf_offset + 1) % u->buf_count;
     u->reader_sw_count++;
+    u->tx_buffers++;
 
     /* keep ring flowing; writer reuses slots indefinitely */
     return 0;

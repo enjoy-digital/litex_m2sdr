@@ -141,6 +141,25 @@ struct m2sdr_liteeth_rx_stream_config {
     uint32_t local_ip;
 };
 
+struct m2sdr_liteeth_udp_stats {
+    size_t buffer_size;
+    size_t buffer_count;
+    uint64_t rx_buffers;
+    uint64_t rx_ring_full_events;
+    uint64_t rx_flushes;
+    uint64_t rx_flush_bytes;
+    uint64_t rx_kernel_drops;
+    uint64_t rx_source_drops;
+    uint64_t rx_timeout_recoveries;
+    uint64_t rx_recv_errors;
+    uint64_t tx_buffers;
+    uint64_t tx_send_errors;
+    int so_rcvbuf_requested;
+    int so_rcvbuf_actual;
+    int so_sndbuf_requested;
+    int so_sndbuf_actual;
+};
+
 struct m2sdr_devinfo {
     /* Stable serial string when available. */
     char serial[M2SDR_SERIAL_MAX];
@@ -488,6 +507,8 @@ int m2sdr_liteeth_rx_stream_prepare(struct m2sdr_dev *dev,
 int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
                                      const struct m2sdr_liteeth_rx_stream_config *config);
 int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev);
+int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
+                                struct m2sdr_liteeth_udp_stats *stats);
 
 /* Blocking sync receive/transmit helpers. */
 int m2sdr_sync_rx(struct m2sdr_dev *dev,

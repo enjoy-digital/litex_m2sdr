@@ -217,6 +217,37 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
     }
 }
 
+static void print_liteeth_udp_summary(struct m2sdr_dev *dev, uint8_t quiet)
+{
+    struct m2sdr_liteeth_udp_stats stats;
+
+    if (quiet || !dev)
+        return;
+    if (m2sdr_liteeth_get_udp_stats(dev, &stats) != 0)
+        return;
+
+    fprintf(stderr,
+            "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
+            " rx_ring_full=%" PRIu64 " rx_flushes=%" PRIu64
+            " rx_recv_errors=%" PRIu64 "\n",
+            stats.rx_buffers,
+            stats.rx_kernel_drops,
+            stats.rx_ring_full_events,
+            stats.rx_flushes,
+            stats.rx_recv_errors);
+    if (stats.so_rcvbuf_requested > 0) {
+        fprintf(stderr,
+                "LiteEth UDP SO_RCVBUF: requested=%d actual=%d\n",
+                stats.so_rcvbuf_requested,
+                stats.so_rcvbuf_actual);
+        if (stats.so_rcvbuf_actual > 0 &&
+            stats.so_rcvbuf_actual < stats.so_rcvbuf_requested) {
+            fprintf(stderr,
+                    "LiteEth UDP SO_RCVBUF capped; increase net.core.rmem_max for more RX headroom.\n");
+        }
+    }
+}
+
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
                          bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
@@ -483,6 +514,8 @@ cleanup:
     if (use_pcie_dma)
         litepcie_dma_cleanup(&dma);
 #endif
+    if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
+        print_liteeth_udp_summary(dev, quiet);
     if (fo && fo != stdout)
         fclose(fo);
     if (dev)

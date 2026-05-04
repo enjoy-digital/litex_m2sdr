@@ -64,9 +64,15 @@ struct liteeth_udp_ctrl {
     uint64_t      rx_flushes;
     uint64_t      rx_flush_bytes;
     uint64_t      rx_kernel_drops;
+    uint64_t      rx_source_drops;
+    uint64_t      rx_timeout_recoveries;
     uint64_t      rx_recv_errors;
     uint32_t      rxq_ovfl_last;
     int           rxq_ovfl_valid;
+
+    /* TX diagnostics */
+    uint64_t      tx_buffers;
+    uint64_t      tx_send_errors;
 
     /* Options */
     int           nonblock;
