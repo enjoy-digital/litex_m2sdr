@@ -29,6 +29,7 @@
 #include "etherbone.h"
 
 #define EB_DEFAULT_TIMEOUT_MS 1000
+#define EB_DIRECT_RX_SETTLE_US 20000
 
 struct eb_connection {
     int fd;
@@ -90,6 +91,28 @@ int eb_set_timeout(struct eb_connection *conn, int timeout_ms)
 int eb_get_last_error(struct eb_connection *conn)
 {
     return conn ? conn->last_error : EB_ERR_IO;
+}
+
+static void eb_drain_direct_rx(struct eb_connection *conn)
+{
+    uint8_t discard[256];
+
+    if (!conn || !conn->is_direct || conn->read_fd < 0)
+        return;
+
+    for (;;) {
+        int ret = recvfrom(conn->read_fd, discard, sizeof(discard), MSG_DONTWAIT, NULL, NULL);
+
+        if (ret > 0)
+            continue;
+        if (ret == 0)
+            return;
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+        return;
+    }
 }
 
 int eb_unfill_read32(uint8_t wb_buffer[20]) {
@@ -245,6 +268,9 @@ int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) 
 
     eb_fill_read32(raw_pkt, addr);
 
+    if (conn->is_direct)
+        eb_drain_direct_rx(conn);
+
     if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0) {
         fprintf(stderr, "eb_read32: send failed\n");
         return eb_get_last_error(conn);
@@ -370,6 +396,9 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         conn->read_fd = rx_socket;
         conn->fd = tx_socket;
         conn->addr = res;
+        eb_drain_direct_rx(conn);
+        usleep(EB_DIRECT_RX_SETTLE_US);
+        eb_drain_direct_rx(conn);
     }
     else {
         sock = socket(AF_INET, SOCK_STREAM, 0);

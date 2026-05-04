@@ -21,6 +21,13 @@
 #include "csr.h"
 #include "m2sdr_internal.h"
 
+/* Defines */
+/*---------*/
+
+#ifdef USE_LITEETH
+#define M2SDR_LITEETH_CONTROL_TIMEOUT_MS 500
+#endif
+
 /* Helpers */
 /*---------*/
 
@@ -403,6 +410,11 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
          * the resolved address tuple plus the opaque handle. */
         dev->eb = eb_connect(ip, port_str, 1);
         if (!dev->eb) {
+            free(dev);
+            return M2SDR_ERR_IO;
+        }
+        if (eb_set_timeout(dev->eb, M2SDR_LITEETH_CONTROL_TIMEOUT_MS) != EB_ERR_OK) {
+            eb_disconnect(&dev->eb);
             free(dev);
             return M2SDR_ERR_IO;
         }

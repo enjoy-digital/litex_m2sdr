@@ -15,6 +15,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <errno.h>
+#include <stdint.h>
+#include <time.h>
 
 #include "ad9361.h"
 #include "ad9361_api.h"
@@ -40,6 +43,9 @@
 #define SI5351_STATUS_LOL_A    0x20
 #define SI5351_STATUS_LOS      0x10
 #define SI5351_READY_TIMEOUT_MS 100
+#ifdef USE_LITEETH
+#define M2SDR_LITEETH_RF_INIT_TIMEOUT_MS 5000
+#endif
 
 #ifndef M2SDR_LOG_ENABLED
 #define M2SDR_LOG_ENABLED 1
@@ -64,10 +70,22 @@
  * single implicit active device. libm2sdr keeps that glue local here. */
 #if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
 static _Thread_local struct m2sdr_dev *tls_rf_dev;
+#ifdef USE_LITEETH
+static _Thread_local uint64_t tls_rf_init_deadline_us;
+static _Thread_local bool tls_rf_init_timed_out;
+#endif
 #elif defined(__GNUC__) || defined(__clang__)
 static __thread struct m2sdr_dev *tls_rf_dev;
+#ifdef USE_LITEETH
+static __thread uint64_t tls_rf_init_deadline_us;
+static __thread bool tls_rf_init_timed_out;
+#endif
 #else
 static struct m2sdr_dev *tls_rf_dev;
+#ifdef USE_LITEETH
+static uint64_t tls_rf_init_deadline_us;
+static bool tls_rf_init_timed_out;
+#endif
 #endif
 
 /* Helpers */
@@ -86,6 +104,43 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
     return NULL;
 #endif
 }
+
+#ifdef USE_LITEETH
+static uint64_t m2sdr_time_us(void)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0;
+
+    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+}
+
+static void m2sdr_start_rf_init_timeout(void)
+{
+    uint64_t now = m2sdr_time_us();
+
+    tls_rf_init_timed_out = false;
+    tls_rf_init_deadline_us = now ?
+        now + (uint64_t)M2SDR_LITEETH_RF_INIT_TIMEOUT_MS * 1000u : 0;
+}
+
+static void m2sdr_clear_rf_init_timeout(void)
+{
+    tls_rf_init_deadline_us = 0;
+}
+
+static bool m2sdr_rf_init_timeout_expired(void)
+{
+    uint64_t now;
+
+    if (!tls_rf_init_deadline_us)
+        return false;
+
+    now = m2sdr_time_us();
+    return now && now >= tls_rf_init_deadline_us;
+}
+#endif
 
 static int m2sdr_from_ad9361_rc(int32_t rc)
 {
@@ -777,6 +832,15 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
     if (!tls_rf_dev)
         return -1;
 
+#ifdef USE_LITEETH
+    if (m2sdr_rf_init_timeout_expired()) {
+        tls_rf_init_timed_out = true;
+        M2SDR_LOGF("AD9361 SPI transaction aborted after %d ms RF init timeout.\n",
+            M2SDR_LITEETH_RF_INIT_TIMEOUT_MS);
+        return -ETIMEDOUT;
+    }
+#endif
+
     conn = m2sdr_conn(tls_rf_dev);
 
     /* The imported AD9361 driver only uses the 2-byte-address/1-byte-read and
@@ -934,7 +998,18 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     rc = m2sdr_apply_channel_layout(dev, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
-    rc = m2sdr_from_ad9361_rc(ad9361_init(&dev->ad9361_phy, &default_init_param, 1));
+#ifdef USE_LITEETH
+    m2sdr_start_rf_init_timeout();
+#endif
+    rc = ad9361_init(&dev->ad9361_phy, &default_init_param, 1);
+#ifdef USE_LITEETH
+    if (tls_rf_init_timed_out) {
+        m2sdr_clear_rf_init_timeout();
+        return M2SDR_ERR_TIMEOUT;
+    }
+    m2sdr_clear_rf_init_timeout();
+#endif
+    rc = m2sdr_from_ad9361_rc(rc);
     if (rc != M2SDR_ERR_OK)
         return m2sdr_transport_error(dev);
     phy = m2sdr_current_phy(dev);
