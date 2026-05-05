@@ -75,6 +75,7 @@ struct liteeth_udp_ctrl {
 
     /* TX diagnostics */
     uint64_t      tx_buffers;
+    uint64_t      tx_bytes;
     uint64_t      tx_send_errors;
 
     /* Options */

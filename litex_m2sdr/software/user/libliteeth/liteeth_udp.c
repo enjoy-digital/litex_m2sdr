@@ -429,6 +429,7 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
     u->usr_write_buf_offset = (u->usr_write_buf_offset + 1) % u->buf_count;
     u->reader_sw_count++;
     u->tx_buffers++;
+    u->tx_bytes += u->buf_size;
 
     /* keep ring flowing; writer reuses slots indefinitely */
     return 0;

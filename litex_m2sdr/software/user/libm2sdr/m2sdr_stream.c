@@ -360,6 +360,7 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
     stats->rx_timeout_recoveries = dev->udp.rx_timeout_recoveries;
     stats->rx_recv_errors        = dev->udp.rx_recv_errors;
     stats->tx_buffers            = dev->udp.tx_buffers;
+    stats->tx_bytes              = dev->udp.tx_bytes;
     stats->tx_send_errors        = dev->udp.tx_send_errors;
     stats->so_rcvbuf_requested   = dev->udp.so_rcvbuf_bytes;
     stats->so_rcvbuf_actual      = dev->udp.so_rcvbuf_actual_bytes;

@@ -1920,6 +1920,9 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("liteeth_rx_source_drops");
     sensors.push_back("liteeth_rx_timeout_recoveries");
     sensors.push_back("liteeth_rx_recv_errors");
+    sensors.push_back("liteeth_tx_buffers");
+    sensors.push_back("liteeth_tx_bytes");
+    sensors.push_back("liteeth_tx_send_errors");
     sensors.push_back("liteeth_udp_rcvbuf_requested");
     sensors.push_back("liteeth_udp_rcvbuf_actual");
     sensors.push_back("liteeth_udp_sndbuf_requested");
@@ -2065,6 +2068,12 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.description = "LiteEth RX timeout recovery cycles";
             } else if (sensorStr == "rx_recv_errors") {
                 info.description = "LiteEth UDP RX socket receive errors";
+            } else if (sensorStr == "tx_buffers") {
+                info.description = "Complete LiteEth UDP TX buffers submitted by userspace";
+            } else if (sensorStr == "tx_bytes") {
+                info.description = "LiteEth UDP TX payload bytes submitted by userspace";
+            } else if (sensorStr == "tx_send_errors") {
+                info.description = "LiteEth UDP TX socket send errors";
             } else if (sensorStr == "udp_rcvbuf_requested") {
                 info.description = "Requested LiteEth UDP SO_RCVBUF size in bytes";
             } else if (sensorStr == "udp_rcvbuf_actual") {
@@ -2185,6 +2194,12 @@ std::string SoapyLiteXM2SDR::readSensor(
                 sensorValue = std::to_string(_rx_stream.rx_timeout_recoveries);
             } else if (sensorStr == "rx_recv_errors") {
                 sensorValue = std::to_string(_udp.rx_recv_errors);
+            } else if (sensorStr == "tx_buffers") {
+                sensorValue = std::to_string(_udp.tx_buffers);
+            } else if (sensorStr == "tx_bytes") {
+                sensorValue = std::to_string(_udp.tx_bytes);
+            } else if (sensorStr == "tx_send_errors") {
+                sensorValue = std::to_string(_udp.tx_send_errors);
             } else if (sensorStr == "udp_rcvbuf_requested") {
                 sensorValue = std::to_string(_udp.so_rcvbuf_bytes);
             } else if (sensorStr == "udp_rcvbuf_actual") {

@@ -153,6 +153,7 @@ struct m2sdr_liteeth_udp_stats {
     uint64_t rx_timeout_recoveries;
     uint64_t rx_recv_errors;
     uint64_t tx_buffers;
+    uint64_t tx_bytes;
     uint64_t tx_send_errors;
     int so_rcvbuf_requested;
     int so_rcvbuf_actual;
