@@ -57,6 +57,22 @@ Common PCIe build:
 lspci
 ```
 
+Host software can be switched between the two transports from
+`litex_m2sdr/software/`:
+
+```bash
+cd litex_m2sdr/software
+sudo ./build.py --interface=liteeth
+sudo ./build.py --interface=litepcie
+```
+
+For faster local rebuilds while iterating only on user-space code:
+
+```bash
+make -C litex_m2sdr/software/user INTERFACE=USE_LITEETH all
+make -C litex_m2sdr/software/user INTERFACE=USE_LITEPCIE all
+```
+
 Use `--load` for volatile debug iterations. Use flash flows only when the
 bitstream has already been validated or when persistent boot behavior is the
 thing being tested.
@@ -112,6 +128,126 @@ litex_term crossover --csr-csv scripts/csr.csv
 When debugging a hang, also check whether host writes accumulate but the target
 logic does not consume them. That often separates host transport problems from
 internal bus or state-machine problems.
+
+## LiteEth And Etherbone
+
+Use this sequence when debugging Ethernet access, LiteEth streaming, or
+Soapy/Gqrx over Ethernet.
+
+First verify the board and host path before starting RF or streaming:
+
+```bash
+ping 192.168.1.50
+cd litex_m2sdr/software/user
+./m2sdr_util --device eth:192.168.1.50:1234 info
+./m2sdr_util info
+```
+
+The `info` output should be coherent: correct SoC identifier, API version,
+board variant, Ethernet enabled, plausible FPGA temperature and voltages, and
+AD9361 presence/product ID. If the output contains shifted strings, API version
+`0.0`, impossible temperatures, reserved variants, or missing features on a
+known-good bitstream, suspect corrupted Etherbone reads or a wedged board before
+debugging RF state.
+
+Use bounded commands while debugging failures so a slow hardware timeout does
+not trap the terminal:
+
+```bash
+timeout 6s ./m2sdr_rf
+timeout 12s ./m2sdr_record /dev/null 67108864
+```
+
+Typical LiteEth RF-init failures:
+
+- `m2sdr_apply_config failed: timeout`: Etherbone did not complete a register
+  transaction quickly enough.
+- `m2sdr_apply_config failed: io`: a lower-level register/RF transaction
+  failed; this can happen after repeated timeouts or while the board is wedged.
+- `Unsupported PRODUCT_ID 0x1` or inconsistent AD9361 product IDs: do not
+  assume a real RFIC ID change. First recheck `m2sdr_util info`, then reset or
+  reload the board if the SoC fields are also incoherent.
+- `ad9361_init : AD936x setup error -110`: RFIC initialization reached a Linux
+  timeout-style error path. Keep the command bounded and check whether simple
+  CSR reads still work afterward.
+
+The SI5351 status should be interpreted with the selected clocking mode in
+mind. For the internal-XO baseboard flow, the important quick check during RF
+init is that the code can continue after SI5351 setup and the expected PLL path
+is locked. A status warning alone is less useful than a coherent `info` dump
+plus a successful AD9361 product-ID read.
+
+When stream cleanup is suspected, verify the stream-selection CSR after the
+program exits. On the current baseboard CSR map used during Ethernet debug,
+`CSR_CROSSBAR_MUX_SEL_ADDR` was `0xc804`; prefer the generated CSR name when
+available and treat the literal address as build-specific:
+
+```bash
+./m2sdr_util reg-read 0xc804
+```
+
+The value should be `0x00000000` after `m2sdr_record` exits or after a Soapy
+stream is deactivated and closed. If it remains selected, the next process can
+inherit an active stream path and symptoms can look like stale hardware state.
+
+`m2sdr_record` prints LiteEth UDP counters on exit. A healthy short receive
+test should have zero or near-zero drops:
+
+```text
+LiteEth UDP: rx_buffers=... rx_kernel_drops=0 rx_source_drops=0 rx_ring_full=0 rx_flushes=0 rx_recoveries=0 rx_recv_errors=0
+LiteEth UDP SO_RCVBUF: requested=8388608 actual=...
+```
+
+Use the counters to separate failure classes:
+
+- `rx_kernel_drops`: the Linux socket receive queue overflowed. Increase
+  `net.core.rmem_max`, reduce sample rate, or reduce host load.
+- `rx_source_drops`: packets arrived from an unexpected source IP. Check the
+  configured board IP, local routing, and whether another sender is using the
+  stream port.
+- `rx_ring_full`: user-space did not drain the LiteEth UDP ring fast enough.
+- `rx_recoveries`: the RX path timed out, then libm2sdr/Soapy stopped, flushed,
+  reactivated, and retried the stream once.
+- `rx_recv_errors`: socket-level receive errors. Check host permissions,
+  interface state, and whether another process owns the needed port.
+
+Linux often caps socket buffers below the requested value. If the tools report:
+
+```text
+LiteEth UDP SO_RCVBUF capped; increase net.core.rmem_max for more RX headroom.
+```
+
+increase the host limit before long high-rate captures:
+
+```bash
+sudo sysctl -w net.core.rmem_max=8388608
+sudo sysctl -w net.core.wmem_max=8388608
+```
+
+For Soapy/Gqrx Ethernet tests, force the intended plugin and device arguments
+so an installed PCIe/default plugin does not hide what is being tested:
+
+```bash
+SOAPY_SDR_ROOT=/tmp/soapy-empty-root \
+SOAPY_SDR_PLUGIN_PATH=/tmp/litex_m2sdr_soapysdr_liteeth \
+LD_LIBRARY_PATH=$PWD/libm2sdr \
+SoapySDRUtil --probe=driver=LiteXM2SDR,eth_ip=192.168.1.50
+```
+
+For a minimal RX sample check:
+
+```bash
+SOAPY_SDR_ROOT=/tmp/soapy-empty-root \
+SOAPY_SDR_PLUGIN_PATH=/tmp/litex_m2sdr_soapysdr_liteeth \
+LD_LIBRARY_PATH=$PWD/libm2sdr \
+python3 -c 'import numpy as np, SoapySDR; from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_CF32; s=SoapySDR.Device({"driver":"LiteXM2SDR","eth_ip":"192.168.1.50"}); s.setSampleRate(SOAPY_SDR_RX,0,2e6); st=s.setupStream(SOAPY_SDR_RX,SOAPY_SDR_CF32,[0]); s.activateStream(st); b=np.empty(4096,np.complex64); r=s.readStream(st,[b],4096); print("read", r.ret); print("source_drops", s.readSensor("liteeth_rx_source_drops")); print("recoveries", s.readSensor("liteeth_rx_timeout_recoveries")); s.deactivateStream(st); s.closeStream(st)'
+```
+
+Gqrx should use a device string that selects the LiteX-M2SDR Soapy driver and
+the Ethernet board IP, for example `driver=LiteXM2SDR,eth_ip=192.168.1.50`.
+If Gqrx appears slow during startup, compare with `SoapySDRUtil --probe` and
+the Python sample check above. If those are fast, focus on Gqrx sample-rate,
+gain, antenna, and demodulator settings rather than the Etherbone path.
 
 ## Adding CSRs
 
