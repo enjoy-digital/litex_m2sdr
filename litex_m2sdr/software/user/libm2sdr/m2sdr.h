@@ -435,6 +435,7 @@ int  m2sdr_set_ptp_discipline_config(struct m2sdr_dev *dev, const struct m2sdr_p
 int  m2sdr_clear_ptp_counters(struct m2sdr_dev *dev);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 

@@ -1129,6 +1129,24 @@ int m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable)
 #endif
 }
 
+/* Enable or disable the common TX stream to RX stream loopback path. */
+int m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+#if defined(CSR_TXRX_LOOPBACK_CONTROL_ADDR) && \
+    defined(CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET)
+    uint32_t control = (enable ? 1u : 0u) << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET;
+    if (m2sdr_reg_write(dev, CSR_TXRX_LOOPBACK_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    (void)enable;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
 /* Enable or disable RX-side DMA headers and remember whether the sync API
  * should strip them before returning samples to the caller. */
 int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
