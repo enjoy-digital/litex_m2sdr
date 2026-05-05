@@ -211,7 +211,6 @@ Useful next checks:
 - Sweep sizes just above the boundary, such as `0x9000`, `0xc000`, and `0x10000`, to see whether the issue is tied to inferred BRAM depth, power-of-two decode size, or a specific implementation layout.
 - Use the ROM bus LiteScope probe to compare a known-good `0x8000` ROM read with a failing `0x10000` ROM read.
 - Revise the probe to include the SI5351 sequencer Wishbone master and/or the ROM arbiter grant. The observed `0x2805` low address matches the SI5351 status CSR low word address (`0xf000a014 >> 2`), so this is worth ruling out explicitly.
-- Try a deliberately banked ROM implementation made from two 32 KiB memories selected by address bit 13. If that boots, the issue is probably in the single `16384x32` inferred memory implementation or its physical placement/timing.
 - Try adding one explicit extra read latency cycle to the integrated ROM path. The larger BRAM tree may be returning invalid data when acknowledged with the current one-cycle SRAM wrapper.
 - Build a reduced SoC with only CPU, integrated ROM/SRAM, crossover UART, and Etherbone to remove unrelated placement pressure before debugging the full design.
 
@@ -249,3 +248,40 @@ Hardware result:
 - After that ROM read, `ctrl_scratch` read back `0x00000000` and `litex_server` reported UDP read timeouts.
 
 This reproduces the failure with a different CPU and a timing-clean 100 MHz build. The issue is therefore unlikely to be specific to VexRiscv instruction fetch/cache behavior. The common failing surface remains the 64 KiB integrated ROM access through the full crossbar with the other bus masters present.
+
+### Banked ROM Comparison
+
+The target now accepts `--with-banked-integrated-rom`, a diagnostic option that keeps one public 64 KiB `rom` bus region at `0x00000000` but backs it with two 32 KiB memories. The low bank is selected by Wishbone word address bit 13 equal to zero, and the high bank by bit 13 equal to one.
+
+Command:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --with-banked-integrated-rom \
+    --build
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --with-banked-integrated-rom \
+    --load
+```
+
+Build result:
+
+- The public bus map stayed unchanged: ROM at `0x00000000`, size `0x00010000`; SRAM at `0x10000000`; CSR at `0xf0000000`.
+- The SoC hierarchy showed `rom (BankedROM)` with `bank0` and `bank1`.
+- Vivado inferred `rom_bank0_dat0_reg` as `8192x32` Block RAM. The high bank was mostly optimized because the BIOS image is below 32 KiB and the upper 32 KiB is zero-padded.
+- The bank0 initialization file starts with the expected BIOS word sequence: `0b00006f`, `00000013`, ...
+- Final post-route timing was clean: WNS `+0.349 ns`, TNS `0.000 ns`, WHS `+0.056 ns`, THS `0.000 ns`.
+
+Hardware result:
+
+- The bitstream loaded successfully over FT4232.
+- Etherbone CSR access was alive immediately after load: `ctrl_scratch` read back `0x12345678`.
+- The crossover UART stayed silent: no BIOS banner and no response to `help`.
+- With the CPU reset bit asserted through `ctrl_reset=0x00000002`, an external Etherbone read from `0x00000000` returned `0x00000000` instead of `0x0b00006f`.
+- After that ROM read, `ctrl_scratch` read back `0x00000000` and `litex_server` reported UDP read timeouts.
+
+This rules out the single `16384x32` inferred ROM as the sole trigger for the first-word failure. Address zero is served by an `8192x32` low bank whose initialization file is correct, but the failing bus-visible behavior is unchanged. The next checks should focus on the 64 KiB ROM region decode/crossbar interaction or on adding visibility to the ROM arbiter and other masters.

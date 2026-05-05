@@ -17,7 +17,7 @@ from litex.gen import *
 from litex.build.generic_platform import Subsignal, Pins
 
 from litex.soc.interconnect.csr import *
-from litex.soc.interconnect     import stream
+from litex.soc.interconnect     import stream, wishbone
 
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder  import *
@@ -68,6 +68,73 @@ from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
 from litex_m2sdr.software import generate_litepcie_software
+
+# Banked ROM ---------------------------------------------------------------------------------------
+
+class BankedROM(Module):
+    def __init__(self, size, bank_size=0x8000, bus_data_width=32, bus_address_width=32, init=None):
+        assert size == 2*bank_size
+        if init is None:
+            init = []
+
+        word_bytes = bus_data_width//8
+        bank_words = bank_size//word_bytes
+
+        self.bus = bus = wishbone.Interface(
+            data_width    = bus_data_width,
+            address_width = bus_address_width,
+            addressing    = "word",
+            mode          = "r",
+        )
+
+        bank0_bus = wishbone.Interface(data_width=bus_data_width, address_width=bus_address_width, addressing="word")
+        bank1_bus = wishbone.Interface(data_width=bus_data_width, address_width=bus_address_width, addressing="word")
+
+        self.submodules.bank0 = wishbone.SRAM(bank_size, read_only=True, init=init[:bank_words],              bus=bank0_bus, name="rom_bank0")
+        self.submodules.bank1 = wishbone.SRAM(bank_size, read_only=True, init=init[bank_words:2*bank_words], bus=bank1_bus, name="rom_bank1")
+
+        # Expose a minimal init holder for Builder's regular ROM initialization check.
+        self.mem = type("BankedROMInit", (), {})()
+        self.mem.init = init
+
+        bank_sel   = Signal()
+        bank_sel_d = Signal()
+
+        self.comb += [
+            bank_sel.eq(bus.adr[bank_words.bit_length() - 1]),
+
+            bank0_bus.adr.eq(bus.adr),
+            bank0_bus.dat_w.eq(bus.dat_w),
+            bank0_bus.sel.eq(bus.sel),
+            bank0_bus.we.eq(0),
+            bank0_bus.cyc.eq(bus.cyc & ~bank_sel),
+            bank0_bus.stb.eq(bus.stb & ~bank_sel),
+            bank0_bus.cti.eq(bus.cti),
+            bank0_bus.bte.eq(bus.bte),
+
+            bank1_bus.adr.eq(bus.adr),
+            bank1_bus.dat_w.eq(bus.dat_w),
+            bank1_bus.sel.eq(bus.sel),
+            bank1_bus.we.eq(0),
+            bank1_bus.cyc.eq(bus.cyc & bank_sel),
+            bank1_bus.stb.eq(bus.stb & bank_sel),
+            bank1_bus.cti.eq(bus.cti),
+            bank1_bus.bte.eq(bus.bte),
+
+            bus.dat_r.eq(Mux(bank_sel_d, bank1_bus.dat_r, bank0_bus.dat_r)),
+            bus.ack.eq(Mux(bank_sel_d, bank1_bus.ack,   bank0_bus.ack)),
+            bus.err.eq(Mux(bank_sel_d, bank1_bus.err,   bank0_bus.err)),
+        ]
+        self.sync += If(bus.cyc & bus.stb & ~bus.ack, bank_sel_d.eq(bank_sel))
+
+    def init(self, contents):
+        bank_words = self.bank0.mem.depth
+        contents   = list(contents)
+        if len(contents) < 2*bank_words:
+            contents += [0]*(2*bank_words - len(contents))
+        self.bank0.mem.init = contents[:bank_words]
+        self.bank1.mem.init = contents[bank_words:2*bank_words]
+        self.mem.init       = contents
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -223,6 +290,7 @@ class BaseSoC(SoCMini):
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_cpu               = False, cpu_type="vexriscv", cpu_variant="standard", integrated_rom_size=0x10000,
+        with_banked_integrated_rom = False,
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_debug=False,
@@ -266,18 +334,35 @@ class BaseSoC(SoCMini):
             csr_address_width=15,
         )
         if with_cpu:
+            soc_integrated_rom_size = 0 if with_banked_integrated_rom else integrated_rom_size
             SoCCore.__init__(
                 self,
                 platform,
                 sys_clk_freq,
                 cpu_type=cpu_type,
                 cpu_variant=cpu_variant,
-                integrated_rom_size=integrated_rom_size,
+                integrated_rom_size=soc_integrated_rom_size,
                 integrated_sram_size=0x10000,
                 uart_name="crossover",
                 bus_interconnect="crossbar",
                 **soc_kwargs,
             )
+            if with_banked_integrated_rom:
+                if integrated_rom_size != 0x10000:
+                    raise ValueError("--with-banked-integrated-rom currently expects --integrated-rom-size=0x10000.")
+                self.rom = BankedROM(
+                    size              = integrated_rom_size,
+                    bank_size         = 0x8000,
+                    bus_data_width    = self.bus.data_width,
+                    bus_address_width = self.bus.address_width,
+                )
+                self.bus.add_slave(
+                    name   = "rom",
+                    slave  = self.rom.bus,
+                    region = SoCRegion(origin=self.cpu.reset_address, size=integrated_rom_size, mode="rx"),
+                )
+                self.integrated_rom_size        = integrated_rom_size
+                self.integrated_rom_initialized = False
         else:
             SoCMini.__init__(self, platform, sys_clk_freq, **soc_kwargs)
 
@@ -1034,6 +1119,18 @@ class BaseSoC(SoCMini):
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
+    def init_rom(self, name, contents=None, auto_size=True):
+        if name == "rom" and isinstance(getattr(self, "rom", None), BankedROM):
+            if auto_size:
+                raise ValueError("Banked integrated ROM requires --no-integrated-rom-auto-size.")
+            if contents is None:
+                contents = []
+            self.logger.info("Initializing ROM rom with banked contents (Size: 0x{:x}).".format(
+                len(contents)*(self.bus.data_width//8)))
+            self.rom.init(contents)
+        else:
+            SoCCore.init_rom(self, name, contents, auto_size)
+
     # Integrated ROM.
     def add_rom_bus_probe(self, depth=512):
         assert hasattr(self, "rom")
@@ -1289,6 +1386,7 @@ def main():
     )
     parser.add_argument("--integrated-rom-size", default=0x10000, type=lambda x: int(x, 0), help="Integrated ROM size used when --with-cpu is enabled.")
     parser.add_argument("--no-integrated-rom-auto-size", action="store_true", help="Keep integrated ROM at the size declared in SoC construction instead of shrinking it to the BIOS binary size.")
+    parser.add_argument("--with-banked-integrated-rom", action="store_true", help="Use two 32KiB ROM banks behind one 64KiB integrated ROM window.")
 
     # RFIC parameters.
     parser.add_argument("--with-rfic-oversampling", action="store_true", help="Double the RFIC clock to enable the oversampling mode.")
@@ -1376,6 +1474,7 @@ def main():
         cpu_type            = args.cpu_type,
         cpu_variant         = args.cpu_variant,
         integrated_rom_size = args.integrated_rom_size,
+        with_banked_integrated_rom = args.with_banked_integrated_rom,
 
         # RFIC.
         with_rfic_oversampling = args.with_rfic_oversampling,
@@ -1463,6 +1562,8 @@ def main():
         if args.with_cpu:
             r += f"_cpu_{args.cpu_type}_{args.cpu_variant.replace('+', '_')}"
             r += f"_rom_{args.integrated_rom_size:x}"
+            if args.with_banked_integrated_rom:
+                r += "_banked"
         return r
 
     builder = Builder(soc,
