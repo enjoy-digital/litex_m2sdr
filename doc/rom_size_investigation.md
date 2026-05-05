@@ -285,3 +285,32 @@ Hardware result:
 - After that ROM read, `ctrl_scratch` read back `0x00000000` and `litex_server` reported UDP read timeouts.
 
 This rules out the single `16384x32` inferred ROM as the sole trigger for the first-word failure. Address zero is served by an `8192x32` low bank whose initialization file is correct, but the failing bus-visible behavior is unchanged. The next checks should focus on the 64 KiB ROM region decode/crossbar interaction or on adding visibility to the ROM arbiter and other masters.
+
+## SI5351 Crossbar Address Decode
+
+Static analysis of the generated RTL found that the SI5351 I2C sequencer was issuing Wishbone byte addresses without the main CSR bus base:
+
+- The sequencer source used `i2c_base = self.csr.address_map("si5351", origin=True)`, which returns the CSR-bank offset `0xa000`, not the external Wishbone address `0xf000a000`.
+- The generated RTL consequently drove addresses such as `si5351_bus_adr <= 16'd40980`, i.e. `0x0000a014`.
+- The byte-to-word adapter then generated `adapted_interface_adr = si5351_bus_adr[31:2] = 0x00002805`.
+- In the 64 KiB ROM build, the SI5351 master decoder checks `adapted_interface_adr[29:14] == 0`, so `0x2805` selects the ROM slave instead of CSR.
+- In the 32 KiB ROM build, the ROM decoder checks one more address bit, `adapted_interface_adr[29:13] == 0`, so the same bad address falls outside the ROM window. This matches the observed failure boundary.
+
+This also matches the LiteScope CPU-reset-release capture: the ROM slave was repeatedly acknowledging reads at low word address `0x2805` with zero data. That address is not a CPU reset fetch; it is the low word address of the SI5351 status CSR when the CSR base bits are missing.
+
+The ROM arbiter only moves away from the current grant once that request drops. A persistent SI5351 request to an unintended ROM address can therefore explain why CPU and Etherbone ROM accesses see stale/zero data or become starved when the ROM region grows large enough to decode the bad address.
+
+The target now passes the full Wishbone CSR address to the SI5351 sequencer:
+
+```python
+si5351_i2c_base = self.mem_map["csr"] + self.csr.address_map("si5351", origin=True)
+```
+
+Validation with a rebuilt 100 MHz, 64 KiB ROM image confirmed the generated RTL now emits `32'd4026572820` (`0xf000a014`) for the SI5351 status CSR, so the SI5351 master selects the CSR slave and no longer the ROM slave. The post-route timing report met constraints with WNS `+0.474 ns` and WHS `+0.060 ns`.
+
+Hardware result after loading the fixed image:
+
+- `ctrl_scratch` read/write/read stayed at `0x12345678`.
+- An external Etherbone read from ROM address `0x00000000` returned `0x0b00006f`.
+- A subsequent `ctrl_scratch` read still returned `0x12345678`, so the ROM read no longer wedges Etherbone/CSR access.
+- `litex_term --csr-csv scripts/csr.csv crossover` showed the LiteX BIOS banner, `ROM: 64.0KiB`, CRC passed, and reached the `litex>` prompt.

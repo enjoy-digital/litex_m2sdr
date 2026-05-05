@@ -427,7 +427,8 @@ class BaseSoC(SoCMini):
 
         # SI5351 Control.
         si5351_pads   = platform.request("si5351")
-        self.si5351 = SI5351(pads=si5351_pads, i2c_base=self.csr.address_map("si5351", origin=True))
+        si5351_i2c_base = self.mem_map["csr"] + self.csr.address_map("si5351", origin=True)
+        self.si5351 = SI5351(pads=si5351_pads, i2c_base=si5351_i2c_base)
         self.bus.add_master(name="si5351", master=self.si5351.sequencer.bus)
 
         # SI5351 ClkIn Ext/uFL.
