@@ -1957,6 +1957,52 @@ static void led_release(void)
 #endif
 
 #ifdef USE_LITEETH
+enum eth_loopback_pace {
+    ETH_LOOPBACK_PACE_RX,
+    ETH_LOOPBACK_PACE_RATE,
+    ETH_LOOPBACK_PACE_NONE,
+};
+
+static int64_t get_time_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static const char *eth_loopback_pace_name(enum eth_loopback_pace pace)
+{
+    switch (pace) {
+    case ETH_LOOPBACK_PACE_RX:
+        return "rx";
+    case ETH_LOOPBACK_PACE_RATE:
+        return "rate";
+    case ETH_LOOPBACK_PACE_NONE:
+        return "none";
+    default:
+        return "unknown";
+    }
+}
+
+static int eth_loopback_parse_pace(const char *s, enum eth_loopback_pace *pace)
+{
+    if (!s || !pace)
+        return -1;
+    if (!strcmp(s, "rx")) {
+        *pace = ETH_LOOPBACK_PACE_RX;
+        return 0;
+    }
+    if (!strcmp(s, "rate")) {
+        *pace = ETH_LOOPBACK_PACE_RATE;
+        return 0;
+    }
+    if (!strcmp(s, "none")) {
+        *pace = ETH_LOOPBACK_PACE_NONE;
+        return 0;
+    }
+    return -1;
+}
+
 static uint32_t eth_data_mask(int data_width)
 {
     if (data_width >= 32)
@@ -1991,7 +2037,34 @@ static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t 
     return errors;
 }
 
-static int eth_loopback_test(int data_width, int duration)
+static void eth_loopback_rate_wait(int64_t start_us,
+                                   uint64_t tx_buffers,
+                                   unsigned samples_per_buf,
+                                   int64_t sample_rate)
+{
+    if (sample_rate <= 0)
+        return;
+
+    double target_us_d = ((double)tx_buffers * (double)samples_per_buf * 1e6) /
+                         (double)sample_rate;
+    int64_t target_us = start_us + (int64_t)target_us_d;
+
+    for (;;) {
+        int64_t now = get_time_us();
+        if (now >= target_us)
+            break;
+        int64_t delta = target_us - now;
+        if (delta > 1000)
+            delta = 1000;
+        usleep((useconds_t)delta);
+    }
+}
+
+static int eth_loopback_test(int data_width,
+                             int duration,
+                             enum eth_loopback_pace pace,
+                             int64_t sample_rate,
+                             unsigned window)
 {
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
@@ -2008,6 +2081,8 @@ static int eth_loopback_test(int data_width, int duration)
     uint64_t total_errors = 0;
     uint64_t last_checked_buffers = 0;
     int64_t last_time;
+    int64_t start_us;
+    int64_t last_progress_us;
     int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
     int i = 0;
     int status = 1;
@@ -2020,6 +2095,12 @@ static int eth_loopback_test(int data_width, int duration)
         fprintf(stderr, "Invalid data width %d\n", data_width);
         return 1;
     }
+    if (pace == ETH_LOOPBACK_PACE_RATE && sample_rate <= 0) {
+        fprintf(stderr, "--pace=rate requires a positive --sample-rate\n");
+        return 1;
+    }
+    if (window == 0)
+        window = 1;
     mask = eth_data_mask(data_width);
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
@@ -2044,6 +2125,10 @@ static int eth_loopback_test(int data_width, int duration)
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
     printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
     printf("Data width  : %d bits\n", data_width);
+    printf("Pace        : %s\n", eth_loopback_pace_name(pace));
+    if (pace == ETH_LOOPBACK_PACE_RATE)
+        printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
+    printf("TX window   : %u buffers\n", window);
     printf("Loopback    : TX stream -> RX stream inside FPGA\n");
 
     if (m2sdr_set_txrx_loopback(dev, true) != M2SDR_ERR_OK) {
@@ -2068,28 +2153,60 @@ static int eth_loopback_test(int data_width, int duration)
     }
 
     last_time = get_time_ms();
+    start_us = get_time_us();
+    last_progress_us = start_us;
     while (keep_running && (duration <= 0 || get_time_ms() < end_time)) {
-        int rc;
-        uint32_t errors;
+        int did_work = 0;
+        uint64_t outstanding = tx_buffers - rx_buffers;
 
-        eth_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
-        rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
-        if (rc != M2SDR_ERR_OK) {
-            fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
-            goto cleanup_disable_loopback;
+        while (outstanding < window) {
+            int rc;
+
+            if (pace == ETH_LOOPBACK_PACE_RX && outstanding > 0)
+                break;
+            if (pace == ETH_LOOPBACK_PACE_RATE)
+                eth_loopback_rate_wait(start_us, tx_buffers, samples_per_buf, sample_rate);
+
+            eth_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
+            rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup_disable_loopback;
+            }
+            tx_buffers++;
+            outstanding++;
+            did_work = 1;
+
+            if (pace != ETH_LOOPBACK_PACE_NONE)
+                break;
         }
-        tx_buffers++;
 
-        rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
-        if (rc != M2SDR_ERR_OK) {
-            fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
-            goto cleanup_disable_loopback;
+        if (outstanding > 0) {
+            int timeout_ms = (pace == ETH_LOOPBACK_PACE_RX || outstanding >= window) ? 1000 : 0;
+            int rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
+            if (rc == M2SDR_ERR_OK) {
+                uint32_t errors;
+
+                rx_buffers++;
+                outstanding--;
+                errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask);
+                total_errors += errors;
+                checked_buffers++;
+                did_work = 1;
+                last_progress_us = get_time_us();
+                if (errors)
+                    status = 1;
+            } else if (rc != M2SDR_ERR_TIMEOUT) {
+                fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup_disable_loopback;
+            } else if (outstanding >= window) {
+                fprintf(stderr, "m2sdr_sync_rx failed: timeout with TX window full\n");
+                goto cleanup_disable_loopback;
+            } else if ((get_time_us() - last_progress_us) > 1000000) {
+                fprintf(stderr, "m2sdr_sync_rx failed: timeout waiting for loopback data\n");
+                goto cleanup_disable_loopback;
+            }
         }
-        rx_buffers++;
-
-        errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask);
-        total_errors += errors;
-        checked_buffers++;
 
         int64_t now = get_time_ms();
         int64_t elapsed = now - last_time;
@@ -2119,8 +2236,8 @@ static int eth_loopback_test(int data_width, int duration)
             last_checked_buffers = checked_buffers;
         }
 
-        if (errors)
-            status = 1;
+        if (!did_work)
+            usleep(1000);
     }
 
     if (total_errors == 0) {
@@ -2167,6 +2284,9 @@ static void help(void)
 #elif USE_LITEETH
            "  -i, --ip ADDR                    Target IP address for Etherbone.\n"
            "  -p, --port PORT                  Port number (default: 1234).\n"
+           "      --pace MODE                  LiteEth TX pace: rx, rate, none (default: rx).\n"
+           "      --sample-rate RATE           Sample rate for --pace=rate.\n"
+           "      --window N                   TX buffers allowed ahead of RX (default: 64).\n"
 #endif
            "\n"
            "device commands:\n"
@@ -2194,7 +2314,7 @@ static void help(void)
 #elif USE_LITEETH
            "test commands:\n"
            "  eth-loopback-test\n"
-           "      Run a LiteEth TX/RX FPGA loopback test.\n"
+           "      Run a LiteEth TX/RX FPGA loopback test. Use --pace to compare pacing modes.\n"
 #endif
            "  scratch-test\n"
            "      Test the scratch register.\n"
@@ -2267,6 +2387,9 @@ int main(int argc, char **argv)
     enum {
         OPTION_WATCH = 256,
         OPTION_WATCH_INTERVAL,
+        OPTION_PACE,
+        OPTION_SAMPLE_RATE,
+        OPTION_WINDOW,
     };
     const char *cmd;
     int c;
@@ -2275,6 +2398,11 @@ int main(int argc, char **argv)
     double ptp_watch_interval = 1.0;
     static int test_data_width = 32;
     static int test_duration = 0; /* Default to 0 for infinite duration. */
+#ifdef USE_LITEETH
+    static enum eth_loopback_pace eth_pace = ETH_LOOPBACK_PACE_RX;
+    static int64_t eth_sample_rate = 30720000;
+    static unsigned eth_window = 64;
+#endif
 #ifdef USE_LITEPCIE
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
@@ -2291,6 +2419,11 @@ int main(int argc, char **argv)
         { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
         { "data-width", required_argument, NULL, 'w' },
         { "duration", required_argument, NULL, 't' },
+#ifdef USE_LITEETH
+        { "pace", required_argument, NULL, OPTION_PACE },
+        { "sample-rate", required_argument, NULL, OPTION_SAMPLE_RATE },
+        { "window", required_argument, NULL, OPTION_WINDOW },
+#endif
 #ifdef USE_LITEPCIE
         { "warmup-buffers", required_argument, NULL, 'W' },
         { "force", no_argument, NULL, 'y' },
@@ -2331,6 +2464,27 @@ int main(int argc, char **argv)
                 exit(1);
             }
             break;
+#ifdef USE_LITEETH
+        case OPTION_PACE:
+            if (eth_loopback_parse_pace(optarg, &eth_pace) != 0) {
+                fprintf(stderr, "Invalid --pace '%s' (expected rx, rate, or none)\n", optarg);
+                exit(1);
+            }
+            break;
+        case OPTION_SAMPLE_RATE:
+            if (m2sdr_cli_parse_int64(optarg, &eth_sample_rate) != 0 || eth_sample_rate <= 0) {
+                fprintf(stderr, "Invalid --sample-rate '%s'\n", optarg);
+                exit(1);
+            }
+            break;
+        case OPTION_WINDOW:
+            eth_window = (unsigned)strtoul(optarg, NULL, 0);
+            if (eth_window == 0) {
+                fprintf(stderr, "Invalid --window '%s'\n", optarg);
+                exit(1);
+            }
+            break;
+#endif
         case 'w':
             test_data_width = atoi(optarg);
             break;
@@ -2528,7 +2682,8 @@ int main(int argc, char **argv)
 
 #ifdef USE_LITEETH
     else if (cmd_is(cmd, "eth_loopback_test", "eth-loopback-test"))
-        return eth_loopback_test(test_data_width, test_duration);
+        return eth_loopback_test(test_data_width, test_duration,
+                                 eth_pace, eth_sample_rate, eth_window);
 #endif
 
     /* Show help otherwise. */
