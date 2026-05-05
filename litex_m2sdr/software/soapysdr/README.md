@@ -53,6 +53,9 @@ You can pass device arguments to configure the driver. These are most useful whe
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
 - **VRT UDP port override** (Etherbone + `eth_mode=vrt`): `vrt_port=4991`
+- **LiteEth TX pacing**: `tx_pacing=rate|none`
+  - `rate` is the default and submits TX UDP buffers according to the configured TX sample rate.
+  - `none` keeps TX submissions unpaced for link stress tests.
 
 Example:
 ```bash

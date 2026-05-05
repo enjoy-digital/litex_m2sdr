@@ -18,6 +18,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <chrono>
 
 #include "liblitepcie.h"
 #include "etherbone.h"
@@ -480,6 +481,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool   burst_end   = false;
         int32_t burst_samps = 0;
         std::map<size_t, uint8_t*> pendingWriteBufs;
+#if USE_LITEETH
+        bool rate_pacing = true;
+        std::chrono::steady_clock::time_point pace_start;
+        uint64_t paced_buffers = 0;
+#endif
     };
 
     RXStream _rx_stream;

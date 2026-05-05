@@ -98,6 +98,23 @@ static void log_liteeth_socket_buffer(const char *name, int requested, int actua
     }
 }
 
+static std::string get_kwargs_string(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key,
+    const char *fallback)
+{
+    auto it = stream_args.find(key);
+    if (it != stream_args.end())
+        return it->second;
+
+    it = device_args.find(key);
+    if (it != device_args.end())
+        return it->second;
+
+    return fallback;
+}
+
 struct m2sdr_liteeth_rx_stream_config SoapyLiteXM2SDR::makeLiteEthRxStreamConfig() const
 {
     struct m2sdr_liteeth_rx_stream_config config;
@@ -362,6 +379,17 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
         throw std::runtime_error("Soapy TX streaming is not supported in eth_mode=vrt");
     }
+    {
+        const std::string tx_pacing = get_kwargs_string(searchArgs, _deviceArgs, "tx_pacing", "rate");
+        if (tx_pacing == "rate") {
+            _tx_stream.rate_pacing = true;
+        } else if (tx_pacing == "none") {
+            _tx_stream.rate_pacing = false;
+        } else {
+            throw std::runtime_error("Invalid tx_pacing: " + tx_pacing + " (supported: rate, none)");
+        }
+        SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth TX pacing: %s", tx_pacing.c_str());
+    }
     if (!_udp_inited) {
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
                                 : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : _eth_ip);
@@ -594,7 +622,8 @@ int SoapyLiteXM2SDR::activateStream(
                 "LiteEth TX stream activation failed: %s", m2sdr_strerror(rc));
             return SOAPY_SDR_STREAM_ERROR;
         }
-        /* No explicit start; pacing handled by client cadence if needed. */
+        _tx_stream.pace_start = std::chrono::steady_clock::now();
+        _tx_stream.paced_buffers = 0;
         _tx_stream.user_count = 0;
 #endif
         _tx_stream.pendingWriteBufs.clear();
@@ -1181,9 +1210,22 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
             _tx_stream.pendingWriteBufs.erase(it);
         }
     }
+    if (_tx_stream.rate_pacing && _tx_stream.samplerate > 0.0) {
+        const long long samples =
+            static_cast<long long>(_tx_stream.paced_buffers) *
+            static_cast<long long>(mtu);
+        const auto target =
+            _tx_stream.pace_start +
+            std::chrono::nanoseconds(samples_to_ns(_tx_stream.samplerate, samples));
+        const auto now = std::chrono::steady_clock::now();
+        if (target > now)
+            std::this_thread::sleep_until(target);
+    }
     if (liteeth_udp_write_submit(&_udp) < 0) {
         _tx_stream.underflow = true;
         SoapySDR_logf(SOAPY_SDR_ERROR, "UDP write_submit failed.");
+    } else {
+        _tx_stream.paced_buffers++;
     }
 #endif
 }
