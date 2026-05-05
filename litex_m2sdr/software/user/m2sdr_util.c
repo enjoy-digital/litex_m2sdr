@@ -1956,6 +1956,192 @@ static void led_release(void)
 
 #endif
 
+#ifdef USE_LITEETH
+static uint32_t eth_data_mask(int data_width)
+{
+    if (data_width >= 32)
+        return 0xffffffffu;
+    return (1u << data_width) - 1u;
+}
+
+static uint32_t eth_pn_word(uint32_t seed)
+{
+    return seed * 69069u + 1u;
+}
+
+static void eth_write_pn_data(uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
+{
+    for (unsigned i = 0; i < words; i++) {
+        buf[i] = eth_pn_word(*seed) & mask;
+        *seed += 1;
+    }
+}
+
+static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
+{
+    uint32_t errors = 0;
+
+    for (unsigned i = 0; i < words; i++) {
+        uint32_t expected = eth_pn_word(*seed) & mask;
+        if (unlikely((buf[i] & mask) != expected))
+            errors++;
+        *seed += 1;
+    }
+
+    return errors;
+}
+
+static int eth_loopback_test(int data_width, int duration)
+{
+    struct m2sdr_dev *dev = NULL;
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    const unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
+    const unsigned words_per_buf = M2SDR_BUFFER_BYTES / sizeof(uint32_t);
+    uint8_t *tx_buf = NULL;
+    uint8_t *rx_buf = NULL;
+    uint32_t seed_wr = 0;
+    uint32_t seed_rd = 0;
+    uint32_t mask;
+    uint64_t tx_buffers = 0;
+    uint64_t rx_buffers = 0;
+    uint64_t checked_buffers = 0;
+    uint64_t total_errors = 0;
+    uint64_t last_checked_buffers = 0;
+    int64_t last_time;
+    int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
+    int i = 0;
+    int status = 1;
+
+    if (samples_per_buf == 0) {
+        fprintf(stderr, "Invalid LiteEth loopback buffer size.\n");
+        return 1;
+    }
+    if (data_width < 1 || data_width > 32) {
+        fprintf(stderr, "Invalid data width %d\n", data_width);
+        return 1;
+    }
+    mask = eth_data_mask(data_width);
+
+    if (!m2sdr_cli_finalize_device(&g_cli_dev))
+        return 1;
+    if (m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
+        fprintf(stderr, "Could not init driver\n");
+        return 1;
+    }
+
+    tx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    rx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    if (!tx_buf || !rx_buf) {
+        fprintf(stderr, "buffer allocation failed\n");
+        goto cleanup;
+    }
+
+    signal(SIGINT, intHandler);
+    keep_running = 1;
+
+    printf("\e[1m[> LiteEth loopback test:\e[0m\n");
+    printf("------------------------\n");
+    printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
+    printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
+    printf("Data width  : %d bits\n", data_width);
+    printf("Loopback    : TX stream -> RX stream inside FPGA\n");
+
+    if (m2sdr_set_txrx_loopback(dev, true) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_txrx_loopback(enable) failed\n");
+        goto cleanup;
+    }
+    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        goto cleanup_disable_loopback;
+    }
+    if (m2sdr_set_tx_header(dev, false) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_tx_header failed\n");
+        goto cleanup_disable_loopback;
+    }
+    if (m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(RX) failed\n");
+        goto cleanup_disable_loopback;
+    }
+    if (m2sdr_sync_config(dev, M2SDR_TX, format, 64, samples_per_buf, 0, 1000) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(TX) failed\n");
+        goto cleanup_disable_loopback;
+    }
+
+    last_time = get_time_ms();
+    while (keep_running && (duration <= 0 || get_time_ms() < end_time)) {
+        int rc;
+        uint32_t errors;
+
+        eth_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
+        rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
+            goto cleanup_disable_loopback;
+        }
+        tx_buffers++;
+
+        rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+            goto cleanup_disable_loopback;
+        }
+        rx_buffers++;
+
+        errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask);
+        total_errors += errors;
+        checked_buffers++;
+
+        int64_t now = get_time_ms();
+        int64_t elapsed = now - last_time;
+        if (elapsed > 500) {
+            struct m2sdr_liteeth_udp_stats stats;
+            uint64_t delta = checked_buffers - last_checked_buffers;
+            double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
+
+            if (i % 10 == 0)
+                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tRX_DROPS\tTX_SEND_ERR\e[0m\n");
+            i++;
+
+            if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%8" PRIu64 "\t%11" PRIu64 "\n",
+                    gbps,
+                    tx_buffers,
+                    rx_buffers,
+                    total_errors,
+                    stats.rx_kernel_drops + stats.rx_source_drops + stats.rx_ring_full_events,
+                    stats.tx_send_errors);
+            } else {
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%8u\t%11u\n",
+                    gbps, tx_buffers, rx_buffers, total_errors, 0u, 0u);
+            }
+
+            last_time = now;
+            last_checked_buffers = checked_buffers;
+        }
+
+        if (errors)
+            status = 1;
+    }
+
+    if (total_errors == 0) {
+        printf("LiteEth loopback test passed: checked %" PRIu64 " buffers.\n", checked_buffers);
+        status = 0;
+    } else {
+        printf("LiteEth loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
+            total_errors, checked_buffers);
+    }
+
+cleanup_disable_loopback:
+    if (m2sdr_set_txrx_loopback(dev, false) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_set_txrx_loopback(disable) failed\n");
+cleanup:
+    free(tx_buf);
+    free(rx_buf);
+    m2sdr_close(dev);
+    return status;
+}
+#endif
+
 /* Help */
 /*------*/
 
@@ -1969,15 +2155,15 @@ static void help(void)
            "  -d, --device DEV                 Use explicit device id.\n"
            "      --watch                      Refresh supported status commands until Ctrl-C.\n"
            "      --watch-interval SEC         Refresh interval for --watch (default: 1.0).\n"
+           "      --data-width N               Width of generated test data (default: 32).\n"
+           "      --duration SEC               Duration of loopback tests (default: 0, infinite).\n"
 #ifdef USE_LITEPCIE
            "  -c, --device-num N               Select the device (default: 0).\n"
            "  -y, --force                      Skip confirmation prompts for destructive commands.\n"
            "      --zero-copy                  Enable zero-copy DMA mode.\n"
            "      --external-loopback          Use external loopback (default: internal).\n"
-           "      --data-width N               Width of data bus (default: 32).\n"
            "      --warmup-buffers N           Number of DMA buffers to skip before validation.\n"
            "      --auto-rx-delay              Automatic DMA RX-delay calibration.\n"
-           "      --duration SEC               Duration of the test in seconds (default: 0, infinite).\n"
 #elif USE_LITEETH
            "  -i, --ip ADDR                    Target IP address for Etherbone.\n"
            "  -p, --port PORT                  Port number (default: 1234).\n"
@@ -2005,6 +2191,10 @@ static void help(void)
            "test commands:\n"
            "  dma-test\n"
            "      Run the DMA test.\n"
+#elif USE_LITEETH
+           "test commands:\n"
+           "  eth-loopback-test\n"
+           "      Run a LiteEth TX/RX FPGA loopback test.\n"
 #endif
            "  scratch-test\n"
            "      Test the scratch register.\n"
@@ -2083,13 +2273,13 @@ int main(int argc, char **argv)
     int option_index = 0;
     bool ptp_watch = false;
     double ptp_watch_interval = 1.0;
+    static int test_data_width = 32;
+    static int test_duration = 0; /* Default to 0 for infinite duration. */
 #ifdef USE_LITEPCIE
     static uint8_t m2sdr_device_zero_copy = 0;
     static uint8_t m2sdr_device_external_loopback = 0;
-    static int litepcie_data_width = 32;
     static int litepcie_warmup_buffers = 128 * DMA_BUFFER_COUNT;
     static int litepcie_auto_rx_delay = 0;
-    static int test_duration = 0; /* Default to 0 for infinite duration.*/
 #endif
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -2099,14 +2289,14 @@ int main(int argc, char **argv)
         { "port", required_argument, NULL, 'p' },
         { "watch", no_argument, NULL, OPTION_WATCH },
         { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
-#ifdef USE_LITEPCIE
         { "data-width", required_argument, NULL, 'w' },
+        { "duration", required_argument, NULL, 't' },
+#ifdef USE_LITEPCIE
         { "warmup-buffers", required_argument, NULL, 'W' },
         { "force", no_argument, NULL, 'y' },
         { "zero-copy", no_argument, NULL, 'z' },
         { "external-loopback", no_argument, NULL, 'e' },
         { "auto-rx-delay", no_argument, NULL, 'a' },
-        { "duration", required_argument, NULL, 't' },
 #endif
         { NULL, 0, NULL, 0 }
     };
@@ -2117,7 +2307,7 @@ int main(int argc, char **argv)
 #ifdef USE_LITEPCIE
         c = getopt_long(argc, argv, "hd:c:i:p:w:W:yzeat:", options, &option_index);
 #else
-        c = getopt_long(argc, argv, "hd:c:i:p:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:w:t:", options, &option_index);
 #endif
         if (c == -1)
             break;
@@ -2141,12 +2331,15 @@ int main(int argc, char **argv)
                 exit(1);
             }
             break;
+        case 'w':
+            test_data_width = atoi(optarg);
+            break;
+        case 't':
+            test_duration = atoi(optarg);
+            break;
 #ifdef USE_LITEPCIE
         case 'y':
             g_force_flash_write = true;
-            break;
-        case 'w':
-            litepcie_data_width = atoi(optarg);
             break;
         case 'W':
             litepcie_warmup_buffers = atoi(optarg);
@@ -2161,9 +2354,6 @@ int main(int argc, char **argv)
             break;
         case 'a':
             litepcie_auto_rx_delay = 1;
-            break;
-        case 't':
-            test_duration = atoi(optarg);
             break;
 #endif
         default:
@@ -2330,10 +2520,15 @@ int main(int argc, char **argv)
         return dma_test(
             m2sdr_device_zero_copy,
             m2sdr_device_external_loopback,
-            litepcie_data_width,
+            test_data_width,
             litepcie_auto_rx_delay,
             test_duration,
             litepcie_warmup_buffers);
+#endif
+
+#ifdef USE_LITEETH
+    else if (cmd_is(cmd, "eth_loopback_test", "eth-loopback-test"))
+        return eth_loopback_test(test_data_width, test_duration);
 #endif
 
     /* Show help otherwise. */
