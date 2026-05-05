@@ -580,12 +580,18 @@ class BaseSoC(SoCMini):
             # UDP Streamer.
             # -------------
             eth_streamer_port = self.ethcore_etherbone.udp.crossbar.get_port(eth_udp_port, dw=64, cd="sys")
+            eth_rx_streamer_fifo_depth = 1024//8
+            # Host TX data is sent as 1 KiB UDP datagrams. Keep several public
+            # sync buffers worth of samples in front of the RFIC stream so
+            # packet bursts and host scheduling jitter do not immediately
+            # underrun the AD9361 TX path.
+            eth_tx_streamer_fifo_depth = (256*1024)//8
 
             # RFIC -> UDP TX.
             # ---------------
             self.eth_rx_streamer = LiteEthStream2UDPTX(
                 udp_port   = eth_udp_port,
-                fifo_depth = 1024//8,
+                fifo_depth = eth_rx_streamer_fifo_depth,
                 data_width = 64,
                 with_csr   = True,
             )
@@ -595,11 +601,25 @@ class BaseSoC(SoCMini):
             # ---------------
             self.eth_tx_streamer = LiteEthUDP2StreamRX(
                 udp_port   = eth_udp_port,
-                fifo_depth = 1024//8,
+                fifo_depth = eth_tx_streamer_fifo_depth,
                 data_width = 64,
                 with_csr   = True,
             )
             self.comb += eth_streamer_port.source.connect(self.eth_tx_streamer.sink)
+
+            self.eth_tx_streamer_started = Signal()
+            eth_tx_streamer_primed = Signal()
+            self.comb += eth_tx_streamer_primed.eq(
+                self.eth_tx_streamer.fifo.level[14] | self.eth_tx_streamer.fifo.level[15])
+            self.sync += [
+                If(~self.eth_tx_streamer.enable,
+                    self.eth_tx_streamer_started.eq(0)
+                ).Elif(eth_tx_streamer_primed,
+                    self.eth_tx_streamer_started.eq(1)
+                ).Elif(self.eth_tx_streamer.fifo.level == 0,
+                    self.eth_tx_streamer_started.eq(0)
+                )
+            ]
 
             if with_eth_vrt:
                 self.eth_rx_mode = CSRStorage(fields=[
@@ -670,10 +690,15 @@ class BaseSoC(SoCMini):
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
+        with_rfic_stream_fifos = with_eth and not with_pcie
         self.ad9361 = AD9361RFIC(
-            rfic_pads    = platform.request("ad9361_rfic"),
-            spi_pads     = platform.request("ad9361_spi"),
-            sys_clk_freq = sys_clk_freq,
+            rfic_pads      = platform.request("ad9361_rfic"),
+            spi_pads       = platform.request("ad9361_spi"),
+            sys_clk_freq   = sys_clk_freq,
+            with_tx_fifo   = with_rfic_stream_fifos,
+            tx_fifo_depth  = 8192,
+            with_rx_fifo   = with_rfic_stream_fifos,
+            rx_fifo_depth  = 8192,
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
@@ -719,7 +744,13 @@ class BaseSoC(SoCMini):
                 )
             ]
         if with_eth:
-            self.comb += self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error"})
+            self.comb += [
+                self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error", "valid", "ready"}),
+                self.crossbar.mux.sink1.valid.eq(
+                    self.eth_tx_streamer.source.valid & self.eth_tx_streamer_started),
+                self.eth_tx_streamer.source.ready.eq(
+                    self.crossbar.mux.sink1.ready & self.eth_tx_streamer_started),
+            ]
         if with_sata:
             self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
@@ -1138,7 +1169,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
-    parser.add_argument("--sys-clk-freq",     default=125e6, type=float, help="System clock frequency in Hz.")
+    parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz for LiteEth-only, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
     parser.add_argument("--load",             action="store_true",       help="Load bitstream.")
@@ -1221,6 +1252,10 @@ def main():
     if args.wr_status and not args.with_white_rabbit:
         return
 
+    default_sys_clk_freq = 100e6 if (args.with_eth and not args.with_pcie) else 125e6
+    if args.sys_clk_freq is None:
+        args.sys_clk_freq = default_sys_clk_freq
+
     # Build SoC.
     soc = BaseSoC(
         # Generic.
@@ -1286,7 +1321,7 @@ def main():
     # Builder.
     def get_build_name():
         r = f"litex_m2sdr_{args.variant}"
-        if int(args.sys_clk_freq) != int(125e6):
+        if int(args.sys_clk_freq) != int(default_sys_clk_freq):
             r += f"_sysclk_{int(args.sys_clk_freq)}"
         if args.with_pcie:
             r += f"_pcie_x{args.pcie_lanes}"

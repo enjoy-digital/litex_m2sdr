@@ -80,8 +80,20 @@ from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
+class AD9361RFICStreamBypass(LiteXModule):
+    def __init__(self):
+        self.sink   = stream.Endpoint(dma_layout(64))
+        self.source = stream.Endpoint(dma_layout(64))
+
+        # # #
+
+        self.comb += self.sink.connect(self.source)
+
+
 class AD9361RFIC(LiteXModule):
-    def __init__(self, rfic_pads, spi_pads, sys_clk_freq):
+    def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
+        with_tx_fifo = False, tx_fifo_depth = 8192,
+        with_rx_fifo = False, rx_fifo_depth = 8192):
         # Controls ---------------------------------------------------------------------------------
         self.enable_datapath = Signal(reset=1)
 
@@ -173,6 +185,31 @@ class AD9361RFIC(LiteXModule):
         # Buffers (For Timings) --------------------------------------------------------------------
         self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
+        self.tx_rfic_fifo_started = tx_rfic_fifo_started = Signal()
+        if with_tx_fifo:
+            self.tx_rfic_fifo = tx_rfic_fifo = ClockDomainsRenamer("rfic")(
+                stream.SyncFIFO(dma_layout(64), depth=tx_fifo_depth, buffered=True)
+            )
+            tx_fifo_start_level = max(1, tx_fifo_depth//2)
+            tx_rfic_fifo_primed = Signal()
+            self.comb += tx_rfic_fifo_primed.eq(tx_rfic_fifo.level >= tx_fifo_start_level)
+            self.sync.rfic += [
+                If(tx_rfic_fifo_primed,
+                    tx_rfic_fifo_started.eq(1)
+                ).Elif(tx_rfic_fifo.level == 0,
+                    tx_rfic_fifo_started.eq(0)
+                )
+            ]
+        else:
+            self.tx_rfic_fifo = tx_rfic_fifo = AD9361RFICStreamBypass()
+            self.comb += tx_rfic_fifo_started.eq(1)
+
+        if with_rx_fifo:
+            self.rx_rfic_fifo = rx_rfic_fifo = ClockDomainsRenamer("rfic")(
+                stream.SyncFIFO(dma_layout(64), depth=rx_fifo_depth, buffered=True)
+            )
+        else:
+            self.rx_rfic_fifo = rx_rfic_fifo = AD9361RFICStreamBypass()
 
         # BitMode ----------------------------------------------------------------------------------
         self.tx_bitmode = tx_bitmode = AD9361TXBitMode()
@@ -184,16 +221,18 @@ class AD9361RFIC(LiteXModule):
 
         # TX.
         # ---
-        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> GPIOTXUnpacker -> PHY.
+        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> optional TX RFIC FIFO -> GPIOTXUnpacker -> PHY.
         self.tx_pipeline = stream.Pipeline(
             self.sink,
             tx_buffer,
             tx_bitmode,
             tx_cdc,
+            tx_rfic_fifo,
             gpio_tx_unpacker,
         )
         self.comb += [
-            gpio_tx_unpacker.source.connect(self.phy.sink, keep={"valid", "ready"}),
+            self.phy.sink.valid.eq(gpio_tx_unpacker.source.valid & tx_rfic_fifo_started),
+            gpio_tx_unpacker.source.ready.eq(self.phy.sink.ready & tx_rfic_fifo_started),
             self.phy.sink.ia.eq(gpio_tx_unpacker.source.data[0*16:1*16]),
             self.phy.sink.qa.eq(gpio_tx_unpacker.source.data[1*16:2*16]),
             self.phy.sink.ib.eq(gpio_tx_unpacker.source.data[2*16:3*16]),
@@ -202,7 +241,7 @@ class AD9361RFIC(LiteXModule):
 
         # RX.
         # ---
-        # PHY -> GPIORXUnpacker -> RX CDC -> RX BitMode -> RX Buffer -> Source.
+        # PHY -> GPIORXUnpacker -> optional RX RFIC FIFO -> RX CDC -> RX BitMode -> RX Buffer -> Source.
         self.comb += [
             self.phy.source.connect(gpio_rx_packer.sink, keep={"valid", "ready"}),
             gpio_rx_packer.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
@@ -212,6 +251,7 @@ class AD9361RFIC(LiteXModule):
         ]
         self.rx_pipeline = stream.Pipeline(
             gpio_rx_packer,
+            rx_rfic_fifo,
             rx_cdc,
             rx_bitmode,
             rx_buffer,
