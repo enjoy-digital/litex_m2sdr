@@ -174,6 +174,38 @@ A second capture was taken around CPU reset release, without doing an external R
 
 This points away from missing ROM initialization and toward the bus/mux/arbiter side of the failure. The ROM slave is acknowledging a stale or unexpected read in the larger-ROM design, and an external ROM read can wedge the Etherbone path badly enough that LiteScope cannot be read back afterward.
 
+### 100 MHz Timing Check
+
+A timing-clean `0x10000` ROM build was generated and loaded with a reduced system clock:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --build
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --load
+```
+
+Build result:
+
+- The SoC used a `100.000MHz` system clock.
+- Etherbone remained on the normal 32-bit Wishbone path.
+- The ROM was still inferred as `16384x32` Block RAM.
+- Final post-route timing was clean: WNS `+0.493 ns`, TNS `0.000 ns`, WHS `+0.024 ns`, THS `0.000 ns`.
+
+Hardware result:
+
+- The timing-clean bitstream loaded successfully over FT4232.
+- Etherbone CSR access was alive immediately after load: `ctrl_scratch` read back `0x12345678`.
+- The crossover UART still stayed silent: no BIOS banner and no response to `help`.
+- With the CPU reset bit asserted through `ctrl_reset=0x00000002`, an external Etherbone read from `0x00000000` still returned `0x00000000` instead of `0x0b00006f`.
+- That external ROM read again caused `litex_server` UDP read timeouts; after the read, `ctrl_scratch` read back `0x00000000` until reload.
+
+This makes a simple 125 MHz timing-closure explanation unlikely. The failing behavior survives with positive post-route setup and hold timing at 100 MHz, so the next investigation step should focus on the ROM slave arbitration/muxing and other bus masters.
+
 Useful next checks:
 
 - Sweep sizes just above the boundary, such as `0x9000`, `0xc000`, and `0x10000`, to see whether the issue is tied to inferred BRAM depth, power-of-two decode size, or a specific implementation layout.
