@@ -224,10 +224,11 @@ class AD9361PHY(LiteXModule):
 
         # TX Sink Interface.
         # ------------------
-        # Accepts new TX samples every 4 RFIC clock cycles (tx_count == 0).
+        # Accepts new TX samples just before the serializer wraps to count 0,
+        # so the next word starts with the freshly latched IA/QA MSBs.
         tx_count = Signal(2)
         self.sync.rfic += tx_count.eq(tx_count + 1)
-        self.comb += sink.ready.eq(tx_count == 0)  # Ready for new data at cycle 0.
+        self.comb += sink.ready.eq(tx_count == 3)
 
         # TX Data Latching.
         # -----------------
