@@ -2257,6 +2257,115 @@ cleanup:
     m2sdr_close(dev);
     return status;
 }
+
+static int eth_rfic_rx_sweep(int duration)
+{
+    static const int64_t rates[] = {
+        1920000,
+        3840000,
+        7680000,
+        15360000,
+        30720000,
+        61440000,
+    };
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    const unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
+    uint8_t *rx_buf = NULL;
+    int status = 0;
+
+    if (duration <= 0)
+        duration = 1;
+    if (!m2sdr_cli_finalize_device(&g_cli_dev))
+        return 1;
+
+    rx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    if (!rx_buf) {
+        fprintf(stderr, "buffer allocation failed\n");
+        return 1;
+    }
+
+    signal(SIGINT, intHandler);
+    keep_running = 1;
+
+    printf("\e[1m[> LiteEth RFIC RX sweep:\e[0m\n");
+    printf("--------------------------\n");
+    printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
+    printf("Duration    : %d s/rate\n", duration);
+    printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
+    printf("\e[1mRATE(MSPS)\tRX_Gbps\tBUFFERS\tKDROP\tSRC_DROP\tRING_FULL\tRECOVERIES\tSTATUS\e[0m\n");
+
+    for (unsigned i = 0; keep_running && i < (sizeof(rates) / sizeof(rates[0])); i++) {
+        struct m2sdr_dev *dev = NULL;
+        struct m2sdr_config cfg;
+        struct m2sdr_liteeth_udp_stats stats;
+        uint64_t buffers = 0;
+        int64_t start_ms;
+        int rc;
+        const char *rate_status = "ok";
+
+        if (m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
+            fprintf(stderr, "Could not init driver\n");
+            free(rx_buf);
+            return 1;
+        }
+
+        m2sdr_config_init(&cfg);
+        cfg.sample_rate = (double)rates[i];
+        cfg.bandwidth = (double)rates[i];
+        cfg.loopback = 0;
+
+        rc = m2sdr_apply_config(dev, &cfg);
+        if (rc != M2SDR_ERR_OK) {
+            printf("%10.2f\t%7.2f\t%7u\t%5u\t%8u\t%9u\t%10u\t%s\n",
+                (double)rates[i] / 1e6, 0.0, 0u, 0u, 0u, 0u, 0u, m2sdr_strerror(rc));
+            m2sdr_close(dev);
+            status = 1;
+            continue;
+        }
+
+        rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            printf("%10.2f\t%7.2f\t%7u\t%5u\t%8u\t%9u\t%10u\t%s\n",
+                (double)rates[i] / 1e6, 0.0, 0u, 0u, 0u, 0u, 0u, m2sdr_strerror(rc));
+            m2sdr_close(dev);
+            status = 1;
+            continue;
+        }
+
+        start_ms = get_time_ms();
+        while (keep_running && (get_time_ms() - start_ms) < (int64_t)duration * 1000) {
+            rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                rate_status = m2sdr_strerror(rc);
+                status = 1;
+                break;
+            }
+            buffers++;
+        }
+
+        memset(&stats, 0, sizeof(stats));
+        (void)m2sdr_liteeth_get_udp_stats(dev, &stats);
+        double elapsed_ms = (double)(get_time_ms() - start_ms);
+        double gbps = elapsed_ms > 0.0
+            ? (double)buffers * M2SDR_BUFFER_BYTES * 8.0 / (elapsed_ms * 1e6)
+            : 0.0;
+
+        printf("%10.2f\t%7.2f\t%7" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%10" PRIu64 "\t%s\n",
+            (double)rates[i] / 1e6,
+            gbps,
+            buffers,
+            stats.rx_kernel_drops,
+            stats.rx_source_drops,
+            stats.rx_ring_full_events,
+            stats.rx_timeout_recoveries,
+            rate_status);
+
+        m2sdr_close(dev);
+    }
+
+    free(rx_buf);
+    return status;
+}
 #endif
 
 /* Help */
@@ -2315,6 +2424,8 @@ static void help(void)
            "test commands:\n"
            "  eth-loopback-test\n"
            "      Run a LiteEth TX/RX FPGA loopback test. Use --pace to compare pacing modes.\n"
+           "  eth-rfic-rx-sweep\n"
+           "      Sweep RFIC sample rates and measure LiteEth RX throughput.\n"
 #endif
            "  scratch-test\n"
            "      Test the scratch register.\n"
@@ -2684,6 +2795,8 @@ int main(int argc, char **argv)
     else if (cmd_is(cmd, "eth_loopback_test", "eth-loopback-test"))
         return eth_loopback_test(test_data_width, test_duration,
                                  eth_pace, eth_sample_rate, eth_window);
+    else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
+        return eth_rfic_rx_sweep(test_duration);
 #endif
 
     /* Show help otherwise. */
