@@ -2421,6 +2421,684 @@ static int eth_rfic_rx_sweep(int duration)
     free(rx_buf);
     return status;
 }
+
+#define RFIC_LOOPBACK_SYNC_LANES       32u
+#define RFIC_LOOPBACK_SEARCH_LANES   1024u
+#define RFIC_LOOPBACK_LANES_PER_WORD    4u
+#define RFIC_LOOPBACK_MAX_DELAY_BUFS  128u
+#define RFIC_LOOPBACK_SEARCH_BUFS     128u
+#define RFIC_LOOPBACK_PREFILL_BUFS     24u
+#define RFIC_LOOPBACK_WARMUP_MS      4000u
+#define RFIC_LOOPBACK_MIN_DURATION_S    8u
+#define RFIC_PRBS_SEED             0x0a54u
+#define RFIC_PRBS_LEN               65535u
+#define RFIC_PRBS_SYNC_LANES          128u
+#define RFIC_PRBS_MAX_STALE_BUFS      128u
+
+static uint32_t rfic_loopback_mix32(uint64_t x)
+{
+    x += UINT64_C(0x9e3779b97f4a7c15);
+    x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+    x ^= x >> 31;
+    return (uint32_t)(x ^ (x >> 32));
+}
+
+static uint16_t rfic_loopback_lane12(uint32_t run_seed, uint64_t lane)
+{
+    uint64_t word = lane / RFIC_LOOPBACK_LANES_PER_WORD;
+    uint64_t key = ((uint64_t)run_seed << 32) ^ word;
+    return (uint16_t)(rfic_loopback_mix32(key) & 0x0fffu);
+}
+
+static int16_t rfic_loopback_sign_extend12(uint16_t v)
+{
+    v &= 0x0fffu;
+    return (int16_t)((v & 0x0800u) ? (v | 0xf000u) : v);
+}
+
+static void rfic_loopback_fill(int16_t *buf, unsigned lanes, uint64_t *lane_wr, uint32_t run_seed)
+{
+    for (unsigned i = 0; i < lanes; i++) {
+        buf[i] = rfic_loopback_sign_extend12(rfic_loopback_lane12(run_seed, *lane_wr));
+        *lane_wr += 1;
+    }
+}
+
+static uint64_t rfic_loopback_check(const int16_t *buf,
+                                    unsigned lanes,
+                                    uint64_t *lane_rd,
+                                    uint32_t run_seed,
+                                    bool verbose)
+{
+    uint64_t errors = 0;
+
+    for (unsigned i = 0; i < lanes; i++) {
+        uint16_t got = (uint16_t)buf[i] & 0x0fffu;
+        uint16_t expected = rfic_loopback_lane12(run_seed, *lane_rd);
+
+        if (unlikely(got != expected)) {
+            if (verbose && errors < 8) {
+                fprintf(stderr, "rfic loopback mismatch[%u]: got=0x%03x expected=0x%03x\n",
+                    i, got, expected);
+            }
+            errors++;
+        }
+        *lane_rd += 1;
+    }
+
+    return errors;
+}
+
+static bool rfic_loopback_match_at(const int16_t *buf,
+                                   unsigned lanes,
+                                   unsigned sync_lanes,
+                                   uint64_t lane,
+                                   uint32_t run_seed)
+{
+    if (lanes < sync_lanes || sync_lanes < RFIC_LOOPBACK_SYNC_LANES)
+        return false;
+
+    for (unsigned i = 0; i < sync_lanes; i++) {
+        uint16_t got = (uint16_t)buf[i] & 0x0fffu;
+        uint16_t expected = rfic_loopback_lane12(run_seed, lane + i);
+
+        if (got != expected)
+            return false;
+    }
+
+    return true;
+}
+
+static bool rfic_loopback_find_sync(const int16_t *buf,
+                                    unsigned lanes,
+                                    uint64_t lane_wr,
+                                    uint64_t *lane_rd,
+                                    uint32_t run_seed)
+{
+    unsigned sync_lanes = lanes < RFIC_LOOPBACK_SEARCH_LANES ? lanes : RFIC_LOOPBACK_SEARCH_LANES;
+    uint64_t search_lanes = (uint64_t)RFIC_LOOPBACK_SEARCH_BUFS * lanes;
+    uint64_t start_lane = 0;
+
+    if (lane_wr < sync_lanes || sync_lanes < RFIC_LOOPBACK_SYNC_LANES)
+        return false;
+
+    if (lane_wr > search_lanes)
+        start_lane = lane_wr - search_lanes;
+    start_lane &= ~(uint64_t)(RFIC_LOOPBACK_LANES_PER_WORD - 1u);
+
+    for (uint64_t lane = start_lane; lane + sync_lanes <= lane_wr; lane += RFIC_LOOPBACK_LANES_PER_WORD) {
+        if (rfic_loopback_match_at(buf, lanes, sync_lanes, lane, run_seed)) {
+            *lane_rd = lane;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void rfic_loopback_print_rx_preview(const int16_t *buf, unsigned lanes)
+{
+    unsigned preview = lanes < 16 ? lanes : 16;
+
+    fprintf(stderr, "RFIC loopback RX preview:");
+    for (unsigned i = 0; i < preview; i++)
+        fprintf(stderr, " %03x", (uint16_t)buf[i] & 0x0fffu);
+    fprintf(stderr, "\n");
+}
+
+static int rfic_loopback_test(int duration,
+                              enum eth_loopback_pace pace,
+                              int64_t sample_rate,
+                              unsigned window,
+                              bool fpga_data_loopback)
+{
+    struct m2sdr_dev *dev = NULL;
+    struct m2sdr_config cfg;
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    const unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
+    const unsigned lanes_per_buf = M2SDR_BUFFER_BYTES / sizeof(int16_t);
+    const unsigned stream_words_per_buf = lanes_per_buf / RFIC_LOOPBACK_LANES_PER_WORD;
+    int16_t *tx_buf = NULL;
+    int16_t *rx_buf = NULL;
+    uint32_t run_seed = (uint32_t)get_time_us();
+    uint64_t lane_wr = 0;
+    uint64_t lane_rd = 0;
+    uint64_t tx_buffers = 0;
+    uint64_t rx_buffers = 0;
+    uint64_t checked_buffers = 0;
+    uint64_t stale_buffers = 0;
+    uint64_t warmup_buffers = 0;
+    uint64_t startup_skip_lanes = 0;
+    uint64_t total_errors = 0;
+    uint64_t last_checked_buffers = 0;
+    unsigned prefill_buffers;
+    bool warmup_done = fpga_data_loopback;
+    bool seed_synced = false;
+    int64_t start_us;
+    int64_t last_time;
+    int64_t warmup_end_time = 0;
+    int64_t end_time;
+    int i = 0;
+    int rc;
+    int status = 1;
+
+    if (duration <= 0)
+        duration = fpga_data_loopback ? 1 : RFIC_LOOPBACK_MIN_DURATION_S;
+    if (!fpga_data_loopback && duration < (int)RFIC_LOOPBACK_MIN_DURATION_S)
+        duration = RFIC_LOOPBACK_MIN_DURATION_S;
+    if (window == 0)
+        window = 1;
+    if (sample_rate <= 0)
+        sample_rate = DEFAULT_SAMPLERATE;
+    prefill_buffers = window < RFIC_LOOPBACK_PREFILL_BUFS ? window : RFIC_LOOPBACK_PREFILL_BUFS;
+
+    if (!m2sdr_cli_finalize_device(&g_cli_dev))
+        return 1;
+
+    rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
+    if (rc != M2SDR_ERR_OK) {
+        m2sdr_print_open_error(m2sdr_cli_device_id(&g_cli_dev), rc);
+        return 1;
+    }
+
+    tx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    rx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    if (!tx_buf || !rx_buf) {
+        fprintf(stderr, "buffer allocation failed\n");
+        goto cleanup;
+    }
+
+    signal(SIGINT, intHandler);
+    keep_running = 1;
+
+    printf("\e[1m[> AD9361 TX/RX digital loopback test:\e[0m\n");
+    printf("--------------------------------------\n");
+    printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
+    printf("Duration    : %d s\n", duration);
+    printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
+    printf("Pace        : %s\n", eth_loopback_pace_name(pace));
+    printf("Buffer      : %u bytes / %u samples / %u int16 lanes\n",
+        M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
+    printf("RFIC words  : %u per buffer\n", stream_words_per_buf);
+    printf("Pattern seed: 0x%08x\n", run_seed);
+    printf("Loopback    : LiteEth TX -> %s -> LiteEth RX\n",
+        fpga_data_loopback ? "FPGA RFIC data loopback" : "AD9361 digital loopback");
+    printf("Precision   : 12-bit compare on lane[11:0]\n");
+    printf("TX prefill  : %u buffers\n", prefill_buffers);
+    if (!fpga_data_loopback)
+        printf("Warmup      : %u ms\n", RFIC_LOOPBACK_WARMUP_MS);
+
+    m2sdr_config_init(&cfg);
+    cfg.sample_rate = sample_rate;
+    cfg.bandwidth = sample_rate;
+    cfg.loopback = fpga_data_loopback ? 0 : 1;
+    cfg.enable_8bit_mode = false;
+    rc = m2sdr_apply_config(dev, &cfg);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup;
+    }
+
+    (void)m2sdr_set_txrx_loopback(dev, false);
+    (void)m2sdr_set_fpga_prbs_tx(dev, false);
+    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        goto cleanup_disable_loopback;
+    }
+    if (m2sdr_set_tx_header(dev, false) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_tx_header failed\n");
+        goto cleanup_disable_loopback;
+    }
+    if (fpga_data_loopback && m2sdr_set_rfic_data_loopback(dev, true) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_rfic_data_loopback(enable) failed\n");
+        goto cleanup_disable_loopback;
+    }
+    rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(RX) failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup_disable_loopback;
+    }
+    rc = m2sdr_sync_config(dev, M2SDR_TX, format, 64, samples_per_buf, 0, 1000);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(TX) failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup_disable_loopback;
+    }
+
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    /* Keep LiteEth TX packets in the Ethernet-side FIFO during the explicit
+     * test prefill. Releasing the crossbar after prefill avoids startup gaps
+     * in the RFIC TX stream caused by host packet scheduling latency. */
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
+        fprintf(stderr, "m2sdr TX prefill hold failed\n");
+        goto cleanup_disable_loopback;
+    }
+#endif
+
+    if (prefill_buffers > 0) {
+        for (unsigned n = 0; n < prefill_buffers; n++) {
+            rfic_loopback_fill(tx_buf, lanes_per_buf, &lane_wr, run_seed);
+            rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                fprintf(stderr, "m2sdr_sync_tx prefill failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup_disable_loopback;
+            }
+            tx_buffers++;
+        }
+    }
+
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
+        fprintf(stderr, "m2sdr TX prefill release failed\n");
+        goto cleanup_disable_loopback;
+    }
+#endif
+
+    last_time = get_time_ms();
+    warmup_end_time = last_time + (fpga_data_loopback ? 0 : RFIC_LOOPBACK_WARMUP_MS);
+    start_us = get_time_us();
+    end_time = last_time + (int64_t)duration * 1000;
+    while (keep_running && get_time_ms() < end_time) {
+        int did_work = 0;
+        uint64_t outstanding = tx_buffers - rx_buffers;
+
+        while (outstanding < window) {
+            if (pace == ETH_LOOPBACK_PACE_RX && outstanding >= prefill_buffers)
+                break;
+            if (pace == ETH_LOOPBACK_PACE_RATE && tx_buffers >= prefill_buffers) {
+                uint64_t paced_tx_buffers = tx_buffers - prefill_buffers + 1;
+                eth_loopback_rate_wait(start_us, paced_tx_buffers, stream_words_per_buf, sample_rate);
+            }
+            rfic_loopback_fill(tx_buf, lanes_per_buf, &lane_wr, run_seed);
+            rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup_disable_loopback;
+            }
+            tx_buffers++;
+            outstanding++;
+            did_work = 1;
+        }
+
+        if (outstanding > 0) {
+            rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+            if (rc != M2SDR_ERR_OK) {
+                fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup_disable_loopback;
+            }
+            rx_buffers++;
+            outstanding--;
+            did_work = 1;
+
+            if (!warmup_done) {
+                warmup_buffers++;
+                if (get_time_ms() < warmup_end_time)
+                    continue;
+                warmup_done = true;
+            }
+
+            if (!seed_synced) {
+                if (!rfic_loopback_find_sync(rx_buf, lanes_per_buf, lane_wr, &lane_rd, run_seed)) {
+                    stale_buffers++;
+                    if (stale_buffers == 1)
+                        rfic_loopback_print_rx_preview(rx_buf, lanes_per_buf);
+                    if (stale_buffers > RFIC_LOOPBACK_MAX_DELAY_BUFS) {
+                        fprintf(stderr, "RFIC loopback sync failed after %" PRIu64 " stale buffers.\n",
+                            stale_buffers);
+                        goto cleanup_disable_loopback;
+                    }
+                    continue;
+                }
+                startup_skip_lanes = lane_rd;
+                seed_synced = true;
+            }
+
+            uint64_t errors = rfic_loopback_check(rx_buf, lanes_per_buf, &lane_rd, run_seed,
+                total_errors == 0);
+            total_errors += errors;
+            checked_buffers++;
+            if (errors)
+                status = 1;
+        }
+
+        int64_t now = get_time_ms();
+        int64_t elapsed = now - last_time;
+        if (elapsed > 500) {
+            uint64_t delta = checked_buffers - last_checked_buffers;
+            double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
+
+            if (i % 10 == 0)
+                printf("\e[1mRFIC_LB_Gbps\tTX_BUFFERS\tRX_BUFFERS\tCHECKED\tERRORS\tSTART_SKIP\tWARMUP\tSTALE\e[0m\n");
+            i++;
+            printf("%12.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\n",
+                gbps, tx_buffers, rx_buffers, checked_buffers, total_errors,
+                startup_skip_lanes, warmup_buffers, stale_buffers);
+
+            last_time = now;
+            last_checked_buffers = checked_buffers;
+        }
+
+        if (!did_work)
+            usleep(1000);
+    }
+
+    if (!seed_synced) {
+        fprintf(stderr, "RFIC loopback test failed: no synchronized RX data.\n");
+    } else if (total_errors == 0) {
+        printf("RFIC loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
+        if (startup_skip_lanes)
+            printf(" after skipping %" PRIu64 " startup lanes", startup_skip_lanes);
+        if (warmup_buffers)
+            printf(", warming up %" PRIu64 " buffers", warmup_buffers);
+        if (stale_buffers)
+            printf("%sdiscarding %" PRIu64 " stale startup buffers",
+                warmup_buffers ? ", and " : " after ", stale_buffers);
+        printf(".\n");
+        status = 0;
+    } else {
+        printf("RFIC loopback test failed: %" PRIu64 " lane errors over %" PRIu64 " buffers.\n",
+            total_errors, checked_buffers);
+    }
+
+cleanup_disable_loopback:
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+    if (m2sdr_set_rfic_data_loopback(dev, false) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_set_rfic_data_loopback(disable) failed\n");
+    if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_set_rfic_loopback(disable) failed\n");
+cleanup:
+    free(tx_buf);
+    free(rx_buf);
+    m2sdr_close(dev);
+    return status;
+}
+
+struct rfic_prbs_phase {
+    unsigned phase;
+    unsigned lane_mod;
+};
+
+static uint16_t rfic_prbs_next(uint16_t state)
+{
+    uint16_t feedback =
+        ((state >> 1)  ^ (state >> 2)  ^ (state >> 4)  ^ (state >> 5)  ^
+         (state >> 6)  ^ (state >> 7)  ^ (state >> 8)  ^ (state >> 9)  ^
+         (state >> 10) ^ (state >> 11) ^ (state >> 12) ^ (state >> 13) ^
+         (state >> 14) ^ (state >> 15)) & 0x1u;
+
+    return (uint16_t)(((state << 1) & 0xfffeu) | feedback);
+}
+
+static void rfic_prbs_build_sequence(uint16_t *seq)
+{
+    uint16_t state = RFIC_PRBS_SEED;
+
+    for (unsigned i = 0; i < RFIC_PRBS_LEN; i++) {
+        seq[i] = state & 0x0fffu;
+        state = rfic_prbs_next(state);
+    }
+}
+
+static uint16_t rfic_prbs_expected(const uint16_t *seq, const struct rfic_prbs_phase *phase, unsigned lane)
+{
+    unsigned word_advance = (phase->lane_mod + lane) / RFIC_LOOPBACK_LANES_PER_WORD;
+    return seq[(phase->phase + word_advance) % RFIC_PRBS_LEN];
+}
+
+static void rfic_prbs_advance(struct rfic_prbs_phase *phase, unsigned lanes)
+{
+    unsigned total = phase->lane_mod + lanes;
+
+    phase->phase = (phase->phase + total / RFIC_LOOPBACK_LANES_PER_WORD) % RFIC_PRBS_LEN;
+    phase->lane_mod = total % RFIC_LOOPBACK_LANES_PER_WORD;
+}
+
+static bool rfic_prbs_match_at(const int16_t *buf,
+                               unsigned lanes,
+                               const uint16_t *seq,
+                               const struct rfic_prbs_phase *phase)
+{
+    unsigned sync_lanes = lanes < RFIC_PRBS_SYNC_LANES ? lanes : RFIC_PRBS_SYNC_LANES;
+
+    if (sync_lanes == 0)
+        return false;
+
+    for (unsigned i = 0; i < sync_lanes; i++) {
+        uint16_t got = (uint16_t)buf[i] & 0x0fffu;
+        uint16_t expected = rfic_prbs_expected(seq, phase, i);
+
+        if (got != expected)
+            return false;
+    }
+
+    return true;
+}
+
+static bool rfic_prbs_find_sync(const int16_t *buf,
+                                unsigned lanes,
+                                const uint16_t *seq,
+                                struct rfic_prbs_phase *phase)
+{
+    struct rfic_prbs_phase candidate;
+
+    if (lanes < RFIC_PRBS_SYNC_LANES)
+        return false;
+
+    for (candidate.phase = 0; candidate.phase < RFIC_PRBS_LEN; candidate.phase++) {
+        for (candidate.lane_mod = 0; candidate.lane_mod < RFIC_LOOPBACK_LANES_PER_WORD; candidate.lane_mod++) {
+            if (rfic_prbs_match_at(buf, lanes, seq, &candidate)) {
+                *phase = candidate;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static uint64_t rfic_prbs_check(const int16_t *buf,
+                                unsigned lanes,
+                                const uint16_t *seq,
+                                struct rfic_prbs_phase *phase,
+                                bool verbose)
+{
+    uint64_t errors = 0;
+
+    for (unsigned i = 0; i < lanes; i++) {
+        uint16_t got = (uint16_t)buf[i] & 0x0fffu;
+        uint16_t expected = rfic_prbs_expected(seq, phase, i);
+
+        if (unlikely(got != expected)) {
+            if (verbose && errors < 8) {
+                fprintf(stderr, "rfic prbs mismatch[%u]: got=0x%03x expected=0x%03x phase=%u lane_mod=%u\n",
+                    i, got, expected, phase->phase, phase->lane_mod);
+            }
+            errors++;
+        }
+    }
+
+    rfic_prbs_advance(phase, lanes);
+    return errors;
+}
+
+static void rfic_prbs_print_rx_preview(const int16_t *buf, unsigned lanes)
+{
+    unsigned preview = lanes < 16 ? lanes : 16;
+
+    fprintf(stderr, "RFIC PRBS RX preview:");
+    for (unsigned i = 0; i < preview; i++)
+        fprintf(stderr, " %03x", (uint16_t)buf[i] & 0x0fffu);
+    fprintf(stderr, "\n");
+}
+
+static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
+{
+    struct m2sdr_dev *dev = NULL;
+    struct m2sdr_config cfg;
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    const unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
+    const unsigned lanes_per_buf = M2SDR_BUFFER_BYTES / sizeof(int16_t);
+    struct rfic_prbs_phase phase = {0, 0};
+    uint16_t *seq = NULL;
+    int16_t *rx_buf = NULL;
+    uint64_t rx_buffers = 0;
+    uint64_t checked_buffers = 0;
+    uint64_t stale_buffers = 0;
+    uint64_t total_errors = 0;
+    uint64_t last_checked_buffers = 0;
+    bool host_synced = false;
+    bool fpga_synced = false;
+    int64_t last_time;
+    int64_t end_time;
+    int i = 0;
+    int rc;
+    int status = 1;
+
+    if (duration <= 0)
+        duration = 1;
+    if (sample_rate <= 0)
+        sample_rate = DEFAULT_SAMPLERATE;
+
+    if (!m2sdr_cli_finalize_device(&g_cli_dev))
+        return 1;
+
+    rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
+    if (rc != M2SDR_ERR_OK) {
+        m2sdr_print_open_error(m2sdr_cli_device_id(&g_cli_dev), rc);
+        return 1;
+    }
+
+    seq = malloc(RFIC_PRBS_LEN * sizeof(*seq));
+    rx_buf = aligned_alloc(64, M2SDR_BUFFER_BYTES);
+    if (!seq || !rx_buf) {
+        fprintf(stderr, "buffer allocation failed\n");
+        goto cleanup;
+    }
+    rfic_prbs_build_sequence(seq);
+
+    signal(SIGINT, intHandler);
+    keep_running = 1;
+
+    printf("\e[1m[> RFIC PRBS loopback test:\e[0m\n");
+    printf("----------------------------\n");
+    printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
+    printf("Duration    : %d s\n", duration);
+    printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
+    printf("Buffer      : %u bytes / %u samples / %u int16 lanes\n",
+        M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
+    printf("Loopback    : FPGA PRBS TX -> AD9361 internal loopback -> FPGA RX -> LiteEth RX\n");
+    printf("Precision   : 12-bit compare on lane[11:0]\n");
+
+    m2sdr_config_init(&cfg);
+    cfg.sample_rate = sample_rate;
+    cfg.bandwidth = sample_rate;
+    cfg.loopback = 1;
+    cfg.enable_8bit_mode = false;
+    rc = m2sdr_apply_config(dev, &cfg);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup;
+    }
+
+    (void)m2sdr_set_txrx_loopback(dev, false);
+    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        goto cleanup_disable_prbs;
+    }
+    rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(RX) failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup_disable_prbs;
+    }
+    rc = m2sdr_set_fpga_prbs_tx(dev, true);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_set_fpga_prbs_tx(enable) failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup_disable_prbs;
+    }
+
+    last_time = get_time_ms();
+    end_time = last_time + (int64_t)duration * 1000;
+    while (keep_running && get_time_ms() < end_time) {
+        rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+            goto cleanup_disable_prbs;
+        }
+        rx_buffers++;
+
+        (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
+
+        if (!host_synced) {
+            if (!rfic_prbs_find_sync(rx_buf, lanes_per_buf, seq, &phase)) {
+                stale_buffers++;
+                if (stale_buffers == 1)
+                    rfic_prbs_print_rx_preview(rx_buf, lanes_per_buf);
+                if (stale_buffers > RFIC_PRBS_MAX_STALE_BUFS) {
+                    fprintf(stderr, "RFIC PRBS host sync failed after %" PRIu64 " stale buffers (FPGA synced: %s).\n",
+                        stale_buffers, fpga_synced ? "yes" : "no");
+                    goto cleanup_disable_prbs;
+                }
+                continue;
+            }
+            printf("Host PRBS sync: phase=%u lane_mod=%u after %" PRIu64 " stale buffers (FPGA synced: %s).\n",
+                phase.phase, phase.lane_mod, stale_buffers, fpga_synced ? "yes" : "no");
+            host_synced = true;
+        }
+
+        uint64_t errors = rfic_prbs_check(rx_buf, lanes_per_buf, seq, &phase, checked_buffers == 0);
+        total_errors += errors;
+        checked_buffers++;
+        if (errors)
+            status = 1;
+
+        int64_t now = get_time_ms();
+        int64_t elapsed = now - last_time;
+        if (elapsed > 500) {
+            uint64_t delta = checked_buffers - last_checked_buffers;
+            double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
+
+            if (i % 10 == 0)
+                printf("\e[1mPRBS_Gbps\tRX_BUFFERS\tCHECKED\tERRORS\tSTALE\tFPGA_SYNC\tPHASE\tLANE_MOD\e[0m\n");
+            i++;
+            printf("%9.2f\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\t%9s\t%5u\t%8u\n",
+                gbps, rx_buffers, checked_buffers, total_errors, stale_buffers,
+                fpga_synced ? "yes" : "no", phase.phase, phase.lane_mod);
+
+            last_time = now;
+            last_checked_buffers = checked_buffers;
+        }
+    }
+
+    (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
+    if (!host_synced) {
+        fprintf(stderr, "RFIC PRBS loopback test failed: no synchronized host RX data (FPGA synced: %s).\n",
+            fpga_synced ? "yes" : "no");
+    } else if (!fpga_synced) {
+        fprintf(stderr, "RFIC PRBS loopback test failed: FPGA PRBS checker is not synced.\n");
+    } else if (total_errors == 0) {
+        printf("RFIC PRBS loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
+        if (stale_buffers)
+            printf(" after discarding %" PRIu64 " stale startup buffers", stale_buffers);
+        printf(".\n");
+        status = 0;
+    } else {
+        printf("RFIC PRBS loopback test failed: %" PRIu64 " lane errors over %" PRIu64 " buffers (FPGA synced: %s).\n",
+            total_errors, checked_buffers, fpga_synced ? "yes" : "no");
+    }
+
+cleanup_disable_prbs:
+    if (m2sdr_set_fpga_prbs_tx(dev, false) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_set_fpga_prbs_tx(disable) failed\n");
+    if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_set_rfic_loopback(disable) failed\n");
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+cleanup:
+    free(seq);
+    free(rx_buf);
+    m2sdr_close(dev);
+    return status;
+}
 #endif
 
 /* Help */
@@ -2481,6 +3159,12 @@ static void help(void)
            "      Run a LiteEth TX/RX FPGA loopback test. Use --pace to compare pacing modes.\n"
            "  eth-rfic-rx-sweep\n"
            "      Sweep RFIC sample rates and measure LiteEth RX throughput.\n"
+           "  rfic-loopback-test\n"
+           "      Run LiteEth TX through AD9361 loopback and compare LiteEth RX data.\n"
+           "  rfic-data-loopback-test\n"
+           "      Run LiteEth TX through the FPGA RFIC data loopback and compare LiteEth RX data.\n"
+           "  rfic-prbs-loopback-test\n"
+           "      Run FPGA PRBS TX through AD9361 loopback and compare LiteEth RX data.\n"
 #endif
            "  scratch-test\n"
            "      Test the scratch register.\n"
@@ -2852,6 +3536,12 @@ int main(int argc, char **argv)
                                  eth_pace, eth_sample_rate, eth_window);
     else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
         return eth_rfic_rx_sweep(test_duration);
+    else if (cmd_is(cmd, "rfic_loopback_test", "rfic-loopback-test"))
+        return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, false);
+    else if (cmd_is(cmd, "rfic_data_loopback_test", "rfic-data-loopback-test"))
+        return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, true);
+    else if (cmd_is(cmd, "rfic_prbs_loopback_test", "rfic-prbs-loopback-test"))
+        return rfic_prbs_loopback_test(test_duration, eth_sample_rate);
 #endif
 
     /* Show help otherwise. */

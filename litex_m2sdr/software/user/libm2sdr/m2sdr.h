@@ -437,6 +437,7 @@ int  m2sdr_clear_ptp_counters(struct m2sdr_dev *dev);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_set_rfic_data_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 
@@ -470,6 +471,9 @@ int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_rx_gain(struct m2sdr_dev *dev, int64_t gain);
 int  m2sdr_set_rx_gain_chan(struct m2sdr_dev *dev, unsigned channel, int64_t gain);
 int  m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db);
+int  m2sdr_set_rfic_loopback(struct m2sdr_dev *dev, uint8_t mode);
+int  m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
 

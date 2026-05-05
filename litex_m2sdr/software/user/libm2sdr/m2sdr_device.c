@@ -1147,6 +1147,36 @@ int m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable)
 #endif
 }
 
+/* Enable or disable the RFIC PHY TX data to RX data loopback path. */
+int m2sdr_set_rfic_data_loopback(struct m2sdr_dev *dev, bool enable)
+{
+    uint32_t control = 0;
+    uint32_t mask;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+#if defined(CSR_AD9361_PHY_CONTROL_ADDR) && \
+    defined(CSR_AD9361_PHY_CONTROL_LOOPBACK_OFFSET) && \
+    defined(CSR_AD9361_PHY_CONTROL_LOOPBACK_SIZE)
+    mask = ((1u << CSR_AD9361_PHY_CONTROL_LOOPBACK_SIZE) - 1u) <<
+        CSR_AD9361_PHY_CONTROL_LOOPBACK_OFFSET;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PHY_CONTROL_ADDR, &control) != 0)
+        return M2SDR_ERR_IO;
+    control &= ~mask;
+    if (enable)
+        control |= 1u << CSR_AD9361_PHY_CONTROL_LOOPBACK_OFFSET;
+    if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+#else
+    (void)enable;
+    (void)control;
+    (void)mask;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
 /* Enable or disable RX-side DMA headers and remember whether the sync API
  * should strip them before returning samples to the caller. */
 int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)

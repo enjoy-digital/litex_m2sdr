@@ -1197,3 +1197,37 @@ int m2sdr_set_tx_att(struct m2sdr_dev *dev, int64_t attenuation_db)
 {
     return m2sdr_set_gain(dev, M2SDR_TX, attenuation_db);
 }
+
+int m2sdr_set_rfic_loopback(struct m2sdr_dev *dev, uint8_t mode)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (mode > 2)
+        return M2SDR_ERR_RANGE;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, mode)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    return m2sdr_write_prbs_tx_ctrl(dev,
+        enable ? (1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET) : 0);
+}
+
+int m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced)
+{
+    return m2sdr_read_prbs_synced(dev, synced);
+}
