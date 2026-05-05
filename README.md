@@ -342,6 +342,8 @@ For some platforms we created detailed tutorials. For everything else, please fo
 
 For those who want to dive deeper into development with the LiteX-M2SDR board, follow these additional steps after completing the SDR enthusiast steps:
 
+For a broader hardware/software debug workflow, see [Debugging Guide](doc/debugging-guide.md).
+
 1. **Test Structure (CI-safe vs hardware scripts):**
    - Gateware simulation/unit tests live in `test/` and are CI-safe (no hardware needed):
    ```
