@@ -222,7 +222,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_cpu               = False, cpu_variant="standard", integrated_rom_size=0x10000,
+        with_cpu               = False, cpu_type="vexriscv", cpu_variant="standard", integrated_rom_size=0x10000,
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_debug=False,
@@ -270,7 +270,7 @@ class BaseSoC(SoCMini):
                 self,
                 platform,
                 sys_clk_freq,
-                cpu_type="vexriscv",
+                cpu_type=cpu_type,
                 cpu_variant=cpu_variant,
                 integrated_rom_size=integrated_rom_size,
                 integrated_sram_size=0x10000,
@@ -392,7 +392,7 @@ class BaseSoC(SoCMini):
         if with_jtagbone and not with_cpu:
             self.add_jtagbone()
         elif with_jtagbone and with_cpu:
-            print("NOTE: JTAGBone disabled (conflicts with VexRiscv debug JTAG).")
+            print(f"NOTE: JTAGBone disabled (conflicts with {self.cpu.name} debug JTAG).")
 
         # ICAP -------------------------------------------------------------------------------------
 
@@ -1274,13 +1274,18 @@ def main():
     parser.add_argument(
         "--with-cpu",
         action="store_true",
-        help="Integrate VexRiscv soft CPU with BIOS + crossover console.",
+        help="Integrate a soft CPU with BIOS + crossover console.",
+    )
+    parser.add_argument(
+        "--cpu-type",
+        default="vexriscv",
+        choices=["vexriscv", "serv"],
+        help="Soft CPU type.",
     )
     parser.add_argument(
         "--cpu-variant",
         default="standard",
-        choices=["minimal", "lite", "lite+debug", "standard", "full"],
-        help="VexRiscv CPU variant.",
+        help="Soft CPU variant.",
     )
     parser.add_argument("--integrated-rom-size", default=0x10000, type=lambda x: int(x, 0), help="Integrated ROM size used when --with-cpu is enabled.")
     parser.add_argument("--no-integrated-rom-auto-size", action="store_true", help="Keep integrated ROM at the size declared in SoC construction instead of shrinking it to the BIOS binary size.")
@@ -1368,6 +1373,7 @@ def main():
 
         # CPU.
         with_cpu            = args.with_cpu,
+        cpu_type            = args.cpu_type,
         cpu_variant         = args.cpu_variant,
         integrated_rom_size = args.integrated_rom_size,
 
@@ -1455,7 +1461,7 @@ def main():
         if args.without_jtagbone:
             r += "_no_jtagbone"
         if args.with_cpu:
-            r += f"_cpu_{args.cpu_variant.replace('+', '_')}"
+            r += f"_cpu_{args.cpu_type}_{args.cpu_variant.replace('+', '_')}"
             r += f"_rom_{args.integrated_rom_size:x}"
         return r
 

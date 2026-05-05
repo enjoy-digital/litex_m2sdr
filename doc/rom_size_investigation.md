@@ -214,3 +214,38 @@ Useful next checks:
 - Try a deliberately banked ROM implementation made from two 32 KiB memories selected by address bit 13. If that boots, the issue is probably in the single `16384x32` inferred memory implementation or its physical placement/timing.
 - Try adding one explicit extra read latency cycle to the integrated ROM path. The larger BRAM tree may be returning invalid data when acknowledged with the current one-cycle SRAM wrapper.
 - Build a reduced SoC with only CPU, integrated ROM/SRAM, crossover UART, and Etherbone to remove unrelated placement pressure before debugging the full design.
+
+### SERV CPU Comparison
+
+The target now accepts `--cpu-type`, defaulting to `vexriscv`. This was used to build a SERV comparison image while keeping the same 100 MHz system clock and 64 KiB integrated ROM:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --cpu-type=serv --cpu-variant=standard \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --build
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-cpu \
+    --cpu-type=serv --cpu-variant=standard \
+    --sys-clk-freq=100e6 \
+    --integrated-rom-size=0x10000 --no-integrated-rom-auto-size \
+    --load
+```
+
+Build result:
+
+- CPU changed to SERV with two Wishbone masters.
+- ROM stayed at `0x00000000`, size `0x00010000`.
+- SERV changed the default SRAM origin to `0x01000000` and CSR origin to `0x82000000`.
+- The crossbar topology remained `4 <-> 3`: `cpu_bus0`, `cpu_bus1`, `si5351`, and `etherbone` masters against ROM, SRAM, and CSR slaves.
+- Final post-route timing was clean: WNS `+0.404 ns`, TNS `0.000 ns`, WHS `+0.053 ns`, THS `0.000 ns`.
+
+Hardware result:
+
+- The bitstream loaded successfully over FT4232.
+- Etherbone CSR access was alive immediately after load: `ctrl_scratch` read back `0x12345678` at the SERV CSR base.
+- The crossover UART stayed silent: no BIOS banner and no response to `help`.
+- With the CPU reset bit asserted through `ctrl_reset=0x00000002`, an external Etherbone read from `0x00000000` returned `0x00000000` instead of `0x0b00006f`.
+- After that ROM read, `ctrl_scratch` read back `0x00000000` and `litex_server` reported UDP read timeouts.
+
+This reproduces the failure with a different CPU and a timing-clean 100 MHz build. The issue is therefore unlikely to be specific to VexRiscv instruction fetch/cache behavior. The common failing surface remains the 64 KiB integrated ROM access through the full crossbar with the other bus masters present.
