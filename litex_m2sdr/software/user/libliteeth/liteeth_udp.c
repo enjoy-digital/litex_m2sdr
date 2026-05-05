@@ -24,6 +24,8 @@
 
 #include "liteeth_udp.h"
 
+#define LITEETH_UDP_TX_CHUNK_BYTES 1024u
+
 /* Utilities */
 
 static int set_nonblock(int fd, int nb)
@@ -410,20 +412,35 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
         return -1;
 
     uint8_t *src = u->buf_wr + (u->usr_write_buf_offset * u->buf_size);
-    size_t   left = u->buf_size;
+    size_t left = u->buf_size;
 
     while (left) {
-        ssize_t nb = sendto(u->sock, src, left, 0,
-                            (struct sockaddr *)&u->remote, sizeof(u->remote));
-        if (nb < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                continue; /* retry */
-            u->tx_send_errors++;
-            perror("liteeth_udp: sendto");
-            return -1;
+        size_t chunk = left;
+        uint8_t *chunk_src = src;
+
+        if (chunk > LITEETH_UDP_TX_CHUNK_BYTES)
+            chunk = LITEETH_UDP_TX_CHUNK_BYTES;
+
+        while (chunk) {
+            ssize_t nb = sendto(u->sock, chunk_src, chunk, 0,
+                                (struct sockaddr *)&u->remote, sizeof(u->remote));
+            if (nb < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    continue; /* retry */
+                u->tx_send_errors++;
+                perror("liteeth_udp: sendto");
+                return -1;
+            }
+            chunk_src += nb;
+            chunk     -= (size_t)nb;
         }
-        src  += nb;
-        left -= (size_t)nb;
+
+        if (left > LITEETH_UDP_TX_CHUNK_BYTES) {
+            src  += LITEETH_UDP_TX_CHUNK_BYTES;
+            left -= LITEETH_UDP_TX_CHUNK_BYTES;
+        } else {
+            left = 0;
+        }
     }
 
     u->usr_write_buf_offset = (u->usr_write_buf_offset + 1) % u->buf_count;

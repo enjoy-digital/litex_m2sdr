@@ -2025,6 +2025,11 @@ static uint32_t eth_pn_word(uint32_t seed)
     return seed * 69069u + 1u;
 }
 
+static uint32_t eth_pn_seed_from_word(uint32_t word)
+{
+    return (word - 1u) * UINT32_C(0xa5e2a705);
+}
+
 static void eth_write_pn_data(uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
 {
     for (unsigned i = 0; i < words; i++) {
@@ -2033,14 +2038,19 @@ static void eth_write_pn_data(uint32_t *buf, unsigned words, uint32_t *seed, uin
     }
 }
 
-static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
+static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask, bool verbose)
 {
     uint32_t errors = 0;
 
     for (unsigned i = 0; i < words; i++) {
         uint32_t expected = eth_pn_word(*seed) & mask;
-        if (unlikely((buf[i] & mask) != expected))
+        if (unlikely((buf[i] & mask) != expected)) {
+            if (verbose && errors < 8) {
+                fprintf(stderr, "loopback mismatch[%u]: got=0x%08x expected=0x%08x\n",
+                    i, buf[i] & mask, expected);
+            }
             errors++;
+        }
         *seed += 1;
     }
 
@@ -2089,11 +2099,14 @@ static int eth_loopback_test(int data_width,
     uint64_t rx_buffers = 0;
     uint64_t checked_buffers = 0;
     uint64_t total_errors = 0;
+    uint64_t startup_skip_words = 0;
+    uint64_t startup_discard_buffers = 0;
     uint64_t last_checked_buffers = 0;
+    bool seed_synced = false;
     int64_t last_time;
     int64_t start_us;
     int64_t last_progress_us;
-    int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
+    int64_t end_time = 0;
     int i = 0;
     int rc;
     int status = 1;
@@ -2167,6 +2180,7 @@ static int eth_loopback_test(int data_width,
     last_time = get_time_ms();
     start_us = get_time_us();
     last_progress_us = start_us;
+    end_time = (duration > 0) ? last_time + duration * 1000 : 0;
     while (keep_running && (duration <= 0 || get_time_ms() < end_time)) {
         int did_work = 0;
         uint64_t outstanding = tx_buffers - rx_buffers;
@@ -2199,9 +2213,30 @@ static int eth_loopback_test(int data_width,
             if (rc == M2SDR_ERR_OK) {
                 uint32_t errors;
 
+                if (!seed_synced && mask == 0xffffffffu) {
+                    uint32_t observed_seed = eth_pn_seed_from_word(((const uint32_t *)rx_buf)[0]);
+                    uint32_t tmp_seed = observed_seed;
+
+                    if (observed_seed >= seed_wr ||
+                        eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &tmp_seed, mask, false) != 0) {
+                        rx_buffers++;
+                        outstanding--;
+                        startup_discard_buffers++;
+                        did_work = 1;
+                        last_progress_us = get_time_us();
+                        continue;
+                    }
+                    if (observed_seed > seed_rd) {
+                        startup_skip_words = observed_seed - seed_rd;
+                        seed_rd = observed_seed;
+                    }
+                    seed_synced = true;
+                }
+
                 rx_buffers++;
                 outstanding--;
-                errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask);
+                errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask,
+                    checked_buffers == 0);
                 total_errors += errors;
                 checked_buffers++;
                 did_work = 1;
@@ -2228,20 +2263,22 @@ static int eth_loopback_test(int data_width,
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
 
             if (i % 10 == 0)
-                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tRX_DROPS\tTX_SEND_ERR\e[0m\n");
+                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tRX_DROPS\tTX_SEND_ERR\e[0m\n");
             i++;
 
             if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%8" PRIu64 "\t%11" PRIu64 "\n",
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%8" PRIu64 "\t%11" PRIu64 "\n",
                     gbps,
                     tx_buffers,
                     rx_buffers,
                     total_errors,
+                    startup_skip_words,
+                    startup_discard_buffers,
                     stats.rx_kernel_drops + stats.rx_source_drops + stats.rx_ring_full_events,
                     stats.tx_send_errors);
             } else {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%8u\t%11u\n",
-                    gbps, tx_buffers, rx_buffers, total_errors, 0u, 0u);
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%8u\t%11u\n",
+                    gbps, tx_buffers, rx_buffers, total_errors, startup_skip_words, startup_discard_buffers, 0u, 0u);
             }
 
             last_time = now;
@@ -2253,7 +2290,12 @@ static int eth_loopback_test(int data_width,
     }
 
     if (total_errors == 0) {
-        printf("LiteEth loopback test passed: checked %" PRIu64 " buffers.\n", checked_buffers);
+        printf("LiteEth loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
+        if (startup_skip_words)
+            printf(" after skipping %" PRIu64 " startup words", startup_skip_words);
+        if (startup_discard_buffers)
+            printf(" and discarding %" PRIu64 " stale startup buffers", startup_discard_buffers);
+        printf(".\n");
         status = 0;
     } else {
         printf("LiteEth loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",

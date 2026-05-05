@@ -302,6 +302,9 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
      * Ethernet RX mode flush branch when present, then route RX away. */
     (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
 #endif
+#ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
+    (void)m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0);
+#endif
 #ifdef CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR
     (void)m2sdr_reg_write(dev, CSR_VRT_STREAMER_VRT_STREAMER_ENABLE_ADDR, 0);
 #endif
@@ -316,6 +319,12 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
+#ifdef CSR_ETH_TX_STREAMER_ENABLE_ADDR
+    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
+        return M2SDR_ERR_IO;
+#else
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
@@ -334,6 +343,9 @@ int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
 
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     (void)m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+#endif
+#ifdef CSR_ETH_TX_STREAMER_ENABLE_ADDR
+    (void)m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 0);
 #endif
     return M2SDR_ERR_OK;
 }
@@ -475,6 +487,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     if (direction == M2SDR_RX) {
         m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
+        (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+
         if (!dev->rx_header_enable) {
             if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
                 (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
@@ -530,6 +544,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
     if (eth_rx_needs_activate) {
+        liteeth_udp_flush_rx(&dev->udp);
         rc = m2sdr_liteeth_rx_stream_activate(dev, &eth_rx_config);
         if (rc != M2SDR_ERR_OK)
             return rc;
@@ -539,6 +554,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     }
 
     if (direction == M2SDR_TX) {
+        (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+
         rc = m2sdr_liteeth_tx_stream_activate(dev);
         if (rc != M2SDR_ERR_OK)
             return rc;
