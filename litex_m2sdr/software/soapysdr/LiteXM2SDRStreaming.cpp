@@ -211,7 +211,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     _liteeth_rx_port = port;
     if (!_udp_inited) {
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
-                                : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
+                                : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : _eth_ip);
 
         const size_t buf_bytes = is_vrt
                                  ? VRT_RX_PACKET_BYTES_DEFAULT
@@ -364,7 +364,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     }
     if (!_udp_inited) {
         const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
-                                : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : "127.0.0.1");
+                                : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : _eth_ip);
         const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
                                 : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
 
