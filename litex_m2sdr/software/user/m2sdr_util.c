@@ -77,14 +77,24 @@ static bool confirm_flash_write(void)
 
 static struct m2sdr_dev *g_dev = NULL;
 
+static void m2sdr_print_open_error(const char *device_id, int rc)
+{
+    fprintf(stderr, "Could not init driver for %s: %s\n",
+        device_id ? device_id : "(default)",
+        m2sdr_strerror(rc));
+}
+
 static struct m2sdr_dev *m2sdr_open_dev(void) {
+    int rc;
+
     if (g_dev)
         return g_dev;
     if (!m2sdr_cli_finalize_device(&g_cli_dev)) {
         exit(1);
     }
-    if (m2sdr_open(&g_dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
-        fprintf(stderr, "Could not init driver\n");
+    rc = m2sdr_open(&g_dev, m2sdr_cli_device_id(&g_cli_dev));
+    if (rc != 0) {
+        m2sdr_print_open_error(m2sdr_cli_device_id(&g_cli_dev), rc);
         exit(1);
     }
     return g_dev;
@@ -2085,6 +2095,7 @@ static int eth_loopback_test(int data_width,
     int64_t last_progress_us;
     int64_t end_time = (duration > 0) ? get_time_ms() + duration * 1000 : 0;
     int i = 0;
+    int rc;
     int status = 1;
 
     if (samples_per_buf == 0) {
@@ -2105,8 +2116,9 @@ static int eth_loopback_test(int data_width,
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
         return 1;
-    if (m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
-        fprintf(stderr, "Could not init driver\n");
+    rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
+    if (rc != M2SDR_ERR_OK) {
+        m2sdr_print_open_error(m2sdr_cli_device_id(&g_cli_dev), rc);
         return 1;
     }
 
@@ -2303,8 +2315,9 @@ static int eth_rfic_rx_sweep(int duration)
         int rc;
         const char *rate_status = "ok";
 
-        if (m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
-            fprintf(stderr, "Could not init driver\n");
+        rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
+        if (rc != M2SDR_ERR_OK) {
+            m2sdr_print_open_error(m2sdr_cli_device_id(&g_cli_dev), rc);
             free(rx_buf);
             return 1;
         }
