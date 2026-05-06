@@ -177,6 +177,10 @@ class AD9361PHY(LiteXModule):
         rx_data_ib  = Signal(12)
         rx_data_qb  = Signal(12)
         rx_valid    = Signal()
+        rx_source_ia = Signal(12)
+        rx_source_qa = Signal(12)
+        rx_source_ib = Signal(12)
+        rx_source_qb = Signal(12)
         self.sync.rfic += [
             Case(rx_count[1], {
                 0b0: [  # Assemble IA/QA: MSBs in high bits, LSBs in low bits.
@@ -201,6 +205,10 @@ class AD9361PHY(LiteXModule):
             rx_valid.eq(0),
             If(rx_count == 0,
                 rx_valid.eq(1),
+                rx_source_ia.eq(rx_data_ia),
+                rx_source_qa.eq(rx_data_qa),
+                rx_source_ib.eq(rx_data_ib),
+                rx_source_qb.eq(rx_data_qb),
             )
         ]
 
@@ -237,10 +245,10 @@ class AD9361PHY(LiteXModule):
                 source.qb.eq(loopback_qb),
             ).Else(
                 source.valid.eq(rx_valid),
-                source.ia.eq(rx_data_ia),
-                source.qa.eq(rx_data_qa),
-                source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb),
+                source.ia.eq(rx_source_ia),
+                source.qa.eq(rx_source_qa),
+                source.ib.eq(rx_source_ib),
+                source.qb.eq(rx_source_qb),
             )
         ]
 
