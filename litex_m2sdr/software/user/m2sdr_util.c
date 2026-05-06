@@ -2324,7 +2324,7 @@ static int stream_loopback_test(int data_width,
             usleep(1000);
     }
 
-    if (total_errors == 0) {
+    if (checked_buffers > 0 && total_errors == 0) {
         printf("Stream loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
         if (startup_skip_words)
             printf(" after skipping %" PRIu64 " startup words", startup_skip_words);
@@ -2333,8 +2333,12 @@ static int stream_loopback_test(int data_width,
         printf(".\n");
         status = 0;
     } else {
-        printf("Stream loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
-            total_errors, checked_buffers);
+        if (checked_buffers == 0)
+            printf("Stream loopback test failed: no synchronized RX data after discarding %" PRIu64 " stale startup buffers.\n",
+                startup_discard_buffers);
+        else
+            printf("Stream loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
+                total_errors, checked_buffers);
     }
 
 cleanup_disable_loopback:
