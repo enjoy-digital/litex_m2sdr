@@ -1966,7 +1966,7 @@ static void led_release(void)
 
 #endif
 
-#ifdef USE_LITEETH
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
 enum eth_loopback_pace {
     ETH_LOOPBACK_PACE_RX,
     ETH_LOOPBACK_PACE_RATE,
@@ -2161,8 +2161,8 @@ static int eth_loopback_test(int data_width,
     signal(SIGINT, intHandler);
     keep_running = 1;
 
-    printf("\e[1m[> LiteEth loopback test:\e[0m\n");
-    printf("------------------------\n");
+    printf("\e[1m[> Stream loopback test:\e[0m\n");
+    printf("-------------------------\n");
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
     printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
     printf("Data width  : %d bits\n", data_width);
@@ -2282,7 +2282,7 @@ static int eth_loopback_test(int data_width,
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
 
             if (i % 10 == 0)
-                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tKDROP\tSRC_DROP\tRING_FULL\tTX_SEND_ERR\e[0m\n");
+                printf("\e[1mSTREAM_Gbps\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tKDROP\tSRC_DROP\tRING_FULL\tTX_SEND_ERR\e[0m\n");
             i++;
 
             if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
@@ -2311,7 +2311,7 @@ static int eth_loopback_test(int data_width,
     }
 
     if (total_errors == 0) {
-        printf("LiteEth loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
+        printf("Stream loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
         if (startup_skip_words)
             printf(" after skipping %" PRIu64 " startup words", startup_skip_words);
         if (startup_discard_buffers)
@@ -2319,7 +2319,7 @@ static int eth_loopback_test(int data_width,
         printf(".\n");
         status = 0;
     } else {
-        printf("LiteEth loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
+        printf("Stream loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
             total_errors, checked_buffers);
     }
 
@@ -2335,6 +2335,7 @@ cleanup:
     return status;
 }
 
+#ifdef USE_LITEETH
 static int eth_rfic_rx_sweep(int duration)
 {
     static const int64_t rates[] = {
@@ -2444,6 +2445,7 @@ static int eth_rfic_rx_sweep(int duration)
     free(rx_buf);
     return status;
 }
+#endif
 
 #define RFIC_LOOPBACK_SYNC_LANES       32u
 #define RFIC_LOOPBACK_SEARCH_LANES   1024u
@@ -2651,7 +2653,7 @@ static int rfic_loopback_test(int duration,
         M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
     printf("RFIC words  : %u per buffer\n", stream_words_per_buf);
     printf("Pattern seed: 0x%08x\n", run_seed);
-    printf("Loopback    : LiteEth TX -> %s -> LiteEth RX\n",
+    printf("Loopback    : host TX -> %s -> host RX\n",
         fpga_data_loopback ? "FPGA RFIC data loopback" : "AD9361 digital loopback");
     printf("Precision   : 12-bit compare on lane[11:0]\n");
     printf("TX prefill  : %u buffers\n", prefill_buffers);
@@ -2899,6 +2901,7 @@ cleanup:
     return status;
 }
 
+#ifdef USE_LITEETH
 struct rfic_prbs_phase {
     unsigned phase;
     unsigned lane_mod;
@@ -3185,6 +3188,7 @@ cleanup:
     return status;
 }
 #endif
+#endif
 
 /* Help */
 /*------*/
@@ -3208,10 +3212,13 @@ static void help(void)
            "      --external-loopback          Use external loopback (default: internal).\n"
            "      --warmup-buffers N           Number of DMA buffers to skip before validation.\n"
            "      --auto-rx-delay              Automatic DMA RX-delay calibration.\n"
-#elif USE_LITEETH
+#endif
+#ifdef USE_LITEETH
            "  -i, --ip ADDR                    Target IP address for Etherbone.\n"
            "  -p, --port PORT                  Port number (default: 1234).\n"
-           "      --pace MODE                  LiteEth TX pace: rx, rate, none (default: rx).\n"
+#endif
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
+           "      --pace MODE                  TX pace: rx, rate, none (default: rx).\n"
            "      --sample-rate RATE           Sample rate for --pace=rate.\n"
            "      --window N                   TX buffers allowed ahead of RX (default: 64).\n"
 #endif
@@ -3238,16 +3245,22 @@ static void help(void)
            "test commands:\n"
            "  dma-test\n"
            "      Run the DMA test.\n"
-#elif USE_LITEETH
+#else
            "test commands:\n"
+#endif
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
+           "  stream-loopback-test\n"
+           "      Run a host TX/RX FPGA stream loopback test. Use --pace to compare pacing modes.\n"
+           "  rfic-loopback-test\n"
+           "      Run host TX through AD9361 loopback and compare host RX data.\n"
+           "  rfic-data-loopback-test\n"
+           "      Run host TX through the FPGA RFIC data loopback and compare host RX data.\n"
+#endif
+#ifdef USE_LITEETH
            "  eth-loopback-test\n"
-           "      Run a LiteEth TX/RX FPGA loopback test. Use --pace to compare pacing modes.\n"
+           "      Alias for stream-loopback-test.\n"
            "  eth-rfic-rx-sweep\n"
            "      Sweep RFIC sample rates and measure LiteEth RX throughput.\n"
-           "  rfic-loopback-test\n"
-           "      Run LiteEth TX through AD9361 loopback and compare LiteEth RX data.\n"
-           "  rfic-data-loopback-test\n"
-           "      Run LiteEth TX through the FPGA RFIC data loopback and compare LiteEth RX data.\n"
            "  rfic-prbs-loopback-test\n"
            "      Run FPGA PRBS TX through AD9361 loopback and compare LiteEth RX data.\n"
 #endif
@@ -3333,7 +3346,7 @@ int main(int argc, char **argv)
     double ptp_watch_interval = 1.0;
     static int test_data_width = 32;
     static int test_duration = 0; /* Default to 0 for infinite duration. */
-#ifdef USE_LITEETH
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
     static enum eth_loopback_pace eth_pace = ETH_LOOPBACK_PACE_RX;
     static int64_t eth_sample_rate = 30720000;
     static unsigned eth_window = 64;
@@ -3354,7 +3367,7 @@ int main(int argc, char **argv)
         { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
         { "data-width", required_argument, NULL, 'w' },
         { "duration", required_argument, NULL, 't' },
-#ifdef USE_LITEETH
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
         { "pace", required_argument, NULL, OPTION_PACE },
         { "sample-rate", required_argument, NULL, OPTION_SAMPLE_RATE },
         { "window", required_argument, NULL, OPTION_WINDOW },
@@ -3399,7 +3412,7 @@ int main(int argc, char **argv)
                 exit(1);
             }
             break;
-#ifdef USE_LITEETH
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
         case OPTION_PACE:
             if (eth_loopback_parse_pace(optarg, &eth_pace) != 0) {
                 fprintf(stderr, "Invalid --pace '%s' (expected rx, rate, or none)\n", optarg);
@@ -3615,16 +3628,22 @@ int main(int argc, char **argv)
             litepcie_warmup_buffers);
 #endif
 
+#if defined(USE_LITEETH) || defined(USE_LITEPCIE)
+    else if (cmd_is(cmd, "stream_loopback_test", "stream-loopback-test")
 #ifdef USE_LITEETH
-    else if (cmd_is(cmd, "eth_loopback_test", "eth-loopback-test"))
+             || cmd_is(cmd, "eth_loopback_test", "eth-loopback-test")
+#endif
+             )
         return eth_loopback_test(test_data_width, test_duration,
                                  eth_pace, eth_sample_rate, eth_window);
-    else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
-        return eth_rfic_rx_sweep(test_duration);
     else if (cmd_is(cmd, "rfic_loopback_test", "rfic-loopback-test"))
         return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, false);
     else if (cmd_is(cmd, "rfic_data_loopback_test", "rfic-data-loopback-test"))
         return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, true);
+#endif
+#ifdef USE_LITEETH
+    else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
+        return eth_rfic_rx_sweep(test_duration);
     else if (cmd_is(cmd, "rfic_prbs_loopback_test", "rfic-prbs-loopback-test"))
         return rfic_prbs_loopback_test(test_duration, eth_sample_rate);
 #endif
