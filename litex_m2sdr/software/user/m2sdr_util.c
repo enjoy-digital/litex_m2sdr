@@ -2118,6 +2118,7 @@ static int stream_loopback_test(int data_width,
     uint64_t startup_skip_words = 0;
     uint64_t startup_discard_buffers = 0;
     uint64_t last_checked_buffers = 0;
+    unsigned prefill_buffers;
     bool seed_synced = false;
     int64_t last_time;
     int64_t start_us;
@@ -2141,6 +2142,7 @@ static int stream_loopback_test(int data_width,
     }
     if (window == 0)
         window = 1;
+    prefill_buffers = window < STREAM_LOOPBACK_PREFILL_BUFS ? window : STREAM_LOOPBACK_PREFILL_BUFS;
     mask = stream_data_mask(data_width);
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
@@ -2170,6 +2172,7 @@ static int stream_loopback_test(int data_width,
     if (pace == STREAM_LOOPBACK_PACE_RATE)
         printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
     printf("TX window   : %u buffers\n", window);
+    printf("TX prefill  : %u buffers\n", prefill_buffers);
     printf("Loopback    : TX stream -> RX stream inside FPGA\n");
 
     (void)m2sdr_liteeth_rx_stream_deactivate(dev);
@@ -2199,6 +2202,17 @@ static int stream_loopback_test(int data_width,
     last_time = get_time_ms();
     start_us = get_time_us();
     last_progress_us = start_us;
+
+    for (unsigned n = 0; n < prefill_buffers; n++) {
+        stream_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
+        rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
+        if (rc != M2SDR_ERR_OK) {
+            fprintf(stderr, "m2sdr_sync_tx prefill failed: %s\n", m2sdr_strerror(rc));
+            goto cleanup_disable_loopback;
+        }
+        tx_buffers++;
+    }
+
     end_time = (duration > 0) ? last_time + duration * 1000 : 0;
     while (keep_running && (duration <= 0 || get_time_ms() < end_time)) {
         int did_work = 0;
