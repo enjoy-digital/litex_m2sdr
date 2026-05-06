@@ -1967,15 +1967,15 @@ static void led_release(void)
 #endif
 
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
-enum eth_loopback_pace {
-    ETH_LOOPBACK_PACE_RX,
-    ETH_LOOPBACK_PACE_RATE,
-    ETH_LOOPBACK_PACE_NONE,
+enum stream_loopback_pace {
+    STREAM_LOOPBACK_PACE_RX,
+    STREAM_LOOPBACK_PACE_RATE,
+    STREAM_LOOPBACK_PACE_NONE,
 };
 
-#define LITEETH_LOOPBACK_PREFILL_BUFS       24u
-#define LITEETH_LOOPBACK_RX_TIMEOUT_MS     200u
-#define LITEETH_LOOPBACK_STALL_US      1000000u
+#define STREAM_LOOPBACK_PREFILL_BUFS       24u
+#define STREAM_LOOPBACK_RX_TIMEOUT_MS     200u
+#define STREAM_LOOPBACK_STALL_US      1000000u
 
 static int64_t get_time_us(void)
 {
@@ -1984,70 +1984,70 @@ static int64_t get_time_us(void)
     return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
-static const char *eth_loopback_pace_name(enum eth_loopback_pace pace)
+static const char *stream_loopback_pace_name(enum stream_loopback_pace pace)
 {
     switch (pace) {
-    case ETH_LOOPBACK_PACE_RX:
+    case STREAM_LOOPBACK_PACE_RX:
         return "rx";
-    case ETH_LOOPBACK_PACE_RATE:
+    case STREAM_LOOPBACK_PACE_RATE:
         return "rate";
-    case ETH_LOOPBACK_PACE_NONE:
+    case STREAM_LOOPBACK_PACE_NONE:
         return "none";
     default:
         return "unknown";
     }
 }
 
-static int eth_loopback_parse_pace(const char *s, enum eth_loopback_pace *pace)
+static int stream_loopback_parse_pace(const char *s, enum stream_loopback_pace *pace)
 {
     if (!s || !pace)
         return -1;
     if (!strcmp(s, "rx")) {
-        *pace = ETH_LOOPBACK_PACE_RX;
+        *pace = STREAM_LOOPBACK_PACE_RX;
         return 0;
     }
     if (!strcmp(s, "rate")) {
-        *pace = ETH_LOOPBACK_PACE_RATE;
+        *pace = STREAM_LOOPBACK_PACE_RATE;
         return 0;
     }
     if (!strcmp(s, "none")) {
-        *pace = ETH_LOOPBACK_PACE_NONE;
+        *pace = STREAM_LOOPBACK_PACE_NONE;
         return 0;
     }
     return -1;
 }
 
-static uint32_t eth_data_mask(int data_width)
+static uint32_t stream_data_mask(int data_width)
 {
     if (data_width >= 32)
         return 0xffffffffu;
     return (1u << data_width) - 1u;
 }
 
-static uint32_t eth_pn_word(uint32_t seed)
+static uint32_t stream_pn_word(uint32_t seed)
 {
     return seed * 69069u + 1u;
 }
 
-static uint32_t eth_pn_seed_from_word(uint32_t word)
+static uint32_t stream_pn_seed_from_word(uint32_t word)
 {
     return (word - 1u) * UINT32_C(0xa5e2a705);
 }
 
-static void eth_write_pn_data(uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
+static void stream_write_pn_data(uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask)
 {
     for (unsigned i = 0; i < words; i++) {
-        buf[i] = eth_pn_word(*seed) & mask;
+        buf[i] = stream_pn_word(*seed) & mask;
         *seed += 1;
     }
 }
 
-static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask, bool verbose)
+static uint32_t stream_check_pn_data(const uint32_t *buf, unsigned words, uint32_t *seed, uint32_t mask, bool verbose)
 {
     uint32_t errors = 0;
 
     for (unsigned i = 0; i < words; i++) {
-        uint32_t expected = eth_pn_word(*seed) & mask;
+        uint32_t expected = stream_pn_word(*seed) & mask;
         if (unlikely((buf[i] & mask) != expected)) {
             if (verbose && errors < 8) {
                 fprintf(stderr, "loopback mismatch[%u]: got=0x%08x expected=0x%08x\n",
@@ -2061,10 +2061,10 @@ static uint32_t eth_check_pn_data(const uint32_t *buf, unsigned words, uint32_t 
     return errors;
 }
 
-static void eth_loopback_rate_wait(int64_t start_us,
-                                   uint64_t tx_buffers,
-                                   unsigned samples_per_buf,
-                                   int64_t sample_rate)
+static void stream_loopback_rate_wait(int64_t start_us,
+                                      uint64_t tx_buffers,
+                                      unsigned samples_per_buf,
+                                      int64_t sample_rate)
 {
     if (sample_rate <= 0)
         return;
@@ -2084,7 +2084,7 @@ static void eth_loopback_rate_wait(int64_t start_us,
     }
 }
 
-static uint64_t liteeth_loopback_rx_observed_buffers(struct m2sdr_dev *dev, uint64_t fallback)
+static uint64_t stream_loopback_rx_observed_buffers(struct m2sdr_dev *dev, uint64_t fallback)
 {
     struct m2sdr_liteeth_udp_stats stats;
 
@@ -2096,11 +2096,11 @@ static uint64_t liteeth_loopback_rx_observed_buffers(struct m2sdr_dev *dev, uint
     return fallback;
 }
 
-static int eth_loopback_test(int data_width,
-                             int duration,
-                             enum eth_loopback_pace pace,
-                             int64_t sample_rate,
-                             unsigned window)
+static int stream_loopback_test(int data_width,
+                                int duration,
+                                enum stream_loopback_pace pace,
+                                int64_t sample_rate,
+                                unsigned window)
 {
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
@@ -2128,20 +2128,20 @@ static int eth_loopback_test(int data_width,
     int status = 1;
 
     if (samples_per_buf == 0) {
-        fprintf(stderr, "Invalid LiteEth loopback buffer size.\n");
+        fprintf(stderr, "Invalid stream loopback buffer size.\n");
         return 1;
     }
     if (data_width < 1 || data_width > 32) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
         return 1;
     }
-    if (pace == ETH_LOOPBACK_PACE_RATE && sample_rate <= 0) {
+    if (pace == STREAM_LOOPBACK_PACE_RATE && sample_rate <= 0) {
         fprintf(stderr, "--pace=rate requires a positive --sample-rate\n");
         return 1;
     }
     if (window == 0)
         window = 1;
-    mask = eth_data_mask(data_width);
+    mask = stream_data_mask(data_width);
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
         return 1;
@@ -2166,8 +2166,8 @@ static int eth_loopback_test(int data_width,
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
     printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
     printf("Data width  : %d bits\n", data_width);
-    printf("Pace        : %s\n", eth_loopback_pace_name(pace));
-    if (pace == ETH_LOOPBACK_PACE_RATE)
+    printf("Pace        : %s\n", stream_loopback_pace_name(pace));
+    if (pace == STREAM_LOOPBACK_PACE_RATE)
         printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
     printf("TX window   : %u buffers\n", window);
     printf("Loopback    : TX stream -> RX stream inside FPGA\n");
@@ -2207,12 +2207,12 @@ static int eth_loopback_test(int data_width,
         while (outstanding < window) {
             int rc;
 
-            if (pace == ETH_LOOPBACK_PACE_RX && outstanding > 0)
+            if (pace == STREAM_LOOPBACK_PACE_RX && outstanding > 0)
                 break;
-            if (pace == ETH_LOOPBACK_PACE_RATE)
-                eth_loopback_rate_wait(start_us, tx_buffers, samples_per_buf, sample_rate);
+            if (pace == STREAM_LOOPBACK_PACE_RATE)
+                stream_loopback_rate_wait(start_us, tx_buffers, samples_per_buf, sample_rate);
 
-            eth_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
+            stream_write_pn_data((uint32_t *)tx_buf, words_per_buf, &seed_wr, mask);
             rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
             if (rc != M2SDR_ERR_OK) {
                 fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));
@@ -2222,22 +2222,22 @@ static int eth_loopback_test(int data_width,
             outstanding++;
             did_work = 1;
 
-            if (pace != ETH_LOOPBACK_PACE_NONE)
+            if (pace != STREAM_LOOPBACK_PACE_NONE)
                 break;
         }
 
         if (outstanding > 0) {
-            int timeout_ms = (pace == ETH_LOOPBACK_PACE_RX || outstanding >= window) ? 1000 : 0;
+            int timeout_ms = (pace == STREAM_LOOPBACK_PACE_RX || outstanding >= window) ? 1000 : 0;
             int rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
             if (rc == M2SDR_ERR_OK) {
                 uint32_t errors;
 
                 if (!seed_synced && mask == 0xffffffffu) {
-                    uint32_t observed_seed = eth_pn_seed_from_word(((const uint32_t *)rx_buf)[0]);
+                    uint32_t observed_seed = stream_pn_seed_from_word(((const uint32_t *)rx_buf)[0]);
                     uint32_t tmp_seed = observed_seed;
 
                     if (observed_seed >= seed_wr ||
-                        eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &tmp_seed, mask, false) != 0) {
+                        stream_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &tmp_seed, mask, false) != 0) {
                         rx_buffers++;
                         outstanding--;
                         startup_discard_buffers++;
@@ -2254,7 +2254,7 @@ static int eth_loopback_test(int data_width,
 
                 rx_buffers++;
                 outstanding--;
-                errors = eth_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask,
+                errors = stream_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask,
                     checked_buffers == 0);
                 total_errors += errors;
                 checked_buffers++;
@@ -2452,7 +2452,7 @@ static int eth_rfic_rx_sweep(int duration)
 #define RFIC_LOOPBACK_LANES_PER_WORD    4u
 #define RFIC_LOOPBACK_MAX_DELAY_BUFS  128u
 #define RFIC_LOOPBACK_SEARCH_BUFS     128u
-#define RFIC_LOOPBACK_PREFILL_BUFS     LITEETH_LOOPBACK_PREFILL_BUFS
+#define RFIC_LOOPBACK_PREFILL_BUFS     STREAM_LOOPBACK_PREFILL_BUFS
 #define RFIC_LOOPBACK_WARMUP_MS      4000u
 #define RFIC_LOOPBACK_MIN_DURATION_S    8u
 #define RFIC_PRBS_SEED             0x0a54u
@@ -2573,7 +2573,7 @@ static void rfic_loopback_print_rx_preview(const int16_t *buf, unsigned lanes)
 }
 
 static int rfic_loopback_test(int duration,
-                              enum eth_loopback_pace pace,
+                              enum stream_loopback_pace pace,
                               int64_t sample_rate,
                               unsigned window,
                               bool fpga_data_loopback)
@@ -2648,7 +2648,7 @@ static int rfic_loopback_test(int duration,
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
     printf("Duration    : %d s\n", duration);
     printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
-    printf("Pace        : %s\n", eth_loopback_pace_name(pace));
+    printf("Pace        : %s\n", stream_loopback_pace_name(pace));
     printf("Buffer      : %u bytes / %u samples / %u int16 lanes\n",
         M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
     printf("RFIC words  : %u per buffer\n", stream_words_per_buf);
@@ -2733,17 +2733,17 @@ static int rfic_loopback_test(int duration,
     end_time = last_time + (int64_t)duration * 1000;
     while (keep_running && get_time_ms() < end_time) {
         int did_work = 0;
-        uint64_t rx_observed_buffers = liteeth_loopback_rx_observed_buffers(dev, rx_buffers);
+        uint64_t rx_observed_buffers = stream_loopback_rx_observed_buffers(dev, rx_buffers);
         uint64_t outstanding = tx_buffers > rx_observed_buffers ? tx_buffers - rx_observed_buffers : 0;
         uint64_t tx_target = window;
 
-        if (pace == ETH_LOOPBACK_PACE_RX)
+        if (pace == STREAM_LOOPBACK_PACE_RX)
             tx_target = restart_refilling ? restart_window : window;
 
         while (outstanding < tx_target) {
-            if (pace == ETH_LOOPBACK_PACE_RATE && tx_buffers >= prefill_buffers) {
+            if (pace == STREAM_LOOPBACK_PACE_RATE && tx_buffers >= prefill_buffers) {
                 uint64_t paced_tx_buffers = tx_buffers - prefill_buffers + 1;
-                eth_loopback_rate_wait(start_us, paced_tx_buffers, stream_words_per_buf, sample_rate);
+                stream_loopback_rate_wait(start_us, paced_tx_buffers, stream_words_per_buf, sample_rate);
             }
             rfic_loopback_fill(tx_buf, lanes_per_buf, &lane_wr, run_seed);
             rc = m2sdr_sync_tx(dev, tx_buf, samples_per_buf, NULL, 1000);
@@ -2762,11 +2762,11 @@ static int rfic_loopback_test(int duration,
         }
 
         if (outstanding > 0) {
-            int timeout_ms = (pace == ETH_LOOPBACK_PACE_RX) ?
-                LITEETH_LOOPBACK_RX_TIMEOUT_MS : 1000;
+            int timeout_ms = (pace == STREAM_LOOPBACK_PACE_RX) ?
+                STREAM_LOOPBACK_RX_TIMEOUT_MS : 1000;
             rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
             if (rc != M2SDR_ERR_OK) {
-                if (rc == M2SDR_ERR_TIMEOUT && pace == ETH_LOOPBACK_PACE_RX) {
+                if (rc == M2SDR_ERR_TIMEOUT && pace == STREAM_LOOPBACK_PACE_RX) {
                     if (!restart_refilling && !restart_waiting) {
                         restart_refilling = true;
                         seed_synced = false;
@@ -2774,8 +2774,8 @@ static int rfic_loopback_test(int duration,
                         continue;
                     }
                     if (restart_waiting &&
-                        (get_time_us() - last_rx_progress_us) > LITEETH_LOOPBACK_STALL_US) {
-                        fprintf(stderr, "m2sdr_sync_rx failed: stalled after LiteEth TX refill\n");
+                        (get_time_us() - last_rx_progress_us) > STREAM_LOOPBACK_STALL_US) {
+                        fprintf(stderr, "m2sdr_sync_rx failed: stalled after TX refill\n");
                         goto cleanup_disable_loopback;
                     }
                     continue;
@@ -2796,7 +2796,7 @@ static int rfic_loopback_test(int duration,
             if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK &&
                 stats.rx_timeout_recoveries != last_rx_timeout_recoveries) {
                 last_rx_timeout_recoveries = stats.rx_timeout_recoveries;
-                if (pace == ETH_LOOPBACK_PACE_RX)
+                if (pace == STREAM_LOOPBACK_PACE_RX)
                     restart_refilling = true;
                 seed_synced = false;
             }
@@ -3347,9 +3347,9 @@ int main(int argc, char **argv)
     static int test_data_width = 32;
     static int test_duration = 0; /* Default to 0 for infinite duration. */
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
-    static enum eth_loopback_pace eth_pace = ETH_LOOPBACK_PACE_RX;
-    static int64_t eth_sample_rate = 30720000;
-    static unsigned eth_window = 64;
+    static enum stream_loopback_pace stream_pace = STREAM_LOOPBACK_PACE_RX;
+    static int64_t stream_sample_rate = 30720000;
+    static unsigned stream_window = 64;
 #endif
 #ifdef USE_LITEPCIE
     static uint8_t m2sdr_device_zero_copy = 0;
@@ -3414,20 +3414,20 @@ int main(int argc, char **argv)
             break;
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
         case OPTION_PACE:
-            if (eth_loopback_parse_pace(optarg, &eth_pace) != 0) {
+            if (stream_loopback_parse_pace(optarg, &stream_pace) != 0) {
                 fprintf(stderr, "Invalid --pace '%s' (expected rx, rate, or none)\n", optarg);
                 exit(1);
             }
             break;
         case OPTION_SAMPLE_RATE:
-            if (m2sdr_cli_parse_int64(optarg, &eth_sample_rate) != 0 || eth_sample_rate <= 0) {
+            if (m2sdr_cli_parse_int64(optarg, &stream_sample_rate) != 0 || stream_sample_rate <= 0) {
                 fprintf(stderr, "Invalid --sample-rate '%s'\n", optarg);
                 exit(1);
             }
             break;
         case OPTION_WINDOW:
-            eth_window = (unsigned)strtoul(optarg, NULL, 0);
-            if (eth_window == 0) {
+            stream_window = (unsigned)strtoul(optarg, NULL, 0);
+            if (stream_window == 0) {
                 fprintf(stderr, "Invalid --window '%s'\n", optarg);
                 exit(1);
             }
@@ -3634,18 +3634,18 @@ int main(int argc, char **argv)
              || cmd_is(cmd, "eth_loopback_test", "eth-loopback-test")
 #endif
              )
-        return eth_loopback_test(test_data_width, test_duration,
-                                 eth_pace, eth_sample_rate, eth_window);
+        return stream_loopback_test(test_data_width, test_duration,
+                                    stream_pace, stream_sample_rate, stream_window);
     else if (cmd_is(cmd, "rfic_loopback_test", "rfic-loopback-test"))
-        return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, false);
+        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, false);
     else if (cmd_is(cmd, "rfic_data_loopback_test", "rfic-data-loopback-test"))
-        return rfic_loopback_test(test_duration, eth_pace, eth_sample_rate, eth_window, true);
+        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, true);
 #endif
 #ifdef USE_LITEETH
     else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
         return eth_rfic_rx_sweep(test_duration);
     else if (cmd_is(cmd, "rfic_prbs_loopback_test", "rfic-prbs-loopback-test"))
-        return rfic_prbs_loopback_test(test_duration, eth_sample_rate);
+        return rfic_prbs_loopback_test(test_duration, stream_sample_rate);
 #endif
 
     /* Show help otherwise. */
