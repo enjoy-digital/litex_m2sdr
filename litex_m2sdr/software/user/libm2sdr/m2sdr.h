@@ -67,6 +67,8 @@ struct m2sdr_version {
 const char *m2sdr_strerror(int err);
 /* Fill version information for the linked libm2sdr instance. */
 void m2sdr_get_version(struct m2sdr_version *ver);
+/* Enable or disable informational library logs. Errors are still reported. */
+int m2sdr_set_log_enabled(bool enable);
 
 /* Data direction */
 enum m2sdr_direction {
@@ -439,6 +441,7 @@ int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_rfic_data_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_rfic_data_loopback(struct m2sdr_dev *dev, bool *enabled);
+int  m2sdr_reset_datapath(struct m2sdr_dev *dev);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 

@@ -1099,6 +1099,12 @@ int m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sen
 /* Control helpers */
 /*-----------------*/
 
+static void m2sdr_reset_keep_error(int rc, int *status)
+{
+    if (rc != M2SDR_ERR_OK && rc != M2SDR_ERR_UNSUPPORTED && *status == M2SDR_ERR_OK)
+        *status = rc;
+}
+
 /* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
 int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 {
@@ -1200,6 +1206,38 @@ int m2sdr_get_rfic_data_loopback(struct m2sdr_dev *dev, bool *enabled)
     (void)mask;
     return M2SDR_ERR_UNSUPPORTED;
 #endif
+}
+
+/* Return the FPGA streaming datapath to the neutral state expected by normal
+ * RF use and standalone diagnostics. This intentionally does not touch AD9361
+ * RF state; use m2sdr_apply_config() or RF setters for that. */
+int m2sdr_reset_datapath(struct m2sdr_dev *dev)
+{
+    int status = M2SDR_ERR_OK;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    m2sdr_reset_keep_error(m2sdr_liteeth_rx_stream_deactivate(dev), &status);
+    m2sdr_reset_keep_error(m2sdr_liteeth_tx_stream_deactivate(dev), &status);
+
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0)
+        m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+#endif
+#ifdef CSR_CROSSBAR_DEMUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
+        m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+#endif
+
+    m2sdr_reset_keep_error(m2sdr_set_txrx_loopback(dev, false), &status);
+    m2sdr_reset_keep_error(m2sdr_set_rfic_data_loopback(dev, false), &status);
+    m2sdr_reset_keep_error(m2sdr_set_fpga_prbs_tx(dev, false), &status);
+    m2sdr_reset_keep_error(m2sdr_set_rx_header(dev, false, false), &status);
+    m2sdr_reset_keep_error(m2sdr_set_tx_header(dev, false), &status);
+    m2sdr_reset_keep_error(m2sdr_set_bitmode(dev, false), &status);
+
+    return status;
 }
 
 /* Enable or disable RX-side DMA headers and remember whether the sync API

@@ -1976,6 +1976,7 @@ enum stream_loopback_pace {
 #define STREAM_LOOPBACK_PREFILL_BUFS       24u
 #define STREAM_LOOPBACK_RX_TIMEOUT_MS     200u
 #define STREAM_LOOPBACK_STALL_US      1000000u
+#define LOOPBACK_PROGRESS_MS             1000u
 
 static int64_t get_time_us(void)
 {
@@ -2101,11 +2102,63 @@ static uint64_t stream_loopback_rx_observed_delta(struct m2sdr_dev *dev,
     return fallback;
 }
 
+static void loopback_print_compact_progress(double gbps,
+                                            uint64_t checked_buffers,
+                                            uint64_t errors,
+                                            struct m2sdr_dev *dev)
+{
+    struct m2sdr_liteeth_udp_stats stats;
+
+    printf("RX %.2f Gbps | checked %" PRIu64 " buffers | errors %" PRIu64,
+        gbps, checked_buffers, errors);
+    if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
+        if (stats.rx_kernel_drops || stats.rx_source_drops)
+            printf(" | drops kernel=%" PRIu64 " source=%" PRIu64,
+                stats.rx_kernel_drops, stats.rx_source_drops);
+        if (stats.rx_timeout_recoveries)
+            printf(" | recoveries=%" PRIu64, stats.rx_timeout_recoveries);
+        if (stats.tx_send_errors)
+            printf(" | tx_errors=%" PRIu64, stats.tx_send_errors);
+    }
+    printf("\n");
+}
+
+static double loopback_average_gbps(uint64_t checked_buffers, int64_t start_us)
+{
+    int64_t elapsed_us = get_time_us() - start_us;
+
+    if (checked_buffers == 0 || elapsed_us <= 0)
+        return 0.0;
+
+    return (double)checked_buffers * M2SDR_BUFFER_BYTES * 8.0 /
+        ((double)elapsed_us * 1e3);
+}
+
+static void loopback_print_udp_diagnostics(struct m2sdr_dev *dev)
+{
+    struct m2sdr_liteeth_udp_stats stats;
+
+    if (m2sdr_liteeth_get_udp_stats(dev, &stats) != M2SDR_ERR_OK)
+        return;
+
+    printf("UDP diagnostics: kernel_drops=%" PRIu64
+           " source_drops=%" PRIu64
+           " ring_full=%" PRIu64
+           " recoveries=%" PRIu64
+           " tx_send_errors=%" PRIu64 "\n",
+        stats.rx_kernel_drops,
+        stats.rx_source_drops,
+        stats.rx_ring_full_events,
+        stats.rx_timeout_recoveries,
+        stats.tx_send_errors);
+}
+
 static int stream_loopback_test(int data_width,
                                 int duration,
                                 enum stream_loopback_pace pace,
                                 int64_t sample_rate,
-                                unsigned window)
+                                unsigned window,
+                                bool verbose)
 {
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
@@ -2130,6 +2183,7 @@ static int stream_loopback_test(int data_width,
     int64_t start_us;
     int64_t last_progress_us;
     int64_t end_time = 0;
+    double last_gbps = 0.0;
     int i = 0;
     int rc;
     int status = 1;
@@ -2172,17 +2226,26 @@ static int stream_loopback_test(int data_width,
     printf("\e[1m[> Stream loopback test:\e[0m\n");
     printf("-------------------------\n");
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
-    printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
-    printf("Data width  : %d bits\n", data_width);
-    printf("Pace        : %s\n", stream_loopback_pace_name(pace));
-    if (pace == STREAM_LOOPBACK_PACE_RATE)
-        printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
-    printf("TX window   : %u buffers\n", window);
-    printf("TX prefill  : %u buffers\n", prefill_buffers);
-    printf("Loopback    : TX stream -> RX stream inside FPGA\n");
+    printf("Path        : host TX -> FPGA stream loopback -> host RX\n");
+    if (duration > 0)
+        printf("Duration    : %d s\n", duration);
+    else
+        printf("Duration    : infinite\n");
+    printf("Mode        : pace=%s, window=%u buffers\n",
+        stream_loopback_pace_name(pace), window);
+    if (verbose) {
+        printf("Buffer      : %u bytes / %u samples\n", M2SDR_BUFFER_BYTES, samples_per_buf);
+        printf("Data width  : %d bits\n", data_width);
+        if (pace == STREAM_LOOPBACK_PACE_RATE)
+            printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
+        printf("TX prefill  : %u buffers\n", prefill_buffers);
+    }
 
-    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
-    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+    rc = m2sdr_reset_datapath(dev);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup;
+    }
 
     if (m2sdr_set_txrx_loopback(dev, true) != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_set_txrx_loopback(enable) failed\n");
@@ -2332,30 +2395,35 @@ static int stream_loopback_test(int data_width,
 
         int64_t now = get_time_ms();
         int64_t elapsed = now - last_time;
-        if (elapsed > 500) {
+        if (elapsed > LOOPBACK_PROGRESS_MS) {
             struct m2sdr_liteeth_udp_stats stats;
             uint64_t delta = checked_buffers - last_checked_buffers;
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
+            last_gbps = gbps;
 
-            if (i % 10 == 0)
-                printf("\e[1mSTREAM_Gbps\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tKDROP\tSRC_DROP\tRING_FULL\tTX_SEND_ERR\e[0m\n");
-            i++;
+            if (verbose) {
+                if (i % 10 == 0)
+                    printf("\e[1mSTREAM_Gbps\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tKDROP\tSRC_DROP\tRING_FULL\tTX_SEND_ERR\e[0m\n");
+                i++;
 
-            if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%11" PRIu64 "\n",
-                    gbps,
-                    tx_buffers,
-                    rx_buffers,
-                    total_errors,
-                    startup_skip_words,
-                    startup_discard_buffers,
-                    stats.rx_kernel_drops,
-                    stats.rx_source_drops,
-                    stats.rx_ring_full_events,
-                    stats.tx_send_errors);
+                if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
+                    printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%11" PRIu64 "\n",
+                        gbps,
+                        tx_buffers,
+                        rx_buffers,
+                        total_errors,
+                        startup_skip_words,
+                        startup_discard_buffers,
+                        stats.rx_kernel_drops,
+                        stats.rx_source_drops,
+                        stats.rx_ring_full_events,
+                        stats.tx_send_errors);
+                } else {
+                    printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5u\t%8u\t%9u\t%11u\n",
+                        gbps, tx_buffers, rx_buffers, total_errors, startup_skip_words, startup_discard_buffers, 0u, 0u, 0u, 0u);
+                }
             } else {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5u\t%8u\t%9u\t%11u\n",
-                    gbps, tx_buffers, rx_buffers, total_errors, startup_skip_words, startup_discard_buffers, 0u, 0u, 0u, 0u);
+                loopback_print_compact_progress(gbps, checked_buffers, total_errors, dev);
             }
 
             last_time = now;
@@ -2367,12 +2435,20 @@ static int stream_loopback_test(int data_width,
     }
 
     if (checked_buffers > 0 && total_errors == 0) {
-        printf("Stream loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
-        if (startup_skip_words)
-            printf(" after skipping %" PRIu64 " startup words", startup_skip_words);
-        if (startup_discard_buffers)
-            printf(" and discarding %" PRIu64 " stale startup buffers", startup_discard_buffers);
-        printf(".\n");
+        double final_gbps = last_gbps > 0.0 ?
+            last_gbps : loopback_average_gbps(checked_buffers, start_us);
+
+        printf("PASS: checked %" PRIu64 " buffers, 0 errors, RX %.2f Gbps\n",
+            checked_buffers, final_gbps);
+        if (startup_skip_words || startup_discard_buffers) {
+            printf("Note: synchronized");
+            if (startup_skip_words)
+                printf(" after skipping %" PRIu64 " startup words", startup_skip_words);
+            if (startup_discard_buffers)
+                printf("%sdiscarding %" PRIu64 " stale startup buffers",
+                    startup_skip_words ? " and " : " after ", startup_discard_buffers);
+            printf(".\n");
+        }
         status = 0;
     } else {
         if (checked_buffers == 0)
@@ -2381,16 +2457,19 @@ static int stream_loopback_test(int data_width,
         else
             printf("Stream loopback test failed: %" PRIu64 " data errors over %" PRIu64 " buffers.\n",
                 total_errors, checked_buffers);
+        printf("Diagnostics: tx=%" PRIu64 " rx=%" PRIu64 " checked=%" PRIu64
+               " start_skip=%" PRIu64 " stale_start=%" PRIu64 "\n",
+            tx_buffers, rx_buffers, checked_buffers,
+            startup_skip_words, startup_discard_buffers);
+        loopback_print_udp_diagnostics(dev);
     }
 
 cleanup_disable_loopback:
-    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
-    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
 #ifdef USE_LITEETH
     (void)m2sdr_liteeth_set_rx_timeout_recovery(dev, true);
 #endif
-    if (m2sdr_set_txrx_loopback(dev, false) != M2SDR_ERR_OK)
-        fprintf(stderr, "m2sdr_set_txrx_loopback(disable) failed\n");
+    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
 cleanup:
     free(tx_buf);
     free(rx_buf);
@@ -2652,7 +2731,8 @@ static int rfic_loopback_test(int duration,
                               enum stream_loopback_pace pace,
                               int64_t sample_rate,
                               unsigned window,
-                              bool fpga_data_loopback)
+                              bool fpga_data_loopback,
+                              bool verbose)
 {
     struct m2sdr_dev *dev = NULL;
     struct m2sdr_config cfg;
@@ -2686,6 +2766,7 @@ static int rfic_loopback_test(int duration,
     int64_t last_rx_progress_us;
     int64_t warmup_end_time = 0;
     int64_t end_time;
+    double last_gbps = 0.0;
     int i = 0;
     int rc;
     int status = 1;
@@ -2722,43 +2803,51 @@ static int rfic_loopback_test(int duration,
     signal(SIGINT, intHandler);
     keep_running = 1;
 
-    printf("\e[1m[> AD9361 TX/RX digital loopback test:\e[0m\n");
+    printf("\e[1m[> %s:\e[0m\n",
+        fpga_data_loopback ? "FPGA PHY loopback test" : "AD9361 digital loopback test");
     printf("--------------------------------------\n");
     printf("Device      : %s\n", m2sdr_cli_device_id(&g_cli_dev));
-    printf("Duration    : %d s\n", duration);
     printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
-    printf("Pace        : %s\n", stream_loopback_pace_name(pace));
-    printf("Buffer      : %u bytes / %u samples / %u int16 lanes\n",
-        M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
-    printf("RFIC words  : %u per buffer\n", stream_words_per_buf);
-    printf("Pattern seed: 0x%08x\n", run_seed);
-    printf("Loopback    : host TX -> %s -> host RX\n",
+    printf("Duration    : %d s\n", duration);
+    printf("Mode        : pace=%s, window=%u buffers\n",
+        stream_loopback_pace_name(pace), window);
+    printf("Path        : host TX -> %s -> host RX\n",
         fpga_data_loopback ? "FPGA RFIC data loopback" : "AD9361 digital loopback");
-    printf("Precision   : 12-bit compare on lane[11:0]\n");
-    printf("TX prefill  : %u buffers\n", prefill_buffers);
-    printf("Restart fill: %" PRIu64 " outstanding buffers\n", restart_window);
     if (!fpga_data_loopback)
-        printf("Warmup      : %u ms\n", RFIC_LOOPBACK_WARMUP_MS);
+        printf("Warmup      : %u ms ignored before checking\n", RFIC_LOOPBACK_WARMUP_MS);
+    if (verbose) {
+        printf("Buffer      : %u bytes / %u samples / %u int16 lanes\n",
+            M2SDR_BUFFER_BYTES, samples_per_buf, lanes_per_buf);
+        printf("RFIC words  : %u per buffer\n", stream_words_per_buf);
+        printf("Pattern seed: 0x%08x\n", run_seed);
+        printf("Precision   : 12-bit compare on lane[11:0]\n");
+        printf("TX prefill  : %u buffers\n", prefill_buffers);
+        printf("Restart fill: %" PRIu64 " outstanding buffers\n", restart_window);
+    }
+    fflush(stdout);
+
+    rc = m2sdr_reset_datapath(dev);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup;
+    }
 
     m2sdr_config_init(&cfg);
     cfg.sample_rate = sample_rate;
     cfg.bandwidth = sample_rate;
     cfg.loopback = fpga_data_loopback ? 0 : 1;
     cfg.enable_8bit_mode = false;
+    (void)m2sdr_set_log_enabled(verbose);
     rc = m2sdr_apply_config(dev, &cfg);
+    (void)m2sdr_set_log_enabled(true);
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
         goto cleanup;
     }
 
-    (void)m2sdr_set_txrx_loopback(dev, false);
-    (void)m2sdr_set_fpga_prbs_tx(dev, false);
-    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_rx_header failed\n");
-        goto cleanup_disable_loopback;
-    }
-    if (m2sdr_set_tx_header(dev, false) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_tx_header failed\n");
+    rc = m2sdr_reset_datapath(dev);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
         goto cleanup_disable_loopback;
     }
     rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
@@ -2921,14 +3010,18 @@ static int rfic_loopback_test(int duration,
                 if (get_time_ms() < warmup_end_time)
                     continue;
                 warmup_done = true;
+                last_time = get_time_ms();
+                last_checked_buffers = checked_buffers;
             }
 
             if (!seed_synced) {
                 if (!rfic_loopback_find_sync(rx_buf, lanes_per_buf, lane_wr, &lane_rd, run_seed)) {
                     stale_buffers++;
-                    if (stale_buffers == 1)
+                    if (verbose && stale_buffers == 1)
                         rfic_loopback_print_rx_preview(rx_buf, lanes_per_buf);
                     if (stale_buffers > RFIC_LOOPBACK_MAX_DELAY_BUFS) {
+                        if (!verbose)
+                            rfic_loopback_print_rx_preview(rx_buf, lanes_per_buf);
                         fprintf(stderr, "RFIC loopback sync failed after %" PRIu64 " stale buffers.\n",
                             stale_buffers);
                         goto cleanup_disable_loopback;
@@ -2949,7 +3042,7 @@ static int rfic_loopback_test(int duration,
 
         int64_t now = get_time_ms();
         int64_t elapsed = now - last_time;
-        if (elapsed > 500) {
+        if (elapsed > LOOPBACK_PROGRESS_MS) {
             struct m2sdr_liteeth_udp_stats stats;
             uint64_t delta = checked_buffers - last_checked_buffers;
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
@@ -2958,6 +3051,7 @@ static int rfic_loopback_test(int duration,
             uint64_t rx_ring_full = 0;
             uint64_t rx_recoveries = 0;
             uint64_t tx_send_errors = 0;
+            last_gbps = gbps;
 
             if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
                 rx_kernel_drops = stats.rx_kernel_drops;
@@ -2967,14 +3061,20 @@ static int rfic_loopback_test(int duration,
                 tx_send_errors = stats.tx_send_errors;
             }
 
-            if (i % 10 == 0)
-                printf("\e[1mRFIC_LB_Gbps\tTX_BUFFERS\tRX_BUFFERS\tCHECKED\tERRORS\tSTART_SKIP\tWARMUP\tSTALE\tKDROP\tSRC_DROP\tRING_FULL\tRECOV\tTX_SEND_ERR\e[0m\n");
-            i++;
-            printf("%12.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%5" PRIu64 "\t%11" PRIu64 "\n",
-                gbps, tx_buffers, rx_buffers, checked_buffers, total_errors,
-                startup_skip_lanes, warmup_buffers, stale_buffers,
-                rx_kernel_drops, rx_source_drops, rx_ring_full,
-                rx_recoveries, tx_send_errors);
+            if (verbose) {
+                if (i % 10 == 0)
+                    printf("\e[1mRFIC_LB_Gbps\tTX_BUFFERS\tRX_BUFFERS\tCHECKED\tERRORS\tSTART_SKIP\tWARMUP\tSTALE\tKDROP\tSRC_DROP\tRING_FULL\tRECOV\tTX_SEND_ERR\e[0m\n");
+                i++;
+                printf("%12.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%5" PRIu64 "\t%11" PRIu64 "\n",
+                    gbps, tx_buffers, rx_buffers, checked_buffers, total_errors,
+                    startup_skip_lanes, warmup_buffers, stale_buffers,
+                    rx_kernel_drops, rx_source_drops, rx_ring_full,
+                    rx_recoveries, tx_send_errors);
+            } else if (checked_buffers != last_checked_buffers ||
+                       total_errors || rx_kernel_drops || rx_source_drops ||
+                       rx_ring_full || rx_recoveries || tx_send_errors) {
+                loopback_print_compact_progress(gbps, checked_buffers, total_errors, dev);
+            }
 
             last_time = now;
             last_checked_buffers = checked_buffers;
@@ -2986,27 +3086,45 @@ static int rfic_loopback_test(int duration,
 
     if (!seed_synced) {
         fprintf(stderr, "RFIC loopback test failed: no synchronized RX data.\n");
+        printf("Diagnostics: tx=%" PRIu64 " rx=%" PRIu64 " checked=%" PRIu64
+               " errors=%" PRIu64 " warmup=%" PRIu64 " stale=%" PRIu64 "\n",
+            tx_buffers, rx_buffers, checked_buffers,
+            total_errors, warmup_buffers, stale_buffers);
+        loopback_print_udp_diagnostics(dev);
     } else if (total_errors == 0) {
-        printf("RFIC loopback test passed: checked %" PRIu64 " buffers", checked_buffers);
-        if (startup_skip_lanes)
-            printf(" after skipping %" PRIu64 " startup lanes", startup_skip_lanes);
-        if (warmup_buffers)
-            printf(", warming up %" PRIu64 " buffers", warmup_buffers);
-        if (stale_buffers)
-            printf("%sdiscarding %" PRIu64 " stale startup buffers",
-                warmup_buffers ? ", and " : " after ", stale_buffers);
-        printf(".\n");
+        double final_gbps = last_gbps > 0.0 ?
+            last_gbps : loopback_average_gbps(checked_buffers, start_us);
+
+        printf("PASS: checked %" PRIu64 " buffers, 0 errors, RX %.2f Gbps\n",
+            checked_buffers, final_gbps);
+        if (startup_skip_lanes || warmup_buffers || stale_buffers) {
+            printf("Note:");
+            if (warmup_buffers)
+                printf(" ignored warmup=%" PRIu64 " buffers", warmup_buffers);
+            if (startup_skip_lanes)
+                printf("%ssynchronized after skipping %" PRIu64 " startup lanes",
+                    warmup_buffers ? "; " : " ", startup_skip_lanes);
+            if (stale_buffers)
+                printf("%sdiscarded %" PRIu64 " stale startup buffer%s",
+                    (startup_skip_lanes || warmup_buffers) ? "; " : " ",
+                    stale_buffers, stale_buffers == 1 ? "" : "s");
+            printf(".\n");
+        }
         status = 0;
     } else {
         printf("RFIC loopback test failed: %" PRIu64 " lane errors over %" PRIu64 " buffers.\n",
             total_errors, checked_buffers);
+        printf("Diagnostics: tx=%" PRIu64 " rx=%" PRIu64
+               " start_skip=%" PRIu64 " warmup=%" PRIu64 " stale=%" PRIu64 "\n",
+            tx_buffers, rx_buffers, startup_skip_lanes, warmup_buffers, stale_buffers);
+        loopback_print_udp_diagnostics(dev);
     }
 
 cleanup_disable_loopback:
-    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
     if (fpga_data_loopback && rx_buf)
         rfic_loopback_drain_rx(dev, rx_buf, samples_per_buf);
-    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
     if (m2sdr_set_rfic_data_loopback(dev, false) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_rfic_data_loopback(disable) failed\n");
     if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
@@ -3200,15 +3318,20 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     cfg.bandwidth = sample_rate;
     cfg.loopback = 1;
     cfg.enable_8bit_mode = false;
+    rc = m2sdr_reset_datapath(dev);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+        goto cleanup;
+    }
     rc = m2sdr_apply_config(dev, &cfg);
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
         goto cleanup;
     }
 
-    (void)m2sdr_set_txrx_loopback(dev, false);
-    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+    rc = m2sdr_reset_datapath(dev);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
         goto cleanup_disable_prbs;
     }
     rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
@@ -3293,11 +3416,10 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     }
 
 cleanup_disable_prbs:
-    if (m2sdr_set_fpga_prbs_tx(dev, false) != M2SDR_ERR_OK)
-        fprintf(stderr, "m2sdr_set_fpga_prbs_tx(disable) failed\n");
+    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
     if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_rfic_loopback(disable) failed\n");
-    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
 cleanup:
     free(seq);
     free(rx_buf);
@@ -3322,6 +3444,7 @@ static void help(void)
            "      --watch-interval SEC         Refresh interval for --watch (default: 1.0).\n"
            "      --data-width N               Width of generated test data (default: 32).\n"
            "      --duration SEC               Duration of loopback tests (default: 0, infinite).\n"
+           "  -v, --verbose                    Show detailed test progress and RF config logs.\n"
 #ifdef USE_LITEPCIE
            "  -c, --device-num N               Select the device (default: 0).\n"
            "  -y, --force                      Skip confirmation prompts for destructive commands.\n"
@@ -3461,6 +3584,7 @@ int main(int argc, char **argv)
     double ptp_watch_interval = 1.0;
     static int test_data_width = 32;
     static int test_duration = 0; /* Default to 0 for infinite duration. */
+    static bool test_verbose = false;
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
     static enum stream_loopback_pace stream_pace = STREAM_LOOPBACK_PACE_RX;
     static int64_t stream_sample_rate = 30720000;
@@ -3482,6 +3606,7 @@ int main(int argc, char **argv)
         { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
         { "data-width", required_argument, NULL, 'w' },
         { "duration", required_argument, NULL, 't' },
+        { "verbose", no_argument, NULL, 'v' },
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
         { "pace", required_argument, NULL, OPTION_PACE },
         { "sample-rate", required_argument, NULL, OPTION_SAMPLE_RATE },
@@ -3501,9 +3626,9 @@ int main(int argc, char **argv)
     m2sdr_cli_device_init(&g_cli_dev);
     for (;;) {
 #ifdef USE_LITEPCIE
-        c = getopt_long(argc, argv, "hd:c:i:p:w:W:yzeat:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:w:W:yzeat:v", options, &option_index);
 #else
-        c = getopt_long(argc, argv, "hd:c:i:p:w:t:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:w:t:v", options, &option_index);
 #endif
         if (c == -1)
             break;
@@ -3553,6 +3678,9 @@ int main(int argc, char **argv)
             break;
         case 't':
             test_duration = atoi(optarg);
+            break;
+        case 'v':
+            test_verbose = true;
             break;
 #ifdef USE_LITEPCIE
         case 'y':
@@ -3746,11 +3874,14 @@ int main(int argc, char **argv)
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
     else if (cmd_is(cmd, "fpga_loopback_test", "fpga-loopback-test"))
         return stream_loopback_test(test_data_width, test_duration,
-                                    stream_pace, stream_sample_rate, stream_window);
+                                    stream_pace, stream_sample_rate, stream_window,
+                                    test_verbose);
     else if (cmd_is(cmd, "fpga_phy_loopback_test", "fpga-phy-loopback-test"))
-        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, true);
+        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, true,
+                                  test_verbose);
     else if (cmd_is(cmd, "ad9361_loopback_test", "ad9361-loopback-test"))
-        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, false);
+        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, false,
+                                  test_verbose);
 #endif
 #ifdef USE_LITEETH
     else if (cmd_is(cmd, "eth_rx_rate_sweep", "eth-rx-rate-sweep"))

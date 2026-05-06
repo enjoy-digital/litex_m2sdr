@@ -51,11 +51,8 @@
 #define M2SDR_LOG_ENABLED 1
 #endif
 
-#if M2SDR_LOG_ENABLED
-#define M2SDR_LOGF(...) do { fprintf(stderr, __VA_ARGS__); } while (0)
-#else
-#define M2SDR_LOGF(...) do {} while (0)
-#endif
+static int m2sdr_log_enabled = M2SDR_LOG_ENABLED ? 1 : 0;
+#define M2SDR_LOGF(...) do { if (m2sdr_log_enabled) fprintf(stderr, __VA_ARGS__); } while (0)
 
 #if defined(__GNUC__) || defined(__clang__)
 #define M2SDR_WEAK __attribute__((weak))
@@ -90,6 +87,12 @@ static bool tls_rf_init_timed_out;
 
 /* Helpers */
 /*---------*/
+
+int m2sdr_set_log_enabled(bool enable)
+{
+    m2sdr_log_enabled = enable ? 1 : 0;
+    return M2SDR_ERR_OK;
+}
 
 /* Return the raw backend connection object expected by the low-level AD9361
  * SPI and SI5351 helpers. */

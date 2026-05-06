@@ -455,6 +455,18 @@ void dma_set_loopback(int fd, bool loopback_enable) {
 }
 #endif
 
+void SoapyLiteXM2SDR::resetDatapathUnlocked()
+{
+    if (!_dev)
+        return;
+
+    int rc = m2sdr_reset_datapath(_dev);
+    if (rc != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "m2sdr_reset_datapath failed: %s", m2sdr_strerror(rc));
+    }
+}
+
 /***************************************************************************************************
  *                                     Constructor
  **************************************************************************************************/
@@ -537,6 +549,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                    ptp_ipv4_to_string(local_ip).c_str());
 #endif
 
+#if USE_LITEETH
+    resetDatapathUnlocked();
+#endif
+
+    if (args.count("bitmode") > 0) {
+        _bitMode = std::stoi(args.at("bitmode"));
+    } else {
+        _bitMode = 16;
+    }
+
     /* Configure Mode based on _bitMode */
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
     m2sdr_set_bitmode(_dev, _bitMode == 8);
@@ -578,12 +600,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("bypass_init") > 0) {
         std::cout << args.at("bypass_init")[0] << std::endl;
         do_init = args.at("bypass_init")[0] == '0';
-    }
-
-    if (args.count("bitmode") > 0) {
-        _bitMode = std::stoi(args.at("bitmode"));
-    } else {
-        _bitMode = 16;
     }
 
     if (args.count("oversampling") > 0) {
@@ -825,6 +841,10 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         _tx_stream.opened = false;
     }
     cleanupLiteEthUdpIfIdleUnlocked();
+
+#if USE_LITEETH
+    resetDatapathUnlocked();
+#endif
 
     /* Crossbar Mux/Demux : Select PCIe streaming */
     litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
