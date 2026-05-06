@@ -3267,20 +3267,18 @@ static void help(void)
            "test commands:\n"
 #endif
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
-           "  stream-loopback-test\n"
-           "      Run a host TX/RX FPGA stream loopback test. Use --pace to compare pacing modes.\n"
-           "  rfic-loopback-test\n"
-           "      Run host TX through AD9361 loopback and compare host RX data.\n"
-           "  rfic-data-loopback-test\n"
-           "      Run host TX through the FPGA RFIC data loopback and compare host RX data.\n"
+           "  fpga-loopback-test\n"
+           "      Test host TX -> FPGA stream loopback -> host RX. Use --pace to compare pacing modes.\n"
+           "  fpga-phy-loopback-test\n"
+           "      Test host TX -> FPGA AD9361 PHY data loopback -> host RX.\n"
+           "  ad9361-loopback-test\n"
+           "      Test host TX -> AD9361 internal digital loopback -> host RX.\n"
 #endif
 #ifdef USE_LITEETH
-           "  eth-loopback-test\n"
-           "      Alias for stream-loopback-test.\n"
-           "  eth-rfic-rx-sweep\n"
+           "  eth-rx-rate-sweep\n"
            "      Sweep RFIC sample rates and measure LiteEth RX throughput.\n"
-           "  rfic-prbs-loopback-test\n"
-           "      Run FPGA PRBS TX through AD9361 loopback and compare LiteEth RX data.\n"
+           "  ad9361-prbs-test\n"
+           "      Test FPGA PRBS TX -> AD9361 internal loopback -> FPGA/host RX.\n"
 #endif
            "  scratch-test\n"
            "      Test the scratch register.\n"
@@ -3647,22 +3645,18 @@ int main(int argc, char **argv)
 #endif
 
 #if defined(USE_LITEETH) || defined(USE_LITEPCIE)
-    else if (cmd_is(cmd, "stream_loopback_test", "stream-loopback-test")
-#ifdef USE_LITEETH
-             || cmd_is(cmd, "eth_loopback_test", "eth-loopback-test")
-#endif
-             )
+    else if (cmd_is(cmd, "fpga_loopback_test", "fpga-loopback-test"))
         return stream_loopback_test(test_data_width, test_duration,
                                     stream_pace, stream_sample_rate, stream_window);
-    else if (cmd_is(cmd, "rfic_loopback_test", "rfic-loopback-test"))
-        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, false);
-    else if (cmd_is(cmd, "rfic_data_loopback_test", "rfic-data-loopback-test"))
+    else if (cmd_is(cmd, "fpga_phy_loopback_test", "fpga-phy-loopback-test"))
         return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, true);
+    else if (cmd_is(cmd, "ad9361_loopback_test", "ad9361-loopback-test"))
+        return rfic_loopback_test(test_duration, stream_pace, stream_sample_rate, stream_window, false);
 #endif
 #ifdef USE_LITEETH
-    else if (cmd_is(cmd, "eth_rfic_rx_sweep", "eth-rfic-rx-sweep"))
+    else if (cmd_is(cmd, "eth_rx_rate_sweep", "eth-rx-rate-sweep"))
         return eth_rfic_rx_sweep(test_duration);
-    else if (cmd_is(cmd, "rfic_prbs_loopback_test", "rfic-prbs-loopback-test"))
+    else if (cmd_is(cmd, "ad9361_prbs_test", "ad9361-prbs-test"))
         return rfic_prbs_loopback_test(test_duration, stream_sample_rate);
 #endif
 
