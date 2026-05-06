@@ -2153,6 +2153,46 @@ static void loopback_print_udp_diagnostics(struct m2sdr_dev *dev)
         stats.tx_send_errors);
 }
 
+static int loopback_reset_datapath(struct m2sdr_dev *dev, const char *phase)
+{
+    int rc = m2sdr_reset_datapath(dev);
+
+    if (rc != M2SDR_ERR_OK) {
+        if (phase && phase[0])
+            fprintf(stderr, "m2sdr_reset_datapath(%s) failed: %s\n", phase, m2sdr_strerror(rc));
+        else
+            fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    }
+    return rc;
+}
+
+static int loopback_config_sync_stream(struct m2sdr_dev *dev,
+                                       enum m2sdr_direction direction,
+                                       enum m2sdr_format format,
+                                       unsigned samples_per_buf)
+{
+    int rc = m2sdr_sync_config(dev, direction, format, 64, samples_per_buf, 0, 1000);
+
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config(%s) failed: %s\n",
+            direction == M2SDR_RX ? "RX" : "TX", m2sdr_strerror(rc));
+    }
+    return rc;
+}
+
+static int loopback_config_sync_streams(struct m2sdr_dev *dev,
+                                        enum m2sdr_format format,
+                                        unsigned samples_per_buf,
+                                        bool with_tx)
+{
+    int rc = loopback_config_sync_stream(dev, M2SDR_RX, format, samples_per_buf);
+
+    if (rc != M2SDR_ERR_OK || !with_tx)
+        return rc;
+
+    return loopback_config_sync_stream(dev, M2SDR_TX, format, samples_per_buf);
+}
+
 static int stream_loopback_test(int data_width,
                                 int duration,
                                 enum stream_loopback_pace pace,
@@ -2241,32 +2281,17 @@ static int stream_loopback_test(int data_width,
         printf("TX prefill  : %u buffers\n", prefill_buffers);
     }
 
-    rc = m2sdr_reset_datapath(dev);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    rc = loopback_reset_datapath(dev, NULL);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup;
-    }
 
     if (m2sdr_set_txrx_loopback(dev, true) != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_set_txrx_loopback(enable) failed\n");
         goto cleanup;
     }
-    if (m2sdr_set_rx_header(dev, false, false) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+    rc = loopback_config_sync_streams(dev, format, samples_per_buf, true);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup_disable_loopback;
-    }
-    if (m2sdr_set_tx_header(dev, false) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_tx_header failed\n");
-        goto cleanup_disable_loopback;
-    }
-    if (m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config(RX) failed\n");
-        goto cleanup_disable_loopback;
-    }
-    if (m2sdr_sync_config(dev, M2SDR_TX, format, 64, samples_per_buf, 0, 1000) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config(TX) failed\n");
-        goto cleanup_disable_loopback;
-    }
 
 #ifdef USE_LITEETH
     rc = m2sdr_liteeth_set_rx_timeout_recovery(dev, false);
@@ -2468,8 +2493,7 @@ cleanup_disable_loopback:
 #ifdef USE_LITEETH
     (void)m2sdr_liteeth_set_rx_timeout_recovery(dev, true);
 #endif
-    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
-        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
+    (void)loopback_reset_datapath(dev, "cleanup");
 cleanup:
     free(tx_buf);
     free(rx_buf);
@@ -2826,11 +2850,9 @@ static int rfic_loopback_test(int duration,
     }
     fflush(stdout);
 
-    rc = m2sdr_reset_datapath(dev);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    rc = loopback_reset_datapath(dev, NULL);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup;
-    }
 
     m2sdr_config_init(&cfg);
     cfg.sample_rate = sample_rate;
@@ -2845,21 +2867,13 @@ static int rfic_loopback_test(int duration,
         goto cleanup;
     }
 
-    rc = m2sdr_reset_datapath(dev);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    rc = loopback_reset_datapath(dev, NULL);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup_disable_loopback;
-    }
-    rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config(RX) failed: %s\n", m2sdr_strerror(rc));
+
+    rc = loopback_config_sync_streams(dev, format, samples_per_buf, true);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup_disable_loopback;
-    }
-    rc = m2sdr_sync_config(dev, M2SDR_TX, format, 64, samples_per_buf, 0, 1000);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config(TX) failed: %s\n", m2sdr_strerror(rc));
-        goto cleanup_disable_loopback;
-    }
 #ifdef USE_LITEETH
     if (fpga_data_loopback) {
         rc = m2sdr_liteeth_set_rx_timeout_recovery(dev, false);
@@ -3123,8 +3137,7 @@ static int rfic_loopback_test(int duration,
 cleanup_disable_loopback:
     if (fpga_data_loopback && rx_buf)
         rfic_loopback_drain_rx(dev, rx_buf, samples_per_buf);
-    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
-        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
+    (void)loopback_reset_datapath(dev, "cleanup");
     if (m2sdr_set_rfic_data_loopback(dev, false) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_rfic_data_loopback(disable) failed\n");
     if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
@@ -3318,27 +3331,22 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     cfg.bandwidth = sample_rate;
     cfg.loopback = 1;
     cfg.enable_8bit_mode = false;
-    rc = m2sdr_reset_datapath(dev);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    rc = loopback_reset_datapath(dev, NULL);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup;
-    }
     rc = m2sdr_apply_config(dev, &cfg);
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
         goto cleanup;
     }
 
-    rc = m2sdr_reset_datapath(dev);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_reset_datapath failed: %s\n", m2sdr_strerror(rc));
+    rc = loopback_reset_datapath(dev, NULL);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup_disable_prbs;
-    }
-    rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config(RX) failed: %s\n", m2sdr_strerror(rc));
+
+    rc = loopback_config_sync_streams(dev, format, samples_per_buf, false);
+    if (rc != M2SDR_ERR_OK)
         goto cleanup_disable_prbs;
-    }
     rc = m2sdr_set_fpga_prbs_tx(dev, true);
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_set_fpga_prbs_tx(enable) failed: %s\n", m2sdr_strerror(rc));
@@ -3416,8 +3424,7 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     }
 
 cleanup_disable_prbs:
-    if (m2sdr_reset_datapath(dev) != M2SDR_ERR_OK)
-        fprintf(stderr, "m2sdr_reset_datapath(cleanup) failed\n");
+    (void)loopback_reset_datapath(dev, "cleanup");
     if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_rfic_loopback(disable) failed\n");
 cleanup:
