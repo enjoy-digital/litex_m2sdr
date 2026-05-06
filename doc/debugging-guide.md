@@ -158,6 +158,88 @@ timeout 6s ./m2sdr_rf
 timeout 12s ./m2sdr_record /dev/null 67108864
 ```
 
+### Ethernet Loopback Diagnostics
+
+Use the loopback tests before involving antennas, demodulators, or Gqrx. They
+exercise increasingly complete pieces of the Ethernet/RF path and print compact
+progress by default. Add `--verbose` to recover the detailed RF init logs and
+counter table.
+
+The tests reset the FPGA streaming datapath at startup and cleanup: LiteEth
+streamers are stopped, crossbars are idled, FPGA loopbacks/PRBS are disabled,
+stream headers are disabled, and 16-bit packing is restored. This makes the
+checks suitable after a Gqrx/Soapy session or after another loopback test.
+
+Build the utility for the Ethernet transport first:
+
+```bash
+cd litex_m2sdr/software/user
+make m2sdr_util INTERFACE=USE_LITEETH
+./m2sdr_util -i 192.168.1.50 info
+```
+
+Recommended quick checks:
+
+```bash
+# Host TX -> FPGA AD9361 PHY data loopback -> host RX.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 4 --pace=rx --sample-rate 1920000 --window 32 \
+    fpga-phy-loopback-test
+
+# Host TX -> AD9361 internal digital loopback -> host RX.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 8 --pace=rx --sample-rate 1920000 --window 32 \
+    ad9361-loopback-test
+```
+
+A healthy compact run looks like:
+
+```text
+[> FPGA PHY loopback test:
+Device      : eth:192.168.1.50:1234
+Sample rate : 1920000 S/s
+Duration    : 4 s
+Mode        : pace=rx, window=32 buffers
+Path        : host TX -> FPGA RFIC data loopback -> host RX
+RX 0.12 Gbps | checked 1811 buffers | errors 0
+PASS: checked 7434 buffers, 0 errors, RX 0.12 Gbps
+Note: synchronized after skipping ... startup lanes; discarded 1 stale startup buffer.
+```
+
+Use `--verbose` when a test fails or when you need the raw counters:
+
+```bash
+./m2sdr_util -i 192.168.1.50 --verbose \
+    --duration 4 --pace=rx --sample-rate 1920000 --window 32 \
+    fpga-phy-loopback-test
+```
+
+The pure FPGA stream loopback is useful for stressing the Ethernet host/FPGA
+stream path without the RFIC rate limit:
+
+```bash
+# Moderate paced run for a quick formatting/sanity check.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 3 --pace=rate --sample-rate 30720000 --window 32 \
+    fpga-loopback-test
+
+# Near line-rate stress run. Drops or data errors here usually point to host
+# socket/ring pressure or stream pacing, not RFIC configuration.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 3 --pace=rx --sample-rate 1920000 --window 32 \
+    fpga-loopback-test
+```
+
+Loopback command meanings:
+
+- `fpga-loopback-test`: host TX to FPGA stream loopback to host RX; isolates
+  the Ethernet stream path from the AD9361.
+- `fpga-phy-loopback-test`: host TX through the FPGA AD9361 PHY data loopback
+  to host RX; validates the host/Ethernet path plus RFIC-side stream packing.
+- `ad9361-loopback-test`: host TX through AD9361 internal digital loopback to
+  host RX; validates the RFIC digital loopback path. The initial warmup is
+  expected and is ignored before data checking starts.
+
 Typical LiteEth RF-init failures:
 
 - `m2sdr_apply_config failed: timeout`: Etherbone did not complete a register

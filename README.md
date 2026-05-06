@@ -418,6 +418,19 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --with-eth --eth-sfp=0 --build --load
    ping 192.168.1.50
    ```
+   - After loading an Ethernet image, use `m2sdr_util` loopback tests to
+     exercise the stream path before starting Soapy/Gqrx:
+   ```
+   cd litex_m2sdr/software/user
+   make m2sdr_util INTERFACE=USE_LITEETH
+   ./m2sdr_util -i 192.168.1.50 --duration 4 --pace=rx --sample-rate 1920000 --window 32 fpga-phy-loopback-test
+   ./m2sdr_util -i 192.168.1.50 --duration 8 --pace=rx --sample-rate 1920000 --window 32 ad9361-loopback-test
+   ```
+   - The loopback tests reset FPGA stream state at startup/cleanup, so they can
+     be run after Soapy/Gqrx sessions. Add `--verbose` to show detailed RF setup
+     logs and LiteEth counters. See
+     [Debugging Guide](doc/debugging-guide.md#ethernet-loopback-diagnostics)
+     for the full loopback workflow.
    - For Ethernet PTP time-discipline tests on the baseboard:
    ```
    ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load

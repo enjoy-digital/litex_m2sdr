@@ -95,6 +95,13 @@ m2sdr_util [options] cmd [args...]
   Check scratch register for basic read/write.
 - **clk-test**
   Measure on-board clock frequencies.
+- **fpga-loopback-test**
+  Test host TX -> FPGA stream loopback -> host RX. This isolates the Ethernet
+  or PCIe stream path from the AD9361.
+- **fpga-phy-loopback-test**
+  Test host TX -> FPGA AD9361 PHY data loopback -> host RX.
+- **ad9361-loopback-test**
+  Test host TX -> AD9361 internal digital loopback -> host RX.
 - **led-status**, **led-control**, **led-pulse**, **led-release**
   Inspect or override the user LED CSR block from the host side.
   `led-control` and `led-pulse` take raw bitmasks from `software/kernel/csr.h`.
@@ -119,6 +126,58 @@ Example usage:
 ./m2sdr_util led-pulse 0x4
 ./m2sdr_util flash-read backup.bin 0x100000
 ~~~~
+
+Loopback diagnostics use compact progress by default and accept `--verbose` for
+the detailed RF setup logs and counter table. They reset the FPGA streaming
+datapath at startup/cleanup, so they can be run after Gqrx/Soapy without
+inheriting stream headers, test loopbacks, PRBS TX, or 8-bit packing. For
+Ethernet/baseboard testing:
+
+~~~~
+make m2sdr_util INTERFACE=USE_LITEETH
+./m2sdr_util -i 192.168.1.50 info
+
+# Host TX -> FPGA AD9361 PHY data loopback -> host RX.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 4 --pace=rx --sample-rate 1920000 --window 32 \
+    fpga-phy-loopback-test
+
+# Host TX -> AD9361 internal digital loopback -> host RX.
+./m2sdr_util -i 192.168.1.50 \
+    --duration 8 --pace=rx --sample-rate 1920000 --window 32 \
+    ad9361-loopback-test
+
+# Detailed/debug output.
+./m2sdr_util -i 192.168.1.50 --verbose \
+    --duration 4 --pace=rx --sample-rate 1920000 --window 32 \
+    fpga-phy-loopback-test
+~~~~
+
+Example compact output:
+
+~~~~
+[> FPGA PHY loopback test:
+Device      : eth:192.168.1.50:1234
+Sample rate : 1920000 S/s
+Duration    : 4 s
+Mode        : pace=rx, window=32 buffers
+Path        : host TX -> FPGA RFIC data loopback -> host RX
+RX 0.12 Gbps | checked 1811 buffers | errors 0
+PASS: checked 7434 buffers, 0 errors, RX 0.12 Gbps
+Note: synchronized after skipping ... startup lanes; discarded 1 stale startup buffer.
+~~~~
+
+The pure FPGA stream loopback can be used as an Ethernet/PCIe stream stress
+test:
+
+~~~~
+./m2sdr_util -i 192.168.1.50 \
+    --duration 3 --pace=rate --sample-rate 30720000 --window 32 \
+    fpga-loopback-test
+~~~~
+
+For a broader Ethernet debug flow and interpretation of LiteEth UDP counters,
+see `../../../doc/debugging-guide.md`.
 
 ---
 
