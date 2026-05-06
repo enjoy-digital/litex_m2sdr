@@ -1218,17 +1218,24 @@ int m2sdr_reset_datapath(struct m2sdr_dev *dev)
     if (!dev)
         return M2SDR_ERR_INVAL;
 
-    m2sdr_reset_keep_error(m2sdr_liteeth_rx_stream_deactivate(dev), &status);
-    m2sdr_reset_keep_error(m2sdr_liteeth_tx_stream_deactivate(dev), &status);
+    switch (dev->transport) {
+    case M2SDR_TRANSPORT_LITEPCIE:
+        m2sdr_reset_keep_error(m2sdr_set_dma_loopback(dev, false), &status);
+        break;
 
+    case M2SDR_TRANSPORT_LITEETH:
+        m2sdr_reset_keep_error(m2sdr_liteeth_rx_stream_deactivate(dev), &status);
+        m2sdr_reset_keep_error(m2sdr_liteeth_tx_stream_deactivate(dev), &status);
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0)
-        m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0)
+            m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
 #endif
 #ifdef CSR_CROSSBAR_DEMUX_SEL_ADDR
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
-        m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
+            m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
 #endif
+        break;
+    }
 
     m2sdr_reset_keep_error(m2sdr_set_txrx_loopback(dev, false), &status);
     m2sdr_reset_keep_error(m2sdr_set_rfic_data_loopback(dev, false), &status);
