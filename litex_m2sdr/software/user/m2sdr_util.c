@@ -1973,6 +1973,10 @@ enum eth_loopback_pace {
     ETH_LOOPBACK_PACE_NONE,
 };
 
+#define LITEETH_LOOPBACK_PREFILL_BUFS       24u
+#define LITEETH_LOOPBACK_RX_TIMEOUT_MS     200u
+#define LITEETH_LOOPBACK_STALL_US      1000000u
+
 static int64_t get_time_us(void)
 {
     struct timespec ts;
@@ -2080,6 +2084,18 @@ static void eth_loopback_rate_wait(int64_t start_us,
     }
 }
 
+static uint64_t liteeth_loopback_rx_observed_buffers(struct m2sdr_dev *dev, uint64_t fallback)
+{
+    struct m2sdr_liteeth_udp_stats stats;
+
+    if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK &&
+        stats.rx_buffers > fallback) {
+        return stats.rx_buffers;
+    }
+
+    return fallback;
+}
+
 static int eth_loopback_test(int data_width,
                              int duration,
                              enum eth_loopback_pace pace,
@@ -2155,6 +2171,9 @@ static int eth_loopback_test(int data_width,
         printf("Sample rate : %" PRId64 " S/s\n", sample_rate);
     printf("TX window   : %u buffers\n", window);
     printf("Loopback    : TX stream -> RX stream inside FPGA\n");
+
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
 
     if (m2sdr_set_txrx_loopback(dev, true) != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_set_txrx_loopback(enable) failed\n");
@@ -2263,22 +2282,24 @@ static int eth_loopback_test(int data_width,
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
 
             if (i % 10 == 0)
-                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tRX_DROPS\tTX_SEND_ERR\e[0m\n");
+                printf("\e[1mETH_SPEED(Gbps)\tTX_BUFFERS\tRX_BUFFERS\tERRORS\tSTART_SKIP\tSTART_DROP\tKDROP\tSRC_DROP\tRING_FULL\tTX_SEND_ERR\e[0m\n");
             i++;
 
             if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%8" PRIu64 "\t%11" PRIu64 "\n",
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%11" PRIu64 "\n",
                     gbps,
                     tx_buffers,
                     rx_buffers,
                     total_errors,
                     startup_skip_words,
                     startup_discard_buffers,
-                    stats.rx_kernel_drops + stats.rx_source_drops + stats.rx_ring_full_events,
+                    stats.rx_kernel_drops,
+                    stats.rx_source_drops,
+                    stats.rx_ring_full_events,
                     stats.tx_send_errors);
             } else {
-                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%8u\t%11u\n",
-                    gbps, tx_buffers, rx_buffers, total_errors, startup_skip_words, startup_discard_buffers, 0u, 0u);
+                printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%10" PRIu64 "\t%5u\t%8u\t%9u\t%11u\n",
+                    gbps, tx_buffers, rx_buffers, total_errors, startup_skip_words, startup_discard_buffers, 0u, 0u, 0u, 0u);
             }
 
             last_time = now;
@@ -2303,6 +2324,8 @@ static int eth_loopback_test(int data_width,
     }
 
 cleanup_disable_loopback:
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+    (void)m2sdr_liteeth_tx_stream_deactivate(dev);
     if (m2sdr_set_txrx_loopback(dev, false) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_txrx_loopback(disable) failed\n");
 cleanup:
@@ -2427,7 +2450,7 @@ static int eth_rfic_rx_sweep(int duration)
 #define RFIC_LOOPBACK_LANES_PER_WORD    4u
 #define RFIC_LOOPBACK_MAX_DELAY_BUFS  128u
 #define RFIC_LOOPBACK_SEARCH_BUFS     128u
-#define RFIC_LOOPBACK_PREFILL_BUFS     24u
+#define RFIC_LOOPBACK_PREFILL_BUFS     LITEETH_LOOPBACK_PREFILL_BUFS
 #define RFIC_LOOPBACK_WARMUP_MS      4000u
 #define RFIC_LOOPBACK_MIN_DURATION_S    8u
 #define RFIC_PRBS_SEED             0x0a54u
@@ -2572,11 +2595,16 @@ static int rfic_loopback_test(int duration,
     uint64_t startup_skip_lanes = 0;
     uint64_t total_errors = 0;
     uint64_t last_checked_buffers = 0;
+    uint64_t last_rx_timeout_recoveries = 0;
     unsigned prefill_buffers;
+    uint64_t restart_window;
+    bool restart_refilling = false;
+    bool restart_waiting = false;
     bool warmup_done = fpga_data_loopback;
     bool seed_synced = false;
     int64_t start_us;
     int64_t last_time;
+    int64_t last_rx_progress_us;
     int64_t warmup_end_time = 0;
     int64_t end_time;
     int i = 0;
@@ -2592,6 +2620,7 @@ static int rfic_loopback_test(int duration,
     if (sample_rate <= 0)
         sample_rate = DEFAULT_SAMPLERATE;
     prefill_buffers = window < RFIC_LOOPBACK_PREFILL_BUFS ? window : RFIC_LOOPBACK_PREFILL_BUFS;
+    restart_window = window + prefill_buffers;
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
         return 1;
@@ -2626,6 +2655,7 @@ static int rfic_loopback_test(int duration,
         fpga_data_loopback ? "FPGA RFIC data loopback" : "AD9361 digital loopback");
     printf("Precision   : 12-bit compare on lane[11:0]\n");
     printf("TX prefill  : %u buffers\n", prefill_buffers);
+    printf("Restart fill: %" PRIu64 " outstanding buffers\n", restart_window);
     if (!fpga_data_loopback)
         printf("Warmup      : %u ms\n", RFIC_LOOPBACK_WARMUP_MS);
 
@@ -2697,14 +2727,18 @@ static int rfic_loopback_test(int duration,
     last_time = get_time_ms();
     warmup_end_time = last_time + (fpga_data_loopback ? 0 : RFIC_LOOPBACK_WARMUP_MS);
     start_us = get_time_us();
+    last_rx_progress_us = start_us;
     end_time = last_time + (int64_t)duration * 1000;
     while (keep_running && get_time_ms() < end_time) {
         int did_work = 0;
-        uint64_t outstanding = tx_buffers - rx_buffers;
+        uint64_t rx_observed_buffers = liteeth_loopback_rx_observed_buffers(dev, rx_buffers);
+        uint64_t outstanding = tx_buffers > rx_observed_buffers ? tx_buffers - rx_observed_buffers : 0;
+        uint64_t tx_target = window;
 
-        while (outstanding < window) {
-            if (pace == ETH_LOOPBACK_PACE_RX && outstanding >= prefill_buffers)
-                break;
+        if (pace == ETH_LOOPBACK_PACE_RX)
+            tx_target = restart_refilling ? restart_window : window;
+
+        while (outstanding < tx_target) {
             if (pace == ETH_LOOPBACK_PACE_RATE && tx_buffers >= prefill_buffers) {
                 uint64_t paced_tx_buffers = tx_buffers - prefill_buffers + 1;
                 eth_loopback_rate_wait(start_us, paced_tx_buffers, stream_words_per_buf, sample_rate);
@@ -2720,15 +2754,50 @@ static int rfic_loopback_test(int duration,
             did_work = 1;
         }
 
+        if (restart_refilling && outstanding >= tx_target) {
+            restart_refilling = false;
+            restart_waiting = true;
+        }
+
         if (outstanding > 0) {
-            rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 1000);
+            int timeout_ms = (pace == ETH_LOOPBACK_PACE_RX) ?
+                LITEETH_LOOPBACK_RX_TIMEOUT_MS : 1000;
+            rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
             if (rc != M2SDR_ERR_OK) {
+                if (rc == M2SDR_ERR_TIMEOUT && pace == ETH_LOOPBACK_PACE_RX) {
+                    if (!restart_refilling && !restart_waiting) {
+                        restart_refilling = true;
+                        seed_synced = false;
+                        did_work = 1;
+                        continue;
+                    }
+                    if (restart_waiting &&
+                        (get_time_us() - last_rx_progress_us) > LITEETH_LOOPBACK_STALL_US) {
+                        fprintf(stderr, "m2sdr_sync_rx failed: stalled after LiteEth TX refill\n");
+                        goto cleanup_disable_loopback;
+                    }
+                    continue;
+                }
                 fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
                 goto cleanup_disable_loopback;
             }
             rx_buffers++;
-            outstanding--;
+            if (outstanding > 0)
+                outstanding--;
             did_work = 1;
+            restart_waiting = false;
+
+            struct m2sdr_liteeth_udp_stats stats;
+            int64_t now_us = get_time_us();
+            last_rx_progress_us = now_us;
+
+            if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK &&
+                stats.rx_timeout_recoveries != last_rx_timeout_recoveries) {
+                last_rx_timeout_recoveries = stats.rx_timeout_recoveries;
+                if (pace == ETH_LOOPBACK_PACE_RX)
+                    restart_refilling = true;
+                seed_synced = false;
+            }
 
             if (!warmup_done) {
                 warmup_buffers++;
@@ -2764,15 +2833,31 @@ static int rfic_loopback_test(int duration,
         int64_t now = get_time_ms();
         int64_t elapsed = now - last_time;
         if (elapsed > 500) {
+            struct m2sdr_liteeth_udp_stats stats;
             uint64_t delta = checked_buffers - last_checked_buffers;
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
+            uint64_t rx_kernel_drops = 0;
+            uint64_t rx_source_drops = 0;
+            uint64_t rx_ring_full = 0;
+            uint64_t rx_recoveries = 0;
+            uint64_t tx_send_errors = 0;
+
+            if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
+                rx_kernel_drops = stats.rx_kernel_drops;
+                rx_source_drops = stats.rx_source_drops;
+                rx_ring_full = stats.rx_ring_full_events;
+                rx_recoveries = stats.rx_timeout_recoveries;
+                tx_send_errors = stats.tx_send_errors;
+            }
 
             if (i % 10 == 0)
-                printf("\e[1mRFIC_LB_Gbps\tTX_BUFFERS\tRX_BUFFERS\tCHECKED\tERRORS\tSTART_SKIP\tWARMUP\tSTALE\e[0m\n");
+                printf("\e[1mRFIC_LB_Gbps\tTX_BUFFERS\tRX_BUFFERS\tCHECKED\tERRORS\tSTART_SKIP\tWARMUP\tSTALE\tKDROP\tSRC_DROP\tRING_FULL\tRECOV\tTX_SEND_ERR\e[0m\n");
             i++;
-            printf("%12.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\n",
+            printf("%12.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%7" PRIu64 "\t%6" PRIu64 "\t%10" PRIu64 "\t%6" PRIu64 "\t%5" PRIu64 "\t%5" PRIu64 "\t%8" PRIu64 "\t%9" PRIu64 "\t%5" PRIu64 "\t%11" PRIu64 "\n",
                 gbps, tx_buffers, rx_buffers, checked_buffers, total_errors,
-                startup_skip_lanes, warmup_buffers, stale_buffers);
+                startup_skip_lanes, warmup_buffers, stale_buffers,
+                rx_kernel_drops, rx_source_drops, rx_ring_full,
+                rx_recoveries, tx_send_errors);
 
             last_time = now;
             last_checked_buffers = checked_buffers;

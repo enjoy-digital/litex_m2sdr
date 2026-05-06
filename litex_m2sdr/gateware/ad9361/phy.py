@@ -176,6 +176,7 @@ class AD9361PHY(LiteXModule):
         rx_data_qa  = Signal(12)
         rx_data_ib  = Signal(12)
         rx_data_qb  = Signal(12)
+        rx_valid    = Signal()
         self.sync.rfic += [
             Case(rx_count[1], {
                 0b0: [  # Assemble IA/QA: MSBs in high bits, LSBs in low bits.
@@ -197,26 +198,49 @@ class AD9361PHY(LiteXModule):
         # --------------------
         # Outputs assembled RX samples when valid (rx_count == 0).
         self.sync.rfic += [
-            source.valid.eq(0),
+            rx_valid.eq(0),
             If(rx_count == 0,
-                source.valid.eq(1),
-                source.ia.eq(rx_data_ia),
-                source.qa.eq(rx_data_qa),
-                source.ib.eq(rx_data_ib),
-                source.qb.eq(rx_data_qb),
+                rx_valid.eq(1),
             )
         ]
 
         # TX -> RX Loopback ------------------------------------------------------------------------
 
         # Routes TX data to RX when loopback is enabled.
+        loopback_valid = Signal()
+        loopback_ia    = Signal(12)
+        loopback_qa    = Signal(12)
+        loopback_ib    = Signal(12)
+        loopback_qb    = Signal(12)
         self.sync.rfic += [
+            If(~loopback,
+                loopback_valid.eq(0),
+            ).Else(
+                If(source.ready,
+                    loopback_valid.eq(0),
+                ),
+                If(sink.valid & sink.ready,
+                    loopback_valid.eq(1),
+                    loopback_ia.eq(sink.ia),
+                    loopback_qa.eq(sink.qa),
+                    loopback_ib.eq(sink.ib),
+                    loopback_qb.eq(sink.qb),
+                ),
+            )
+        ]
+        self.comb += [
             If(loopback,
-                source.valid.eq(sink.valid & sink.ready),
-                source.ia.eq(sink.ia),
-                source.qa.eq(sink.qa),
-                source.ib.eq(sink.ib),
-                source.qb.eq(sink.qb),
+                source.valid.eq(loopback_valid),
+                source.ia.eq(loopback_ia),
+                source.qa.eq(loopback_qa),
+                source.ib.eq(loopback_ib),
+                source.qb.eq(loopback_qb),
+            ).Else(
+                source.valid.eq(rx_valid),
+                source.ia.eq(rx_data_ia),
+                source.qa.eq(rx_data_qa),
+                source.ib.eq(rx_data_ib),
+                source.qb.eq(rx_data_qb),
             )
         ]
 
@@ -228,7 +252,7 @@ class AD9361PHY(LiteXModule):
         # so the next word starts with the freshly latched IA/QA MSBs.
         tx_count = Signal(2)
         self.sync.rfic += tx_count.eq(tx_count + 1)
-        self.comb += sink.ready.eq(tx_count == 3)
+        self.comb += sink.ready.eq((tx_count == 3) & (~loopback | source.ready | ~loopback_valid))
 
         # TX Data Latching.
         # -----------------
