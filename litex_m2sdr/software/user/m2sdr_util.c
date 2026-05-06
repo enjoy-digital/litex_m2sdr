@@ -2084,13 +2084,18 @@ static void stream_loopback_rate_wait(int64_t start_us,
     }
 }
 
-static uint64_t stream_loopback_rx_observed_buffers(struct m2sdr_dev *dev, uint64_t fallback)
+static uint64_t stream_loopback_rx_observed_delta(struct m2sdr_dev *dev,
+                                                  uint64_t base,
+                                                  uint64_t fallback)
 {
     struct m2sdr_liteeth_udp_stats stats;
 
     if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK &&
-        stats.rx_buffers > fallback) {
-        return stats.rx_buffers;
+        stats.rx_buffers >= base) {
+        uint64_t delta = stats.rx_buffers - base;
+
+        if (delta > fallback)
+            return delta;
     }
 
     return fallback;
@@ -2115,6 +2120,7 @@ static int stream_loopback_test(int data_width,
     uint64_t rx_buffers = 0;
     uint64_t checked_buffers = 0;
     uint64_t total_errors = 0;
+    uint64_t rx_observed_base = 0;
     uint64_t startup_skip_words = 0;
     uint64_t startup_discard_buffers = 0;
     uint64_t last_checked_buffers = 0;
@@ -2199,6 +2205,21 @@ static int stream_loopback_test(int data_width,
         goto cleanup_disable_loopback;
     }
 
+#ifdef USE_LITEETH
+    rc = m2sdr_liteeth_set_rx_timeout_recovery(dev, false);
+    if (rc != M2SDR_ERR_OK && rc != M2SDR_ERR_UNSUPPORTED) {
+        fprintf(stderr, "m2sdr_liteeth_set_rx_timeout_recovery(disable) failed: %s\n",
+            m2sdr_strerror(rc));
+        goto cleanup_disable_loopback;
+    }
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
+        fprintf(stderr, "m2sdr TX prefill hold failed\n");
+        goto cleanup_disable_loopback;
+    }
+#endif
+#endif
+
     last_time = get_time_ms();
     start_us = get_time_us();
     last_progress_us = start_us;
@@ -2213,16 +2234,32 @@ static int stream_loopback_test(int data_width,
         tx_buffers++;
     }
 
+#ifdef USE_LITEETH
+    {
+        struct m2sdr_liteeth_udp_stats stats;
+        if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK)
+            rx_observed_base = stats.rx_buffers;
+    }
+#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
+        fprintf(stderr, "m2sdr TX prefill release failed\n");
+        goto cleanup_disable_loopback;
+    }
+#endif
+#endif
+
     end_time = (duration > 0) ? last_time + duration * 1000 : 0;
     while (keep_running && (duration <= 0 || get_time_ms() < end_time)) {
         int did_work = 0;
-        uint64_t outstanding = tx_buffers - rx_buffers;
+        uint64_t rx_observed_buffers =
+            stream_loopback_rx_observed_delta(dev, rx_observed_base, rx_buffers);
+        uint64_t outstanding = tx_buffers > rx_observed_buffers ? tx_buffers - rx_observed_buffers : 0;
+        uint64_t rx_pending = tx_buffers > rx_buffers ? tx_buffers - rx_buffers : 0;
+        uint64_t tx_target = (pace == STREAM_LOOPBACK_PACE_RX) ? prefill_buffers : window;
 
-        while (outstanding < window) {
+        while (outstanding < tx_target) {
             int rc;
 
-            if (pace == STREAM_LOOPBACK_PACE_RX && outstanding > 0)
-                break;
             if (pace == STREAM_LOOPBACK_PACE_RATE)
                 stream_loopback_rate_wait(start_us, tx_buffers, samples_per_buf, sample_rate);
 
@@ -2234,14 +2271,15 @@ static int stream_loopback_test(int data_width,
             }
             tx_buffers++;
             outstanding++;
+            rx_pending++;
             did_work = 1;
 
-            if (pace != STREAM_LOOPBACK_PACE_NONE)
+            if (pace == STREAM_LOOPBACK_PACE_RATE)
                 break;
         }
 
-        if (outstanding > 0) {
-            int timeout_ms = (pace == STREAM_LOOPBACK_PACE_RX || outstanding >= window) ? 1000 : 0;
+        if (rx_pending > 0) {
+            int timeout_ms = (pace == STREAM_LOOPBACK_PACE_RX || outstanding >= tx_target) ? 1000 : 0;
             int rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
             if (rc == M2SDR_ERR_OK) {
                 uint32_t errors;
@@ -2253,7 +2291,9 @@ static int stream_loopback_test(int data_width,
                     if (observed_seed >= seed_wr ||
                         stream_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &tmp_seed, mask, false) != 0) {
                         rx_buffers++;
-                        outstanding--;
+                        rx_pending--;
+                        if (outstanding > 0)
+                            outstanding--;
                         startup_discard_buffers++;
                         did_work = 1;
                         last_progress_us = get_time_us();
@@ -2267,7 +2307,9 @@ static int stream_loopback_test(int data_width,
                 }
 
                 rx_buffers++;
-                outstanding--;
+                rx_pending--;
+                if (outstanding > 0)
+                    outstanding--;
                 errors = stream_check_pn_data((const uint32_t *)rx_buf, words_per_buf, &seed_rd, mask,
                     checked_buffers == 0);
                 total_errors += errors;
@@ -2279,7 +2321,7 @@ static int stream_loopback_test(int data_width,
             } else if (rc != M2SDR_ERR_TIMEOUT) {
                 fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
                 goto cleanup_disable_loopback;
-            } else if (outstanding >= window) {
+            } else if (outstanding >= tx_target) {
                 fprintf(stderr, "m2sdr_sync_rx failed: timeout with TX window full\n");
                 goto cleanup_disable_loopback;
             } else if ((get_time_us() - last_progress_us) > 1000000) {
@@ -2344,6 +2386,9 @@ static int stream_loopback_test(int data_width,
 cleanup_disable_loopback:
     (void)m2sdr_liteeth_rx_stream_deactivate(dev);
     (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+#ifdef USE_LITEETH
+    (void)m2sdr_liteeth_set_rx_timeout_recovery(dev, true);
+#endif
     if (m2sdr_set_txrx_loopback(dev, false) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_txrx_loopback(disable) failed\n");
 cleanup:
@@ -2471,6 +2516,8 @@ static int eth_rfic_rx_sweep(int duration)
 #define RFIC_LOOPBACK_MAX_DELAY_BUFS  128u
 #define RFIC_LOOPBACK_SEARCH_BUFS     128u
 #define RFIC_LOOPBACK_PREFILL_BUFS     STREAM_LOOPBACK_PREFILL_BUFS
+#define RFIC_DATA_LOOPBACK_PREFILL_BUFS  STREAM_LOOPBACK_PREFILL_BUFS
+#define RFIC_LOOPBACK_DRAIN_BUFS      256u
 #define RFIC_LOOPBACK_WARMUP_MS      4000u
 #define RFIC_LOOPBACK_MIN_DURATION_S    8u
 #define RFIC_PRBS_SEED             0x0a54u
@@ -2590,6 +2637,17 @@ static void rfic_loopback_print_rx_preview(const int16_t *buf, unsigned lanes)
     fprintf(stderr, "\n");
 }
 
+static void rfic_loopback_drain_rx(struct m2sdr_dev *dev,
+                                   int16_t *rx_buf,
+                                   unsigned samples_per_buf)
+{
+    for (unsigned i = 0; i < RFIC_LOOPBACK_DRAIN_BUFS; i++) {
+        int rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, 10);
+        if (rc != M2SDR_ERR_OK)
+            break;
+    }
+}
+
 static int rfic_loopback_test(int duration,
                               enum stream_loopback_pace pace,
                               int64_t sample_rate,
@@ -2616,6 +2674,7 @@ static int rfic_loopback_test(int duration,
     uint64_t total_errors = 0;
     uint64_t last_checked_buffers = 0;
     uint64_t last_rx_timeout_recoveries = 0;
+    uint64_t rx_observed_base = 0;
     unsigned prefill_buffers;
     uint64_t restart_window;
     bool restart_refilling = false;
@@ -2639,7 +2698,9 @@ static int rfic_loopback_test(int duration,
         window = 1;
     if (sample_rate <= 0)
         sample_rate = DEFAULT_SAMPLERATE;
-    prefill_buffers = window < RFIC_LOOPBACK_PREFILL_BUFS ? window : RFIC_LOOPBACK_PREFILL_BUFS;
+    unsigned max_prefill_buffers = fpga_data_loopback ?
+        RFIC_DATA_LOOPBACK_PREFILL_BUFS : RFIC_LOOPBACK_PREFILL_BUFS;
+    prefill_buffers = window < max_prefill_buffers ? window : max_prefill_buffers;
     restart_window = window + prefill_buffers;
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
@@ -2700,10 +2761,6 @@ static int rfic_loopback_test(int duration,
         fprintf(stderr, "m2sdr_set_tx_header failed\n");
         goto cleanup_disable_loopback;
     }
-    if (fpga_data_loopback && m2sdr_set_rfic_data_loopback(dev, true) != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_set_rfic_data_loopback(enable) failed\n");
-        goto cleanup_disable_loopback;
-    }
     rc = m2sdr_sync_config(dev, M2SDR_RX, format, 64, samples_per_buf, 0, 1000);
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "m2sdr_sync_config(RX) failed: %s\n", m2sdr_strerror(rc));
@@ -2714,6 +2771,16 @@ static int rfic_loopback_test(int duration,
         fprintf(stderr, "m2sdr_sync_config(TX) failed: %s\n", m2sdr_strerror(rc));
         goto cleanup_disable_loopback;
     }
+#ifdef USE_LITEETH
+    if (fpga_data_loopback) {
+        rc = m2sdr_liteeth_set_rx_timeout_recovery(dev, false);
+        if (rc != M2SDR_ERR_OK && rc != M2SDR_ERR_UNSUPPORTED) {
+            fprintf(stderr, "m2sdr_liteeth_set_rx_timeout_recovery(disable) failed: %s\n",
+                m2sdr_strerror(rc));
+            goto cleanup_disable_loopback;
+        }
+    }
+#endif
 
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     /* Keep LiteEth TX packets in the Ethernet-side FIFO during the explicit
@@ -2724,6 +2791,23 @@ static int rfic_loopback_test(int duration,
         goto cleanup_disable_loopback;
     }
 #endif
+
+    if (fpga_data_loopback) {
+        bool enabled = false;
+
+        if (m2sdr_set_rfic_data_loopback(dev, true) != M2SDR_ERR_OK) {
+            fprintf(stderr, "m2sdr_set_rfic_data_loopback(enable) failed\n");
+            goto cleanup_disable_loopback;
+        }
+        if (m2sdr_get_rfic_data_loopback(dev, &enabled) != M2SDR_ERR_OK || !enabled) {
+            fprintf(stderr, "m2sdr_set_rfic_data_loopback(enable) did not latch\n");
+            goto cleanup_disable_loopback;
+        }
+
+        /* Let the CSR cross into the RFIC clock domain before TX is released. */
+        usleep(1000);
+        rfic_loopback_drain_rx(dev, rx_buf, samples_per_buf);
+    }
 
     if (prefill_buffers > 0) {
         for (unsigned n = 0; n < prefill_buffers; n++) {
@@ -2743,6 +2827,11 @@ static int rfic_loopback_test(int duration,
         goto cleanup_disable_loopback;
     }
 #endif
+    {
+        struct m2sdr_liteeth_udp_stats stats;
+        if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK)
+            rx_observed_base = stats.rx_buffers;
+    }
 
     last_time = get_time_ms();
     warmup_end_time = last_time + (fpga_data_loopback ? 0 : RFIC_LOOPBACK_WARMUP_MS);
@@ -2751,12 +2840,13 @@ static int rfic_loopback_test(int duration,
     end_time = last_time + (int64_t)duration * 1000;
     while (keep_running && get_time_ms() < end_time) {
         int did_work = 0;
-        uint64_t rx_observed_buffers = stream_loopback_rx_observed_buffers(dev, rx_buffers);
+        uint64_t rx_observed_buffers =
+            stream_loopback_rx_observed_delta(dev, rx_observed_base, rx_buffers);
         uint64_t outstanding = tx_buffers > rx_observed_buffers ? tx_buffers - rx_observed_buffers : 0;
-        uint64_t tx_target = window;
+        uint64_t tx_target = (pace == STREAM_LOOPBACK_PACE_RX) ? prefill_buffers : window;
 
-        if (pace == STREAM_LOOPBACK_PACE_RX)
-            tx_target = restart_refilling ? restart_window : window;
+        if (pace == STREAM_LOOPBACK_PACE_RX && restart_refilling)
+            tx_target = restart_window;
 
         while (outstanding < tx_target) {
             if (pace == STREAM_LOOPBACK_PACE_RATE && tx_buffers >= prefill_buffers) {
@@ -2782,8 +2872,14 @@ static int rfic_loopback_test(int duration,
         if (outstanding > 0) {
             int timeout_ms = (pace == STREAM_LOOPBACK_PACE_RX) ?
                 STREAM_LOOPBACK_RX_TIMEOUT_MS : 1000;
+            if (fpga_data_loopback)
+                timeout_ms = 1000;
             rc = m2sdr_sync_rx(dev, rx_buf, samples_per_buf, NULL, timeout_ms);
             if (rc != M2SDR_ERR_OK) {
+                if (rc == M2SDR_ERR_TIMEOUT && fpga_data_loopback) {
+                    fprintf(stderr, "m2sdr_sync_rx failed: timeout waiting for FPGA PHY loopback data\n");
+                    goto cleanup_disable_loopback;
+                }
                 if (rc == M2SDR_ERR_TIMEOUT && pace == STREAM_LOOPBACK_PACE_RX) {
                     if (!restart_refilling && !restart_waiting) {
                         restart_refilling = true;
@@ -2817,6 +2913,7 @@ static int rfic_loopback_test(int duration,
                 if (pace == STREAM_LOOPBACK_PACE_RX)
                     restart_refilling = true;
                 seed_synced = false;
+                continue;
             }
 
             if (!warmup_done) {
@@ -2906,8 +3003,10 @@ static int rfic_loopback_test(int duration,
     }
 
 cleanup_disable_loopback:
-    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
     (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+    if (fpga_data_loopback && rx_buf)
+        rfic_loopback_drain_rx(dev, rx_buf, samples_per_buf);
+    (void)m2sdr_liteeth_rx_stream_deactivate(dev);
     if (m2sdr_set_rfic_data_loopback(dev, false) != M2SDR_ERR_OK)
         fprintf(stderr, "m2sdr_set_rfic_data_loopback(disable) failed\n");
     if (m2sdr_set_rfic_loopback(dev, 0) != M2SDR_ERR_OK)

@@ -747,9 +747,10 @@ class BaseSoC(SoCMini):
             self.comb += [
                 self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error", "valid", "ready"}),
                 self.crossbar.mux.sink1.valid.eq(
-                    self.eth_tx_streamer.source.valid & self.eth_tx_streamer_started),
+                    self.eth_tx_streamer.source.valid & self.eth_tx_streamer_started & self.eth_tx_streamer.enable),
                 self.eth_tx_streamer.source.ready.eq(
-                    self.crossbar.mux.sink1.ready & self.eth_tx_streamer_started),
+                    (self.crossbar.mux.sink1.ready & self.eth_tx_streamer_started) |
+                    ~self.eth_tx_streamer.enable),
             ]
         if with_sata:
             self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})

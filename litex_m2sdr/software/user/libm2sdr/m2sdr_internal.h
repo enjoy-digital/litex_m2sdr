@@ -54,6 +54,7 @@ struct m2sdr_dev {
     struct m2sdr_liteeth_rx_stream_config liteeth_rx_config;
     int liteeth_rx_config_valid;
     int liteeth_rx_timeout_recovery_armed;
+    int liteeth_rx_timeout_recovery_disabled;
 #endif
 
     int rx_configured;

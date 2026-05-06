@@ -32,6 +32,7 @@
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
+#define M2SDR_LITEETH_TX_DRAIN_DELAY_US 1000
 
 /* Helpers */
 /*---------*/
@@ -347,6 +348,25 @@ int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
 #ifdef CSR_ETH_TX_STREAMER_ENABLE_ADDR
     (void)m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 0);
 #endif
+    /* Gateware drains the TX streamer FIFO while disabled; this delay covers a
+     * full 256 KiB FIFO at the Ethernet-only 100 MHz sys_clk with margin. */
+    usleep(M2SDR_LITEETH_TX_DRAIN_DELAY_US);
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    dev->liteeth_rx_timeout_recovery_disabled = enable ? 0 : 1;
+    if (!enable)
+        dev->liteeth_rx_timeout_recovery_armed = 0;
+    else if (dev->liteeth_rx_config_valid)
+        dev->liteeth_rx_timeout_recovery_armed = 1;
+
     return M2SDR_ERR_OK;
 }
 
@@ -428,6 +448,13 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
 int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
 {
     (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable)
+{
+    (void)dev;
+    (void)enable;
     return M2SDR_ERR_UNSUPPORTED;
 }
 
@@ -708,6 +735,7 @@ static int m2sdr_liteeth_wait_rx_buffer(struct m2sdr_dev *dev,
     }
 
     if (!dev->liteeth_rx_config_valid ||
+        dev->liteeth_rx_timeout_recovery_disabled ||
         !dev->liteeth_rx_timeout_recovery_armed ||
         timeout_ms == 0) {
         return M2SDR_ERR_TIMEOUT;

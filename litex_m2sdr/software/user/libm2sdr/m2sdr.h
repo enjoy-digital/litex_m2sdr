@@ -438,6 +438,7 @@ int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_rfic_data_loopback(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_get_rfic_data_loopback(struct m2sdr_dev *dev, bool *enabled);
 int  m2sdr_get_fpga_dna(struct m2sdr_dev *dev, uint64_t *dna);
 int  m2sdr_get_fpga_sensors(struct m2sdr_dev *dev, struct m2sdr_fpga_sensors *sensors);
 
@@ -515,6 +516,7 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev);
+int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable);
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats);
 

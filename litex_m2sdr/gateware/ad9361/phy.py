@@ -214,36 +214,17 @@ class AD9361PHY(LiteXModule):
 
         # TX -> RX Loopback ------------------------------------------------------------------------
 
-        # Routes TX data to RX when loopback is enabled.
-        loopback_valid = Signal()
-        loopback_ia    = Signal(12)
-        loopback_qa    = Signal(12)
-        loopback_ib    = Signal(12)
-        loopback_qb    = Signal(12)
-        self.sync.rfic += [
-            If(~loopback,
-                loopback_valid.eq(0),
-            ).Else(
-                If(source.ready,
-                    loopback_valid.eq(0),
-                ),
-                If(sink.valid & sink.ready,
-                    loopback_valid.eq(1),
-                    loopback_ia.eq(sink.ia),
-                    loopback_qa.eq(sink.qa),
-                    loopback_ib.eq(sink.ib),
-                    loopback_qb.eq(sink.qb),
-                ),
-            )
-        ]
+        # Routes TX data to RX when loopback is enabled. Keep an RFIC-domain FIFO
+        # here instead of a single registered word so TX serializer pacing is
+        # decoupled from RX-side Ethernet/backpressure pauses during diagnostics.
+        self.loopback_fifo = loopback_fifo = ClockDomainsRenamer("rfic")(
+            stream.SyncFIFO(phy_layout(), depth=16, buffered=True)
+        )
         self.comb += [
             If(loopback,
-                source.valid.eq(loopback_valid),
-                source.ia.eq(loopback_ia),
-                source.qa.eq(loopback_qa),
-                source.ib.eq(loopback_ib),
-                source.qb.eq(loopback_qb),
+                loopback_fifo.source.connect(source),
             ).Else(
+                loopback_fifo.source.ready.eq(1),
                 source.valid.eq(rx_valid),
                 source.ia.eq(rx_source_ia),
                 source.qa.eq(rx_source_qa),
@@ -260,7 +241,14 @@ class AD9361PHY(LiteXModule):
         # so the next word starts with the freshly latched IA/QA MSBs.
         tx_count = Signal(2)
         self.sync.rfic += tx_count.eq(tx_count + 1)
-        self.comb += sink.ready.eq((tx_count == 3) & (~loopback | source.ready | ~loopback_valid))
+        self.comb += [
+            sink.ready.eq((tx_count == 3) & (~loopback | loopback_fifo.sink.ready)),
+            loopback_fifo.sink.valid.eq(loopback & sink.valid & (tx_count == 3)),
+            loopback_fifo.sink.ia.eq(sink.ia),
+            loopback_fifo.sink.qa.eq(sink.qa),
+            loopback_fifo.sink.ib.eq(sink.ib),
+            loopback_fifo.sink.qb.eq(sink.qb),
+        ]
 
         # TX Data Latching.
         # -----------------
