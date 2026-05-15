@@ -17,6 +17,7 @@ The user-space code is intentionally layered:
 
 - `libm2sdr/` is the public device/RF/streaming API for host applications.
 - `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr` or the shared host-side support code.
+- `m2sdr_fm_tx` and `m2sdr_fm_rx` are transport-independent FM helpers and are built in both PCIe and LiteEth user builds.
 - `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
 
@@ -537,6 +538,34 @@ Example:
 ~~~~
 ffmpeg -i music.mp3 -f s16le -ac 2 -ar 44100 - | ./m2sdr_fm_tx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo --input-channels 2 --input-sample-rate 44100 - - | ./m2sdr_play -
 ~~~~
+
+Ethernet TX example on the baseboard:
+~~~~
+make m2sdr_rf m2sdr_play m2sdr_fm_tx INTERFACE=USE_LITEETH
+
+./m2sdr_rf -i 192.168.1.50 \
+    --format sc16 \
+    --channel-layout 1t1r \
+    --sample-rate 1000000 \
+    --bandwidth 1500000 \
+    --tx-freq 100000000 \
+    --rx-freq 100000000 \
+    --tx-att 20
+
+ffmpeg -re -stream_loop -1 -i music.mp3 -f s16le -ac 1 -ar 44100 - \
+| ./m2sdr_fm_tx \
+    --sample-rate 1000000 \
+    --deviation 75000 \
+    --bits 12 \
+    --emphasis eu \
+    --mode mono \
+    --input-channels 1 \
+    --input-sample-rate 44100 \
+    - - \
+| ./m2sdr_play -i 192.168.1.50 --format sc16 -
+~~~~
+
+Use an attenuated or otherwise controlled RF path when transmitting in the FM broadcast band.
 
 ---
 

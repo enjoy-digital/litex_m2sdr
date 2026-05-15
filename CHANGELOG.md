@@ -2,7 +2,16 @@
 
 ## Introduction
 
-The LiteX M2 SDR project is actively under development and does not yet have formal releases. However, we maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. The updates below are summarized by quarter, highlighting major advancements to provide a clear overview of the project's evolution.
+The LiteX M2 SDR project is actively under development. We maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. Date-named bitstream archive releases complement the quarterly development summaries below.
+
+[> 2026-05-15 First Date-Named Release
+--------------------------------------
+**Core PCIe/Ethernet Images with Ethernet PTP Timing Support**
+- Added a first date-named release flow that builds and archives the core M2/baseboard PCIe and Ethernet bitstreams with CSR exports and per-build manifests.
+- Included the validated baseboard Ethernet PTP RFIC-reference image (`--with-eth --with-eth-ptp --with-eth-ptp-rfic-clock`) in the release matrix.
+- Validated LiteEth TX/RX streaming paths with FPGA stream, AD9361 PHY, and AD9361 internal digital loopback checks; Ethernet TX is now documented as supported on the baseboard.
+- Fixed the FM helper utilities for Ethernet use by building `m2sdr_fm_tx`/`m2sdr_fm_rx` in LiteEth user builds and keeping binary IQ/PCM pipes free of stdout status text.
+- Documented the remaining release boundaries: White Rabbit, SATA, VRT, 2.5G Ethernet, PCIe x4, and oversampling images are source-build options rather than first-release artifacts.
 
 [> 2026 Q2 (Apr - Jun)
 ----------------------

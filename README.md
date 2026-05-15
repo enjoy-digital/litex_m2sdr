@@ -74,9 +74,10 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 2. [Capabilities Overview](#capabilities-overview)
 3. [M.2 / GPIO Voltage Levels](#m2-gpio-voltage-levels)
 4. [PCIe SoC Design](#pcie-soc-design)
-5. [Ethernet SoC Design (WIP)](#ethernet-soc-design)
-6. [Quick Start](#quick-start)
-7. [Contact](#contact)
+5. [Ethernet SoC Design](#ethernet-soc-design)
+6. [Release Artifacts](#release-artifacts)
+7. [Quick Start](#quick-start)
+8. [Contact](#contact)
 
 [> Hardware Availability
 ------------------------
@@ -108,7 +109,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | PCIe (up to Gen2 x4)            | ✅                           | ✅ (x1 only)                 | `--with-pcie --pcie-lanes=1|2|4`              |
 | Ethernet (1G/2.5G)              | ❌                           | ✅                           | `--with-eth`                                  |
 | ├─ Ethernet RX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
-| └─ Ethernet TX (LiteEth)        | ❌                           | ⚠️ (in development)          | (included with `--with-eth`)                  |
+| └─ Ethernet TX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
 |                                 |                              |                              |                                               |
 | **Timing & Sync**               |                              |                              |                                               |
 | PTM (Precision Time Measurement)| ✅ (PCIe Gen2 x1 only)       | ✅ (PCIe Gen2 x1 only)       | `--with-pcie --pcie-lanes=1 --with-pcie-ptm`  |
@@ -303,10 +304,32 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
-- **Ethernet / SATA (WIP)**: Ethernet SoC is RX-only for now; TX support is in development. SATA support is in development. Both require the LiteX Acorn Baseboard Mini.
+- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. SATA support is still in development.
 - **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
 - **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
 - **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
+
+[> Release Artifacts
+--------------------
+<a id="release-artifacts"></a>
+
+Date-named release archives are generated with:
+
+```
+./release.py
+```
+
+The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
+
+| Archive prefix | Build command |
+|----------------|---------------|
+| `litex_m2sdr_baseboard_eth` | `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build` |
+| `litex_m2sdr_baseboard_eth_ptp_rfic_clock` | `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-eth-ptp --with-eth-ptp-rfic-clock --build` |
+| `litex_m2sdr_baseboard_pcie_x1_eth` | `./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-eth --eth-sfp=0 --build` |
+| `litex_m2sdr_m2_pcie_x1` | `./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=1 --build` |
+| `litex_m2sdr_m2_pcie_x2` | `./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=2 --build` |
+
+Each `build/*_<YYYY_MM_DD>.zip` contains the `.bit`, `.bin`, multiboot fallback/operational images, CSR exports, and a JSON manifest. Generated archives and bitstreams are release artifacts and are not committed to git.
 
 > [!TIP]
 > If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
