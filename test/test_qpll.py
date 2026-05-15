@@ -64,6 +64,24 @@ def test_shared_qpll_dual_configuration_assigns_distinct_channels(monkeypatch):
     )
 
 
+def test_shared_qpll_eth_sata_configuration_assigns_distinct_channels(monkeypatch):
+    """Verify Ethernet+SATA fits the two-channel QPLL resource budget."""
+    monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
+    platform = _DummyPlatform()
+
+    dut = SharedQPLL(platform, with_eth=True, with_sata=True)
+
+    assert dut.channel_map == {"eth": 0, "sata": 1}
+    assert dut.get_channel("eth") is dut.qpll.channels[0]
+    assert dut.get_channel("sata") is dut.qpll.channels[1]
+    assert dut.qpll.kwargs["qpllsettings1"] == qpll_mod.QPLLSettings(
+        refclksel  = 0b111,
+        fbdiv      = 5,
+        fbdiv_45   = 4,
+        refclk_div = 1,
+    )
+
+
 @pytest.mark.parametrize("eth_phy, refclk_freq, out_div, expected_linerate", [
     ("1000basex", 125e6,    4, 1.25e9),
     ("1000basex", 156.25e6, 4, 1.25e9),

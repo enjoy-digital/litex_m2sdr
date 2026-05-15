@@ -119,7 +119,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | External Clocking               | ✅ (SI5351C: ext. 10MHz)     | ✅ (SI5351C: ext. 10MHz)     | (SI5351B VCXO mode in dev for PTM regulation) |
 |                                 |                              |                              |                                               |
 | **Storage**                     |                              |                              |                                               |
-| SATA                            | ❌                           | ⚠️ (in development)          | `--with-sata`                                 |
+| SATA                            | ❌                           | ✅ (source build)            | `--with-sata`                                 |
 |                                 |                              |                              |                                               |
 | **System Features**             |                              |                              |                                               |
 | Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
@@ -214,6 +214,8 @@ In this design, the PCIe core will then be replaced with [LiteEth](https://githu
 
 The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path. The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC clock to the selected link speed.
 
+Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, using SATA on PCIe lane 0 and Ethernet on the selected SFP lane. PCIe, Ethernet/White-Rabbit, and SATA cannot all be enabled in one image because the shared QPLL exposes two channels.
+
 When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
 
 [> Getting Started
@@ -305,7 +307,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
-- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. SATA support is still in development.
+- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`.
 - **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
 - **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
 - **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
@@ -451,7 +453,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
 2. **Ethernet and PCIe Tests:**
    - For Ethernet tests, if the board is mounted in an Acorn Mini Baseboard:
    ```
-   ./litex_m2sdr.py --with-eth --eth-sfp=0 --build --load
+   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build --load
    ping 192.168.1.50
    ```
    - After loading an Ethernet image, use `m2sdr_util` loopback tests to
@@ -467,6 +469,13 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
      logs and LiteEth counters. See
      [Debugging Guide](doc/debugging-guide.md#ethernet-loopback-diagnostics)
      for the full loopback workflow.
+   - For Ethernet + SATA source-build tests:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
+   cd litex_m2sdr/software/user
+   make m2sdr_sata INTERFACE=USE_LITEETH
+   ./m2sdr_sata -i 192.168.1.50 status
+   ```
    - For Ethernet PTP time-discipline tests on the baseboard:
    ```
    ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load

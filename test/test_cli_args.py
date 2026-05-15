@@ -9,6 +9,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_soc_module():
     root = Path(__file__).resolve().parents[1]
@@ -135,3 +137,70 @@ def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
     assert captured["kwargs"]["sys_clk_freq"] == 100000000
     assert captured["build_name"] == "litex_m2sdr_baseboard_pcie_x1_eth"
     assert captured["output_dir"].endswith(captured["build_name"])
+
+
+def test_main_accepts_ethernet_sata_source_build(monkeypatch):
+    soc_mod = _load_soc_module()
+    captured = {}
+
+    class FakeSoC:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+    class FakeBuilder:
+        def __init__(self, soc, **kwargs):
+            captured["builder_soc"] = soc
+            captured.update(kwargs)
+            self.gateware_dir = "build/fake/gateware"
+
+        def build(self, build_name, run):
+            captured["build_name"] = build_name
+            captured["run"] = run
+
+    monkeypatch.setattr(soc_mod, "BaseSoC", FakeSoC)
+    monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
+    monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        soc_mod,
+        "prepare_wr_environment",
+        lambda **kwargs: {
+            "wr_firmware": kwargs["wr_firmware"],
+            "wr_sfp": kwargs["wr_sfp"],
+            "wr_nic_dir": kwargs["wr_nic_dir"],
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "litex_m2sdr.py",
+            "--variant=baseboard",
+            "--with-eth",
+            "--eth-sfp=0",
+            "--with-sata",
+        ],
+    )
+
+    soc_mod.main()
+
+    assert captured["kwargs"]["variant"] == "baseboard"
+    assert captured["kwargs"]["sys_clk_freq"] == 100000000
+    assert captured["kwargs"]["with_pcie"] is False
+    assert captured["kwargs"]["with_eth"] is True
+    assert captured["kwargs"]["with_sata"] is True
+    assert captured["build_name"] == "litex_m2sdr_baseboard_eth_sata"
+    assert captured["output_dir"].endswith(captured["build_name"])
+    assert captured["run"] is False
+
+
+def test_base_soc_rejects_pcie_eth_sata_triple_use():
+    soc_mod = _load_soc_module()
+
+    with pytest.raises(ValueError, match="shared QPLL has two channels"):
+        soc_mod.BaseSoC(
+            variant="baseboard",
+            with_pcie=True,
+            with_eth=True,
+            with_sata=True,
+            with_jtagbone=False,
+        )

@@ -265,6 +265,11 @@ class BaseSoC(SoCMini):
             msg = "Ethernet and SATA are only supported when mounted in the LiteX Acorn Baseboard Mini! "
             msg += "Available here: https://enjoy-digital-shop.myshopify.com/products/litex-acorn-baseboard-mini"
             raise ValueError(msg)
+        if with_pcie and (with_eth or with_white_rabbit) and with_sata:
+            msg = "PCIe, Ethernet/White-Rabbit, and SATA cannot be enabled together: "
+            msg += "the shared QPLL has two channels. Use Ethernet+SATA without PCIe, "
+            msg += "or disable one SerDes protocol."
+            raise ValueError(msg)
 
         if with_white_rabbit and (variant != "baseboard"):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
