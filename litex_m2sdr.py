@@ -363,7 +363,7 @@ class BaseSoC(SoCMini):
         # Clk10 Phase Discipline ----------------------------------------------------------------
 
         if not with_white_rabbit:
-            self.clk10_discipline = MMCMPhaseDiscipline(sys_clk_freq=sys_clk_freq)
+            self.clk10_discipline = MMCMPhaseDiscipline(sys_clk_freq=sys_clk_freq, psclk_domain="clk200")
             self.comb += [
                 self.crg.clk10_mmcm.psen.eq(self.clk10_discipline.psen),
                 self.crg.clk10_mmcm.psincdec.eq(self.clk10_discipline.psincdec),
@@ -1051,6 +1051,14 @@ class BaseSoC(SoCMini):
         # ICAP / DNA utility domains (generated from sys_clk).
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
+
+        # Internal clk200/clk10 utility domains only cross sys through explicit
+        # CDC blocks: MMCM DPS handshakes, IDELAY helpers and the optional
+        # PTP-to-clk10 monitor. Keep those crossings out of synchronous timing.
+        if not with_white_rabbit:
+            for cdc_clk in ["*crg*clkout1*", "*crg*s7mmcm*clkout*"]:
+                add_guarded_false_path("*crg*clkout0*", cdc_clk)
+                add_guarded_false_path(cdc_clk, "*crg*clkout0*")
 
         # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
         if with_pcie:

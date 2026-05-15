@@ -50,7 +50,96 @@ def restore_snapshot(snapshot):
         else:
             path.write_bytes(contents)
 
-def create_manifest(build_dir, build_name, date_str, config, command, release_metadata):
+def parse_number(value):
+    """Convert Vivado timing table values while preserving N/A entries."""
+    return None if value == "N/A" else float(value)
+
+def parse_timing_summary(report):
+    """Extract the top-level Design Timing Summary row from a Vivado report."""
+    lines = report.splitlines()
+    fields = [
+        "wns_ns",
+        "tns_ns",
+        "tns_failing_endpoints",
+        "tns_total_endpoints",
+        "whs_ns",
+        "ths_ns",
+        "ths_failing_endpoints",
+        "ths_total_endpoints",
+        "wpws_ns",
+        "tpws_ns",
+        "tpws_failing_endpoints",
+        "tpws_total_endpoints",
+    ]
+
+    for index, line in enumerate(lines):
+        if "| Design Timing Summary" not in line:
+            continue
+        for row_index in range(index, min(index + 30, len(lines))):
+            if "WNS(ns)" not in lines[row_index]:
+                continue
+            if row_index + 2 >= len(lines):
+                break
+            values = lines[row_index + 2].split()
+            if len(values) < len(fields):
+                break
+            summary = dict(zip(fields, values[:len(fields)]))
+            for key in fields:
+                if key.endswith("_endpoints"):
+                    summary[key] = int(summary[key])
+                else:
+                    summary[key] = parse_number(summary[key])
+            return summary
+
+    raise SystemExit("Unable to parse Design Timing Summary from timing report.")
+
+def check_timing(build_dir, build_name, allow_pcie_pulse_width_warning=False):
+    """Reject bitstreams with setup/hold timing failures before packaging."""
+    timing_report = Path(build_dir, build_name, "gateware", f"{build_name}_timing.rpt")
+    if not timing_report.exists():
+        raise SystemExit(f"Missing timing report for {build_name}: {timing_report}")
+
+    report = timing_report.read_text(errors="replace")
+    summary = parse_timing_summary(report)
+
+    setup_ok = (
+        summary["wns_ns"] is not None and summary["wns_ns"] >= 0 and
+        summary["tns_ns"] == 0 and
+        summary["tns_failing_endpoints"] == 0
+    )
+    hold_ok = (
+        summary["whs_ns"] is not None and summary["whs_ns"] >= 0 and
+        summary["ths_ns"] == 0 and
+        summary["ths_failing_endpoints"] == 0
+    )
+    if not (setup_ok and hold_ok):
+        raise SystemExit(f"Setup/hold timing failed for {build_name}: {timing_report}")
+
+    pulse_width_ok = (
+        (summary["wpws_ns"] is None or summary["wpws_ns"] >= 0) and
+        (summary["tpws_ns"] is None or summary["tpws_ns"] >= 0) and
+        summary["tpws_failing_endpoints"] == 0
+    )
+    allowed_pcie_pulse_width_warning = (
+        # Vivado 2024.1 reports a single -42ps pulse-width endpoint on the
+        # Xilinx 7-series PCIe IP generated clocks. Keep this explicit and
+        # narrow so real setup/hold or broader pulse-width failures still stop.
+        allow_pcie_pulse_width_warning and
+        summary["tpws_failing_endpoints"] == 1 and
+        summary["tpws_ns"] is not None and
+        summary["tpws_ns"] >= -0.050
+    )
+    summary["pulse_width_warning_allowed"] = bool(allowed_pcie_pulse_width_warning)
+    if not (pulse_width_ok or allowed_pcie_pulse_width_warning):
+        raise SystemExit(f"Pulse-width timing failed for {build_name}: {timing_report}")
+
+    if allowed_pcie_pulse_width_warning:
+        print(f"Setup/hold timing clean with allowed PCIe pulse-width warning: {timing_report}")
+    else:
+        print(f"Timing clean: {timing_report}")
+    return summary
+
+def create_manifest(build_dir, build_name, date_str, config, command, release_metadata, timing_summary=None):
     """Create a small release manifest next to the generated SoC artifacts."""
     manifest_path = Path(build_dir, build_name, "release_manifest.json")
     manifest = {
@@ -63,15 +152,17 @@ def create_manifest(build_dir, build_name, date_str, config, command, release_me
         "git_revision"  : release_metadata["git_revision"],
         "git_dirty"     : release_metadata["git_dirty"],
     }
+    if timing_summary is not None:
+        manifest["timing_summary"] = timing_summary
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest_path
 
-def create_archive(build_dir, build_name, date_str, config, command, release_metadata, nobuild=False):
+def create_archive(build_dir, build_name, date_str, config, command, release_metadata, timing_summary=None, nobuild=False):
     """Create a release zip archive for one build configuration."""
     gateware_dir = Path(build_dir, build_name, "gateware")
     archive_name = Path(build_dir, f"{build_name}_{date_str}.zip")
-    manifest_path = create_manifest(build_dir, build_name, date_str, config, command, release_metadata)
+    manifest_path = create_manifest(build_dir, build_name, date_str, config, command, release_metadata, timing_summary)
 
     # If building is disabled, package the generated build directory contents
     # that already exist. This is useful to validate archive naming/layout
@@ -215,8 +306,15 @@ def main():
     try:
         for config in configurations:
             command = build_configuration(config, nobuild=args.nobuild)
+            timing_summary = None
+            if not args.nobuild:
+                timing_summary = check_timing(
+                    build_dir,
+                    config["build_name"],
+                    allow_pcie_pulse_width_warning=config["with_pcie"],
+                )
             # Create archive for this build and move it to build_dir.
-            create_archive(build_dir, config["build_name"], date_str, config, command, release_metadata, args.nobuild)
+            create_archive(build_dir, config["build_name"], date_str, config, command, release_metadata, timing_summary, args.nobuild)
     finally:
         restore_snapshot(generated_snapshot)
 

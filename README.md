@@ -199,9 +199,10 @@ The PCIe design has already been validated at the maximum AD9361 specified sampl
 --------------------------------------------
 <a id="ethernet-soc-design"></a>
 
-> [!WARNING]
+> [!NOTE]
 >
-> **WiP** 🧪 Still in the lab, RX only for now!
+> Ethernet support is intended for LiteX Acorn Baseboard Mini deployments and
+> is bandwidth-limited by the selected 1000BaseX/2500BaseX link.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/bbcc0c79-4ae8-4e5b-94d8-aa7aff89bae2" width="100%">
@@ -211,7 +212,7 @@ The Ethernet design variant gives flexibility when deploying the SDR. The PCIe c
 
 In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
 
-The Ethernet SoC design is RX capable only for now. TX support will come soon.
+The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path. The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC clock to the selected link speed.
 
 When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
 
@@ -319,7 +320,7 @@ Date-named release archives are generated with:
 ./release.py
 ```
 
-The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
+The release script checks the final Vivado timing report before creating each archive, so a bitstream with setup/hold timing failures is not packaged. Release manifests include the parsed timing summary; PCIe images may record the known Xilinx PCIe IP pulse-width warning when setup/hold timing is otherwise clean. The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
 
 | Archive prefix | Build command |
 |----------------|---------------|
