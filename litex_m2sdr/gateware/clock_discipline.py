@@ -15,7 +15,7 @@ from litex.soc.interconnect.csr import *
 
 class MMCMPhaseDiscipline(LiteXModule):
     """Drive a MMCM Dynamic Phase Shift port with bounded phase-step requests."""
-    def __init__(self, sys_clk_freq, with_csr=True):
+    def __init__(self, sys_clk_freq, psclk_domain="sys", with_csr=True):
         # Config.
         # -------
         self.enable             = Signal()
@@ -63,6 +63,9 @@ class MMCMPhaseDiscipline(LiteXModule):
         auto_step               = Signal()
         step_inc_request        = Signal()
         step_dec_request        = Signal()
+        psdone_sys              = Signal()
+        psen_sys                = Signal()
+        psincdec_sys            = Signal()
 
         self.comb += [
             effective_enable.eq(Mux(self.override, self.override_enable, self.enable)),
@@ -86,10 +89,42 @@ class MMCMPhaseDiscipline(LiteXModule):
             self.pending.eq(step_inc_request | step_dec_request),
         ]
 
+        # MMCM DPS Clock-Domain Crossing.
+        # -------------------------------
+        # The MMCM samples PSEN/PSINCDEC on the PSCLK domain configured through
+        # S7MMCM.expose_dps().  Keep the servo, counters and CSRs in sys, then
+        # cross only the one-cycle step pulse, the stable direction bit and the
+        # PSDONE pulse.  This avoids timing-analyzed sys->PSCLK paths in PCIe
+        # builds, where sys normally runs at 125MHz while PSCLK is 200MHz.
+        if psclk_domain == "sys":
+            self.comb += [
+                self.psen.eq(psen_sys),
+                self.psincdec.eq(psincdec_sys),
+                psdone_sys.eq(self.psdone),
+            ]
+        else:
+            request_cdc = PulseSynchronizer("sys", psclk_domain)
+            done_cdc    = PulseSynchronizer(psclk_domain, "sys")
+            psincdec_ps = Signal()
+            psen_ps     = Signal()
+            self.submodules += request_cdc, done_cdc
+            self.specials += MultiReg(psincdec_sys, psincdec_ps, odomain=psclk_domain)
+            self.comb += [
+                request_cdc.i.eq(psen_sys),
+                done_cdc.i.eq(self.psdone),
+                self.psincdec.eq(psincdec_ps),
+                psdone_sys.eq(done_cdc.o),
+            ]
+            psclk_sync = getattr(self.sync, psclk_domain)
+            psclk_sync += [
+                psen_ps.eq(request_cdc.o),
+                self.psen.eq(psen_ps),
+            ]
+
         # Q0.32 Rate Accumulator.
         # -----------------------
         self.sync += [
-            self.psen.eq(0),
+            psen_sys.eq(0),
             If(sample_counter >= (effective_update_cycles - 1),
                 sample_counter.eq(0),
                 sample_tick.eq(1),
@@ -116,7 +151,7 @@ class MMCMPhaseDiscipline(LiteXModule):
                 self.dropped_count.eq(0),
             ),
             If(self.busy,
-                If(self.psdone,
+                If(psdone_sys,
                     self.busy.eq(0),
                     self.step_count.eq(self.step_count + 1),
                     If(self.last_direction,
@@ -129,13 +164,13 @@ class MMCMPhaseDiscipline(LiteXModule):
                 ),
             ).Else(
                 If(step_inc_request,
-                    self.psen.eq(1),
-                    self.psincdec.eq(1),
+                    psen_sys.eq(1),
+                    psincdec_sys.eq(1),
                     self.last_direction.eq(1),
                     self.busy.eq(1),
                 ).Elif(step_dec_request,
-                    self.psen.eq(1),
-                    self.psincdec.eq(0),
+                    psen_sys.eq(1),
+                    psincdec_sys.eq(0),
                     self.last_direction.eq(0),
                     self.busy.eq(1),
                 )

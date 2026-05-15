@@ -363,7 +363,7 @@ class BaseSoC(SoCMini):
         # Clk10 Phase Discipline ----------------------------------------------------------------
 
         if not with_white_rabbit:
-            self.clk10_discipline = MMCMPhaseDiscipline(sys_clk_freq=sys_clk_freq)
+            self.clk10_discipline = MMCMPhaseDiscipline(sys_clk_freq=sys_clk_freq, psclk_domain="clk200")
             self.comb += [
                 self.crg.clk10_mmcm.psen.eq(self.clk10_discipline.psen),
                 self.crg.clk10_mmcm.psincdec.eq(self.clk10_discipline.psincdec),
@@ -1052,15 +1052,33 @@ class BaseSoC(SoCMini):
         self.icap.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
         self.dna.add_timing_constraints(platform, sys_clk_freq, self.crg.cd_sys.clk)
 
-        # PCIe: keep CRG <-> PCIe pclk asynchronous and ignore 125/250MHz mux alternatives.
+        # Internal clk200/clk10 utility domains only cross sys through explicit
+        # CDC blocks: MMCM DPS handshakes, IDELAY helpers and the optional
+        # PTP-to-clk10 monitor. Keep those crossings out of synchronous timing.
+        if not with_white_rabbit:
+            for cdc_clk in ["*crg*clkout1*", "*crg*s7mmcm*clkout*"]:
+                add_guarded_false_path("*crg*clkout0*", cdc_clk)
+                add_guarded_false_path(cdc_clk, "*crg*clkout0*")
+
+        # PCIe: all PHY-generated user clocks are asynchronous to sys. LitePCIe
+        # crosses status/control signals with CDC primitives; keeping these paths
+        # timed makes Vivado optimize impossible phase relationships between the
+        # PCIe hard-IP PIPECLK outputs and the board system clock.
         if with_pcie:
-            false_paths = [
-                ("*crg*clkout0*",  "*s7pciephy_clkout3*"),
-                ("*s7pciephy_clkout0*", "*s7pciephy_clkout1*"),
-            ]
-            for clk0, clk1 in false_paths:
-                add_guarded_false_path(clk0, clk1)
-                add_guarded_false_path(clk1, clk0)
+            for pcie_clk in [
+                "*s7pciephy_clkout0*",
+                "*s7pciephy_clkout1*",
+                "*s7pciephy_clkout2*",
+                "*s7pciephy_clkout3*",
+            ]:
+                add_guarded_false_path("*crg*clkout0*", pcie_clk)
+                add_guarded_false_path(pcie_clk, "*crg*clkout0*")
+
+            # The S7 PCIe PHY contains both 125MHz and 250MHz user-clock
+            # alternatives. They are muxed by the IP and are not synchronous
+            # launch/capture domains for user logic.
+            add_guarded_false_path("*s7pciephy_clkout0*", "*s7pciephy_clkout1*")
+            add_guarded_false_path("*s7pciephy_clkout1*", "*s7pciephy_clkout0*")
 
         # Ethernet transceiver clocks.
         if with_eth:
@@ -1208,7 +1226,7 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX SoC on LiteX-M2SDR.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # Build/Load/Utilities.
     parser.add_argument("--variant",          default="m2",              help="Design variant.", choices=["m2", "baseboard"])
-    parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz for LiteEth-only, 125MHz otherwise).")
+    parser.add_argument("--sys-clk-freq",     default=None, type=float,  help="System clock frequency in Hz (default: 100MHz with Ethernet, 125MHz otherwise).")
     parser.add_argument("--reset",            action="store_true",       help="Reset the device.")
     parser.add_argument("--build",            action="store_true",       help="Build bitstream.")
     parser.add_argument("--load",             action="store_true",       help="Load bitstream.")
@@ -1293,7 +1311,7 @@ def main():
     if args.wr_status and not args.with_white_rabbit:
         return
 
-    default_sys_clk_freq = 100e6 if (args.with_eth and not args.with_pcie) else 125e6
+    default_sys_clk_freq = 100e6 if args.with_eth else 125e6
     if args.sys_clk_freq is None:
         args.sys_clk_freq = default_sys_clk_freq
 
