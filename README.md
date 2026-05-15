@@ -332,6 +332,15 @@ The release script checks the final Vivado timing report before creating each ar
 
 Each `build/*_<YYYY_MM_DD>.zip` contains the `.bit`, `.bin`, multiboot fallback/operational images, CSR exports, and a JSON manifest. Generated archives and bitstreams are release artifacts and are not committed to git.
 
+GitHub release publication uses the same date string as the archive suffix, with no `v` prefix on the tag. After generating the archives from the final release commit, validate the upload plan and then publish it with:
+
+```
+scripts/github_release.py --date 2026_05_15 --dry-run
+scripts/github_release.py --date 2026_05_15
+```
+
+The helper requires the GitHub CLI `gh` to be installed and authenticated with release write access. It checks for a clean tracked tree, verifies that the expected `build/*_2026_05_15.zip` files exist, reads each archive manifest, creates and pushes the annotated `2026_05_15` tag on the manifest git revision, extracts the matching `CHANGELOG.md` section as release notes, and uploads the archive set to the GitHub release.
+
 > [!TIP]
 > If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
 >

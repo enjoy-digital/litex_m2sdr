@@ -24,6 +24,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Extended `libm2sdr`, `m2sdr_util`, and SoapySDR with PTP monitoring/control support, time-source reporting, and updated host-side documentation for the new workflow.
 - Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend for PTP-referenced RFIC clock operation without changing the default non-PTP operating mode.
 - Added date-named release archives with timing-gated packaging and manifests for the first supported PCIe/Ethernet image set.
+- Added a GitHub release helper that publishes the checked archive set with the same `YYYY_MM_DD` date used by archive names and release tags.
 - Added Ethernet TX validation and FM TX/RX utility support for baseboard Ethernet operation.
 - Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release artifact packaging, and Ethernet-enabled build defaults.
 
