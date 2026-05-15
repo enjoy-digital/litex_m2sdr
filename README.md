@@ -113,6 +113,7 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 | **Timing & Sync**               |                              |                              |                                               |
 | PTM (Precision Time Measurement)| ✅ (PCIe Gen2 x1 only)       | ✅ (PCIe Gen2 x1 only)       | `--with-pcie --pcie-lanes=1 --with-pcie-ptm`  |
 | Ethernet PTP Time Discipline    | ❌                           | ✅                           | `--with-eth --with-eth-ptp`                   |
+| Ethernet PTP RFIC Ref Clock     | ❌                           | ✅                           | `--with-eth --with-eth-ptp --with-eth-ptp-rfic-clock` |
 | White Rabbit Support            | ❌                           | ✅                           | `--with-white-rabbit`                         |
 | External Clocking               | ✅ (SI5351C: ext. 10MHz)     | ✅ (SI5351C: ext. 10MHz)     | (SI5351B VCXO mode in dev for PTM regulation) |
 |                                 |                              |                              |                                               |
@@ -211,7 +212,7 @@ In this design, the PCIe core will then be replaced with [LiteEth](https://githu
 
 The Ethernet SoC design is RX capable only for now. TX support will come soon.
 
-When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. In this first implementation, Ethernet PTP and White Rabbit are mutually exclusive, and the RF/sample clocks themselves are not yet steered from PTP.
+When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
 
 [> Getting Started
 ------------------
@@ -303,7 +304,9 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA (WIP)**: Ethernet SoC is RX-only for now; TX support is in development. SATA support is in development. Both require the LiteX Acorn Baseboard Mini.
-- **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util ptp-status --watch`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
+- **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
+- **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
+- **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
 
 > [!TIP]
 > If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
@@ -434,13 +437,29 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    - For Ethernet PTP time-discipline tests on the baseboard:
    ```
    ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
-   sudo ptp4l -i <host-eth-iface> -2 -m
+   sudo ptp4l -i <host-eth-iface> -4 -E -S -m
    cd litex_m2sdr/software/user
-   ./m2sdr_util info
-   ./m2sdr_util ptp-status --watch
+   make m2sdr_util INTERFACE=USE_LITEETH
+   ./m2sdr_util -i 192.168.1.50 info
+   ./m2sdr_util -i 192.168.1.50 --watch ptp-status
    ```
    - `m2sdr_util info` reports whether the LiteEth PTP core is locked, whether the board time is locked to PTP, and whether the clock is in holdover.
-   - `m2sdr_util ptp-status --watch` shows the live discipline state, learned master identity, and lock-loss / protocol counters. `m2sdr_util ptp-config` exposes runtime servo tuning.
+   - `m2sdr_util --watch ptp-status` shows the live discipline state, learned master identity, and lock/loss counters from the board-time discipline loop. `m2sdr_util --json ptp-status` and `m2sdr_util ptp-smoke` provide machine-readable and pass/fail checks for lab automation; use tcpdump when protocol message visibility is needed. `m2sdr_util ptp-config` exposes runtime servo tuning.
+   - To also discipline the FPGA-generated 10MHz RFIC reference path:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --with-eth-ptp-rfic-clock --eth-sfp=0 --build --load
+   sudo ptp4l -i <host-eth-iface> -4 -E -S -m
+   cd litex_m2sdr/software/user
+   make m2sdr_util INTERFACE=USE_LITEETH
+   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config
+   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on
+   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config align
+   ./m2sdr_util -i 192.168.1.50 --watch ptp-clock10-status
+   cd ../../..
+   scripts/m2sdr_ptp_check.py smoke --ip 192.168.1.50 --iface <host-eth-iface> --with-clock10 --require-clock10-lock
+   ```
+   - After the clk10 loop is stable, use `m2sdr_rf --sync fpga` or SoapySDR `clock_source=fpga` so the SI5351C derives the AD9361 reference from the FPGA 10MHz path.
+   - See [Ethernet PTP Bring-Up](doc/ptp/README.md) for known-good `ptp4l` configs, host timestamping checks, and smoke/soak validation commands.
    - For PCIe tests, if the board is mounted directly in an M2 slot:
    ```
    ./litex_m2sdr.py --with-pcie --variant=m2 --build --load

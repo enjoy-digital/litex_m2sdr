@@ -40,9 +40,11 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - TX control uses positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR.
 - Streaming-oriented tools that support both SC16 and SC8 expose `--format sc16|sc8`. Older `--8bit` / `-8` forms are kept as compatibility aliases where applicable.
 - Some tools still accept `-z` / `--zero-copy` for compatibility, but the current sync API hides transport-specific zero-copy behavior.
-- On gateware builds that enable Ethernet PTP time discipline (`--with-eth --with-eth-ptp`), `m2sdr_util info` reports the current PTP lock/holdover state and `m2sdr_util ptp-status --watch` shows the live lock, identity, and counter state.
-- `m2sdr_util ptp-config` exposes the runtime servo controls (enable/holdover, thresholds, trims, gains) and can clear the board-side discipline/identity counters.
-- The public `libm2sdr` API exposes `m2sdr_get_ptp_status()`, `m2sdr_get_ptp_discipline_config()`, `m2sdr_set_ptp_discipline_config()`, and `m2sdr_clear_ptp_counters()`.
+- On gateware builds that enable Ethernet PTP time discipline (`--with-eth --with-eth-ptp`), `m2sdr_util info` reports the current PTP lock/holdover state and `m2sdr_util --watch ptp-status` shows the live lock, identity, and counter state.
+- `m2sdr_util --json ptp-status` emits machine-readable status for automation and `m2sdr_util ptp-smoke` provides a bounded pass/fail lock and error check. Use the tcpdump-backed helper script when protocol message visibility is needed.
+- `m2sdr_util ptp-config` exposes the runtime servo controls (enable/holdover, thresholds, lock-loss/coarse-step deglitching, trims, gains) and can clear the board-side discipline/identity counters. The default discipline disables runtime coarse rewrites after acquisition, and near-one-second runtime coarse excursions are always ignored so LiteEth TSU second-step glitches are not copied into board time.
+- Builds with `--with-eth-ptp-rfic-clock` also expose `m2sdr_util ptp-clock10-status` and `m2sdr_util ptp-clock10-config` for the optional PTP-to-FPGA-10MHz PI monitor/discipline loop used by the SI5351C FPGA clock-source path.
+- The public `libm2sdr` API exposes `m2sdr_get_ptp_status()`, `m2sdr_get_ptp_discipline_config()`, `m2sdr_set_ptp_discipline_config()`, `m2sdr_clear_ptp_counters()`, plus the matching `m2sdr_get_ptp_clock10_*()` helpers when the PTP clk10 block is present.
 - When Ethernet PTP actively owns the board clock, host-side absolute time writes are rejected to avoid conflicting masters.
 
 ## Build dependencies
@@ -94,7 +96,17 @@ m2sdr_util [options] cmd [args...]
 - **scratch-test**
   Check scratch register for basic read/write.
 - **clk-test**
-  Measure on-board clock frequencies.
+  Measure on-board clock frequencies, including the FPGA 10 MHz clock when the loaded gateware exposes it.
+- **ptp-status** / **ptp-status --json**
+  Show Ethernet PTP lock, board-time discipline, learned master identity, and board-time discipline counters. The JSON form is intended for lab automation.
+- **ptp-smoke**
+  Run a bounded PTP pass/fail check for lock and board-time error.
+- **ptp-config**
+  Show or update PTP board-time discipline fields such as `enable`, `holdover`, `update-cycles`, `unlock-misses`, and `coarse-confirm`; use `ptp-config clear-counters` to reset PTP counters.
+- **ptp-clock10-status** / **ptp-clock10-status --json**
+  Show the optional PTP-to-FPGA-10MHz monitor/discipline state exposed by `--with-eth-ptp-rfic-clock`. The alias **ptp-rfic-clock-status** is also accepted.
+- **ptp-clock10-config**
+  Show or update the optional clk10 discipline fields such as `enable`, `holdover`, `invert`, `update-cycles`, `p-gain`, `i-gain`, `rate-limit`, and `lock-window-ticks`; use `ptp-clock10-config align` to realign the 1 Hz marker on the next PTP reference edge and `ptp-clock10-config clear-counters` to reset clk10 counters. The alias **ptp-rfic-clock-config** is also accepted.
 - **fpga-loopback-test**
   Test host TX -> FPGA stream loopback -> host RX. This isolates the Ethernet
   or PCIe stream path from the AD9361.
@@ -126,6 +138,27 @@ Example usage:
 ./m2sdr_util led-pulse 0x4
 ./m2sdr_util flash-read backup.bin 0x100000
 ~~~~
+
+Ethernet PTP bring-up and RFIC-reference clock checks:
+
+~~~~
+make m2sdr_util INTERFACE=USE_LITEETH
+./m2sdr_util -i 192.168.1.50 info
+./m2sdr_util -i 192.168.1.50 ptp-status
+./m2sdr_util -i 192.168.1.50 --json ptp-status
+./m2sdr_util -i 192.168.1.50 ptp-config
+
+# Only present in gateware built with --with-eth-ptp-rfic-clock.
+./m2sdr_util -i 192.168.1.50 ptp-clock10-config
+./m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on
+./m2sdr_util -i 192.168.1.50 ptp-clock10-config align
+./m2sdr_util -i 192.168.1.50 --watch ptp-clock10-status
+~~~~
+
+Use `scripts/m2sdr_ptp_check.py smoke --with-clock10` or the longer `soak`
+mode from the repository root when you need tcpdump-backed validation and
+JSON/CSV logs. See `../../../doc/ptp/README.md` for the full direct-cable PTP
+workflow and known-good `ptp4l` configurations.
 
 Loopback diagnostics use compact progress by default and accept `--verbose` for
 the detailed RF setup logs and counter table. They reset the FPGA streaming
@@ -219,6 +252,12 @@ Example usage:
 External 10MHz synchronization example:
 ~~~~
 ./m2sdr_rf --sync=external --refclk-freq=38400000
+~~~~
+
+FPGA-generated 10MHz synchronization example, for builds where the FPGA clk10
+path is present and the PTP clk10 loop has already been enabled and locked:
+~~~~
+./m2sdr_rf --sync=fpga --refclk-freq=38400000
 ~~~~
 
 Explicit FPGA<->AD9361 interface delay calibration example:

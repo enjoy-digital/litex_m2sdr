@@ -194,8 +194,8 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 ## Notes
 
 - Streaming supports SC16/Q11 and SC8/Q7.
-- `m2sdr_get_ptp_status()` reports the LiteEth PTP lock state, current discipline mode, local/master port identity, lock-loss counters, and protocol/debug counters when the FPGA bitstream was built with `--with-eth --with-eth-ptp`.
-- `m2sdr_get_ptp_discipline_config()` / `m2sdr_set_ptp_discipline_config()` expose the runtime servo controls used by `m2sdr_util ptp-config`.
+- `m2sdr_get_ptp_status()` reports the LiteEth PTP lock state, current discipline mode, local/master port identity, tolerated lock-window misses, lock-loss counters, and protocol/debug counters when the FPGA bitstream was built with `--with-eth --with-eth-ptp`.
+- `m2sdr_get_ptp_discipline_config()` / `m2sdr_set_ptp_discipline_config()` expose the runtime servo controls used by `m2sdr_util ptp-config`, including the consecutive `unlock_misses` threshold used to deglitch time-lock loss reporting and `coarse_confirm` used to allow confirmed runtime coarse realignments. The default `unlock_misses=64` avoids reporting short software-timestamp jitter bursts as lock drops. The default `coarse_confirm=0` disables runtime coarse rewrites after initial acquisition; near-one-second runtime coarse errors are always treated as TSU excursions and are not copied into the board clock.
 - `m2sdr_clear_ptp_counters()` clears the board-side discipline and identity counters. LiteEth protocol counters remain read-only in this first implementation.
 - Read-side time APIs continue to operate on the same logical board clock regardless of whether it is free-running, manually set, or disciplined from Ethernet PTP.
 - Use `m2sdr_bytes_to_samples()` / `m2sdr_samples_to_bytes()` instead of hard-coding sample sizes in applications.

@@ -49,6 +49,9 @@ You can pass device arguments to configure the driver. These are most useful whe
   - `internal` keeps the local XO path.
   - `external` selects the SI5351C `10MHz` CLKIN from the uFL connector.
   - `fpga` selects the SI5351C `10MHz` CLKIN from the FPGA `clk10` path.
+    On Ethernet PTP builds that also enable `--with-eth-ptp-rfic-clock`, use
+    `m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on` and wait for
+    the clk10 loop to lock before opening SoapySDR with `clock_source=fpga`.
 - **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
@@ -70,6 +73,11 @@ SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_prof
 Example (Etherbone control + Soapy RX over FPGA VRT):
 ```bash
 SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50,eth_mode=vrt,vrt_port=4991"
+```
+
+Example (Ethernet PTP-disciplined FPGA 10MHz RFIC reference):
+```bash
+SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50,clock_source=fpga"
 ```
 
 When the bitstream was built with `--with-eth --with-eth-ptp`, the Soapy driver also exposes:
