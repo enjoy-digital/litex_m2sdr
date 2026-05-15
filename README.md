@@ -320,7 +320,7 @@ Date-named release archives are generated with:
 ./release.py
 ```
 
-The release script checks the final Vivado timing report before creating each archive, so a bitstream with setup/hold timing failures is not packaged. Release manifests include the parsed timing summary; PCIe images may record the known Xilinx PCIe IP pulse-width warning when setup/hold timing is otherwise clean. The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
+The release script checks the final Vivado timing report before creating each archive, so a bitstream with setup/hold timing failures is not packaged. Release manifests include the parsed timing summary; PCIe images may record the known Xilinx PCIe IP pulse-width warning when setup/hold timing is otherwise clean. Ethernet-enabled builds default to a 100MHz system clock for timing margin; PCIe-only M.2 builds keep the 125MHz system clock. The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
 
 | Archive prefix | Build command |
 |----------------|---------------|

@@ -85,3 +85,53 @@ def test_main_exposes_base_soc_optional_args(monkeypatch):
     assert captured["output_dir"].endswith(captured["build_name"])
     assert captured["csr_csv"] == "scripts/csr.csv"
     assert captured["run"] is False
+
+
+def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
+    soc_mod = _load_soc_module()
+    captured = {}
+
+    class FakeSoC:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+    class FakeBuilder:
+        def __init__(self, soc, **kwargs):
+            captured["builder_soc"] = soc
+            captured.update(kwargs)
+            self.gateware_dir = "build/fake/gateware"
+
+        def build(self, build_name, run):
+            captured["build_name"] = build_name
+            captured["run"] = run
+
+    monkeypatch.setattr(soc_mod, "BaseSoC", FakeSoC)
+    monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
+    monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        soc_mod,
+        "prepare_wr_environment",
+        lambda **kwargs: {
+            "wr_firmware": kwargs["wr_firmware"],
+            "wr_sfp": kwargs["wr_sfp"],
+            "wr_nic_dir": kwargs["wr_nic_dir"],
+        },
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "litex_m2sdr.py",
+            "--variant=baseboard",
+            "--with-pcie",
+            "--pcie-lanes=1",
+            "--with-eth",
+            "--eth-sfp=0",
+        ],
+    )
+
+    soc_mod.main()
+
+    assert captured["kwargs"]["sys_clk_freq"] == 100000000
+    assert captured["build_name"] == "litex_m2sdr_baseboard_pcie_x1_eth"
+    assert captured["output_dir"].endswith(captured["build_name"])
