@@ -11,36 +11,12 @@ from litex.soc.interconnect.csr import *
 # Capability ---------------------------------------------------------------------------------------
 
 class Capability(LiteXModule):
-    """
-    Capability Module for LiteX M2SDR.
-    Provides read-only CSRs to indicate the API version, hardware capabilities such as PCIe
-    presence and configuration, Ethernet presence and speed, SATA presence and configuration,
-    GPIO presence, White Rabbit presence, and board-level details.
-
-    Parameters:
-    - api_version_str (str) : API version as a string (e.g., "1.0" for v1.0).
-    - pcie_enabled (bool)   : Indicates if PCIe is present.
-    - pcie_speed (str)      : PCIe speed (e.g., "gen2").
-    - pcie_lanes (int)      : Number of PCIe lanes (e.g., 1, 2, 4, 8).
-    - pcie_ptm (bool)       : PCIe Precision Time Measurement enable status (True if PTM is enabled).
-    - eth_enabled (bool)    : Indicates if Ethernet is present.
-    - eth_speed (str)       : Ethernet speed (e.g., "1000basex" for 1Gbps).
-    - eth_ptp (bool)        : Indicates if Ethernet PTP time discipline is present.
-    - sata_enabled (bool)   : Indicates if SATA is present.
-    - sata_gen (str)        : SATA generation (e.g., "gen2").
-    - sata_mode (str)       : SATA mode (e.g., "read+write").
-    - gpio_enabled (bool)   : Indicates if GPIO is present.
-    - wr_enabled (bool)     : Indicates if White Rabbit is present.
-    - variant (str)         : Board variant ("m2" or "baseboard").
-    - jtagbone (bool)       : Indicates if JTAGBone is present.
-    - eth_sfp (int)         : Ethernet SFP index.
-    - wr_sfp (int)          : White Rabbit SFP index.
-    """
+    """Expose build-time feature and configuration CSRs to software."""
     def __init__(self, api_version_str,
         # PCIe.
         pcie_enabled, pcie_speed, pcie_lanes, pcie_ptm,
         # Ethernet.
-        eth_enabled, eth_speed, eth_ptp,
+        eth_enabled, eth_speed, eth_ptp, eth_ptp_rfic_clock,
         # SATA.
         sata_enabled, sata_gen, sata_mode,
         # GPIO.
@@ -68,15 +44,17 @@ class Capability(LiteXModule):
             CSRField("wr",       size=1, offset=4, reset=int(wr_enabled),   description="White Rabbit is present."),
             CSRField("jtagbone", size=1, offset=5, reset=int(jtagbone),     description="JTAGBone is present."),
             CSRField("eth_ptp",  size=1, offset=6, reset=int(eth_ptp),      description="Ethernet PTP time discipline is present."),
-            # Reserved bits for future features
+            CSRField("eth_ptp_rfic_clock", size=1, offset=7, reset=int(eth_ptp_rfic_clock),
+                description="Ethernet PTP can discipline the RFIC reference clock path."),
+            # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 
         # PCIe Config.
         # ------------
-        self.pcie_speed_map  = {"gen1": 0, "gen2": 1}
-        self.pcie_lanes_map  = {1: 0, 2: 1, 4: 2}
-        pcie_speed_value     = self.pcie_speed_map[pcie_speed] if pcie_enabled else 0
-        pcie_lanes_value     = self.pcie_lanes_map[pcie_lanes] if pcie_enabled else 0
+        pcie_speed_map  = {"gen1": 0, "gen2": 1}
+        pcie_lanes_map  = {1: 0, 2: 1, 4: 2}
+        pcie_speed_value = pcie_speed_map[pcie_speed] if pcie_enabled else 0
+        pcie_lanes_value = pcie_lanes_map[pcie_lanes] if pcie_enabled else 0
         self._pcie_config = CSRStatus(32, fields=[
             CSRField("speed", size=2, offset=0, reset=pcie_speed_value, values=[
                 ("``0b00``", "Gen1"),
@@ -92,13 +70,13 @@ class Capability(LiteXModule):
                 ("``0``", "PTM disabled or not present."),
                 ("``1``", "PTM enabled."),
             ], description="PCIe Precision Time Measurement (PTM) enable status."),
-            # Reserved bits
+            # Reserved bits.
         ], description="PCIe configuration. Valid only if features.pcie is set.")
 
         # Ethernet Config.
         # ----------------
-        self.eth_speed_map = {"1000basex": 0, "2500basex": 1}
-        eth_speed_value    = self.eth_speed_map[eth_speed] if eth_enabled else 0
+        eth_speed_map  = {"1000basex": 0, "2500basex": 1}
+        eth_speed_value = eth_speed_map[eth_speed] if eth_enabled else 0
         self._eth_config = CSRStatus(32, fields=[
             CSRField("speed", size=2, offset=0, reset=eth_speed_value, values=[
                 ("``0b00``", "1Gbps"),
@@ -107,23 +85,25 @@ class Capability(LiteXModule):
                 ("``0b11``", "Reserved"),
             ], description="Ethernet speed configuration."),
             CSRField("ptp", size=1, offset=2, reset=int(eth_ptp), description="Ethernet PTP time discipline build support."),
-            # Reserved bits
+            CSRField("ptp_rfic_clock", size=1, offset=3, reset=int(eth_ptp_rfic_clock),
+                description="PTP-to-RFIC-reference clock discipline build support."),
+            # Reserved bits.
         ], description="Ethernet configuration. Valid only if features.eth is set.")
 
         # SATA Config.
         # ------------
-        self.sata_gen_map  = {
+        sata_gen_map  = {
             "gen1": 0,
             "gen2": 1,
             "gen3": 2,
         }
-        self.sata_mode_map = {
+        sata_mode_map = {
             "read-only":  0,
             "write-only": 1,
             "read+write": 2,
         }
-        sata_gen_value  = self.sata_gen_map[sata_gen] if sata_enabled else 0
-        sata_mode_value = self.sata_mode_map[sata_mode] if sata_enabled else 0
+        sata_gen_value  = sata_gen_map[sata_gen] if sata_enabled else 0
+        sata_mode_value = sata_mode_map[sata_mode] if sata_enabled else 0
         self._sata_config = CSRStatus(32, fields=[
             CSRField("gen", size=2, offset=0, reset=sata_gen_value, values=[
                 ("``0b00``", "Gen1"),
@@ -137,13 +117,13 @@ class Capability(LiteXModule):
                 ("``0b10``", "Read+Write"),
                 ("``0b11``", "Reserved"),
             ], description="SATA mode configuration."),
-            # Reserved bits
+            # Reserved bits.
         ], description="SATA configuration. Valid only if features.sata is set.")
 
         # Board Info.
         # -----------
-        self.variant_map = {"m2": 0, "baseboard": 1}
-        variant_value = self.variant_map.get(variant, 0)
+        variant_map   = {"m2": 0, "baseboard": 1}
+        variant_value = variant_map.get(variant, 0)
         self._board_info = CSRStatus(32, fields=[
             CSRField("variant",  size=2, offset=0, reset=variant_value, values=[
                 ("``0b00``", "M.2"),
@@ -154,5 +134,5 @@ class Capability(LiteXModule):
             CSRField("jtagbone", size=1, offset=2, reset=int(jtagbone), description="JTAGBone enabled."),
             CSRField("eth_sfp",  size=1, offset=3, reset=int(eth_sfp),  description="Ethernet SFP index."),
             CSRField("wr_sfp",   size=1, offset=4, reset=int(wr_sfp),   description="White Rabbit SFP index."),
-            # Reserved bits
+            # Reserved bits.
         ], description="Board-level configuration.")

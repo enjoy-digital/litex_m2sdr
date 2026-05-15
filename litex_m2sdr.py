@@ -50,7 +50,7 @@ from litex_m2sdr import Platform, _io_baseboard
 from litex_m2sdr.wr_helper import prepare_wr_environment
 
 from litex_m2sdr.gateware.capability       import Capability
-from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline
+from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock10Discipline
 from litex_m2sdr.gateware.si5351           import SI5351
 from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 from litex_m2sdr.gateware.qpll        import SharedQPLL
@@ -68,6 +68,21 @@ from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
 from litex_m2sdr.software import generate_litepcie_software
+
+# RFIC Clock Policy --------------------------------------------------------------------------------
+
+def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversampling=False):
+    if with_eth:
+        # Ethernet builds are limited by streaming bandwidth. Size the RFIC clock for 2T2R SC8:
+        # 1000BaseX -> 30.72MSPS, 2500BaseX -> 61.44MSPS.
+        return {
+            "1000basex" : 122.88e6,
+            "2500basex" : 245.76e6,
+        }[eth_phy]
+    return {
+        False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
+        True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
+    }[with_rfic_oversampling]
 
 # CRG ----------------------------------------------------------------------------------------------
 
@@ -209,6 +224,7 @@ class BaseSoC(SoCMini):
         # SDR.
         "si5351"           : 20,
         "clk10_discipline" : 40,
+        "ptp_clk10_discipline" : 41,
         "header"           : 23,
         "ad9361"           : 24,
         "crossbar"         : 25,
@@ -224,7 +240,8 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_debug=False,
+        with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_igmp=True, eth_ptp_igmp_interval=2,
+        with_eth_ptp_rfic_clock = False,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
@@ -237,10 +254,11 @@ class BaseSoC(SoCMini):
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
-        platform.rfic_clk_freq = {
-            False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
-            True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
-        }[with_rfic_oversampling]
+        platform.rfic_clk_freq = get_rfic_clk_freq(
+            with_eth               = with_eth,
+            eth_phy                = eth_phy,
+            with_rfic_oversampling = with_rfic_oversampling,
+        )
         if variant == "baseboard":
             platform.add_extension(_io_baseboard)
         if (with_eth or with_sata) and (variant != "baseboard"):
@@ -256,6 +274,10 @@ class BaseSoC(SoCMini):
             raise ValueError("Ethernet PTP requires --with-eth.")
         if with_eth_ptp and with_white_rabbit:
             raise ValueError("Ethernet PTP and White Rabbit cannot both own the board time generator in the same build yet.")
+        if with_eth_ptp_rfic_clock and not with_eth_ptp:
+            raise ValueError("PTP RFIC clock discipline requires --with-eth-ptp.")
+        if with_eth_ptp_rfic_clock and with_white_rabbit:
+            raise ValueError("PTP RFIC clock discipline uses the non-White-Rabbit clk10 MMCM path.")
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -303,6 +325,7 @@ class BaseSoC(SoCMini):
             eth_enabled     = with_eth,
             eth_speed       = eth_phy,
             eth_ptp         = with_eth_ptp,
+            eth_ptp_rfic_clock = with_eth_ptp_rfic_clock,
 
             # SATA Capabilities.
             sata_enabled    = with_sata,
@@ -521,14 +544,15 @@ class BaseSoC(SoCMini):
                 data_width = 32,
                 arp_entries = 4,
             )
-            if with_eth_ptp:
+            ptp_igmp_groups = None
+            if with_eth_ptp and eth_ptp_igmp:
                 ptp_igmp_groups = [0xE0000181, 0xE0000182]  # 224.0.1.129, 224.0.1.130.
                 if eth_ptp_p2p:
                     ptp_igmp_groups.append(0xE000006B)     # 224.0.0.107.
                 eth_etherbone_kwargs.update(
                     with_igmp     = True,
                     igmp_groups   = ptp_igmp_groups,
-                    igmp_interval = 2,
+                    igmp_interval = eth_ptp_igmp_interval,
                 )
             self.add_etherbone(**eth_etherbone_kwargs)
 
@@ -542,7 +566,6 @@ class BaseSoC(SoCMini):
                     self.eth_ptp_event_port,
                     self.eth_ptp_general_port,
                     sys_clk_freq,
-                    monitor_debug = eth_ptp_debug,
                 )
                 self.ptp_discipline = PTPTimeDiscipline(
                     sys_clk_freq      = sys_clk_freq,
@@ -576,6 +599,20 @@ class BaseSoC(SoCMini):
                     self.ptp_identity.general_ip.eq(self.eth_ptp_general_port.source.ip_address),
                     self.ptp_identity.general_source_port_id.eq(self.eth_ptp.rx_general.depacketizer.source.source_port_id),
                 ]
+
+                if with_eth_ptp_rfic_clock:
+                    self.ptp_clk10_discipline = PTPClock10Discipline(
+                        sys_clk_freq    = sys_clk_freq,
+                        clk10           = ClockSignal("clk10"),
+                        reference_pulse = self.pps_gen.pps_pulse,
+                        reference_valid = self.ptp_discipline.locked,
+                    )
+                    self.comb += [
+                        self.clk10_discipline.override.eq(self.ptp_clk10_discipline.mmcm_override),
+                        self.clk10_discipline.override_enable.eq(self.ptp_clk10_discipline.mmcm_enable),
+                        self.clk10_discipline.override_rate.eq(self.ptp_clk10_discipline.mmcm_rate),
+                        self.clk10_discipline.override_update_cycles.eq(self.ptp_clk10_discipline.mmcm_update_cycles),
+                    ]
 
             # UDP Streamer.
             # -------------
@@ -1042,6 +1079,7 @@ class BaseSoC(SoCMini):
             "clk2" : si5351_clk0,
             "clk3" : ClockSignal("rfic"),
             "clk4" : si5351_clk1,
+            "clk5" : ClockSignal("clk10"),
         })
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
@@ -1198,7 +1236,9 @@ def main():
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
     parser.add_argument("--eth-ptp-p2p",     action="store_true",     help="Use PTP peer-to-peer delay mode instead of end-to-end.")
-    parser.add_argument("--eth-ptp-debug",   action="store_true",     help="Expose the verbose LiteEth PTP monitor CSRs.")
+    parser.add_argument("--eth-ptp-no-igmp", action="store_true",     help="Disable PTP multicast IGMP reports.")
+    parser.add_argument("--eth-ptp-igmp-interval", default=2.0, type=float, help="PTP multicast IGMP report interval in seconds.")
+    parser.add_argument("--with-eth-ptp-rfic-clock", action="store_true", help="Add optional PTP discipline for the FPGA 10MHz clock feeding SI5351C/AD9361 reference mode.")
     parser.add_argument("--with-eth-vrt",    action="store_true",     help="Enable Ethernet RX VRT UDP streamer path.")
     parser.add_argument("--vrt-dst-ip",      default="239.168.1.100", help="VRT destination IP address (when --with-eth-vrt).")
     parser.add_argument("--vrt-dst-port",    default=4991, type=int,  help="VRT destination UDP port (when --with-eth-vrt).")
@@ -1281,7 +1321,9 @@ def main():
         eth_udp_port  = args.eth_udp_port,
         with_eth_ptp  = args.with_eth_ptp,
         eth_ptp_p2p   = args.eth_ptp_p2p,
-        eth_ptp_debug = args.eth_ptp_debug,
+        eth_ptp_igmp  = not args.eth_ptp_no_igmp,
+        eth_ptp_igmp_interval = args.eth_ptp_igmp_interval,
+        with_eth_ptp_rfic_clock = args.with_eth_ptp_rfic_clock,
         with_eth_vrt  = args.with_eth_vrt,
         vrt_dst_ip    = args.vrt_dst_ip,
         vrt_dst_port  = args.vrt_dst_port,
@@ -1330,10 +1372,12 @@ def main():
             r += f"_eth"
             if args.with_eth_ptp:
                 r += "_ptp"
+                if args.with_eth_ptp_rfic_clock:
+                    r += "_rfic_clock"
                 if args.eth_ptp_p2p:
                     r += "_p2p"
-                if args.eth_ptp_debug:
-                    r += "_debug"
+                if args.eth_ptp_no_igmp:
+                    r += "_no_igmp"
             if args.with_eth_vrt:
                 r += "_vrt"
         if args.with_sata:

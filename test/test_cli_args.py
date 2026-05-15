@@ -19,6 +19,20 @@ def _load_soc_module():
     return module
 
 
+def test_rfic_clk_freq_policy():
+    soc_mod = _load_soc_module()
+
+    assert soc_mod.get_rfic_clk_freq() == 245.76e6
+    assert soc_mod.get_rfic_clk_freq(with_rfic_oversampling=True) == 491.52e6
+    assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="1000basex") == 122.88e6
+    assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="2500basex") == 245.76e6
+    assert soc_mod.get_rfic_clk_freq(
+        with_eth=True,
+        eth_phy="1000basex",
+        with_rfic_oversampling=True,
+    ) == 122.88e6
+
+
 def test_main_exposes_base_soc_optional_args(monkeypatch):
     soc_mod = _load_soc_module()
     captured = {}

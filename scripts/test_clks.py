@@ -19,6 +19,7 @@ CLOCKS = {
     "clk2": "AD9361 Ref Clk",
     "clk3": "AD9361 Dat Clk",
     "clk4": "  Time Ref Clk",
+    "clk5": "  FPGA 10M Clk",
 }
 
 # Clk Driver ---------------------------------------------------------------------------------------
@@ -73,9 +74,13 @@ def test_frequency(num_measurements=10, delay_between_tests=1.0):
     bus = RemoteClient()
     bus.open()
 
-    # Create a ClkDriver for each clock.
-    clk_drivers = {clk: ClkDriver(bus, clk, desc) for clk, desc in CLOCKS.items()}
-    max_name_len = max(len(desc) for desc in CLOCKS.values())
+    # Create a ClkDriver for each clock present in the loaded gateware.
+    available_clocks = {
+        clk: desc for clk, desc in CLOCKS.items()
+        if hasattr(bus.regs, f"clk_measurement_{clk}_value")
+    }
+    clk_drivers = {clk: ClkDriver(bus, clk, desc) for clk, desc in available_clocks.items()}
+    max_name_len = max(len(desc) for desc in available_clocks.values())
 
     for meas in range(num_measurements):
         time.sleep(delay_between_tests)

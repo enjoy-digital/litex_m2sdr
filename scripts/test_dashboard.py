@@ -115,7 +115,11 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
     # Initialize ClkDriver if available.
     if with_clks:
-        clk_drivers = {clk: ClkDriver(bus, clk, CLOCKS[clk]) for clk in CLOCKS}
+        clk_drivers = {
+            clk: ClkDriver(bus, clk, CLOCKS[clk])
+            for clk in CLOCKS
+            if hasattr(bus.regs, f"clk_measurement_{clk}_value")
+        }
     else:
         clk_drivers = None
 
@@ -290,6 +294,8 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                 dpg.add_table_column(label="Name")
                 dpg.add_table_column(label="Frequency (MHz)")
                 for clk, name in CLOCKS.items():
+                    if clk_drivers is not None and clk not in clk_drivers:
+                        continue
                     with dpg.table_row():
                         dpg.add_text(name)
                         dpg.add_text("--", tag=f"clock_{clk}_freq")
