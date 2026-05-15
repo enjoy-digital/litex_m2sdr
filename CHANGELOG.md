@@ -2,16 +2,30 @@
 
 ## Introduction
 
-The LiteX M2 SDR project is actively under development and does not yet have formal releases. However, we maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. The updates below are summarized by quarter, highlighting major advancements to provide a clear overview of the project's evolution.
+The LiteX M2 SDR project is actively under development. We maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. Date-named bitstream archive releases complement the development summaries below.
 
-[> 2026 Q2 (Apr - Jun)
-----------------------
-**Ethernet PTP Board Time Discipline and SI5351C Clocking Preparation**
+[> 2026-05-15 First Date-Named Release
+--------------------------------------
+**Feature Status at Release**
+- Release artifacts: first date-named, timing-checked archives are provided for the supported core M.2 PCIe and Acorn Baseboard Ethernet images, with CSR exports and per-build manifests.
+- M.2 PCIe: PCIe Gen2 x1 and x2 images are provided for the M.2 form factor; PCIe-only images keep the 125MHz system clock.
+- Baseboard Ethernet: 1000BaseX Etherbone control and LiteEth UDP RX/TX sample streaming are supported on the Acorn Baseboard Mini.
+- Baseboard PCIe + Ethernet: a combined PCIe Gen2 x1 + 1000BaseX Ethernet image is provided and uses a 100MHz system clock for timing margin.
+- Ethernet PTP: the baseboard Ethernet PTP image disciplines the board `time_gen` clock for timestamps, PPS, and host-visible board time.
+- PTP RFIC reference: the dedicated baseboard PTP RFIC-reference image exposes the FPGA `clk10` MMCM discipline loop and SI5351C FPGA-fed `10MHz` input mode.
+- Host software: `libm2sdr`, `m2sdr_util`, SoapySDR, `m2sdr_play`, and the FM helper utilities include the matching Ethernet/PTP/RFIC-reference controls and examples.
+- Source-build options: White Rabbit, SATA, VRT, 2.5G Ethernet, PCIe x4, and oversampling images remain available from source but are outside this first release artifact set.
+
+[> 2026 Q2 to date (Apr - May)
+------------------------------
+**Ethernet PTP Board Time Discipline, RFIC Reference Clocking, and Release Packaging**
 - Added Ethernet PTP board-time discipline for baseboard Ethernet builds while keeping `time_gen` as the single exported logical hardware clock for timestamps, PPS, and host-visible time.
 - Exposed the PTP feature cleanly across gateware and host software with capability bits, runtime status/tuning controls, learned master identity reporting, and host-side time ownership rules to prevent manual PHC writes from fighting the servo.
 - Extended `libm2sdr`, `m2sdr_util`, and SoapySDR with PTP monitoring/control support, time-source reporting, and updated host-side documentation for the new workflow.
-- Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend, preparing the SI5351C path for later physical clock steering without changing the default non-PTP operating mode.
-- Expanded regression coverage around PTP, `clk10` discipline, and SI5351/LiteI2C interactions, including test-isolation fixes so SoC build tests remain stable regardless of execution order.
+- Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend for PTP-referenced RFIC clock operation without changing the default non-PTP operating mode.
+- Added date-named release archives with timing-gated packaging and manifests for the first supported PCIe/Ethernet image set.
+- Added Ethernet TX validation and FM TX/RX utility support for baseboard Ethernet operation.
+- Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release artifact packaging, and Ethernet-enabled build defaults.
 
 [> 2026 Q1 (Jan - Mar)
 ----------------------
