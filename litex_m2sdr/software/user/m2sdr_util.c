@@ -208,6 +208,23 @@ static int parse_u32_arg(const char *arg, uint32_t *value)
     return 0;
 }
 
+static int parse_i64_arg(const char *arg, int64_t *value)
+{
+    char *end = NULL;
+    long long parsed = 0;
+
+    if (!arg || !value)
+        return -1;
+
+    errno = 0;
+    parsed = strtoll(arg, &end, 0);
+    if ((errno != 0) || (end == arg) || (*end != '\0'))
+        return -1;
+
+    *value = (int64_t)parsed;
+    return 0;
+}
+
 static int parse_double_arg(const char *arg, double *value)
 {
     char *end = NULL;
@@ -223,6 +240,34 @@ static int parse_double_arg(const char *arg, double *value)
 
     *value = parsed;
     return 0;
+}
+
+static bool ptp_field_is(const char *field, const char *name, const char *alias)
+{
+    return field && (
+        (strcmp(field, name) == 0) ||
+        (alias && (strcmp(field, alias) == 0)));
+}
+
+static void ptp_fail_and_close(struct m2sdr_dev *conn, const char *fmt, ...)
+{
+    va_list args;
+
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    va_end(args);
+
+    m2sdr_close_dev(conn);
+    exit(1);
+}
+
+static double monotonic_seconds(void)
+{
+    struct timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+        return 0.0;
+    return (double)ts.tv_sec + ((double)ts.tv_nsec / 1e9);
 }
 
 static void sleep_seconds(double seconds)
@@ -292,12 +337,52 @@ static void ptp_print_status_details(const struct m2sdr_ptp_status *status)
     printf("Phase Steps      : %" PRIu32 "\n", status->phase_steps);
     printf("Rate Updates     : %" PRIu32 "\n", status->rate_updates);
     printf("PTP Lock Losses  : %" PRIu32 "\n", status->ptp_lock_losses);
+    printf("Time Lock Misses : %" PRIu32 "\n", status->time_lock_misses);
+    printf("Time Miss Count  : %" PRIu32 "\n", status->time_lock_miss_count);
     printf("Time Lock Losses : %" PRIu32 "\n", status->time_lock_losses);
-    printf("Invalid Header   : %" PRIu32 "\n", status->invalid_header_count);
-    printf("Wrong Peer       : %" PRIu32 "\n", status->wrong_peer_count);
-    printf("Wrong Requester  : %" PRIu32 "\n", status->wrong_requester_count);
-    printf("RX Timeout       : %" PRIu32 "\n", status->rx_timeout_count);
-    printf("Announce Expiry  : %" PRIu32 "\n", status->announce_expiry_count);
+}
+
+static void ptp_print_status_json(const struct m2sdr_ptp_status *status, time_t refresh_time)
+{
+    char master_ip[32];
+    char local_port[48];
+    char master_port[48];
+
+    ptp_format_ipv4(master_ip, sizeof(master_ip), status->master_ip);
+    ptp_format_port_identity(local_port, sizeof(local_port), &status->local_port);
+    ptp_format_port_identity(master_port, sizeof(master_port), &status->master_port);
+
+    printf("{");
+    printf("\"refresh_time_unix\":%" PRIdMAX, (intmax_t)refresh_time);
+    printf(",\"enabled\":%s", status->enabled ? "true" : "false");
+    printf(",\"active\":%s", status->active ? "true" : "false");
+    printf(",\"ptp_locked\":%s", status->ptp_locked ? "true" : "false");
+    printf(",\"time_locked\":%s", status->time_locked ? "true" : "false");
+    printf(",\"holdover\":%s", status->holdover ? "true" : "false");
+    printf(",\"state\":%u", status->state);
+    printf(",\"state_name\":\"%s\"", ptp_state_name(status->state));
+    printf(",\"master_ip\":\"%s\"", master_ip);
+    printf(",\"local_port\":{\"clock_id\":\"%016" PRIx64 "\",\"port_number\":%u,\"identity\":\"%s\"}",
+        status->local_port.clock_id,
+        (unsigned)status->local_port.port_number,
+        local_port);
+    printf(",\"master_port\":{\"clock_id\":\"%016" PRIx64 "\",\"port_number\":%u,\"identity\":\"%s\"}",
+        status->master_port.clock_id,
+        (unsigned)status->master_port.port_number,
+        master_port);
+    printf(",\"identity_updates\":%" PRIu32, status->identity_updates);
+    printf(",\"time_inc\":%" PRIu32, status->time_inc);
+    printf(",\"last_error_ns\":%" PRId64, status->last_error_ns);
+    printf(",\"last_ptp_time_ns\":%" PRIu64, status->last_ptp_time_ns);
+    printf(",\"last_local_time_ns\":%" PRIu64, status->last_local_time_ns);
+    printf(",\"coarse_steps\":%" PRIu32, status->coarse_steps);
+    printf(",\"phase_steps\":%" PRIu32, status->phase_steps);
+    printf(",\"rate_updates\":%" PRIu32, status->rate_updates);
+    printf(",\"ptp_lock_losses\":%" PRIu32, status->ptp_lock_losses);
+    printf(",\"time_lock_misses\":%" PRIu32, status->time_lock_misses);
+    printf(",\"time_lock_miss_count\":%" PRIu32, status->time_lock_miss_count);
+    printf(",\"time_lock_losses\":%" PRIu32, status->time_lock_losses);
+    printf("}\n");
 }
 
 static void ptp_print_discipline_config(const struct m2sdr_ptp_discipline_config *cfg)
@@ -308,13 +393,95 @@ static void ptp_print_discipline_config(const struct m2sdr_ptp_discipline_config
     printf("Coarse Threshold : %" PRIu32 " ns\n", cfg->coarse_threshold_ns);
     printf("Phase Threshold  : %" PRIu32 " ns\n", cfg->phase_threshold_ns);
     printf("Lock Window      : %" PRIu32 " ns\n", cfg->lock_window_ns);
+    printf("Unlock Misses    : %" PRIu32 "\n", cfg->unlock_misses);
+    printf("Coarse Confirm   : %" PRIu32 "\n", cfg->coarse_confirm);
     printf("Phase Step Shift : %u\n", cfg->phase_step_shift);
     printf("Phase Step Max   : %" PRIu32 " ns\n", cfg->phase_step_max_ns);
     printf("Trim Limit       : %" PRIu32 "\n", cfg->trim_limit);
     printf("P Gain           : %u\n", cfg->p_gain);
 }
 
-static void ptp_status(bool watch, double watch_interval)
+static double q32_rate_to_steps_per_update(int32_t rate)
+{
+    /* Hardware reports MMCM steering as signed Q0.32 steps per update. */
+    return (double)rate / 4294967296.0;
+}
+
+static void ptp_clock10_print_status_details(const struct m2sdr_ptp_clock10_status *status)
+{
+    printf("Discipline Enable: %s\n", ptp_yes_no(status->enabled));
+    printf("MMCM Owner       : %s\n", status->active ? "PTP clk10 loop" : "Manual/Free-run");
+    printf("Reference Locked : %s\n", ptp_yes_no(status->reference_locked));
+    printf("Clock Locked     : %s\n", ptp_yes_no(status->clock_locked));
+    printf("Holdover         : %s\n", ptp_yes_no(status->holdover));
+    printf("Aligned          : %s\n", ptp_yes_no(status->aligned));
+    printf("Waiting After Ref: %s\n", ptp_yes_no(status->waiting_after_ref));
+    printf("Rate Limited     : %s\n", ptp_yes_no(status->rate_limited));
+    printf("Phase Tick       : %" PRIu32 " ps\n", status->phase_tick_ps);
+    printf("Last Error       : %" PRId64 " ns (%" PRId32 " ticks)\n",
+        status->last_error_ns,
+        status->last_error_ticks);
+    printf("Last Rate        : 0x%08" PRIx32 " (%+.9f steps/update)\n",
+        (uint32_t)status->last_rate,
+        q32_rate_to_steps_per_update(status->last_rate));
+    printf("Samples          : %" PRIu32 "\n", status->sample_count);
+    printf("Reference Pulses : %" PRIu32 "\n", status->reference_count);
+    printf("Clk10 Markers    : %" PRIu32 "\n", status->clk10_count);
+    printf("Missing Windows  : %" PRIu32 "\n", status->missing_count);
+    printf("Alignments       : %" PRIu32 "\n", status->align_count);
+    printf("Lock Losses      : %" PRIu32 "\n", status->lock_loss_count);
+    printf("Rate Updates     : %" PRIu32 "\n", status->rate_update_count);
+    printf("Saturations      : %" PRIu32 "\n", status->saturation_count);
+}
+
+static void ptp_clock10_print_status_json(const struct m2sdr_ptp_clock10_status *status, time_t refresh_time)
+{
+    printf("{");
+    printf("\"refresh_time_unix\":%" PRIdMAX, (intmax_t)refresh_time);
+    printf(",\"enabled\":%s", status->enabled ? "true" : "false");
+    printf(",\"active\":%s", status->active ? "true" : "false");
+    printf(",\"reference_locked\":%s", status->reference_locked ? "true" : "false");
+    printf(",\"clock_locked\":%s", status->clock_locked ? "true" : "false");
+    printf(",\"holdover\":%s", status->holdover ? "true" : "false");
+    printf(",\"aligned\":%s", status->aligned ? "true" : "false");
+    printf(",\"waiting_after_ref\":%s", status->waiting_after_ref ? "true" : "false");
+    printf(",\"rate_limited\":%s", status->rate_limited ? "true" : "false");
+    printf(",\"phase_tick_ps\":%" PRIu32, status->phase_tick_ps);
+    printf(",\"last_error_ticks\":%" PRId32, status->last_error_ticks);
+    printf(",\"last_error_ns\":%" PRId64, status->last_error_ns);
+    printf(",\"last_rate\":%" PRId32, status->last_rate);
+    printf(",\"last_rate_steps_per_update\":%.12f", q32_rate_to_steps_per_update(status->last_rate));
+    printf(",\"sample_count\":%" PRIu32, status->sample_count);
+    printf(",\"reference_count\":%" PRIu32, status->reference_count);
+    printf(",\"clk10_count\":%" PRIu32, status->clk10_count);
+    printf(",\"missing_count\":%" PRIu32, status->missing_count);
+    printf(",\"align_count\":%" PRIu32, status->align_count);
+    printf(",\"lock_loss_count\":%" PRIu32, status->lock_loss_count);
+    printf(",\"rate_update_count\":%" PRIu32, status->rate_update_count);
+    printf(",\"saturation_count\":%" PRIu32, status->saturation_count);
+    printf("}\n");
+}
+
+static void ptp_clock10_print_config(const struct m2sdr_ptp_clock10_config *cfg)
+{
+    printf("Enable           : %s\n", ptp_yes_no(cfg->enable));
+    printf("Holdover         : %s\n", ptp_yes_no(cfg->holdover));
+    printf("Invert           : %s\n", ptp_yes_no(cfg->invert));
+    printf("Update Cycles    : %" PRIu32 "\n", cfg->update_cycles);
+    printf("P Gain           : 0x%08" PRIx32 " (%.9f steps/update/tick)\n",
+        cfg->p_gain,
+        (double)cfg->p_gain / 4294967296.0);
+    printf("I Gain           : 0x%08" PRIx32 " (%.9f steps/update/tick)\n",
+        cfg->i_gain,
+        (double)cfg->i_gain / 4294967296.0);
+    printf("Rate Limit       : 0x%08" PRIx32 " (%.9f steps/update)\n",
+        cfg->rate_limit,
+        (double)cfg->rate_limit / 4294967296.0);
+    printf("Lock Window      : %" PRIu32 " ticks\n", cfg->lock_window_ticks);
+    printf("Half Period      : %" PRIu32 " ticks\n", cfg->half_period_ticks);
+}
+
+static void ptp_status(bool watch, double watch_interval, bool json)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
 
@@ -339,15 +506,20 @@ static void ptp_status(bool watch, double watch_interval)
         localtime_r(&now, &tm);
         strftime(refresh_time, sizeof(refresh_time), "%Y-%m-%d %H:%M:%S", &tm);
 
-        if (watch && isatty(STDOUT_FILENO))
-            printf("\033[H\033[J");
+        if (json) {
+            ptp_print_status_json(&status, now);
+            fflush(stdout);
+        } else {
+            if (watch && isatty(STDOUT_FILENO))
+                printf("\033[H\033[J");
 
-        printf("\e[1m[> PTP Status:\e[0m\n");
-        printf("--------------\n");
-        printf("Refresh Time     : %s\n", refresh_time);
-        ptp_print_status_details(&status);
-        printf("\n");
-        fflush(stdout);
+            printf("\e[1m[> PTP Status:\e[0m\n");
+            printf("--------------\n");
+            printf("Refresh Time     : %s\n", refresh_time);
+            ptp_print_status_details(&status);
+            printf("\n");
+            fflush(stdout);
+        }
 
         if (!watch)
             break;
@@ -357,30 +529,152 @@ static void ptp_status(bool watch, double watch_interval)
     m2sdr_close_dev(conn);
 }
 
+static void ptp_clock10_status(bool watch, double watch_interval, bool json)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+
+    keep_running = 1;
+    signal(SIGINT, intHandler);
+
+    do {
+        struct m2sdr_ptp_clock10_status status;
+        char refresh_time[64];
+        time_t now;
+        struct tm tm;
+        int ret;
+
+        ret = m2sdr_get_ptp_clock10_status(conn, &status);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to read PTP clk10 status: %s\n", m2sdr_strerror(ret));
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+
+        now = time(NULL);
+        localtime_r(&now, &tm);
+        strftime(refresh_time, sizeof(refresh_time), "%Y-%m-%d %H:%M:%S", &tm);
+
+        if (json) {
+            ptp_clock10_print_status_json(&status, now);
+            fflush(stdout);
+        } else {
+            if (watch && isatty(STDOUT_FILENO))
+                printf("\033[H\033[J");
+
+            printf("\e[1m[> PTP Clk10 Status:\e[0m\n");
+            printf("-------------------\n");
+            printf("Refresh Time     : %s\n", refresh_time);
+            ptp_clock10_print_status_details(&status);
+            printf("\n");
+            fflush(stdout);
+        }
+
+        if (!watch)
+            break;
+        sleep_seconds(watch_interval);
+    } while (keep_running);
+
+    m2sdr_close_dev(conn);
+}
+
+static void ptp_smoke(int duration, double interval, int64_t max_error_ns)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct m2sdr_ptp_status first;
+    struct m2sdr_ptp_status last;
+    double start;
+    double deadline;
+    unsigned samples = 0;
+    unsigned locked_samples = 0;
+    uint64_t max_abs_error_ns = 0;
+    bool failed = false;
+    int ret;
+
+    if (duration <= 0)
+        duration = 10;
+    if (interval <= 0.0)
+        interval = 1.0;
+    if (max_error_ns < 0)
+        max_error_ns = 1000000;
+
+    keep_running = 1;
+    signal(SIGINT, intHandler);
+
+    ret = m2sdr_get_ptp_status(conn, &first);
+    if (ret != 0) {
+        fprintf(stderr, "Failed to read initial PTP status: %s\n", m2sdr_strerror(ret));
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+    last = first;
+
+    start    = monotonic_seconds();
+    deadline = start + duration;
+
+    while (keep_running) {
+        int64_t abs_error_ns;
+
+        ret = m2sdr_get_ptp_status(conn, &last);
+        if (ret != 0) {
+            fprintf(stderr, "Failed to read PTP status: %s\n", m2sdr_strerror(ret));
+            failed = true;
+            break;
+        }
+
+        samples++;
+        if (last.last_error_ns < 0)
+            abs_error_ns = -last.last_error_ns;
+        else
+            abs_error_ns = last.last_error_ns;
+        if ((uint64_t)abs_error_ns > max_abs_error_ns)
+            max_abs_error_ns = (uint64_t)abs_error_ns;
+
+        if (last.enabled && last.active && last.ptp_locked && last.time_locked && !last.holdover) {
+            locked_samples++;
+            if (abs_error_ns > max_error_ns)
+                failed = true;
+        } else {
+            failed = true;
+        }
+
+        if (monotonic_seconds() >= deadline)
+            break;
+        sleep_seconds(interval);
+    }
+
+    printf("\e[1m[> PTP Smoke:\e[0m\n");
+    printf("------------\n");
+    printf("Duration         : %d s\n", duration);
+    printf("Samples          : %u\n", samples);
+    printf("Locked Samples   : %u\n", locked_samples);
+    printf("Max Abs Error    : %" PRIu64 " ns\n", max_abs_error_ns);
+    printf("Max Error Limit  : %" PRId64 " ns\n", max_error_ns);
+    printf("Result           : %s\n\n", failed ? "FAIL" : "PASS");
+
+    m2sdr_close_dev(conn);
+
+    if (failed)
+        exit(1);
+}
+
 static void ptp_config(const char *field, const char *value)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
     struct m2sdr_ptp_discipline_config cfg;
     int ret;
 
-    if (field && ((strcmp(field, "clear-counters") == 0) || (strcmp(field, "clear_counters") == 0))) {
+    if (ptp_field_is(field, "clear-counters", "clear_counters")) {
         ret = m2sdr_clear_ptp_counters(conn);
-        if (ret != 0) {
-            fprintf(stderr, "Failed to clear PTP counters: %s\n", m2sdr_strerror(ret));
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
+        if (ret != 0)
+            ptp_fail_and_close(conn, "Failed to clear PTP counters: %s\n", m2sdr_strerror(ret));
         printf("PTP counters cleared.\n");
         m2sdr_close_dev(conn);
         return;
     }
 
     ret = m2sdr_get_ptp_discipline_config(conn, &cfg);
-    if (ret != 0) {
-        fprintf(stderr, "Failed to read PTP discipline config: %s\n", m2sdr_strerror(ret));
-        m2sdr_close_dev(conn);
-        exit(1);
-    }
+    if (ret != 0)
+        ptp_fail_and_close(conn, "Failed to read PTP discipline config: %s\n", m2sdr_strerror(ret));
 
     if (!field) {
         printf("\e[1m[> PTP Discipline Config:\e[0m\n");
@@ -391,92 +685,148 @@ static void ptp_config(const char *field, const char *value)
         return;
     }
 
-    if (!value) {
-        fprintf(stderr, "ptp-config requires a value for '%s'\n", field);
-        m2sdr_close_dev(conn);
-        exit(1);
-    }
+    if (!value)
+        ptp_fail_and_close(conn, "ptp-config requires a value for '%s'\n", field);
 
-    if ((strcmp(field, "enable") == 0)) {
-        if (parse_bool_arg(value, &cfg.enable) != 0) {
-            fprintf(stderr, "Invalid boolean value '%s' for enable\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "holdover") == 0)) {
-        if (parse_bool_arg(value, &cfg.holdover) != 0) {
-            fprintf(stderr, "Invalid boolean value '%s' for holdover\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "update-cycles") == 0) || (strcmp(field, "update_cycles") == 0)) {
-        if (parse_u32_arg(value, &cfg.update_cycles) != 0) {
-            fprintf(stderr, "Invalid value '%s' for update-cycles\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "coarse-threshold") == 0) || (strcmp(field, "coarse_threshold") == 0)) {
-        if (parse_u32_arg(value, &cfg.coarse_threshold_ns) != 0) {
-            fprintf(stderr, "Invalid value '%s' for coarse-threshold\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "phase-threshold") == 0) || (strcmp(field, "phase_threshold") == 0)) {
-        if (parse_u32_arg(value, &cfg.phase_threshold_ns) != 0) {
-            fprintf(stderr, "Invalid value '%s' for phase-threshold\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "lock-window") == 0) || (strcmp(field, "lock_window") == 0)) {
-        if (parse_u32_arg(value, &cfg.lock_window_ns) != 0) {
-            fprintf(stderr, "Invalid value '%s' for lock-window\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "phase-step-shift") == 0) || (strcmp(field, "phase_step_shift") == 0)) {
+    if (ptp_field_is(field, "enable", NULL)) {
+        if (parse_bool_arg(value, &cfg.enable) != 0)
+            ptp_fail_and_close(conn, "Invalid boolean value '%s' for enable\n", value);
+    } else if (ptp_field_is(field, "holdover", NULL)) {
+        if (parse_bool_arg(value, &cfg.holdover) != 0)
+            ptp_fail_and_close(conn, "Invalid boolean value '%s' for holdover\n", value);
+    } else if (ptp_field_is(field, "update-cycles", "update_cycles")) {
+        if (parse_u32_arg(value, &cfg.update_cycles) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for update-cycles\n", value);
+    } else if (ptp_field_is(field, "coarse-threshold", "coarse_threshold")) {
+        if (parse_u32_arg(value, &cfg.coarse_threshold_ns) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for coarse-threshold\n", value);
+    } else if (ptp_field_is(field, "phase-threshold", "phase_threshold")) {
+        if (parse_u32_arg(value, &cfg.phase_threshold_ns) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for phase-threshold\n", value);
+    } else if (ptp_field_is(field, "lock-window", "lock_window")) {
+        if (parse_u32_arg(value, &cfg.lock_window_ns) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for lock-window\n", value);
+    } else if (ptp_field_is(field, "unlock-misses", "unlock_misses")) {
+        if (parse_u32_arg(value, &cfg.unlock_misses) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for unlock-misses\n", value);
+    } else if (ptp_field_is(field, "coarse-confirm", "coarse_confirm")) {
+        if (parse_u32_arg(value, &cfg.coarse_confirm) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for coarse-confirm\n", value);
+    } else if (ptp_field_is(field, "phase-step-shift", "phase_step_shift")) {
         uint32_t parsed = 0;
-        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 63u)) {
-            fprintf(stderr, "Invalid value '%s' for phase-step-shift\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
+        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 63u))
+            ptp_fail_and_close(conn, "Invalid value '%s' for phase-step-shift\n", value);
         cfg.phase_step_shift = (uint8_t)parsed;
-    } else if ((strcmp(field, "phase-step-max") == 0) || (strcmp(field, "phase_step_max") == 0)) {
-        if (parse_u32_arg(value, &cfg.phase_step_max_ns) != 0) {
-            fprintf(stderr, "Invalid value '%s' for phase-step-max\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "trim-limit") == 0) || (strcmp(field, "trim_limit") == 0)) {
-        if (parse_u32_arg(value, &cfg.trim_limit) != 0) {
-            fprintf(stderr, "Invalid value '%s' for trim-limit\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
-    } else if ((strcmp(field, "p-gain") == 0) || (strcmp(field, "p_gain") == 0)) {
+    } else if (ptp_field_is(field, "phase-step-max", "phase_step_max")) {
+        if (parse_u32_arg(value, &cfg.phase_step_max_ns) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for phase-step-max\n", value);
+    } else if (ptp_field_is(field, "trim-limit", "trim_limit")) {
+        if (parse_u32_arg(value, &cfg.trim_limit) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for trim-limit\n", value);
+    } else if (ptp_field_is(field, "p-gain", "p_gain")) {
         uint32_t parsed = 0;
-        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 0xffffu)) {
-            fprintf(stderr, "Invalid value '%s' for p-gain\n", value);
-            m2sdr_close_dev(conn);
-            exit(1);
-        }
+        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 0xffffu))
+            ptp_fail_and_close(conn, "Invalid value '%s' for p-gain\n", value);
         cfg.p_gain = (uint16_t)parsed;
     } else {
-        fprintf(stderr, "Unknown ptp-config field '%s'\n", field);
-        m2sdr_close_dev(conn);
-        exit(1);
+        ptp_fail_and_close(conn, "Unknown ptp-config field '%s'\n", field);
     }
 
     ret = m2sdr_set_ptp_discipline_config(conn, &cfg);
-    if (ret != 0) {
-        fprintf(stderr, "Failed to update PTP discipline config: %s\n", m2sdr_strerror(ret));
-        m2sdr_close_dev(conn);
-        exit(1);
-    }
+    if (ret != 0)
+        ptp_fail_and_close(conn, "Failed to update PTP discipline config: %s\n", m2sdr_strerror(ret));
 
     printf("\e[1m[> PTP Discipline Config:\e[0m\n");
     printf("------------------------\n");
     ptp_print_discipline_config(&cfg);
+    printf("\n");
+
+    m2sdr_close_dev(conn);
+}
+
+static void ptp_clock10_config(const char *field, const char *value)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct m2sdr_ptp_clock10_config cfg;
+    int ret;
+
+    /*
+     * These commands are one-shot control pulses. They intentionally bypass
+     * the normal read/modify/write path for tunable clk10 loop coefficients.
+     */
+    if (ptp_field_is(field, "clear-counters", "clear_counters")) {
+        ret = m2sdr_clear_ptp_clock10_counters(conn);
+        if (ret != 0)
+            ptp_fail_and_close(conn, "Failed to clear PTP clk10 counters: %s\n", m2sdr_strerror(ret));
+        printf("PTP clk10 counters cleared.\n");
+        m2sdr_close_dev(conn);
+        return;
+    }
+
+    if (ptp_field_is(field, "align", NULL) ||
+        ptp_field_is(field, "align-now", "align_now")) {
+        ret = m2sdr_align_ptp_clock10(conn);
+        if (ret != 0)
+            ptp_fail_and_close(conn, "Failed to align PTP clk10 marker: %s\n", m2sdr_strerror(ret));
+        printf("PTP clk10 marker alignment requested.\n");
+        m2sdr_close_dev(conn);
+        return;
+    }
+
+    ret = m2sdr_get_ptp_clock10_config(conn, &cfg);
+    if (ret != 0)
+        ptp_fail_and_close(conn, "Failed to read PTP clk10 config: %s\n", m2sdr_strerror(ret));
+
+    if (!field) {
+        printf("\e[1m[> PTP Clk10 Config:\e[0m\n");
+        printf("------------------\n");
+        ptp_clock10_print_config(&cfg);
+        printf("\n");
+        m2sdr_close_dev(conn);
+        return;
+    }
+
+    if (!value)
+        ptp_fail_and_close(conn, "ptp-clock10-config requires a value for '%s'\n", field);
+
+    if (ptp_field_is(field, "enable", NULL)) {
+        if (parse_bool_arg(value, &cfg.enable) != 0)
+            ptp_fail_and_close(conn, "Invalid boolean value '%s' for enable\n", value);
+    } else if (ptp_field_is(field, "holdover", NULL)) {
+        if (parse_bool_arg(value, &cfg.holdover) != 0)
+            ptp_fail_and_close(conn, "Invalid boolean value '%s' for holdover\n", value);
+    } else if (ptp_field_is(field, "invert", NULL)) {
+        if (parse_bool_arg(value, &cfg.invert) != 0)
+            ptp_fail_and_close(conn, "Invalid boolean value '%s' for invert\n", value);
+    } else if (ptp_field_is(field, "update-cycles", "update_cycles")) {
+        if (parse_u32_arg(value, &cfg.update_cycles) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for update-cycles\n", value);
+    } else if (ptp_field_is(field, "p-gain", "p_gain")) {
+        if (parse_u32_arg(value, &cfg.p_gain) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for p-gain\n", value);
+    } else if (ptp_field_is(field, "i-gain", "i_gain")) {
+        if (parse_u32_arg(value, &cfg.i_gain) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for i-gain\n", value);
+    } else if (ptp_field_is(field, "rate-limit", "rate_limit")) {
+        if ((parse_u32_arg(value, &cfg.rate_limit) != 0) || (cfg.rate_limit > 0x7fffffffu))
+            ptp_fail_and_close(conn, "Invalid value '%s' for rate-limit\n", value);
+    } else if (ptp_field_is(field, "lock-window-ticks", "lock_window_ticks")) {
+        if (parse_u32_arg(value, &cfg.lock_window_ticks) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for lock-window-ticks\n", value);
+    } else if (ptp_field_is(field, "half-period-ticks", "half_period_ticks")) {
+        if (parse_u32_arg(value, &cfg.half_period_ticks) != 0)
+            ptp_fail_and_close(conn, "Invalid value '%s' for half-period-ticks\n", value);
+    } else {
+        ptp_fail_and_close(conn, "Unknown ptp-clock10-config field '%s'\n", field);
+    }
+
+    ret = m2sdr_set_ptp_clock10_config(conn, &cfg);
+    if (ret != 0)
+        ptp_fail_and_close(conn, "Failed to update PTP clk10 config: %s\n", m2sdr_strerror(ret));
+
+    printf("\e[1m[> PTP Clk10 Config:\e[0m\n");
+    printf("------------------\n");
+    ptp_clock10_print_config(&cfg);
     printf("\n");
 
     m2sdr_close_dev(conn);
@@ -905,9 +1255,18 @@ static void info(void)
     bool wr_enabled   = (caps.features >> CSR_CAPABILITY_FEATURES_WR_OFFSET)   & ((1 << CSR_CAPABILITY_FEATURES_WR_SIZE)   - 1);
     bool jtagbone_enabled = (caps.features >> CSR_CAPABILITY_FEATURES_JTAGBONE_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_JTAGBONE_SIZE) - 1);
 #ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET
-    bool eth_ptp_enabled = (caps.features >> CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET) & ((1 << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1);
+    bool eth_ptp_enabled =
+        ((caps.features >> CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET) &
+         ((1 << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1)) != 0;
 #else
     bool eth_ptp_enabled = false;
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_OFFSET
+    bool eth_ptp_rfic_clock_enabled =
+        ((caps.features >> CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_OFFSET) &
+         ((1 << CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_SIZE) - 1)) != 0;
+#else
+    bool eth_ptp_rfic_clock_enabled = false;
 #endif
 
     {
@@ -926,6 +1285,7 @@ static void info(void)
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
     printf("  Ethernet PTP   : %s\n", eth_ptp_enabled ? "Yes" : "No");
+    printf("  PTP RFIC Clock : %s\n", eth_ptp_rfic_clock_enabled ? "Yes" : "No");
 
     if (pcie_enabled) {
         int pcie_speed = (caps.pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
@@ -1617,7 +1977,11 @@ end:
 /* Clk Measurement */
 /*-----------------*/
 
+#ifdef CSR_CLK_MEASUREMENT_CLK5_VALUE_ADDR
+#define N_CLKS 6
+#else
 #define N_CLKS 5
+#endif
 
 static const uint32_t latch_addrs[N_CLKS] =
 {
@@ -1626,6 +1990,9 @@ static const uint32_t latch_addrs[N_CLKS] =
     CSR_CLK_MEASUREMENT_CLK2_LATCH_ADDR,
     CSR_CLK_MEASUREMENT_CLK3_LATCH_ADDR,
     CSR_CLK_MEASUREMENT_CLK4_LATCH_ADDR,
+#ifdef CSR_CLK_MEASUREMENT_CLK5_LATCH_ADDR
+    CSR_CLK_MEASUREMENT_CLK5_LATCH_ADDR,
+#endif
 };
 
 static const uint32_t value_addrs[N_CLKS] =
@@ -1635,6 +2002,9 @@ static const uint32_t value_addrs[N_CLKS] =
     CSR_CLK_MEASUREMENT_CLK2_VALUE_ADDR,
     CSR_CLK_MEASUREMENT_CLK3_VALUE_ADDR,
     CSR_CLK_MEASUREMENT_CLK4_VALUE_ADDR,
+#ifdef CSR_CLK_MEASUREMENT_CLK5_VALUE_ADDR
+    CSR_CLK_MEASUREMENT_CLK5_VALUE_ADDR,
+#endif
 };
 
 static const char* clk_names[N_CLKS] = {
@@ -1643,6 +2013,9 @@ static const char* clk_names[N_CLKS] = {
     "AD9361 Ref Clk",
     "AD9361 Dat Clk",
     "  Time Ref Clk",
+#ifdef CSR_CLK_MEASUREMENT_CLK5_VALUE_ADDR
+    "  FPGA 10M Clk",
+#endif
 };
 
 static uint64_t read_64bit_register(void *conn, uint32_t addr)
@@ -3480,13 +3853,30 @@ static void help(void)
            "\n"
            "ptp commands:\n"
            "  ptp-status\n"
-           "      Show Ethernet PTP lock, identity, and counter status.\n"
+           "      Show Ethernet PTP lock, identity, and board-time discipline status.\n"
+           "  ptp-status --json\n"
+           "      Emit one machine-readable JSON status object.\n"
+           "  ptp-smoke [--duration SEC] [--watch-interval SEC] [--max-error-ns NS]\n"
+           "      Poll PTP lock/error state and fail if the board is not disciplined.\n"
            "  ptp-config\n"
            "      Show PTP discipline configuration.\n"
            "  ptp-config FIELD VALUE\n"
-           "      Update one PTP discipline field (enable, holdover, update-cycles, ...).\n"
+           "      Update one PTP discipline field (enable, holdover, update-cycles, unlock-misses, coarse-confirm, ...).\n"
+           "      coarse-confirm=0 disables runtime coarse realignment after initial acquisition.\n"
            "  ptp-config clear-counters\n"
            "      Clear PTP discipline and identity counters.\n"
+           "  ptp-clock10-status\n"
+           "      Show PTP-disciplined FPGA 10MHz/RFIC-reference clock status.\n"
+           "  ptp-clock10-status --json\n"
+           "      Emit one machine-readable JSON status object.\n"
+           "  ptp-clock10-config\n"
+           "      Show PTP clk10 discipline configuration.\n"
+           "  ptp-clock10-config FIELD VALUE\n"
+           "      Update one PTP clk10 field (enable, holdover, invert, update-cycles, p-gain, i-gain, rate-limit, ...).\n"
+           "  ptp-clock10-config align\n"
+           "      Reset the clk10 1Hz marker phase on the next PTP reference edge.\n"
+           "  ptp-clock10-config clear-counters\n"
+           "      Clear PTP clk10 monitor counters.\n"
            "\n"
 #ifdef USE_LITEPCIE
            "test commands:\n"
@@ -3583,12 +3973,16 @@ int main(int argc, char **argv)
         OPTION_PACE,
         OPTION_SAMPLE_RATE,
         OPTION_WINDOW,
+        OPTION_JSON,
+        OPTION_MAX_ERROR_NS,
     };
     const char *cmd;
     int c;
     int option_index = 0;
     bool ptp_watch = false;
     double ptp_watch_interval = 1.0;
+    bool ptp_json = false;
+    int64_t ptp_max_error_ns = 1000000;
     static int test_data_width = 32;
     static int test_duration = 0; /* Default to 0 for infinite duration. */
     static bool test_verbose = false;
@@ -3611,6 +4005,8 @@ int main(int argc, char **argv)
         { "port", required_argument, NULL, 'p' },
         { "watch", no_argument, NULL, OPTION_WATCH },
         { "watch-interval", required_argument, NULL, OPTION_WATCH_INTERVAL },
+        { "json", no_argument, NULL, OPTION_JSON },
+        { "max-error-ns", required_argument, NULL, OPTION_MAX_ERROR_NS },
         { "data-width", required_argument, NULL, 'w' },
         { "duration", required_argument, NULL, 't' },
         { "verbose", no_argument, NULL, 'v' },
@@ -3656,6 +4052,15 @@ int main(int argc, char **argv)
         case OPTION_WATCH_INTERVAL:
             if ((parse_double_arg(optarg, &ptp_watch_interval) != 0) || (ptp_watch_interval <= 0.0)) {
                 fprintf(stderr, "Invalid --watch-interval value '%s'\n", optarg);
+                exit(1);
+            }
+            break;
+        case OPTION_JSON:
+            ptp_json = true;
+            break;
+        case OPTION_MAX_ERROR_NS:
+            if ((parse_i64_arg(optarg, &ptp_max_error_ns) != 0) || (ptp_max_error_ns < 0)) {
+                fprintf(stderr, "Invalid --max-error-ns value '%s'\n", optarg);
                 exit(1);
             }
             break;
@@ -3725,7 +4130,9 @@ int main(int argc, char **argv)
 
     /* PTP cmds. */
     else if (cmd_is(cmd, "ptp_status", "ptp-status"))
-        ptp_status(ptp_watch, ptp_watch_interval);
+        ptp_status(ptp_watch, ptp_watch_interval, ptp_json);
+    else if (cmd_is(cmd, "ptp_smoke", "ptp-smoke"))
+        ptp_smoke(test_duration, ptp_watch_interval, ptp_max_error_ns);
     else if (cmd_is(cmd, "ptp_config", "ptp-config")) {
         const char *field = NULL;
         const char *value = NULL;
@@ -3737,6 +4144,23 @@ int main(int argc, char **argv)
         if (optind < argc)
             goto show_help;
         ptp_config(field, value);
+    }
+    else if (cmd_is(cmd, "ptp_clock10_status", "ptp-clock10-status") ||
+             cmd_is(cmd, "ptp_rfic_clock_status", "ptp-rfic-clock-status")) {
+        ptp_clock10_status(ptp_watch, ptp_watch_interval, ptp_json);
+    }
+    else if (cmd_is(cmd, "ptp_clock10_config", "ptp-clock10-config") ||
+             cmd_is(cmd, "ptp_rfic_clock_config", "ptp-rfic-clock-config")) {
+        const char *field = NULL;
+        const char *value = NULL;
+
+        if (optind < argc)
+            field = argv[optind++];
+        if (optind < argc)
+            value = argv[optind++];
+        if (optind < argc)
+            goto show_help;
+        ptp_clock10_config(field, value);
     }
 
     /* Reg cmds. */

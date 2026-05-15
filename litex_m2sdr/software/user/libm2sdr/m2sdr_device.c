@@ -196,20 +196,92 @@ static int m2sdr_liteeth_probe_control(struct m2sdr_dev *dev)
 /* Read one logical 64-bit CSR value stored as hi/lo 32-bit words. */
 static int m2sdr_read_reg_u64(struct m2sdr_dev *dev, uint32_t addr, uint64_t *value)
 {
-    uint32_t high = 0;
-    uint32_t low  = 0;
+    uint32_t high0 = 0;
+    uint32_t high1 = 0;
+    uint32_t low   = 0;
 
     if (!dev || !value)
         return M2SDR_ERR_INVAL;
 
-    if (m2sdr_reg_read(dev, addr + 0, &high) != 0)
-        return M2SDR_ERR_IO;
+    for (unsigned int attempt = 0; attempt < 4; attempt++) {
+        if (m2sdr_reg_read(dev, addr + 0, &high0) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_reg_read(dev, addr + 4, &low) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_reg_read(dev, addr + 0, &high1) != 0)
+            return M2SDR_ERR_IO;
+
+        if (high0 == high1) {
+            *value = ((uint64_t)high0 << 32) | (uint64_t)low;
+            return M2SDR_ERR_OK;
+        }
+    }
+
     if (m2sdr_reg_read(dev, addr + 4, &low) != 0)
         return M2SDR_ERR_IO;
 
-    *value = ((uint64_t)high << 32) | (uint64_t)low;
+    *value = ((uint64_t)high1 << 32) | (uint64_t)low;
     return M2SDR_ERR_OK;
 }
+
+#if defined(CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR)
+static int m2sdr_read_ptp_last_sample(struct m2sdr_dev *dev,
+                                      int64_t *last_error_ns,
+                                      uint64_t *last_ptp_time_ns,
+                                      uint64_t *last_local_time_ns)
+{
+    uint64_t last_error = 0;
+
+    if (!dev || !last_error_ns || !last_ptp_time_ns || !last_local_time_ns)
+        return M2SDR_ERR_INVAL;
+
+#if defined(CSR_PTP_DISCIPLINE_COARSE_STEPS_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_RATE_UPDATES_ADDR)
+    /*
+     * Read the multi-register sample between servo counters to avoid reporting
+     * mixed values when the hardware updates the sample while software reads it.
+     */
+    for (unsigned int attempt = 0; attempt < 4; attempt++) {
+        uint32_t coarse0 = 0;
+        uint32_t coarse1 = 0;
+        uint32_t rate0 = 0;
+        uint32_t rate1 = 0;
+
+        if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_COARSE_STEPS_ADDR, &coarse0) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_RATE_UPDATES_ADDR, &rate0) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR, &last_error) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR, last_ptp_time_ns) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR, last_local_time_ns) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_COARSE_STEPS_ADDR, &coarse1) != 0)
+            return M2SDR_ERR_IO;
+        if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_RATE_UPDATES_ADDR, &rate1) != 0)
+            return M2SDR_ERR_IO;
+
+        *last_error_ns = (int64_t)last_error;
+        if (coarse0 == coarse1 && rate0 == rate1)
+            return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_OK;
+#else
+    if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR, &last_error) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR, last_ptp_time_ns) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR, last_local_time_ns) != 0)
+        return M2SDR_ERR_IO;
+    *last_error_ns = (int64_t)last_error;
+    return M2SDR_ERR_OK;
+#endif
+}
+#endif
 
 static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
 {
@@ -223,6 +295,25 @@ static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
         return M2SDR_ERR_IO;
 
     *present = (caps.features & M2SDR_FEATURE_ETH_PTP_MASK) != 0;
+    return M2SDR_ERR_OK;
+}
+
+static __attribute__((unused)) int m2sdr_has_ptp_clock10(struct m2sdr_dev *dev, bool *present)
+{
+    struct m2sdr_capabilities caps;
+
+    if (!dev || !present)
+        return M2SDR_ERR_INVAL;
+
+    *present = false;
+#if defined(CSR_PTP_CLK10_DISCIPLINE_STATUS_ADDR)
+    if (m2sdr_get_capabilities(dev, &caps) != 0)
+        return M2SDR_ERR_IO;
+
+    *present = (caps.features & M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK_MASK) != 0;
+#else
+    (void)caps;
+#endif
     return M2SDR_ERR_OK;
 }
 
@@ -245,6 +336,10 @@ static int m2sdr_time_owned_by_ptp(struct m2sdr_dev *dev, bool *owned)
         return M2SDR_ERR_OK;
     }
 
+    /*
+     * Host-side time writes should defer whenever the PTP discipline actively
+     * owns the TimeGenerator.
+     */
 #if defined(CSR_PTP_DISCIPLINE_STATUS_ADDR) && \
     defined(CSR_PTP_DISCIPLINE_STATUS_ACTIVE_OFFSET) && \
     defined(CSR_PTP_DISCIPLINE_STATUS_ACTIVE_SIZE)
@@ -306,6 +401,78 @@ static __attribute__((unused)) int m2sdr_write_ptp_discipline_control(struct m2s
     (void)dev;
     (void)enable;
     (void)holdover;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+static __attribute__((unused)) int m2sdr_get_ptp_clock10_control(struct m2sdr_dev *dev, uint32_t *control)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    if (!dev || !control)
+        return M2SDR_ERR_INVAL;
+
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)control;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+static __attribute__((unused)) int m2sdr_write_ptp_clock10_control(
+    struct m2sdr_dev *dev,
+    bool enable,
+    bool holdover,
+    bool invert,
+    bool align,
+    bool clear_counters)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    uint32_t control = 0;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    /*
+     * Rebuild the whole control word on every write. "align" and
+     * "clear_counters" are pulse bits, while enable/holdover/invert are
+     * persistent ownership policy for the clk10 MMCM loop.
+     */
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_OFFSET
+    control |= ((enable ? 1u : 0u) & ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_SIZE) - 1u))
+        << CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_OFFSET;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_OFFSET
+    control |= ((holdover ? 1u : 0u) & ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_SIZE) - 1u))
+        << CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_OFFSET;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_OFFSET
+    control |= ((invert ? 1u : 0u) & ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_SIZE) - 1u))
+        << CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_OFFSET;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_ALIGN_OFFSET
+    control |= ((align ? 1u : 0u) & ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_ALIGN_SIZE) - 1u))
+        << CSR_PTP_CLK10_DISCIPLINE_CONTROL_ALIGN_OFFSET;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_CLEAR_COUNTERS_OFFSET
+    control |= ((clear_counters ? 1u : 0u) & ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_CLEAR_COUNTERS_SIZE) - 1u))
+        << CSR_PTP_CLK10_DISCIPLINE_CONTROL_CLEAR_COUNTERS_OFFSET;
+#endif
+
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)enable;
+    (void)holdover;
+    (void)invert;
+    (void)align;
+    (void)clear_counters;
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 }
@@ -770,6 +937,14 @@ int m2sdr_get_ptp_discipline_config(struct m2sdr_dev *dev, struct m2sdr_ptp_disc
     if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_LOCK_WINDOW_ADDR, &cfg->lock_window_ns) != 0)
         return M2SDR_ERR_IO;
 #endif
+#ifdef CSR_PTP_DISCIPLINE_UNLOCK_MISSES_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_UNLOCK_MISSES_ADDR, &cfg->unlock_misses) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_DISCIPLINE_COARSE_CONFIRM_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_COARSE_CONFIRM_ADDR, &cfg->coarse_confirm) != 0)
+        return M2SDR_ERR_IO;
+#endif
 #ifdef CSR_PTP_DISCIPLINE_PHASE_STEP_SHIFT_ADDR
     if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_PHASE_STEP_SHIFT_ADDR, &value) != 0)
         return M2SDR_ERR_IO;
@@ -831,6 +1006,14 @@ int m2sdr_set_ptp_discipline_config(struct m2sdr_dev *dev, const struct m2sdr_pt
     if (m2sdr_reg_write(dev, CSR_PTP_DISCIPLINE_LOCK_WINDOW_ADDR, cfg->lock_window_ns) != 0)
         return M2SDR_ERR_IO;
 #endif
+#ifdef CSR_PTP_DISCIPLINE_UNLOCK_MISSES_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_DISCIPLINE_UNLOCK_MISSES_ADDR, cfg->unlock_misses) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_DISCIPLINE_COARSE_CONFIRM_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_DISCIPLINE_COARSE_CONFIRM_ADDR, cfg->coarse_confirm) != 0)
+        return M2SDR_ERR_IO;
+#endif
 #ifdef CSR_PTP_DISCIPLINE_PHASE_STEP_SHIFT_ADDR
     if (m2sdr_reg_write(dev, CSR_PTP_DISCIPLINE_PHASE_STEP_SHIFT_ADDR, cfg->phase_step_shift) != 0)
         return M2SDR_ERR_IO;
@@ -888,7 +1071,6 @@ int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
     bool has_eth_ptp = false;
     uint32_t reg = 0;
     uint32_t value = 0;
-    uint64_t u64 = 0;
     int ret = 0;
 
     if (!dev || !status)
@@ -921,10 +1103,24 @@ int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
         return M2SDR_ERR_IO;
     if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_TIME_INC_ADDR, &status->time_inc) != 0)
         return M2SDR_ERR_IO;
+#if defined(CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR) && \
+    defined(CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR)
+    ret = m2sdr_read_ptp_last_sample(
+        dev,
+        &status->last_error_ns,
+        &status->last_ptp_time_ns,
+        &status->last_local_time_ns);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+#else
+#ifdef CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR
+    uint64_t u64 = 0;
+
     if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_ERROR_ADDR, &u64) != 0)
         return M2SDR_ERR_IO;
     status->last_error_ns = (int64_t)u64;
-
+#endif
 #ifdef CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR
     if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_PTP_TIME_ADDR, &status->last_ptp_time_ns) != 0)
         return M2SDR_ERR_IO;
@@ -932,6 +1128,7 @@ int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
 #ifdef CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR
     if (m2sdr_read_reg_u64(dev, CSR_PTP_DISCIPLINE_LAST_LOCAL_TIME_ADDR, &status->last_local_time_ns) != 0)
         return M2SDR_ERR_IO;
+#endif
 #endif
 #ifdef CSR_PTP_IDENTITY_LOCAL_CLOCK_ID_ADDR
     if (m2sdr_read_reg_u64(dev, CSR_PTP_IDENTITY_LOCAL_CLOCK_ID_ADDR, &status->local_port.clock_id) != 0)
@@ -971,28 +1168,263 @@ int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
     if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_PTP_LOCK_LOSSES_ADDR, &status->ptp_lock_losses) != 0)
         return M2SDR_ERR_IO;
 #endif
+#ifdef CSR_PTP_DISCIPLINE_TIME_LOCK_MISSES_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_TIME_LOCK_MISSES_ADDR, &status->time_lock_misses) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_DISCIPLINE_TIME_LOCK_MISS_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_TIME_LOCK_MISS_COUNT_ADDR, &status->time_lock_miss_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
 #ifdef CSR_PTP_DISCIPLINE_TIME_LOCK_LOSSES_ADDR
     if (m2sdr_reg_read(dev, CSR_PTP_DISCIPLINE_TIME_LOCK_LOSSES_ADDR, &status->time_lock_losses) != 0)
         return M2SDR_ERR_IO;
 #endif
-#ifdef CSR_ETH_PTP_INVALID_HEADER_COUNT_ADDR
-    if (m2sdr_reg_read(dev, CSR_ETH_PTP_INVALID_HEADER_COUNT_ADDR, &status->invalid_header_count) != 0)
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)status;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_ptp_clock10_config(struct m2sdr_dev *dev, struct m2sdr_ptp_clock10_config *cfg)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    bool present = false;
+    uint32_t control = 0;
+    int ret = 0;
+
+    if (!dev || !cfg)
+        return M2SDR_ERR_INVAL;
+
+    memset(cfg, 0, sizeof(*cfg));
+
+    ret = m2sdr_has_ptp_clock10(dev, &present);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (!present)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    ret = m2sdr_get_ptp_clock10_control(dev, &control);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_OFFSET
+    cfg->enable = ((control >> CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_ENABLE_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_OFFSET
+    cfg->holdover = ((control >> CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_HOLDOVER_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_OFFSET
+    cfg->invert = ((control >> CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_CONTROL_INVERT_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_UPDATE_CYCLES_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_UPDATE_CYCLES_ADDR, &cfg->update_cycles) != 0)
         return M2SDR_ERR_IO;
 #endif
-#ifdef CSR_ETH_PTP_WRONG_PEER_COUNT_ADDR
-    if (m2sdr_reg_read(dev, CSR_ETH_PTP_WRONG_PEER_COUNT_ADDR, &status->wrong_peer_count) != 0)
+#ifdef CSR_PTP_CLK10_DISCIPLINE_P_GAIN_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_P_GAIN_ADDR, &cfg->p_gain) != 0)
         return M2SDR_ERR_IO;
 #endif
-#ifdef CSR_ETH_PTP_WRONG_REQUESTER_COUNT_ADDR
-    if (m2sdr_reg_read(dev, CSR_ETH_PTP_WRONG_REQUESTER_COUNT_ADDR, &status->wrong_requester_count) != 0)
+#ifdef CSR_PTP_CLK10_DISCIPLINE_I_GAIN_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_I_GAIN_ADDR, &cfg->i_gain) != 0)
         return M2SDR_ERR_IO;
 #endif
-#ifdef CSR_ETH_PTP_RX_TIMEOUT_COUNT_ADDR
-    if (m2sdr_reg_read(dev, CSR_ETH_PTP_RX_TIMEOUT_COUNT_ADDR, &status->rx_timeout_count) != 0)
+#ifdef CSR_PTP_CLK10_DISCIPLINE_RATE_LIMIT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_RATE_LIMIT_ADDR, &cfg->rate_limit) != 0)
         return M2SDR_ERR_IO;
 #endif
-#ifdef CSR_ETH_PTP_ANNOUNCE_EXPIRY_COUNT_ADDR
-    if (m2sdr_reg_read(dev, CSR_ETH_PTP_ANNOUNCE_EXPIRY_COUNT_ADDR, &status->announce_expiry_count) != 0)
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LOCK_WINDOW_TICKS_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_LOCK_WINDOW_TICKS_ADDR, &cfg->lock_window_ticks) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_HALF_PERIOD_TICKS_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_HALF_PERIOD_TICKS_ADDR, &cfg->half_period_ticks) != 0)
+        return M2SDR_ERR_IO;
+#endif
+
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)cfg;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_set_ptp_clock10_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_clock10_config *cfg)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    bool present = false;
+    int ret = 0;
+
+    if (!dev || !cfg)
+        return M2SDR_ERR_INVAL;
+
+    ret = m2sdr_has_ptp_clock10(dev, &present);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (!present)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    if (cfg->rate_limit > 0x7fffffffu)
+        return M2SDR_ERR_RANGE;
+
+    /*
+     * Program loop coefficients before changing the control register. When
+     * enable becomes true, hardware can then take MMCM ownership with a fully
+     * coherent PI configuration.
+     */
+#ifdef CSR_PTP_CLK10_DISCIPLINE_UPDATE_CYCLES_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_UPDATE_CYCLES_ADDR, cfg->update_cycles) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_P_GAIN_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_P_GAIN_ADDR, cfg->p_gain) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_I_GAIN_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_I_GAIN_ADDR, cfg->i_gain) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_RATE_LIMIT_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_RATE_LIMIT_ADDR, cfg->rate_limit) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LOCK_WINDOW_TICKS_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_LOCK_WINDOW_TICKS_ADDR, cfg->lock_window_ticks) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_HALF_PERIOD_TICKS_ADDR
+    if (m2sdr_reg_write(dev, CSR_PTP_CLK10_DISCIPLINE_HALF_PERIOD_TICKS_ADDR, cfg->half_period_ticks) != 0)
+        return M2SDR_ERR_IO;
+#endif
+
+    return m2sdr_write_ptp_clock10_control(
+        dev,
+        cfg->enable,
+        cfg->holdover,
+        cfg->invert,
+        false,
+        false);
+#else
+    (void)dev;
+    (void)cfg;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_ptp_clock10_status(struct m2sdr_dev *dev, struct m2sdr_ptp_clock10_status *status)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_STATUS_ADDR)
+    bool present = false;
+    uint32_t reg = 0;
+    uint64_t u64 = 0;
+    int ret = 0;
+
+    if (!dev || !status)
+        return M2SDR_ERR_INVAL;
+
+    memset(status, 0, sizeof(*status));
+
+    ret = m2sdr_has_ptp_clock10(dev, &present);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+    if (!present)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_STATUS_ADDR, &reg) != 0)
+        return M2SDR_ERR_IO;
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_ENABLE_OFFSET
+    status->enabled = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_ENABLE_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_ENABLE_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_ACTIVE_OFFSET
+    status->active = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_ACTIVE_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_ACTIVE_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_REFERENCE_LOCKED_OFFSET
+    status->reference_locked = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_REFERENCE_LOCKED_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_REFERENCE_LOCKED_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_CLOCK_LOCKED_OFFSET
+    status->clock_locked = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_CLOCK_LOCKED_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_CLOCK_LOCKED_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_HOLDOVER_OFFSET
+    status->holdover = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_HOLDOVER_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_HOLDOVER_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_ALIGNED_OFFSET
+    status->aligned = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_ALIGNED_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_ALIGNED_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_WAITING_AFTER_REF_OFFSET
+    status->waiting_after_ref = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_WAITING_AFTER_REF_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_WAITING_AFTER_REF_SIZE) - 1u)) != 0;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_STATUS_RATE_LIMITED_OFFSET
+    status->rate_limited = ((reg >> CSR_PTP_CLK10_DISCIPLINE_STATUS_RATE_LIMITED_OFFSET) &
+        ((1u << CSR_PTP_CLK10_DISCIPLINE_STATUS_RATE_LIMITED_SIZE) - 1u)) != 0;
+#endif
+
+#ifdef CSR_PTP_CLK10_DISCIPLINE_PHASE_TICK_PS_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_PHASE_TICK_PS_ADDR, &status->phase_tick_ps) != 0)
+        return M2SDR_ERR_IO;
+#endif
+    /*
+     * Signed hardware values are exposed through unsigned CSR storage. Cast
+     * after reconstructing the raw register words to recover the two's
+     * complement phase error and Q0.32 rate command.
+     */
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LAST_ERROR_TICKS_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_LAST_ERROR_TICKS_ADDR, &reg) != 0)
+        return M2SDR_ERR_IO;
+    status->last_error_ticks = (int32_t)reg;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LAST_ERROR_NS_ADDR
+    if (m2sdr_read_reg_u64(dev, CSR_PTP_CLK10_DISCIPLINE_LAST_ERROR_NS_ADDR, &u64) != 0)
+        return M2SDR_ERR_IO;
+    status->last_error_ns = (int64_t)u64;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LAST_RATE_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_LAST_RATE_ADDR, &reg) != 0)
+        return M2SDR_ERR_IO;
+    status->last_rate = (int32_t)reg;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_SAMPLE_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_SAMPLE_COUNT_ADDR, &status->sample_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_REFERENCE_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_REFERENCE_COUNT_ADDR, &status->reference_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_CLK10_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_CLK10_COUNT_ADDR, &status->clk10_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_MISSING_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_MISSING_COUNT_ADDR, &status->missing_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_ALIGN_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_ALIGN_COUNT_ADDR, &status->align_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_LOCK_LOSS_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_LOCK_LOSS_COUNT_ADDR, &status->lock_loss_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_RATE_UPDATE_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_RATE_UPDATE_COUNT_ADDR, &status->rate_update_count) != 0)
+        return M2SDR_ERR_IO;
+#endif
+#ifdef CSR_PTP_CLK10_DISCIPLINE_SATURATION_COUNT_ADDR
+    if (m2sdr_reg_read(dev, CSR_PTP_CLK10_DISCIPLINE_SATURATION_COUNT_ADDR, &status->saturation_count) != 0)
         return M2SDR_ERR_IO;
 #endif
 
@@ -1000,6 +1432,54 @@ int m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status)
 #else
     (void)dev;
     (void)status;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_clear_ptp_clock10_counters(struct m2sdr_dev *dev)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    struct m2sdr_ptp_clock10_config cfg;
+    int ret = 0;
+
+    ret = m2sdr_get_ptp_clock10_config(dev, &cfg);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+
+    /* Preserve persistent policy bits and assert only the clear pulse. */
+    return m2sdr_write_ptp_clock10_control(
+        dev,
+        cfg.enable,
+        cfg.holdover,
+        cfg.invert,
+        false,
+        true);
+#else
+    (void)dev;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_align_ptp_clock10(struct m2sdr_dev *dev)
+{
+#if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
+    struct m2sdr_ptp_clock10_config cfg;
+    int ret = 0;
+
+    ret = m2sdr_get_ptp_clock10_config(dev, &cfg);
+    if (ret != M2SDR_ERR_OK)
+        return ret;
+
+    /* Preserve persistent policy bits and assert only the align pulse. */
+    return m2sdr_write_ptp_clock10_control(
+        dev,
+        cfg.enable,
+        cfg.holdover,
+        cfg.invert,
+        true,
+        false);
+#else
+    (void)dev;
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 }

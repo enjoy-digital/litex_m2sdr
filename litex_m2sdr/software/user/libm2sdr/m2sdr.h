@@ -193,48 +193,126 @@ struct m2sdr_clock_info {
 };
 
 struct m2sdr_ptp_port_identity {
+    /* IEEE 1588 clockIdentity and portNumber. Zero values mean unknown. */
     uint64_t clock_id;
     uint16_t port_number;
 };
 
+/* Runtime policy for the Ethernet PTP board-time discipline loop. */
 struct m2sdr_ptp_discipline_config {
+    /* Allow PTP to own and steer the shared board TimeGenerator. */
     bool enable;
+    /* Keep the last disciplined increment when PTP lock is lost. */
     bool holdover;
+    /* Number of sys_clk cycles between discipline samples. */
     uint32_t update_cycles;
+    /* First-lock / large-error threshold that requests an absolute time write. */
     uint32_t coarse_threshold_ns;
+    /* Error threshold below which bounded phase trims are preferred. */
     uint32_t phase_threshold_ns;
+    /* Error window considered locked after a valid PTP sample. */
     uint32_t lock_window_ns;
+    /* Consecutive out-of-window samples required before declaring time unlock. */
+    uint32_t unlock_misses;
+    /* Consecutive runtime coarse errors required before allowing realignment. */
+    uint32_t coarse_confirm;
+    /* Right shift applied when converting phase error to phase-trim size. */
     uint8_t phase_step_shift;
+    /* Maximum single bounded phase trim in ns. */
     uint32_t phase_step_max_ns;
+    /* Signed TimeGenerator increment trim limit around the nominal increment. */
     uint32_t trim_limit;
+    /* Proportional gain for TimeGenerator increment steering. */
     uint16_t p_gain;
 };
 
+/* Snapshot of Ethernet PTP board-time discipline state and counters. */
 struct m2sdr_ptp_status {
+    /* Configured enable bit; active means PTP currently owns board time. */
     bool enabled;
     bool active;
+    /* ptp_locked tracks packet/reference validity; time_locked tracks local time error. */
     bool ptp_locked;
     bool time_locked;
+    /* Holdover means the loop is retaining the last correction after PTP loss. */
     bool holdover;
     uint8_t state;
+    /* Master IPv4 address in host byte order. */
     uint32_t master_ip;
+    /* Current TimeGenerator fractional increment word. */
     uint32_t time_inc;
+    /* Signed PTP time minus local board time for the last discipline sample. */
     int64_t last_error_ns;
     uint64_t last_ptp_time_ns;
     uint64_t last_local_time_ns;
     struct m2sdr_ptp_port_identity local_port;
     struct m2sdr_ptp_port_identity master_port;
+    /* Learned sourcePortIdentity update count. */
     uint32_t identity_updates;
+    /* Discipline action and loss counters, all wrapping 32-bit values. */
     uint32_t coarse_steps;
     uint32_t phase_steps;
     uint32_t rate_updates;
     uint32_t ptp_lock_losses;
+    uint32_t time_lock_misses;
+    uint32_t time_lock_miss_count;
     uint32_t time_lock_losses;
-    uint32_t invalid_header_count;
-    uint32_t wrong_peer_count;
-    uint32_t wrong_requester_count;
-    uint32_t rx_timeout_count;
-    uint32_t announce_expiry_count;
+};
+
+/* Runtime policy for the PTP-referenced FPGA 10MHz / RFIC clock loop. */
+struct m2sdr_ptp_clock10_config {
+    /* Allow the clk10 PI loop to override the MMCM dynamic phase-shift rate. */
+    bool enable;
+    /* Keep the last MMCM rate when the PTP reference is lost. */
+    bool holdover;
+    /* Invert MMCM phase-step sign when board wiring/MMCM direction requires it. */
+    bool invert;
+    /* Number of sys_clk cycles between MMCM rate accumulator updates. */
+    uint32_t update_cycles;
+    /* Q0.32 MMCM steps/update per sys_clk tick of phase error. */
+    uint32_t p_gain;
+    /* Q0.32 integral gain in MMCM steps/update per sys_clk tick of phase error. */
+    uint32_t i_gain;
+    /* Absolute Q0.32 MMCM steps/update limit for the PI command. */
+    uint32_t rate_limit;
+    /* clk10 marker lock window in sys_clk ticks. */
+    uint32_t lock_window_ticks;
+    /* Phase-detector search window in sys_clk ticks; normally half a second. */
+    uint32_t half_period_ticks;
+};
+
+/* Snapshot of the PTP-to-10MHz discipline loop state and counters. */
+struct m2sdr_ptp_clock10_status {
+    /* Configured enable bit; active means the PTP clk10 loop owns MMCM steering. */
+    bool enabled;
+    bool active;
+    /* reference_locked follows the board-time PTP reference. */
+    bool reference_locked;
+    /* clock_locked means the clk10 marker is inside lock_window_ticks. */
+    bool clock_locked;
+    bool holdover;
+    /* aligned is set after automatic or manual 1Hz marker alignment. */
+    bool aligned;
+    /* Phase detector is waiting for the clk10 marker following a PTP reference. */
+    bool waiting_after_ref;
+    /* Most recent PI update saturated at rate_limit. */
+    bool rate_limited;
+    /* sys_clk phase-detector tick period in picoseconds. */
+    uint32_t phase_tick_ps;
+    /* Signed clk10 marker minus PTP reference phase error. */
+    int32_t last_error_ticks;
+    int64_t last_error_ns;
+    /* Signed Q0.32 MMCM steps/update command. */
+    int32_t last_rate;
+    /* Phase-detector and PI-loop counters, all wrapping 32-bit values. */
+    uint32_t sample_count;
+    uint32_t reference_count;
+    uint32_t clk10_count;
+    uint32_t missing_count;
+    uint32_t align_count;
+    uint32_t lock_loss_count;
+    uint32_t rate_update_count;
+    uint32_t saturation_count;
 };
 
 enum m2sdr_feature_flag {
@@ -273,6 +351,11 @@ enum m2sdr_feature_flag {
 #else
     M2SDR_FEATURE_ETH_PTP = 0,
 #endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_OFFSET
+    M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK = 1u << CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK = 0,
+#endif
 };
 
 enum m2sdr_feature_mask {
@@ -307,9 +390,17 @@ enum m2sdr_feature_mask {
     M2SDR_FEATURE_JTAGBONE_MASK = 0,
 #endif
 #ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE
-    M2SDR_FEATURE_ETH_PTP_MASK = ((1u << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET,
+    M2SDR_FEATURE_ETH_PTP_MASK =
+        ((1u << CSR_CAPABILITY_FEATURES_ETH_PTP_SIZE) - 1u) << CSR_CAPABILITY_FEATURES_ETH_PTP_OFFSET,
 #else
     M2SDR_FEATURE_ETH_PTP_MASK = 0,
+#endif
+#ifdef CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_SIZE
+    M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK_MASK =
+        ((1u << CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_SIZE) - 1u) <<
+        CSR_CAPABILITY_FEATURES_ETH_PTP_RFIC_CLOCK_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK_MASK = 0,
 #endif
 };
 
@@ -436,6 +527,12 @@ int  m2sdr_get_ptp_status(struct m2sdr_dev *dev, struct m2sdr_ptp_status *status
 int  m2sdr_get_ptp_discipline_config(struct m2sdr_dev *dev, struct m2sdr_ptp_discipline_config *cfg);
 int  m2sdr_set_ptp_discipline_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_discipline_config *cfg);
 int  m2sdr_clear_ptp_counters(struct m2sdr_dev *dev);
+int  m2sdr_get_ptp_clock10_status(struct m2sdr_dev *dev, struct m2sdr_ptp_clock10_status *status);
+int  m2sdr_get_ptp_clock10_config(struct m2sdr_dev *dev, struct m2sdr_ptp_clock10_config *cfg);
+int  m2sdr_set_ptp_clock10_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_clock10_config *cfg);
+int  m2sdr_clear_ptp_clock10_counters(struct m2sdr_dev *dev);
+/* Queue a clk10 marker realignment; hardware applies it on the next PTP reference edge. */
+int  m2sdr_align_ptp_clock10(struct m2sdr_dev *dev);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
