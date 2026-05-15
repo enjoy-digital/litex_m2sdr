@@ -16,7 +16,7 @@ from litex.soc.interconnect import stream
 
 class TimeGenerator(LiteXModule):
     def __init__(self, clk, clk_freq, init=0, with_csr=True):
-        time_inc_reset = int(round((1e9/clk_freq) * (1 << 24)))
+        time_inc_reset = int(round((1e9 / clk_freq) * (1 << 24)))
         assert time_inc_reset < (1 << 32)
         self.enable          = Signal()
         self.sync_enable     = Signal()
@@ -48,7 +48,7 @@ class TimeGenerator(LiteXModule):
         frac = Signal(24)
 
         # Time Clk Domain.
-        self.cd_time = ClockDomain()
+        self.cd_time = ClockDomain(reset_less=True)
         self.comb += self.cd_time.clk.eq(clk)
 
         # Helpers.
@@ -61,6 +61,9 @@ class TimeGenerator(LiteXModule):
         ]
 
         # Time Handling (Q8.24 fractional ns).
+        # Priority is explicit: reset, coarse write, PPS sync, bounded phase trim, then
+        # normal fractional increment. The PTP discipline uses the same write/trim path
+        # as software so time changes remain centralized in this clock domain.
         self.sync.time += [
             If(~self.enable,
                 time.eq(init),
@@ -115,7 +118,10 @@ class TimeGenerator(LiteXModule):
         self._read_time       = CSRStatus(64,  description="Read Time  (ns) (FPGA Time -> SW).")
         self._write_time      = CSRStorage(64, description="Write Time (ns) (SW Time -> FPGA).")
         self._time_adjustment = CSRStorage(64, description="Time Adjustment Value (ns) (SW -> FPGA).")
-        self._time_inc        = CSRStorage(32, reset=self.time_inc.reset, description="Time Increment in ns per tick (Q8.24 format).")
+        self._time_inc        = CSRStorage(32,
+            reset=self.time_inc.reset,
+            description="Time Increment in ns per tick (Q8.24 format)."
+        )
 
         # # #
 
@@ -161,7 +167,6 @@ class TimeGenerator(LiteXModule):
             layout          = cdc_layout,
             cd_from         = "time",
             cd_to           = "sys",
-            with_common_rst = True,
         )
         self.comb += [
             cdc.sink.valid.eq(1),

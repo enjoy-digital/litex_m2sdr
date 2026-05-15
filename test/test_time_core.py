@@ -38,6 +38,13 @@ def test_time_generator_basic_increment_and_write():
     assert samples["t2"] >= 123456789
 
 
+def test_time_generator_time_domain_is_reset_less():
+    """Validate the SI5351-driven time domain has no generated async reset path."""
+    dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, with_csr=False)
+
+    assert dut.cd_time.rst is None
+
+
 def test_time_generator_adjust_and_disable_reset():
     """Validate time adjustment effect and value drop after disable/reset path."""
     dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, init=42, with_csr=False)

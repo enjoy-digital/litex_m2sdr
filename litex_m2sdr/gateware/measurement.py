@@ -5,8 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
-from migen.genlib.cdc       import PulseSynchronizer, MultiReg
-from migen.genlib.resetsync import AsyncResetSynchronizer
+from migen.genlib.cdc import MultiReg, PulseSynchronizer
 
 from litex.gen import *
 
@@ -22,9 +21,8 @@ class ClkMeasurement(LiteXModule):
         # # #
 
         # Create Clock Domain.
-        self.cd_counter = ClockDomain()
+        self.cd_counter = ClockDomain(reset_less=True)
         self.comb += self.cd_counter.clk.eq(clk)
-        self.specials += AsyncResetSynchronizer(self.cd_counter, ResetSignal())
 
         # Free-running Clock Counter.
         counter = Signal(64)

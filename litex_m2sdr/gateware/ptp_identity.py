@@ -19,6 +19,7 @@ from liteeth.core.ptp import (
     PTP_MSG_SYNC,
 )
 
+# PTP Identity Tracker ----------------------------------------------------------------------------
 
 class PTPIdentityTracker(LiteXModule):
     """Track the local and learned master PTP port identities."""
@@ -48,6 +49,8 @@ class PTPIdentityTracker(LiteXModule):
         event_type_ok = Signal()
         general_type_ok = Signal()
 
+        # Event and general PTP streams carry different message types; learn the master
+        # identity from either stream, but only when it matches the selected master IP.
         self.comb += [
             event_type_ok.eq(
                 (self.event_msg_type == PTP_MSG_SYNC) |
@@ -88,11 +91,21 @@ class PTPIdentityTracker(LiteXModule):
             self.add_csr()
 
     def add_csr(self):
-        self._local_clock_id = CSRStatus(64, description="Local PTP clockIdentity (upper 64 bits of sourcePortIdentity).")
-        self._local_port_number = CSRStatus(16, description="Local PTP portNumber (lower 16 bits of sourcePortIdentity).")
-        self._master_clock_id = CSRStatus(64, description="Learned master clockIdentity (upper 64 bits of sourcePortIdentity).")
-        self._master_port_number = CSRStatus(16, description="Learned master portNumber (lower 16 bits of sourcePortIdentity).")
-        self._update_count = CSRStatus(32, description="Number of master sourcePortIdentity updates.")
+        self._local_clock_id = CSRStatus(64,
+            description="Local PTP clockIdentity (upper 64 bits of sourcePortIdentity)."
+        )
+        self._local_port_number = CSRStatus(16,
+            description="Local PTP portNumber (lower 16 bits of sourcePortIdentity)."
+        )
+        self._master_clock_id = CSRStatus(64,
+            description="Learned master clockIdentity (upper 64 bits of sourcePortIdentity)."
+        )
+        self._master_port_number = CSRStatus(16,
+            description="Learned master portNumber (lower 16 bits of sourcePortIdentity)."
+        )
+        self._update_count = CSRStatus(32,
+            description="Number of master sourcePortIdentity updates."
+        )
 
         self.comb += [
             self._local_port_number.status.eq(self.local_port_id[0:16]),
