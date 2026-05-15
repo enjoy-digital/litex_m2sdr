@@ -158,12 +158,15 @@ static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double
             process_buffer = resampled_chunk;
         }
 
-        /* Apply de-emphasis if enabled */
-        for (size_t i = 0; i < process_frames; i++) {
-            double x = process_buffer[i];
-            double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
-            prev_y[0] = y;
-            process_buffer[i] = y;
+        if (tau > 0.0) {
+            /* Apply de-emphasis when requested; otherwise leave the demodulated
+             * audio untouched. */
+            for (size_t i = 0; i < process_frames; i++) {
+                double x = process_buffer[i];
+                double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
+                prev_y[0] = y;
+                process_buffer[i] = y;
+            }
         }
 
         /* Write audio to output */
@@ -194,12 +197,15 @@ static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double
         size_t process_frames = src_data.output_frames_gen;
         float *process_buffer = resampled_chunk;
 
-        /* Apply de-emphasis if enabled */
-        for (size_t i = 0; i < process_frames; i++) {
-            double x = process_buffer[i];
-            double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
-            prev_y[0] = y;
-            process_buffer[i] = y;
+        if (tau > 0.0) {
+            /* Apply de-emphasis when requested; otherwise leave the demodulated
+             * audio untouched. */
+            for (size_t i = 0; i < process_frames; i++) {
+                double x = process_buffer[i];
+                double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
+                prev_y[0] = y;
+                process_buffer[i] = y;
+            }
         }
 
         /* Write audio to output */
@@ -412,7 +418,8 @@ int main(int argc, char **argv) {
     if (outfile != stdout) fclose(outfile);
 
     /* Report completion */
-    printf("✓ wrote %s\n", (strcmp(output_file, "-") == 0) ? "stdout" : output_file);
+    /* Keep stdout reserved for PCM samples when the tool is used in a pipe. */
+    fprintf(stderr, "Wrote %s\n", (strcmp(output_file, "-") == 0) ? "stdout" : output_file);
 
     return 0;
 }

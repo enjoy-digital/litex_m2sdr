@@ -520,7 +520,8 @@ int main(int argc, char **argv) {
     if (outfile != stdout) fclose(outfile);
 
     /* Report completion */
-    printf("✓ wrote %s\n", (strcmp(output_file, "-") == 0) ? "stdout" : output_file);
+    /* Keep stdout reserved for IQ samples when the tool is used in a pipe. */
+    fprintf(stderr, "Wrote %s\n", (strcmp(output_file, "-") == 0) ? "stdout" : output_file);
 
     return 0;
 }

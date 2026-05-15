@@ -35,7 +35,7 @@ ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sig
 
 # Which binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
+  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
   BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
 else
@@ -200,6 +200,12 @@ m2sdr_check: libm2sdr/libm2sdr.a kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ kissfft/kiss_fft.o m2sdr_check.o $(M2SDR_IMGUI_OBJS) libm2sdr/libm2sdr.a -lm $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
+m2sdr_fm_tx: m2sdr_fm_tx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_fm_tx.o -lm -lsndfile -lsamplerate
+
+m2sdr_fm_rx: m2sdr_fm_rx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_fm_rx.o -lm -lsndfile -lsamplerate
+
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)
 m2sdr_util: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_util.o
@@ -226,12 +232,6 @@ m2sdr_sigmf: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a m2sdr_sigmf.o
 
 m2sdr_sata: liblitepcie/liblitepcie.a libm2sdr/libm2sdr.a $(CLI_OBJS) m2sdr_sata.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -Llibm2sdr -lm -lm2sdr -llitepcie
-
-m2sdr_fm_tx: liblitepcie/liblitepcie.a m2sdr_fm_tx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
-
-m2sdr_fm_rx: liblitepcie/liblitepcie.a m2sdr_fm_rx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $^ -Lliblitepcie -lm -llitepcie -lsndfile -lsamplerate
 
 M2SDR_SCAN_SRCS := m2sdr_scan.c kissfft/kiss_fft.c
 M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
