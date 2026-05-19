@@ -211,6 +211,26 @@ static bool parse_uint_range_named_arg(const char *name,
     return false;
 }
 
+static bool have_args(int optind, int argc, int needed)
+{
+    return (needed >= 0) && (optind <= argc) && ((argc - optind) >= needed);
+}
+
+static bool parse_next_u32_arg(const char *name, char **argv, int *optind, uint32_t *value)
+{
+    return parse_u32_named_arg(name, argv[(*optind)++], value);
+}
+
+static bool parse_next_u8_arg(const char *name, char **argv, int *optind, uint8_t *value)
+{
+    return parse_u8_named_arg(name, argv[(*optind)++], value);
+}
+
+static bool parse_next_u16_arg(const char *name, char **argv, int *optind, uint16_t *value)
+{
+    return parse_u16_named_arg(name, argv[(*optind)++], value);
+}
+
 static bool ptp_field_is(const char *field, const char *name, const char *alias)
 {
     return field && (
@@ -4104,10 +4124,12 @@ int main(int argc, char **argv)
         const char *field = NULL;
         const char *value = NULL;
 
-        if (optind < argc)
+        if (optind < argc) {
             field = argv[optind++];
-        if (optind < argc)
+        }
+        if (optind < argc) {
             value = argv[optind++];
+        }
         if (optind < argc)
             goto show_help;
         ptp_config(field, value);
@@ -4121,10 +4143,12 @@ int main(int argc, char **argv)
         const char *field = NULL;
         const char *value = NULL;
 
-        if (optind < argc)
+        if (optind < argc) {
             field = argv[optind++];
-        if (optind < argc)
+        }
+        if (optind < argc) {
             value = argv[optind++];
+        }
         if (optind < argc)
             goto show_help;
         ptp_clock10_config(field, value);
@@ -4132,18 +4156,22 @@ int main(int argc, char **argv)
 
     /* Reg cmds. */
     else if (cmd_is(cmd, "reg_write", "reg-write")) {
-        if (optind + 2 > argc) goto show_help;
         uint32_t offset;
         uint32_t value;
-        if (!parse_u32_named_arg("offset", argv[optind++], &offset) ||
-            !parse_u32_named_arg("value", argv[optind++], &value))
+
+        if (!have_args(optind, argc, 2))
+            goto show_help;
+        if (!parse_next_u32_arg("offset", argv, &optind, &offset) ||
+            !parse_next_u32_arg("value", argv, &optind, &value))
             exit(1);
         test_reg_write(offset, value);
     }
     else if (cmd_is(cmd, "reg_read", "reg-read")) {
-        if (optind + 1 > argc) goto show_help;
         uint32_t offset;
-        if (!parse_u32_named_arg("offset", argv[optind++], &offset))
+
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        if (!parse_next_u32_arg("offset", argv, &optind, &offset))
             exit(1);
         test_reg_read(offset);
     }
@@ -4157,12 +4185,14 @@ int main(int argc, char **argv)
         int num_measurements = 10;
         int delay_between_tests = 1;
 
-        if (optind < argc)
+        if (optind < argc) {
             if (!parse_int_range_named_arg("measurement count", argv[optind++], 0, INT_MAX, &num_measurements))
                 exit(1);
-        if (optind < argc)
+        }
+        if (optind < argc) {
             if (!parse_int_range_named_arg("measurement delay", argv[optind++], 0, INT_MAX, &delay_between_tests))
                 exit(1);
+        }
 
         clk_test(num_measurements, delay_between_tests);
     }
@@ -4172,16 +4202,20 @@ int main(int argc, char **argv)
     else if (cmd_is(cmd, "led_status", "led-status"))
         led_status();
     else if (cmd_is(cmd, "led_control", "led-control")) {
-        if (optind + 1 > argc) goto show_help;
         uint32_t control;
-        if (!parse_u32_named_arg("LED control", argv[optind++], &control))
+
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        if (!parse_next_u32_arg("LED control", argv, &optind, &control))
             exit(1);
         led_control(control);
     }
     else if (cmd_is(cmd, "led_pulse", "led-pulse")) {
-        if (optind + 1 > argc) goto show_help;
         uint32_t pulse;
-        if (!parse_u32_named_arg("LED pulse", argv[optind++], &pulse))
+
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        if (!parse_next_u32_arg("LED pulse", argv, &optind, &pulse))
             exit(1);
         led_pulse(pulse);
     }
@@ -4203,18 +4237,22 @@ int main(int argc, char **argv)
     else if (cmd_is(cmd, "si5351_dump", "si5351-dump"))
         test_si5351_dump();
     else if (cmd_is(cmd, "si5351_write", "si5351-write")) {
-        if (optind + 2 > argc) goto show_help;
         uint8_t reg;
         uint8_t value;
-        if (!parse_u8_named_arg("SI5351 register", argv[optind++], &reg) ||
-            !parse_u8_named_arg("SI5351 value", argv[optind++], &value))
+
+        if (!have_args(optind, argc, 2))
+            goto show_help;
+        if (!parse_next_u8_arg("SI5351 register", argv, &optind, &reg) ||
+            !parse_next_u8_arg("SI5351 value", argv, &optind, &value))
             exit(1);
         test_si5351_write(reg, value);
     }
     else if (cmd_is(cmd, "si5351_read", "si5351-read")) {
-        if (optind + 1 > argc) goto show_help;
         uint8_t reg;
-        if (!parse_u8_named_arg("SI5351 register", argv[optind++], &reg))
+
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        if (!parse_next_u8_arg("SI5351 register", argv, &optind, &reg))
             exit(1);
         test_si5351_read(reg);
     }
@@ -4224,18 +4262,22 @@ int main(int argc, char **argv)
     else if (cmd_is(cmd, "ad9361_dump", "ad9361-dump"))
         test_ad9361_dump();
     else if (cmd_is(cmd, "ad9361_write", "ad9361-write")) {
-        if (optind + 2 > argc) goto show_help;
         uint16_t reg;
         uint16_t value;
-        if (!parse_u16_named_arg("AD9361 register", argv[optind++], &reg) ||
-            !parse_u16_named_arg("AD9361 value", argv[optind++], &value))
+
+        if (!have_args(optind, argc, 2))
+            goto show_help;
+        if (!parse_next_u16_arg("AD9361 register", argv, &optind, &reg) ||
+            !parse_next_u16_arg("AD9361 value", argv, &optind, &value))
             exit(1);
         test_ad9361_write(reg, value);
     }
     else if (cmd_is(cmd, "ad9361_read", "ad9361-read")) {
-        if (optind + 1 > argc) goto show_help;
         uint16_t reg;
-        if (!parse_u16_named_arg("AD9361 register", argv[optind++], &reg))
+
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        if (!parse_next_u16_arg("AD9361 register", argv, &optind, &reg))
             exit(1);
         test_ad9361_read(reg);
     }
@@ -4250,12 +4292,13 @@ int main(int argc, char **argv)
     else if (cmd_is(cmd, "flash_write", "flash-write")) {
         const char *filename;
         uint32_t offset = CONFIG_FLASH_IMAGE_SIZE;  /* Operational */
-        if (optind + 1 > argc)
+        if (!have_args(optind, argc, 1))
             goto show_help;
         filename = argv[optind++];
-        if (optind < argc)
-            if (!parse_u32_named_arg("flash offset", argv[optind++], &offset))
+        if (optind < argc) {
+            if (!parse_next_u32_arg("flash offset", argv, &optind, &offset))
                 exit(1);
+        }
         if (!g_force_flash_write && !confirm_flash_write()) {
             fprintf(stderr, "Aborted.\n");
             exit(1);
@@ -4267,14 +4310,15 @@ int main(int argc, char **argv)
         const char *filename;
         uint32_t size = 0;
         uint32_t offset = CONFIG_FLASH_IMAGE_SIZE; /* Operational */
-        if (optind + 2 > argc)
+        if (!have_args(optind, argc, 2))
             goto show_help;
         filename = argv[optind++];
-        if (!parse_u32_named_arg("flash size", argv[optind++], &size))
+        if (!parse_next_u32_arg("flash size", argv, &optind, &size))
             exit(1);
-        if (optind < argc)
-            if (!parse_u32_named_arg("flash offset", argv[optind++], &offset))
+        if (optind < argc) {
+            if (!parse_next_u32_arg("flash offset", argv, &optind, &offset))
                 exit(1);
+        }
         flash_read(filename, size, offset);
     }
     else if (cmd_is(cmd, "flash_reload", "flash-reload"))
