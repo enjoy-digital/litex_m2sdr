@@ -47,16 +47,28 @@ static int test_cli_numeric_parser(void)
         return -1;
     if (m2sdr_cli_parse_int64("2.4e9", &value) != 0 || value != 2400000000LL)
         return -1;
+    if (m2sdr_cli_parse_int64(" 1.25M ", &value) != 0 || value != 1250000)
+        return -1;
+    if (m2sdr_cli_parse_int64("-2k", &value) != 0 || value != -2000)
+        return -1;
     if (m2sdr_cli_parse_int64("10.5", &value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_int64("10.01", &value) == 0)
         return -1;
     if (m2sdr_cli_parse_int64("30.72foo", &value) == 0)
         return -1;
     if (m2sdr_cli_parse_int64("nan", &value) == 0)
         return -1;
+    if (m2sdr_cli_parse_int64(NULL, &value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_int64("1", NULL) == 0)
+        return -1;
 
     if (m2sdr_cli_parse_double("30.72e6", &dvalue) != 0 || dvalue != 30720000.0)
         return -1;
     if (m2sdr_cli_parse_double("2.4G", &dvalue) != 0 || dvalue != 2400000000.0)
+        return -1;
+    if (m2sdr_cli_parse_double(" 1.5k ", &dvalue) != 0 || dvalue != 1500.0)
         return -1;
     if (m2sdr_cli_parse_double("-1.25", &dvalue) != 0 || dvalue != -1.25)
         return -1;
@@ -64,32 +76,60 @@ static int test_cli_numeric_parser(void)
         return -1;
     if (m2sdr_cli_parse_double("inf", &dvalue) == 0)
         return -1;
+    if (m2sdr_cli_parse_double(NULL, &dvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_double("1", NULL) == 0)
+        return -1;
 
     if (m2sdr_cli_parse_u64("0x100", &uvalue) != 0 || uvalue != 0x100)
+        return -1;
+    if (m2sdr_cli_parse_u64(" 42 ", &uvalue) != 0 || uvalue != 42)
         return -1;
     if (m2sdr_cli_parse_u64("-1", &uvalue) == 0)
         return -1;
     if (m2sdr_cli_parse_u64("12bad", &uvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u64("1k", &uvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u64(NULL, &uvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u64("1", NULL) == 0)
         return -1;
 
     if (m2sdr_cli_parse_u32("4294967295", &u32value) != 0 || u32value != UINT32_MAX)
         return -1;
     if (m2sdr_cli_parse_u32("4294967296", &u32value) == 0)
         return -1;
+    if (m2sdr_cli_parse_u32("-1", &u32value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u32("1", NULL) == 0)
+        return -1;
 
     if (m2sdr_cli_parse_uint_range("3", 0, 3, &unsigned_value) != 0 || unsigned_value != 3)
         return -1;
     if (m2sdr_cli_parse_uint_range("4", 0, 3, &unsigned_value) == 0)
         return -1;
+    if (m2sdr_cli_parse_uint_range("1", 3, 0, &unsigned_value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_uint_range("1", 0, 3, NULL) == 0)
+        return -1;
     if (m2sdr_cli_parse_int_range("-1", -2, 2, &int_value) != 0 || int_value != -1)
         return -1;
     if (m2sdr_cli_parse_int_range("3", -2, 2, &int_value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_int_range("1", 2, -2, &int_value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_int_range("1", -2, 2, NULL) == 0)
         return -1;
     if (m2sdr_cli_parse_double_range("0.5", 0.0, 1.0, &dvalue) != 0 || dvalue != 0.5)
         return -1;
     if (m2sdr_cli_parse_double_range("1.5", 0.0, 1.0, &dvalue) == 0)
         return -1;
     if (m2sdr_cli_parse_double_range("-1.5", -2.0, 0.0, &dvalue) != 0 || dvalue != -1.5)
+        return -1;
+    if (m2sdr_cli_parse_double_range("0.5", 1.0, 0.0, &dvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_double_range("0.5", 0.0, 1.0, NULL) == 0)
         return -1;
 
     return 0;
@@ -104,6 +144,10 @@ static int test_cli_format_parser(void)
     if (m2sdr_cli_parse_format("sc8", &format) != 0 || format != M2SDR_FORMAT_SC8_Q7)
         return -1;
     if (m2sdr_cli_parse_format("ci16", &format) == 0)
+        return -1;
+    if (m2sdr_cli_parse_format(NULL, &format) == 0)
+        return -1;
+    if (m2sdr_cli_parse_format("sc16", NULL) == 0)
         return -1;
     if (strcmp(m2sdr_cli_format_name(M2SDR_FORMAT_SC16_Q11), "sc16") != 0)
         return -1;

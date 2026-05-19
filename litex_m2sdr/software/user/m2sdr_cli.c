@@ -272,6 +272,8 @@ int m2sdr_cli_parse_u32(const char *text, uint32_t *value)
 {
     uint64_t parsed;
 
+    if (!value)
+        return -1;
     if (m2sdr_cli_parse_u64(text, &parsed) != 0 || parsed > UINT32_MAX)
         return -1;
 
