@@ -929,6 +929,78 @@ static bool parse_preset_bool(const char *path, const char *key, const char *tex
     return false;
 }
 
+static bool load_preset_value(struct scan_state *s, const char *path, const char *key, const char *value)
+{
+    if (!strcmp(key, "refclk_hz"))
+        return parse_preset_int64(path, key, value, &s->refclk_hz);
+    if (!strcmp(key, "start_hz"))
+        return parse_preset_int64(path, key, value, &s->scan_start_hz);
+    if (!strcmp(key, "stop_hz"))
+        return parse_preset_int64(path, key, value, &s->scan_stop_hz);
+    if (!strcmp(key, "sample_rate_hz"))
+        return parse_preset_u32(path, key, value, &s->sample_rate_hz);
+    if (!strcmp(key, "fft_len"))
+        return parse_preset_int(path, key, value, &s->fft_len);
+    if (!strcmp(key, "lines"))
+        return parse_preset_int(path, key, value, &s->lines);
+    if (!strcmp(key, "rx_gain"))
+        return parse_preset_int(path, key, value, &s->rx_gain);
+    if (!strcmp(key, "settle_us"))
+        return parse_preset_int(path, key, value, &s->rx_settle_us);
+    if (!strcmp(key, "stitch_pct"))
+        return parse_preset_int(path, key, value, &s->stitch_pct);
+    if (!strcmp(key, "auto_samplerate"))
+        return parse_preset_bool(path, key, value, &s->auto_samplerate);
+    if (!strcmp(key, "db_min"))
+        return parse_preset_float(path, key, value, &s->db_min);
+    if (!strcmp(key, "db_max"))
+        return parse_preset_float(path, key, value, &s->db_max);
+    if (!strcmp(key, "display_rows"))
+        return parse_preset_int(path, key, value, &s->display_rows);
+    if (!strcmp(key, "waterfall_palette"))
+        return parse_preset_int(path, key, value, &s->waterfall_palette);
+    if (!strcmp(key, "waterfall_view_mode"))
+        return parse_preset_int(path, key, value, &s->waterfall_view_mode);
+    if (!strcmp(key, "waterfall_3d_depth"))
+        return parse_preset_int(path, key, value, &s->waterfall_3d_depth);
+    if (!strcmp(key, "waterfall_3d_render_mode"))
+        return parse_preset_int(path, key, value, &s->waterfall_3d_render_mode);
+    if (!strcmp(key, "waterfall_3d_lift"))
+        return parse_preset_float(path, key, value, &s->waterfall_3d_lift);
+    if (!strcmp(key, "waterfall_3d_zoom"))
+        return parse_preset_float(path, key, value, &s->waterfall_3d_zoom);
+    if (!strcmp(key, "waterfall_3d_yaw"))
+        return parse_preset_float(path, key, value, &s->waterfall_3d_yaw);
+    if (!strcmp(key, "waterfall_3d_pitch"))
+        return parse_preset_float(path, key, value, &s->waterfall_3d_pitch);
+
+    return true;
+}
+
+static void sanitize_loaded_preset(struct scan_state *s)
+{
+    s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(s->sample_rate_hz);
+    if (s->waterfall_view_mode < WATERFALL_VIEW_2D || s->waterfall_view_mode > WATERFALL_VIEW_3D)
+        s->waterfall_view_mode = WATERFALL_VIEW_2D;
+    if (s->waterfall_palette < 0 || s->waterfall_palette >= WATERFALL_PALETTE_COUNT)
+        s->waterfall_palette = 0;
+    if (s->display_rows < 1 || s->display_rows > MAX_DISPLAY_ROWS)
+        s->display_rows = 1;
+    if (s->waterfall_3d_depth < 16)
+        s->waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
+    if (s->waterfall_3d_render_mode < 0 ||
+        s->waterfall_3d_render_mode >= WATERFALL_3D_RENDER_COUNT)
+        s->waterfall_3d_render_mode = DEFAULT_WATERFALL_3D_RENDER_MODE;
+    if (s->waterfall_3d_lift < 0.10f || s->waterfall_3d_lift > 1.20f)
+        s->waterfall_3d_lift = DEFAULT_WATERFALL_3D_LIFT;
+    if (s->waterfall_3d_zoom < 0.50f || s->waterfall_3d_zoom > 4.00f)
+        s->waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
+    if (s->waterfall_3d_yaw < -80.0f || s->waterfall_3d_yaw > 80.0f)
+        s->waterfall_3d_yaw = DEFAULT_WATERFALL_3D_YAW;
+    if (s->waterfall_3d_pitch < 15.0f || s->waterfall_3d_pitch > 75.0f)
+        s->waterfall_3d_pitch = DEFAULT_WATERFALL_3D_PITCH;
+}
+
 static bool load_preset_file(struct scan_state *s, const char *path)
 {
     FILE *f;
@@ -952,48 +1024,7 @@ static bool load_preset_file(struct scan_state *s, const char *path)
         line[strcspn(line, "\r\n")] = '\0';
         eq[strcspn(eq, "\r\n")] = '\0';
 
-        if (!strcmp(line, "refclk_hz"))
-            ok = parse_preset_int64(path, line, eq, &s->refclk_hz);
-        else if (!strcmp(line, "start_hz"))
-            ok = parse_preset_int64(path, line, eq, &s->scan_start_hz);
-        else if (!strcmp(line, "stop_hz"))
-            ok = parse_preset_int64(path, line, eq, &s->scan_stop_hz);
-        else if (!strcmp(line, "sample_rate_hz"))
-            ok = parse_preset_u32(path, line, eq, &s->sample_rate_hz);
-        else if (!strcmp(line, "fft_len"))
-            ok = parse_preset_int(path, line, eq, &s->fft_len);
-        else if (!strcmp(line, "lines"))
-            ok = parse_preset_int(path, line, eq, &s->lines);
-        else if (!strcmp(line, "rx_gain"))
-            ok = parse_preset_int(path, line, eq, &s->rx_gain);
-        else if (!strcmp(line, "settle_us"))
-            ok = parse_preset_int(path, line, eq, &s->rx_settle_us);
-        else if (!strcmp(line, "stitch_pct"))
-            ok = parse_preset_int(path, line, eq, &s->stitch_pct);
-        else if (!strcmp(line, "auto_samplerate"))
-            ok = parse_preset_bool(path, line, eq, &s->auto_samplerate);
-        else if (!strcmp(line, "db_min"))
-            ok = parse_preset_float(path, line, eq, &s->db_min);
-        else if (!strcmp(line, "db_max"))
-            ok = parse_preset_float(path, line, eq, &s->db_max);
-        else if (!strcmp(line, "display_rows"))
-            ok = parse_preset_int(path, line, eq, &s->display_rows);
-        else if (!strcmp(line, "waterfall_palette"))
-            ok = parse_preset_int(path, line, eq, &s->waterfall_palette);
-        else if (!strcmp(line, "waterfall_view_mode"))
-            ok = parse_preset_int(path, line, eq, &s->waterfall_view_mode);
-        else if (!strcmp(line, "waterfall_3d_depth"))
-            ok = parse_preset_int(path, line, eq, &s->waterfall_3d_depth);
-        else if (!strcmp(line, "waterfall_3d_render_mode"))
-            ok = parse_preset_int(path, line, eq, &s->waterfall_3d_render_mode);
-        else if (!strcmp(line, "waterfall_3d_lift"))
-            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_lift);
-        else if (!strcmp(line, "waterfall_3d_zoom"))
-            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_zoom);
-        else if (!strcmp(line, "waterfall_3d_yaw"))
-            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_yaw);
-        else if (!strcmp(line, "waterfall_3d_pitch"))
-            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_pitch);
+        ok = load_preset_value(s, path, line, eq);
         if (!ok)
             break;
     }
@@ -1001,26 +1032,7 @@ static bool load_preset_file(struct scan_state *s, const char *path)
     if (!ok)
         return false;
 
-    s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(s->sample_rate_hz);
-    if (s->waterfall_view_mode < WATERFALL_VIEW_2D || s->waterfall_view_mode > WATERFALL_VIEW_3D)
-        s->waterfall_view_mode = WATERFALL_VIEW_2D;
-    if (s->waterfall_palette < 0 || s->waterfall_palette >= WATERFALL_PALETTE_COUNT)
-        s->waterfall_palette = 0;
-    if (s->display_rows < 1 || s->display_rows > MAX_DISPLAY_ROWS)
-        s->display_rows = 1;
-    if (s->waterfall_3d_depth < 16)
-        s->waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
-    if (s->waterfall_3d_render_mode < 0 ||
-        s->waterfall_3d_render_mode >= WATERFALL_3D_RENDER_COUNT)
-        s->waterfall_3d_render_mode = DEFAULT_WATERFALL_3D_RENDER_MODE;
-    if (s->waterfall_3d_lift < 0.10f || s->waterfall_3d_lift > 1.20f)
-        s->waterfall_3d_lift = DEFAULT_WATERFALL_3D_LIFT;
-    if (s->waterfall_3d_zoom < 0.50f || s->waterfall_3d_zoom > 4.00f)
-        s->waterfall_3d_zoom = DEFAULT_WATERFALL_3D_ZOOM;
-    if (s->waterfall_3d_yaw < -80.0f || s->waterfall_3d_yaw > 80.0f)
-        s->waterfall_3d_yaw = DEFAULT_WATERFALL_3D_YAW;
-    if (s->waterfall_3d_pitch < 15.0f || s->waterfall_3d_pitch > 75.0f)
-        s->waterfall_3d_pitch = DEFAULT_WATERFALL_3D_PITCH;
+    sanitize_loaded_preset(s);
     return true;
 }
 
