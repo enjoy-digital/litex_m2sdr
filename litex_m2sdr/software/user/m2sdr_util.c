@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
@@ -164,52 +163,9 @@ static void ptp_format_port_identity(char *buf, size_t len, const struct m2sdr_p
         (unsigned)port->port_number);
 }
 
-static int parse_bool_arg(const char *arg, bool *value)
-{
-    if (!arg || !value)
-        return -1;
-
-    if ((strcasecmp(arg, "1") == 0) ||
-        (strcasecmp(arg, "true") == 0) ||
-        (strcasecmp(arg, "yes") == 0) ||
-        (strcasecmp(arg, "on") == 0) ||
-        (strcasecmp(arg, "enable") == 0) ||
-        (strcasecmp(arg, "enabled") == 0)) {
-        *value = true;
-        return 0;
-    }
-
-    if ((strcasecmp(arg, "0") == 0) ||
-        (strcasecmp(arg, "false") == 0) ||
-        (strcasecmp(arg, "no") == 0) ||
-        (strcasecmp(arg, "off") == 0) ||
-        (strcasecmp(arg, "disable") == 0) ||
-        (strcasecmp(arg, "disabled") == 0)) {
-        *value = false;
-        return 0;
-    }
-
-    return -1;
-}
-
-static int parse_u32_arg(const char *arg, uint32_t *value)
-{
-    return m2sdr_cli_parse_u32(arg, value);
-}
-
-static int parse_i64_arg(const char *arg, int64_t *value)
-{
-    return m2sdr_cli_parse_int64(arg, value);
-}
-
-static int parse_double_arg(const char *arg, double *value)
-{
-    return m2sdr_cli_parse_double(arg, value);
-}
-
 static bool parse_u32_named_arg(const char *name, const char *arg, uint32_t *value)
 {
-    if (parse_u32_arg(arg, value) == 0)
+    if (m2sdr_cli_parse_u32(arg, value) == 0)
         return true;
     fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
     return false;
@@ -217,26 +173,18 @@ static bool parse_u32_named_arg(const char *name, const char *arg, uint32_t *val
 
 static bool parse_u8_named_arg(const char *name, const char *arg, uint8_t *value)
 {
-    uint32_t parsed;
-
-    if (parse_u32_arg(arg, &parsed) != 0 || parsed > UINT8_MAX) {
-        fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
-        return false;
-    }
-    *value = (uint8_t)parsed;
-    return true;
+    if (m2sdr_cli_parse_u8(arg, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+    return false;
 }
 
 static bool parse_u16_named_arg(const char *name, const char *arg, uint16_t *value)
 {
-    uint32_t parsed;
-
-    if (parse_u32_arg(arg, &parsed) != 0 || parsed > UINT16_MAX) {
-        fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
-        return false;
-    }
-    *value = (uint16_t)parsed;
-    return true;
+    if (m2sdr_cli_parse_u16(arg, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+    return false;
 }
 
 static bool parse_int_range_named_arg(const char *name,
@@ -710,43 +658,43 @@ static void ptp_config(const char *field, const char *value)
         ptp_fail_and_close(conn, "ptp-config requires a value for '%s'\n", field);
 
     if (ptp_field_is(field, "enable", NULL)) {
-        if (parse_bool_arg(value, &cfg.enable) != 0)
+        if (m2sdr_cli_parse_bool(value, &cfg.enable) != 0)
             ptp_fail_and_close(conn, "Invalid boolean value '%s' for enable\n", value);
     } else if (ptp_field_is(field, "holdover", NULL)) {
-        if (parse_bool_arg(value, &cfg.holdover) != 0)
+        if (m2sdr_cli_parse_bool(value, &cfg.holdover) != 0)
             ptp_fail_and_close(conn, "Invalid boolean value '%s' for holdover\n", value);
     } else if (ptp_field_is(field, "update-cycles", "update_cycles")) {
-        if (parse_u32_arg(value, &cfg.update_cycles) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.update_cycles) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for update-cycles\n", value);
     } else if (ptp_field_is(field, "coarse-threshold", "coarse_threshold")) {
-        if (parse_u32_arg(value, &cfg.coarse_threshold_ns) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.coarse_threshold_ns) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for coarse-threshold\n", value);
     } else if (ptp_field_is(field, "phase-threshold", "phase_threshold")) {
-        if (parse_u32_arg(value, &cfg.phase_threshold_ns) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.phase_threshold_ns) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for phase-threshold\n", value);
     } else if (ptp_field_is(field, "lock-window", "lock_window")) {
-        if (parse_u32_arg(value, &cfg.lock_window_ns) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.lock_window_ns) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for lock-window\n", value);
     } else if (ptp_field_is(field, "unlock-misses", "unlock_misses")) {
-        if (parse_u32_arg(value, &cfg.unlock_misses) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.unlock_misses) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for unlock-misses\n", value);
     } else if (ptp_field_is(field, "coarse-confirm", "coarse_confirm")) {
-        if (parse_u32_arg(value, &cfg.coarse_confirm) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.coarse_confirm) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for coarse-confirm\n", value);
     } else if (ptp_field_is(field, "phase-step-shift", "phase_step_shift")) {
         uint32_t parsed = 0;
-        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 63u))
+        if ((m2sdr_cli_parse_u32(value, &parsed) != 0) || (parsed > 63u))
             ptp_fail_and_close(conn, "Invalid value '%s' for phase-step-shift\n", value);
         cfg.phase_step_shift = (uint8_t)parsed;
     } else if (ptp_field_is(field, "phase-step-max", "phase_step_max")) {
-        if (parse_u32_arg(value, &cfg.phase_step_max_ns) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.phase_step_max_ns) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for phase-step-max\n", value);
     } else if (ptp_field_is(field, "trim-limit", "trim_limit")) {
-        if (parse_u32_arg(value, &cfg.trim_limit) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.trim_limit) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for trim-limit\n", value);
     } else if (ptp_field_is(field, "p-gain", "p_gain")) {
         uint32_t parsed = 0;
-        if ((parse_u32_arg(value, &parsed) != 0) || (parsed > 0xffffu))
+        if ((m2sdr_cli_parse_u32(value, &parsed) != 0) || (parsed > 0xffffu))
             ptp_fail_and_close(conn, "Invalid value '%s' for p-gain\n", value);
         cfg.p_gain = (uint16_t)parsed;
     } else {
@@ -811,31 +759,31 @@ static void ptp_clock10_config(const char *field, const char *value)
         ptp_fail_and_close(conn, "ptp-clock10-config requires a value for '%s'\n", field);
 
     if (ptp_field_is(field, "enable", NULL)) {
-        if (parse_bool_arg(value, &cfg.enable) != 0)
+        if (m2sdr_cli_parse_bool(value, &cfg.enable) != 0)
             ptp_fail_and_close(conn, "Invalid boolean value '%s' for enable\n", value);
     } else if (ptp_field_is(field, "holdover", NULL)) {
-        if (parse_bool_arg(value, &cfg.holdover) != 0)
+        if (m2sdr_cli_parse_bool(value, &cfg.holdover) != 0)
             ptp_fail_and_close(conn, "Invalid boolean value '%s' for holdover\n", value);
     } else if (ptp_field_is(field, "invert", NULL)) {
-        if (parse_bool_arg(value, &cfg.invert) != 0)
+        if (m2sdr_cli_parse_bool(value, &cfg.invert) != 0)
             ptp_fail_and_close(conn, "Invalid boolean value '%s' for invert\n", value);
     } else if (ptp_field_is(field, "update-cycles", "update_cycles")) {
-        if (parse_u32_arg(value, &cfg.update_cycles) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.update_cycles) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for update-cycles\n", value);
     } else if (ptp_field_is(field, "p-gain", "p_gain")) {
-        if (parse_u32_arg(value, &cfg.p_gain) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.p_gain) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for p-gain\n", value);
     } else if (ptp_field_is(field, "i-gain", "i_gain")) {
-        if (parse_u32_arg(value, &cfg.i_gain) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.i_gain) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for i-gain\n", value);
     } else if (ptp_field_is(field, "rate-limit", "rate_limit")) {
-        if ((parse_u32_arg(value, &cfg.rate_limit) != 0) || (cfg.rate_limit > 0x7fffffffu))
+        if ((m2sdr_cli_parse_u32(value, &cfg.rate_limit) != 0) || (cfg.rate_limit > 0x7fffffffu))
             ptp_fail_and_close(conn, "Invalid value '%s' for rate-limit\n", value);
     } else if (ptp_field_is(field, "lock-window-ticks", "lock_window_ticks")) {
-        if (parse_u32_arg(value, &cfg.lock_window_ticks) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.lock_window_ticks) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for lock-window-ticks\n", value);
     } else if (ptp_field_is(field, "half-period-ticks", "half_period_ticks")) {
-        if (parse_u32_arg(value, &cfg.half_period_ticks) != 0)
+        if (m2sdr_cli_parse_u32(value, &cfg.half_period_ticks) != 0)
             ptp_fail_and_close(conn, "Invalid value '%s' for half-period-ticks\n", value);
     } else {
         ptp_fail_and_close(conn, "Unknown ptp-clock10-config field '%s'\n", field);
@@ -4071,7 +4019,7 @@ int main(int argc, char **argv)
             ptp_watch = true;
             break;
         case OPTION_WATCH_INTERVAL:
-            if ((parse_double_arg(optarg, &ptp_watch_interval) != 0) || (ptp_watch_interval <= 0.0)) {
+            if ((m2sdr_cli_parse_double(optarg, &ptp_watch_interval) != 0) || (ptp_watch_interval <= 0.0)) {
                 fprintf(stderr, "Invalid --watch-interval value '%s'\n", optarg);
                 exit(1);
             }
@@ -4080,7 +4028,7 @@ int main(int argc, char **argv)
             ptp_json = true;
             break;
         case OPTION_MAX_ERROR_NS:
-            if ((parse_i64_arg(optarg, &ptp_max_error_ns) != 0) || (ptp_max_error_ns < 0)) {
+            if ((m2sdr_cli_parse_int64(optarg, &ptp_max_error_ns) != 0) || (ptp_max_error_ns < 0)) {
                 fprintf(stderr, "Invalid --max-error-ns value '%s'\n", optarg);
                 exit(1);
             }

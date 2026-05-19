@@ -38,6 +38,9 @@ static int test_cli_numeric_parser(void)
     unsigned unsigned_value = 0;
     int int_value = 0;
     double dvalue = 0.0;
+    uint16_t u16value = 0;
+    uint8_t u8value = 0;
+    bool bvalue = false;
 
     if (m2sdr_cli_parse_int64("30720000", &value) != 0 || value != 30720000)
         return -1;
@@ -103,6 +106,35 @@ static int test_cli_numeric_parser(void)
     if (m2sdr_cli_parse_u32("-1", &u32value) == 0)
         return -1;
     if (m2sdr_cli_parse_u32("1", NULL) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_u16("65535", &u16value) != 0 || u16value != UINT16_MAX)
+        return -1;
+    if (m2sdr_cli_parse_u16("65536", &u16value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u16("-1", &u16value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u16("1", NULL) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_u8("255", &u8value) != 0 || u8value != UINT8_MAX)
+        return -1;
+    if (m2sdr_cli_parse_u8("256", &u8value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u8("-1", &u8value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u8("1", NULL) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_bool("enabled", &bvalue) != 0 || !bvalue)
+        return -1;
+    if (m2sdr_cli_parse_bool("OFF", &bvalue) != 0 || bvalue)
+        return -1;
+    if (m2sdr_cli_parse_bool("maybe", &bvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_bool(NULL, &bvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_bool("true", NULL) == 0)
         return -1;
 
     if (m2sdr_cli_parse_uint_range("3", 0, 3, &unsigned_value) != 0 || unsigned_value != 3)

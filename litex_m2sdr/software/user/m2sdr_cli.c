@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <ctype.h>
 #include <errno.h>
@@ -279,6 +280,60 @@ int m2sdr_cli_parse_u32(const char *text, uint32_t *value)
 
     *value = (uint32_t)parsed;
     return 0;
+}
+
+int m2sdr_cli_parse_u16(const char *text, uint16_t *value)
+{
+    uint32_t parsed;
+
+    if (!value)
+        return -1;
+    if (m2sdr_cli_parse_u32(text, &parsed) != 0 || parsed > UINT16_MAX)
+        return -1;
+
+    *value = (uint16_t)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_u8(const char *text, uint8_t *value)
+{
+    uint32_t parsed;
+
+    if (!value)
+        return -1;
+    if (m2sdr_cli_parse_u32(text, &parsed) != 0 || parsed > UINT8_MAX)
+        return -1;
+
+    *value = (uint8_t)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_bool(const char *text, bool *value)
+{
+    if (!text || !value)
+        return -1;
+
+    if ((strcasecmp(text, "1") == 0) ||
+        (strcasecmp(text, "true") == 0) ||
+        (strcasecmp(text, "yes") == 0) ||
+        (strcasecmp(text, "on") == 0) ||
+        (strcasecmp(text, "enable") == 0) ||
+        (strcasecmp(text, "enabled") == 0)) {
+        *value = true;
+        return 0;
+    }
+
+    if ((strcasecmp(text, "0") == 0) ||
+        (strcasecmp(text, "false") == 0) ||
+        (strcasecmp(text, "no") == 0) ||
+        (strcasecmp(text, "off") == 0) ||
+        (strcasecmp(text, "disable") == 0) ||
+        (strcasecmp(text, "disabled") == 0)) {
+        *value = false;
+        return 0;
+    }
+
+    return -1;
 }
 
 int m2sdr_cli_parse_uint_range(const char *text, unsigned min, unsigned max, unsigned *value)
