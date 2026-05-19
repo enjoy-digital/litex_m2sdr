@@ -23,6 +23,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
@@ -193,53 +194,73 @@ static int parse_bool_arg(const char *arg, bool *value)
 
 static int parse_u32_arg(const char *arg, uint32_t *value)
 {
-    char *end = NULL;
-    unsigned long parsed = 0;
-
-    if (!arg || !value)
-        return -1;
-
-    errno = 0;
-    parsed = strtoul(arg, &end, 0);
-    if ((errno != 0) || (end == arg) || (*end != '\0') || (parsed > 0xfffffffful))
-        return -1;
-
-    *value = (uint32_t)parsed;
-    return 0;
+    return m2sdr_cli_parse_u32(arg, value);
 }
 
 static int parse_i64_arg(const char *arg, int64_t *value)
 {
-    char *end = NULL;
-    long long parsed = 0;
-
-    if (!arg || !value)
-        return -1;
-
-    errno = 0;
-    parsed = strtoll(arg, &end, 0);
-    if ((errno != 0) || (end == arg) || (*end != '\0'))
-        return -1;
-
-    *value = (int64_t)parsed;
-    return 0;
+    return m2sdr_cli_parse_int64(arg, value);
 }
 
 static int parse_double_arg(const char *arg, double *value)
 {
-    char *end = NULL;
-    double parsed = 0.0;
+    return m2sdr_cli_parse_double(arg, value);
+}
 
-    if (!arg || !value)
-        return -1;
+static bool parse_u32_named_arg(const char *name, const char *arg, uint32_t *value)
+{
+    if (parse_u32_arg(arg, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+    return false;
+}
 
-    errno = 0;
-    parsed = strtod(arg, &end);
-    if ((errno != 0) || (end == arg) || (*end != '\0'))
-        return -1;
+static bool parse_u8_named_arg(const char *name, const char *arg, uint8_t *value)
+{
+    uint32_t parsed;
 
-    *value = parsed;
-    return 0;
+    if (parse_u32_arg(arg, &parsed) != 0 || parsed > UINT8_MAX) {
+        fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+        return false;
+    }
+    *value = (uint8_t)parsed;
+    return true;
+}
+
+static bool parse_u16_named_arg(const char *name, const char *arg, uint16_t *value)
+{
+    uint32_t parsed;
+
+    if (parse_u32_arg(arg, &parsed) != 0 || parsed > UINT16_MAX) {
+        fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+        return false;
+    }
+    *value = (uint16_t)parsed;
+    return true;
+}
+
+static bool parse_int_range_named_arg(const char *name,
+                                      const char *arg,
+                                      int min,
+                                      int max,
+                                      int *value)
+{
+    if (m2sdr_cli_parse_int_range(arg, min, max, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+    return false;
+}
+
+static bool parse_uint_range_named_arg(const char *name,
+                                       const char *arg,
+                                       unsigned min,
+                                       unsigned max,
+                                       unsigned *value)
+{
+    if (m2sdr_cli_parse_uint_range(arg, min, max, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s '%s'\n", name, arg ? arg : "");
+    return false;
 }
 
 static bool ptp_field_is(const char *field, const char *name, const char *alias)
@@ -4078,18 +4099,17 @@ int main(int argc, char **argv)
             }
             break;
         case OPTION_WINDOW:
-            stream_window = (unsigned)strtoul(optarg, NULL, 0);
-            if (stream_window == 0) {
-                fprintf(stderr, "Invalid --window '%s'\n", optarg);
+            if (!parse_uint_range_named_arg("--window", optarg, 1, UINT_MAX, &stream_window))
                 exit(1);
-            }
             break;
 #endif
         case 'w':
-            test_data_width = atoi(optarg);
+            if (!parse_int_range_named_arg("--data-width", optarg, 1, 32, &test_data_width))
+                exit(1);
             break;
         case 't':
-            test_duration = atoi(optarg);
+            if (!parse_int_range_named_arg("--duration", optarg, INT_MIN, INT_MAX, &test_duration))
+                exit(1);
             break;
         case 'v':
             test_verbose = true;
@@ -4099,9 +4119,8 @@ int main(int argc, char **argv)
             g_force_flash_write = true;
             break;
         case 'W':
-            litepcie_warmup_buffers = atoi(optarg);
-            if (litepcie_warmup_buffers < 0)
-                litepcie_warmup_buffers = 0;
+            if (!parse_int_range_named_arg("--warmup-buffers", optarg, 0, INT_MAX, &litepcie_warmup_buffers))
+                exit(1);
             break;
         case 'z':
             m2sdr_device_zero_copy = 1;
@@ -4166,13 +4185,18 @@ int main(int argc, char **argv)
     /* Reg cmds. */
     else if (cmd_is(cmd, "reg_write", "reg-write")) {
         if (optind + 2 > argc) goto show_help;
-        uint32_t offset = strtoul(argv[optind++], NULL, 0);
-        uint32_t value = strtoul(argv[optind++], NULL, 0);
+        uint32_t offset;
+        uint32_t value;
+        if (!parse_u32_named_arg("offset", argv[optind++], &offset) ||
+            !parse_u32_named_arg("value", argv[optind++], &value))
+            exit(1);
         test_reg_write(offset, value);
     }
     else if (cmd_is(cmd, "reg_read", "reg-read")) {
         if (optind + 1 > argc) goto show_help;
-        uint32_t offset = strtoul(argv[optind++], NULL, 0);
+        uint32_t offset;
+        if (!parse_u32_named_arg("offset", argv[optind++], &offset))
+            exit(1);
         test_reg_read(offset);
     }
 
@@ -4186,9 +4210,11 @@ int main(int argc, char **argv)
         int delay_between_tests = 1;
 
         if (optind < argc)
-            num_measurements = atoi(argv[optind++]);
+            if (!parse_int_range_named_arg("measurement count", argv[optind++], 0, INT_MAX, &num_measurements))
+                exit(1);
         if (optind < argc)
-            delay_between_tests = atoi(argv[optind++]);
+            if (!parse_int_range_named_arg("measurement delay", argv[optind++], 0, INT_MAX, &delay_between_tests))
+                exit(1);
 
         clk_test(num_measurements, delay_between_tests);
     }
@@ -4199,12 +4225,16 @@ int main(int argc, char **argv)
         led_status();
     else if (cmd_is(cmd, "led_control", "led-control")) {
         if (optind + 1 > argc) goto show_help;
-        uint32_t control = strtoul(argv[optind++], NULL, 0);
+        uint32_t control;
+        if (!parse_u32_named_arg("LED control", argv[optind++], &control))
+            exit(1);
         led_control(control);
     }
     else if (cmd_is(cmd, "led_pulse", "led-pulse")) {
         if (optind + 1 > argc) goto show_help;
-        uint32_t pulse = strtoul(argv[optind++], NULL, 0);
+        uint32_t pulse;
+        if (!parse_u32_named_arg("LED pulse", argv[optind++], &pulse))
+            exit(1);
         led_pulse(pulse);
     }
     else if (cmd_is(cmd, "led_release", "led-release"))
@@ -4226,13 +4256,18 @@ int main(int argc, char **argv)
         test_si5351_dump();
     else if (cmd_is(cmd, "si5351_write", "si5351-write")) {
         if (optind + 2 > argc) goto show_help;
-        uint8_t reg = strtoul(argv[optind++], NULL, 0);
-        uint8_t value = strtoul(argv[optind++], NULL, 0);
+        uint8_t reg;
+        uint8_t value;
+        if (!parse_u8_named_arg("SI5351 register", argv[optind++], &reg) ||
+            !parse_u8_named_arg("SI5351 value", argv[optind++], &value))
+            exit(1);
         test_si5351_write(reg, value);
     }
     else if (cmd_is(cmd, "si5351_read", "si5351-read")) {
         if (optind + 1 > argc) goto show_help;
-        uint8_t reg = strtoul(argv[optind++], NULL, 0);
+        uint8_t reg;
+        if (!parse_u8_named_arg("SI5351 register", argv[optind++], &reg))
+            exit(1);
         test_si5351_read(reg);
     }
 #endif
@@ -4242,13 +4277,18 @@ int main(int argc, char **argv)
         test_ad9361_dump();
     else if (cmd_is(cmd, "ad9361_write", "ad9361-write")) {
         if (optind + 2 > argc) goto show_help;
-        uint16_t reg = strtoul(argv[optind++], NULL, 0);
-        uint16_t value = strtoul(argv[optind++], NULL, 0);
+        uint16_t reg;
+        uint16_t value;
+        if (!parse_u16_named_arg("AD9361 register", argv[optind++], &reg) ||
+            !parse_u16_named_arg("AD9361 value", argv[optind++], &value))
+            exit(1);
         test_ad9361_write(reg, value);
     }
     else if (cmd_is(cmd, "ad9361_read", "ad9361-read")) {
         if (optind + 1 > argc) goto show_help;
-        uint16_t reg = strtoul(argv[optind++], NULL, 0);
+        uint16_t reg;
+        if (!parse_u16_named_arg("AD9361 register", argv[optind++], &reg))
+            exit(1);
         test_ad9361_read(reg);
     }
     else if (cmd_is(cmd, "ad9361_port_dump", "ad9361-port-dump"))
@@ -4266,7 +4306,8 @@ int main(int argc, char **argv)
             goto show_help;
         filename = argv[optind++];
         if (optind < argc)
-            offset = strtoul(argv[optind++], NULL, 0);
+            if (!parse_u32_named_arg("flash offset", argv[optind++], &offset))
+                exit(1);
         if (!g_force_flash_write && !confirm_flash_write()) {
             fprintf(stderr, "Aborted.\n");
             exit(1);
@@ -4281,9 +4322,11 @@ int main(int argc, char **argv)
         if (optind + 2 > argc)
             goto show_help;
         filename = argv[optind++];
-        size = strtoul(argv[optind++], NULL, 0);
+        if (!parse_u32_named_arg("flash size", argv[optind++], &size))
+            exit(1);
         if (optind < argc)
-            offset = strtoul(argv[optind++], NULL, 0);
+            if (!parse_u32_named_arg("flash offset", argv[optind++], &offset))
+                exit(1);
         flash_read(filename, size, offset);
     }
     else if (cmd_is(cmd, "flash_reload", "flash-reload"))

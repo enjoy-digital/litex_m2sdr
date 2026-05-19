@@ -15,6 +15,8 @@ modules.order
 *.o.cmd
 *.order.cmd
 __pycache__
+.pytest_cache/
+*.egg-info/
 *.csv
 
 # Local fetched dependencies and generated host-side binaries

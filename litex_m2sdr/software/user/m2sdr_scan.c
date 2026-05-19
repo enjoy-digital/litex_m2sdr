@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stddef.h>
+#include <limits.h>
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -69,6 +70,7 @@
 
 #define WATERFALL_VIEW_2D 0
 #define WATERFALL_VIEW_3D 1
+#define WATERFALL_PALETTE_COUNT 6
 #define WATERFALL_3D_RENDER_LINES 0
 #define WATERFALL_3D_RENDER_SOLID 1
 #define WATERFALL_3D_RENDER_SOLID_LINES 2
@@ -879,10 +881,59 @@ static bool save_preset_file(const struct scan_state *s, const char *path)
     return true;
 }
 
+static bool parse_preset_int64(const char *path, const char *key, const char *text, int64_t *value)
+{
+    if (m2sdr_cli_parse_int64(text, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s in preset %s: '%s'\n", key, path, text);
+    return false;
+}
+
+static bool parse_preset_u32(const char *path, const char *key, const char *text, uint32_t *value)
+{
+    if (m2sdr_cli_parse_u32(text, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s in preset %s: '%s'\n", key, path, text);
+    return false;
+}
+
+static bool parse_preset_int(const char *path, const char *key, const char *text, int *value)
+{
+    if (m2sdr_cli_parse_int_range(text, INT_MIN, INT_MAX, value) == 0)
+        return true;
+    fprintf(stderr, "Invalid %s in preset %s: '%s'\n", key, path, text);
+    return false;
+}
+
+static bool parse_preset_float(const char *path, const char *key, const char *text, float *value)
+{
+    double parsed;
+
+    if (m2sdr_cli_parse_double(text, &parsed) == 0) {
+        *value = (float)parsed;
+        return true;
+    }
+    fprintf(stderr, "Invalid %s in preset %s: '%s'\n", key, path, text);
+    return false;
+}
+
+static bool parse_preset_bool(const char *path, const char *key, const char *text, bool *value)
+{
+    int parsed;
+
+    if (m2sdr_cli_parse_int_range(text, 0, 1, &parsed) == 0) {
+        *value = parsed != 0;
+        return true;
+    }
+    fprintf(stderr, "Invalid %s in preset %s: '%s'\n", key, path, text);
+    return false;
+}
+
 static bool load_preset_file(struct scan_state *s, const char *path)
 {
     FILE *f;
     char line[256];
+    bool ok = true;
 
     if (!path || !s)
         return false;
@@ -902,52 +953,61 @@ static bool load_preset_file(struct scan_state *s, const char *path)
         eq[strcspn(eq, "\r\n")] = '\0';
 
         if (!strcmp(line, "refclk_hz"))
-            s->refclk_hz = (int64_t)strtoll(eq, NULL, 0);
+            ok = parse_preset_int64(path, line, eq, &s->refclk_hz);
         else if (!strcmp(line, "start_hz"))
-            s->scan_start_hz = (int64_t)strtoll(eq, NULL, 0);
+            ok = parse_preset_int64(path, line, eq, &s->scan_start_hz);
         else if (!strcmp(line, "stop_hz"))
-            s->scan_stop_hz = (int64_t)strtoll(eq, NULL, 0);
+            ok = parse_preset_int64(path, line, eq, &s->scan_stop_hz);
         else if (!strcmp(line, "sample_rate_hz"))
-            s->sample_rate_hz = (uint32_t)strtoul(eq, NULL, 0);
+            ok = parse_preset_u32(path, line, eq, &s->sample_rate_hz);
         else if (!strcmp(line, "fft_len"))
-            s->fft_len = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->fft_len);
         else if (!strcmp(line, "lines"))
-            s->lines = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->lines);
         else if (!strcmp(line, "rx_gain"))
-            s->rx_gain = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->rx_gain);
         else if (!strcmp(line, "settle_us"))
-            s->rx_settle_us = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->rx_settle_us);
         else if (!strcmp(line, "stitch_pct"))
-            s->stitch_pct = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->stitch_pct);
         else if (!strcmp(line, "auto_samplerate"))
-            s->auto_samplerate = atoi(eq) ? true : false;
+            ok = parse_preset_bool(path, line, eq, &s->auto_samplerate);
         else if (!strcmp(line, "db_min"))
-            s->db_min = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->db_min);
         else if (!strcmp(line, "db_max"))
-            s->db_max = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->db_max);
         else if (!strcmp(line, "display_rows"))
-            s->display_rows = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->display_rows);
         else if (!strcmp(line, "waterfall_palette"))
-            s->waterfall_palette = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->waterfall_palette);
         else if (!strcmp(line, "waterfall_view_mode"))
-            s->waterfall_view_mode = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->waterfall_view_mode);
         else if (!strcmp(line, "waterfall_3d_depth"))
-            s->waterfall_3d_depth = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->waterfall_3d_depth);
         else if (!strcmp(line, "waterfall_3d_render_mode"))
-            s->waterfall_3d_render_mode = atoi(eq);
+            ok = parse_preset_int(path, line, eq, &s->waterfall_3d_render_mode);
         else if (!strcmp(line, "waterfall_3d_lift"))
-            s->waterfall_3d_lift = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_lift);
         else if (!strcmp(line, "waterfall_3d_zoom"))
-            s->waterfall_3d_zoom = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_zoom);
         else if (!strcmp(line, "waterfall_3d_yaw"))
-            s->waterfall_3d_yaw = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_yaw);
         else if (!strcmp(line, "waterfall_3d_pitch"))
-            s->waterfall_3d_pitch = strtof(eq, NULL);
+            ok = parse_preset_float(path, line, eq, &s->waterfall_3d_pitch);
+        if (!ok)
+            break;
     }
     fclose(f);
+    if (!ok)
+        return false;
+
     s->rf_bandwidth_hz = scan_bandwidth_from_samplerate(s->sample_rate_hz);
     if (s->waterfall_view_mode < WATERFALL_VIEW_2D || s->waterfall_view_mode > WATERFALL_VIEW_3D)
         s->waterfall_view_mode = WATERFALL_VIEW_2D;
+    if (s->waterfall_palette < 0 || s->waterfall_palette >= WATERFALL_PALETTE_COUNT)
+        s->waterfall_palette = 0;
+    if (s->display_rows < 1 || s->display_rows > MAX_DISPLAY_ROWS)
+        s->display_rows = 1;
     if (s->waterfall_3d_depth < 16)
         s->waterfall_3d_depth = DEFAULT_WATERFALL_3D_DEPTH;
     if (s->waterfall_3d_render_mode < 0 ||
@@ -4089,22 +4149,15 @@ static bool is_power_of_two_int(int n)
     return (n > 0) && ((n & (n - 1)) == 0);
 }
 
-static bool apply_runtime_config(struct scan_state *s,
-                                 int64_t start_hz,
+static bool validate_scan_config(int64_t start_hz,
                                  int64_t stop_hz,
                                  uint32_t sample_rate_hz,
                                  int fft_len,
                                  int lines,
                                  int rx_gain,
                                  int rx_settle_us,
-                                 int stitch_pct,
-                                 bool auto_samplerate)
+                                 int stitch_pct)
 {
-    int64_t old_start_hz, old_stop_hz;
-    uint32_t old_sample_rate_hz, old_rf_bandwidth_hz;
-    int old_fft_len, old_lines, old_rx_gain, old_rx_settle_us, old_stitch_pct;
-    bool old_auto_samplerate;
-
     if (!is_power_of_two_int(fft_len) || fft_len < 128 || fft_len > 16384) {
         fprintf(stderr, "Invalid FFT length %d (must be power of two between 128 and 16384).\n", fft_len);
         return false;
@@ -4139,6 +4192,29 @@ static bool apply_runtime_config(struct scan_state *s,
         fprintf(stderr, "Invalid stitch %d%% (must be 0..160).\n", stitch_pct);
         return false;
     }
+
+    return true;
+}
+
+static bool apply_runtime_config(struct scan_state *s,
+                                 int64_t start_hz,
+                                 int64_t stop_hz,
+                                 uint32_t sample_rate_hz,
+                                 int fft_len,
+                                 int lines,
+                                 int rx_gain,
+                                 int rx_settle_us,
+                                 int stitch_pct,
+                                 bool auto_samplerate)
+{
+    int64_t old_start_hz, old_stop_hz;
+    uint32_t old_sample_rate_hz, old_rf_bandwidth_hz;
+    int old_fft_len, old_lines, old_rx_gain, old_rx_settle_us, old_stitch_pct;
+    bool old_auto_samplerate;
+
+    if (!validate_scan_config(start_hz, stop_hz, sample_rate_hz, fft_len, lines,
+                              rx_gain, rx_settle_us, stitch_pct))
+        return false;
 
     old_start_hz = s->scan_start_hz;
     old_stop_hz = s->scan_stop_hz;
@@ -4432,9 +4508,9 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
         s->waterfall_view_mode = view_mode;
     igSameLine(0.0f, 10.0f);
     igSetNextItemWidth(170.0f);
-    if (p < 0 || p > 5)
+    if (p < 0 || p >= WATERFALL_PALETTE_COUNT)
         p = 0;
-    if (igCombo_Str_arr("Colormap", &p, palette_items, 6, 6)) {
+    if (igCombo_Str_arr("Colormap", &p, palette_items, WATERFALL_PALETTE_COUNT, WATERFALL_PALETTE_COUNT)) {
         s->waterfall_palette = p;
     }
     igSameLine(0.0f, 10.0f);
@@ -4904,33 +4980,55 @@ int main(int argc, char **argv)
         case 0:
             break;
         case 1:
-            s.refclk_hz = (int64_t)strtod(optarg, NULL);
+            if (m2sdr_cli_parse_int64(optarg, &s.refclk_hz) != 0 || s.refclk_hz <= 0) {
+                fprintf(stderr, "Invalid --refclk-freq '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 2:
-            s.scan_start_hz = (int64_t)strtod(optarg, NULL);
+            if (m2sdr_cli_parse_int64(optarg, &s.scan_start_hz) != 0) {
+                fprintf(stderr, "Invalid --start-freq '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 3:
-            s.scan_stop_hz = (int64_t)strtod(optarg, NULL);
+            if (m2sdr_cli_parse_int64(optarg, &s.scan_stop_hz) != 0) {
+                fprintf(stderr, "Invalid --stop-freq '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 4:
-            s.rx_gain = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, RX_GAIN_MIN, RX_GAIN_MAX, &s.rx_gain) != 0) {
+                fprintf(stderr, "Invalid --rx-gain '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 5:
-            s.fft_len = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 128, 16384, &s.fft_len) != 0 ||
+                !is_power_of_two_int(s.fft_len)) {
+                fprintf(stderr, "Invalid --fft-len '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 6:
-            s.lines = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 32, 2048, &s.lines) != 0) {
+                fprintf(stderr, "Invalid --lines '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 7:
-            s.sample_rate_hz = (uint32_t)strtoul(optarg, NULL, 10);
-            if (!is_supported_samplerate(s.sample_rate_hz)) {
-                fprintf(stderr, "Unsupported sample rate %u Hz.\n", s.sample_rate_hz);
+            if (m2sdr_cli_parse_u32(optarg, &s.sample_rate_hz) != 0 ||
+                !is_supported_samplerate(s.sample_rate_hz)) {
+                fprintf(stderr, "Unsupported sample rate '%s'.\n", optarg);
                 return 1;
             }
             s.rf_bandwidth_hz = scan_bandwidth_from_samplerate(s.sample_rate_hz);
             break;
         case 8:
-            initial_display = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 0, INT_MAX, &initial_display) != 0) {
+                fprintf(stderr, "Invalid --display '%s'\n", optarg);
+                return 1;
+            }
             break;
         case 9:
             preset_load_path = optarg;
@@ -4955,6 +5053,11 @@ int main(int argc, char **argv)
     }
 
     if (preset_save_path && !save_preset_file(&s, preset_save_path))
+        return 1;
+
+    if (!validate_scan_config(s.scan_start_hz, s.scan_stop_hz, s.sample_rate_hz,
+                              s.fft_len, s.lines, s.rx_gain,
+                              s.rx_settle_us, s.stitch_pct))
         return 1;
 
     signal(SIGINT, int_handler);
