@@ -46,9 +46,9 @@ static void int_handler(int dummy)
 
 static uint64_t parse_u64(const char *s)
 {
-    char *end = NULL;
-    uint64_t v = strtoull(s, &end, 0);
-    if (!s || !*s || (end && *end)) {
+    uint64_t v = 0;
+
+    if (m2sdr_cli_parse_u64(s, &v) != 0) {
         m2sdr_cli_error("invalid number '%s'", s ? s : "(null)");
         exit(1);
     }
@@ -57,33 +57,31 @@ static uint64_t parse_u64(const char *s)
 
 static uint32_t parse_u32(const char *s)
 {
-    uint64_t v = parse_u64(s);
-    if (v > UINT32_MAX) {
-        fprintf(stderr, "Value out of range for u32: %" PRIu64 "\n", v);
+    uint32_t v = 0;
+
+    if (m2sdr_cli_parse_u32(s, &v) != 0) {
+        m2sdr_cli_error("invalid u32 value '%s'", s ? s : "(null)");
         exit(1);
     }
-    return (uint32_t)v;
+    return v;
 }
 
 static int parse_timeout_ms(const char *s)
 {
-    char *end = NULL;
-    long v = strtol(s, &end, 0);
-    if (!s || !*s || (end && *end)) {
+    int v = 0;
+
+    if (m2sdr_cli_parse_int_range(s, -1, INT32_MAX, &v) != 0) {
         m2sdr_cli_error("invalid timeout '%s'", s ? s : "(null)");
         exit(1);
     }
-    if (v < -1 || v > INT32_MAX) {
-        m2sdr_cli_error("timeout must be -1 or a non-negative integer");
-        exit(1);
-    }
-    return (int)v;
+    return v;
 }
 
 static int parse_bool01(const char *label, const char *s)
 {
-    uint32_t v = parse_u32(s);
-    if (v > 1) {
+    unsigned v = 0;
+
+    if (m2sdr_cli_parse_uint_range(s, 0, 1, &v) != 0) {
         m2sdr_cli_invalid_choice(label, s, "0 or 1");
         exit(1);
     }

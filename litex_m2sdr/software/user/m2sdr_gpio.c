@@ -180,10 +180,16 @@ int main(int argc, char **argv) {
             }
             break;
         case 'o':
-            output_data = strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_u32(optarg, &output_data) != 0) {
+                m2sdr_cli_error("invalid GPIO output data '%s'", optarg);
+                exit(1);
+            }
             break;
         case 'e':
-            output_enable = strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_u32(optarg, &output_enable) != 0) {
+                m2sdr_cli_error("invalid GPIO output enable '%s'", optarg);
+                exit(1);
+            }
             break;
         default:
             exit(1);

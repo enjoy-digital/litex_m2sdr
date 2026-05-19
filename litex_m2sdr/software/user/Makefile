@@ -15,6 +15,12 @@ HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
 PNG_CFLAGS  := $(shell pkg-config --cflags libpng 2>/dev/null)
 PNG_LIBS    := $(shell pkg-config --libs libpng 2>/dev/null)
 HAVE_CIMGUI := $(shell test -f $(SCAN_CIMGUI_DIR)/cimgui.h && test -f $(SCAN_CIMGUI_DIR)/imgui/imgui.cpp && echo 1 || echo 0)
+SNDFILE_CFLAGS    := $(shell pkg-config --cflags sndfile 2>/dev/null)
+SNDFILE_LIBS      := $(shell pkg-config --libs sndfile 2>/dev/null || echo -lsndfile)
+SAMPLERATE_CFLAGS := $(shell pkg-config --cflags samplerate 2>/dev/null)
+SAMPLERATE_LIBS   := $(shell pkg-config --libs samplerate 2>/dev/null || echo -lsamplerate)
+HAVE_SNDFILE      := $(shell pkg-config --exists sndfile 2>/dev/null && echo 1 || echo 0)
+HAVE_SAMPLERATE   := $(shell pkg-config --exists samplerate 2>/dev/null && echo 1 || echo 0)
 LDFLAGS = -g
 LDFLAGS += $(EXTRA_LDFLAGS)
 SANITIZER_FLAGS := $(sort $(filter -fsanitize=% -fno-sanitize-recover=%,$(CFLAGS) $(CXXFLAGS) $(LDFLAGS)))
@@ -28,18 +34,31 @@ CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
-.PHONY: FORCE
+.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli clean install install_dev check analyze-libm2sdr
 
 ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
                 m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan
 
-# Which binaries to build per interface
+# Which core binaries to build per interface
 ifeq ($(INTERFACE),USE_LITEETH)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
 else ifeq ($(INTERFACE),USE_LITEPCIE)
-  BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata
+  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_sata
 else
   $(error INTERFACE must be USE_LITEPCIE or USE_LITEETH)
+endif
+
+BINARIES := $(CORE_BINARIES)
+
+ifeq ($(and $(filter 1,$(HAVE_SNDFILE)),$(filter 1,$(HAVE_SAMPLERATE))),1)
+  BINARIES += m2sdr_fm_tx m2sdr_fm_rx
+else
+  ifneq ($(HAVE_SNDFILE),1)
+    $(warning sndfile pkg-config metadata not found; skipping FM audio tools)
+  endif
+  ifneq ($(HAVE_SAMPLERATE),1)
+    $(warning samplerate pkg-config metadata not found; skipping FM audio tools)
+  endif
 endif
 
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
@@ -96,6 +115,8 @@ M2SDR_IMGUI_SRCS := \
 M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
+core-tools: $(CORE_BINARIES) libm2sdr/libm2sdr.a libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so ad9361/libad9361_m2sdr.a
+core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli
 
 examples: libm2sdr/libm2sdr.a $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
@@ -202,10 +223,16 @@ m2sdr_check: libm2sdr/libm2sdr.a kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2s
 endif
 
 m2sdr_fm_tx: $(CLI_OBJS) m2sdr_fm_tx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_tx.o -lm -lsndfile -lsamplerate
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_tx.o -lm $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
 
 m2sdr_fm_rx: $(CLI_OBJS) m2sdr_fm_rx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_rx.o -lm -lsndfile -lsamplerate
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_rx.o -lm $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
+
+m2sdr_fm_tx.o: m2sdr_fm_tx.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
+
+m2sdr_fm_rx.o: m2sdr_fm_rx.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
 
 # PCIe-only build
 ifeq ($(INTERFACE),USE_LITEPCIE)

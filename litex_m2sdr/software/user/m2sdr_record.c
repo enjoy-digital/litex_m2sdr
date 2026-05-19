@@ -602,15 +602,24 @@ int main(int argc, char **argv)
             format = M2SDR_FORMAT_SC8_Q7;
             break;
         case 3:
-            sigmf_meta.sample_rate = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 0.0, 1.0e15, &sigmf_meta.sample_rate) != 0) {
+                m2sdr_cli_error("invalid SigMF sample rate '%s'", optarg);
+                return 1;
+            }
             sigmf_meta.has_sample_rate = true;
             break;
         case 4:
-            sigmf_meta.center_freq = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, -1.0e15, 1.0e15, &sigmf_meta.center_freq) != 0) {
+                m2sdr_cli_error("invalid SigMF center frequency '%s'", optarg);
+                return 1;
+            }
             sigmf_meta.has_center_freq = true;
             break;
         case 5:
-            sigmf_meta.num_channels = (unsigned)strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_uint_range(optarg, 1, UINT32_MAX, &sigmf_meta.num_channels) != 0) {
+                m2sdr_cli_error("invalid SigMF channel count '%s'", optarg);
+                return 1;
+            }
             sigmf_meta.has_num_channels = true;
             break;
         case 6:
@@ -629,18 +638,30 @@ int main(int argc, char **argv)
             snprintf(pending_annotation.comment, sizeof(pending_annotation.comment), "%s", optarg);
             break;
         case 11:
-            pending_annotation.sample_start = strtoull(optarg, NULL, 0);
+            if (m2sdr_cli_parse_u64(optarg, &pending_annotation.sample_start) != 0) {
+                m2sdr_cli_error("invalid annotation start '%s'", optarg);
+                return 1;
+            }
             break;
         case 12:
-            pending_annotation.sample_count = strtoull(optarg, NULL, 0);
+            if (m2sdr_cli_parse_u64(optarg, &pending_annotation.sample_count) != 0) {
+                m2sdr_cli_error("invalid annotation count '%s'", optarg);
+                return 1;
+            }
             pending_annotation.has_sample_count = true;
             break;
         case 13:
-            pending_annotation.freq_lower_edge = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, -1.0e15, 1.0e15, &pending_annotation.freq_lower_edge) != 0) {
+                m2sdr_cli_error("invalid annotation lower frequency edge '%s'", optarg);
+                return 1;
+            }
             pending_annotation.has_freq_lower_edge = true;
             break;
         case 14:
-            pending_annotation.freq_upper_edge = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, -1.0e15, 1.0e15, &pending_annotation.freq_upper_edge) != 0) {
+                m2sdr_cli_error("invalid annotation upper frequency edge '%s'", optarg);
+                return 1;
+            }
             pending_annotation.has_freq_upper_edge = true;
             break;
         case 15:
@@ -653,7 +674,10 @@ int main(int argc, char **argv)
             annotate_ts_jumps = 1;
             break;
         case 17:
-            ts_jump_threshold_pct = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 0.0, 100000.0, &ts_jump_threshold_pct) != 0) {
+                m2sdr_cli_error("invalid timestamp-jump threshold '%s'", optarg);
+                return 1;
+            }
             break;
         default:
             exit(1);
@@ -669,10 +693,23 @@ int main(int argc, char **argv)
     size_t size = 0;
     if (optind < argc) {
         filename = argv[optind++];
-        if (optind < argc)
-            size = strtoull(argv[optind++], NULL, 0);
+        if (optind < argc) {
+            uint64_t parsed_size;
+            const char *size_arg = argv[optind++];
+
+            if (m2sdr_cli_parse_u64(size_arg, &parsed_size) != 0 || parsed_size > SIZE_MAX) {
+                m2sdr_cli_error("invalid capture byte limit '%s'", size_arg);
+                return 1;
+            }
+            size = (size_t)parsed_size;
+        }
     } else if (!isatty(STDIN_FILENO)) {
         filename = "-";
+    }
+
+    if (optind < argc) {
+        m2sdr_cli_error("unexpected extra argument: %s", argv[optind]);
+        return 1;
     }
 
     if (!m2sdr_cli_finalize_device(&cli_dev))

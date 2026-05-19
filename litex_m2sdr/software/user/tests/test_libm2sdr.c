@@ -33,6 +33,10 @@ static int test_parse_identifier_invalid_ports(void)
 static int test_cli_numeric_parser(void)
 {
     int64_t value = 0;
+    uint64_t uvalue = 0;
+    uint32_t u32value = 0;
+    unsigned unsigned_value = 0;
+    int int_value = 0;
     double dvalue = 0.0;
 
     if (m2sdr_cli_parse_int64("30720000", &value) != 0 || value != 30720000)
@@ -47,12 +51,45 @@ static int test_cli_numeric_parser(void)
         return -1;
     if (m2sdr_cli_parse_int64("30.72foo", &value) == 0)
         return -1;
+    if (m2sdr_cli_parse_int64("nan", &value) == 0)
+        return -1;
 
     if (m2sdr_cli_parse_double("30.72e6", &dvalue) != 0 || dvalue != 30720000.0)
         return -1;
     if (m2sdr_cli_parse_double("2.4G", &dvalue) != 0 || dvalue != 2400000000.0)
         return -1;
+    if (m2sdr_cli_parse_double("-1.25", &dvalue) != 0 || dvalue != -1.25)
+        return -1;
     if (m2sdr_cli_parse_double("1.0foo", &dvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_double("inf", &dvalue) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_u64("0x100", &uvalue) != 0 || uvalue != 0x100)
+        return -1;
+    if (m2sdr_cli_parse_u64("-1", &uvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_u64("12bad", &uvalue) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_u32("4294967295", &u32value) != 0 || u32value != UINT32_MAX)
+        return -1;
+    if (m2sdr_cli_parse_u32("4294967296", &u32value) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_uint_range("3", 0, 3, &unsigned_value) != 0 || unsigned_value != 3)
+        return -1;
+    if (m2sdr_cli_parse_uint_range("4", 0, 3, &unsigned_value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_int_range("-1", -2, 2, &int_value) != 0 || int_value != -1)
+        return -1;
+    if (m2sdr_cli_parse_int_range("3", -2, 2, &int_value) == 0)
+        return -1;
+    if (m2sdr_cli_parse_double_range("0.5", 0.0, 1.0, &dvalue) != 0 || dvalue != 0.5)
+        return -1;
+    if (m2sdr_cli_parse_double_range("1.5", 0.0, 1.0, &dvalue) == 0)
+        return -1;
+    if (m2sdr_cli_parse_double_range("-1.5", -2.0, 0.0, &dvalue) != 0 || dvalue != -1.5)
         return -1;
 
     return 0;

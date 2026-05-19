@@ -56,7 +56,12 @@ The user utilities now follow a mostly shared CLI vocabulary:
 
 ## Build dependencies
 
-Core user tools build with standard C/C++ toolchains and the RF/audio dependencies already used by this project.
+Core user tools build with the standard C/C++ toolchain and do not require the optional audio or GUI packages.
+
+`m2sdr_fm_tx` and `m2sdr_fm_rx` additionally require:
+- `pkg-config`
+- libsndfile development headers/libraries (`libsndfile1-dev`)
+- libsamplerate development headers/libraries (`libsamplerate0-dev`)
 
 `m2sdr_scan` and `m2sdr_check` additionally require:
 - `pkg-config`
@@ -66,7 +71,7 @@ Core user tools build with standard C/C++ toolchains and the RF/audio dependenci
 
 On Debian/Ubuntu:
 ~~~~
-sudo apt install pkg-config libsdl2-dev libgl1-mesa-dev
+sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev libsdl2-dev libgl1-mesa-dev
 ~~~~
 
 Populate the pinned `cimgui` checkout with:
@@ -83,7 +88,7 @@ cd ../
 
 Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
 
-These dependencies are only needed for the optional GUI tools. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped by the `Makefile`; the CLI tools, `libm2sdr`, and the SoapySDR module still build.
+These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.

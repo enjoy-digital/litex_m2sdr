@@ -418,13 +418,22 @@ int main(int argc, char **argv) {
             help();
             break;
         case 's':
-            samplerate = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &samplerate) != 0) {
+                m2sdr_cli_error("invalid sample rate '%s'", optarg);
+                return 1;
+            }
             break;
         case 'd':
-            deviation = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &deviation) != 0) {
+                m2sdr_cli_error("invalid FM deviation '%s'", optarg);
+                return 1;
+            }
             break;
         case 'b':
-            bits = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, 16, &bits) != 0) {
+                m2sdr_cli_error("invalid bits value '%s' (expected 1 to 16)", optarg);
+                return 1;
+            }
             bits_set = true;
             break;
         case 1:
@@ -446,10 +455,16 @@ int main(int argc, char **argv) {
             mode = optarg;
             break;
         case 'i':
-            input_channels = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, 2, &input_channels) != 0) {
+                m2sdr_cli_error("invalid input channel count '%s' (expected 1 or 2)", optarg);
+                return 1;
+            }
             break;
         case 'f':
-            input_srate = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &input_srate) != 0) {
+                m2sdr_cli_error("invalid input sample rate '%s'", optarg);
+                return 1;
+            }
             break;
         default:
             exit(1);
@@ -482,12 +497,6 @@ int main(int argc, char **argv) {
     }
     input_file = argv[optind];
     output_file = argv[optind + 1];
-
-    /* Validate options */
-    if (bits > 16) {
-        fprintf(stderr, "Error: Bits per sample must be <= 16\n");
-        exit(1);
-    }
 
     /* Handle input */
     FILE *in_stream = NULL;

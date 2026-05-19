@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdint.h>
 
 #include "m2sdr_cli.h"
@@ -34,7 +35,10 @@ int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const 
 
 #ifdef USE_LITEPCIE
     if (opt == 'c') {
-        dev->device_num = atoi(optarg);
+        if (m2sdr_cli_parse_int_range(optarg, 0, 255, &dev->device_num) != 0) {
+            m2sdr_cli_error("invalid device number '%s'", optarg);
+            return -1;
+        }
         return 0;
     }
 #elif defined(USE_LITEETH)
@@ -176,6 +180,8 @@ int m2sdr_cli_parse_int64(const char *text, int64_t *value)
     if (*end != '\0')
         return -1;
 
+    if (!isfinite(parsed))
+        return -1;
     if (parsed > (double)INT64_MAX || parsed < (double)INT64_MIN)
         return -1;
 
@@ -197,7 +203,6 @@ int m2sdr_cli_parse_double(const char *text, double *value)
 
     if (!text || !value)
         return -1;
-
     errno = 0;
     parsed = strtod(text, &end);
     if (end == text || errno == ERANGE)
@@ -227,6 +232,86 @@ int m2sdr_cli_parse_double(const char *text, double *value)
     while (*end && isspace((unsigned char)*end))
         end++;
     if (*end != '\0')
+        return -1;
+
+    if (!isfinite(parsed))
+        return -1;
+
+    *value = parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_u64(const char *text, uint64_t *value)
+{
+    char *end = NULL;
+    unsigned long long parsed;
+
+    if (!text || !value)
+        return -1;
+
+    while (*text && isspace((unsigned char)*text))
+        text++;
+    if (*text == '-')
+        return -1;
+
+    errno = 0;
+    parsed = strtoull(text, &end, 0);
+    if ((errno != 0) || (end == text))
+        return -1;
+
+    while (*end && isspace((unsigned char)*end))
+        end++;
+    if (*end != '\0')
+        return -1;
+
+    *value = (uint64_t)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_u32(const char *text, uint32_t *value)
+{
+    uint64_t parsed;
+
+    if (m2sdr_cli_parse_u64(text, &parsed) != 0 || parsed > UINT32_MAX)
+        return -1;
+
+    *value = (uint32_t)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_uint_range(const char *text, unsigned min, unsigned max, unsigned *value)
+{
+    uint64_t parsed;
+
+    if (!value || min > max)
+        return -1;
+    if (m2sdr_cli_parse_u64(text, &parsed) != 0 || parsed < min || parsed > max)
+        return -1;
+
+    *value = (unsigned)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_int_range(const char *text, int min, int max, int *value)
+{
+    int64_t parsed;
+
+    if (!value || min > max)
+        return -1;
+    if (m2sdr_cli_parse_int64(text, &parsed) != 0 || parsed < min || parsed > max)
+        return -1;
+
+    *value = (int)parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_double_range(const char *text, double min, double max, double *value)
+{
+    double parsed;
+
+    if (!value || min > max)
+        return -1;
+    if (m2sdr_cli_parse_double(text, &parsed) != 0 || parsed < min || parsed > max)
         return -1;
 
     *value = parsed;

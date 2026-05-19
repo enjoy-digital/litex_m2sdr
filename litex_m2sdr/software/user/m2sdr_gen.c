@@ -553,9 +553,8 @@ int main(int argc, char **argv) {
                 exit(1);
             break;
         case 's':
-            sample_rate = atof(optarg);
-            if (sample_rate <= 0) {
-                fprintf(stderr, "Sample rate must be positive\n");
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &sample_rate) != 0) {
+                m2sdr_cli_error("invalid sample rate '%s'", optarg);
                 exit(1);
             }
             break;
@@ -568,16 +567,14 @@ int main(int argc, char **argv) {
             }
             break;
         case 'f':
-            frequency = atof(optarg);
-            if (frequency < 0) {
-                fprintf(stderr, "Frequency must be non-negative\n");
+            if (m2sdr_cli_parse_double_range(optarg, 0.0, 1.0e15, &frequency) != 0) {
+                m2sdr_cli_error("invalid tone frequency '%s'", optarg);
                 exit(1);
             }
             break;
         case 'a':
-            amplitude = atof(optarg);
-            if (amplitude < 0.0 || amplitude > 1.0) {
-                fprintf(stderr, "Amplitude must be between 0.0 and 1.0\n");
+            if (m2sdr_cli_parse_double_range(optarg, 0.0, 1.0, &amplitude) != 0) {
+                m2sdr_cli_error("invalid amplitude '%s' (expected 0.0 to 1.0)", optarg);
                 exit(1);
             }
             break;
@@ -585,23 +582,20 @@ int main(int argc, char **argv) {
             m2sdr_device_zero_copy = 1;
             break;
         case 'p':
-            if (optarg) {
-                pps_freq = atof(optarg); /* Use provided argument */
-            } else if (optind < argc && argv[optind][0] != '-') {
-                pps_freq = atof(argv[optind++]); /* Use next argument if no space */
-            } else {
-                pps_freq = 1.0; /* Default to 1 Hz */
-            }
-            if (pps_freq <= 0) {
-                fprintf(stderr, "PPS/toggle frequency must be positive\n");
+            if (m2sdr_cli_parse_double_range(optarg, 1e-9, 1.0e12, &pps_freq) != 0) {
+                m2sdr_cli_error("invalid PPS/toggle frequency '%s'", optarg);
                 exit(1);
             }
             break;
         case 'g':
-            gpio_pin = atoi(optarg);
-            if (gpio_pin > 3) {
-                fprintf(stderr, "GPIO pin must be between 0 and 3\n");
-                exit(1);
+            {
+                unsigned pin;
+
+                if (m2sdr_cli_parse_uint_range(optarg, 0, 3, &pin) != 0) {
+                    m2sdr_cli_error("invalid GPIO pin '%s' (expected 0 to 3)", optarg);
+                    exit(1);
+                }
+                gpio_pin = (uint8_t)pin;
             }
             break;
         case 1:
@@ -622,13 +616,22 @@ int main(int argc, char **argv) {
             enable_header = 1;
             break;
         case 3:
-            ofdm_fft_size = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, 65536, &ofdm_fft_size) != 0) {
+                m2sdr_cli_error("invalid OFDM FFT size '%s'", optarg);
+                return 1;
+            }
             break;
         case 4:
-            ofdm_cp_len = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 0, 65535, &ofdm_cp_len) != 0) {
+                m2sdr_cli_error("invalid OFDM CP length '%s'", optarg);
+                return 1;
+            }
             break;
         case 5:
-            ofdm_occupied_carriers = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, 65535, &ofdm_occupied_carriers) != 0) {
+                m2sdr_cli_error("invalid OFDM occupied-carrier count '%s'", optarg);
+                return 1;
+            }
             break;
         case 6:
             strncpy(ofdm_modulation, optarg, sizeof(ofdm_modulation) - 1);
@@ -639,7 +642,10 @@ int main(int argc, char **argv) {
             }
             break;
         case 7:
-            ofdm_seed = (uint32_t)strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_u32(optarg, &ofdm_seed) != 0) {
+                m2sdr_cli_error("invalid OFDM seed '%s'", optarg);
+                return 1;
+            }
             break;
         default:
             exit(1);

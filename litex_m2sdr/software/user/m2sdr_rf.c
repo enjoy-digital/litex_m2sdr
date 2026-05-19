@@ -238,7 +238,15 @@ int main(int argc, char **argv)
             cfg.program_rx_gains = true;
             break;
         case 15:
-            cfg.loopback = (uint8_t)strtoul(optarg, NULL, 0);
+            {
+                unsigned loopback;
+
+                if (m2sdr_cli_parse_uint_range(optarg, 0, 255, &loopback) != 0) {
+                    m2sdr_cli_error("invalid loopback value '%s'", optarg);
+                    return 1;
+                }
+                cfg.loopback = (uint8_t)loopback;
+            }
             break;
         case 16:
             cfg.bist_tx_tone = true;
@@ -250,7 +258,15 @@ int main(int argc, char **argv)
             cfg.bist_prbs = true;
             break;
         case 19:
-            cfg.bist_tone_freq = (int32_t)strtoul(optarg, NULL, 0);
+            {
+                int tone_freq;
+
+                if (m2sdr_cli_parse_int_range(optarg, 0, INT32_MAX, &tone_freq) != 0) {
+                    m2sdr_cli_error("invalid BIST tone frequency '%s'", optarg);
+                    return 1;
+                }
+                cfg.bist_tone_freq = (int32_t)tone_freq;
+            }
             break;
         case 20:
             cfg.calibrate_interface_delay = true;

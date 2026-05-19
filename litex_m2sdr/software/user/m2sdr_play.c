@@ -426,7 +426,10 @@ int main(int argc, char **argv)
             format = M2SDR_FORMAT_SC8_Q7;
             break;
         case 3:
-            capture_index = (unsigned)strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_uint_range(optarg, 0, UINT32_MAX, &capture_index) != 0) {
+                m2sdr_cli_error("invalid capture index '%s'", optarg);
+                return 1;
+            }
             break;
         case 'q':
             quiet = 1;
@@ -446,13 +449,25 @@ int main(int argc, char **argv)
         if (strcmp(filename, "-") == 0) {
             loops = 1;
         } else if (optind < argc) {
-            loops = strtoul(argv[optind++], NULL, 0);
+            const char *loop_arg = argv[optind++];
+            uint32_t parsed_loops;
+
+            if (m2sdr_cli_parse_u32(loop_arg, &parsed_loops) != 0) {
+                m2sdr_cli_error("invalid loop count '%s'", loop_arg);
+                return 1;
+            }
+            loops = parsed_loops;
         }
     } else if (!isatty(STDIN_FILENO)) {
         filename = "-";
         loops = 1;
     } else {
         help();
+    }
+
+    if (optind < argc) {
+        m2sdr_cli_error("unexpected extra argument: %s", argv[optind]);
+        return 1;
     }
 
     if (strcmp(filename, "-") != 0 && m2sdr_sigmf_read(filename, &sigmf_meta) == 0) {

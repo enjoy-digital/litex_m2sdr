@@ -1466,13 +1466,22 @@ int main(int argc, char **argv)
             help();
             return 0;
         case 1:
-            nchannels = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, CHECK_MAX_CHANNELS, &nchannels) != 0) {
+                m2sdr_cli_error("invalid channel count '%s'", optarg);
+                return 1;
+            }
             break;
         case 2:
-            nbits = atoi(optarg);
+            if (m2sdr_cli_parse_int_range(optarg, 1, 32, &nbits) != 0) {
+                m2sdr_cli_error("invalid bit width '%s'", optarg);
+                return 1;
+            }
             break;
         case 3:
-            sample_rate = atof(optarg);
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &sample_rate) != 0) {
+                m2sdr_cli_error("invalid sample rate '%s'", optarg);
+                return 1;
+            }
             break;
         case 4:
             {
@@ -1489,13 +1498,32 @@ int main(int argc, char **argv)
             frame_header = true;
             break;
         case 6:
-            frame_size = (size_t)strtoull(optarg, NULL, 0);
+            {
+                uint64_t parsed;
+
+                if (m2sdr_cli_parse_u64(optarg, &parsed) != 0 || parsed > SIZE_MAX) {
+                    m2sdr_cli_error("invalid frame size '%s'", optarg);
+                    return 1;
+                }
+                frame_size = (size_t)parsed;
+            }
             break;
         case 7:
-            max_samples = (size_t)strtoull(optarg, NULL, 0);
+            {
+                uint64_t parsed;
+
+                if (m2sdr_cli_parse_u64(optarg, &parsed) != 0 || parsed > SIZE_MAX) {
+                    m2sdr_cli_error("invalid max-samples value '%s'", optarg);
+                    return 1;
+                }
+                max_samples = (size_t)parsed;
+            }
             break;
         case 8:
-            capture_index = (unsigned)strtoul(optarg, NULL, 0);
+            if (m2sdr_cli_parse_uint_range(optarg, 0, UINT32_MAX, &capture_index) != 0) {
+                m2sdr_cli_error("invalid capture index '%s'", optarg);
+                return 1;
+            }
             break;
         default:
             return 1;
