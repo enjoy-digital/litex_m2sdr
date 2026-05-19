@@ -36,6 +36,7 @@
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_tool.h"
 #include "kissfft/kiss_fft.h"
 #include "config.h"
 #include "csr.h"
@@ -357,8 +358,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             if (enable_header) {
                 uint64_t ts = 0;
                 m2sdr_get_time(dev, &ts);
-                ((uint64_t *)buf_wr)[0] = 0x5aa55aa55aa55aa5ULL;
-                ((uint64_t *)buf_wr)[1] = ts;
+                m2sdr_tool_write_dma_header((uint8_t *)buf_wr, ts);
             }
             for (int j = 0; j < num_samples; j++) {
                 float I = 0.0;
@@ -605,13 +605,14 @@ int main(int argc, char **argv) {
             }
             break;
         case 1:
-            if (!strcmp(optarg, "sc16")) {
-                use_8bit = 0;
-            } else if (!strcmp(optarg, "sc8")) {
-                use_8bit = 1;
-            } else {
-                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
-                return 1;
+            {
+                enum m2sdr_format format;
+
+                if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+                    m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                    return 1;
+                }
+                use_8bit = (format == M2SDR_FORMAT_SC8_Q7);
             }
             break;
         case 2:

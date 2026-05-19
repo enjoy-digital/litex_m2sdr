@@ -25,7 +25,9 @@
 #include "cimgui/cimgui.h"
 #include "scan_ui/imgui_sdl_gl3_bridge.h"
 #include "kissfft/kiss_fft.h"
+#include "m2sdr_cli.h"
 #include "m2sdr_sigmf.h"
+#include "m2sdr_tool.h"
 
 #define igGetIO igGetIO_Nil
 
@@ -326,24 +328,16 @@ static bool load_file(const char *filename,
 
         if (frame_header && frame_payload_used >= frame_payload_bytes) {
             uint8_t header[16];
-            uint64_t magic;
-            uint64_t ts;
+            uint64_t ts = 0;
 
             if (fread(header, 1, sizeof(header), f) != sizeof(header))
                 break;
 
-            magic = ((uint64_t)header[0] << 0) | ((uint64_t)header[1] << 8) |
-                    ((uint64_t)header[2] << 16) | ((uint64_t)header[3] << 24) |
-                    ((uint64_t)header[4] << 32) | ((uint64_t)header[5] << 40) |
-                    ((uint64_t)header[6] << 48) | ((uint64_t)header[7] << 56);
-            ts = ((uint64_t)header[8] << 0) | ((uint64_t)header[9] << 8) |
-                 ((uint64_t)header[10] << 16) | ((uint64_t)header[11] << 24) |
-                 ((uint64_t)header[12] << 32) | ((uint64_t)header[13] << 40) |
-                 ((uint64_t)header[14] << 48) | ((uint64_t)header[15] << 56);
-
             headers_seen++;
-            if (magic != 0x5aa55aa55aa55aa5ULL)
+            if (!m2sdr_tool_parse_dma_header(header, &ts)) {
                 headers_bad++;
+                memcpy(&ts, header + 8, sizeof(ts));
+            }
 
             if (first_header) {
                 first_ts = ts;
@@ -1481,13 +1475,14 @@ int main(int argc, char **argv)
             sample_rate = atof(optarg);
             break;
         case 4:
-            if (strcmp(optarg, "sc16") == 0)
-                sample_bytes = 2;
-            else if (strcmp(optarg, "sc8") == 0)
-                sample_bytes = 1;
-            else {
-                fprintf(stderr, "Unsupported format: %s\n", optarg);
-                return 1;
+            {
+                enum m2sdr_format format;
+
+                if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+                    m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                    return 1;
+                }
+                sample_bytes = (format == M2SDR_FORMAT_SC8_Q7) ? 1 : 2;
             }
             break;
         case 5:

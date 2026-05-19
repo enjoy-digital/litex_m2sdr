@@ -154,13 +154,14 @@ int main(int argc, char **argv)
                 exit(1);
             break;
         case 1:
-            if (!strcmp(optarg, "sc16"))
-                cfg.enable_8bit_mode = false;
-            else if (!strcmp(optarg, "sc8"))
-                cfg.enable_8bit_mode = true;
-            else {
-                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
-                return 1;
+            {
+                enum m2sdr_format format;
+
+                if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+                    m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                    return 1;
+                }
+                cfg.enable_8bit_mode = (format == M2SDR_FORMAT_SC8_Q7);
             }
             break;
         case 2:

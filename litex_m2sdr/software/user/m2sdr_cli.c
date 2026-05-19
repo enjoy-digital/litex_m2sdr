@@ -190,6 +190,78 @@ int m2sdr_cli_parse_int64(const char *text, int64_t *value)
     return 0;
 }
 
+int m2sdr_cli_parse_double(const char *text, double *value)
+{
+    char *end = NULL;
+    double parsed;
+
+    if (!text || !value)
+        return -1;
+
+    errno = 0;
+    parsed = strtod(text, &end);
+    if (end == text || errno == ERANGE)
+        return -1;
+
+    while (*end && isspace((unsigned char)*end))
+        end++;
+
+    switch (*end) {
+    case 'k':
+    case 'K':
+        parsed *= 1e3;
+        end++;
+        break;
+    case 'M':
+        parsed *= 1e6;
+        end++;
+        break;
+    case 'G':
+        parsed *= 1e9;
+        end++;
+        break;
+    default:
+        break;
+    }
+
+    while (*end && isspace((unsigned char)*end))
+        end++;
+    if (*end != '\0')
+        return -1;
+
+    *value = parsed;
+    return 0;
+}
+
+int m2sdr_cli_parse_format(const char *text, enum m2sdr_format *format)
+{
+    if (!text || !format)
+        return -1;
+
+    if (strcmp(text, "sc16") == 0) {
+        *format = M2SDR_FORMAT_SC16_Q11;
+        return 0;
+    }
+    if (strcmp(text, "sc8") == 0) {
+        *format = M2SDR_FORMAT_SC8_Q7;
+        return 0;
+    }
+
+    return -1;
+}
+
+const char *m2sdr_cli_format_name(enum m2sdr_format format)
+{
+    switch (format) {
+    case M2SDR_FORMAT_SC16_Q11:
+        return "sc16";
+    case M2SDR_FORMAT_SC8_Q7:
+        return "sc8";
+    default:
+        return "unknown";
+    }
+}
+
 void m2sdr_cli_error(const char *fmt, ...)
 {
     va_list ap;

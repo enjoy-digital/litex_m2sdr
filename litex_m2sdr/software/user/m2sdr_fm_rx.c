@@ -30,6 +30,7 @@
 #include <samplerate.h>
 
 #include "m2sdr.h"
+#include "m2sdr_cli.h"
 
 /* Constants */
 /*-----------*/
@@ -241,6 +242,7 @@ static void help(void) {
            "-s, --sample-rate sps  Set I/Q sample rate in SPS (default: 500000).\n"
            "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
            "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "    --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
            "-8, --sc8             Input is 8-bit I/Q samples (SC8 Q7).\n"
            "-e, --emphasis type   Set de-emphasis to us, eu or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
@@ -264,6 +266,7 @@ static struct option options[] = {
     { "samplerate", required_argument, NULL, 's' },
     { "deviation",  required_argument, NULL, 'd' },
     { "bits",       required_argument, NULL, 'b' },
+    { "format",     required_argument, NULL, 1 },
     { "sc8",        no_argument,       NULL, '8' },
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
@@ -301,6 +304,14 @@ int main(int argc, char **argv) {
         case 'b':
             bits = atoi(optarg);
             bits_set = true;
+            break;
+        case 1:
+            if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                return 1;
+            }
+            if (format == M2SDR_FORMAT_SC8_Q7 && !bits_set)
+                bits = 8;
             break;
         case '8':
             format = M2SDR_FORMAT_SC8_Q7;

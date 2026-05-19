@@ -7,6 +7,7 @@
 #include "m2sdr.h"
 #include "m2sdr_internal.h"
 #include "../m2sdr_cli.h"
+#include "../m2sdr_tool.h"
 
 static int test_parse_identifier_invalid_ports(void)
 {
@@ -32,6 +33,7 @@ static int test_parse_identifier_invalid_ports(void)
 static int test_cli_numeric_parser(void)
 {
     int64_t value = 0;
+    double dvalue = 0.0;
 
     if (m2sdr_cli_parse_int64("30720000", &value) != 0 || value != 30720000)
         return -1;
@@ -44,6 +46,52 @@ static int test_cli_numeric_parser(void)
     if (m2sdr_cli_parse_int64("10.5", &value) == 0)
         return -1;
     if (m2sdr_cli_parse_int64("30.72foo", &value) == 0)
+        return -1;
+
+    if (m2sdr_cli_parse_double("30.72e6", &dvalue) != 0 || dvalue != 30720000.0)
+        return -1;
+    if (m2sdr_cli_parse_double("2.4G", &dvalue) != 0 || dvalue != 2400000000.0)
+        return -1;
+    if (m2sdr_cli_parse_double("1.0foo", &dvalue) == 0)
+        return -1;
+
+    return 0;
+}
+
+static int test_cli_format_parser(void)
+{
+    enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+
+    if (m2sdr_cli_parse_format("sc16", &format) != 0 || format != M2SDR_FORMAT_SC16_Q11)
+        return -1;
+    if (m2sdr_cli_parse_format("sc8", &format) != 0 || format != M2SDR_FORMAT_SC8_Q7)
+        return -1;
+    if (m2sdr_cli_parse_format("ci16", &format) == 0)
+        return -1;
+    if (strcmp(m2sdr_cli_format_name(M2SDR_FORMAT_SC16_Q11), "sc16") != 0)
+        return -1;
+    if (strcmp(m2sdr_cli_format_name(M2SDR_FORMAT_SC8_Q7), "sc8") != 0)
+        return -1;
+
+    return 0;
+}
+
+static int test_dma_header_helper(void)
+{
+    uint8_t header[16];
+    uint64_t timestamp = 0;
+
+    memset(header, 0, sizeof(header));
+    m2sdr_tool_write_dma_header(header, 123456789ULL);
+
+    if (m2sdr_tool_parse_dma_header(header, &timestamp) != 1)
+        return -1;
+    if (timestamp != 123456789ULL)
+        return -1;
+
+    header[0] ^= 0xff;
+    timestamp = 0;
+    if (m2sdr_tool_parse_dma_header(header, &timestamp) != 0)
         return -1;
 
     return 0;
@@ -131,6 +179,14 @@ int main(void)
     }
     if (test_cli_numeric_parser() != 0) {
         fprintf(stderr, "test_cli_numeric_parser failed\n");
+        return 1;
+    }
+    if (test_cli_format_parser() != 0) {
+        fprintf(stderr, "test_cli_format_parser failed\n");
+        return 1;
+    }
+    if (test_dma_header_helper() != 0) {
+        fprintf(stderr, "test_dma_header_helper failed\n");
         return 1;
     }
     if (test_stream_direction_validation() != 0) {

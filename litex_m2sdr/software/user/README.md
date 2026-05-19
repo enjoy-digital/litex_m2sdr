@@ -16,10 +16,16 @@ The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and 
 The user-space code is intentionally layered:
 
 - `libm2sdr/` is the public device/RF/streaming API for host applications.
-- `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are thin application wrappers built on top of `libm2sdr` or the shared host-side support code.
+- `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are application wrappers built on top of `libm2sdr` plus the shared CLI/header helpers in `m2sdr_cli.*` and `m2sdr_tool.*`.
 - `m2sdr_fm_tx` and `m2sdr_fm_rx` are transport-independent FM helpers and are built in both PCIe and LiteEth user builds.
 - `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
+
+New user tools should start from the shared helpers instead of adding another
+local parser or DMA-header copy. Direct CSR and DMA access is still acceptable
+for low-level diagnostics and performance-sensitive PCIe paths, but keep that
+code behind a tool-local helper so the public command behavior remains
+transport-neutral where possible.
 
 If you want to understand or extend the host stack, start with:
 

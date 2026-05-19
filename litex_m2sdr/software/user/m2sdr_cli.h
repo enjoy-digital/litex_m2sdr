@@ -8,6 +8,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 
+#include "m2sdr.h"
+
 struct m2sdr_cli_device {
     char device_id[128];
     bool use_explicit_device_id;
@@ -27,6 +29,9 @@ bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev);
 const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev);
 int m2sdr_cli_parse_int64(const char *text, int64_t *value);
+int m2sdr_cli_parse_double(const char *text, double *value);
+int m2sdr_cli_parse_format(const char *text, enum m2sdr_format *format);
+const char *m2sdr_cli_format_name(enum m2sdr_format format);
 void m2sdr_cli_print_device_help(void);
 void m2sdr_cli_error(const char *fmt, ...);
 void m2sdr_cli_invalid_choice(const char *what, const char *value, const char *expected);

@@ -22,6 +22,7 @@
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_sigmf.h"
+#include "m2sdr_tool.h"
 #include "config.h"
 
 #include "liblitepcie.h"
@@ -32,22 +33,6 @@ void intHandler(int dummy) {
     (void)dummy;
     keep_running = 0;
 }
-
-#ifdef USE_LITEPCIE
-static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
-{
-    uint64_t sync_word = 0;
-    uint64_t ts = 0;
-
-    memcpy(&sync_word, buf, sizeof(sync_word));
-    if (sync_word != 0x5aa55aa55aa55aa5ULL)
-        return 0;
-
-    memcpy(&ts, buf + 8, sizeof(ts));
-    *timestamp = ts;
-    return 1;
-}
-#endif
 
 static void help(void)
 {
@@ -372,7 +357,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                 if (header) {
                     uint64_t ts = 0;
 
-                    if (parse_m2sdr_dma_header((const uint8_t *)dma_buf, &ts)) {
+                    if (m2sdr_tool_parse_dma_header((const uint8_t *)dma_buf, &ts)) {
                         last_timestamp = ts;
                         if (first_timestamp == 0)
                             first_timestamp = ts;
@@ -608,11 +593,7 @@ int main(int argc, char **argv)
             strip_header = 1;
             break;
         case 1:
-            if (!strcmp(optarg, "sc16")) {
-                format = M2SDR_FORMAT_SC16_Q11;
-            } else if (!strcmp(optarg, "sc8")) {
-                format = M2SDR_FORMAT_SC8_Q7;
-            } else {
+            if (m2sdr_cli_parse_format(optarg, &format) != 0) {
                 m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }

@@ -21,30 +21,16 @@
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_sigmf.h"
+#include "m2sdr_tool.h"
 #include "config.h"
 
 #include "liblitepcie.h"
-
-#define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 
 sig_atomic_t keep_running = 1;
 
 void intHandler(int dummy) {
     (void)dummy;
     keep_running = 0;
-}
-
-static int parse_m2sdr_dma_header(const uint8_t *buf, uint64_t *timestamp)
-{
-    uint64_t sync_word = 0;
-    uint64_t ts = 0;
-
-    memcpy(&sync_word, buf, sizeof(sync_word));
-    if (sync_word != M2SDR_DMA_HEADER_SYNC_WORD)
-        return 0;
-    memcpy(&ts, buf + 8, sizeof(ts));
-    *timestamp = ts;
-    return 1;
 }
 
 static void print_time_banner(const char *label, uint64_t time_ns)
@@ -113,14 +99,6 @@ static int read_next_play_frame(FILE *fi, int close_fi, uint32_t *current_loop, 
 }
 
 #ifdef USE_LITEPCIE
-static void write_m2sdr_dma_header(uint8_t *buf, uint64_t timestamp)
-{
-    const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
-
-    memcpy(buf, &sync_word, sizeof(sync_word));
-    memcpy(buf + 8, &timestamp, sizeof(timestamp));
-}
-
 static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes,
                             unsigned header_bytes, struct m2sdr_metadata *meta)
 {
@@ -129,12 +107,12 @@ static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes
     if (header_bytes > 0) {
         uint64_t timestamp = 0;
 
-        if (parse_m2sdr_dma_header(src, &timestamp)) {
+        if (m2sdr_tool_parse_dma_header(src, &timestamp)) {
             meta->timestamp = timestamp;
             meta->flags |= M2SDR_META_FLAG_HAS_TIME;
         }
         memcpy(dst + header_bytes, src + header_bytes, frame_bytes - header_bytes);
-        write_m2sdr_dma_header(dst, (meta->flags & M2SDR_META_FLAG_HAS_TIME) ? meta->timestamp : 0);
+        m2sdr_tool_write_dma_header(dst, (meta->flags & M2SDR_META_FLAG_HAS_TIME) ? meta->timestamp : 0);
     } else {
         memcpy(dst, src, frame_bytes);
     }
@@ -328,7 +306,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                 break;
 
             if (header_bytes > 0) {
-                if (parse_m2sdr_dma_header(raw_buf, &meta.timestamp))
+                if (m2sdr_tool_parse_dma_header(raw_buf, &meta.timestamp))
                     meta.flags |= M2SDR_META_FLAG_HAS_TIME;
                 memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
             } else {
@@ -439,11 +417,7 @@ int main(int argc, char **argv)
         case 'z':
             break;
         case 1:
-            if (!strcmp(optarg, "sc16")) {
-                format = M2SDR_FORMAT_SC16_Q11;
-            } else if (!strcmp(optarg, "sc8")) {
-                format = M2SDR_FORMAT_SC8_Q7;
-            } else {
+            if (m2sdr_cli_parse_format(optarg, &format) != 0) {
                 m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }
