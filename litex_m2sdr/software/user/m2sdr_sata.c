@@ -88,17 +88,6 @@ static int parse_bool01(const char *label, const char *s)
     return (int)v;
 }
 
-static __attribute__((unused)) void msleep(unsigned ms)
-{
-    usleep(ms * 1000);
-}
-
-static __attribute__((unused)) int64_t m2sdr_sata_get_time_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
 /* Connection functions ------------------------------------------------------ */
 
 static struct m2sdr_dev *m2sdr_open_dev(void)
@@ -119,23 +108,6 @@ static void m2sdr_close_dev(struct m2sdr_dev *dev)
     if (dev) {
         m2sdr_close(dev);
     }
-}
-
-/* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4) -------- */
-
-static __attribute__((unused)) void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
-{
-    m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
-    m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
-}
-
-static  __attribute__((unused))  uint64_t csr_read64(struct m2sdr_dev *dev, uint32_t addr)
-{
-    uint32_t upper = 0;
-    uint32_t lower = 0;
-    m2sdr_reg_read(dev, addr + 0, &upper);
-    m2sdr_reg_read(dev, addr + 4, &lower);
-    return ((uint64_t)upper << 32) | (uint64_t)lower;
 }
 
 static uint32_t m2sdr_read32(struct m2sdr_dev *dev, uint32_t addr)
@@ -170,33 +142,35 @@ enum {
     RXDST_SATA = 2,
 };
 
-#if defined(CSR_SATA_PHY_BASE) // defined together with optional TXRX loopback support
-#if defined(CSR_TXRX_LOOPBACK_BASE)
+#if defined(CSR_SATA_PHY_BASE) && defined(CSR_TXRX_LOOPBACK_BASE)
 static void txrx_loopback_set(void *conn, int enable);
 #endif
-#endif
 
-static int parse_txsrc(const char *s)
+struct route_choice {
+    const char *name;
+    int value;
+};
+
+static const struct route_choice route_choices[] = {
+    { "pcie", TXSRC_PCIE },
+    { "eth",  TXSRC_ETH  },
+    { "sata", TXSRC_SATA },
+};
+
+static int parse_route_choice(const char *label, const char *text)
 {
-    if (!strcmp(s, "pcie")) return TXSRC_PCIE;
-    if (!strcmp(s, "eth"))  return TXSRC_ETH;
-    if (!strcmp(s, "sata")) return TXSRC_SATA;
-    m2sdr_cli_invalid_choice("TX source", s, "pcie, eth, or sata");
+    for (size_t i = 0; i < sizeof(route_choices) / sizeof(route_choices[0]); i++) {
+        if (text && strcmp(text, route_choices[i].name) == 0)
+            return route_choices[i].value;
+    }
+
+    m2sdr_cli_invalid_choice(label, text, "pcie, eth, or sata");
     exit(1);
 }
 
-static int parse_rxdst(const char *s)
+static const char *route_choice_name(int route)
 {
-    if (!strcmp(s, "pcie")) return RXDST_PCIE;
-    if (!strcmp(s, "eth"))  return RXDST_ETH;
-    if (!strcmp(s, "sata")) return RXDST_SATA;
-    m2sdr_cli_invalid_choice("RX destination", s, "pcie, eth, or sata");
-    exit(1);
-}
-
-static const char *txsrc_name(int txsrc)
-{
-    switch (txsrc) {
+    switch (route) {
     case TXSRC_PCIE: return "pcie";
     case TXSRC_ETH:  return "eth";
     case TXSRC_SATA: return "sata";
@@ -204,14 +178,24 @@ static const char *txsrc_name(int txsrc)
     }
 }
 
+static int parse_txsrc(const char *s)
+{
+    return parse_route_choice("TX source", s);
+}
+
+static int parse_rxdst(const char *s)
+{
+    return parse_route_choice("RX destination", s);
+}
+
+static const char *txsrc_name(int txsrc)
+{
+    return route_choice_name(txsrc);
+}
+
 static const char *rxdst_name(int rxdst)
 {
-    switch (rxdst) {
-    case RXDST_PCIE: return "pcie";
-    case RXDST_ETH:  return "eth";
-    case RXDST_SATA: return "sata";
-    default:         return "unknown";
-    }
+    return route_choice_name(rxdst);
 }
 
 static void crossbar_set(void *conn, int txsrc, int rxdst)
@@ -227,6 +211,35 @@ static void crossbar_set(void *conn, int txsrc, int rxdst)
 }
 
 #ifdef CSR_SATA_PHY_BASE
+
+static void msleep(unsigned ms)
+{
+    usleep(ms * 1000);
+}
+
+static int64_t m2sdr_sata_get_time_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4). */
+static void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
+{
+    m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
+    m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
+}
+
+static uint64_t csr_read64(struct m2sdr_dev *dev, uint32_t addr)
+{
+    uint32_t upper = 0;
+    uint32_t lower = 0;
+    m2sdr_reg_read(dev, addr + 0, &upper);
+    m2sdr_reg_read(dev, addr + 4, &lower);
+    return ((uint64_t)upper << 32) | (uint64_t)lower;
+}
+
 struct sata_route_state {
     bool crossbar_valid;
     bool loopback_valid;
