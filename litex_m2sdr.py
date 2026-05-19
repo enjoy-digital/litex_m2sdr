@@ -47,7 +47,6 @@ from litesata.frontend.stream import LiteSATAStream2Sectors, LiteSATASectors2Str
 from litescope import LiteScopeAnalyzer
 
 from litex_m2sdr import Platform, _io_baseboard
-from litex_m2sdr.wr_helper import prepare_wr_environment
 
 from litex_m2sdr.gateware.capability       import Capability
 from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock10Discipline
@@ -68,6 +67,46 @@ from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 
 from litex_m2sdr.software import generate_litepcie_software
+
+# White Rabbit Integration Loader ------------------------------------------------------------------
+
+def _iter_wr_nic_import_candidates(root_dir, wr_nic_dir=None):
+    candidates = []
+    if wr_nic_dir:
+        candidates.append(wr_nic_dir)
+    env_dir = os.environ.get("LITEX_WR_NIC_DIR")
+    if env_dir:
+        candidates.append(env_dir)
+    candidates += [
+        os.path.join(root_dir, "litex_wr_nic"),
+        os.path.join(os.path.dirname(root_dir), "litex_wr_nic"),
+    ]
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate = os.path.abspath(candidate)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        yield candidate
+
+
+def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
+    for candidate in _iter_wr_nic_import_candidates(root_dir, wr_nic_dir):
+        for path in (candidate, os.path.dirname(candidate)):
+            if path not in sys.path:
+                sys.path.insert(0, path)
+
+    try:
+        from litex_wr_nic.integration import prepare_wr_environment
+    except ImportError as error:
+        msg  = "White Rabbit support requires the litex_wr_nic Python package. "
+        msg += "Install it, set LITEX_WR_NIC_DIR, or keep a sibling ../litex_wr_nic checkout."
+        raise SystemExit(msg) from error
+
+    return prepare_wr_environment
 
 # RFIC Clock Policy --------------------------------------------------------------------------------
 
@@ -1298,18 +1337,27 @@ def main():
 
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
-    wr_env = prepare_wr_environment(
-        root_dir          = this_dir,
-        variant           = args.variant,
-        baseboard_io      = _io_baseboard,
-        with_white_rabbit = args.with_white_rabbit,
-        wr_sfp            = args.wr_sfp,
-        wr_nic_dir        = args.wr_nic_dir,
-        wr_firmware       = args.wr_firmware,
-        wr_firmware_target= args.wr_firmware_target,
-        build             = args.build,
-        status            = args.wr_status,
-    )
+    wr_env = {
+        "wr_nic_dir"     : args.wr_nic_dir,
+        "wr_firmware"    : args.wr_firmware,
+        "wr_sfp"         : args.wr_sfp,
+        "available_sfps" : [],
+        "wr_cores_state" : None,
+    }
+    if args.with_white_rabbit or args.wr_status:
+        prepare_wr_environment = _load_prepare_wr_environment(this_dir, args.wr_nic_dir)
+        wr_env = prepare_wr_environment(
+            root_dir          = this_dir,
+            variant           = args.variant,
+            baseboard_io      = _io_baseboard,
+            with_white_rabbit = args.with_white_rabbit,
+            wr_sfp            = args.wr_sfp,
+            wr_nic_dir        = args.wr_nic_dir,
+            wr_firmware       = args.wr_firmware,
+            wr_firmware_target= args.wr_firmware_target,
+            build             = args.build,
+            status            = args.wr_status,
+        )
     wr_firmware = wr_env["wr_firmware"]
     wr_sfp      = wr_env["wr_sfp"]
 

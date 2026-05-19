@@ -14,6 +14,7 @@ SDL2_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 HAVE_SDL2   := $(shell pkg-config --exists sdl2 2>/dev/null && echo 1 || echo 0)
 PNG_CFLAGS  := $(shell pkg-config --cflags libpng 2>/dev/null)
 PNG_LIBS    := $(shell pkg-config --libs libpng 2>/dev/null)
+HAVE_PNG    := $(shell pkg-config --exists libpng 2>/dev/null && echo 1 || echo 0)
 HAVE_CIMGUI := $(shell test -f $(SCAN_CIMGUI_DIR)/cimgui.h && test -f $(SCAN_CIMGUI_DIR)/imgui/imgui.cpp && echo 1 || echo 0)
 SNDFILE_CFLAGS    := $(shell pkg-config --cflags sndfile 2>/dev/null)
 SNDFILE_LIBS      := $(shell pkg-config --libs sndfile 2>/dev/null || echo -lsndfile)
@@ -64,7 +65,11 @@ endif
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
   BINARIES += m2sdr_check
   ifeq ($(INTERFACE),USE_LITEPCIE)
-    BINARIES += m2sdr_scan
+    ifeq ($(HAVE_PNG),1)
+      BINARIES += m2sdr_scan
+    else
+      $(warning libpng pkg-config metadata not found; skipping m2sdr_scan)
+    endif
   endif
 else
   ifneq ($(HAVE_SDL2),1)

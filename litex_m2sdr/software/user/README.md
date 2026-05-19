@@ -67,28 +67,22 @@ Core user tools build with the standard C/C++ toolchain and do not require the o
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
+- libpng development headers/libraries for `m2sdr_scan` (`libpng-dev`)
 - a populated `software/user/cimgui/` directory containing the pinned `cimgui` and Dear ImGui sources
 
 On Debian/Ubuntu:
 ~~~~
-sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev libsdl2-dev libgl1-mesa-dev
+sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev libsdl2-dev libgl1-mesa-dev libpng-dev
 ~~~~
 
-Populate the pinned `cimgui` checkout with:
+Populate the pinned `cimgui` submodule from the repository root with:
 ~~~~
-cd ../
-./fetch_cimgui.py
-~~~~
-
-Or let the top-level software build do it for you:
-~~~~
-cd ../
-./build.py --fetch-cimgui
+git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 ~~~~
 
 Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
 
-These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
+These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. When libpng is not available, `m2sdr_scan` is skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
 
 ### m2sdr_util
 General-purpose utility that provides board information, basic tests, and SPI flash operations.
@@ -647,7 +641,7 @@ Notes:
 - `F11` toggles a borderless fullscreen span across all monitors.
 - `--preset-save` writes a simple text preset file containing the current scan settings.
 - In headless/non-GUI build environments without SDL2, this binary is not built.
-- A populated `software/user/cimgui/` checkout is also required for the build. Use `../fetch_cimgui.py` or `../build.py --fetch-cimgui`.
+- A populated `software/user/cimgui/` submodule is also required for the build. From the repository root, use `git submodule update --init --recursive litex_m2sdr/software/user/cimgui`.
 
 ---
 

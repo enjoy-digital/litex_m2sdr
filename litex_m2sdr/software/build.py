@@ -37,10 +37,6 @@ def build_driver(path, cmake_options=None, prefix="/usr", do_install=False, clea
     if do_install:
         run_command(["make", "install"], cwd=build_path)
 
-def fetch_cimgui(base_dir):
-    run_command(["./fetch_cimgui.py"], cwd=base_dir)
-
-
 def install_user_software(base_dir, prefix, interface):
     user_dir = os.path.join(base_dir, "user")
     run_command(["make", f"INTERFACE={interface}", f"PREFIX={prefix}", "install"], cwd=user_dir)
@@ -54,7 +50,6 @@ def main():
     parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--interface",   default="litepcie",  help="Control/Data path interface", choices=["litepcie", "liteeth"])
     parser.add_argument("--prefix",      default="/usr",      help="Install prefix for SoapySDR driver.")
-    parser.add_argument("--fetch-cimgui", action="store_true", help="Populate software/user/cimgui at the pinned revision before building.")
     parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
     parser.add_argument("--no-install",  action="store_true", help="Build only; do not run install steps.")
     parser.add_argument("--skip-kernel", action="store_true", help="Skip kernel driver build/install.")
@@ -77,9 +72,6 @@ def main():
         print("Install steps skipped (--no-install).")
     elif not is_root:
         print("Install steps skipped (run as root to install).")
-
-    if args.fetch_cimgui:
-        fetch_cimgui(base_dir)
 
     # Kernel compilation.
     if (args.interface == "litepcie") and (not args.skip_kernel):

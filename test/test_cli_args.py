@@ -57,15 +57,6 @@ def test_main_exposes_base_soc_optional_args(monkeypatch):
     monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
     monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        soc_mod,
-        "prepare_wr_environment",
-        lambda **kwargs: {
-            "wr_firmware": kwargs["wr_firmware"],
-            "wr_sfp": kwargs["wr_sfp"],
-            "wr_nic_dir": kwargs["wr_nic_dir"],
-        },
-    )
-    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -111,15 +102,6 @@ def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
     monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
     monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        soc_mod,
-        "prepare_wr_environment",
-        lambda **kwargs: {
-            "wr_firmware": kwargs["wr_firmware"],
-            "wr_sfp": kwargs["wr_sfp"],
-            "wr_nic_dir": kwargs["wr_nic_dir"],
-        },
-    )
-    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -161,15 +143,6 @@ def test_main_accepts_ethernet_sata_source_build(monkeypatch):
     monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
     monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        soc_mod,
-        "prepare_wr_environment",
-        lambda **kwargs: {
-            "wr_firmware": kwargs["wr_firmware"],
-            "wr_sfp": kwargs["wr_sfp"],
-            "wr_nic_dir": kwargs["wr_nic_dir"],
-        },
-    )
-    monkeypatch.setattr(
         sys,
         "argv",
         [
@@ -191,6 +164,43 @@ def test_main_accepts_ethernet_sata_source_build(monkeypatch):
     assert captured["build_name"] == "litex_m2sdr_baseboard_eth_sata"
     assert captured["output_dir"].endswith(captured["build_name"])
     assert captured["run"] is False
+
+
+def test_main_wr_status_uses_lazy_wr_integration(monkeypatch):
+    soc_mod = _load_soc_module()
+    captured = {}
+
+    def fake_loader(root_dir, wr_nic_dir):
+        captured["loader_root_dir"] = root_dir
+        captured["loader_wr_nic_dir"] = wr_nic_dir
+
+        def fake_prepare(**kwargs):
+            captured["prepare_kwargs"] = kwargs
+            return {
+                "wr_firmware": kwargs["wr_firmware"],
+                "wr_sfp": kwargs["wr_sfp"],
+                "wr_nic_dir": kwargs["wr_nic_dir"],
+            }
+
+        return fake_prepare
+
+    monkeypatch.setattr(soc_mod, "_load_prepare_wr_environment", fake_loader)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "litex_m2sdr.py",
+            "--variant=baseboard",
+            "--wr-status",
+            "--wr-nic-dir=/tmp/litex_wr_nic",
+        ],
+    )
+
+    soc_mod.main()
+
+    assert captured["loader_wr_nic_dir"] == "/tmp/litex_wr_nic"
+    assert captured["prepare_kwargs"]["status"] is True
+    assert captured["prepare_kwargs"]["with_white_rabbit"] is False
 
 
 def test_base_soc_rejects_pcie_eth_sata_triple_use():

@@ -257,25 +257,14 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    ./build.py
    ```
    - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
-   - If you also want the optional SDL/OpenGL GUI tools (`m2sdr_check` / `m2sdr_scan`), first populate the pinned `cimgui` checkout with:
+   - If you also want the optional SDL/OpenGL GUI tools (`m2sdr_check` / `m2sdr_scan`), first populate the pinned `cimgui` submodule:
    ```
-   cd litex_m2sdr/software
-   ./fetch_cimgui.py
-   ```
-   - Or in a single step:
-   ```
-   cd litex_m2sdr/software
-   ./build.py --fetch-cimgui
+   git submodule update --init --recursive litex_m2sdr/software/user/cimgui
    ```
    - By default, `./build.py` builds incrementally and does not install when run as a normal user.
    - Use `./build.py --clean` when you want a full rebuild.
    - Use `sudo ./build.py` when you also want to install the kernel driver, the user-space utilities / `libm2sdr`, and the SoapySDR module under the default prefix.
-   - Example install command with the optional GUI fetch step:
-   ```
-   cd litex_m2sdr/software
-   sudo ./build.py --fetch-cimgui
-   ```
-   - `m2sdr_check` and `m2sdr_scan` are optional SDL/OpenGL GUI tools. They are built only when SDL2/OpenGL development packages are installed and `litex_m2sdr/software/user/cimgui/` has been populated. If `cimgui` is absent, only those two GUI tools are skipped; the CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
+   - `m2sdr_check` and `m2sdr_scan` are optional SDL/OpenGL GUI tools. They are built only when SDL2/OpenGL development packages are installed and `litex_m2sdr/software/user/cimgui/` has been populated; `m2sdr_scan` also needs libpng. If these optional GUI dependencies are absent, only the affected GUI tools are skipped; the CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
 
 5. **Install the Built Software:**
    - Install the kernel driver:
@@ -519,6 +508,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
    ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
    ```
+   - The White Rabbit helper logic is provided by `litex_wr_nic`; install it, set `LITEX_WR_NIC_DIR`, or keep a sibling `../litex_wr_nic` checkout.
    - `--wr-sfp` is optional; when omitted, the first available `sfp` index is auto-selected.
    - Firmware path lookup order:
      1. `--wr-firmware`

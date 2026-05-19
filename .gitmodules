@@ -1,0 +1,3 @@
+[submodule "litex_m2sdr/software/user/cimgui"]
+	path = litex_m2sdr/software/user/cimgui
+	url = https://github.com/cimgui/cimgui.git

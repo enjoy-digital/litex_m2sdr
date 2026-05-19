@@ -19,7 +19,6 @@ __pycache__
 
 # Local fetched dependencies and generated host-side binaries
 /wr-cores/
-/litex_m2sdr/software/user/cimgui/
 /litex_m2sdr/software/user/m2sdr_*
 !/litex_m2sdr/software/user/*.c
 !/litex_m2sdr/software/user/*.h
