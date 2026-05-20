@@ -13,8 +13,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake cppcheck pkg-config libsdl2-dev libgl1-mesa-dev libpng-dev libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
-      - name: Fetch pinned cimgui checkout
-        run: ./litex_m2sdr/software/fetch_cimgui.py
+      - name: Fetch pinned cimgui submodule
+        run: git submodule update --init --recursive litex_m2sdr/software/user/cimgui
       - name: Build user (PCIe)
         run: make -C litex_m2sdr/software/user clean all
       - name: Check optional GUI utilities

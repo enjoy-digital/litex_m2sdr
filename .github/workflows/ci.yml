@@ -39,10 +39,9 @@ jobs:
           make clean all
           test -f m2sdr.ko
 
-      - name: Fetch pinned cimgui checkout
+      - name: Fetch pinned cimgui submodule
         run: |
-          cd litex_m2sdr/software
-          ./fetch_cimgui.py
+          git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 
       - name: Build User Utilities
         run: |
