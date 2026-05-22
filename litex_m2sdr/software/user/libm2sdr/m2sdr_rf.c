@@ -143,6 +143,52 @@ static int m2sdr_from_ad9361_rc(int32_t rc)
     return (rc == 0) ? M2SDR_ERR_OK : M2SDR_ERR_IO;
 }
 
+static int m2sdr_to_ad9361_gain_mode(enum m2sdr_rx_gain_mode mode, uint8_t *ad9361_mode)
+{
+    if (!ad9361_mode)
+        return M2SDR_ERR_INVAL;
+
+    switch (mode) {
+    case M2SDR_RX_GAIN_MODE_MANUAL:
+        *ad9361_mode = RF_GAIN_MGC;
+        return M2SDR_ERR_OK;
+    case M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC:
+        *ad9361_mode = RF_GAIN_SLOWATTACK_AGC;
+        return M2SDR_ERR_OK;
+    case M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC:
+        *ad9361_mode = RF_GAIN_FASTATTACK_AGC;
+        return M2SDR_ERR_OK;
+    case M2SDR_RX_GAIN_MODE_HYBRID_AGC:
+        *ad9361_mode = RF_GAIN_HYBRID_AGC;
+        return M2SDR_ERR_OK;
+    default:
+        return M2SDR_ERR_INVAL;
+    }
+}
+
+static int m2sdr_from_ad9361_gain_mode(uint8_t ad9361_mode, enum m2sdr_rx_gain_mode *mode)
+{
+    if (!mode)
+        return M2SDR_ERR_INVAL;
+
+    switch (ad9361_mode) {
+    case RF_GAIN_MGC:
+        *mode = M2SDR_RX_GAIN_MODE_MANUAL;
+        return M2SDR_ERR_OK;
+    case RF_GAIN_SLOWATTACK_AGC:
+        *mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+        return M2SDR_ERR_OK;
+    case RF_GAIN_FASTATTACK_AGC:
+        *mode = M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC;
+        return M2SDR_ERR_OK;
+    case RF_GAIN_HYBRID_AGC:
+        *mode = M2SDR_RX_GAIN_MODE_HYBRID_AGC;
+        return M2SDR_ERR_OK;
+    default:
+        return M2SDR_ERR_UNSUPPORTED;
+    }
+}
+
 static int m2sdr_transport_error(struct m2sdr_dev *dev)
 {
 #ifdef USE_LITEETH
@@ -1120,6 +1166,48 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     return M2SDR_ERR_OK;
 }
 
+int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
+                           unsigned rx_channel, unsigned tx_channel)
+{
+    struct ad9361_rf_phy *phy;
+    struct ad9361_phy_platform_data *pd;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (channel_count != 1 && channel_count != 2)
+        return M2SDR_ERR_RANGE;
+    if (rx_channel > 1 || tx_channel > 1)
+        return M2SDR_ERR_RANGE;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR,
+                        channel_count == 1 ? 1 : 0) != 0)
+        return M2SDR_ERR_IO;
+
+    phy->pdata->rx2tx2 = (channel_count == 2);
+    if (channel_count == 1) {
+        phy->pdata->rx1tx1_mode_use_rx_num = rx_channel == 0 ? RX_1 : RX_2;
+        phy->pdata->rx1tx1_mode_use_tx_num = tx_channel == 0 ? TX_1 : TX_2;
+    } else {
+        phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
+        phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+    }
+
+    pd = phy->pdata;
+    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
+    if (channel_count == 2)
+        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_no_ch_mode(phy, channel_count)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
 /* Apply one direction-specific gain setting to the initialized AD9361. */
 int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain)
 {
@@ -1149,6 +1237,54 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
     }
 
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                           enum m2sdr_rx_gain_mode mode)
+{
+    struct ad9361_rf_phy *phy;
+    uint8_t ad9361_mode;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (channel > 1)
+        return M2SDR_ERR_RANGE;
+
+    rc = m2sdr_to_ad9361_gain_mode(mode, &ad9361_mode);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, channel, ad9361_mode)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                           enum m2sdr_rx_gain_mode *mode)
+{
+    struct ad9361_rf_phy *phy;
+    uint8_t ad9361_mode = RF_GAIN_MGC;
+    int rc;
+
+    if (!dev || !mode)
+        return M2SDR_ERR_INVAL;
+    if (channel > 1)
+        return M2SDR_ERR_RANGE;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_get_rx_gain_control_mode(phy, channel, &ad9361_mode)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return m2sdr_from_ad9361_gain_mode(ad9361_mode, mode);
 }
 
 /* Convenience wrapper for the RX LO frequency setter. */

@@ -321,6 +321,7 @@ static int test_rf_range_validation(void)
 {
     struct m2sdr_dev dev;
     struct m2sdr_config cfg;
+    enum m2sdr_rx_gain_mode gain_mode = M2SDR_RX_GAIN_MODE_MANUAL;
 
     memset(&dev, 0, sizeof(dev));
     m2sdr_config_init(&cfg);
@@ -342,6 +343,33 @@ static int test_rf_range_validation(void)
     if (m2sdr_set_sample_rate(&dev, -1) != M2SDR_ERR_RANGE)
         return -1;
     if (m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
+        return -1;
+
+    if (m2sdr_set_channel_mode(NULL, 2, 0, 0) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 3, 0, 0) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 2, 2, 0) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 2, 0, 0) != M2SDR_ERR_STATE)
+        return -1;
+
+    if (m2sdr_set_rx_gain_mode(NULL, 0, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 2, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 0, (enum m2sdr_rx_gain_mode)99) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 0, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_STATE)
+        return -1;
+
+    if (m2sdr_get_rx_gain_mode(NULL, 0, &gain_mode) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 0, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 2, &gain_mode) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 0, &gain_mode) != M2SDR_ERR_STATE)
         return -1;
 
     return 0;

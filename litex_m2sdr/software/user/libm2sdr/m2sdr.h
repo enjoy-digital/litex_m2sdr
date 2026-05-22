@@ -431,6 +431,13 @@ enum m2sdr_clock_source {
     M2SDR_CLOCK_SOURCE_SI5351C_FPGA  = 2,
 };
 
+enum m2sdr_rx_gain_mode {
+    M2SDR_RX_GAIN_MODE_MANUAL = 0,
+    M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC = 1,
+    M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC = 2,
+    M2SDR_RX_GAIN_MODE_HYBRID_AGC = 3,
+};
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     /* Common TX/RX sample rate in SPS. */
@@ -577,6 +584,12 @@ int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, 
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+int  m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
+                            unsigned rx_channel, unsigned tx_channel);
+int  m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                            enum m2sdr_rx_gain_mode mode);
+int  m2sdr_get_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                            enum m2sdr_rx_gain_mode *mode);
 /* Convenience RF setters for the common one-direction case. */
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);

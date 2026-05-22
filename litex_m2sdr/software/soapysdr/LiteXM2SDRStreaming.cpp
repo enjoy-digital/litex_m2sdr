@@ -474,36 +474,19 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     };
     const uint32_t rx_channel_mask = _rx_stream.opened ? channelMask(_rx_stream.channels) : 0;
     const uint32_t tx_channel_mask = _tx_stream.opened ? channelMask(_tx_stream.channels) : 0;
+    const unsigned rx_channel = (_rx_stream.opened && !_rx_stream.channels.empty()) ?
+        static_cast<unsigned>(_rx_stream.channels[0]) : 0;
+    const unsigned tx_channel = (_tx_stream.opened && !_tx_stream.channels.empty()) ?
+        static_cast<unsigned>(_tx_stream.channels[0]) : 0;
     const bool channel_mode_changed = !_channelModeHwApplied ||
         _channelModeHw != _nChannels ||
         _rxChannelMaskHw != rx_channel_mask ||
         _txChannelMaskHw != tx_channel_mask;
     if (channel_mode_changed) {
-        /* Configure 2T2R/1T1R mode (PHY). ad9361_set_no_ch_mode() resets and
-         * re-runs AD9361 setup, so the active Soapy settings must be reapplied. */
-        litex_m2sdr_writel(_dev, CSR_AD9361_PHY_CONTROL_ADDR, _nChannels == 1 ? 1 : 0);
-
-        /* AD9361 Channel en/dis */
-        ad9361_phy->pdata->rx2tx2 = (_nChannels == 2);
-        if (_nChannels == 1) {
-            if (_rx_stream.opened && !_rx_stream.channels.empty())
-                ad9361_phy->pdata->rx1tx1_mode_use_rx_num = _rx_stream.channels[0] == 0 ? RX_1 : RX_2;
-            if (_tx_stream.opened && !_tx_stream.channels.empty())
-                ad9361_phy->pdata->rx1tx1_mode_use_tx_num = _tx_stream.channels[0] == 0 ? TX_1 : TX_2;
-        } else {
-            ad9361_phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-            ad9361_phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
-        }
-
-        /* AD9361 Port Control 2t2r timing enable */
-        struct ad9361_phy_platform_data *pd = ad9361_phy->pdata;
-        pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-        if (_nChannels == 2)
-            pd->port_ctrl.pp_conf[0] |= (1 << 2);
-
-        int rc = ad9361_set_no_ch_mode(ad9361_phy, _nChannels);
-        if (rc != 0)
-            throw std::runtime_error("ad9361_set_no_ch_mode failed (rc=" + std::to_string(rc) + ")");
+        /* Re-runs AD9361 setup, so active Soapy settings are reapplied below. */
+        int rc = m2sdr_set_channel_mode(_dev, _nChannels, rx_channel, tx_channel);
+        if (rc != M2SDR_ERR_OK)
+            throw std::runtime_error("m2sdr_set_channel_mode failed: " + std::string(m2sdr_strerror(rc)));
 
         _channelModeHwApplied = true;
         _channelModeHw = _nChannels;

@@ -480,7 +480,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     TXStream _tx_stream;
     std::vector<std::string> _rx_antennas;
     std::vector<std::string> _tx_antennas;
-    int _rx_agc_mode = 0;
+    enum m2sdr_rx_gain_mode _rx_agc_mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
     std::string _ad9361_fir_profile = "legacy"; /* legacy | bypass | match | wide */
     bool _sampleRateHwApplied = false;
     int64_t _sampleRateHw = 0;

@@ -99,16 +99,16 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
     return it->second;
 }
 
-uint8_t parse_agc_mode(const std::string &mode)
+enum m2sdr_rx_gain_mode parse_agc_mode(const std::string &mode)
 {
     if (mode == "slow" || mode == "slowattack")
-        return RF_GAIN_SLOWATTACK_AGC;
+        return M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
     if (mode == "fast" || mode == "fastattack")
-        return RF_GAIN_FASTATTACK_AGC;
+        return M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC;
     if (mode == "hybrid")
-        return RF_GAIN_HYBRID_AGC;
+        return M2SDR_RX_GAIN_MODE_HYBRID_AGC;
     if (mode == "manual" || mode == "mgc")
-        return RF_GAIN_MGC;
+        return M2SDR_RX_GAIN_MODE_MANUAL;
     throw std::runtime_error("Invalid rx_agc_mode: " + mode);
 }
 
@@ -662,7 +662,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             "Custom antenna lists are not supported; use RX=A_BALANCED and TX=A");
     }
 
-    _rx_agc_mode = RF_GAIN_SLOWATTACK_AGC;
+    _rx_agc_mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
     if (args.count("rx_agc_mode") > 0)
         _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
 
@@ -1086,8 +1086,10 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
 #if USE_LITEETH
     LiteEthRfOpTimeout timeout("setGainMode");
 #endif
-    ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
-        (automatic ? _rx_agc_mode : RF_GAIN_MGC));
+    int rc = m2sdr_set_rx_gain_mode(_dev, channel,
+        automatic ? _rx_agc_mode : M2SDR_RX_GAIN_MODE_MANUAL);
+    if (rc != M2SDR_ERR_OK)
+        SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
 #if USE_LITEETH
     timeout.throw_if_timed_out();
 #endif
@@ -1102,15 +1104,15 @@ bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) con
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
-        uint8_t gc_mode;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("getGainMode");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
 #if USE_LITEETH
         timeout.throw_if_timed_out();
 #endif
-        return (gc_mode != RF_GAIN_MGC);
+        return (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL);
     }
 
     /* Fallback */
@@ -1153,18 +1155,20 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (SOAPY_SDR_RX == direction) {
-        uint8_t gc_mode = RF_GAIN_MGC;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
         _rx_stream.gain[channel] = value;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
-        if (gc_mode != RF_GAIN_MGC) {
-            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
+        if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
+            rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
+            if (rc != M2SDR_ERR_OK)
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
             _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
+        rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
@@ -1207,18 +1211,20 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (name == "PGA" || name == "RF" || name == "GAIN") {
-        uint8_t gc_mode = RF_GAIN_MGC;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
         _rx_stream.gain[channel] = value;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
-        if (gc_mode != RF_GAIN_MGC) {
-            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
+        if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
+            rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
+            if (rc != M2SDR_ERR_OK)
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
             _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
+        rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
