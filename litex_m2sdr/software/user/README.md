@@ -7,7 +7,7 @@
 - **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
 - **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
-The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module.
+The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module. It is built as one runtime PCIe/Ethernet library, so external applications should only need to link `libm2sdr`.
 
 ---
 
@@ -18,7 +18,7 @@ The user-space code is intentionally layered:
 - `libm2sdr/` is the public device/RF/streaming API for host applications.
 - `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are application wrappers built on top of `libm2sdr` plus the shared CLI/header helpers in `m2sdr_cli.*` and `m2sdr_tool.*`.
 - `m2sdr_fm_tx` and `m2sdr_fm_rx` are transport-independent FM helpers and are built in both PCIe and LiteEth user builds.
-- `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
+- `liblitepcie/` and `libliteeth/` remain transport helper source trees used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
 
 New user tools should start from the shared helpers instead of adding another

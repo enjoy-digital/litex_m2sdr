@@ -20,6 +20,7 @@
 - Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
 - Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
 - Current public library version: `1.0.0` (ABI `1`)
+- The library is built as a runtime PCIe/Ethernet library; external applications only need to link `libm2sdr`.
 - Recent API additions: backend accessors `m2sdr_get_transport()` / `m2sdr_get_eb_handle()` and finer-grained `parse`/`range`/`state` error classes.
 
 <div align="center">

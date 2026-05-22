@@ -3,8 +3,6 @@ project(SoapySDRLiteXM2SDR CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 
-option(USE_LITEETH "Uses Ethernet interface for control and streaming" OFF)
-
 ########################################################################
 ## LitePCIe discovery
 ########################################################################
@@ -26,12 +24,6 @@ find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
             software/user/liblitepcie
 )
 set(LITEPCIE_INCLUDE_DIR ${LITEPCIE_KERNEL_INCLUDE_DIR} ${LITEPCIE_USER_INCLUDE_DIR})
-find_library(LITEPCIE_LIBRARY litepcie
-             REQUIRED
-             HINTS
-               ${CMAKE_CURRENT_SOURCE_DIR}/../..
-             PATH_SUFFIXES
-               software/user/liblitepcie)
 
 include_directories(${LITEPCIE_INCLUDE_DIR})
 
@@ -104,36 +96,15 @@ find_library(LIBM2SDR_LIBRARY m2sdr
                software/user/libm2sdr
 )
 
-########################################################################
-## SoapySDR library
-########################################################################
-
 find_package(SoapySDR "0.2.1" REQUIRED)
 
-set(LITEXM2SDR_SOURCE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_api.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/ad9361_conv.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/ad9361/util.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/etherbone.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../software/user/libliteeth/liteeth_udp.c
-)
-
-if(USE_LITEETH)
-    add_definitions(-DUSE_LITEPCIE=0 -DUSE_LITEETH=1)
-else()
-    add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=0)
-endif()
-
-add_library(SoapyLiteXM2SDR_C OBJECT ${LITEXM2SDR_SOURCE})
-set_target_properties(SoapyLiteXM2SDR_C PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=1)
 
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    $<TARGET_OBJECTS:SoapyLiteXM2SDR_C>
-    LIBRARIES ${LIBM2SDR_LIBRARY} ${LITEPCIE_LIBRARY} m
+    LIBRARIES ${LIBM2SDR_LIBRARY} m
 )
 
 # Bind internal symbol references to this module to avoid conflicts
