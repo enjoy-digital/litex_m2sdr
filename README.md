@@ -295,6 +295,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 
 - **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
+- **PCIe PTM host-time sync**: Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`.
 - **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
@@ -496,6 +497,27 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --with-pcie --variant=m2 --build --load
    lspci
    ```
+   - To have a PCIe/PTM image automatically follow host time, build with PTM and start the host-side sync helper after the kernel driver has created the M2SDR PHC:
+   ```
+   ./litex_m2sdr.py --with-pcie --pcie-lanes=1 --with-pcie-ptm --variant=m2 --build --load
+   scripts/m2sdr_pcie_time_sync.py --dry-run
+   sudo scripts/m2sdr_pcie_time_sync.py --stdout
+   ```
+   - For boot-time use, install a systemd service similar to:
+   ```
+   [Unit]
+   Description=Synchronize M2SDR PCIe board time to host time
+   After=multi-user.target
+
+   [Service]
+   ExecStart=/path/to/litex_m2sdr/scripts/m2sdr_pcie_time_sync.py --stdout
+   Restart=always
+   RestartSec=2
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   - The helper auto-detects `/sys/class/ptp/ptp*/clock_name == m2sdr` and runs `phc2sys -s CLOCK_REALTIME -c /dev/ptpN`, so the board is the sink and the host is the source. For multi-board systems, pass `--phc /dev/ptpN`.
 
    - For PCIe tests, if the board is mounted directly in a LiteX Acorn Baseboard:
    ```
