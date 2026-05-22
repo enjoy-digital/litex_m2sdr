@@ -758,8 +758,18 @@ class BaseSoC(SoCMini):
 
             # Streamers.
             # ----------
-            self.sata_rx_streamer = LiteSATAStream2Sectors(port=self.sata_crossbar.get_port())
-            self.sata_tx_streamer = LiteSATASectors2Stream(port=self.sata_crossbar.get_port())
+            self.sata_rx_streamer = ResetInserter()(LiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
+            self.sata_tx_streamer = ResetInserter()(LiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
+            self.sata_streamer_control = CSRStorage(fields=[
+                CSRField("rx_reset", size=1, offset=0, pulse=True,
+                    description="Pulse reset on the SATA Stream2Sectors streamer."),
+                CSRField("tx_reset", size=1, offset=1, pulse=True,
+                    description="Pulse reset on the SATA Sectors2Stream streamer."),
+            ], description="SATA streamer control.")
+            self.comb += [
+                self.sata_rx_streamer.reset.eq(self.sata_streamer_control.fields.rx_reset),
+                self.sata_tx_streamer.reset.eq(self.sata_streamer_control.fields.tx_reset),
+            ]
 
             # IRQs.
             # -----

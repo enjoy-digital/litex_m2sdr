@@ -608,6 +608,63 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
     return (tx_rc == SATA_WAIT_OK && rx_rc == SATA_WAIT_OK) ? 0 : 1;
 }
 
+static int parse_stream_selector(const char *label, const char *text, bool *rx, bool *tx)
+{
+    if (!text || !rx || !tx)
+        return -1;
+
+    *rx = false;
+    *tx = false;
+    if (!strcmp(text, "rx")) {
+        *rx = true;
+        return 0;
+    }
+    if (!strcmp(text, "tx")) {
+        *tx = true;
+        return 0;
+    }
+    if (!strcmp(text, "both")) {
+        *rx = true;
+        *tx = true;
+        return 0;
+    }
+
+    m2sdr_cli_invalid_choice(label, text, "rx, tx, or both");
+    return -1;
+}
+
+static int do_stream_stop(const char *which_s)
+{
+    bool rx = false;
+    bool tx = false;
+    uint32_t control = 0;
+    struct m2sdr_dev *conn;
+
+    if (parse_stream_selector("stream", which_s, &rx, &tx) != 0)
+        return 1;
+
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+
+#ifdef CSR_SATA_STREAMER_CONTROL_ADDR
+    if (rx)
+        control |= 1u << CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
+    if (tx)
+        control |= 1u << CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
+    m2sdr_write32(conn, CSR_SATA_STREAMER_CONTROL_ADDR, control);
+    printf("SATA streamer reset: %s\n", which_s);
+    m2sdr_close_dev(conn);
+    return 0;
+#else
+    (void)control;
+    fprintf(stderr,
+        "SATA streamer stop is not supported by this gateware/software header. "
+        "Rebuild and load gateware with CSR_SATA_STREAMER_CONTROL.\n");
+    m2sdr_close_dev(conn);
+    return 1;
+#endif
+}
+
 #endif /* CSR_SATA_PHY_BASE */
 
 /* Status ------------------------------------------------------------------- */
@@ -757,6 +814,9 @@ static void help(void)
            "stream-status\n"
            "    Alias for status, useful after nonblocking starts.\n"
            "\n"
+           "stream-stop RX|TX|BOTH\n"
+           "    Reset the selected SATA streamer(s) when the gateware exposes the stop CSR.\n"
+           "\n"
            "replay SRC_SECTOR NSECTORS DST\n"
            "    SSD -> TX -> loopback -> RX destination.\n"
            "    dst: pcie|eth|sata\n"
@@ -895,6 +955,11 @@ int main(int argc, char **argv)
         return do_play_start(src_sector, nsectors, timeout_ms, dry_run);
     }
 
+    if (!strcmp(cmd, "stream-stop")) {
+        if (optind + 1 > argc) help();
+        return do_stream_stop(argv[optind++]);
+    }
+
     if (!strcmp(cmd, "replay")) {
         if (optind + 3 > argc) help();
         uint64_t src_sector = parse_u64(argv[optind++]);
@@ -921,7 +986,7 @@ int main(int argc, char **argv)
 #else
     if (!strcmp(cmd, "record") || !strcmp(cmd, "record-start") ||
         !strcmp(cmd, "play") || !strcmp(cmd, "play-start") ||
-        !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
+        !strcmp(cmd, "stream-stop") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
         fprintf(stderr, "Command '%s' not available: SATA not present in this gateware.\n", cmd);
         return 1;
     }
