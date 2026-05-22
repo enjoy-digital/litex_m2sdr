@@ -10,16 +10,20 @@
 
 #include "m2sdr.h"
 
+enum m2sdr_cli_transport {
+    M2SDR_CLI_TRANSPORT_DEFAULT = 0,
+    M2SDR_CLI_TRANSPORT_LITEPCIE,
+    M2SDR_CLI_TRANSPORT_LITEETH,
+};
+
 struct m2sdr_cli_device {
     char device_id[128];
     bool use_explicit_device_id;
-#ifdef USE_LITEPCIE
+    enum m2sdr_cli_transport transport;
     char pcie_path[64];
     int device_num;
-#elif defined(USE_LITEETH)
     char ip_address[1024];
     char port[16];
-#endif
 };
 
 void m2sdr_cli_device_init(struct m2sdr_cli_device *dev);

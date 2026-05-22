@@ -683,12 +683,9 @@ static void help(void)
            "options:\n"
            "  -h, --help                     Show this help message.\n"
            "  -d, --device DEV               Use explicit device id.\n"
-#ifdef USE_LITEPCIE
            "  -c, --device-num N             Select the device (default: 0).\n"
-#elif defined(USE_LITEETH)
            "  -i, --ip ADDR                  Target IP address for Etherbone.\n"
            "  -p, --port PORT                Port number (default: 1234).\n"
-#endif
            "      --timeout-ms MS            Timeout for streamer operations (default: 10000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
            "\n"

@@ -13,13 +13,12 @@
 
 #include "m2sdr_internal.h"
 
-#ifdef USE_LITEPCIE
 #include "litepcie_helpers.h"
 
 /* HAL */
 /*-----*/
 
-int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+static int m2sdr_litepcie_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     if (!dev || !val || dev->fd < 0)
         return M2SDR_ERR_INVAL;
@@ -29,7 +28,7 @@ int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
     return M2SDR_ERR_OK;
 }
 
-int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+static int m2sdr_litepcie_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     if (!dev || dev->fd < 0)
         return M2SDR_ERR_INVAL;
@@ -37,4 +36,7 @@ int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
     return M2SDR_ERR_OK;
 }
 
-#endif /* USE_LITEPCIE */
+const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops = {
+    .readl  = m2sdr_litepcie_readl,
+    .writel = m2sdr_litepcie_writel,
+};

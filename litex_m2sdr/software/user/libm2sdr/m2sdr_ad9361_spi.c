@@ -28,25 +28,26 @@
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
-#ifdef USE_LITEETH
-#define AD9361_SPI_TIMEOUT_US 10000
-#else
-#define AD9361_SPI_TIMEOUT_US 100000
-#endif
+#define AD9361_SPI_TIMEOUT_PCIE_US 100000
+#define AD9361_SPI_TIMEOUT_ETH_US   10000
 #define AD9361_RESET_PULSE_US 1000
 #define AD9361_RESET_SETTLE_US 10000
 
 /* Helpers */
 /*---------*/
 
+static int m2sdr_ad9361_spi_timeout_us(void *conn)
+{
+    return m2sdr_legacy_handle_is_fd(conn) ?
+        AD9361_SPI_TIMEOUT_PCIE_US : AD9361_SPI_TIMEOUT_ETH_US;
+}
+
 static bool m2sdr_ad9361_bus_ok(void *conn)
 {
-#ifdef USE_LITEETH
-    return eb_get_last_error(m2sdr_conn_cast(conn)) == EB_ERR_OK;
-#else
-    (void)conn;
-    return true;
-#endif
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return true;
+
+    return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
 }
 
 /* m2sdr_ad9361_spi_init */
@@ -91,7 +92,7 @@ bool m2sdr_ad9361_spi_xfer_checked(void *conn, uint8_t len, uint8_t *mosi, uint8
 #ifdef AD9361_SPI_WAIT_DONE
     /* Keep the helper synchronous so the caller sees a simple register-style
      * interface even though the FPGA block is command based. */
-    for (int timeout = AD9361_SPI_TIMEOUT_US; timeout > 0; timeout--) {
+    for (int timeout = m2sdr_ad9361_spi_timeout_us(conn); timeout > 0; timeout--) {
         if ((m2sdr_readl(conn, CSR_AD9361_SPI_STATUS_ADDR) & 0x1) == SPI_STATUS_DONE) {
             done = true;
             break;

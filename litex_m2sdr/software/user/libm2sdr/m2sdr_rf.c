@@ -98,14 +98,7 @@ int m2sdr_set_log_enabled(bool enable)
  * SPI and SI5351 helpers. */
 static void *m2sdr_conn(struct m2sdr_dev *dev)
 {
-#ifdef USE_LITEPCIE
-    return (void *)(intptr_t)dev->fd;
-#elif defined(USE_LITEETH)
-    return dev->eb;
-#else
-    (void)dev;
-    return NULL;
-#endif
+    return m2sdr_get_handle(dev);
 }
 
 #ifdef USE_LITEETH
@@ -1002,15 +995,17 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (rc != M2SDR_ERR_OK)
         return rc;
 #ifdef USE_LITEETH
-    m2sdr_start_rf_init_timeout();
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH)
+        m2sdr_start_rf_init_timeout();
 #endif
     rc = ad9361_init(&dev->ad9361_phy, &default_init_param, 1);
 #ifdef USE_LITEETH
-    if (tls_rf_init_timed_out) {
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH && tls_rf_init_timed_out) {
         m2sdr_clear_rf_init_timeout();
         return M2SDR_ERR_TIMEOUT;
     }
-    m2sdr_clear_rf_init_timeout();
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH)
+        m2sdr_clear_rf_init_timeout();
 #endif
     rc = m2sdr_from_ad9361_rc(rc);
     if (rc != M2SDR_ERR_OK)

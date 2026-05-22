@@ -37,12 +37,10 @@
 
 static bool m2sdr_si5351_bus_ok(void *conn)
 {
-#ifdef USE_LITEETH
-    return eb_get_last_error(m2sdr_conn_cast(conn)) == EB_ERR_OK;
-#else
-    (void)conn;
-    return true;
-#endif
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return true;
+
+    return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
 }
 
 /* m2sdr_si5351_i2c_reset */

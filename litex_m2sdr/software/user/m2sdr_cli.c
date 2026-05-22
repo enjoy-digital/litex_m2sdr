@@ -18,12 +18,14 @@ void m2sdr_cli_device_init(struct m2sdr_cli_device *dev)
         return;
 
     memset(dev, 0, sizeof(*dev));
-#ifdef USE_LITEPCIE
+#ifdef M2SDR_DEFAULT_TRANSPORT_LITEETH
+    dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
+#else
+    dev->transport = M2SDR_CLI_TRANSPORT_DEFAULT;
+#endif
     dev->device_num = 0;
-#elif defined(USE_LITEETH)
     strncpy(dev->ip_address, "192.168.1.50", sizeof(dev->ip_address) - 1);
     strncpy(dev->port, "1234", sizeof(dev->port) - 1);
-#endif
 }
 
 int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const char *optarg)
@@ -34,26 +36,26 @@ int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const 
     if (opt == 'd')
         return m2sdr_cli_set_device_id(dev, optarg);
 
-#ifdef USE_LITEPCIE
     if (opt == 'c') {
         if (m2sdr_cli_parse_int_range(optarg, 0, 255, &dev->device_num) != 0) {
             m2sdr_cli_error("invalid device number '%s'", optarg);
             return -1;
         }
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEPCIE;
         return 0;
     }
-#elif defined(USE_LITEETH)
     if (opt == 'i') {
         strncpy(dev->ip_address, optarg, sizeof(dev->ip_address) - 1);
         dev->ip_address[sizeof(dev->ip_address) - 1] = '\0';
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
         return 0;
     }
     if (opt == 'p') {
         strncpy(dev->port, optarg, sizeof(dev->port) - 1);
         dev->port[sizeof(dev->port) - 1] = '\0';
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
         return 0;
     }
-#endif
     return -1;
 }
 
@@ -68,12 +70,12 @@ int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
     }
     dev->use_explicit_device_id = true;
 
-#ifdef USE_LITEPCIE
     if (strncmp(device_id, "pcie:", 5) == 0) {
         if (snprintf(dev->pcie_path, sizeof(dev->pcie_path), "%s", device_id + 5) >= (int)sizeof(dev->pcie_path)) {
             fprintf(stderr, "PCIe device path too long\n");
             return -1;
         }
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEPCIE;
     } else if (strncmp(device_id, "/dev/m2sdr", 10) == 0) {
         if (snprintf(dev->pcie_path, sizeof(dev->pcie_path), "%s", device_id) >= (int)sizeof(dev->pcie_path)) {
             fprintf(stderr, "PCIe device path too long\n");
@@ -83,10 +85,11 @@ int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
             fprintf(stderr, "Device identifier too long\n");
             return -1;
         }
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEPCIE;
     } else {
         dev->pcie_path[0] = '\0';
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
     }
-#endif
     return 0;
 }
 
@@ -98,18 +101,18 @@ bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev)
     if (dev->use_explicit_device_id)
         return true;
 
-#ifdef USE_LITEPCIE
-    snprintf(dev->pcie_path, sizeof(dev->pcie_path), "/dev/m2sdr%d", dev->device_num);
-    if (snprintf(dev->device_id, sizeof(dev->device_id), "pcie:%s", dev->pcie_path) >= (int)sizeof(dev->device_id)) {
-        fprintf(stderr, "Device path too long\n");
-        return false;
+    if (dev->transport == M2SDR_CLI_TRANSPORT_LITEETH) {
+        if (snprintf(dev->device_id, sizeof(dev->device_id), "eth:%s:%s", dev->ip_address, dev->port) >= (int)sizeof(dev->device_id)) {
+            fprintf(stderr, "Device address too long\n");
+            return false;
+        }
+    } else {
+        snprintf(dev->pcie_path, sizeof(dev->pcie_path), "/dev/m2sdr%d", dev->device_num);
+        if (snprintf(dev->device_id, sizeof(dev->device_id), "pcie:%s", dev->pcie_path) >= (int)sizeof(dev->device_id)) {
+            fprintf(stderr, "Device path too long\n");
+            return false;
+        }
     }
-#elif defined(USE_LITEETH)
-    if (snprintf(dev->device_id, sizeof(dev->device_id), "eth:%s:%s", dev->ip_address, dev->port) >= (int)sizeof(dev->device_id)) {
-        fprintf(stderr, "Device address too long\n");
-        return false;
-    }
-#endif
     return true;
 }
 
@@ -120,24 +123,16 @@ const char *m2sdr_cli_device_id(const struct m2sdr_cli_device *dev)
 
 const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev)
 {
-#ifdef USE_LITEPCIE
     return dev ? dev->pcie_path : NULL;
-#else
-    (void)dev;
-    return NULL;
-#endif
 }
 
 void m2sdr_cli_print_device_help(void)
 {
     fputs("Device options:\n", stdout);
     fputs("  -d, --device DEV      Use explicit device id.\n", stdout);
-#ifdef USE_LITEPCIE
     fputs("  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n", stdout);
-#elif defined(USE_LITEETH)
     fputs("  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n", stdout);
     fputs("  -p, --port PORT       Target port (default: 1234).\n", stdout);
-#endif
 }
 
 int m2sdr_cli_parse_int64(const char *text, int64_t *value)

@@ -104,12 +104,9 @@ static void help(void) {
            "Options:\n"
            "  -h, --help            Display this help message.\n"
            "  -d, --device DEV      Use explicit device id.\n"
-#ifdef USE_LITEPCIE
            "  -c, --device-num N    Select the device (default: 0).\n"
-#elif defined(USE_LITEETH)
            "  -i, --ip ADDR         Target IP address of the board.\n"
            "  -p, --port PORT       Port number (default: 1234).\n"
-#endif
            "  -g, --enable          Enable GPIO control.\n"
            "  -l, --loopback        Enable GPIO loopback mode (requires --enable).\n"
            "      --source MODE     Select gpio source: dma or csr (default: dma).\n"

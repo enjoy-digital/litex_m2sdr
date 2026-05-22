@@ -497,13 +497,13 @@ int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
 /* Low-level transport handle access for advanced integrations.
  *
- * `m2sdr_get_fd()` is meaningful only on LitePCIe builds.
- * `m2sdr_get_eb_handle()` is meaningful only on LiteEth builds.
+ * `m2sdr_get_fd()` returns a valid descriptor only for LitePCIe devices.
+ * `m2sdr_get_eb_handle()` returns a valid handle only for LiteEth devices.
  * `m2sdr_get_transport()` is the preferred way to branch on active backend.
  * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
  * or the Etherbone connection handle, depending on the active backend. On
- * LitePCIe builds this value is an integer fd reinterpreted as a pointer; it is
- * only for passing through opaque APIs and must not be dereferenced. Prefer
+ * LitePCIe devices this value is an integer fd reinterpreted as a pointer; it
+ * is only for passing through opaque APIs and must not be dereferenced. Prefer
  * backend-specific accessors in new code.
  */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
