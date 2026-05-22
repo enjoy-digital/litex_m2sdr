@@ -1766,11 +1766,18 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
 static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration, int warmup_buffers)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
+    const char *pcie_path;
     dma.loopback = external_loopback ? 0 : 1;
     keep_running = 1;
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
         exit(1);
+    pcie_path = m2sdr_cli_pcie_path(&g_cli_dev);
+    if (!pcie_path || pcie_path[0] == '\0') {
+        fprintf(stderr, "dma_test requires a LitePCIe device; selected device is %s\n",
+                m2sdr_cli_device_id(&g_cli_dev));
+        return 1;
+    }
 
     if (unlikely(data_width > 32 || data_width < 1)) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
@@ -1810,7 +1817,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (unlikely(litepcie_dma_init(&dma, m2sdr_cli_pcie_path(&g_cli_dev), zero_copy)))
+    if (unlikely(litepcie_dma_init(&dma, pcie_path, zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;

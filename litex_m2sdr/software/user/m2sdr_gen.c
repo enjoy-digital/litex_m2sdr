@@ -232,6 +232,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     uint64_t sw_underflows = 0;
     int64_t hw_count_stop = 0;
     struct m2sdr_dev *dev = NULL;
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
     int fd = -1;
     struct ofdm_state ofdm;
     int ofdm_enabled = strcmp(signal_type, "ofdm") == 0;
@@ -241,9 +242,19 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
         fprintf(stderr, "Could not open device: %s\n", device_id);
         exit(1);
     }
+    if (m2sdr_get_transport(dev, &transport) != 0) {
+        fprintf(stderr, "m2sdr_get_transport failed\n");
+        m2sdr_close(dev);
+        exit(1);
+    }
+    if (transport != M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        fprintf(stderr, "m2sdr_gen requires LitePCIe DMA; selected device is %s\n", device_id);
+        m2sdr_close(dev);
+        exit(1);
+    }
     fd = m2sdr_get_fd(dev);
     if (fd < 0) {
-        fprintf(stderr, "No PCIe fd available\n");
+        fprintf(stderr, "No LitePCIe fd available\n");
         m2sdr_close(dev);
         exit(1);
     }
@@ -466,8 +477,10 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 /*------*/
 
 static void help(void) {
-    printf("M2SDR Signal Generator Utility\n"
+    printf("M2SDR PCIe Signal Generator Utility\n"
            "usage: m2sdr_gen [options]\n"
+           "\n"
+           "This tool requires LitePCIe DMA. Use m2sdr_play for transport-neutral playback.\n"
            "\n"
            "Options:\n"
            "  -h, --help                     Show this help message.\n"
