@@ -19,7 +19,8 @@ make install_dev PREFIX=/usr/local
 
 This installs:
 
-- headers under `include/litex_m2sdr/`
+- public libm2sdr headers under `include/litex_m2sdr/libm2sdr/`
+- generated kernel CSR headers under `include/litex_m2sdr/kernel/`
 - `libm2sdr.a` for static linking
 - `libm2sdr.so.1` plus the `libm2sdr.so` symlink for shared linking
 - `m2sdr.pc` under `lib/pkgconfig/`

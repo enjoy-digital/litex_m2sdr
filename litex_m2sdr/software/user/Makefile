@@ -334,10 +334,9 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -d $(PREFIX)/include/litex_m2sdr
 	install -d $(PREFIX)/include/litex_m2sdr/kernel
 	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel
-	$(foreach inc,ad9361 liblitepcie libm2sdr libliteeth, \
-		install -d $(PREFIX)/include/litex_m2sdr/$(inc); \
-		install -m 644 $(inc)/*.h $(PREFIX)/include/litex_m2sdr/$(inc); \
-	)
+	install -d $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_sigmf.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../doc/libm2sdr/$$ex.c ]; then \
