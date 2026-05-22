@@ -1,0 +1,30 @@
+get_filename_component(_M2SDR_PREFIX "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
+set(M2SDR_VERSION "@M2SDR_VERSION@")
+set(M2SDR_INCLUDE_DIR "${_M2SDR_PREFIX}/include/litex_m2sdr/libm2sdr")
+set(M2SDR_KERNEL_INCLUDE_DIR "${_M2SDR_PREFIX}/include/litex_m2sdr/kernel")
+set(M2SDR_INCLUDE_DIRS
+    "${M2SDR_INCLUDE_DIR}"
+    "${M2SDR_KERNEL_INCLUDE_DIR}"
+    "${_M2SDR_PREFIX}/include/litex_m2sdr")
+
+find_library(M2SDR_LIBRARY
+    NAMES m2sdr
+    HINTS "${_M2SDR_PREFIX}/lib"
+    NO_DEFAULT_PATH)
+if(NOT M2SDR_LIBRARY)
+    find_library(M2SDR_LIBRARY NAMES m2sdr)
+endif()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(m2sdr
+    REQUIRED_VARS M2SDR_LIBRARY M2SDR_INCLUDE_DIR
+    VERSION_VAR M2SDR_VERSION)
+
+if(M2SDR_FOUND AND NOT TARGET m2sdr::m2sdr)
+    add_library(m2sdr::m2sdr UNKNOWN IMPORTED)
+    set_target_properties(m2sdr::m2sdr PROPERTIES
+        IMPORTED_LOCATION "${M2SDR_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${M2SDR_INCLUDE_DIRS}")
+endif()
+

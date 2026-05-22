@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
 SCAN_CIMGUI_DIR := cimgui
+M2SDR_VERSION := 1.0.0
 
 # Backend selection: USE_RUNTIME (default), USE_LITEPCIE, or USE_LITEETH.
 # USE_RUNTIME builds one binary set that can open either pcie: or eth: devices.
@@ -331,6 +332,10 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -d $(PREFIX)/lib/pkgconfig
 	sed -e "s|^prefix=.*|prefix=$(PREFIX)|" libm2sdr/m2sdr.pc > $(PREFIX)/lib/pkgconfig/m2sdr.pc
 	chmod 644 $(PREFIX)/lib/pkgconfig/m2sdr.pc
+	install -d $(PREFIX)/lib/cmake/m2sdr
+	sed -e "s|@M2SDR_VERSION@|$(M2SDR_VERSION)|g" libm2sdr/m2sdrConfig.cmake.in > $(PREFIX)/lib/cmake/m2sdr/m2sdrConfig.cmake
+	sed -e "s|@M2SDR_VERSION@|$(M2SDR_VERSION)|g" libm2sdr/m2sdrConfigVersion.cmake.in > $(PREFIX)/lib/cmake/m2sdr/m2sdrConfigVersion.cmake
+	chmod 644 $(PREFIX)/lib/cmake/m2sdr/m2sdrConfig.cmake $(PREFIX)/lib/cmake/m2sdr/m2sdrConfigVersion.cmake
 	install -d $(PREFIX)/include/litex_m2sdr
 	install -d $(PREFIX)/include/litex_m2sdr/kernel
 	cp -f ../kernel/*.h $(PREFIX)/include/litex_m2sdr/kernel

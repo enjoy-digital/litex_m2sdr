@@ -24,6 +24,7 @@ This installs:
 - `libm2sdr.a` for static linking
 - `libm2sdr.so.1` plus the `libm2sdr.so` symlink for shared linking
 - `m2sdr.pc` under `lib/pkgconfig/`
+- `m2sdrConfig.cmake` under `lib/cmake/m2sdr/`
 
 ## Getting started
 
@@ -62,6 +63,13 @@ sudo make install
 ```
 pkg-config --modversion m2sdr
 pkg-config --cflags --libs m2sdr
+```
+
+For CMake projects, use:
+
+```
+find_package(m2sdr REQUIRED)
+target_link_libraries(my_app PRIVATE m2sdr::m2sdr)
 ```
 
 ## Quick Start (SC16)
