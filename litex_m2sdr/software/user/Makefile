@@ -164,6 +164,7 @@ tests/test_sigmf_cli: tests/test_sigmf_cli.o | $(BUILD_FLAGS_FILE)
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
+		--suppress=constParameter \
 		--suppress=constParameterPointer \
 		--suppress=variableScope \
 		--suppress=unreadVariable \

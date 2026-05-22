@@ -497,6 +497,8 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         struct m2sdr_liteeth_rx_stream_config eth_rx_config;
         int eth_rx_needs_activate = 0;
 
+        m2sdr_liteeth_rx_stream_config_init(&eth_rx_config);
+
         if (direction == M2SDR_RX) {
             m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
 
@@ -507,7 +509,6 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                     return M2SDR_ERR_IO;
             }
 
-            m2sdr_liteeth_rx_stream_config_init(&eth_rx_config);
             eth_rx_config.mode = M2SDR_LITEETH_RX_MODE_UDP;
             eth_rx_config.udp_port = listen_port;
             rc = m2sdr_liteeth_rx_stream_prepare(dev, &eth_rx_config);
@@ -956,7 +957,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
             copied += to_copy;
             if (dev->zero_copy) {
                 dev->rx_release_count++;
-                int rc = m2sdr_pcie_dma_update_rx_release(dev);
+                rc = m2sdr_pcie_dma_update_rx_release(dev);
                 if (rc != M2SDR_ERR_OK)
                     return rc;
             }
