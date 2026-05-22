@@ -1127,7 +1127,10 @@ class BaseSoC(SoCMini):
 
         # SI5351 10MHz clock select only feeds the external ssen_clkin DDR output, so a
         # non-dedicated BUFG cascade route is acceptable here.
-        platform.add_platform_command("set_property CLOCK_DEDICATED_ROUTE FALSE [get_nets -quiet clk10_clk]")
+        platform.add_platform_command(
+            "set_property CLOCK_DEDICATED_ROUTE FALSE "
+            "[get_nets -hierarchical -quiet {{*crg_s7mmcm_clkout_buf*}}]"
+        )
 
         # Low-Speed Peripheral Control Outputs (registered/static outputs, no external timing budget modeled).
         platform.add_platform_command(
