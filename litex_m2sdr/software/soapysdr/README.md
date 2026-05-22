@@ -22,11 +22,25 @@ For building and installing instructions, **refer to the main LiteX-M2SDR README
 
 Once installed, the driver will be automatically loaded by SoapySDR. You can then:
 
-1. **Probe SoapySDR**
+1. **Find/Probe SoapySDR**
+   ```bash
+   SoapySDRUtil --find="driver=LiteXM2SDR"
+   ```
+   This enumerates PCIe devices and probes the default Ethernet target
+   (`192.168.1.50:1234`) so a mixed PCIe/Ethernet setup can appear in one
+   Soapy device list.
+
+   To scan specific Ethernet targets during discovery, pass a semicolon-separated
+   list or set the matching environment variable:
+   ```bash
+   SoapySDRUtil --find="driver=LiteXM2SDR,eth_ips=192.168.1.50;192.168.1.51:1234"
+   LITEXM2SDR_ETH_IPS=192.168.1.50,192.168.1.51 SoapySDRUtil --find="driver=LiteXM2SDR"
+   ```
+
    ```bash
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
-   This probes PCIe devices by default and should list the capabilities and configuration parameters of your M2SDR board.
+   This probes the first discovered M2SDR board and should list the capabilities and configuration parameters.
 
    For an Ethernet board, pass the board IP explicitly:
    ```bash
@@ -51,6 +65,7 @@ You can pass device arguments to configure the driver. These are most useful whe
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
 - **Device selection**: `path=/dev/m2sdr0` for PCIe, `eth_ip=192.168.1.50` for Ethernet, or `dev_id=pcie:/dev/m2sdr0` / `dev_id=eth:192.168.1.50:1234` for an explicit libm2sdr identifier.
+- **Ethernet discovery**: default discovery probes `192.168.1.50:1234` after PCIe. Use `eth_ips=ip[;ip[:port]...]` or `LITEXM2SDR_ETH_IPS` to override the discovery list, and `eth_discovery=0` to disable Ethernet discovery.
 - **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`
   The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
 - **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
@@ -177,8 +192,8 @@ This repository includes several Python utilities to help test and demonstrate t
 ## Notes & Tips
 
 - **Single module**: The installed SoapySDR module handles PCIe DMA and Ethernet UDP/VRT paths. Select the transport with `path=`, `eth_ip=`, or `dev_id=`.
-- **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates PCIe devices by default. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,path=/dev/m2sdr1`).
-- **Ethernet/Etherbone**: Ethernet probing is explicit to avoid slow network discovery. Use `driver=LiteXM2SDR,eth_ip=192.168.1.50`.
+- **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates PCIe devices and the configured Ethernet discovery targets. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,path=/dev/m2sdr1` or `driver=LiteXM2SDR,dev_id=eth:192.168.1.50:1234`).
+- **Ethernet/Etherbone**: Ethernet discovery is bounded to configured targets, not a subnet scan. Use `eth_ips=...` or `LITEXM2SDR_ETH_IPS=...` for non-default Ethernet addresses.
 
 ---
 

@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cctype>
+#include <cstdlib>
+#include <sstream>
 
 #include "LiteXM2SDRDevice.hpp"
 
@@ -100,6 +102,61 @@ static bool resolveIdentifier(const std::string &candidate, struct m2sdr_device_
     return m2sdr_resolve_device_identifier(candidate.c_str(), &addr) == M2SDR_ERR_OK;
 }
 
+static bool stringFlagEnabled(const std::string &value)
+{
+    return !(value == "0" || value == "false" || value == "off" || value == "none");
+}
+
+static std::vector<std::string> splitList(const std::string &value)
+{
+    std::vector<std::string> items;
+    std::string normalized = value;
+    std::stringstream ss;
+    std::string item;
+
+    for (char &c : normalized) {
+        if (c == ';')
+            c = ',';
+    }
+    ss.str(normalized);
+
+    while (std::getline(ss, item, ',')) {
+        size_t first = item.find_first_not_of(" \t\r\n");
+        size_t last = item.find_last_not_of(" \t\r\n");
+
+        if (first == std::string::npos)
+            continue;
+        items.push_back(item.substr(first, last - first + 1));
+    }
+
+    return items;
+}
+
+static std::string makeEthernetIdentifier(const std::string &target,
+                                          const std::string &default_port)
+{
+    if (target.rfind("eth:", 0) == 0)
+        return target;
+    if (target.find(':') != std::string::npos)
+        return "eth:" + target;
+    return "eth:" + target + ":" + default_port;
+}
+
+static std::vector<std::string> ethernetDiscoveryTargets(const SoapySDR::Kwargs &args)
+{
+    std::string targets;
+    const char *env_targets = std::getenv("LITEXM2SDR_ETH_IPS");
+
+    if (args.count("eth_ips") != 0)
+        targets = args.at("eth_ips");
+    else if (env_targets && env_targets[0] != '\0')
+        targets = env_targets;
+    else
+        targets = "192.168.1.50";
+
+    return splitList(targets);
+}
+
 SoapySDR::Kwargs createDeviceKwargs(
     struct m2sdr_dev *m2sdr_dev,
     const struct m2sdr_device_addr &addr) {
@@ -128,6 +185,11 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     std::string eth_ip = "192.168.1.50";
     if (args.count("eth_ip") != 0)
         eth_ip = args.at("eth_ip");
+    std::string eth_port = "1234";
+    if (args.count("eth_port") != 0)
+        eth_port = args.at("eth_port");
+    else if (args.count("port") != 0)
+        eth_port = args.at("port");
 
     auto attemptToAddDevice = [&](const std::string &candidate) {
         struct m2sdr_dev *dev = nullptr;
@@ -143,6 +205,10 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
         m2sdr_close(dev);
 
         if (dev_args["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
+            for (const auto &existing : discovered) {
+                if (existing.count("dev_id") && existing.at("dev_id") == dev_args["dev_id"])
+                    return true;
+            }
             discovered.push_back(std::move(dev_args));
             return true;
         }
@@ -164,7 +230,7 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     }
 
     if (args.count("eth_ip") != 0) {
-        attemptToAddDevice("eth:" + eth_ip + ":1234");
+        attemptToAddDevice(makeEthernetIdentifier(eth_ip, eth_port));
     } else if (args.count("path") != 0) {
         attemptToAddDevice(args.at("path"));
     } else {
@@ -172,6 +238,10 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
             const std::string path = "/dev/m2sdr" + std::to_string(i);
             if (!attemptToAddDevice(path))
                 break;
+        }
+        if (args.count("eth_discovery") == 0 || stringFlagEnabled(args.at("eth_discovery"))) {
+            for (const auto &target : ethernetDiscoveryTargets(args))
+                attemptToAddDevice(makeEthernetIdentifier(target, eth_port));
         }
     }
     return discovered;
