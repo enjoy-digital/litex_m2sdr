@@ -65,6 +65,7 @@ from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
+from litex_m2sdr.gateware.sata        import SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -755,6 +756,19 @@ class BaseSoC(SoCMini):
                     pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
                     pcie_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
                 ]
+
+            # Host-accessible SATA DMA staging buffer.
+            # ----------------------------------------
+            self.sata_host_buffer = SATAHostBuffer(size=SATA_HOST_BUFFER_SIZE)
+            self.bus.add_slave(name="sata_host_buffer",
+                slave  = self.sata_host_buffer.host_bus,
+                region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
+            )
+            if hasattr(self, "dma_bus"):
+                self.dma_bus.add_slave(name="sata_host_buffer",
+                    slave  = self.sata_host_buffer.dma_bus,
+                    region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
+                )
 
             # Streamers.
             # ----------
