@@ -27,6 +27,10 @@
 #define M2SDR_LITEETH_CONTROL_TIMEOUT_MS 500
 #define M2SDR_LITEETH_OPEN_PROBE_ATTEMPTS 3
 #define M2SDR_LITEETH_OPEN_PROBE_DELAY_US 1000
+#define M2SDR_DISCOVERY_DEFAULT_PCIE_FIRST 0
+#define M2SDR_DISCOVERY_DEFAULT_PCIE_COUNT 8
+#define M2SDR_DISCOVERY_DEFAULT_ETH_TARGETS "192.168.1.50"
+#define M2SDR_DISCOVERY_DEFAULT_ETH_PORT 1234
 
 /* Helpers */
 /*---------*/
@@ -548,18 +552,146 @@ static void m2sdr_fill_transport_info(struct m2sdr_dev *dev, struct m2sdr_devinf
 }
 
 /* Probe one candidate identifier and return its public metadata. */
-static int m2sdr_probe_one(const char *device_id, struct m2sdr_devinfo *info)
+static int m2sdr_probe_discovered_one(const struct m2sdr_device_addr *addr,
+                                      struct m2sdr_discovered_device *entry)
 {
     struct m2sdr_dev *dev = NULL;
     int rc;
 
-    rc = m2sdr_open(&dev, device_id);
+    if (!addr || !entry)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_open(&dev, addr->identifier);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    rc = m2sdr_get_device_info(dev, info);
+    memset(entry, 0, sizeof(*entry));
+    entry->addr = *addr;
+    rc = m2sdr_get_device_info(dev, &entry->info);
     m2sdr_close(dev);
     return rc;
+}
+
+static void m2sdr_discovery_resolved_config(const struct m2sdr_discovery_config *config,
+                                            struct m2sdr_discovery_config *resolved)
+{
+    m2sdr_discovery_config_init(resolved);
+    if (!config)
+        return;
+
+    resolved->enable_pcie = config->enable_pcie;
+    resolved->enable_liteeth = config->enable_liteeth;
+    resolved->pcie_first = config->pcie_first;
+    resolved->pcie_count = config->pcie_count;
+    resolved->liteeth_targets = config->liteeth_targets ?
+        config->liteeth_targets : M2SDR_DISCOVERY_DEFAULT_ETH_TARGETS;
+    resolved->liteeth_port = config->liteeth_port ?
+        config->liteeth_port : M2SDR_DISCOVERY_DEFAULT_ETH_PORT;
+}
+
+static int m2sdr_discovery_target_exists(const struct m2sdr_device_addr *targets,
+                                         size_t count,
+                                         const char *identifier)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(targets[i].identifier, identifier) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int m2sdr_discovery_add_target(struct m2sdr_device_addr *targets,
+                                      size_t max,
+                                      size_t *count,
+                                      const char *candidate)
+{
+    struct m2sdr_device_addr addr;
+    int rc;
+
+    if (!targets || !count || !candidate)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_resolve_device_identifier(candidate, &addr);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_discovery_target_exists(targets, *count, addr.identifier))
+        return M2SDR_ERR_OK;
+
+    if (*count >= max)
+        return M2SDR_ERR_RANGE;
+
+    targets[*count] = addr;
+    (*count)++;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_discovery_add_eth_target(struct m2sdr_device_addr *targets,
+                                          size_t max,
+                                          size_t *count,
+                                          const char *target,
+                                          uint16_t default_port)
+{
+    char candidate[M2SDR_DEVICE_STR_MAX];
+    const char *body = target;
+
+    if (!target || !target[0])
+        return M2SDR_ERR_OK;
+    if (!strncmp(body, "eth:", 4))
+        body += 4;
+
+    if (strchr(body, ':')) {
+        if (snprintf(candidate, sizeof(candidate), "eth:%s", body) >= (int)sizeof(candidate))
+            return M2SDR_ERR_PARSE;
+    } else {
+        if (snprintf(candidate, sizeof(candidate), "eth:%s:%u",
+                     body, (unsigned)default_port) >= (int)sizeof(candidate))
+            return M2SDR_ERR_PARSE;
+    }
+
+    return m2sdr_discovery_add_target(targets, max, count, candidate);
+}
+
+static int m2sdr_discovery_add_eth_targets(struct m2sdr_device_addr *targets,
+                                           size_t max,
+                                           size_t *count,
+                                           const char *target_list,
+                                           uint16_t default_port)
+{
+    const char *p = target_list;
+
+    if (!target_list || !target_list[0])
+        return M2SDR_ERR_OK;
+
+    while (*p) {
+        char item[M2SDR_DEVICE_STR_MAX];
+        size_t len = 0;
+        int rc;
+
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n' ||
+               *p == ',' || *p == ';')
+            p++;
+        while (p[len] && p[len] != ',' && p[len] != ';')
+            len++;
+        while (len > 0 &&
+               (p[len - 1] == ' ' || p[len - 1] == '\t' ||
+                p[len - 1] == '\r' || p[len - 1] == '\n'))
+            len--;
+
+        if (len >= sizeof(item))
+            return M2SDR_ERR_PARSE;
+        if (len > 0) {
+            memcpy(item, p, len);
+            item[len] = '\0';
+            rc = m2sdr_discovery_add_eth_target(targets, max, count,
+                                                item, default_port);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+        }
+        p += strcspn(p, ",;");
+    }
+
+    return M2SDR_ERR_OK;
 }
 
 /* Version / Lifetime */
@@ -771,33 +903,110 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
     return M2SDR_ERR_OK;
 }
 
-/* Enumerate the set of reachable devices for the active backend. */
-int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
+void m2sdr_discovery_config_init(struct m2sdr_discovery_config *config)
 {
+    if (!config)
+        return;
+
+    memset(config, 0, sizeof(*config));
+    config->enable_pcie = true;
+    config->enable_liteeth = true;
+    config->pcie_first = M2SDR_DISCOVERY_DEFAULT_PCIE_FIRST;
+    config->pcie_count = M2SDR_DISCOVERY_DEFAULT_PCIE_COUNT;
+    config->liteeth_targets = M2SDR_DISCOVERY_DEFAULT_ETH_TARGETS;
+    config->liteeth_port = M2SDR_DISCOVERY_DEFAULT_ETH_PORT;
+}
+
+int m2sdr_get_discovery_targets(const struct m2sdr_discovery_config *config,
+                                struct m2sdr_device_addr *targets,
+                                size_t max,
+                                size_t *count)
+{
+    struct m2sdr_discovery_config resolved;
     size_t found = 0;
+    int rc;
+
+    if (!targets || !count)
+        return M2SDR_ERR_INVAL;
+
+    *count = 0;
+    m2sdr_discovery_resolved_config(config, &resolved);
+
+    if (resolved.enable_pcie) {
+        for (unsigned i = 0; i < resolved.pcie_count; i++) {
+            char dev_id[64];
+            unsigned index = resolved.pcie_first + i;
+
+            /* Match the historical expectation that boards enumerate as a
+             * small, fixed /dev/m2sdrN set instead of walking sysfs. */
+            if (snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%u", index) >= (int)sizeof(dev_id))
+                return M2SDR_ERR_PARSE;
+            rc = m2sdr_discovery_add_target(targets, max, &found, dev_id);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+        }
+    }
+
+    if (resolved.enable_liteeth) {
+        rc = m2sdr_discovery_add_eth_targets(targets, max, &found,
+                                             resolved.liteeth_targets,
+                                             resolved.liteeth_port);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+
+    *count = found;
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_device_list_ex(const struct m2sdr_discovery_config *config,
+                             struct m2sdr_discovered_device *list,
+                             size_t max,
+                             size_t *count)
+{
+    struct m2sdr_device_addr targets[64];
+    size_t target_count = 0;
+    size_t found = 0;
+    int rc;
 
     if (!list || !count)
         return M2SDR_ERR_INVAL;
 
-    for (int i = 0; i < 8 && found < max; i++) {
-        char dev_id[64];
+    *count = 0;
+    rc = m2sdr_get_discovery_targets(config, targets,
+                                     sizeof(targets) / sizeof(targets[0]),
+                                     &target_count);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
-        /* Match the historical expectation that boards enumerate as a small,
-         * fixed /dev/m2sdrN set instead of walking sysfs. */
-        snprintf(dev_id, sizeof(dev_id), "pcie:/dev/m2sdr%d", i);
-        if (m2sdr_probe_one(dev_id, &list[found]) == M2SDR_ERR_OK)
+    for (size_t i = 0; i < target_count && found < max; i++) {
+        if (m2sdr_probe_discovered_one(&targets[i], &list[found]) == M2SDR_ERR_OK)
             found++;
     }
 
-    if (found < max) {
-        char dev_id[64];
+    *count = found;
+    return M2SDR_ERR_OK;
+}
 
-        /* Etherbone discovery is still a single default target probe rather
-         * than a subnet scan, which keeps this helper deterministic. */
-        snprintf(dev_id, sizeof(dev_id), "eth:192.168.1.50:1234");
-        if (m2sdr_probe_one(dev_id, &list[found]) == M2SDR_ERR_OK)
-            found++;
-    }
+/* Enumerate the set of reachable devices for the default discovery policy. */
+int m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count)
+{
+    struct m2sdr_discovered_device discovered[64];
+    size_t found = 0;
+    int rc;
+
+    if (!list || !count)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_get_device_list_ex(NULL, discovered,
+                                  max < (sizeof(discovered) / sizeof(discovered[0])) ?
+                                      max : (sizeof(discovered) / sizeof(discovered[0])),
+                                  &found);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    for (size_t i = 0; i < found; i++)
+        list[i] = discovered[i].info;
 
     *count = found;
     return M2SDR_ERR_OK;

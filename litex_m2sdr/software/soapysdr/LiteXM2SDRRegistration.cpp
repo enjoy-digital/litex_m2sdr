@@ -13,7 +13,7 @@
 #include <unistd.h>
 #include <cctype>
 #include <cstdlib>
-#include <sstream>
+#include <stdexcept>
 
 #include "LiteXM2SDRDevice.hpp"
 
@@ -23,7 +23,6 @@
  * Find available devices
  **********************************************************************/
 
-#define MAX_DEVICES 8
 #define LITEX_IDENTIFIER_SIZE 256
 #define LITEX_IDENTIFIER      "LiteX-M2SDR"
 
@@ -107,31 +106,6 @@ static bool stringFlagEnabled(const std::string &value)
     return !(value == "0" || value == "false" || value == "off" || value == "none");
 }
 
-static std::vector<std::string> splitList(const std::string &value)
-{
-    std::vector<std::string> items;
-    std::string normalized = value;
-    std::stringstream ss;
-    std::string item;
-
-    for (char &c : normalized) {
-        if (c == ';')
-            c = ',';
-    }
-    ss.str(normalized);
-
-    while (std::getline(ss, item, ',')) {
-        size_t first = item.find_first_not_of(" \t\r\n");
-        size_t last = item.find_last_not_of(" \t\r\n");
-
-        if (first == std::string::npos)
-            continue;
-        items.push_back(item.substr(first, last - first + 1));
-    }
-
-    return items;
-}
-
 static std::string makeEthernetIdentifier(const std::string &target,
                                           const std::string &default_port)
 {
@@ -142,19 +116,25 @@ static std::string makeEthernetIdentifier(const std::string &target,
     return "eth:" + target + ":" + default_port;
 }
 
-static std::vector<std::string> ethernetDiscoveryTargets(const SoapySDR::Kwargs &args)
+static std::string ethernetDiscoveryTargets(const SoapySDR::Kwargs &args)
 {
-    std::string targets;
     const char *env_targets = std::getenv("LITEXM2SDR_ETH_IPS");
 
     if (args.count("eth_ips") != 0)
-        targets = args.at("eth_ips");
+        return args.at("eth_ips");
     else if (env_targets && env_targets[0] != '\0')
-        targets = env_targets;
-    else
-        targets = "192.168.1.50";
+        return env_targets;
+    return "192.168.1.50";
+}
 
-    return splitList(targets);
+static uint16_t parsePort(const std::string &value)
+{
+    size_t end = 0;
+    unsigned long port = std::stoul(value, &end, 10);
+
+    if (end != value.size() || port == 0 || port > 65535)
+        throw std::runtime_error("Invalid Ethernet port: " + value);
+    return static_cast<uint16_t>(port);
 }
 
 SoapySDR::Kwargs createDeviceKwargs(
@@ -234,14 +214,23 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     } else if (args.count("path") != 0) {
         attemptToAddDevice(args.at("path"));
     } else {
-        for (int i = 0; i < MAX_DEVICES; i++) {
-            const std::string path = "/dev/m2sdr" + std::to_string(i);
-            if (!attemptToAddDevice(path))
-                break;
-        }
-        if (args.count("eth_discovery") == 0 || stringFlagEnabled(args.at("eth_discovery"))) {
-            for (const auto &target : ethernetDiscoveryTargets(args))
-                attemptToAddDevice(makeEthernetIdentifier(target, eth_port));
+        struct m2sdr_discovery_config discovery_config;
+        struct m2sdr_device_addr targets[64];
+        size_t target_count = 0;
+        std::string target_list = ethernetDiscoveryTargets(args);
+
+        m2sdr_discovery_config_init(&discovery_config);
+        discovery_config.enable_liteeth =
+            args.count("eth_discovery") == 0 || stringFlagEnabled(args.at("eth_discovery"));
+        discovery_config.liteeth_targets = target_list.c_str();
+        discovery_config.liteeth_port = parsePort(eth_port);
+
+        if (m2sdr_get_discovery_targets(&discovery_config,
+                                        targets,
+                                        sizeof(targets) / sizeof(targets[0]),
+                                        &target_count) == M2SDR_ERR_OK) {
+            for (size_t i = 0; i < target_count; i++)
+                attemptToAddDevice(targets[i].identifier);
         }
     }
     return discovered;

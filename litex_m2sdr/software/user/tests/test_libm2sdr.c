@@ -114,6 +114,44 @@ static int test_cli_device_selection(void)
     return 0;
 }
 
+static int test_discovery_targets(void)
+{
+    struct m2sdr_discovery_config cfg;
+    struct m2sdr_device_addr targets[4];
+    size_t count = 0;
+
+    m2sdr_discovery_config_init(&cfg);
+    cfg.enable_pcie = false;
+    cfg.liteeth_targets = "192.168.1.10; eth:192.168.1.11:2345, 192.168.1.10";
+    cfg.liteeth_port = 1234;
+    if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
+        return -1;
+    if (count != 2)
+        return -1;
+    if (strcmp(targets[0].identifier, "eth:192.168.1.10:1234") != 0)
+        return -1;
+    if (strcmp(targets[1].identifier, "eth:192.168.1.11:2345") != 0)
+        return -1;
+
+    m2sdr_discovery_config_init(&cfg);
+    cfg.enable_liteeth = false;
+    cfg.pcie_first = 2;
+    cfg.pcie_count = 2;
+    if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
+        return -1;
+    if (count != 2)
+        return -1;
+    if (strcmp(targets[0].identifier, "pcie:/dev/m2sdr2") != 0)
+        return -1;
+    if (strcmp(targets[1].identifier, "pcie:/dev/m2sdr3") != 0)
+        return -1;
+
+    if (m2sdr_get_discovery_targets(&cfg, targets, 1, &count) != M2SDR_ERR_RANGE)
+        return -1;
+
+    return 0;
+}
+
 static int test_cli_numeric_parser(void)
 {
     int64_t value = 0;
@@ -429,6 +467,10 @@ int main(void)
     }
     if (test_cli_device_selection() != 0) {
         fprintf(stderr, "test_cli_device_selection failed\n");
+        return 1;
+    }
+    if (test_discovery_targets() != 0) {
+        fprintf(stderr, "test_discovery_targets failed\n");
         return 1;
     }
     if (test_cli_numeric_parser() != 0) {

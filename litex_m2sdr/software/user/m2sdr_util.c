@@ -1412,6 +1412,35 @@ static void info(void)
     m2sdr_close_dev(conn);
 }
 
+static void list_devices(void)
+{
+    struct m2sdr_discovered_device devices[16];
+    size_t count = 0;
+    int rc;
+
+    rc = m2sdr_get_device_list_ex(NULL, devices,
+                                  sizeof(devices) / sizeof(devices[0]),
+                                  &count);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "Device discovery failed: %s\n", m2sdr_strerror(rc));
+        exit(1);
+    }
+
+    if (count == 0) {
+        printf("No M2SDR devices found.\n");
+        return;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        printf("Device %zu:\n", i);
+        printf("  dev_id         : %s\n", devices[i].addr.identifier);
+        printf("  transport      : %s\n", devices[i].info.transport);
+        printf("  path           : %s\n", devices[i].info.path);
+        printf("  serial         : %s\n", devices[i].info.serial);
+        printf("  identification : %s\n", devices[i].info.identification);
+    }
+}
+
 
 /* FPGA Reg Access */
 /*-----------------*/
@@ -3840,6 +3869,8 @@ static void help(void)
 #endif
            "\n"
            "device commands:\n"
+           "  list | devices\n"
+           "      Discover reachable PCIe and configured Ethernet boards.\n"
            "  info | show-info\n"
            "      Show board information.\n"
            "  reg-read OFFSET\n"
@@ -4119,7 +4150,9 @@ int main(int argc, char **argv)
     cmd = argv[optind++];
 
     /* Info cmds. */
-    if (cmd_is(cmd, "info", "show-info"))
+    if (cmd_is(cmd, "list", "devices"))
+        list_devices();
+    else if (cmd_is(cmd, "info", "show-info"))
         info();
 
     /* PTP cmds. */

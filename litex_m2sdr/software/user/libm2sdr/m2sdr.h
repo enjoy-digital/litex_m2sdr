@@ -196,6 +196,24 @@ struct m2sdr_device_addr {
     uint16_t port;
 };
 
+struct m2sdr_discovery_config {
+    bool enable_pcie;
+    bool enable_liteeth;
+    unsigned pcie_first;
+    unsigned pcie_count;
+    /* Comma- or semicolon-separated list of ip[:port] or eth:ip[:port] targets.
+     * NULL selects the library default Ethernet target. */
+    const char *liteeth_targets;
+    /* Default port for Ethernet targets without an explicit port. Use 0 for
+     * the library default. */
+    uint16_t liteeth_port;
+};
+
+struct m2sdr_discovered_device {
+    struct m2sdr_device_addr addr;
+    struct m2sdr_devinfo info;
+};
+
 struct m2sdr_capabilities {
     /* Gateware API version reported by the FPGA. */
     uint32_t api_version;
@@ -504,11 +522,26 @@ int  m2sdr_resolve_device_identifier(const char *device_identifier,
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 
-/* Enumerate reachable devices for the active backend.
+/* Initialize discovery policy with the library defaults:
+ * PCIe /dev/m2sdr0..7 followed by Ethernet target 192.168.1.50:1234. */
+void m2sdr_discovery_config_init(struct m2sdr_discovery_config *config);
+
+/* Expand a discovery policy into canonical candidate identifiers. This does
+ * not open devices; use m2sdr_get_device_list_ex() to probe reachability. */
+int  m2sdr_get_discovery_targets(const struct m2sdr_discovery_config *config,
+                                 struct m2sdr_device_addr *targets,
+                                 size_t max,
+                                 size_t *count);
+
+/* Enumerate reachable devices for a configured discovery policy.
  *
- * PCIe currently probes /dev/m2sdr0..7. LiteEth currently probes only the
- * default target address rather than performing subnet discovery.
+ * Discovery is bounded to the configured PCIe indices and Ethernet targets; it
+ * never performs a subnet scan.
  */
+int  m2sdr_get_device_list_ex(const struct m2sdr_discovery_config *config,
+                              struct m2sdr_discovered_device *list,
+                              size_t max,
+                              size_t *count);
 int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
 
 /* Read stable transport/path/serial/identifier metadata from an open device. */
