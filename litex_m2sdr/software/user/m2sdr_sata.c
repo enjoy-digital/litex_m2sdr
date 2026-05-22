@@ -481,6 +481,27 @@ static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, boo
     return rc == SATA_WAIT_OK ? 0 : 1;
 }
 
+static int do_record_start(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int txsrc = (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
+
+    sata_require_csrs();
+    txrx_loopback_set(conn, 0);
+    crossbar_set(conn, txsrc, RXDST_SATA);
+    sata_rx_program(conn, dst_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("record-start", UINT64_MAX, dst_sector, nsectors, txsrc, RXDST_SATA, 0, timeout_ms);
+        m2sdr_close_dev(conn);
+        return 0;
+    }
+    sata_rx_start(conn);
+    printf("SATA_RX(record): started sector=0x%016" PRIx64 " nsectors=%" PRIu32 "\n",
+        dst_sector, nsectors);
+    m2sdr_close_dev(conn);
+    return 0;
+}
+
 static int do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
@@ -506,6 +527,27 @@ static int do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool 
         wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
     sata_operation_finish(&op);
     return rc == SATA_WAIT_OK ? 0 : 1;
+}
+
+static int do_play_start(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rxdst = (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
+
+    sata_require_csrs();
+    txrx_loopback_set(conn, 0);
+    crossbar_set(conn, TXSRC_SATA, rxdst);
+    sata_tx_program(conn, src_sector, nsectors);
+    if (dry_run) {
+        print_planned_transfer("play-start", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 0, timeout_ms);
+        m2sdr_close_dev(conn);
+        return 0;
+    }
+    sata_tx_start(conn);
+    printf("SATA_TX(play): started sector=0x%016" PRIx64 " nsectors=%" PRIu32 "\n",
+        src_sector, nsectors);
+    m2sdr_close_dev(conn);
+    return 0;
 }
 
 static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms, bool dry_run)
@@ -703,8 +745,17 @@ static void help(void)
            "record DST_SECTOR NSECTORS\n"
            "    RX stream -> SSD (SATA_RX_STREAMER).\n"
            "\n"
+           "record-start DST_SECTOR NSECTORS\n"
+           "    Start RX stream -> SSD and return immediately.\n"
+           "\n"
            "play SRC_SECTOR NSECTORS\n"
            "    SSD -> TX stream (SATA_TX_STREAMER).\n"
+           "\n"
+           "play-start SRC_SECTOR NSECTORS\n"
+           "    Start SSD -> TX stream and return immediately.\n"
+           "\n"
+           "stream-status\n"
+           "    Alias for status, useful after nonblocking starts.\n"
            "\n"
            "replay SRC_SECTOR NSECTORS DST\n"
            "    SSD -> TX -> loopback -> RX destination.\n"
@@ -783,7 +834,7 @@ int main(int argc, char **argv)
 
     cmd = argv[optind++];
 
-    if (!strcmp(cmd, "status")) {
+    if (!strcmp(cmd, "status") || !strcmp(cmd, "stream-status")) {
         status();
         return 0;
     }
@@ -811,6 +862,17 @@ int main(int argc, char **argv)
         return do_record(dst_sector, nsectors, timeout_ms, dry_run);
     }
 
+    if (!strcmp(cmd, "record-start")) {
+        if (optind + 2 > argc) help();
+        uint64_t dst_sector = parse_u64(argv[optind++]);
+        uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            m2sdr_cli_error("nsectors must be greater than zero");
+            return 1;
+        }
+        return do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
+    }
+
     if (!strcmp(cmd, "play")) {
         if (optind + 2 > argc) help();
         uint64_t src_sector = parse_u64(argv[optind++]);
@@ -820,6 +882,17 @@ int main(int argc, char **argv)
             return 1;
         }
         return do_play(src_sector, nsectors, timeout_ms, dry_run);
+    }
+
+    if (!strcmp(cmd, "play-start")) {
+        if (optind + 2 > argc) help();
+        uint64_t src_sector = parse_u64(argv[optind++]);
+        uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            m2sdr_cli_error("nsectors must be greater than zero");
+            return 1;
+        }
+        return do_play_start(src_sector, nsectors, timeout_ms, dry_run);
     }
 
     if (!strcmp(cmd, "replay")) {
@@ -846,7 +919,9 @@ int main(int argc, char **argv)
         return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
     }
 #else
-    if (!strcmp(cmd, "record") || !strcmp(cmd, "play") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
+    if (!strcmp(cmd, "record") || !strcmp(cmd, "record-start") ||
+        !strcmp(cmd, "play") || !strcmp(cmd, "play-start") ||
+        !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
         fprintf(stderr, "Command '%s' not available: SATA not present in this gateware.\n", cmd);
         return 1;
     }
