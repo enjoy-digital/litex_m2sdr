@@ -468,6 +468,18 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    cd litex_m2sdr/software/user
    make m2sdr_sata
    ./m2sdr_sata -i 192.168.1.50 status
+   ./m2sdr_sata -i 192.168.1.50 --pattern counter write-pattern 0x8000 4096
+   ./m2sdr_sata -i 192.168.1.50 --pattern counter verify-pattern 0x8000 4096
+   ```
+   - For PCIe + SATA source-build tests:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --build --load
+   cd litex_m2sdr/software/user
+   make m2sdr_util m2sdr_sata
+   ./m2sdr_util -c 0 info
+   ./m2sdr_sata -c 0 status
+   ./m2sdr_sata -c 0 --pattern counter write-pattern 0x8000 4096
+   ./m2sdr_sata -c 0 --pattern counter verify-pattern 0x8000 4096
    ```
    - For Ethernet PTP time-discipline tests on the baseboard:
    ```

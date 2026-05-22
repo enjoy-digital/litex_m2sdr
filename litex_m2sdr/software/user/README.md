@@ -482,7 +482,7 @@ Example usage:
 ---
 
 ### m2sdr_sata
-Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, and supports replay through the TX/RX loopback.
+Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform slow host-side sector I/O through PCIe or Ethernet register access when the gateware exposes the SATA host staging buffer.
 
 **Usage**:
 ~~~~
@@ -496,12 +496,28 @@ m2sdr_sata [options] cmd [args...]
   Set routing with optional loopback (0/1).
 - **record `DST_SECTOR NSECTORS`**
   RX stream → SSD (SATA_RX_STREAMER).
+- **record-start `DST_SECTOR NSECTORS`**
+  Start RX stream → SSD and return immediately.
 - **play `SRC_SECTOR NSECTORS`**
   SSD → TX stream (SATA_TX_STREAMER).
+- **play-start `SRC_SECTOR NSECTORS`**
+  Start SSD → TX stream and return immediately.
+- **stream-status**
+  Alias for `status`, useful after nonblocking starts.
+- **stream-stop `RX|TX|BOTH`**
+  Reset selected SATA streamer(s) when the loaded gateware exposes the stop CSR.
 - **replay `SRC_SECTOR NSECTORS DST`**
   SSD → TX → loopback → RX destination (`pcie|eth|sata`).
 - **copy `SRC_SECTOR DST_SECTOR NSECTORS`**
   SSD → SSD using loopback.
+- **read-file `SRC_SECTOR NSECTORS FILE|-`**
+  Read sectors from SSD through the host staging buffer.
+- **write-file `FILE|- DST_SECTOR [NSECTORS]`**
+  Write sectors to SSD through the host staging buffer.
+- **write-pattern `DST_SECTOR NSECTORS`**
+  Fill sectors with `--pattern zero|counter|prbs`.
+- **verify-pattern `SRC_SECTOR NSECTORS`**
+  Verify sectors against `--pattern zero|counter|prbs`.
 - **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
   Raw header control (writes HEADER CSR enable bits).
 
@@ -510,9 +526,16 @@ Example usage:
 ./m2sdr_sata status
 ./m2sdr_sata route pcie sata 0
 ./m2sdr_sata record 0x1000 8192
+./m2sdr_sata record-start 0x1000 8192
+./m2sdr_sata stream-status
+./m2sdr_sata stream-stop rx
 ./m2sdr_sata play 0x1000 8192
 ./m2sdr_sata replay 0x1000 8192 pcie
 ./m2sdr_sata copy 0x2000 0x4000 4096
+./m2sdr_sata --pattern counter write-pattern 0x8000 4096
+./m2sdr_sata --pattern counter verify-pattern 0x8000 4096
+./m2sdr_sata read-file 0x8000 4096 /tmp/m2sdr-sata.bin
+./m2sdr_sata write-file /tmp/m2sdr-sata.bin 0x9000
 ~~~~
 
 ---
