@@ -26,7 +26,17 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
    ```bash
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
-   This should list the capabilities and configuration parameters of your M2SDR board.
+   This probes PCIe devices by default and should list the capabilities and configuration parameters of your M2SDR board.
+
+   For an Ethernet board, pass the board IP explicitly:
+   ```bash
+   SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50"
+   ```
+
+   For a specific PCIe node, pass the device path explicitly:
+   ```bash
+   SoapySDRUtil --probe="driver=LiteXM2SDR,path=/dev/m2sdr1"
+   ```
 
 2. **Run SoapySDR Applications**
    - **GNU Radio**: Load `Soapy` blocks in GRC or run `gnuradio-companion`. Select `SoapySDR` source/sink blocks with `driver=LiteXM2SDR`.
@@ -94,6 +104,12 @@ SoapySDRUtil --probe="driver=LiteXM2SDR"
 ```
 The probe output will list the available time sources and the additional PTP sensors when Ethernet PTP support is present in the FPGA image.
 
+For PCIe/PTM host-time synchronization, build the gateware with
+`--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run
+`scripts/m2sdr_pcie_time_sync.py` on the host. The helper drives the M2SDR PHC
+from `CLOCK_REALTIME` through `phc2sys`; Soapy then observes the same board
+hardware time as the rest of the host stack.
+
 ---
 
 ## Test Utilities
@@ -160,6 +176,7 @@ This repository includes several Python utilities to help test and demonstrate t
 
 ## Notes & Tips
 
+- **Single module**: The installed SoapySDR module handles PCIe DMA and Ethernet UDP/VRT paths. Select the transport with `path=`, `eth_ip=`, or `dev_id=`.
 - **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates PCIe devices by default. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,path=/dev/m2sdr1`).
 - **Ethernet/Etherbone**: Ethernet probing is explicit to avoid slow network discovery. Use `driver=LiteXM2SDR,eth_ip=192.168.1.50`.
 
