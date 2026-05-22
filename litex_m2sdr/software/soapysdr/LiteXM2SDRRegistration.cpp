@@ -9,8 +9,6 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
-#include <unistd.h>
 #include <cctype>
 #include <cstdlib>
 #include <stdexcept>
@@ -23,41 +21,25 @@
  * Find available devices
  **********************************************************************/
 
-#define LITEX_IDENTIFIER_SIZE 256
 #define LITEX_IDENTIFIER      "LiteX-M2SDR"
-
-std::string readFPGAData(
-    struct m2sdr_dev *dev,
-    unsigned int baseAddr,
-    size_t size) {
-    std::string data(size, 0);
-    for (size_t i = 0; i < size; i++)
-        data[i] = static_cast<char>(litex_m2sdr_readl(dev, baseAddr + 4 * i));
-    return data;
-}
-
 
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev)
 {
-    /* Read up to LITEX_IDENTIFIER_SIZE bytes from the FPGA */
-    std::string data = readFPGAData(dev, CSR_IDENTIFIER_MEM_BASE, LITEX_IDENTIFIER_SIZE);
+    struct m2sdr_devinfo info = {};
 
-    /* Truncate at the first null terminator if present */
-    size_t nullPos = data.find('\0');
-    if (nullPos != std::string::npos)
-    {
-        data.resize(nullPos);
-    }
+    if (m2sdr_get_device_info(dev, &info) != M2SDR_ERR_OK)
+        return "";
 
-    return data;
+    return info.identification;
 }
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev) {
-    unsigned int high = litex_m2sdr_readl(dev, CSR_DNA_ID_ADDR + 0);
-    unsigned int low  = litex_m2sdr_readl(dev, CSR_DNA_ID_ADDR + 4);
-    char serial[32];
-    snprintf(serial, sizeof(serial), "%x%08x", high, low);
-    return std::string(serial);
+    struct m2sdr_devinfo info = {};
+
+    if (m2sdr_get_device_info(dev, &info) != M2SDR_ERR_OK)
+        return "";
+
+    return info.serial;
 }
 
 std::string generateDeviceLabel(
@@ -141,13 +123,15 @@ SoapySDR::Kwargs createDeviceKwargs(
     struct m2sdr_dev *m2sdr_dev,
     const struct m2sdr_device_addr &addr) {
     const std::string path = displayPath(addr);
+    struct m2sdr_devinfo info = {};
+    (void)m2sdr_get_device_info(m2sdr_dev, &info);
     SoapySDR::Kwargs dev = {
         {"device",         "LiteX-M2SDR"},
         {"transport",      transportName(addr.transport)},
         {"dev_id",         addr.identifier},
         {"path",           path},
-        {"serial",         getLiteXM2SDRSerial(m2sdr_dev)},
-        {"identification", getLiteXM2SDRIdentification(m2sdr_dev)},
+        {"serial",         info.serial},
+        {"identification", info.identification},
         {"version",        "1234"},
         {"label",          ""},
         {"oversampling",   "0"},
