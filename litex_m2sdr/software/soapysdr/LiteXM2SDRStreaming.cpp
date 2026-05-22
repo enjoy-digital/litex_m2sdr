@@ -116,6 +116,149 @@ static std::string get_kwargs_string(
     return fallback;
 }
 
+static size_t get_kwargs_size(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key,
+    size_t fallback)
+{
+    const std::string fallback_value = std::to_string(fallback);
+    const std::string value = get_kwargs_string(
+        stream_args, device_args, key, fallback_value.c_str());
+
+    return static_cast<size_t>(std::stoull(value));
+}
+
+static int get_kwargs_int(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key,
+    int fallback)
+{
+    const std::string fallback_value = std::to_string(fallback);
+    const std::string value = get_kwargs_string(
+        stream_args, device_args, key, fallback_value.c_str());
+
+    return static_cast<int>(std::stol(value));
+}
+
+static uint16_t get_kwargs_port(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key,
+    uint16_t fallback)
+{
+    const std::string fallback_value = std::to_string(fallback);
+    const std::string value = get_kwargs_string(
+        stream_args, device_args, key, fallback_value.c_str());
+    size_t end = 0;
+    unsigned long port = std::stoul(value, &end, 10);
+
+    if (end != value.size() || port == 0 || port > 65535)
+        throw std::runtime_error("Invalid LiteEth UDP port: " + value);
+    return static_cast<uint16_t>(port);
+}
+
+struct LiteEthUdpSettings {
+    std::string log_name;
+    std::string remote_ip;
+    uint16_t port = 2345;
+    bool rx_enable = true;
+    bool tx_enable = true;
+    size_t buffer_bytes = 0;
+    size_t buffer_count = 0;
+    int rcvbuf_bytes = 0;
+    int sndbuf_bytes = 0;
+};
+
+static LiteEthUdpSettings make_liteeth_rx_udp_settings(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const std::string &eth_ip,
+    bool is_vrt,
+    size_t bytes_per_complex,
+    size_t channel_count)
+{
+    LiteEthUdpSettings settings;
+
+    settings.log_name = is_vrt ? "LiteEth VRT/UDP" : "LiteEth UDP";
+    settings.remote_ip = get_kwargs_string(stream_args, device_args, "udp_ip", eth_ip.c_str());
+    settings.port = is_vrt
+        ? get_kwargs_port(stream_args, device_args, "vrt_port", 4991)
+        : get_kwargs_port(stream_args, device_args, "udp_port", 2345);
+    settings.tx_enable = !is_vrt;
+    settings.buffer_bytes = is_vrt
+        ? VRT_RX_PACKET_BYTES_DEFAULT
+        : get_kwargs_size(stream_args, device_args, "udp_buf_complex", 4096) *
+            bytes_per_complex * channel_count;
+    settings.buffer_count = get_kwargs_size(stream_args, device_args, "udp_buf_count", 64);
+    settings.rcvbuf_bytes = get_kwargs_int(stream_args, device_args, "udp_rcvbuf", 8 * 1024 * 1024);
+    return settings;
+}
+
+static LiteEthUdpSettings make_liteeth_tx_udp_settings(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const std::string &eth_ip,
+    size_t bytes_per_complex,
+    size_t channel_count)
+{
+    LiteEthUdpSettings settings;
+
+    settings.log_name = "LiteEth UDP";
+    settings.remote_ip = get_kwargs_string(stream_args, device_args, "udp_ip", eth_ip.c_str());
+    settings.port = get_kwargs_port(stream_args, device_args, "udp_port", 2345);
+    settings.buffer_bytes = get_kwargs_size(stream_args, device_args, "udp_buf_complex", 4096) *
+        bytes_per_complex * channel_count;
+    settings.buffer_count = get_kwargs_size(stream_args, device_args, "udp_buf_count", 64);
+    settings.sndbuf_bytes = get_kwargs_int(stream_args, device_args, "udp_sndbuf", 8 * 1024 * 1024);
+    return settings;
+}
+
+static void init_liteeth_udp(
+    struct liteeth_udp_ctrl *udp,
+    const std::string &source_filter_ip,
+    const LiteEthUdpSettings &settings)
+{
+    if (liteeth_udp_init(udp,
+                         /*listen_ip*/  nullptr, /*listen_port*/  settings.port,
+                         /*remote_ip*/  settings.remote_ip.c_str(), /*remote_port*/ settings.port,
+                         /*rx_enable*/  settings.rx_enable ? 1 : 0,
+                         /*tx_enable*/  settings.tx_enable ? 1 : 0,
+                         /*buffer_size*/ settings.buffer_bytes,
+                         /*buffer_count*/settings.buffer_count,
+                         /*nonblock*/    0) < 0) {
+        throw std::runtime_error("UDP init failed.");
+    }
+    if (liteeth_udp_set_rx_source_filter(udp, source_filter_ip.c_str(), 0) != 0) {
+        throw std::runtime_error("LiteEth UDP RX source filter setup failed.");
+    }
+    if (settings.rcvbuf_bytes > 0 && liteeth_udp_set_so_rcvbuf(udp, settings.rcvbuf_bytes) != 0) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "Failed to set LiteEth UDP SO_RCVBUF to %d bytes", settings.rcvbuf_bytes);
+    }
+    if (settings.sndbuf_bytes > 0 && liteeth_udp_set_so_sndbuf(udp, settings.sndbuf_bytes) != 0) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "Failed to set LiteEth UDP SO_SNDBUF to %d bytes", settings.sndbuf_bytes);
+    }
+
+    int actual_rcvbuf_bytes = 0;
+    if (settings.rcvbuf_bytes > 0 &&
+        liteeth_udp_get_so_rcvbuf(udp, &actual_rcvbuf_bytes) == 0) {
+        log_liteeth_socket_buffer("SO_RCVBUF", settings.rcvbuf_bytes, actual_rcvbuf_bytes);
+    }
+    int actual_sndbuf_bytes = 0;
+    if (settings.sndbuf_bytes > 0 &&
+        liteeth_udp_get_so_sndbuf(udp, &actual_sndbuf_bytes) == 0) {
+        log_liteeth_socket_buffer("SO_SNDBUF", settings.sndbuf_bytes, actual_sndbuf_bytes);
+    }
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "%s init: remote=%s:%u",
+                   settings.log_name.c_str(),
+                   settings.remote_ip.c_str(),
+                   static_cast<unsigned>(settings.port));
+}
+
 struct m2sdr_liteeth_rx_stream_config SoapyLiteXM2SDR::makeLiteEthRxStreamConfig() const
 {
     struct m2sdr_liteeth_rx_stream_config config;
@@ -224,57 +367,13 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         } else if (isLiteEth()) {
             /* Lazy-init UDP helper (enable RX+TX to mirror DMA symmetry). */
             const bool is_vrt = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT);
-            const uint16_t port = is_vrt
-                ? static_cast<uint16_t>(searchArgs.count("vrt_port")
-                      ? std::stoul(searchArgs.at("vrt_port"))
-                      : (_deviceArgs.count("vrt_port") ? std::stoul(_deviceArgs.at("vrt_port")) : 4991))
-                : static_cast<uint16_t>(searchArgs.count("udp_port")
-                      ? std::stoul(searchArgs.at("udp_port"))
-                      : (_deviceArgs.count("udp_port") ? std::stoul(_deviceArgs.at("udp_port")) : 2345));
-            _liteeth_rx_port = port;
+            const LiteEthUdpSettings udp_settings = make_liteeth_rx_udp_settings(
+                searchArgs, _deviceArgs, _eth_ip, is_vrt,
+                _bytesPerComplex, selected_channels.size());
+            _liteeth_rx_port = udp_settings.port;
             if (!_udp_inited) {
-                const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
-                                        : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : _eth_ip);
-
-                const size_t buf_bytes = is_vrt
-                                         ? VRT_RX_PACKET_BYTES_DEFAULT
-                                         : ((searchArgs.count("udp_buf_complex")
-                                              ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
-                                              : 4096) * _bytesPerComplex * selected_channels.size());
-                const size_t buf_count = searchArgs.count("udp_buf_count")
-                                         ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_count")))
-                                         : (_deviceArgs.count("udp_buf_count")
-                                            ? static_cast<size_t>(std::stoul(_deviceArgs.at("udp_buf_count")))
-                                            : 64);
-                const int rcvbuf_bytes = searchArgs.count("udp_rcvbuf")
-                                         ? static_cast<int>(std::stoul(searchArgs.at("udp_rcvbuf")))
-                                         : (_deviceArgs.count("udp_rcvbuf")
-                                            ? static_cast<int>(std::stoul(_deviceArgs.at("udp_rcvbuf")))
-                                            : 8 * 1024 * 1024);
-
-                if (liteeth_udp_init(&_udp,
-                                     /*listen_ip*/  nullptr, /*listen_port*/  port,
-                                     /*remote_ip*/  ip.c_str(), /*remote_port*/ port,
-                                     /*rx_enable*/  1, /*tx_enable*/ is_vrt ? 0 : 1,
-                                     /*buffer_size*/ buf_bytes,
-                                     /*buffer_count*/buf_count,
-                                     /*nonblock*/    0) < 0) {
-                    throw std::runtime_error("UDP init failed.");
-                }
-                if (liteeth_udp_set_rx_source_filter(&_udp, _eth_ip.c_str(), 0) != 0) {
-                    throw std::runtime_error("LiteEth UDP RX source filter setup failed.");
-                }
-                if (rcvbuf_bytes > 0 && liteeth_udp_set_so_rcvbuf(&_udp, rcvbuf_bytes) != 0) {
-                    SoapySDR::logf(SOAPY_SDR_WARNING,
-                        "Failed to set LiteEth UDP SO_RCVBUF to %d bytes", rcvbuf_bytes);
-                }
-                int actual_rcvbuf_bytes = 0;
-                if (liteeth_udp_get_so_rcvbuf(&_udp, &actual_rcvbuf_bytes) == 0) {
-                    log_liteeth_socket_buffer("SO_RCVBUF", rcvbuf_bytes, actual_rcvbuf_bytes);
-                }
+                init_liteeth_udp(&_udp, _eth_ip, udp_settings);
                 _udp_inited = true;
-                SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth %s init: remote=%s:%u",
-                               is_vrt ? "VRT/UDP" : "UDP", ip.c_str(), port);
             } else {
                 if (_nChannels && selected_channels.size() != _nChannels) {
                     throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
@@ -403,50 +502,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth TX pacing: %s", tx_pacing.c_str());
             }
             if (!_udp_inited) {
-                const std::string ip   = searchArgs.count("udp_ip")   ? searchArgs.at("udp_ip")
-                                        : (_deviceArgs.count("udp_ip")   ? _deviceArgs.at("udp_ip")   : _eth_ip);
-                const uint16_t    port = searchArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(searchArgs.at("udp_port")))
-                                        : (_deviceArgs.count("udp_port") ? static_cast<uint16_t>(std::stoul(_deviceArgs.at("udp_port"))) : 2345);
-
-                const size_t buf_complex = searchArgs.count("udp_buf_complex")
-                                           ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_complex")))
-                                           : 4096;
-
-                const size_t chs       = selected_channels.size();
-                const size_t buf_bytes = buf_complex * _bytesPerComplex * chs;
-                const size_t buf_count = searchArgs.count("udp_buf_count")
-                                         ? static_cast<size_t>(std::stoul(searchArgs.at("udp_buf_count")))
-                                         : (_deviceArgs.count("udp_buf_count")
-                                            ? static_cast<size_t>(std::stoul(_deviceArgs.at("udp_buf_count")))
-                                            : 64);
-                const int sndbuf_bytes = searchArgs.count("udp_sndbuf")
-                                         ? static_cast<int>(std::stoul(searchArgs.at("udp_sndbuf")))
-                                         : (_deviceArgs.count("udp_sndbuf")
-                                            ? static_cast<int>(std::stoul(_deviceArgs.at("udp_sndbuf")))
-                                            : 8 * 1024 * 1024);
-
-                if (liteeth_udp_init(&_udp,
-                                     /*listen_ip*/  nullptr, /*listen_port*/  port,
-                                     /*remote_ip*/  ip.c_str(), /*remote_port*/ port,
-                                     /*rx_enable*/  1, /*tx_enable*/ 1,
-                                     /*buffer_size*/ buf_bytes,
-                                     /*buffer_count*/buf_count,
-                                     /*nonblock*/    0) < 0) {
-                    throw std::runtime_error("UDP init failed.");
-                }
-                if (liteeth_udp_set_rx_source_filter(&_udp, _eth_ip.c_str(), 0) != 0) {
-                    throw std::runtime_error("LiteEth UDP RX source filter setup failed.");
-                }
-                if (sndbuf_bytes > 0 && liteeth_udp_set_so_sndbuf(&_udp, sndbuf_bytes) != 0) {
-                    SoapySDR::logf(SOAPY_SDR_WARNING,
-                        "Failed to set LiteEth UDP SO_SNDBUF to %d bytes", sndbuf_bytes);
-                }
-                int actual_sndbuf_bytes = 0;
-                if (liteeth_udp_get_so_sndbuf(&_udp, &actual_sndbuf_bytes) == 0) {
-                    log_liteeth_socket_buffer("SO_SNDBUF", sndbuf_bytes, actual_sndbuf_bytes);
-                }
+                const LiteEthUdpSettings udp_settings = make_liteeth_tx_udp_settings(
+                    searchArgs, _deviceArgs, _eth_ip,
+                    _bytesPerComplex, selected_channels.size());
+                init_liteeth_udp(&_udp, _eth_ip, udp_settings);
                 _udp_inited = true;
-                SoapySDR::logf(SOAPY_SDR_INFO, "LiteEth UDP init: remote=%s:%u", ip.c_str(), port);
             } else {
                 if (_nChannels && selected_channels.size() != _nChannels) {
                     throw std::runtime_error("LiteEth UDP buffers already initialized with a different channel count");
