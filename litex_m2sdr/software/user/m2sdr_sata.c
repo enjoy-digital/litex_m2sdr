@@ -25,11 +25,13 @@
 #include <time.h>
 #include <signal.h>
 #include <getopt.h>
+#include <errno.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "csr.h"
+#include "mem.h"
 
 /* Connection options -------------------------------------------------------- */
 
@@ -291,6 +293,18 @@ enum sata_wait_result {
     SATA_WAIT_TIMEOUT = 1,
     SATA_WAIT_INTERRUPTED = 2,
 };
+
+enum sata_pattern_kind {
+    SATA_PATTERN_ZERO = 0,
+    SATA_PATTERN_COUNTER,
+    SATA_PATTERN_PRBS,
+};
+
+#define SATA_SECTOR_BYTES 512u
+#if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
+    defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
+#define SATA_HOST_IO_AVAILABLE 1
+#endif
 #endif /* CSR_SATA_PHY_BASE */
 
 /* Optional header raw control ---------------------------------------------- */
@@ -394,6 +408,28 @@ static uint32_t sata_tx_error(void *conn)
     return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
 }
 
+#ifdef SATA_HOST_IO_AVAILABLE
+static uint32_t sata_sector2mem_done(void *conn)
+{
+    return m2sdr_read32(conn, CSR_SATA_SECTOR2MEM_DONE_ADDR);
+}
+
+static uint32_t sata_sector2mem_error(void *conn)
+{
+    return m2sdr_read32(conn, CSR_SATA_SECTOR2MEM_ERROR_ADDR);
+}
+
+static uint32_t sata_mem2sector_done(void *conn)
+{
+    return m2sdr_read32(conn, CSR_SATA_MEM2SECTOR_DONE_ADDR);
+}
+
+static uint32_t sata_mem2sector_error(void *conn)
+{
+    return m2sdr_read32(conn, CSR_SATA_MEM2SECTOR_ERROR_ADDR);
+}
+#endif
+
 static enum sata_wait_result wait_done(const char *name,
                                        uint32_t (*done_fn)(void *),
                                        uint32_t (*err_fn)(void *),
@@ -453,6 +489,402 @@ static void print_planned_transfer(const char *name,
     printf("  Loopback           %s\n", loopback ? "enabled" : "disabled");
     printf("  Timeout            %d ms\n", timeout_ms);
 }
+
+static enum sata_pattern_kind parse_pattern(const char *text)
+{
+    if (!text || !strcmp(text, "counter"))
+        return SATA_PATTERN_COUNTER;
+    if (!strcmp(text, "zero"))
+        return SATA_PATTERN_ZERO;
+    if (!strcmp(text, "prbs"))
+        return SATA_PATTERN_PRBS;
+
+    m2sdr_cli_invalid_choice("pattern", text, "zero, counter, or prbs");
+    exit(1);
+}
+
+#ifdef SATA_HOST_IO_AVAILABLE
+static uint32_t pattern_word(enum sata_pattern_kind pattern, uint64_t word_index)
+{
+    uint64_t x;
+
+    switch (pattern) {
+    case SATA_PATTERN_ZERO:
+        return 0;
+    case SATA_PATTERN_COUNTER:
+        return (uint32_t)word_index;
+    case SATA_PATTERN_PRBS:
+    default:
+        x = word_index + 0x9e3779b97f4a7c15ull;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+        x = x ^ (x >> 31);
+        return (uint32_t)(x ^ (x >> 32));
+    }
+}
+
+static void put_le32(uint8_t *buf, uint32_t value)
+{
+    buf[0] = (uint8_t)((value >>  0) & 0xffu);
+    buf[1] = (uint8_t)((value >>  8) & 0xffu);
+    buf[2] = (uint8_t)((value >> 16) & 0xffu);
+    buf[3] = (uint8_t)((value >> 24) & 0xffu);
+}
+
+static uint32_t get_le32(const uint8_t *buf)
+{
+    return ((uint32_t)buf[0] <<  0) |
+           ((uint32_t)buf[1] <<  8) |
+           ((uint32_t)buf[2] << 16) |
+           ((uint32_t)buf[3] << 24);
+}
+
+static void fill_pattern(uint8_t *buf, size_t len, uint64_t start_byte,
+                         enum sata_pattern_kind pattern)
+{
+    uint64_t word_index = start_byte / 4u;
+
+    for (size_t off = 0; off < len; off += 4)
+        put_le32(&buf[off], pattern_word(pattern, word_index++));
+}
+
+static bool check_pattern(const uint8_t *buf, size_t len, uint64_t start_byte,
+                          enum sata_pattern_kind pattern, uint64_t *bad_offset,
+                          uint32_t *expected, uint32_t *actual)
+{
+    uint64_t word_index = start_byte / 4u;
+
+    for (size_t off = 0; off < len; off += 4) {
+        uint32_t exp = pattern_word(pattern, word_index++);
+        uint32_t got = get_le32(&buf[off]);
+        if (exp != got) {
+            if (bad_offset) *bad_offset = start_byte + off;
+            if (expected)   *expected = exp;
+            if (actual)     *actual = got;
+            return false;
+        }
+    }
+    return true;
+}
+
+static uint32_t sata_host_buffer_max_sectors(void)
+{
+    return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
+}
+
+static void sata_host_buffer_write(void *conn, const uint8_t *buf, size_t bytes)
+{
+    for (size_t off = 0; off < bytes; off += 4)
+        m2sdr_write32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off, get_le32(&buf[off]));
+}
+
+static void sata_host_buffer_read(void *conn, uint8_t *buf, size_t bytes)
+{
+    for (size_t off = 0; off < bytes; off += 4)
+        put_le32(&buf[off], m2sdr_read32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off));
+}
+
+static void sata_sector2mem_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
+{
+    csr_write64(conn, CSR_SATA_SECTOR2MEM_SECTOR_ADDR, sector);
+    m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_NSECTORS_ADDR, nsectors);
+    csr_write64(conn, CSR_SATA_SECTOR2MEM_BASE_ADDR, base);
+}
+
+static void sata_mem2sector_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
+{
+    csr_write64(conn, CSR_SATA_MEM2SECTOR_SECTOR_ADDR, sector);
+    m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_NSECTORS_ADDR, nsectors);
+    csr_write64(conn, CSR_SATA_MEM2SECTOR_BASE_ADDR, base);
+}
+
+static int sata_read_to_host_buffer(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+{
+    sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
+    m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
+    return wait_done("SATA_SECTOR2MEM(read-file)",
+        sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms, nsectors) == SATA_WAIT_OK ? 0 : 1;
+}
+
+static int sata_write_from_host_buffer(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+{
+    sata_mem2sector_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
+    m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_START_ADDR, 1);
+    return wait_done("SATA_MEM2SECTOR(write-file)",
+        sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms, nsectors) == SATA_WAIT_OK ? 0 : 1;
+}
+
+static FILE *open_stdio_or_file(const char *path, const char *mode, bool *need_close)
+{
+    FILE *f;
+
+    *need_close = false;
+    if (!strcmp(path, "-"))
+        return (mode[0] == 'r') ? stdin : stdout;
+
+    f = fopen(path, mode);
+    if (!f)
+        perror(path);
+    else
+        *need_close = true;
+    return f;
+}
+
+static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    uint32_t done = 0;
+    bool close_out = false;
+    FILE *out;
+    int rc = 1;
+
+    sata_require_csrs();
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate host buffer.\n");
+        goto out_close_dev;
+    }
+
+    out = open_stdio_or_file(path, "wb", &close_out);
+    if (!out)
+        goto out_free;
+
+    while (done < nsectors) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+
+        if (sata_read_to_host_buffer(conn, src_sector + done, chunk, timeout_ms) != 0)
+            goto out_file;
+        sata_host_buffer_read(conn, buf, bytes);
+        if (fwrite(buf, 1, bytes, out) != bytes) {
+            perror(path);
+            goto out_file;
+        }
+        done += chunk;
+    }
+
+    rc = 0;
+    printf("Read %" PRIu32 " sectors from 0x%016" PRIx64 " to %s\n",
+        nsectors, src_sector, path);
+
+out_file:
+    if (close_out)
+        fclose(out);
+out_free:
+    free(buf);
+out_close_dev:
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsectors,
+                         bool limit_sectors, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    uint32_t done = 0;
+    bool close_in = false;
+    FILE *in;
+    int rc = 1;
+
+    sata_require_csrs();
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate host buffer.\n");
+        goto out_close_dev;
+    }
+
+    in = open_stdio_or_file(path, "rb", &close_in);
+    if (!in)
+        goto out_free;
+
+    for (;;) {
+        uint32_t chunk = max_sectors;
+        size_t bytes;
+        size_t got;
+
+        if (limit_sectors) {
+            if (done >= nsectors)
+                break;
+            if (chunk > nsectors - done)
+                chunk = nsectors - done;
+        }
+
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        memset(buf, 0, bytes);
+        got = fread(buf, 1, bytes, in);
+        if (got == 0 && !limit_sectors) {
+            if (ferror(in))
+                perror(path);
+            else
+                rc = 0;
+            break;
+        }
+        if (ferror(in)) {
+            perror(path);
+            goto out_file;
+        }
+        if (!limit_sectors) {
+            chunk = (uint32_t)((got + SATA_SECTOR_BYTES - 1u) / SATA_SECTOR_BYTES);
+            bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        }
+
+        sata_host_buffer_write(conn, buf, bytes);
+        if (sata_write_from_host_buffer(conn, dst_sector + done, chunk, timeout_ms) != 0)
+            goto out_file;
+        done += chunk;
+
+        if (!limit_sectors && got < (size_t)max_sectors * SATA_SECTOR_BYTES) {
+            rc = 0;
+            break;
+        }
+    }
+
+    if (limit_sectors)
+        rc = 0;
+    if (rc == 0)
+        printf("Wrote %" PRIu32 " sectors to 0x%016" PRIx64 " from %s\n",
+            done, dst_sector, path);
+
+out_file:
+    if (close_in)
+        fclose(in);
+out_free:
+    free(buf);
+out_close_dev:
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int do_write_pattern(uint64_t dst_sector, uint32_t nsectors,
+                            enum sata_pattern_kind pattern, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    uint32_t done = 0;
+    int rc = 1;
+
+    sata_require_csrs();
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate host buffer.\n");
+        goto out_close_dev;
+    }
+
+    while (done < nsectors) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+
+        fill_pattern(buf, bytes, (dst_sector + done) * SATA_SECTOR_BYTES, pattern);
+        sata_host_buffer_write(conn, buf, bytes);
+        if (sata_write_from_host_buffer(conn, dst_sector + done, chunk, timeout_ms) != 0)
+            goto out_free;
+        done += chunk;
+    }
+
+    rc = 0;
+    printf("Wrote pattern to %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
+        nsectors, dst_sector);
+
+out_free:
+    free(buf);
+out_close_dev:
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
+                             enum sata_pattern_kind pattern, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    uint32_t done = 0;
+    int rc = 1;
+
+    sata_require_csrs();
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate host buffer.\n");
+        goto out_close_dev;
+    }
+
+    while (done < nsectors) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+        uint64_t bad_offset = 0;
+        uint32_t expected = 0;
+        uint32_t actual = 0;
+
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+
+        if (sata_read_to_host_buffer(conn, src_sector + done, chunk, timeout_ms) != 0)
+            goto out_free;
+        sata_host_buffer_read(conn, buf, bytes);
+        if (!check_pattern(buf, bytes, (src_sector + done) * SATA_SECTOR_BYTES,
+                           pattern, &bad_offset, &expected, &actual)) {
+            fprintf(stderr,
+                "Pattern mismatch at byte 0x%016" PRIx64 ": expected=0x%08" PRIx32
+                " actual=0x%08" PRIx32 "\n",
+                bad_offset, expected, actual);
+            goto out_free;
+        }
+        done += chunk;
+    }
+
+    rc = 0;
+    printf("Verified pattern over %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
+        nsectors, src_sector);
+
+out_free:
+    free(buf);
+out_close_dev:
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+#else
+
+static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path, int timeout_ms)
+{
+    (void)src_sector; (void)nsectors; (void)path; (void)timeout_ms;
+    fprintf(stderr, "SATA host sector I/O requires a gateware build with SATA_HOST_BUFFER.\n");
+    return 1;
+}
+
+static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsectors,
+                         bool limit_sectors, int timeout_ms)
+{
+    (void)path; (void)dst_sector; (void)nsectors; (void)limit_sectors; (void)timeout_ms;
+    fprintf(stderr, "SATA host sector I/O requires a gateware build with SATA_HOST_BUFFER.\n");
+    return 1;
+}
+
+static int do_write_pattern(uint64_t dst_sector, uint32_t nsectors,
+                            enum sata_pattern_kind pattern, int timeout_ms)
+{
+    (void)dst_sector; (void)nsectors; (void)pattern; (void)timeout_ms;
+    fprintf(stderr, "SATA host sector I/O requires a gateware build with SATA_HOST_BUFFER.\n");
+    return 1;
+}
+
+static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
+                             enum sata_pattern_kind pattern, int timeout_ms)
+{
+    (void)src_sector; (void)nsectors; (void)pattern; (void)timeout_ms;
+    fprintf(stderr, "SATA host sector I/O requires a gateware build with SATA_HOST_BUFFER.\n");
+    return 1;
+}
+
+#endif
 
 static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
 {
@@ -787,6 +1219,7 @@ static void help(void)
            "  -p, --port PORT                Port number (default: 1234).\n"
            "      --timeout-ms MS            Timeout for streamer operations (default: 10000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
+           "      --pattern NAME             Pattern for write-pattern/verify-pattern: zero|counter|prbs.\n"
            "\n"
            "commands:\n"
            "status\n"
@@ -824,8 +1257,20 @@ static void help(void)
            "copy SRC_SECTOR DST_SECTOR NSECTORS\n"
            "    SSD -> SSD copy using loopback.\n"
            "\n"
+           "read-file SRC_SECTOR NSECTORS FILE|-\n"
+           "    Read sectors from SSD through the host staging buffer.\n"
+           "\n"
+           "write-file FILE|- DST_SECTOR [NSECTORS]\n"
+           "    Write sectors to SSD through the host staging buffer.\n"
+           "\n"
+           "write-pattern DST_SECTOR NSECTORS\n"
+           "    Fill sectors with the selected --pattern.\n"
+           "\n"
+           "verify-pattern SRC_SECTOR NSECTORS\n"
+           "    Read sectors and compare against the selected --pattern.\n"
+           "\n"
 #else
-           "record/play/replay/copy\n"
+           "record/play/replay/copy/read-file/write-file/write-pattern/verify-pattern\n"
            "    Not available: SATA not present in this gateware.\n"
            "\n"
 #endif
@@ -845,6 +1290,7 @@ int main(int argc, char **argv)
 
     int timeout_ms = 10000;
     bool dry_run = false;
+    const char *pattern_name = "counter";
     m2sdr_cli_device_init(&g_cli_dev);
     static struct option options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -854,12 +1300,13 @@ int main(int argc, char **argv)
         { "port", required_argument, NULL, 'p' },
         { "timeout-ms", required_argument, NULL, 'T' },
         { "dry-run", no_argument, NULL, 'n' },
+        { "pattern", required_argument, NULL, 'P' },
         { NULL, 0, NULL, 0 }
     };
 
     signal(SIGINT, int_handler);
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:i:p:T:n", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:T:nP:", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
@@ -878,6 +1325,9 @@ int main(int argc, char **argv)
             break;
         case 'n':
             dry_run = true;
+            break;
+        case 'P':
+            pattern_name = optarg;
             break;
         default:
             exit(1);
@@ -983,10 +1433,86 @@ int main(int argc, char **argv)
         }
         return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
     }
+
+    if (!strcmp(cmd, "read-file")) {
+        if (optind + 3 > argc) help();
+        uint64_t src_sector = parse_u64(argv[optind++]);
+        uint32_t nsectors   = parse_u32(argv[optind++]);
+        const char *path    = argv[optind++];
+        if (nsectors == 0) {
+            m2sdr_cli_error("nsectors must be greater than zero");
+            return 1;
+        }
+        if (dry_run) {
+            printf("read-file dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " path=%s\n",
+                src_sector, nsectors, path);
+            return 0;
+        }
+        return do_read_file(src_sector, nsectors, path, timeout_ms);
+    }
+
+    if (!strcmp(cmd, "write-file")) {
+        if (optind + 2 > argc) help();
+        const char *path      = argv[optind++];
+        uint64_t dst_sector   = parse_u64(argv[optind++]);
+        uint32_t nsectors     = 0;
+        bool limit_sectors    = false;
+        if (optind < argc) {
+            nsectors = parse_u32(argv[optind++]);
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            limit_sectors = true;
+        }
+        if (dry_run) {
+            printf("write-file dry-run: path=%s sector=0x%016" PRIx64,
+                path, dst_sector);
+            if (limit_sectors)
+                printf(" nsectors=%" PRIu32, nsectors);
+            printf("\n");
+            return 0;
+        }
+        return do_write_file(path, dst_sector, nsectors, limit_sectors, timeout_ms);
+    }
+
+    if (!strcmp(cmd, "write-pattern")) {
+        if (optind + 2 > argc) help();
+        uint64_t dst_sector = parse_u64(argv[optind++]);
+        uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            m2sdr_cli_error("nsectors must be greater than zero");
+            return 1;
+        }
+        if (dry_run) {
+            printf("write-pattern dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
+                dst_sector, nsectors, pattern_name);
+            return 0;
+        }
+        return do_write_pattern(dst_sector, nsectors, parse_pattern(pattern_name), timeout_ms);
+    }
+
+    if (!strcmp(cmd, "verify-pattern")) {
+        if (optind + 2 > argc) help();
+        uint64_t src_sector = parse_u64(argv[optind++]);
+        uint32_t nsectors   = parse_u32(argv[optind++]);
+        if (nsectors == 0) {
+            m2sdr_cli_error("nsectors must be greater than zero");
+            return 1;
+        }
+        if (dry_run) {
+            printf("verify-pattern dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
+                src_sector, nsectors, pattern_name);
+            return 0;
+        }
+        return do_verify_pattern(src_sector, nsectors, parse_pattern(pattern_name), timeout_ms);
+    }
 #else
     if (!strcmp(cmd, "record") || !strcmp(cmd, "record-start") ||
         !strcmp(cmd, "play") || !strcmp(cmd, "play-start") ||
-        !strcmp(cmd, "stream-stop") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy")) {
+        !strcmp(cmd, "stream-stop") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy") ||
+        !strcmp(cmd, "read-file") || !strcmp(cmd, "write-file") ||
+        !strcmp(cmd, "write-pattern") || !strcmp(cmd, "verify-pattern")) {
         fprintf(stderr, "Command '%s' not available: SATA not present in this gateware.\n", cmd);
         return 1;
     }
