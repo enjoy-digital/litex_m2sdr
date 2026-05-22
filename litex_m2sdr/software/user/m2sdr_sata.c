@@ -305,6 +305,15 @@ enum sata_pattern_kind {
     defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
 #define SATA_HOST_IO_AVAILABLE 1
 #endif
+#if defined(CSR_MAIN_SATA_STREAMER_CONTROL_ADDR)
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR            CSR_MAIN_SATA_STREAMER_CONTROL_ADDR
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET CSR_MAIN_SATA_STREAMER_CONTROL_RX_RESET_OFFSET
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET CSR_MAIN_SATA_STREAMER_CONTROL_TX_RESET_OFFSET
+#elif defined(CSR_SATA_STREAMER_CONTROL_ADDR)
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR            CSR_SATA_STREAMER_CONTROL_ADDR
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET
+#define M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET
+#endif
 #endif /* CSR_SATA_PHY_BASE */
 
 /* Optional header raw control ---------------------------------------------- */
@@ -1078,12 +1087,12 @@ static int do_stream_stop(const char *which_s)
     conn = m2sdr_open_dev();
     sata_require_csrs();
 
-#ifdef CSR_SATA_STREAMER_CONTROL_ADDR
+#ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
     if (rx)
-        control |= 1u << CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
+        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
     if (tx)
-        control |= 1u << CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
-    m2sdr_write32(conn, CSR_SATA_STREAMER_CONTROL_ADDR, control);
+        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
+    m2sdr_write32(conn, M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR, control);
     printf("SATA streamer reset: %s\n", which_s);
     m2sdr_close_dev(conn);
     return 0;

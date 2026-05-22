@@ -71,6 +71,26 @@ from litex_m2sdr.software import generate_litepcie_software
 
 # White Rabbit Integration Loader ------------------------------------------------------------------
 
+def _iter_aligned_power2_regions(origin, size):
+    while size:
+        block = 1 << (size.bit_length() - 1)
+        while origin & (block - 1):
+            block >>= 1
+        while block > size:
+            block >>= 1
+        yield origin, block
+        origin += block
+        size   -= block
+
+def _add_dma_slave_window(bus, slave, prefix, origin, size, index):
+    for region_origin, region_size in _iter_aligned_power2_regions(origin, size):
+        bus.add_slave(name=f"{prefix}{index}",
+            slave  = slave,
+            region = SoCRegion(origin=region_origin, size=region_size)
+        )
+        index += 1
+    return index
+
 def _iter_wr_nic_import_candidates(root_dir, wr_nic_dir=None):
     candidates = []
     if wr_nic_dir:
@@ -540,10 +560,13 @@ class BaseSoC(SoCMini):
                     data_width    = 32,
                     addressing    = "byte",
                 )
-                self.dma_bus.add_slave(name="dma",
-                    slave  = self.pcie_slave.bus,
-                    region = SoCRegion(origin=0x00000000, size=0x1_0000_0000)
-                )
+                dma_index = 0
+                dma_index = _add_dma_slave_window(self.dma_bus, self.pcie_slave.bus, "dma", 0x00000000,
+                    SATA_HOST_BUFFER_BASE, dma_index)
+                dma_index = _add_dma_slave_window(self.dma_bus, self.pcie_slave.bus, "dma",
+                    SATA_HOST_BUFFER_BASE + SATA_HOST_BUFFER_SIZE,
+                    0x1_0000_0000 - (SATA_HOST_BUFFER_BASE + SATA_HOST_BUFFER_SIZE),
+                    dma_index)
 
             # PTM.
             # ----
@@ -767,7 +790,7 @@ class BaseSoC(SoCMini):
             if hasattr(self, "dma_bus"):
                 self.dma_bus.add_slave(name="sata_host_buffer",
                     slave  = self.sata_host_buffer.dma_bus,
-                    region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
+                    region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE)
                 )
 
             # Streamers.
