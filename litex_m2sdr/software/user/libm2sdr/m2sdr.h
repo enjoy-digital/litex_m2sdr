@@ -174,6 +174,15 @@ struct m2sdr_devinfo {
     char transport[16];
 };
 
+struct m2sdr_device_addr {
+    enum m2sdr_transport_kind transport;
+    /* Canonical identifier accepted by m2sdr_open(), eg pcie:/dev/m2sdr0. */
+    char identifier[M2SDR_DEVICE_STR_MAX];
+    char path[M2SDR_DEVICE_STR_MAX];
+    char ip[64];
+    uint16_t port;
+};
+
 struct m2sdr_capabilities {
     /* Gateware API version reported by the FPGA. */
     uint32_t api_version;
@@ -470,6 +479,8 @@ struct m2sdr_dev;
  * The parser also accepts the shorthand forms "/dev/m2sdr0" and
  * "192.168.1.50:1234". Passing NULL selects the backend default.
  */
+int  m2sdr_resolve_device_identifier(const char *device_identifier,
+                                      struct m2sdr_device_addr *addr);
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 

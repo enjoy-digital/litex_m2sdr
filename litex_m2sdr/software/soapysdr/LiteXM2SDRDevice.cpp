@@ -335,11 +335,6 @@ bool soapy_rf_op_timeout_expired()
     return now && now >= soapy_rf_op_deadline_us;
 }
 
-bool startsWith(const std::string &value, const char *prefix)
-{
-    return value.rfind(prefix, 0) == 0;
-}
-
 bool isDecimalIndex(const std::string &value)
 {
     if (value.empty())
@@ -355,54 +350,37 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
                                  std::string &path,
                                  std::string &eth_ip)
 {
+    std::string candidate;
+    struct m2sdr_device_addr addr;
+
     if (args.count("dev_id") != 0) {
-        const std::string dev_id = args.at("dev_id");
-
-        if (startsWith(dev_id, "pcie:")) {
-            path = dev_id.substr(5);
-        } else if (startsWith(dev_id, "eth:")) {
-            const size_t start = 4;
-            const size_t end = dev_id.find(':', start);
-            if (end != std::string::npos && end > start)
-                eth_ip = dev_id.substr(start, end - start);
-        }
-        return dev_id;
-    }
-
-    if (args.count("device") != 0) {
+        candidate = args.at("dev_id");
+    } else if (args.count("device") != 0) {
         const std::string device = args.at("device");
 
-        if (startsWith(device, "pcie:")) {
-            path = device.substr(5);
-            return device;
-        }
-        if (startsWith(device, "eth:")) {
-            const size_t start = 4;
-            const size_t end = device.find(':', start);
-            if (end != std::string::npos && end > start)
-                eth_ip = device.substr(start, end - start);
-            return device;
-        }
-        if (startsWith(device, "/dev/m2sdr")) {
-            path = device;
-            return "pcie:" + device;
-        }
-        if (isDecimalIndex(device)) {
-            path = "/dev/m2sdr" + device;
-            return "pcie:" + path;
-        }
+        if (isDecimalIndex(device))
+            candidate = "/dev/m2sdr" + device;
+        else
+            candidate = device;
+    } else if (args.count("eth_ip") != 0) {
+        candidate = "eth:" + args.at("eth_ip") + ":1234";
+    } else if (args.count("path") != 0) {
+        candidate = "pcie:" + args.at("path");
     }
 
-    if (args.count("eth_ip") != 0) {
-        eth_ip = args.at("eth_ip");
-        return "eth:" + eth_ip + ":1234";
+    int rc = m2sdr_resolve_device_identifier(
+        candidate.empty() ? nullptr : candidate.c_str(), &addr);
+    if (rc != M2SDR_ERR_OK)
+        throw std::runtime_error("Invalid M2SDR device identifier: " + candidate);
+
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+        path = addr.path;
+    else if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+        eth_ip = addr.ip;
+        path = addr.ip;
     }
 
-    if (args.count("path") != 0)
-        path = args.at("path");
-    if (path.empty())
-        path = "/dev/m2sdr0";
-    return "pcie:" + path;
+    return addr.identifier;
 }
 } // namespace
 

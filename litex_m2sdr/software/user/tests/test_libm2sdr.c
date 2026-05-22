@@ -33,6 +33,7 @@ static int test_parse_identifier_invalid_ports(void)
 static int test_parse_identifier_forms(void)
 {
     uint16_t port = 1234;
+    struct m2sdr_device_addr addr;
 
     if (m2sdr_test_parse_identifier(NULL, &port) != 0 || port != 1234)
         return -1;
@@ -44,6 +45,22 @@ static int test_parse_identifier_forms(void)
         return -1;
     port = 1234;
     if (m2sdr_test_parse_identifier("192.168.1.10:3456", &port) != 0 || port != 3456)
+        return -1;
+
+    if (m2sdr_resolve_device_identifier("pcie:/dev/m2sdr3", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (addr.transport != M2SDR_TRANSPORT_KIND_LITEPCIE)
+        return -1;
+    if (strcmp(addr.identifier, "pcie:/dev/m2sdr3") != 0 || strcmp(addr.path, "/dev/m2sdr3") != 0)
+        return -1;
+
+    if (m2sdr_resolve_device_identifier("192.168.1.10:3456", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (addr.transport != M2SDR_TRANSPORT_KIND_LITEETH)
+        return -1;
+    if (strcmp(addr.identifier, "eth:192.168.1.10:3456") != 0 || strcmp(addr.ip, "192.168.1.10") != 0)
+        return -1;
+    if (addr.port != 3456)
         return -1;
 
     return 0;

@@ -147,6 +147,40 @@ int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out)
     return rc;
 }
 
+int m2sdr_resolve_device_identifier(const char *device_identifier,
+                                    struct m2sdr_device_addr *addr)
+{
+    if (!addr)
+        return M2SDR_ERR_INVAL;
+
+    memset(addr, 0, sizeof(*addr));
+    addr->port = 1234;
+
+    if (m2sdr_parse_identifier(device_identifier,
+                               addr->path, sizeof(addr->path),
+                               addr->ip, sizeof(addr->ip),
+                               &addr->port) != 0) {
+        return M2SDR_ERR_PARSE;
+    }
+
+    if (addr->path[0] != '\0') {
+        addr->transport = M2SDR_TRANSPORT_KIND_LITEPCIE;
+        if (strlen(addr->path) + strlen("pcie:") >= sizeof(addr->identifier))
+            return M2SDR_ERR_PARSE;
+        snprintf(addr->identifier, sizeof(addr->identifier), "pcie:%s", addr->path);
+    } else {
+        if (addr->ip[0] == '\0')
+            snprintf(addr->ip, sizeof(addr->ip), "192.168.1.50");
+        addr->transport = M2SDR_TRANSPORT_KIND_LITEETH;
+        if (strlen(addr->ip) + strlen("eth::65535") >= sizeof(addr->identifier))
+            return M2SDR_ERR_PARSE;
+        snprintf(addr->identifier, sizeof(addr->identifier), "eth:%s:%u",
+                 addr->ip, (unsigned)addr->port);
+    }
+
+    return M2SDR_ERR_OK;
+}
+
 static int m2sdr_liteeth_from_eb_error(int err)
 {
     switch (err) {
@@ -551,9 +585,8 @@ void m2sdr_get_version(struct m2sdr_version *ver)
 int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 {
     struct m2sdr_dev *dev;
-    char path[M2SDR_DEVICE_STR_MAX] = {0};
-    char ip[64] = {0};
-    uint16_t port = 1234;
+    struct m2sdr_device_addr addr;
+    int rc;
 
     if (!dev_out)
         return M2SDR_ERR_INVAL;
@@ -564,40 +597,33 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 
     dev->fd = -1;
 
-    if (m2sdr_parse_identifier(device_identifier, path, sizeof(path),
-                               ip, sizeof(ip), &port) != 0) {
+    rc = m2sdr_resolve_device_identifier(device_identifier, &addr);
+    if (rc != M2SDR_ERR_OK) {
         free(dev);
-        return M2SDR_ERR_PARSE;
+        return rc;
     }
 
-    if (path[0] == '\0' && ip[0] == '\0')
-        m2sdr_default_device(path, sizeof(path));
-
-    if (path[0] != '\0') {
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
         dev->transport = M2SDR_TRANSPORT_LITEPCIE;
         dev->ops = &m2sdr_litepcie_backend_ops;
 
-        dev->fd = open(path, O_RDWR | O_CLOEXEC);
+        dev->fd = open(addr.path, O_RDWR | O_CLOEXEC);
         if (dev->fd < 0) {
             free(dev);
             return M2SDR_ERR_IO;
         }
 
-        snprintf(dev->device_path, sizeof(dev->device_path), "%s", path);
+        snprintf(dev->device_path, sizeof(dev->device_path), "%s", addr.path);
     } else {
         char port_str[16];
-        int rc;
 
         dev->transport = M2SDR_TRANSPORT_LITEETH;
         dev->ops = &m2sdr_liteeth_backend_ops;
 
-        if (ip[0] == '\0')
-            snprintf(ip, sizeof(ip), "192.168.1.50");
-
-        snprintf(port_str, sizeof(port_str), "%u", (unsigned)port);
+        snprintf(port_str, sizeof(port_str), "%u", (unsigned)addr.port);
         /* Etherbone owns the actual network connection; libm2sdr keeps only
          * the resolved address tuple plus the opaque handle. */
-        dev->eb = eb_connect(ip, port_str, 1);
+        dev->eb = eb_connect(addr.ip, port_str, 1);
         if (!dev->eb) {
             free(dev);
             return M2SDR_ERR_IO;
@@ -614,8 +640,8 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
             return rc;
         }
 
-        snprintf(dev->eth_ip, sizeof(dev->eth_ip), "%s", ip);
-        dev->eth_port = port;
+        snprintf(dev->eth_ip, sizeof(dev->eth_ip), "%s", addr.ip);
+        dev->eth_port = addr.port;
     }
 
     *dev_out = dev;
