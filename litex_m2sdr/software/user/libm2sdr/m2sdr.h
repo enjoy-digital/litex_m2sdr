@@ -225,6 +225,26 @@ struct m2sdr_capabilities {
     uint32_t sata_config;
 };
 
+#define M2SDR_SATA_SERIAL_MAX   21
+#define M2SDR_SATA_FIRMWARE_MAX 9
+#define M2SDR_SATA_MODEL_MAX    41
+
+struct m2sdr_sata_info {
+    bool phy_enabled;
+    uint32_t phy_status;
+    bool phy_ready;
+    bool tx_ready;
+    bool rx_ready;
+    bool ctrl_ready;
+    bool drive_present;
+    bool identify_done;
+    char serial[M2SDR_SATA_SERIAL_MAX];
+    char firmware[M2SDR_SATA_FIRMWARE_MAX];
+    char model[M2SDR_SATA_MODEL_MAX];
+    uint64_t sector_count;
+    uint32_t logical_sector_size;
+};
+
 struct m2sdr_clock_info {
     /* AD9361 reference clock frequency in Hz. */
     uint64_t refclk_hz;
@@ -550,6 +570,7 @@ int  m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *ca
 int  m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len);
 int  m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash);
 int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
+int  m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, unsigned timeout_ms);
 
 /* Register access.
  *

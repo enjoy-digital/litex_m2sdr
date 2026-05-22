@@ -105,6 +105,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_device.o \
 	libm2sdr/m2sdr_stream.o \
 	libm2sdr/m2sdr_rf.o \
+	libm2sdr/m2sdr_sata.o \
 	libm2sdr/m2sdr_utils.o \
 	libm2sdr/m2sdr_json.o \
 	libm2sdr/m2sdr_sigmf.o \
