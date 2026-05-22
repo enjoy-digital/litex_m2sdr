@@ -568,9 +568,12 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 			mdelay(AD9361_PRODUCT_ID_RETRY_DELAY_MS);
 	}
 	if ((ret & PRODUCT_ID_MASK) != PRODUCT_ID_9361) {
+		int last_attempt = product_id_attempt;
+		if (last_attempt >= AD9361_PRODUCT_ID_RETRIES)
+			last_attempt = AD9361_PRODUCT_ID_RETRIES - 1;
 		printf("%s : Unsupported PRODUCT_ID 0x%X (reads:",
 		       __func__, (unsigned int)ret);
-		for (int i = 0; i <= product_id_attempt; i++)
+		for (int i = 0; i <= last_attempt; i++)
 			printf(" 0x%X", (unsigned int)product_id_reads[i]);
 		printf(")\n");
 		ret = -ENODEV;

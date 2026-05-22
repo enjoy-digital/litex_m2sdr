@@ -84,7 +84,7 @@ find_path(LIBM2SDR_INCLUDE_DIR m2sdr.h
 
 include_directories(${LIBM2SDR_INCLUDE_DIR})
 
-find_library(LIBM2SDR_LIBRARY m2sdr
+find_library(LIBM2SDR_STATIC_LIBRARY libm2sdr.a
              REQUIRED
              HINTS
                ${M2SDR_TREE_ROOT}
@@ -102,12 +102,14 @@ SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    LIBRARIES ${LIBM2SDR_LIBRARY} m
+    LIBRARIES ${LIBM2SDR_STATIC_LIBRARY} m
 )
 
-# Bind internal symbol references to this module to avoid conflicts
+# Keep AD9361/libm2sdr symbols private to this Soapy module. Gqrx/gr-osmosdr
+# loads multiple SDR drivers in one process and some of them export AD9361
+# symbols with the same names.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,-Bsymbolic)
+    target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
 endif()
 
 # Suppress specific warnings
