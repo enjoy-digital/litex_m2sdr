@@ -37,6 +37,7 @@ extern "C" {
  * - PARSE: malformed text input (device identifiers, legacy mode strings).
  * - RANGE: numeric value outside supported device/library limits.
  * - STATE: API call ordering/state preconditions not met.
+ * - OVERFLOW/UNDERFLOW: streaming ring lost RX/TX continuity.
  */
 enum m2sdr_error {
     M2SDR_ERR_OK         =  0,
@@ -49,6 +50,8 @@ enum m2sdr_error {
     M2SDR_ERR_PARSE      = -7,
     M2SDR_ERR_RANGE      = -8,
     M2SDR_ERR_STATE      = -9,
+    M2SDR_ERR_OVERFLOW   = -10,
+    M2SDR_ERR_UNDERFLOW  = -11,
 };
 
 /* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
@@ -161,6 +164,16 @@ struct m2sdr_liteeth_udp_stats {
     int so_rcvbuf_actual;
     int so_sndbuf_requested;
     int so_sndbuf_actual;
+};
+
+struct m2sdr_stream_info {
+    /* Payload bytes visible to the caller, excluding stripped DMA headers. */
+    size_t buffer_bytes;
+    size_t buffer_count;
+    /* Backend stride between direct buffers. May include transport headers. */
+    size_t buffer_stride;
+    /* Backend-owned direct buffer base when available. */
+    void *buffer_base;
 };
 
 struct m2sdr_devinfo {
@@ -625,6 +638,11 @@ void m2sdr_stream_config_init(m2sdr_stream_config_t *config);
 int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params);
 /* Alias of m2sdr_sync_config_ex() for the public stream-config name. */
 int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *config);
+int m2sdr_stream_get_info(struct m2sdr_dev *dev,
+                          enum m2sdr_direction direction,
+                          struct m2sdr_stream_info *info);
+int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
+int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 
 /* LiteEth stream-control helpers.
  *
@@ -659,8 +677,8 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
 
 /* Zero-copy buffer API.
  *
- * These helpers expose backend-owned buffers directly. RX buffers are valid
- * until the next acquire on the same stream; TX buffers must be submitted with
+ * These helpers expose backend-owned buffers directly. RX buffers must be
+ * returned with m2sdr_release_buffer(); TX buffers must be submitted with
  * m2sdr_submit_buffer(). Passing timeout_ms=0 uses the timeout configured by
  * m2sdr_sync_config()/m2sdr_sync_config_ex().
  *
@@ -689,9 +707,10 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
 
 /* Backend notes for zero-copy submit/release:
  *
- * - m2sdr_submit_buffer() performs an explicit enqueue on LiteEth, while on
- *   LitePCIe the DMA ring already owns the buffer and submit is a no-op.
- * - m2sdr_release_buffer() is currently a no-op kept for API symmetry.
+ * - m2sdr_submit_buffer() performs an explicit enqueue on LiteEth and advances
+ *   the kernel-visible TX ring on LitePCIe zero-copy streams.
+ * - m2sdr_release_buffer() advances the kernel-visible RX ring on LitePCIe
+ *   zero-copy streams; other current paths advance on read.
  */
 
 /* Small utility helpers for buffer sizing and allocation. */

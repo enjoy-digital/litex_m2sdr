@@ -65,6 +65,10 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    int64_t rx_user_count;
+    int64_t rx_release_count;
+    int64_t tx_user_count;
+    int64_t tx_submit_count;
     struct ad9361_rf_phy *ad9361_phy;
 };
 

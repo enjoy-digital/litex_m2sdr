@@ -20,9 +20,6 @@
 #include <cstdint>
 #include <chrono>
 
-#include "liblitepcie.h"
-#include "etherbone.h"
-#include "libm2sdr.h"
 #include "m2sdr.h"
 
 #include <SoapySDR/Constants.h>
@@ -51,33 +48,6 @@ enum class SoapyLiteXM2SDREthernetMode {
 #define LITEETH_8BIT_THRESHOLD   20.0e6
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
-
-/*
- * LiteX M2SDR specific flags for RX overflow buffer count reporting.
- *
- * When SOAPY_SDR_OVERFLOW is returned from acquireReadBuffer(), the flags
- * parameter contains the number of lost DMA buffers.
- *
- * Check for LITEX_HAS_OVERFLOW_COUNT in flags to determine if the count
- * is available. If set, extract the count using:
- *   int lost_buffers = (flags & LITEX_OVERFLOW_COUNT_MASK) >> LITEX_OVERFLOW_COUNT_SHIFT;
- *
- * This allows applications to calculate the exact number of lost samples:
- *   lost_samples = lost_buffers * samples_per_buffer
- *
- * Bit layout (flags is int, 32 bits):
- *   Bits 0-7:   Standard SoapySDR flags (OVERFLOW, TIMEOUT, etc.)
- *   Bits 8-15:  Reserved
- *   Bit 16:     LITEX_HAS_OVERFLOW_COUNT (SOAPY_SDR_USER_FLAG0)
- *   Bits 17-30: Lost buffer count (14 bits, up to 16K buffers)
- *   Bit 31:     Sign bit (unused)
- */
-#ifndef SOAPY_SDR_USER_FLAG0
-#define SOAPY_SDR_USER_FLAG0 (1 << 16)
-#endif
-#define LITEX_HAS_OVERFLOW_COUNT    SOAPY_SDR_USER_FLAG0
-#define LITEX_OVERFLOW_COUNT_SHIFT  17
-#define LITEX_OVERFLOW_COUNT_MASK   0x7FFE0000  /* 14 bits for count (up to 16K buffers) */
 
 #define FD_INIT NULL
 typedef void *litex_m2sdr_device_desc_t;
@@ -391,9 +361,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     SoapySDR::Stream *const TX_STREAM = (SoapySDR::Stream *)0x1;
     SoapySDR::Stream *const RX_STREAM = (SoapySDR::Stream *)0x2;
 
-    struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
-    void *_dma_buf;
-
     enum m2sdr_transport_kind _transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
     int _pcie_fd = -1;
 
@@ -401,6 +368,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     size_t _tx_buf_size = 0;
     size_t _rx_buf_count = 0;
     size_t _tx_buf_count = 0;
+    size_t _rx_buf_stride = 0;
+    size_t _tx_buf_stride = 0;
 
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
@@ -413,15 +382,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         Stream() :
             opened(false),
             buf(nullptr),
-            hw_count(0), sw_count(0), user_count(0),
+            user_count(0),
             remainderHandle(-1), remainderSamps(0),
             remainderOffset(0), remainderBuff(nullptr),
             format() {}
 
         bool opened;
         void *buf;
-        struct pollfd fds{};
-        int64_t hw_count, sw_count, user_count;
+        int64_t user_count;
 
         int32_t remainderHandle;
         size_t remainderSamps;
@@ -429,7 +397,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         int8_t* remainderBuff;
         std::string format;
         std::vector<size_t> channels;
-        struct litepcie_dma_ctrl dma;
     };
 
     struct RXStream: Stream {
@@ -456,6 +423,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         uint64_t vrt_packets_lost = 0;
         bool rx_timeout_recovery_armed = false;
         uint64_t rx_timeout_recoveries = 0;
+        std::map<size_t, void *> pendingReadBufs;
     };
 
     struct TXStream: Stream {

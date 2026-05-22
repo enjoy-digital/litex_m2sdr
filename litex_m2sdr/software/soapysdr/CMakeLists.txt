@@ -2,42 +2,36 @@ cmake_minimum_required(VERSION 3.16)
 project(SoapySDRLiteXM2SDR CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
+set(M2SDR_TREE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../..)
 
 ########################################################################
-## LitePCIe discovery
+## Kernel CSR discovery
 ########################################################################
 
-find_path(LITEPCIE_KERNEL_INCLUDE_DIR litepcie.h
+find_path(KERNEL_INCLUDE_DIR csr.h
           REQUIRED
           HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+            ${M2SDR_TREE_ROOT}
           PATH_SUFFIXES
             litex_m2sdr/kernel
             software/kernel
+          NO_DEFAULT_PATH
 )
-find_path(LITEPCIE_USER_INCLUDE_DIR liblitepcie.h
-          REQUIRED
-          HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
-          PATH_SUFFIXES
-            litex_m2sdr/liblitepcie
-            software/user/liblitepcie
-)
-set(LITEPCIE_INCLUDE_DIR ${LITEPCIE_KERNEL_INCLUDE_DIR} ${LITEPCIE_USER_INCLUDE_DIR})
 
-include_directories(${LITEPCIE_INCLUDE_DIR})
+include_directories(${KERNEL_INCLUDE_DIR})
 
 ########################################################################
-## LiteEth discovery (added)
+## LiteEth discovery
 ########################################################################
 
-find_path(LITEETH_INCLUDE_DIR etherbone.h
+find_path(LITEETH_INCLUDE_DIR liteeth_udp.h
           REQUIRED
           HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+            ${M2SDR_TREE_ROOT}
           PATH_SUFFIXES
             litex_m2sdr/libliteeth
             software/user/libliteeth
+          NO_DEFAULT_PATH
 )
 
 include_directories(${LITEETH_INCLUDE_DIR})
@@ -49,10 +43,11 @@ include_directories(${LITEETH_INCLUDE_DIR})
 find_path(USER_INCLUDE_DIR m2sdr_config.h
           REQUIRED
           HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+            ${M2SDR_TREE_ROOT}
           PATH_SUFFIXES
             litex_m2sdr/libm2sdr
             software/user/libm2sdr
+          NO_DEFAULT_PATH
 )
 
 include_directories(${USER_INCLUDE_DIR})
@@ -64,10 +59,11 @@ include_directories(${USER_INCLUDE_DIR})
 find_path(AD9361_INCLUDE_DIR ad9361/ad9361.h
           REQUIRED
           HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+            ${M2SDR_TREE_ROOT}
           PATH_SUFFIXES
             litex_m2sdr
             software/user
+          NO_DEFAULT_PATH
 )
 
 include_directories(${AD9361_INCLUDE_DIR})
@@ -76,13 +72,14 @@ include_directories(${AD9361_INCLUDE_DIR})
 ## LIBM2SDR discovery
 ########################################################################
 
-find_path(LIBM2SDR_INCLUDE_DIR libm2sdr.h
+find_path(LIBM2SDR_INCLUDE_DIR m2sdr.h
           REQUIRED
           HINTS
-            ${CMAKE_CURRENT_SOURCE_DIR}/../..
+            ${M2SDR_TREE_ROOT}
           PATH_SUFFIXES
             litex_m2sdr/libm2sdr
             software/user/libm2sdr
+          NO_DEFAULT_PATH
 )
 
 include_directories(${LIBM2SDR_INCLUDE_DIR})
@@ -90,10 +87,11 @@ include_directories(${LIBM2SDR_INCLUDE_DIR})
 find_library(LIBM2SDR_LIBRARY m2sdr
              REQUIRED
              HINTS
-               ${CMAKE_CURRENT_SOURCE_DIR}/../..
+               ${M2SDR_TREE_ROOT}
              PATH_SUFFIXES
                litex_m2sdr/libm2sdr
                software/user/libm2sdr
+             NO_DEFAULT_PATH
 )
 
 find_package(SoapySDR "0.2.1" REQUIRED)

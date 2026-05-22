@@ -21,6 +21,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -116,6 +117,31 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
         dev->tx_buffer_size = buffer_size;
         dev->tx_timeout_ms  = timeout_ms;
     }
+}
+
+/* PCIe zero-copy DMA uses one kernel-owned ring per direction. libm2sdr keeps
+ * separate userspace counters so callers can acquire buffers first and retire
+ * them later:
+ * - hw_count: hardware-visible buffer count reported by the kernel driver.
+ * - user_count: buffers handed to the public caller.
+ * - release/submit_count: buffers returned to the kernel driver.
+ */
+static int m2sdr_pcie_dma_update_rx_release(struct m2sdr_dev *dev)
+{
+    struct litepcie_ioctl_mmap_dma_update update;
+
+    update.sw_count = dev->rx_release_count;
+    checked_ioctl(dev->rx_dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE, &update);
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_pcie_dma_update_tx_submit(struct m2sdr_dev *dev)
+{
+    struct litepcie_ioctl_mmap_dma_update update;
+
+    update.sw_count = dev->tx_submit_count;
+    checked_ioctl(dev->tx_dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &update);
+    return M2SDR_ERR_OK;
 }
 
 static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
@@ -433,10 +459,23 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         if (litepcie_dma_init(dma, dev->device_path, dev->zero_copy ? 1 : 0) < 0)
             return M2SDR_ERR_IO;
 
-        if (direction == M2SDR_RX)
+        if (direction == M2SDR_RX) {
             dma->writer_enable = 1;
-        else
+            if (dev->zero_copy) {
+                litepcie_dma_writer(dma->fds.fd, 0,
+                                    &dma->writer_hw_count, &dma->writer_sw_count);
+                dev->rx_user_count = dma->writer_sw_count;
+                dev->rx_release_count = dma->writer_sw_count;
+            }
+        } else {
             dma->reader_enable = 1;
+            if (dev->zero_copy) {
+                litepcie_dma_reader(dma->fds.fd, 0,
+                                    &dma->reader_hw_count, &dma->reader_sw_count);
+                dev->tx_user_count = dma->reader_sw_count;
+                dev->tx_submit_count = dma->reader_sw_count;
+            }
+        }
 
         if (direction == M2SDR_RX) {
             m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
@@ -563,6 +602,130 @@ int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *c
     return m2sdr_sync_config_ex(dev, config);
 }
 
+int m2sdr_stream_get_info(struct m2sdr_dev *dev,
+                          enum m2sdr_direction direction,
+                          struct m2sdr_stream_info *info)
+{
+    enum m2sdr_format format;
+    unsigned sample_sz;
+    unsigned payload_bytes;
+
+    if (!dev || !info)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+    if (direction == M2SDR_RX && !dev->rx_configured)
+        return M2SDR_ERR_STATE;
+    if (direction == M2SDR_TX && !dev->tx_configured)
+        return M2SDR_ERR_STATE;
+
+    memset(info, 0, sizeof(*info));
+
+    format = direction == M2SDR_RX ? dev->rx_format : dev->tx_format;
+    sample_sz = m2sdr_sample_size(format);
+    if (!sample_sz)
+        return M2SDR_ERR_UNSUPPORTED;
+    payload_bytes = m2sdr_stream_payload_bytes(dev, direction, format);
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        struct litepcie_dma_ctrl *dma = direction == M2SDR_RX ? &dev->rx_dma : &dev->tx_dma;
+        info->buffer_bytes = payload_bytes;
+        if (direction == M2SDR_RX) {
+            info->buffer_count = dma->mmap_dma_info.dma_rx_buf_count;
+            info->buffer_stride = dma->mmap_dma_info.dma_rx_buf_size;
+            info->buffer_base = dma->buf_rd;
+        } else {
+            info->buffer_count = dma->mmap_dma_info.dma_tx_buf_count;
+            info->buffer_stride = dma->mmap_dma_info.dma_tx_buf_size;
+            info->buffer_base = dma->buf_wr;
+        }
+        if (!info->buffer_count)
+            info->buffer_count = DMA_BUFFER_COUNT;
+        if (!info->buffer_stride)
+            info->buffer_stride = DMA_BUFFER_SIZE;
+        return M2SDR_ERR_OK;
+    }
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        info->buffer_bytes = (direction == M2SDR_RX ? dev->rx_buffer_size : dev->tx_buffer_size) * sample_sz;
+        if (dev->udp_inited) {
+            info->buffer_count = dev->udp.buf_count;
+            info->buffer_stride = dev->udp.buf_size;
+            info->buffer_base = direction == M2SDR_RX ? (void *)dev->udp.buf_rd : (void *)dev->udp.buf_wr;
+        }
+        return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            litepcie_dma_writer(dev->rx_dma.fds.fd, 0,
+                                &dev->rx_dma.writer_hw_count,
+                                &dev->rx_dma.writer_sw_count);
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            litepcie_dma_reader(dev->tx_dma.fds.fd, 0,
+                                &dev->tx_dma.reader_hw_count,
+                                &dev->tx_dma.reader_sw_count);
+        }
+        return M2SDR_ERR_OK;
+    }
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        if (direction == M2SDR_RX)
+            return m2sdr_liteeth_rx_stream_deactivate(dev);
+        return m2sdr_liteeth_tx_stream_deactivate(dev);
+    }
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            (void)m2sdr_stream_deactivate(dev, direction);
+            litepcie_dma_cleanup(&dev->rx_dma);
+            dev->rx_configured = 0;
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            (void)m2sdr_stream_deactivate(dev, direction);
+            litepcie_dma_cleanup(&dev->tx_dma);
+            dev->tx_configured = 0;
+        }
+        return M2SDR_ERR_OK;
+    }
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            (void)m2sdr_liteeth_rx_stream_deactivate(dev);
+            dev->rx_configured = 0;
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            (void)m2sdr_liteeth_tx_stream_deactivate(dev);
+            dev->tx_configured = 0;
+        }
+        if (!dev->rx_configured && !dev->tx_configured && dev->udp_inited) {
+            liteeth_udp_cleanup(&dev->udp);
+            dev->udp_inited = 0;
+        }
+        return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
 {
     if (!dev)
@@ -591,6 +754,39 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
 static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
 {
     int64_t start = get_time_ms();
+
+    if (dev->zero_copy) {
+        struct litepcie_dma_ctrl *dma = &dev->rx_dma;
+
+        for (;;) {
+            litepcie_dma_writer(dma->fds.fd, dma->writer_enable,
+                                &dma->writer_hw_count, &dma->writer_sw_count);
+            int64_t buffer_count = dma->mmap_dma_info.dma_rx_buf_count;
+            if (buffer_count <= 0)
+                return M2SDR_ERR_STATE;
+
+            if ((dma->writer_hw_count - dev->rx_release_count) > (buffer_count / 2)) {
+                dev->rx_user_count = dma->writer_hw_count;
+                dev->rx_release_count = dma->writer_hw_count;
+                int rc = m2sdr_pcie_dma_update_rx_release(dev);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+                return M2SDR_ERR_OVERFLOW;
+            }
+
+            if ((dma->writer_hw_count - dev->rx_user_count) > 0) {
+                int buf_offset = dev->rx_user_count % buffer_count;
+                *buf = dma->buf_rd + buf_offset * dma->mmap_dma_info.dma_rx_buf_size;
+                dev->rx_user_count++;
+                return M2SDR_ERR_OK;
+            }
+            if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
+                return M2SDR_ERR_TIMEOUT;
+            int wait_ms = timeout_ms ? (int)timeout_ms : 100;
+            (void)poll(&dma->fds, 1, wait_ms);
+        }
+    }
+
     for (;;) {
         /* Drain any buffers already staged in userspace before polling the DMA
          * helper again. Re-running litepcie_dma_process() too early refreshes
@@ -614,6 +810,36 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
 {
     int64_t start = get_time_ms();
+
+    if (dev->zero_copy) {
+        struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+
+        for (;;) {
+            litepcie_dma_reader(dma->fds.fd, dma->reader_enable,
+                                &dma->reader_hw_count, &dma->reader_sw_count);
+            int64_t buffer_count = dma->mmap_dma_info.dma_tx_buf_count;
+            if (buffer_count <= 0)
+                return M2SDR_ERR_STATE;
+
+            int64_t buffers_pending = dev->tx_user_count - dma->reader_hw_count;
+            if (buffers_pending < 0) {
+                dev->tx_user_count = dma->reader_hw_count;
+                dev->tx_submit_count = dma->reader_hw_count;
+                return M2SDR_ERR_UNDERFLOW;
+            }
+            if (buffers_pending < buffer_count) {
+                int buf_offset = dev->tx_user_count % buffer_count;
+                *buf = dma->buf_wr + buf_offset * dma->mmap_dma_info.dma_tx_buf_size;
+                dev->tx_user_count++;
+                return M2SDR_ERR_OK;
+            }
+            if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
+                return M2SDR_ERR_TIMEOUT;
+            int wait_ms = timeout_ms ? (int)timeout_ms : 100;
+            (void)poll(&dma->fds, 1, wait_ms);
+        }
+    }
+
     for (;;) {
         /* Mirror the RX-side batching behavior for TX so partially-consumed
          * userspace batches are not overwritten by a fresh DMA poll. */
@@ -719,6 +945,12 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
             }
             memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
             copied += to_copy;
+            if (dev->zero_copy) {
+                dev->rx_release_count++;
+                int rc = m2sdr_pcie_dma_update_rx_release(dev);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+            }
         } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = NULL;
             int rc = m2sdr_liteeth_wait_rx_buffer(dev,
@@ -788,6 +1020,12 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                 to_copy = total_bytes - copied;
             memcpy(buf + payload_off, (const uint8_t *)samples + copied, to_copy);
             copied += to_copy;
+            if (dev->zero_copy) {
+                dev->tx_submit_count++;
+                rc = m2sdr_pcie_dma_update_tx_submit(dev);
+                if (rc != M2SDR_ERR_OK)
+                    return rc;
+            }
         } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);
             if (!buf)
@@ -916,7 +1154,10 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
     (void)num_samples;
 
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
-        /* No explicit submit step required for zero-copy DMA buffers. */
+        if (dev->zero_copy) {
+            dev->tx_submit_count++;
+            return m2sdr_pcie_dma_update_tx_submit(dev);
+        }
         return M2SDR_ERR_OK;
     }
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
@@ -935,7 +1176,10 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
-    /* DMA/UDP ring advances on read; no explicit release step is currently
-     * required, but keep this function for API symmetry. */
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE && dev->zero_copy) {
+        dev->rx_release_count++;
+        return m2sdr_pcie_dma_update_rx_release(dev);
+    }
+    /* DMA/UDP ring advances on read in non-zero-copy and LiteEth modes. */
     return M2SDR_ERR_OK;
 }

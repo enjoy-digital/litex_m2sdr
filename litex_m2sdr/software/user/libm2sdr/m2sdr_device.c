@@ -46,6 +46,8 @@ static const char *m2sdr_err_str(int err)
     case M2SDR_ERR_PARSE:       return "parse";
     case M2SDR_ERR_RANGE:       return "range";
     case M2SDR_ERR_STATE:       return "state";
+    case M2SDR_ERR_OVERFLOW:    return "overflow";
+    case M2SDR_ERR_UNDERFLOW:   return "underflow";
     default:                    return "unknown";
     }
 }

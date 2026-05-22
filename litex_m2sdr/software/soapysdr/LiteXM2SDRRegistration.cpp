@@ -14,7 +14,6 @@
 #include <cctype>
 
 #include "LiteXM2SDRDevice.hpp"
-#include "etherbone.h"
 
 #include <SoapySDR/Registry.hpp>
 

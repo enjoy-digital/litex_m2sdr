@@ -6,14 +6,11 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
 #include <unistd.h>
 #include <memory>
-#include <sys/mman.h>
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
-#include <cerrno>
 #include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
@@ -28,9 +25,10 @@
 
 #include "libm2sdr/m2sdr_config.h"
 
-#include "liblitepcie.h"
-#include "libm2sdr.h"
-#include "etherbone.h"
+extern "C" {
+#include "m2sdr_ad9361_spi.h"
+#include "m2sdr_si5351_i2c.h"
+}
 
 #include "LiteXM2SDRDevice.hpp"
 
@@ -52,6 +50,13 @@ std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
 uint8_t spi_next_id = 0;
 litex_m2sdr_device_desc_t spi_last_fd = FD_INIT;
 bool spi_warned_fallback = false;
+
+static bool soapy_handle_is_fd(void *conn)
+{
+    intptr_t value = (intptr_t)conn;
+
+    return value >= 0 && value < 1048576;
+}
 
 uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
 {
@@ -395,7 +400,7 @@ int spi_write_then_read(struct spi_device *spi,
     if (!fd)
         throw std::runtime_error("spi_write_then_read(): invalid SPI device");
     void *conn = fd;
-    if (!m2sdr_legacy_handle_is_fd(conn) && soapy_rf_op_timeout_expired()) {
+    if (!soapy_handle_is_fd(conn) && soapy_rf_op_timeout_expired()) {
         if (!soapy_rf_op_timed_out) {
             SoapySDR::logf(SOAPY_SDR_ERROR,
                 "AD9361 SPI transaction aborted after %u ms RF operation timeout",
@@ -469,14 +474,6 @@ void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
-
-#if USE_LITEPCIE
-void dma_set_loopback(int fd, bool loopback_enable) {
-    struct litepcie_ioctl_dma m;
-    m.loopback_enable = loopback_enable ? 1 : 0;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA, &m);
-}
-#endif
 
 void SoapyLiteXM2SDR::resetDatapathUnlocked()
 {
@@ -826,12 +823,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
-    if (isLitePCIe()) {
-        /* Set-up the DMA. */
-        checked_ioctl(_pcie_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
-        _dma_buf = NULL;
-    }
-
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
 
@@ -844,8 +835,8 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
         stopRxStreamUnlocked();
-        if (isLitePCIe() && _rx_stream.dma.buf_rd != NULL) {
-            litepcie_dma_cleanup(&_rx_stream.dma);
+        if (isLitePCIe()) {
+            (void)m2sdr_stream_release(_dev, M2SDR_RX);
         } else if (isLiteEth()) {
             std::free(_rx_stream.buf);
         }
@@ -855,8 +846,8 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
     if (_tx_stream.opened) {
         stopTxStreamUnlocked();
-        if (isLitePCIe() && _tx_stream.dma.buf_wr) {
-            litepcie_dma_cleanup(&_tx_stream.dma);
+        if (isLitePCIe()) {
+            (void)m2sdr_stream_release(_dev, M2SDR_TX);
         } else if (isLiteEth()) {
             std::free(_tx_stream.buf);
         }
