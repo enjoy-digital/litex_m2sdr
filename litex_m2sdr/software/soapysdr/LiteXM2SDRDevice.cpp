@@ -351,6 +351,23 @@ bool isDecimalIndex(const std::string &value)
     return true;
 }
 
+std::string makeEthernetDeviceIdentifier(const SoapySDR::Kwargs &args)
+{
+    std::string target = args.at("eth_ip");
+    std::string port = "1234";
+
+    if (args.count("eth_port") != 0)
+        port = args.at("eth_port");
+    else if (args.count("port") != 0)
+        port = args.at("port");
+
+    if (target.rfind("eth:", 0) == 0)
+        return target;
+    if (target.find(':') != std::string::npos)
+        return "eth:" + target;
+    return "eth:" + target + ":" + port;
+}
+
 std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
                                  std::string &path,
                                  std::string &eth_ip)
@@ -368,7 +385,7 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
         else
             candidate = device;
     } else if (args.count("eth_ip") != 0) {
-        candidate = "eth:" + args.at("eth_ip") + ":1234";
+        candidate = makeEthernetDeviceIdentifier(args);
     } else if (args.count("path") != 0) {
         candidate = "pcie:" + args.at("path");
     }
