@@ -127,22 +127,20 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
  * - user_count: buffers handed to the public caller.
  * - release/submit_count: buffers returned to the kernel driver.
  */
-static int m2sdr_pcie_dma_update_rx_release(struct m2sdr_dev *dev)
+static void m2sdr_pcie_dma_update_rx_release(struct m2sdr_dev *dev)
 {
     struct litepcie_ioctl_mmap_dma_update update;
 
     update.sw_count = dev->rx_release_count;
     checked_ioctl(dev->rx_dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE, &update);
-    return M2SDR_ERR_OK;
 }
 
-static int m2sdr_pcie_dma_update_tx_submit(struct m2sdr_dev *dev)
+static void m2sdr_pcie_dma_update_tx_submit(struct m2sdr_dev *dev)
 {
     struct litepcie_ioctl_mmap_dma_update update;
 
     update.sw_count = dev->tx_submit_count;
     checked_ioctl(dev->tx_dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &update);
-    return M2SDR_ERR_OK;
 }
 
 static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
@@ -770,9 +768,7 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             if ((dma->writer_hw_count - dev->rx_release_count) > (buffer_count / 2)) {
                 dev->rx_user_count = dma->writer_hw_count;
                 dev->rx_release_count = dma->writer_hw_count;
-                int rc = m2sdr_pcie_dma_update_rx_release(dev);
-                if (rc != M2SDR_ERR_OK)
-                    return rc;
+                m2sdr_pcie_dma_update_rx_release(dev);
                 return M2SDR_ERR_OVERFLOW;
             }
 
@@ -957,9 +953,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
             copied += to_copy;
             if (dev->zero_copy) {
                 dev->rx_release_count++;
-                rc = m2sdr_pcie_dma_update_rx_release(dev);
-                if (rc != M2SDR_ERR_OK)
-                    return rc;
+                m2sdr_pcie_dma_update_rx_release(dev);
             }
         } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = NULL;
@@ -1032,9 +1026,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
             copied += to_copy;
             if (dev->zero_copy) {
                 dev->tx_submit_count++;
-                rc = m2sdr_pcie_dma_update_tx_submit(dev);
-                if (rc != M2SDR_ERR_OK)
-                    return rc;
+                m2sdr_pcie_dma_update_tx_submit(dev);
             }
         } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);
@@ -1186,7 +1178,7 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (dev->zero_copy) {
             dev->tx_submit_count++;
-            return m2sdr_pcie_dma_update_tx_submit(dev);
+            m2sdr_pcie_dma_update_tx_submit(dev);
         }
         return M2SDR_ERR_OK;
     }
@@ -1208,7 +1200,7 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE && dev->zero_copy) {
         dev->rx_release_count++;
-        return m2sdr_pcie_dma_update_rx_release(dev);
+        m2sdr_pcie_dma_update_rx_release(dev);
     }
     /* DMA/UDP ring advances on read in non-zero-copy and LiteEth modes. */
     return M2SDR_ERR_OK;
