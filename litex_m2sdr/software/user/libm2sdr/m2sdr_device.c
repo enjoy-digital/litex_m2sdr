@@ -71,6 +71,16 @@ static void m2sdr_trim_nl(char *s)
     }
 }
 
+static bool m2sdr_identifier_char_is_valid(uint32_t value)
+{
+    unsigned char c = value & 0xffu;
+
+    if (value == 0xffffffffu)
+        return false;
+    return c == '\0' || c == '\t' || c == '\n' || c == '\r' ||
+        (c >= 0x20 && c <= 0x7e);
+}
+
 /* Return the backend-specific default identifier used when the caller does
  * not specify a target. */
 static void m2sdr_default_device(char *out, size_t out_len)
@@ -528,6 +538,10 @@ static int m2sdr_read_identifier_mem(struct m2sdr_dev *dev, char *buf, size_t le
 
         if (m2sdr_reg_read(dev, CSR_IDENTIFIER_MEM_BASE + 4 * i, &value) != 0)
             return M2SDR_ERR_IO;
+        if (!m2sdr_identifier_char_is_valid(value)) {
+            buf[0] = '\0';
+            return M2SDR_ERR_IO;
+        }
 
         buf[i] = (char)(value & 0xff);
         if (buf[i] == '\0')
@@ -884,6 +898,7 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev)
 int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
 {
     uint64_t dna = 0;
+    int rc;
 
     if (!dev || !info)
         return M2SDR_ERR_INVAL;
@@ -891,14 +906,16 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
     memset(info, 0, sizeof(*info));
     m2sdr_fill_transport_info(dev, info);
 
+#ifdef CSR_IDENTIFIER_MEM_BASE
+    rc = m2sdr_read_identifier_mem(dev, info->identification, sizeof(info->identification));
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+#endif
+
     /* The DNA-derived serial is the most stable identity exposed by current
      * gateware, so use it when available. */
     if (m2sdr_get_fpga_dna(dev, &dna) == M2SDR_ERR_OK)
         snprintf(info->serial, sizeof(info->serial), "%llx", (unsigned long long)dna);
-
-#ifdef CSR_IDENTIFIER_MEM_BASE
-    m2sdr_read_identifier_mem(dev, info->identification, sizeof(info->identification));
-#endif
 
     return M2SDR_ERR_OK;
 }

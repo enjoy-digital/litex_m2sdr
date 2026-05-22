@@ -94,12 +94,23 @@ static int parse_bool01(const char *label, const char *s)
 
 static struct m2sdr_dev *m2sdr_open_dev(void)
 {
+    char identifier[M2SDR_IDENT_MAX];
+    int rc;
     if (!m2sdr_cli_finalize_device(&g_cli_dev)) {
         exit(1);
     }
     struct m2sdr_dev *dev = NULL;
-    if (m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev)) != 0) {
+    rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
+    if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "Could not open %s\n", m2sdr_cli_device_id(&g_cli_dev));
+        exit(1);
+    }
+    rc = m2sdr_get_identifier(dev, identifier, sizeof(identifier));
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr,
+            "Failed to read SoC identifier. If this is PCIe after loading a "
+            "new bitstream, rescan the PCIe bus/driver before using SATA.\n");
+        m2sdr_close(dev);
         exit(1);
     }
     return dev;

@@ -1230,7 +1230,6 @@ static uint32_t icap_read(void *conn, uint32_t reg)
 
 static void info(void)
 {
-    int i;
     unsigned char soc_identifier[256];
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
@@ -1239,8 +1238,13 @@ static void info(void)
     printf("\e[1m[> SoC Info:\e[0m\n");
     printf("------------\n");
 
-    for (i = 0; i < 256; i ++)
-        soc_identifier[i] = m2sdr_read32(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+    if (m2sdr_get_identifier(conn, (char *)soc_identifier, sizeof(soc_identifier)) != M2SDR_ERR_OK) {
+        fprintf(stderr,
+            "Failed to read SoC identifier. If this is PCIe after loading a "
+            "new bitstream, rescan the PCIe bus/driver before using the board.\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
     printf("SoC Identifier   : %s.\n", soc_identifier);
 
 #ifdef CSR_CAPABILITY_BASE
