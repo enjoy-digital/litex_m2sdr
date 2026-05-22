@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOFTWARE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BUILD_DIR="${LITEX_M2SDR_SOAPY_BUILD:-/tmp/litex_m2sdr_soapy_liteeth}"
+BUILD_DIR="${LITEX_M2SDR_SOAPY_BUILD:-/tmp/litex_m2sdr_soapy_runtime}"
 CONFIG_FILE="${LITEX_M2SDR_GQRX_CONFIG:-/tmp/gqrx_litex_m2sdr_liteeth.conf}"
 ETH_IP="${LITEX_M2SDR_ETH_IP:-192.168.1.50}"
 SAMPLE_RATE="${LITEX_M2SDR_SAMPLE_RATE:-2000000}"
@@ -16,7 +16,7 @@ OFFSET="${LITEX_M2SDR_GQRX_OFFSET:-0}"
 UDP_BUF_COUNT="${LITEX_M2SDR_UDP_BUF_COUNT:-128}"
 UDP_RCVBUF="${LITEX_M2SDR_UDP_RCVBUF:-16777216}"
 
-cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DUSE_LITEETH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 cat > "$CONFIG_FILE" <<EOF

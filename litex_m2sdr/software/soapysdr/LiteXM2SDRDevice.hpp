@@ -32,7 +32,6 @@
 #include <SoapySDR/Formats.hpp>
 #include <SoapySDR/Types.hpp>
 
-#if USE_LITEETH
 extern "C" {
 #include "liteeth_udp.h"
 }
@@ -41,7 +40,6 @@ enum class SoapyLiteXM2SDREthernetMode {
     UDP = 0,
     VRT = 1,
 };
-#endif
 
 #define DEBUG
 
@@ -81,13 +79,8 @@ enum class SoapyLiteXM2SDREthernetMode {
 #define LITEX_OVERFLOW_COUNT_SHIFT  17
 #define LITEX_OVERFLOW_COUNT_MASK   0x7FFE0000  /* 14 bits for count (up to 16K buffers) */
 
-#if USE_LITEPCIE
-#define FD_INIT -1
-typedef int litex_m2sdr_device_desc_t;
-#elif USE_LITEETH
 #define FD_INIT NULL
-typedef struct eb_connection *litex_m2sdr_device_desc_t;
-#endif
+typedef void *litex_m2sdr_device_desc_t;
 
 static inline uint32_t litex_m2sdr_readl(struct m2sdr_dev *dev, uint32_t addr)
 {
@@ -401,19 +394,20 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     struct litepcie_ioctl_mmap_dma_info _dma_mmap_info;
     void *_dma_buf;
 
+    enum m2sdr_transport_kind _transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+    int _pcie_fd = -1;
+
     size_t _rx_buf_size = 0;
     size_t _tx_buf_size = 0;
     size_t _rx_buf_count = 0;
     size_t _tx_buf_count = 0;
 
-#if USE_LITEETH
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
     SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
     std::string _eth_ip;
     uint16_t _liteeth_rx_port = 2345;
     struct m2sdr_liteeth_rx_stream_config makeLiteEthRxStreamConfig() const;
-#endif
 
     struct Stream {
         Stream() :
@@ -435,9 +429,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         int8_t* remainderBuff;
         std::string format;
         std::vector<size_t> channels;
-#if USE_LITEPCIE
         struct litepcie_dma_ctrl dma;
-#endif
     };
 
     struct RXStream: Stream {
@@ -462,10 +454,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         uint64_t vrt_packets = 0;
         uint64_t vrt_sequence_gaps = 0;
         uint64_t vrt_packets_lost = 0;
-#if USE_LITEETH
         bool rx_timeout_recovery_armed = false;
         uint64_t rx_timeout_recoveries = 0;
-#endif
     };
 
     struct TXStream: Stream {
@@ -481,11 +471,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool   burst_end   = false;
         int32_t burst_samps = 0;
         std::map<size_t, uint8_t*> pendingWriteBufs;
-#if USE_LITEETH
         bool rate_pacing = true;
         std::chrono::steady_clock::time_point pace_start;
         uint64_t paced_buffers = 0;
-#endif
     };
 
     RXStream _rx_stream;
@@ -519,6 +507,12 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     void stopRxStreamUnlocked();
     void stopTxStreamUnlocked();
     void cleanupLiteEthUdpIfIdleUnlocked();
+    bool isLitePCIe() const {
+        return _transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
+    }
+    bool isLiteEth() const {
+        return _transport == M2SDR_TRANSPORT_KIND_LITEETH;
+    }
 
     void interleaveCF32(
         const void *src,
