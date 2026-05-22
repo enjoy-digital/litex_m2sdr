@@ -220,6 +220,94 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
     }
 }
 
+struct gen_signal_state {
+    const char *signal_type;
+    double amplitude;
+    double phi;
+    double omega;
+    double pps_period_samples;
+    double pps_high_samples;
+    double pps_freq;
+    uint8_t gpio_pin;
+    uint8_t use_8bit;
+    uint64_t sample_count;
+    uint32_t lfsr;
+    struct ofdm_state *ofdm;
+};
+
+static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_signal_state *st)
+{
+    int bytes_per_frame = st->use_8bit ? 4 : 8;
+    size_t num_frames = payload_bytes / (size_t)bytes_per_frame;
+    size_t generated_bytes = num_frames * (size_t)bytes_per_frame;
+
+    for (size_t j = 0; j < num_frames; j++) {
+        float I = 0.0f;
+        float Q = 0.0f;
+
+        if (strcmp(st->signal_type, "tone") == 0) {
+            I = cos(st->phi) * st->amplitude;
+            Q = sin(st->phi) * st->amplitude;
+            st->phi += st->omega;
+            if (st->phi >= 2 * M_PI)
+                st->phi -= 2 * M_PI;
+        } else if (strcmp(st->signal_type, "ofdm") == 0) {
+            ofdm_next_sample(st->ofdm, &I, &Q);
+            I *= st->amplitude;
+            Q *= st->amplitude;
+        } else if (strcmp(st->signal_type, "white") == 0) {
+            /* Fast LFSR-based noise avoids rand() in the hot loop. */
+            st->lfsr ^= st->lfsr << 13;
+            st->lfsr ^= st->lfsr >> 17;
+            st->lfsr ^= st->lfsr << 5;
+            int16_t ni = (int16_t)(st->lfsr & 0xFFFF);
+            int16_t nq = (int16_t)((st->lfsr >> 16) & 0xFFFF);
+            I = (ni / 32768.0f) * st->amplitude;
+            Q = (nq / 32768.0f) * st->amplitude;
+        } else if (strcmp(st->signal_type, "prbs") == 0) {
+            int32_t value_I = 0;
+            int32_t value_Q = 0;
+            for (int b = 0; b < 12; b++)
+                value_I = (value_I << 1) | get_prbs_bit();
+            for (int b = 0; b < 12; b++)
+                value_Q = (value_Q << 1) | get_prbs_bit();
+            I = ((float)(value_I - 2048) / 2048.0f) * st->amplitude;
+            Q = ((float)(value_Q - 2048) / 2048.0f) * st->amplitude;
+        }
+
+        if (st->use_8bit) {
+            int8_t I_int = (int8_t)(I * 127);
+            int8_t Q_int = (int8_t)(Q * 127);
+            ((int8_t *)payload)[4 * j + 0] = I_int;
+            ((int8_t *)payload)[4 * j + 1] = Q_int;
+            ((int8_t *)payload)[4 * j + 2] = I_int;
+            ((int8_t *)payload)[4 * j + 3] = Q_int;
+        } else {
+            int16_t I_int = (int16_t)(I * 2047);
+            int16_t Q_int = (int16_t)(Q * 2047);
+            uint16_t gpio1 = 0, gpio2 = 0;
+
+            if (st->pps_freq > 0) {
+                double phase = fmod(st->sample_count, st->pps_period_samples);
+                if (phase < st->pps_high_samples) {
+                    gpio1 = 1 << st->gpio_pin;
+                    gpio2 = 1 << st->gpio_pin;
+                }
+            }
+
+            ((int16_t *)payload)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12);
+            ((int16_t *)payload)[4 * j + 1] = (Q_int & 0xFFF) | (gpio1 << 12);
+            ((int16_t *)payload)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12);
+            ((int16_t *)payload)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12);
+        }
+
+        st->sample_count++;
+    }
+
+    if (generated_bytes < payload_bytes)
+        memset(payload + generated_bytes, 0, payload_bytes - generated_bytes);
+}
+
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
@@ -227,8 +315,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
 
     int i = 0;
-    int64_t reader_sw_count_last = 0;
     int64_t last_time;
+    uint64_t total_buffers = 0;
+    uint64_t last_buffers = 0;
     uint64_t sw_underflows = 0;
     int64_t hw_count_stop = 0;
     struct m2sdr_dev *dev = NULL;
@@ -236,6 +325,24 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     int fd = -1;
     struct ofdm_state ofdm;
     int ofdm_enabled = strcmp(signal_type, "ofdm") == 0;
+    int ofdm_inited = 0;
+    int use_pcie_dma = 0;
+    int stream_configured = 0;
+    int exit_status = 1;
+    enum m2sdr_format format = use_8bit ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
+    unsigned payload_bytes = M2SDR_BUFFER_BYTES - (enable_header ? M2SDR_HEADER_BYTES : 0);
+    unsigned samples_per_buf = m2sdr_bytes_to_samples(format, payload_bytes);
+    struct gen_signal_state gen;
+
+    if (samples_per_buf == 0) {
+        fprintf(stderr, "Invalid TX buffer size\n");
+        exit(1);
+    }
+
+    if (amplitude < 0.0)
+        amplitude = 0.0;
+    if (amplitude > 1.0)
+        amplitude = 1.0;
 
     /* Open device for CSR access */
     if (m2sdr_open(&dev, device_id) != 0) {
@@ -244,33 +351,17 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     }
     if (m2sdr_get_transport(dev, &transport) != 0) {
         fprintf(stderr, "m2sdr_get_transport failed\n");
-        m2sdr_close(dev);
-        exit(1);
-    }
-    if (transport != M2SDR_TRANSPORT_KIND_LITEPCIE) {
-        fprintf(stderr, "m2sdr_gen requires LitePCIe DMA; selected device is %s\n", device_id);
-        m2sdr_close(dev);
-        exit(1);
-    }
-    fd = m2sdr_get_fd(dev);
-    if (fd < 0) {
-        fprintf(stderr, "No LitePCIe fd available\n");
-        m2sdr_close(dev);
-        exit(1);
+        goto cleanup;
     }
 
-    if (use_8bit) {
-        m2sdr_write32(dev, CSR_AD9361_BITMODE_ADDR, 1);
-    } else {
-        m2sdr_write32(dev, CSR_AD9361_BITMODE_ADDR, 0);
+    if (m2sdr_set_bitmode(dev, use_8bit ? true : false) != 0) {
+        fprintf(stderr, "m2sdr_set_bitmode failed\n");
+        goto cleanup;
     }
 
-    if (enable_header) {
-        if (m2sdr_set_tx_header(dev, true) != 0) {
-            fprintf(stderr, "m2sdr_set_tx_header failed\n");
-            m2sdr_close(dev);
-            exit(1);
-        }
+    if (m2sdr_set_tx_header(dev, enable_header ? true : false) != 0) {
+        fprintf(stderr, "m2sdr_set_tx_header failed\n");
+        goto cleanup;
     }
 
 #ifdef CSR_GPIO_BASE
@@ -287,15 +378,12 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 
 #endif
 
-    /* Clamp amplitude to safe range */
-    if (amplitude < 0.0)
-        amplitude = 0.0;
-    if (amplitude > 1.0)
-        amplitude = 1.0;
-
     /* Print parameters */
     printf("Starting signal generation with parameters:\n");
     printf("  Device: %s\n", device_id);
+    printf("  Transport: %s\n",
+           transport == M2SDR_TRANSPORT_KIND_LITEPCIE ? "LitePCIe" :
+           transport == M2SDR_TRANSPORT_KIND_LITEETH ? "LiteEth" : "unknown");
     printf("  Sample Rate: %.0f Hz\n", sample_rate);
     printf("  Signal Type: %s\n", signal_type);
     if (strcmp(signal_type, "tone") == 0) {
@@ -310,131 +398,128 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     printf("  Amplitude: %.2f\n", amplitude);
     printf("  Zero-Copy Mode: %d\n", zero_copy);
 
-    /* Initialize DMA */
-    dma.shared_fd = 1;
-    dma.fds.fd = fd;
-    if (litepcie_dma_init(&dma, "", zero_copy)) {
-        m2sdr_close(dev);
-        exit(1);
+    if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        fd = m2sdr_get_fd(dev);
+        if (fd < 0) {
+            fprintf(stderr, "No LitePCIe fd available\n");
+            goto cleanup;
+        }
+
+        dma.shared_fd = 1;
+        dma.fds.fd = fd;
+        if (litepcie_dma_init(&dma, "", zero_copy)) {
+            fprintf(stderr, "litepcie_dma_init failed\n");
+            goto cleanup;
+        }
+
+        dma.reader_enable = 1;
+        use_pcie_dma = 1;
+    } else {
+        struct m2sdr_sync_params params;
+        int rc;
+
+        m2sdr_sync_params_init(&params);
+        params.direction = M2SDR_TX;
+        params.format = format;
+        params.buffer_size = samples_per_buf;
+        params.timeout_ms = 1000;
+        params.zero_copy = zero_copy ? true : false;
+        params.tx_header_enable = enable_header ? true : false;
+
+        rc = m2sdr_sync_config_ex(dev, &params);
+        if (rc != 0) {
+            fprintf(stderr, "m2sdr_sync_config_ex failed: %s\n", m2sdr_strerror(rc));
+            goto cleanup;
+        }
+        stream_configured = 1;
     }
 
-    dma.reader_enable = 1;
-
-    if (ofdm_enabled)
+    if (ofdm_enabled) {
         ofdm_init(&ofdm, ofdm_fft_size, ofdm_cp_len, ofdm_occupied_carriers, ofdm_modulation, ofdm_seed);
+        ofdm_inited = 1;
+    }
 
     /* Tone generation parameters */
-    double phi = 0.0;
-    double omega = 2 * M_PI * frequency / sample_rate;
-
-    /* PPS/Toggle parameters */
-    double pps_period_samples = pps_freq > 0 ? sample_rate / pps_freq : 0;
-    double pps_high_samples = pps_period_samples * 0.2; /* 20% high */
-    uint64_t sample_count = 0;
-
-    /* Seed random number generator for white noise */
     srand(time(NULL));
-    uint32_t lfsr = (uint32_t)rand() | 1u;
+    memset(&gen, 0, sizeof(gen));
+    gen.signal_type = signal_type;
+    gen.amplitude = amplitude;
+    gen.phi = 0.0;
+    gen.omega = 2 * M_PI * frequency / sample_rate;
+    gen.pps_freq = pps_freq;
+    gen.pps_period_samples = pps_freq > 0 ? sample_rate / pps_freq : 0;
+    gen.pps_high_samples = gen.pps_period_samples * 0.2;
+    gen.gpio_pin = gpio_pin;
+    gen.use_8bit = use_8bit;
+    gen.lfsr = (uint32_t)rand() | 1u;
+    gen.ofdm = &ofdm;
 
     /* Test Loop */
     last_time = get_time_ms();
     for (;;) {
-        /* Update DMA status */
-        litepcie_dma_process(&dma);
+        if (use_pcie_dma) {
+            litepcie_dma_process(&dma);
 
-        /* Exit loop on CTRL+C */
-        if (!keep_running) {
-            hw_count_stop = dma.reader_sw_count + 16;
-            break;
-        }
-
-        /* Write to DMA */
-        while (1) {
-            /* Get Write buffer */
-            char *buf_wr = litepcie_dma_next_write_buffer(&dma);
-            /* Break when no buffer available for Write */
-            if (!buf_wr) {
+            if (!keep_running) {
+                hw_count_stop = dma.reader_sw_count + 16;
                 break;
             }
-            /* Detect DMA underflows */
-            if (dma.reader_sw_count - dma.reader_hw_count < 0)
-                sw_underflows += (dma.reader_hw_count - dma.reader_sw_count);
 
-            /* Generate tone and fill Write buffer */
-            int bytes_per_sample = use_8bit ? 4 : 8;
-            int payload_bytes = DMA_BUFFER_SIZE - (enable_header ? 16 : 0);
-            int num_samples = payload_bytes / bytes_per_sample;
-            uint8_t *payload = (uint8_t *)buf_wr + (enable_header ? 16 : 0);
+            while (1) {
+                char *buf_wr = litepcie_dma_next_write_buffer(&dma);
+                if (!buf_wr)
+                    break;
+
+                if (dma.reader_sw_count - dma.reader_hw_count < 0)
+                    sw_underflows += (dma.reader_hw_count - dma.reader_sw_count);
+
+                if (enable_header) {
+                    uint64_t ts = 0;
+                    m2sdr_get_time(dev, &ts);
+                    m2sdr_tool_write_dma_header((uint8_t *)buf_wr, ts);
+                }
+
+                gen_fill_payload((uint8_t *)buf_wr + (enable_header ? M2SDR_HEADER_BYTES : 0),
+                                 payload_bytes,
+                                 &gen);
+            }
+            total_buffers = (uint64_t)dma.reader_sw_count;
+        } else {
+            void *buf_wr = NULL;
+            unsigned num_samples = 0;
+            struct m2sdr_metadata meta = {0};
+            int rc;
+            size_t buf_payload_bytes;
+
+            if (!keep_running)
+                break;
+
+            rc = m2sdr_get_buffer(dev, M2SDR_TX, &buf_wr, &num_samples, 1000);
+            if (rc == M2SDR_ERR_TIMEOUT)
+                continue;
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_get_buffer failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup;
+            }
+
+            buf_payload_bytes = m2sdr_samples_to_bytes(format, num_samples);
+            gen_fill_payload((uint8_t *)buf_wr, buf_payload_bytes, &gen);
 
             if (enable_header) {
                 uint64_t ts = 0;
-                m2sdr_get_time(dev, &ts);
-                m2sdr_tool_write_dma_header((uint8_t *)buf_wr, ts);
-            }
-            for (int j = 0; j < num_samples; j++) {
-                float I = 0.0;
-                float Q = 0.0;
-
-                if (strcmp(signal_type, "tone") == 0) {
-                    I = cos(phi) * amplitude;
-                    Q = sin(phi) * amplitude;
-                    phi += omega;
-                    if (phi >= 2 * M_PI) phi -= 2 * M_PI;
-                } else if (strcmp(signal_type, "ofdm") == 0) {
-                    ofdm_next_sample(&ofdm, &I, &Q);
-                    I *= amplitude;
-                    Q *= amplitude;
-                } else if (strcmp(signal_type, "white") == 0) {
-                    /* Fast LFSR-based noise (avoid rand() in hot loop) */
-                    lfsr ^= lfsr << 13;
-                    lfsr ^= lfsr >> 17;
-                    lfsr ^= lfsr << 5;
-                    int16_t ni = (int16_t)(lfsr & 0xFFFF);
-                    int16_t nq = (int16_t)((lfsr >> 16) & 0xFFFF);
-                    I = (ni / 32768.0f) * amplitude;
-                    Q = (nq / 32768.0f) * amplitude;
-                } else if (strcmp(signal_type, "prbs") == 0) {
-                    int32_t value_I = 0;
-                    int32_t value_Q = 0;
-                    for (int b = 0; b < 12; b++) {
-                        value_I = (value_I << 1) | get_prbs_bit();
-                    }
-                    for (int b = 0; b < 12; b++) {
-                        value_Q = (value_Q << 1) | get_prbs_bit();
-                    }
-                    I = ((float)(value_I - 2048) / 2048.0f) * amplitude;
-                    Q = ((float)(value_Q - 2048) / 2048.0f) * amplitude;
+                if (m2sdr_get_time(dev, &ts) == 0) {
+                    meta.timestamp = ts;
+                    meta.flags = M2SDR_META_FLAG_HAS_TIME;
                 }
-
-                if (use_8bit) {
-                    int8_t I_int = (int8_t)(I * 127);
-                    int8_t Q_int = (int8_t)(Q * 127);
-                    ((int8_t *)payload)[4 * j + 0] = I_int;
-                    ((int8_t *)payload)[4 * j + 1] = Q_int;
-                    ((int8_t *)payload)[4 * j + 2] = I_int;
-                    ((int8_t *)payload)[4 * j + 3] = Q_int;
-                } else {
-                    int16_t I_int = (int16_t)(I * 2047); // Scale to 12-bit range
-                    int16_t Q_int = (int16_t)(Q * 2047); // Scale to 12-bit range
-
-                    /* GPIO PPS/Toggle on selected bit */
-                    uint16_t gpio1 = 0, gpio2 = 0;
-                    if (pps_freq > 0) {
-                        double phase = fmod(sample_count, pps_period_samples);
-                        if (phase < pps_high_samples) {
-                            gpio1 = 1 << gpio_pin; // Selected bit high (first edge)
-                            gpio2 = 1 << gpio_pin; // Selected bit high (second edge)
-                        }
-                    }
-
-                    ((int16_t *)payload)[4 * j + 0] = (I_int & 0xFFF) | (gpio1 << 12); // TX1_I
-                    ((int16_t *)payload)[4 * j + 1] = (Q_int & 0xFFF) | (gpio1 << 12); // TX1_Q
-                    ((int16_t *)payload)[4 * j + 2] = (I_int & 0xFFF) | (gpio2 << 12); // TX2_I
-                    ((int16_t *)payload)[4 * j + 3] = (Q_int & 0xFFF) | (gpio2 << 12); // TX2_Q
-                }
-
-                sample_count++;
             }
+
+            rc = m2sdr_submit_buffer(dev, M2SDR_TX, buf_wr, num_samples,
+                                     enable_header ? &meta : NULL);
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_submit_buffer failed: %s\n", m2sdr_strerror(rc));
+                goto cleanup;
+            }
+            total_buffers++;
         }
 
         /* Statistics every 200ms */
@@ -445,47 +530,57 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   UNDERFLOWS\e[0m\n");
             i++;
             /* Print statistics */
-            printf("%10.2f %10" PRIu64 " %10" PRIu64 " %10ld\n",
-                   (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6),
-                   dma.reader_sw_count,
-                   (dma.reader_sw_count * DMA_BUFFER_SIZE) / 1024 / 1024,
+            printf("%10.2f %10" PRIu64 " %10" PRIu64 " %10" PRIu64 "\n",
+                   (double)(total_buffers - last_buffers) * M2SDR_BUFFER_BYTES * 8 / ((double)duration * 1e6),
+                   total_buffers,
+                   (total_buffers * M2SDR_BUFFER_BYTES) / 1024 / 1024,
                    sw_underflows);
             /* Update time/count/underflows */
             last_time = get_time_ms();
-            reader_sw_count_last = dma.reader_sw_count;
+            last_buffers = total_buffers;
             sw_underflows = 0;
         }
     }
 
     /* Wait end of DMA transfer */
-    while (dma.reader_hw_count < hw_count_stop) {
+    while (use_pcie_dma && dma.reader_hw_count < hw_count_stop) {
         dma.reader_enable = 1;
         litepcie_dma_process(&dma);
     }
 
+    exit_status = 0;
+
+cleanup:
     /* Cleanup DMA and close device */
-    litepcie_dma_cleanup(&dma);
-    if (ofdm_enabled)
+    if (use_pcie_dma)
+        litepcie_dma_cleanup(&dma);
+    if (stream_configured)
+        (void)m2sdr_stream_release(dev, M2SDR_TX);
+    if (ofdm_inited)
         ofdm_cleanup(&ofdm);
 #ifdef CSR_GPIO_BASE
-    m2sdr_write32(dev, CSR_GPIO_CONTROL_ADDR, 0);
+    if (dev)
+        (void)m2sdr_reg_write(dev, CSR_GPIO_CONTROL_ADDR, 0);
 #endif
-    m2sdr_close(dev);
+    if (dev)
+        m2sdr_close(dev);
+    if (exit_status != 0)
+        exit(1);
 }
 
 /* Help */
 /*------*/
 
 static void help(void) {
-    printf("M2SDR PCIe Signal Generator Utility\n"
+    printf("M2SDR Signal Generator Utility\n"
            "usage: m2sdr_gen [options]\n"
-           "\n"
-           "This tool requires LitePCIe DMA. Use m2sdr_play for transport-neutral playback.\n"
            "\n"
            "Options:\n"
            "  -h, --help                     Show this help message.\n"
            "  -d, --device DEV               Use explicit device id.\n"
-           "  -c, --device-num N             Select PCIe device number (default: 0).\n"
+           "  -c, --device-num N             Use /dev/m2sdrN (default: 0).\n"
+           "  -i, --ip ADDR                  Target IP address for Etherbone.\n"
+           "      --port PORT                Port number (default: 1234).\n"
            "      --sample-rate HZ           Set sample rate in Hz (default: 30720000).\n"
            "      --signal TYPE              Set signal type: tone, white, prbs, or ofdm.\n"
            "      --tone-freq HZ             Set tone frequency in Hz (default: 1000).\n"
@@ -530,6 +625,8 @@ int main(int argc, char **argv) {
         { "help", no_argument, NULL, 'h' },
         { "device", required_argument, NULL, 'd' },
         { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 8 },
         { "sample-rate", required_argument, NULL, 's' },
         { "signal", required_argument, NULL, 't' },
         { "tone-freq", required_argument, NULL, 'f' },
@@ -553,7 +650,7 @@ int main(int argc, char **argv) {
 
     /* Parameters */
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:s:t:f:a:zp:g:H", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:s:t:f:a:zp:g:H", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
@@ -562,6 +659,7 @@ int main(int argc, char **argv) {
             return 0;
         case 'd':
         case 'c':
+        case 'i':
             if (m2sdr_cli_handle_device_option(&cli_dev, c, optarg) != 0)
                 exit(1);
             break;
@@ -659,6 +757,10 @@ int main(int argc, char **argv) {
                 m2sdr_cli_error("invalid OFDM seed '%s'", optarg);
                 return 1;
             }
+            break;
+        case 8:
+            if (m2sdr_cli_handle_device_option(&cli_dev, 'p', optarg) != 0)
+                exit(1);
             break;
         default:
             exit(1);

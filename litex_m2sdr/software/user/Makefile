@@ -54,7 +54,7 @@ ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sig
 
 # Which core binaries to build per interface.
 ifeq ($(INTERFACE),USE_LITEETH)
-  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
+  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
 else ifneq ($(filter $(INTERFACE),USE_RUNTIME USE_LITEPCIE),)
   CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_sata
 endif
@@ -74,12 +74,10 @@ endif
 
 ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
   BINARIES += m2sdr_check
-  ifneq ($(INTERFACE),USE_LITEETH)
-    ifeq ($(HAVE_PNG),1)
-      BINARIES += m2sdr_scan
-    else
-      $(warning libpng pkg-config metadata not found; skipping m2sdr_scan)
-    endif
+  ifeq ($(HAVE_PNG),1)
+    BINARIES += m2sdr_scan
+  else
+    $(warning libpng pkg-config metadata not found; skipping m2sdr_scan)
   endif
 else
   ifneq ($(HAVE_SDL2),1)
@@ -252,8 +250,7 @@ m2sdr_fm_tx.o: m2sdr_fm_tx.c $(BUILD_FLAGS_FILE)
 m2sdr_fm_rx.o: m2sdr_fm_rx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
 
-# PCIe-oriented tools.
-ifneq ($(INTERFACE),USE_LITEETH)
+# Streaming/test tools.
 m2sdr_gen: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) m2sdr_gen.o kissfft/kiss_fft.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) m2sdr_gen.o kissfft/kiss_fft.o $(M2SDR_LINK_LIBS)
 
@@ -262,7 +259,6 @@ M2SDR_SCAN_OBJS := $(M2SDR_SCAN_SRCS:.c=.o)
 
 m2sdr_scan: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS)
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) $(PNG_LIBS) -lGL -ldl -pthread -lstdc++
-endif
 
 clean:
 	rm -f $(PROGS) $(ALL_BINARIES) *.o *.a *.d *~

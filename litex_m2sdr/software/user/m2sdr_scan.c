@@ -282,7 +282,12 @@ struct scan_state {
     int waterfall_tex_width;
     int gl_max_texture_size;
 
+    enum m2sdr_transport_kind transport;
+    bool stream_active;
+    bool use_pcie_dma;
     struct litepcie_dma_ctrl dma;
+    uint8_t *rx_buf;
+    unsigned rx_samples_per_buf;
     kiss_fft_cfg fft_cfg;
     kiss_fft_cpx *fft_in;
     kiss_fft_cpx *fft_out;
@@ -1538,33 +1543,118 @@ static uint32_t colormap_apply(int palette, float x)
     }
 }
 
-static bool scan_dma_init(struct scan_state *s)
+static bool scan_stream_init(struct scan_state *s)
 {
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+    if (m2sdr_get_transport(g_dev, &transport) != 0) {
+        fprintf(stderr, "m2sdr_get_transport failed\n");
+        return false;
+    }
+
+    s->transport = transport;
+    s->rx_samples_per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    if (s->rx_samples_per_buf == 0) {
+        fprintf(stderr, "Invalid RX buffer size\n");
+        return false;
+    }
+
+    if (transport != M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        int rc;
+
+        s->rx_buf = (uint8_t *)m2sdr_alloc_buffer(M2SDR_FORMAT_SC16_Q11, s->rx_samples_per_buf);
+        if (!s->rx_buf) {
+            fprintf(stderr, "Could not allocate RX buffer\n");
+            return false;
+        }
+
+        rc = m2sdr_sync_config(g_dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
+                               0, s->rx_samples_per_buf, 0, 1000);
+        if (rc != 0) {
+            fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
+            m2sdr_free_buffer(s->rx_buf);
+            s->rx_buf = NULL;
+            return false;
+        }
+
+        s->stream_active = true;
+        return true;
+    }
+
     memset(&s->dma, 0, sizeof(s->dma));
     s->dma.shared_fd = 1;
     s->dma.use_writer = 1;
     s->dma.zero_copy = 0;
     s->dma.fds.fd = m2sdr_get_fd(g_dev);
-
-    if (litepcie_dma_init(&s->dma, "", 0) < 0)
+    if (s->dma.fds.fd < 0) {
+        fprintf(stderr, "m2sdr_get_fd failed\n");
         return false;
+    }
+
+    if (litepcie_dma_init(&s->dma, "", 0) < 0) {
+        fprintf(stderr, "litepcie_dma_init failed\n");
+        return false;
+    }
 
     s->dma.writer_enable = 1;
 
-    m2sdr_set_rx_header(g_dev, false, false);
-    m2sdr_reg_write(g_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    if (m2sdr_set_rx_header(g_dev, false, false) != 0) {
+        fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        litepcie_dma_cleanup(&s->dma);
+        return false;
+    }
+    if (m2sdr_reg_write(g_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0) {
+        fprintf(stderr, "CROSSBAR RX select failed\n");
+        litepcie_dma_cleanup(&s->dma);
+        return false;
+    }
 
+    s->use_pcie_dma = true;
+    s->stream_active = true;
     return true;
 }
 
-static void scan_dma_cleanup(struct scan_state *s)
+static void scan_stream_cleanup(struct scan_state *s)
 {
-    litepcie_dma_cleanup(&s->dma);
+    if (!s->stream_active)
+        return;
+
+    if (s->use_pcie_dma) {
+        litepcie_dma_cleanup(&s->dma);
+    } else {
+        (void)m2sdr_stream_release(g_dev, M2SDR_RX);
+        m2sdr_free_buffer(s->rx_buf);
+        s->rx_buf = NULL;
+    }
+
+    s->stream_active = false;
+    s->use_pcie_dma = false;
 }
 
 static bool capture_iq_block(struct scan_state *s)
 {
     int got = 0;
+
+    if (!s->use_pcie_dma) {
+        while (g_keep_running && got < s->fft_len) {
+            int rc = m2sdr_sync_rx(g_dev, s->rx_buf, s->rx_samples_per_buf, NULL, 0);
+            const int16_t *iq = (const int16_t *)s->rx_buf;
+            unsigned p;
+
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+                return false;
+            }
+
+            for (p = 0; p < s->rx_samples_per_buf && got < s->fft_len; p++) {
+                s->in_re[got] = (float)iq[p * 2 + 0] / 32768.0f;
+                s->in_im[got] = (float)iq[p * 2 + 1] / 32768.0f;
+                got++;
+            }
+        }
+
+        return got == s->fft_len;
+    }
 
     while (g_keep_running && got < s->fft_len) {
         litepcie_dma_process(&s->dma);
@@ -1598,6 +1688,21 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
 
     if (nsamples <= 0)
         return true;
+
+    if (!s->use_pcie_dma) {
+        while (g_keep_running && got < nsamples) {
+            int rc = m2sdr_sync_rx(g_dev, s->rx_buf, s->rx_samples_per_buf, NULL, 0);
+
+            if (rc != 0) {
+                fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
+                return false;
+            }
+
+            got += (int)s->rx_samples_per_buf;
+        }
+
+        return got >= nsamples;
+    }
 
     while (g_keep_running && got < nsamples) {
         litepcie_dma_process(&s->dma);
@@ -1911,8 +2016,7 @@ static void free_scan_state(struct scan_state *s)
 
     if (s->waterfall_tex)
         glDeleteTextures(1, &s->waterfall_tex);
-    if (s->dma.fds.fd > 0)
-        scan_dma_cleanup(s);
+    scan_stream_cleanup(s);
 
     fft_worker_stop(s);
     if (s->fft_cfg) {
@@ -4119,7 +4223,9 @@ static void help(void)
            "Options:\n"
            "  -h, --help             Show this help message and exit.\n"
            "  -d, --device DEV       Use explicit device id.\n"
-           "  -c, --device-num N     Select device number (default: 0).\n"
+           "  -c, --device-num N     Use /dev/m2sdrN (default: 0).\n"
+           "  -i, --ip ADDR          Target IP address for Etherbone.\n"
+           "  -p, --port PORT        Port number (default: 1234).\n"
            "      --refclk-freq HZ   AD9361 reference clock in Hz (default: %" PRId64 ").\n"
            "      --start-freq HZ    Scan start frequency in Hz (default: %" PRId64 ").\n"
            "      --stop-freq HZ     Scan stop frequency in Hz (default: %" PRId64 ").\n"
@@ -4445,7 +4551,7 @@ static void draw_controls_panel(struct scan_state *s, struct ui_state *ui, float
 
     refresh_display_times(s);
     igSameLine(0.0f, 12.0f);
-    igText("Device %s", m2sdr_cli_pcie_path(&g_cli_dev));
+    igText("Device %s", m2sdr_cli_device_id(&g_cli_dev));
     igSameLine(0.0f, 12.0f);
     igText("LO %.3f MHz | retune %.2f/s | dma waits %.1f/s | stitch %d%%",
            (double)s->lo_hz / 1e6, s->perf.retunes_per_sec, s->perf.dma_wait_per_sec, s->stitch_pct);
@@ -4900,6 +5006,8 @@ int main(int argc, char **argv)
         { "help", no_argument, NULL, 'h' },
         { "device", required_argument, NULL, 'd' },
         { "device-num", required_argument, NULL, 'c' },
+        { "ip", required_argument, NULL, 'i' },
+        { "port", required_argument, NULL, 'p' },
         { "refclk-freq", required_argument, NULL, 1 },
         { "refclk_freq", required_argument, NULL, 1 },
         { "start-freq", required_argument, NULL, 2 },
@@ -4976,7 +5084,7 @@ int main(int argc, char **argv)
     m2sdr_cli_device_init(&g_cli_dev);
 
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:", options, &option_index);
+        c = getopt_long(argc, argv, "hd:c:i:p:", options, &option_index);
         if (c == -1)
             break;
 
@@ -4986,6 +5094,8 @@ int main(int argc, char **argv)
             return 0;
         case 'd':
         case 'c':
+        case 'i':
+        case 'p':
             if (m2sdr_cli_handle_device_option(&g_cli_dev, c, optarg) != 0)
                 return 1;
             break;
@@ -5080,7 +5190,7 @@ int main(int argc, char **argv)
     if (!m2sdr_rfic_init(&s))
         goto fail;
 
-    if (!scan_dma_init(&s))
+    if (!scan_stream_init(&s))
         goto fail;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
