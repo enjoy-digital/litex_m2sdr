@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include <errno.h>
+#include <sys/file.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -37,6 +38,7 @@
 
 static struct m2sdr_cli_device g_cli_dev;
 static sig_atomic_t keep_running = 1;
+static int g_sata_lock_fd = -1;
 
 static void int_handler(int dummy)
 {
@@ -92,6 +94,34 @@ static int parse_bool01(const char *label, const char *s)
 
 /* Connection functions ------------------------------------------------------ */
 
+static void m2sdr_sata_unlock(void)
+{
+    if (g_sata_lock_fd >= 0) {
+        flock(g_sata_lock_fd, LOCK_UN);
+        close(g_sata_lock_fd);
+        g_sata_lock_fd = -1;
+    }
+}
+
+static int m2sdr_sata_lock(void)
+{
+    if (g_sata_lock_fd >= 0)
+        return 0;
+
+    g_sata_lock_fd = open("/tmp/m2sdr_sata.lock", O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+    if (g_sata_lock_fd < 0) {
+        perror("/tmp/m2sdr_sata.lock");
+        return -1;
+    }
+
+    if (flock(g_sata_lock_fd, LOCK_EX) != 0) {
+        perror("flock");
+        m2sdr_sata_unlock();
+        return -1;
+    }
+    return 0;
+}
+
 static struct m2sdr_dev *m2sdr_open_dev(void)
 {
     char identifier[M2SDR_IDENT_MAX];
@@ -99,10 +129,14 @@ static struct m2sdr_dev *m2sdr_open_dev(void)
     if (!m2sdr_cli_finalize_device(&g_cli_dev)) {
         exit(1);
     }
+    if (m2sdr_sata_lock() != 0)
+        exit(1);
+
     struct m2sdr_dev *dev = NULL;
     rc = m2sdr_open(&dev, m2sdr_cli_device_id(&g_cli_dev));
     if (rc != M2SDR_ERR_OK) {
         fprintf(stderr, "Could not open %s\n", m2sdr_cli_device_id(&g_cli_dev));
+        m2sdr_sata_unlock();
         exit(1);
     }
     rc = m2sdr_get_identifier(dev, identifier, sizeof(identifier));
@@ -111,6 +145,7 @@ static struct m2sdr_dev *m2sdr_open_dev(void)
             "Failed to read SoC identifier. If this is PCIe after loading a "
             "new bitstream, rescan the PCIe bus/driver before using SATA.\n");
         m2sdr_close(dev);
+        m2sdr_sata_unlock();
         exit(1);
     }
     return dev;
@@ -121,6 +156,7 @@ static void m2sdr_close_dev(struct m2sdr_dev *dev)
     if (dev) {
         m2sdr_close(dev);
     }
+    m2sdr_sata_unlock();
 }
 
 static uint32_t m2sdr_read32(struct m2sdr_dev *dev, uint32_t addr)
@@ -312,6 +348,7 @@ enum sata_pattern_kind {
 };
 
 #define SATA_SECTOR_BYTES 512u
+#define SATA_HOST_IO_MAX_SECTORS_PER_HW_OP 1u
 #if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
     defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
 #define SATA_HOST_IO_AVAILABLE 1
@@ -589,7 +626,12 @@ static bool check_pattern(const uint8_t *buf, size_t len, uint64_t start_byte,
 
 static uint32_t sata_host_buffer_max_sectors(void)
 {
-    return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
+    uint32_t buffer_sectors = (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
+
+    /* The current host staging path is correctness-first: issue one sector per
+     * LiteSATA DMA command until the multi-sector staging-buffer path is fixed. */
+    return buffer_sectors < SATA_HOST_IO_MAX_SECTORS_PER_HW_OP ?
+        buffer_sectors : SATA_HOST_IO_MAX_SECTORS_PER_HW_OP;
 }
 
 static void sata_host_buffer_write(void *conn, const uint8_t *buf, size_t bytes)
