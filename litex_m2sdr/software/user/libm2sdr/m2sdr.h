@@ -680,7 +680,9 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  * These helpers expose backend-owned buffers directly. RX buffers must be
  * returned with m2sdr_release_buffer(); TX buffers must be submitted with
  * m2sdr_submit_buffer(). Passing timeout_ms=0 uses the timeout configured by
- * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ * m2sdr_sync_config()/m2sdr_sync_config_ex(). m2sdr_try_get_buffer() is
+ * non-blocking and returns M2SDR_ERR_TIMEOUT when no buffer is immediately
+ * available.
  *
  * DMA header layout (when enabled):
  * - Total size: 16 bytes.
@@ -694,6 +696,11 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      void **buffer,
                      unsigned *num_samples,
                      unsigned timeout_ms);
+
+int m2sdr_try_get_buffer(struct m2sdr_dev *dev,
+                         enum m2sdr_direction direction,
+                         void **buffer,
+                         unsigned *num_samples);
 
 int m2sdr_submit_buffer(struct m2sdr_dev *dev,
                         enum m2sdr_direction direction,

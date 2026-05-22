@@ -309,6 +309,8 @@ static int test_stream_direction_validation(void)
         return -1;
     if (m2sdr_get_buffer(&dev, (enum m2sdr_direction)42, (void **)&params, &params.buffer_size, 1) != M2SDR_ERR_INVAL)
         return -1;
+    if (m2sdr_try_get_buffer(&dev, (enum m2sdr_direction)42, (void **)&params, &params.buffer_size) != M2SDR_ERR_INVAL)
+        return -1;
     if (m2sdr_sync_rx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)
         return -1;
     if (m2sdr_sync_tx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)

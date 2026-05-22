@@ -29,6 +29,7 @@
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
+#define M2SDR_TIMEOUT_NOWAIT ((unsigned)-1)
 #define M2SDR_LITEETH_TX_DRAIN_DELAY_US 1000
 
 /* Helpers */
@@ -780,6 +781,8 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
                 dev->rx_user_count++;
                 return M2SDR_ERR_OK;
             }
+            if (timeout_ms == M2SDR_TIMEOUT_NOWAIT)
+                return M2SDR_ERR_TIMEOUT;
             if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
                 return M2SDR_ERR_TIMEOUT;
             int wait_ms = timeout_ms ? (int)timeout_ms : 100;
@@ -796,6 +799,8 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             *buf = b;
             return M2SDR_ERR_OK;
         }
+        if (timeout_ms == M2SDR_TIMEOUT_NOWAIT)
+            return M2SDR_ERR_TIMEOUT;
         litepcie_dma_process(&dev->rx_dma);
         b = litepcie_dma_next_read_buffer(&dev->rx_dma);
         if (b) {
@@ -833,6 +838,8 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
                 dev->tx_user_count++;
                 return M2SDR_ERR_OK;
             }
+            if (timeout_ms == M2SDR_TIMEOUT_NOWAIT)
+                return M2SDR_ERR_TIMEOUT;
             if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
                 return M2SDR_ERR_TIMEOUT;
             int wait_ms = timeout_ms ? (int)timeout_ms : 100;
@@ -848,6 +855,8 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             *buf = b;
             return M2SDR_ERR_OK;
         }
+        if (timeout_ms == M2SDR_TIMEOUT_NOWAIT)
+            return M2SDR_ERR_TIMEOUT;
         litepcie_dma_process(&dev->tx_dma);
         b = litepcie_dma_next_write_buffer(&dev->tx_dma);
         if (b) {
@@ -1054,11 +1063,12 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
-int m2sdr_get_buffer(struct m2sdr_dev *dev,
-                     enum m2sdr_direction direction,
-                     void **buffer,
-                     unsigned *num_samples,
-                     unsigned timeout_ms)
+static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
+                                   enum m2sdr_direction direction,
+                                   void **buffer,
+                                   unsigned *num_samples,
+                                   unsigned timeout_ms,
+                                   int nowait)
 {
     if (!dev || !buffer || !num_samples)
         return M2SDR_ERR_INVAL;
@@ -1093,13 +1103,15 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (direction == M2SDR_RX) {
             char *buf = NULL;
-            int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
+            unsigned wait_ms = nowait ? M2SDR_TIMEOUT_NOWAIT : (timeout_ms ? timeout_ms : dev->rx_timeout_ms);
+            int rc = m2sdr_wait_rx_buffer(dev, &buf, wait_ms);
             if (rc != M2SDR_ERR_OK)
                 return rc;
             *buffer = buf + payload_off;
         } else {
             char *buf = NULL;
-            int rc = m2sdr_wait_tx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->tx_timeout_ms);
+            unsigned wait_ms = nowait ? M2SDR_TIMEOUT_NOWAIT : (timeout_ms ? timeout_ms : dev->tx_timeout_ms);
+            int rc = m2sdr_wait_tx_buffer(dev, &buf, wait_ms);
             if (rc != M2SDR_ERR_OK)
                 return rc;
             *buffer = buf + payload_off;
@@ -1108,7 +1120,7 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
         if (direction == M2SDR_RX) {
             uint8_t *buf = NULL;
             int rc = m2sdr_liteeth_wait_rx_buffer(dev,
-                                                  (timeout_ms ? timeout_ms : dev->rx_timeout_ms),
+                                                  nowait ? 0 : (timeout_ms ? timeout_ms : dev->rx_timeout_ms),
                                                   &buf);
             if (rc != M2SDR_ERR_OK)
                 return rc;
@@ -1125,6 +1137,23 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
 
     *num_samples = bytes_per_buffer / sample_sz;
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_buffer(struct m2sdr_dev *dev,
+                     enum m2sdr_direction direction,
+                     void **buffer,
+                     unsigned *num_samples,
+                     unsigned timeout_ms)
+{
+    return m2sdr_get_buffer_common(dev, direction, buffer, num_samples, timeout_ms, 0);
+}
+
+int m2sdr_try_get_buffer(struct m2sdr_dev *dev,
+                         enum m2sdr_direction direction,
+                         void **buffer,
+                         unsigned *num_samples)
+{
+    return m2sdr_get_buffer_common(dev, direction, buffer, num_samples, 0, 1);
 }
 
 int m2sdr_submit_buffer(struct m2sdr_dev *dev,

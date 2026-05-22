@@ -881,7 +881,11 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
     } else if (isLitePCIe()) {
         void *buffer = nullptr;
         unsigned total_samples = 0;
-        int rc = m2sdr_get_buffer(_dev, M2SDR_RX, &buffer, &total_samples,
+        int rc;
+        if (timeoutUs == 0)
+            rc = m2sdr_try_get_buffer(_dev, M2SDR_RX, &buffer, &total_samples);
+        else
+            rc = m2sdr_get_buffer(_dev, M2SDR_RX, &buffer, &total_samples,
                                   timeout_us_to_ms(timeoutUs));
         if (rc == M2SDR_ERR_TIMEOUT)
             return SOAPY_SDR_TIMEOUT;
@@ -957,7 +961,11 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     if (isLitePCIe()) {
         void *buffer = nullptr;
         unsigned total_samples = 0;
-        int rc = m2sdr_get_buffer(_dev, M2SDR_TX, &buffer, &total_samples,
+        int rc;
+        if (timeoutUs == 0)
+            rc = m2sdr_try_get_buffer(_dev, M2SDR_TX, &buffer, &total_samples);
+        else
+            rc = m2sdr_get_buffer(_dev, M2SDR_TX, &buffer, &total_samples,
                                   timeout_us_to_ms(timeoutUs));
         if (rc == M2SDR_ERR_TIMEOUT)
             return SOAPY_SDR_TIMEOUT;
