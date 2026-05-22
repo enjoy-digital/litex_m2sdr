@@ -9,6 +9,21 @@ This note covers the direct-cable M2SDR Ethernet PTP setup used with:
 For the optional PTP-disciplined FPGA 10 MHz RFIC reference path, add
 `--with-eth-ptp-rfic-clock` to the same Ethernet/PTP build.
 
+This is the Ethernet PTP path, where the board receives PTP over LiteEth and
+disciplines its own `time_gen`. For PCIe host-time synchronization, use a PTM
+gateware image and the host helper instead:
+
+```sh
+./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=1 --with-pcie-ptm --build --load
+scripts/m2sdr_pcie_time_sync.py --dry-run
+sudo scripts/m2sdr_pcie_time_sync.py --stdout
+```
+
+The PCIe helper auto-detects the M2SDR PHC and runs `phc2sys` with
+`CLOCK_REALTIME` as the source, so the board follows the host clock. If the host
+clock is itself locked by NTP or PTP, that disciplined host time is what the
+board follows over PCIe.
+
 ## Start ptp4l
 
 For a software-timestamped host NIC:
@@ -47,10 +62,10 @@ Use the hardware config only when the output reports a PTP Hardware Clock and ha
 
 ## Validate The Board
 
-Build the Etherbone utility for the Ethernet transport:
+Build the runtime utility:
 
 ```sh
-make -C litex_m2sdr/software/user m2sdr_util INTERFACE=USE_LITEETH
+make -C litex_m2sdr/software/user m2sdr_util
 ```
 
 Run a short smoke test:

@@ -48,7 +48,7 @@ def install_user_software(base_dir, prefix, interface):
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--interface",   default="litepcie",  help="Control/Data path interface", choices=["litepcie", "liteeth"])
+    parser.add_argument("--interface",   default="runtime",   help="Control/Data path interface", choices=["runtime", "litepcie", "liteeth"])
     parser.add_argument("--prefix",      default="/usr",      help="Install prefix for SoapySDR driver.")
     parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
     parser.add_argument("--no-install",  action="store_true", help="Build only; do not run install steps.")
@@ -58,12 +58,13 @@ def main():
     args = parser.parse_args()
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Control/Data path flags.
-    if args.interface == "litepcie":
-        flags     = ["-DUSE_LITEETH=OFF"]
+    # Control/Data path defaults. The libraries and Soapy module always compile both transports.
+    flags = []
+    if args.interface == "runtime":
+        interface = "USE_RUNTIME"
+    elif args.interface == "litepcie":
         interface = "USE_LITEPCIE"
     else:
-        flags     = ["-DUSE_LITEETH=ON"]
         interface = "USE_LITEETH"
 
     is_root    = (os.geteuid() == 0)
@@ -74,7 +75,7 @@ def main():
         print("Install steps skipped (run as root to install).")
 
     # Kernel compilation.
-    if (args.interface == "litepcie") and (not args.skip_kernel):
+    if (args.interface in ("runtime", "litepcie")) and (not args.skip_kernel):
         kernel_dir = os.path.join(base_dir, "kernel")
         if args.clean:
             run_command(["make", "clean"], cwd=kernel_dir)

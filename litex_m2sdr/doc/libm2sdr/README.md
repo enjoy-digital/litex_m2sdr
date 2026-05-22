@@ -17,12 +17,19 @@ make
 make install_dev PREFIX=/usr/local
 ```
 
+The default `make` build uses `INTERFACE=USE_RUNTIME`, which compiles one
+`libm2sdr` with both LitePCIe and LiteEth support. `INTERFACE=USE_LITEPCIE`
+and `INTERFACE=USE_LITEETH` remain useful for legacy/default-target testing,
+but they do not create separate public APIs for PCIe and Ethernet applications.
+
 This installs:
 
-- headers under `include/litex_m2sdr/`
+- public libm2sdr headers under `include/litex_m2sdr/libm2sdr/`
+- generated kernel CSR headers under `include/litex_m2sdr/kernel/`
 - `libm2sdr.a` for static linking
 - `libm2sdr.so.1` plus the `libm2sdr.so` symlink for shared linking
 - `m2sdr.pc` under `lib/pkgconfig/`
+- `m2sdrConfig.cmake` under `lib/cmake/m2sdr/`
 
 ## Getting started
 
@@ -61,6 +68,13 @@ sudo make install
 ```
 pkg-config --modversion m2sdr
 pkg-config --cflags --libs m2sdr
+```
+
+For CMake projects, use:
+
+```
+find_package(m2sdr REQUIRED)
+target_link_libraries(my_app PRIVATE m2sdr::m2sdr)
 ```
 
 ## Quick Start (SC16)
@@ -142,10 +156,15 @@ See `doc/libm2sdr/example_rx_n.c` for RX N buffers with metadata.
 
 ## Device identifiers
 
-- PCIe: `pcie:/dev/m2sdr0`
-- Ethernet: `eth:192.168.1.50:1234`
+- PCIe explicit form: `pcie:/dev/m2sdr0`
+- PCIe shorthand: `/dev/m2sdr0`
+- Ethernet explicit form: `eth:192.168.1.50:1234`
+- Ethernet shorthand: `192.168.1.50` or `192.168.1.50:1234`
 
-If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `192.168.1.50:1234` (Ethernet).
+If no identifier is provided, the runtime/default PCIe build opens
+`/dev/m2sdr0`. A build made with `INTERFACE=USE_LITEETH` defaults to
+`192.168.1.50:1234`, but explicit identifiers are preferred in applications
+that may run with either transport.
 
 ## API overview
 
@@ -155,7 +174,7 @@ If no identifier is provided, the library defaults to `/dev/m2sdr0` (PCIe) or `1
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
-- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`
+- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`, `m2sdr_get_ptp_discipline_config`, `m2sdr_set_ptp_discipline_config`, `m2sdr_clear_ptp_counters`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
 

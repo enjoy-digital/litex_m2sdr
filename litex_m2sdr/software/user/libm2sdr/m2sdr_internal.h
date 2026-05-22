@@ -17,35 +17,32 @@
 #include <stdint.h>
 
 #include "m2sdr.h"
-
-struct ad9361_rf_phy;
-
-#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
-#endif
-
-#ifdef USE_LITEETH
 #include "etherbone.h"
 #include "liteeth_udp.h"
-#endif
+
+struct ad9361_rf_phy;
 
 enum m2sdr_transport {
     M2SDR_TRANSPORT_LITEPCIE = 0,
     M2SDR_TRANSPORT_LITEETH  = 1,
 };
 
+struct m2sdr_backend_ops {
+    int (*readl)(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
+    int (*writel)(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+};
+
 /* Internal device object shared by the transport, stream, and RF layers. */
 struct m2sdr_dev {
     enum m2sdr_transport transport;
+    const struct m2sdr_backend_ops *ops;
 
-#ifdef USE_LITEPCIE
     int fd;
     char device_path[M2SDR_DEVICE_STR_MAX];
     struct litepcie_dma_ctrl rx_dma;
     struct litepcie_dma_ctrl tx_dma;
-#endif
 
-#ifdef USE_LITEETH
     struct eb_connection *eb;
     char eth_ip[64];
     uint16_t eth_port;
@@ -55,7 +52,6 @@ struct m2sdr_dev {
     int liteeth_rx_config_valid;
     int liteeth_rx_timeout_recovery_armed;
     int liteeth_rx_timeout_recovery_disabled;
-#endif
 
     int rx_configured;
     int tx_configured;
@@ -69,11 +65,16 @@ struct m2sdr_dev {
     unsigned tx_buffer_size;
     unsigned rx_timeout_ms;
     unsigned tx_timeout_ms;
+    int64_t rx_user_count;
+    int64_t rx_release_count;
+    int64_t tx_user_count;
+    int64_t tx_submit_count;
     struct ad9361_rf_phy *ad9361_phy;
 };
 
-int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
-int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;
+extern const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops;
+
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev);
 
 int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);

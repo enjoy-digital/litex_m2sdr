@@ -236,6 +236,48 @@ static void print_liteeth_udp_summary(struct m2sdr_dev *dev, uint8_t quiet)
     }
 }
 
+static void record_note_timestamp(uint64_t timestamp, size_t total_len, unsigned sample_size,
+                                  unsigned samples_per_buf, bool sigmf_enable,
+                                  bool annotate_ts_jumps, double ts_jump_threshold_pct,
+                                  struct m2sdr_sigmf_meta *sigmf_meta,
+                                  uint64_t *last_timestamp, uint64_t *first_timestamp,
+                                  uint64_t *prev_timestamp, uint64_t *nominal_dt)
+{
+    *last_timestamp = timestamp;
+    if (*first_timestamp == 0)
+        *first_timestamp = timestamp;
+
+    if (!sigmf_enable || !annotate_ts_jumps)
+        return;
+
+    if (*prev_timestamp != 0) {
+        uint64_t dt_ns = timestamp - *prev_timestamp;
+
+        if (*nominal_dt == 0) {
+            *nominal_dt = dt_ns;
+        } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(*nominal_dt, dt_ns, ts_jump_threshold_pct)) {
+            uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
+            sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, *nominal_dt);
+        }
+    }
+    *prev_timestamp = timestamp;
+}
+
+static bool record_write_payload(FILE *fo, const void *data, size_t payload_bytes_per_buf,
+                                 size_t size, size_t *total_len)
+{
+    size_t to_write = payload_bytes_per_buf;
+
+    if (size > 0 && to_write > size - *total_len)
+        to_write = size - *total_len;
+    if (fo && fwrite(data, 1, to_write, fo) != to_write) {
+        perror("fwrite");
+        return false;
+    }
+    *total_len += to_write;
+    return true;
+}
+
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
                          bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
@@ -343,7 +385,6 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             litepcie_dma_process(&dma);
             while (!stop) {
                 const uint8_t *rx_data;
-                size_t to_write = payload_bytes_per_buf;
                 char *dma_buf = litepcie_dma_next_read_buffer(&dma);
 
                 if (!dma_buf)
@@ -358,36 +399,20 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                     uint64_t ts = 0;
 
                     if (m2sdr_tool_parse_dma_header((const uint8_t *)dma_buf, &ts)) {
-                        last_timestamp = ts;
-                        if (first_timestamp == 0)
-                            first_timestamp = ts;
-                        if (sigmf_enable && annotate_ts_jumps) {
-                            if (prev_timestamp != 0) {
-                                uint64_t dt_ns = ts - prev_timestamp;
-
-                                if (nominal_dt == 0) {
-                                    nominal_dt = dt_ns;
-                                } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
-                                    uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
-                                    sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
-                                }
-                            }
-                            prev_timestamp = ts;
-                        }
+                        record_note_timestamp(ts, total_len, sample_size, samples_per_buf,
+                                              sigmf_enable, annotate_ts_jumps, ts_jump_threshold_pct,
+                                              sigmf_meta, &last_timestamp, &first_timestamp,
+                                              &prev_timestamp, &nominal_dt);
                     }
                     if (strip_header)
                         rx_data += 16;
                 }
 
-                if (size > 0 && to_write > size - total_len)
-                    to_write = size - total_len;
-                if (fo && fwrite(rx_data, 1, to_write, fo) != to_write) {
-                    perror("fwrite");
+                if (!record_write_payload(fo, rx_data, payload_bytes_per_buf, size, &total_len)) {
                     stop = true;
                     break;
                 }
 
-                total_len += to_write;
                 total_buffers = (uint64_t)dma.writer_sw_count;
                 if (size > 0 && total_len >= size) {
                     stop = true;
@@ -410,34 +435,16 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                 fprintf(stderr, "m2sdr_sync_rx failed: %s\n", m2sdr_strerror(rc));
                 goto cleanup;
             }
-            if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
-                last_timestamp = meta.timestamp;
-            if (first_timestamp == 0 && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME))
-                first_timestamp = meta.timestamp;
-            if (sigmf_enable && annotate_ts_jumps && header && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
-                if (prev_timestamp != 0) {
-                    uint64_t dt_ns = meta.timestamp - prev_timestamp;
-
-                    if (nominal_dt == 0) {
-                        nominal_dt = dt_ns;
-                    } else if (m2sdr_sigmf_timestamp_jump_is_anomalous(nominal_dt, dt_ns, ts_jump_threshold_pct)) {
-                        uint64_t sample_start = sample_size ? (uint64_t)(total_len / sample_size) : 0;
-                        sigmf_record_timestamp_jump(sigmf_meta, sample_start, samples_per_buf, dt_ns, nominal_dt);
-                    }
-                }
-                prev_timestamp = meta.timestamp;
+            if (header && (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
+                record_note_timestamp(meta.timestamp, total_len, sample_size, samples_per_buf,
+                                      sigmf_enable, annotate_ts_jumps, ts_jump_threshold_pct,
+                                      sigmf_meta, &last_timestamp, &first_timestamp,
+                                      &prev_timestamp, &nominal_dt);
             }
 
-            size_t to_write = payload_bytes_per_buf;
-            if (size > 0 && to_write > size - total_len)
-                to_write = size - total_len;
-
-            if (fo && fwrite(rx_data, 1, to_write, fo) != to_write) {
-                perror("fwrite");
+            if (!record_write_payload(fo, rx_data, payload_bytes_per_buf, size, &total_len))
                 break;
-            }
 
-            total_len += to_write;
             total_buffers++;
         }
 

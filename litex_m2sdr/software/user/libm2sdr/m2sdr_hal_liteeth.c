@@ -13,8 +13,6 @@
 
 #include "m2sdr_internal.h"
 
-#ifdef USE_LITEETH
-
 static int m2sdr_from_eb_error(int err)
 {
     switch (err) {
@@ -31,7 +29,7 @@ static int m2sdr_from_eb_error(int err)
 /* HAL */
 /*-----*/
 
-int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+static int m2sdr_liteeth_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
 {
     int err;
 
@@ -43,7 +41,7 @@ int m2sdr_hal_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
     return m2sdr_from_eb_error(err);
 }
 
-int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+static int m2sdr_liteeth_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     int err;
 
@@ -53,4 +51,7 @@ int m2sdr_hal_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
     return m2sdr_from_eb_error(err);
 }
 
-#endif /* USE_LITEETH */
+const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops = {
+    .readl  = m2sdr_liteeth_readl,
+    .writel = m2sdr_liteeth_writel,
+};

@@ -9,11 +9,11 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
-#include <unistd.h>
+#include <cctype>
+#include <cstdlib>
+#include <stdexcept>
 
 #include "LiteXM2SDRDevice.hpp"
-#include "etherbone.h"
 
 #include <SoapySDR/Registry.hpp>
 
@@ -21,42 +21,25 @@
  * Find available devices
  **********************************************************************/
 
-#define MAX_DEVICES 8
-#define LITEX_IDENTIFIER_SIZE 256
 #define LITEX_IDENTIFIER      "LiteX-M2SDR"
-
-std::string readFPGAData(
-    struct m2sdr_dev *dev,
-    unsigned int baseAddr,
-    size_t size) {
-    std::string data(size, 0);
-    for (size_t i = 0; i < size; i++)
-        data[i] = static_cast<char>(litex_m2sdr_readl(dev, baseAddr + 4 * i));
-    return data;
-}
-
 
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev)
 {
-    /* Read up to LITEX_IDENTIFIER_SIZE bytes from the FPGA */
-    std::string data = readFPGAData(dev, CSR_IDENTIFIER_MEM_BASE, LITEX_IDENTIFIER_SIZE);
+    struct m2sdr_devinfo info = {};
 
-    /* Truncate at the first null terminator if present */
-    size_t nullPos = data.find('\0');
-    if (nullPos != std::string::npos)
-    {
-        data.resize(nullPos);
-    }
+    if (m2sdr_get_device_info(dev, &info) != M2SDR_ERR_OK)
+        return "";
 
-    return data;
+    return info.identification;
 }
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev) {
-    unsigned int high = litex_m2sdr_readl(dev, CSR_DNA_ID_ADDR + 0);
-    unsigned int low  = litex_m2sdr_readl(dev, CSR_DNA_ID_ADDR + 4);
-    char serial[32];
-    snprintf(serial, sizeof(serial), "%x%08x", high, low);
-    return std::string(serial);
+    struct m2sdr_devinfo info = {};
+
+    if (m2sdr_get_device_info(dev, &info) != M2SDR_ERR_OK)
+        return "";
+
+    return info.serial;
 }
 
 std::string generateDeviceLabel(
@@ -66,22 +49,95 @@ std::string generateDeviceLabel(
     return dev.at("device") + " " + path + " " + serialTrimmed;
 }
 
+static bool isDecimalIndex(const std::string &value)
+{
+    if (value.empty())
+        return false;
+    for (char c : value) {
+        if (!std::isdigit(static_cast<unsigned char>(c)))
+            return false;
+    }
+    return true;
+}
+
+static std::string transportName(enum m2sdr_transport_kind transport)
+{
+    if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+        return "pcie";
+    if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
+        return "ethernet";
+    return "unknown";
+}
+
+static std::string displayPath(const struct m2sdr_device_addr &addr)
+{
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+        return addr.path;
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH)
+        return addr.ip;
+    return addr.identifier;
+}
+
+static bool resolveIdentifier(const std::string &candidate, struct m2sdr_device_addr &addr)
+{
+    return m2sdr_resolve_device_identifier(candidate.c_str(), &addr) == M2SDR_ERR_OK;
+}
+
+static bool stringFlagEnabled(const std::string &value)
+{
+    return !(value == "0" || value == "false" || value == "off" || value == "none");
+}
+
+static std::string makeEthernetIdentifier(const std::string &target,
+                                          const std::string &default_port)
+{
+    if (target.rfind("eth:", 0) == 0)
+        return target;
+    if (target.find(':') != std::string::npos)
+        return "eth:" + target;
+    return "eth:" + target + ":" + default_port;
+}
+
+static std::string ethernetDiscoveryTargets(const SoapySDR::Kwargs &args)
+{
+    const char *env_targets = std::getenv("LITEXM2SDR_ETH_IPS");
+
+    if (args.count("eth_ips") != 0)
+        return args.at("eth_ips");
+    else if (env_targets && env_targets[0] != '\0')
+        return env_targets;
+    return "192.168.1.50";
+}
+
+static uint16_t parsePort(const std::string &value)
+{
+    size_t end = 0;
+    unsigned long port = std::stoul(value, &end, 10);
+
+    if (end != value.size() || port == 0 || port > 65535)
+        throw std::runtime_error("Invalid Ethernet port: " + value);
+    return static_cast<uint16_t>(port);
+}
+
 SoapySDR::Kwargs createDeviceKwargs(
     struct m2sdr_dev *m2sdr_dev,
-    const std::string &path,
-    const std::string &eth_ip) {
+    const struct m2sdr_device_addr &addr) {
+    const std::string path = displayPath(addr);
+    struct m2sdr_devinfo info = {};
+    (void)m2sdr_get_device_info(m2sdr_dev, &info);
     SoapySDR::Kwargs dev = {
         {"device",         "LiteX-M2SDR"},
-#if USE_LITEETH
-        {"eth_ip",         eth_ip},
-#endif
+        {"transport",      transportName(addr.transport)},
+        {"dev_id",         addr.identifier},
         {"path",           path},
-        {"serial",         getLiteXM2SDRSerial(m2sdr_dev)},
-        {"identification", getLiteXM2SDRIdentification(m2sdr_dev)},
+        {"serial",         info.serial},
+        {"identification", info.identification},
         {"version",        "1234"},
         {"label",          ""},
         {"oversampling",   "0"},
     };
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH)
+        dev["eth_ip"] = addr.ip;
     dev["label"] = generateDeviceLabel(dev, path);
     return dev;
 }
@@ -91,57 +147,76 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
     std::vector<SoapySDR::Kwargs> discovered;
 
     std::string eth_ip = "192.168.1.50";
-    std::string path   = "/dev/m2sdr0";
-
-#if USE_LITEETH
-    if (args.count("eth_ip") != 0) {
+    if (args.count("eth_ip") != 0)
         eth_ip = args.at("eth_ip");
-    }
-#endif
+    std::string eth_port = "1234";
+    if (args.count("eth_port") != 0)
+        eth_port = args.at("eth_port");
+    else if (args.count("port") != 0)
+        eth_port = args.at("port");
 
-#if USE_LITEPCIE
-    auto attemptToAddDevice = [&](const std::string &path, const std::string &eth_ip) {
+    auto attemptToAddDevice = [&](const std::string &candidate) {
         struct m2sdr_dev *dev = nullptr;
-        std::string dev_id = "pcie:" + path;
-        if (m2sdr_open(&dev, dev_id.c_str()) != 0) return false;
-        auto dev_args = createDeviceKwargs(dev, path, eth_ip);
-        m2sdr_close(dev);
+        struct m2sdr_device_addr addr;
 
-        if (dev_args["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
-            discovered.push_back(std::move(dev_args));
-            return true;
-        }
-        return false;
-    };
+        if (!resolveIdentifier(candidate, addr))
+            return false;
 
-    if (args.count("path") != 0) {
-        attemptToAddDevice(args.at("path"), eth_ip);
-    } else {
-        for (int i = 0; i < MAX_DEVICES; i++) {
-            if (!attemptToAddDevice("/dev/m2sdr" + std::to_string(i), eth_ip))
-                break; // Stop trying if a device fails to open, assuming sequential device numbering
-        }
-    }
-#elif USE_LITEETH
-    auto attemptToAddDevice = [&](const std::string &path, const std::string &eth_ip) {
-        struct m2sdr_dev *dev = nullptr;
-        std::string dev_id = "eth:" + eth_ip + ":1234";
-        if (m2sdr_open(&dev, dev_id.c_str()) != 0) {
-            std::cerr << "Can't connect to EtherBone!\n";
+        if (m2sdr_open(&dev, addr.identifier) != 0) {
             return false;
         }
-        auto dev_args = createDeviceKwargs(dev, path, eth_ip);
+        auto dev_args = createDeviceKwargs(dev, addr);
         m2sdr_close(dev);
 
         if (dev_args["identification"].find(LITEX_IDENTIFIER) != std::string::npos) {
+            for (const auto &existing : discovered) {
+                if (existing.count("dev_id") && existing.at("dev_id") == dev_args["dev_id"])
+                    return true;
+            }
             discovered.push_back(std::move(dev_args));
             return true;
         }
         return false;
     };
 
-    attemptToAddDevice(path, eth_ip);
-#endif
+    if (args.count("dev_id") != 0) {
+        attemptToAddDevice(args.at("dev_id"));
+        return discovered;
+    }
+
+    if (args.count("device") != 0) {
+        std::string device = args.at("device");
+
+        if (isDecimalIndex(device))
+            device = "/dev/m2sdr" + device;
+        attemptToAddDevice(device);
+        return discovered;
+    }
+
+    if (args.count("eth_ip") != 0) {
+        attemptToAddDevice(makeEthernetIdentifier(eth_ip, eth_port));
+    } else if (args.count("path") != 0) {
+        attemptToAddDevice(args.at("path"));
+    } else {
+        struct m2sdr_discovery_config discovery_config;
+        struct m2sdr_device_addr targets[64];
+        size_t target_count = 0;
+        std::string target_list = ethernetDiscoveryTargets(args);
+
+        m2sdr_discovery_config_init(&discovery_config);
+        discovery_config.enable_liteeth =
+            args.count("eth_discovery") == 0 || stringFlagEnabled(args.at("eth_discovery"));
+        discovery_config.liteeth_targets = target_list.c_str();
+        discovery_config.liteeth_port = parsePort(eth_port);
+
+        if (m2sdr_get_discovery_targets(&discovery_config,
+                                        targets,
+                                        sizeof(targets) / sizeof(targets[0]),
+                                        &target_count) == M2SDR_ERR_OK) {
+            for (size_t i = 0; i < target_count; i++)
+                attemptToAddDevice(targets[i].identifier);
+        }
+    }
     return discovered;
 }
 

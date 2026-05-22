@@ -32,12 +32,9 @@ static void help(void)
            "Options:\n"
            "  -h, --help             Show this help message and exit.\n"
            "  -d, --device DEV       Use explicit device id.\n"
-#ifdef USE_LITEPCIE
            "  -c, --device-num N     Select PCIe device number (default: 0).\n"
-#elif defined(USE_LITEETH)
            "  -i, --ip ADDR          Target IP address for Etherbone.\n"
            "  -p, --port PORT        Port number (default: 1234).\n"
-#endif
            "      --format FMT       Sample format: sc16 or sc8 (default: sc16).\n"
            "      --8bit             Legacy alias for --format sc8.\n"
            "      --oversample       Enable oversample mode.\n"

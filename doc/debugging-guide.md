@@ -57,20 +57,22 @@ Common PCIe build:
 lspci
 ```
 
-Host software can be switched between the two transports from
-`litex_m2sdr/software/`:
+Host software builds both transports by default from `litex_m2sdr/software/`:
 
 ```bash
 cd litex_m2sdr/software
-sudo ./build.py --interface=liteeth
-sudo ./build.py --interface=litepcie
+sudo ./build.py
 ```
+
+Select the transport with the device identifier at runtime, for example
+`--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234`. The
+`--interface=litepcie` and `--interface=liteeth` build options are still useful
+when you specifically want to test legacy/default shorthand behavior.
 
 For faster local rebuilds while iterating only on user-space code:
 
 ```bash
-make -C litex_m2sdr/software/user INTERFACE=USE_LITEETH all
-make -C litex_m2sdr/software/user INTERFACE=USE_LITEPCIE all
+make -C litex_m2sdr/software/user all
 ```
 
 Use `--load` for volatile debug iterations. Use flash flows only when the
@@ -170,11 +172,11 @@ streamers are stopped, crossbars are idled, FPGA loopbacks/PRBS are disabled,
 stream headers are disabled, and 16-bit packing is restored. This makes the
 checks suitable after a Gqrx/Soapy session or after another loopback test.
 
-Build the utility for the Ethernet transport first:
+Build the runtime utility first:
 
 ```bash
 cd litex_m2sdr/software/user
-make m2sdr_util INTERFACE=USE_LITEETH
+make m2sdr_util
 ./m2sdr_util -i 192.168.1.50 info
 ```
 
@@ -307,11 +309,13 @@ sudo sysctl -w net.core.wmem_max=8388608
 ```
 
 For Soapy/Gqrx Ethernet tests, force the intended plugin and device arguments
-so an installed PCIe/default plugin does not hide what is being tested:
+so another installed plugin does not hide what is being tested. From
+`litex_m2sdr/software/user`, the adjacent Soapy build directory can be used
+directly:
 
 ```bash
 SOAPY_SDR_ROOT=/tmp/soapy-empty-root \
-SOAPY_SDR_PLUGIN_PATH=/tmp/litex_m2sdr_soapysdr_liteeth \
+SOAPY_SDR_PLUGIN_PATH=../soapysdr/build \
 LD_LIBRARY_PATH=$PWD/libm2sdr \
 SoapySDRUtil --probe=driver=LiteXM2SDR,eth_ip=192.168.1.50
 ```
@@ -320,7 +324,7 @@ For a minimal RX sample check:
 
 ```bash
 SOAPY_SDR_ROOT=/tmp/soapy-empty-root \
-SOAPY_SDR_PLUGIN_PATH=/tmp/litex_m2sdr_soapysdr_liteeth \
+SOAPY_SDR_PLUGIN_PATH=../soapysdr/build \
 LD_LIBRARY_PATH=$PWD/libm2sdr \
 python3 -c 'import numpy as np, SoapySDR; from SoapySDR import SOAPY_SDR_RX, SOAPY_SDR_CF32; s=SoapySDR.Device({"driver":"LiteXM2SDR","eth_ip":"192.168.1.50"}); s.setSampleRate(SOAPY_SDR_RX,0,2e6); st=s.setupStream(SOAPY_SDR_RX,SOAPY_SDR_CF32,[0]); s.activateStream(st); b=np.empty(4096,np.complex64); r=s.readStream(st,[b],4096); print("read", r.ret); print("source_drops", s.readSensor("liteeth_rx_source_drops")); print("recoveries", s.readSensor("liteeth_rx_timeout_recoveries")); s.deactivateStream(st); s.closeStream(st)'
 ```
@@ -459,10 +463,11 @@ python3 -m pytest -v test
 # Syntax smoke checks for edited Python entry points.
 python3 -m py_compile litex_m2sdr.py
 
-# User-space C tests, PCIe-oriented build.
+# User-space C tests, runtime PCIe/Ethernet build.
 make -C litex_m2sdr/software/user test-libm2sdr
 
-# User-space C tests, Etherbone-oriented build.
+# Optional default-transport compatibility checks.
+make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEPCIE
 make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEETH
 
 # Kernel build smoke check.

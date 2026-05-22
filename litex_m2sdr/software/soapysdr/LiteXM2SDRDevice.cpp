@@ -6,14 +6,11 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <fcntl.h>
 #include <unistd.h>
 #include <memory>
-#include <sys/mman.h>
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
-#include <cerrno>
 #include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
@@ -28,9 +25,10 @@
 
 #include "libm2sdr/m2sdr_config.h"
 
-#include "liblitepcie.h"
-#include "libm2sdr.h"
-#include "etherbone.h"
+extern "C" {
+#include "m2sdr_ad9361_spi.h"
+#include "m2sdr_si5351_i2c.h"
+}
 
 #include "LiteXM2SDRDevice.hpp"
 
@@ -50,13 +48,15 @@ namespace {
 std::mutex spi_map_mutex;
 std::unordered_map<uint8_t, litex_m2sdr_device_desc_t> spi_fd_map;
 uint8_t spi_next_id = 0;
-litex_m2sdr_device_desc_t spi_last_fd =
-#if USE_LITEPCIE
-    FD_INIT;
-#else
-    nullptr;
-#endif
+litex_m2sdr_device_desc_t spi_last_fd = FD_INIT;
 bool spi_warned_fallback = false;
+
+static bool soapy_handle_is_fd(void *conn)
+{
+    intptr_t value = (intptr_t)conn;
+
+    return value >= 0 && value < 1048576;
+}
 
 uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
 {
@@ -79,11 +79,7 @@ void spi_unregister_fd(uint8_t id)
     std::lock_guard<std::mutex> lock(spi_map_mutex);
     spi_fd_map.erase(id);
     if (spi_fd_map.empty()) {
-#if USE_LITEPCIE
         spi_last_fd = FD_INIT;
-#else
-        spi_last_fd = nullptr;
-#endif
     } else {
         spi_last_fd = spi_fd_map.begin()->second;
     }
@@ -94,11 +90,7 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
     std::lock_guard<std::mutex> lock(spi_map_mutex);
     auto it = spi_fd_map.find(spi->id_no);
     if (it == spi_fd_map.end()) {
-#if USE_LITEPCIE
-        if (spi_last_fd >= 0) {
-#else
         if (spi_last_fd) {
-#endif
             if (!spi_warned_fallback) {
                 spi_warned_fallback = true;
                 fprintf(stderr,
@@ -107,25 +99,21 @@ litex_m2sdr_device_desc_t spi_get_fd(const struct spi_device *spi)
             }
             return spi_last_fd;
         }
-#if USE_LITEPCIE
         return FD_INIT;
-#else
-        return nullptr;
-#endif
     }
     return it->second;
 }
 
-uint8_t parse_agc_mode(const std::string &mode)
+enum m2sdr_rx_gain_mode parse_agc_mode(const std::string &mode)
 {
     if (mode == "slow" || mode == "slowattack")
-        return RF_GAIN_SLOWATTACK_AGC;
+        return M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
     if (mode == "fast" || mode == "fastattack")
-        return RF_GAIN_FASTATTACK_AGC;
+        return M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC;
     if (mode == "hybrid")
-        return RF_GAIN_HYBRID_AGC;
+        return M2SDR_RX_GAIN_MODE_HYBRID_AGC;
     if (mode == "manual" || mode == "mgc")
-        return RF_GAIN_MGC;
+        return M2SDR_RX_GAIN_MODE_MANUAL;
     throw std::runtime_error("Invalid rx_agc_mode: " + mode);
 }
 
@@ -282,7 +270,6 @@ bool select_ad9361_fir_profile_1x(const std::string &name,
     return false;
 }
 
-#if USE_LITEETH
 constexpr unsigned SOAPY_LITEETH_RF_OP_TIMEOUT_MS = 5000;
 thread_local uint64_t soapy_rf_op_deadline_us = 0;
 thread_local bool soapy_rf_op_timed_out = false;
@@ -352,7 +339,71 @@ bool soapy_rf_op_timeout_expired()
     now = monotonic_time_us();
     return now && now >= soapy_rf_op_deadline_us;
 }
-#endif
+
+bool isDecimalIndex(const std::string &value)
+{
+    if (value.empty())
+        return false;
+    for (char c : value) {
+        if (!std::isdigit(static_cast<unsigned char>(c)))
+            return false;
+    }
+    return true;
+}
+
+std::string makeEthernetDeviceIdentifier(const SoapySDR::Kwargs &args)
+{
+    std::string target = args.at("eth_ip");
+    std::string port = "1234";
+
+    if (args.count("eth_port") != 0)
+        port = args.at("eth_port");
+    else if (args.count("port") != 0)
+        port = args.at("port");
+
+    if (target.rfind("eth:", 0) == 0)
+        return target;
+    if (target.find(':') != std::string::npos)
+        return "eth:" + target;
+    return "eth:" + target + ":" + port;
+}
+
+std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
+                                 std::string &path,
+                                 std::string &eth_ip)
+{
+    std::string candidate;
+    struct m2sdr_device_addr addr;
+
+    if (args.count("dev_id") != 0) {
+        candidate = args.at("dev_id");
+    } else if (args.count("device") != 0) {
+        const std::string device = args.at("device");
+
+        if (isDecimalIndex(device))
+            candidate = "/dev/m2sdr" + device;
+        else
+            candidate = device;
+    } else if (args.count("eth_ip") != 0) {
+        candidate = makeEthernetDeviceIdentifier(args);
+    } else if (args.count("path") != 0) {
+        candidate = "pcie:" + args.at("path");
+    }
+
+    int rc = m2sdr_resolve_device_identifier(
+        candidate.empty() ? nullptr : candidate.c_str(), &addr);
+    if (rc != M2SDR_ERR_OK)
+        throw std::runtime_error("Invalid M2SDR device identifier: " + candidate);
+
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+        path = addr.path;
+    else if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+        eth_ip = addr.ip;
+        path = addr.ip;
+    }
+
+    return addr.identifier;
+}
 } // namespace
 
 //#define AD9361_SPI_WRITE_DEBUG
@@ -363,14 +414,10 @@ int spi_write_then_read(struct spi_device *spi,
                         unsigned char *rxbuf, unsigned n_rx)
 {
     litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
-#if USE_LITEPCIE
-    if (fd < 0)
-        throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    void *conn = (void *)(intptr_t)fd;
-#else
     if (!fd)
         throw std::runtime_error("spi_write_then_read(): invalid SPI device");
-    if (soapy_rf_op_timeout_expired()) {
+    void *conn = fd;
+    if (!soapy_handle_is_fd(conn) && soapy_rf_op_timeout_expired()) {
         if (!soapy_rf_op_timed_out) {
             SoapySDR::logf(SOAPY_SDR_ERROR,
                 "AD9361 SPI transaction aborted after %u ms RF operation timeout",
@@ -379,8 +426,6 @@ int spi_write_then_read(struct spi_device *spi,
         soapy_rf_op_timed_out = true;
         return -ETIMEDOUT;
     }
-    void *conn = fd;
-#endif
 
     /* Single Byte Read. */
     if (n_tx == 2 && n_rx == 1) {
@@ -447,14 +492,6 @@ void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
 
-#if USE_LITEPCIE
-void dma_set_loopback(int fd, bool loopback_enable) {
-    struct litepcie_ioctl_dma m;
-    m.loopback_enable = loopback_enable ? 1 : 0;
-    checked_ioctl(fd, LITEPCIE_IOCTL_DMA, &m);
-}
-#endif
-
 void SoapyLiteXM2SDR::resetDatapathUnlocked()
 {
     if (!_dev)
@@ -473,10 +510,10 @@ void SoapyLiteXM2SDR::resetDatapathUnlocked()
 
 SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     : _deviceArgs(args), _rx_buf_size(0), _tx_buf_size(0), _rx_buf_count(0), _tx_buf_count(0),
-#if USE_LITEETH
       _udp_inited(false),
-#endif
       _fd(FD_INIT), ad9361_phy(NULL) {
+    std::string path;
+    std::string eth_ip = "192.168.1.50";
 
     SoapySDR::logf(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initializing...");
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -488,70 +525,77 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 #endif
 
-#if USE_LITEPCIE
-    /* Open LitePCIe descriptor. */
-    if (args.count("path") == 0) {
-        /* If path is not present, then findLiteXM2SDR had zero devices enumerated. */
-        throw std::runtime_error("No LitePCIe devices found!");
-    }
-    std::string path = args.at("path");
-    std::string dev_id = "pcie:" + path;
-    int rc = m2sdr_open(&_dev, dev_id.c_str());
-    if (rc != 0) {
-        throw std::runtime_error("SoapyLiteXM2SDR(): failed to open " + path + " (" + m2sdr_strerror(rc) + ")");
-    }
-    _fd = static_cast<litex_m2sdr_device_desc_t>(m2sdr_get_fd(_dev));
-    /* Global file descriptor for AD9361 lib. */
-    _spi_id = spi_register_fd(_fd);
-
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", path.c_str(), getLiteXM2SDRSerial(_dev).c_str());
-#elif USE_LITEETH
-    /* Prepare EtherBone / Ethernet streamer */
-    std::string eth_ip;
-    if (args.count("eth_ip") == 0)
-        eth_ip = "192.168.1.50";
-    else
-        eth_ip = args.at("eth_ip");
-    _eth_ip = eth_ip;
-
-    /* EtherBone */
-    std::string dev_id = "eth:" + eth_ip + ":1234";
+    std::string dev_id = makeDeviceIdentifier(args, path, eth_ip);
     int rc = m2sdr_open(&_dev, dev_id.c_str());
     if (rc != 0) {
         throw std::runtime_error(
-            "Can't connect to EtherBone at " + eth_ip +
-            ":1234 (hint: set eth_ip=... for the board IP, error: " +
+            "SoapyLiteXM2SDR(): failed to open " + dev_id + " (" +
             std::string(m2sdr_strerror(rc)) + ")");
     }
-    _fd = reinterpret_cast<litex_m2sdr_device_desc_t>(m2sdr_get_handle(_dev));
-    _spi_id = spi_register_fd(_fd);
-
-    SoapySDR::logf(SOAPY_SDR_INFO, "Opened devnode %s, serial %s", eth_ip.c_str(), getLiteXM2SDRSerial(_dev).c_str());
-
-    std::string eth_mode = "udp";
-    if (args.count("eth_mode") > 0)
-        eth_mode = args.at("eth_mode");
-    if (eth_mode == "udp")
-        _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
-    else if (eth_mode == "vrt")
-        _eth_mode = SoapyLiteXM2SDREthernetMode::VRT;
-    else
-        throw std::runtime_error("Invalid eth_mode: " + eth_mode + " (supported: udp, vrt)");
-
-    uint32_t local_ip = 0;
-    rc = m2sdr_liteeth_get_local_ip(_dev, &local_ip);
+    rc = m2sdr_get_transport(_dev, &_transport);
     if (rc != M2SDR_ERR_OK) {
+        m2sdr_close(_dev);
+        _dev = nullptr;
         throw std::runtime_error(
-            "Could not determine local IP for LiteEth streaming (" +
+            "SoapyLiteXM2SDR(): could not determine transport (" +
             std::string(m2sdr_strerror(rc)) + ")");
     }
-    SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming",
-                   ptp_ipv4_to_string(local_ip).c_str());
-#endif
 
-#if USE_LITEETH
-    resetDatapathUnlocked();
-#endif
+    _fd = m2sdr_get_handle(_dev);
+    if (isLitePCIe()) {
+        _pcie_fd = m2sdr_get_fd(_dev);
+        if (_pcie_fd < 0) {
+            m2sdr_close(_dev);
+            _dev = nullptr;
+            throw std::runtime_error("SoapyLiteXM2SDR(): LitePCIe fd unavailable");
+        }
+        _fd = (void *)(intptr_t)_pcie_fd;
+        if (path.empty() && dev_id.rfind("pcie:", 0) == 0)
+            path = dev_id.substr(5);
+    } else if (isLiteEth()) {
+        _eth_ip = eth_ip;
+        if (_fd == nullptr) {
+            m2sdr_close(_dev);
+            _dev = nullptr;
+            throw std::runtime_error("SoapyLiteXM2SDR(): LiteEth handle unavailable");
+        }
+        if (path.empty())
+            path = eth_ip;
+    } else {
+        m2sdr_close(_dev);
+        _dev = nullptr;
+        throw std::runtime_error("SoapyLiteXM2SDR(): unsupported transport");
+    }
+
+    _spi_id = spi_register_fd(_fd);
+
+    SoapySDR::logf(SOAPY_SDR_INFO, "Opened %s via %s, serial %s",
+                   path.empty() ? dev_id.c_str() : path.c_str(),
+                   isLitePCIe() ? "LitePCIe" : "LiteEth",
+                   getLiteXM2SDRSerial(_dev).c_str());
+
+    if (isLiteEth()) {
+        std::string eth_mode = "udp";
+        if (args.count("eth_mode") > 0)
+            eth_mode = args.at("eth_mode");
+        if (eth_mode == "udp")
+            _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
+        else if (eth_mode == "vrt")
+            _eth_mode = SoapyLiteXM2SDREthernetMode::VRT;
+        else
+            throw std::runtime_error("Invalid eth_mode: " + eth_mode + " (supported: udp, vrt)");
+
+        uint32_t local_ip = 0;
+        rc = m2sdr_liteeth_get_local_ip(_dev, &local_ip);
+        if (rc != M2SDR_ERR_OK) {
+            throw std::runtime_error(
+                "Could not determine local IP for LiteEth streaming (" +
+                std::string(m2sdr_strerror(rc)) + ")");
+        }
+        SoapySDR::logf(SOAPY_SDR_INFO, "Using local IP: %s for streaming",
+                       ptp_ipv4_to_string(local_ip).c_str());
+        resetDatapathUnlocked();
+    }
 
     if (args.count("bitmode") > 0) {
         _bitMode = std::stoi(args.at("bitmode"));
@@ -565,13 +609,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
-#if USE_LITEPCIE
-    SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
+    if (isLitePCIe()) {
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
     /* Enable Synchronizer */
 #ifdef CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR
-    litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+        litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 #else
-    SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
+        SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
 #endif
 
     /* DMA RX Header */
@@ -593,8 +637,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     #endif
 
     /* Disable DMA Loopback. */
-    m2sdr_set_dma_loopback(_dev, false);
-#endif
+        m2sdr_set_dma_loopback(_dev, false);
+    }
 
     bool do_init = true;
     if (args.count("bypass_init") > 0) {
@@ -632,7 +676,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             "Custom antenna lists are not supported; use RX=A_BALANCED and TX=A");
     }
 
-    _rx_agc_mode = RF_GAIN_SLOWATTACK_AGC;
+    _rx_agc_mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
     if (args.count("rx_agc_mode") > 0)
         _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
 
@@ -796,12 +840,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
-#if USE_LITEPCIE
-    /* Set-up the DMA. */
-    checked_ioctl(_fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &_dma_mmap_info);
-    _dma_buf = NULL;
-#endif
-
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
 
@@ -814,46 +852,39 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
         stopRxStreamUnlocked();
-#if USE_LITEPCIE
-         /* Release the DMA engine. */
-        if (_rx_stream.dma.buf_rd != NULL) {
-            litepcie_dma_cleanup(&_rx_stream.dma);
+        if (isLitePCIe()) {
+            (void)m2sdr_stream_release(_dev, M2SDR_RX);
+        } else if (isLiteEth()) {
+            std::free(_rx_stream.buf);
         }
         _rx_stream.buf = NULL;
-#elif USE_LITEETH
-        std::free(_rx_stream.buf);
-        _rx_stream.buf = NULL;
-#endif
         _rx_stream.opened = false;
     }
 
     if (_tx_stream.opened) {
         stopTxStreamUnlocked();
-#if USE_LITEPCIE
-        /* Release the DMA engine. */
-        if (_tx_stream.dma.buf_wr) {
-            litepcie_dma_cleanup(&_tx_stream.dma);
+        if (isLitePCIe()) {
+            (void)m2sdr_stream_release(_dev, M2SDR_TX);
+        } else if (isLiteEth()) {
+            std::free(_tx_stream.buf);
         }
-#elif USE_LITEETH
-        std::free(_tx_stream.buf);
-#endif
         _tx_stream.buf = NULL;
         _tx_stream.opened = false;
     }
     cleanupLiteEthUdpIfIdleUnlocked();
 
-#if USE_LITEETH
-    resetDatapathUnlocked();
-#endif
+    if (isLiteEth())
+        resetDatapathUnlocked();
 
-    /* Crossbar Mux/Demux : Select PCIe streaming */
-    litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
-    litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+    if (_dev) {
+        /* Crossbar Mux/Demux : Select PCIe streaming */
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
+        litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-    /* Power-Down AD9361 */
-    litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+        /* Power-Down AD9361 */
+        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+    }
 
-#if USE_LITEETH
     if (_udp_inited) {
         liteeth_udp_cleanup(&_udp);
         _udp_inited = false;
@@ -863,12 +894,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         m2sdr_close(_dev);
         _dev = nullptr;
     }
-#endif
-#if USE_LITEPCIE
     _fd = FD_INIT;
-#elif USE_LITEETH
-    _fd = FD_INIT;
-#endif
+    _pcie_fd = -1;
+    _transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
 }
 
 /***************************************************************************************************
@@ -939,11 +967,10 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
     }
 #endif
 
-#if USE_LITEPCIE
-    key += "-pcie";
-#elif USE_LITEETH
-    key += "-eth";
-#endif
+    if (isLitePCIe())
+        key += "-pcie";
+    else if (isLiteEth())
+        key += "-eth";
 
     return key;
 }
@@ -1067,8 +1094,10 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
 #if USE_LITEETH
     LiteEthRfOpTimeout timeout("setGainMode");
 #endif
-    ad9361_set_rx_gain_control_mode(ad9361_phy, channel,
-        (automatic ? _rx_agc_mode : RF_GAIN_MGC));
+    int rc = m2sdr_set_rx_gain_mode(_dev, channel,
+        automatic ? _rx_agc_mode : M2SDR_RX_GAIN_MODE_MANUAL);
+    if (rc != M2SDR_ERR_OK)
+        SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
 #if USE_LITEETH
     timeout.throw_if_timed_out();
 #endif
@@ -1083,15 +1112,15 @@ bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) con
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
-        uint8_t gc_mode;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("getGainMode");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
 #if USE_LITEETH
         timeout.throw_if_timed_out();
 #endif
-        return (gc_mode != RF_GAIN_MGC);
+        return (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL);
     }
 
     /* Fallback */
@@ -1134,18 +1163,20 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (SOAPY_SDR_RX == direction) {
-        uint8_t gc_mode = RF_GAIN_MGC;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
         _rx_stream.gain[channel] = value;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
-        if (gc_mode != RF_GAIN_MGC) {
-            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
+        if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
+            rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
+            if (rc != M2SDR_ERR_OK)
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
             _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
+        rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
@@ -1188,18 +1219,20 @@ void SoapyLiteXM2SDR::setGain(
 
     /* RX */
     if (name == "PGA" || name == "RF" || name == "GAIN") {
-        uint8_t gc_mode = RF_GAIN_MGC;
+        enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
         _rx_stream.gain[channel] = value;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("setGain(RX)");
 #endif
-        ad9361_get_rx_gain_control_mode(ad9361_phy, channel, &gc_mode);
-        if (gc_mode != RF_GAIN_MGC) {
-            ad9361_set_rx_gain_control_mode(ad9361_phy, channel, RF_GAIN_MGC);
+        int rc = m2sdr_get_rx_gain_mode(_dev, channel, &gc_mode);
+        if (rc == M2SDR_ERR_OK && gc_mode != M2SDR_RX_GAIN_MODE_MANUAL) {
+            rc = m2sdr_set_rx_gain_mode(_dev, channel, M2SDR_RX_GAIN_MODE_MANUAL);
+            if (rc != M2SDR_ERR_OK)
+                SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
             _rx_stream.gainMode[channel] = false;
         }
         SoapySDR::logf(SOAPY_SDR_DEBUG, "RX ch%zu: RF %.3f dB Gain", channel, value);
-        int rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
+        rc = m2sdr_set_rx_gain_chan(_dev, (unsigned)channel, value);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_chan(RX) failed: %s", m2sdr_strerror(rc));
         }
@@ -1529,29 +1562,29 @@ void SoapyLiteXM2SDR::setSampleRate(
     uint32_t sample_rate = static_cast<uint32_t>(rate);
     _rateMult = 1.0;
 
-#if USE_LITEPCIE
-    /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
-    if (rate > LITEPCIE_8BIT_THRESHOLD) {
-        if (_bitMode != 8) {
-            SoapySDR::logf(SOAPY_SDR_WARNING,
-                "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
-                rate / 1e6);
+    if (isLitePCIe()) {
+        /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
+        if (rate > LITEPCIE_8BIT_THRESHOLD) {
+            if (_bitMode != 8) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
+                    rate / 1e6);
+            }
+            _bitMode      = 8;
+            _oversampling = 1;
+        } else {
+            _oversampling = 0;
         }
-        _bitMode      = 8;
-        _oversampling = 1;
-    } else {
-        _oversampling = 0;
+    } else if (isLiteEth()) {
+        /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
+        if (rate > LITEETH_8BIT_THRESHOLD) {
+            _bitMode      = 8;
+            _oversampling = 0;
+        } else {
+            _bitMode      = 16;
+            _oversampling = 0;
+        }
     }
-#elif USE_LITEETH
-    /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
-    if (rate > LITEETH_8BIT_THRESHOLD) {
-        _bitMode      = 8;
-        _oversampling = 0;
-    } else {
-        _bitMode      = 16;
-        _oversampling = 0;
-    }
-#endif
 
     /* If oversampling is enabled, double the rate multiplier. */
     if (_oversampling) {
@@ -1931,26 +1964,26 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
         sensors.push_back("ptp_master_port_id");
         sensors.push_back("ptp_last_error_ns");
     }
-#if USE_LITEETH
-    sensors.push_back("liteeth_rx_buffers");
-    sensors.push_back("liteeth_rx_ring_full_events");
-    sensors.push_back("liteeth_rx_flushes");
-    sensors.push_back("liteeth_rx_flush_bytes");
-    sensors.push_back("liteeth_rx_kernel_drops");
-    sensors.push_back("liteeth_rx_source_drops");
-    sensors.push_back("liteeth_rx_timeout_recoveries");
-    sensors.push_back("liteeth_rx_recv_errors");
-    sensors.push_back("liteeth_tx_buffers");
-    sensors.push_back("liteeth_tx_bytes");
-    sensors.push_back("liteeth_tx_send_errors");
-    sensors.push_back("liteeth_udp_rcvbuf_requested");
-    sensors.push_back("liteeth_udp_rcvbuf_actual");
-    sensors.push_back("liteeth_udp_sndbuf_requested");
-    sensors.push_back("liteeth_udp_sndbuf_actual");
-    sensors.push_back("liteeth_vrt_packets");
-    sensors.push_back("liteeth_vrt_sequence_gaps");
-    sensors.push_back("liteeth_vrt_packets_lost");
-#endif
+    if (isLiteEth()) {
+        sensors.push_back("liteeth_rx_buffers");
+        sensors.push_back("liteeth_rx_ring_full_events");
+        sensors.push_back("liteeth_rx_flushes");
+        sensors.push_back("liteeth_rx_flush_bytes");
+        sensors.push_back("liteeth_rx_kernel_drops");
+        sensors.push_back("liteeth_rx_source_drops");
+        sensors.push_back("liteeth_rx_timeout_recoveries");
+        sensors.push_back("liteeth_rx_recv_errors");
+        sensors.push_back("liteeth_tx_buffers");
+        sensors.push_back("liteeth_tx_bytes");
+        sensors.push_back("liteeth_tx_send_errors");
+        sensors.push_back("liteeth_udp_rcvbuf_requested");
+        sensors.push_back("liteeth_udp_rcvbuf_actual");
+        sensors.push_back("liteeth_udp_sndbuf_requested");
+        sensors.push_back("liteeth_udp_sndbuf_actual");
+        sensors.push_back("liteeth_vrt_packets");
+        sensors.push_back("liteeth_vrt_sequence_gaps");
+        sensors.push_back("liteeth_vrt_packets_lost");
+    }
     return sensors;
 }
 
@@ -2067,8 +2100,7 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             return info;
         }
 
-#if USE_LITEETH
-        if (deviceStr == "liteeth") {
+        if (deviceStr == "liteeth" && isLiteEth()) {
             info.key = sensorStr;
             info.value = "0";
             info.type = SoapySDR::ArgInfo::INT;
@@ -2113,7 +2145,6 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
             }
             return info;
         }
-#endif
 
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
@@ -2196,8 +2227,7 @@ std::string SoapyLiteXM2SDR::readSensor(
             return sensorValue;
         }
 
-#if USE_LITEETH
-        if (deviceStr == "liteeth") {
+        if (deviceStr == "liteeth" && isLiteEth()) {
             if (sensorStr == "rx_buffers") {
                 sensorValue = std::to_string(_udp.rx_buffers);
             } else if (sensorStr == "rx_ring_full_events") {
@@ -2243,7 +2273,6 @@ std::string SoapyLiteXM2SDR::readSensor(
             }
             return sensorValue;
         }
-#endif
 
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }

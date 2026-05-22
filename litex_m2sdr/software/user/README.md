@@ -7,7 +7,7 @@
 - **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
 - **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
-The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module.
+The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module. It is built as one runtime PCIe/Ethernet library, so external applications should only need to link `libm2sdr`.
 
 ---
 
@@ -18,7 +18,7 @@ The user-space code is intentionally layered:
 - `libm2sdr/` is the public device/RF/streaming API for host applications.
 - `m2sdr_util`, `m2sdr_rf`, `m2sdr_play`, `m2sdr_record`, `m2sdr_check`, and `m2sdr_gpio` are application wrappers built on top of `libm2sdr` plus the shared CLI/header helpers in `m2sdr_cli.*` and `m2sdr_tool.*`.
 - `m2sdr_fm_tx` and `m2sdr_fm_rx` are transport-independent FM helpers and are built in both PCIe and LiteEth user builds.
-- `liblitepcie/` and `libliteeth/` remain transport helpers used under `libm2sdr` and by a few lower-level tools.
+- `liblitepcie/` and `libliteeth/` remain transport helper source trees used under `libm2sdr` and by a few lower-level tools.
 - The SoapySDR module also uses `libm2sdr`, so feature additions in the library tend to propagate to both the CLI tools and Soapy path.
 
 New user tools should start from the shared helpers instead of adding another
@@ -43,6 +43,7 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - `--device <dev-id>` selects an explicit device such as `pcie:/dev/m2sdr0` or `eth:192.168.1.50:1234`.
 - `-c` / `--device-num` remains the short PCIe shorthand for `/dev/m2sdrN`.
 - `--ip` and `--port` remain available on Etherbone-capable tools.
+- A default build can open both transports. Prefer explicit `--device`, `-c`, or `--ip` arguments in scripts so the same binary behaves the same way regardless of how it was compiled.
 - Hyphenated long options are preferred: use `--sample-rate`, `--rx-freq`, `--tx-freq`, `--rx-gain`, `--tx-att`, `--refclk-freq`, etc.
 - TX control uses positive attenuation values across the user tools and SoapySDR path: use `--tx-att` natively and `ATT` in SoapySDR.
 - Streaming-oriented tools that support both SC16 and SC8 expose `--format sc16|sc8`. Older `--8bit` / `-8` forms are kept as compatibility aliases where applicable.
@@ -81,6 +82,25 @@ git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 ~~~~
 
 Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
+
+The default user build is `INTERFACE=USE_RUNTIME` and compiles one set of
+tools plus one `libm2sdr` with both LitePCIe and LiteEth support:
+
+~~~~
+make
+~~~~
+
+Use explicit device arguments to choose the transport at runtime:
+
+~~~~
+./m2sdr_util --device pcie:/dev/m2sdr0 info
+./m2sdr_util --device eth:192.168.1.50:1234 info
+./m2sdr_util -i 192.168.1.50 info
+~~~~
+
+`INTERFACE=USE_LITEPCIE` and `INTERFACE=USE_LITEETH` remain available when
+you need to test legacy/default transport behavior, but they are no longer
+required just to build PCIe or Ethernet-capable binaries.
 
 These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. When libpng is not available, `m2sdr_scan` is skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
 
@@ -148,7 +168,7 @@ Example usage:
 Ethernet PTP bring-up and RFIC-reference clock checks:
 
 ~~~~
-make m2sdr_util INTERFACE=USE_LITEETH
+make m2sdr_util
 ./m2sdr_util -i 192.168.1.50 info
 ./m2sdr_util -i 192.168.1.50 ptp-status
 ./m2sdr_util -i 192.168.1.50 --json ptp-status
@@ -173,7 +193,7 @@ inheriting stream headers, test loopbacks, PRBS TX, or 8-bit packing. For
 Ethernet/baseboard testing:
 
 ~~~~
-make m2sdr_util INTERFACE=USE_LITEETH
+make m2sdr_util
 ./m2sdr_util -i 192.168.1.50 info
 
 # Host TX -> FPGA AD9361 PHY data loopback -> host RX.
@@ -546,7 +566,7 @@ ffmpeg -i music.mp3 -f s16le -ac 2 -ar 44100 - | ./m2sdr_fm_tx --sample-rate 100
 
 Ethernet TX example on the baseboard:
 ~~~~
-make m2sdr_rf m2sdr_play m2sdr_fm_tx INTERFACE=USE_LITEETH
+make m2sdr_rf m2sdr_play m2sdr_fm_tx
 
 ./m2sdr_rf -i 192.168.1.50 \
     --format sc16 \

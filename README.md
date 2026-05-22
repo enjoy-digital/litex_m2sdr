@@ -20,6 +20,7 @@
 - Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
 - Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
 - Current public library version: `1.0.0` (ABI `1`)
+- The library is built as a runtime PCIe/Ethernet library; external applications only need to link `libm2sdr`.
 - Recent API additions: backend accessors `m2sdr_get_transport()` / `m2sdr_get_eb_handle()` and finer-grained `parse`/`range`/`state` error classes.
 
 <div align="center">
@@ -257,6 +258,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    ./build.py
    ```
    - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
+   - The default software build is a runtime PCIe/Ethernet build: the same `libm2sdr`, user tools, and SoapySDR module can open PCIe or Ethernet devices from the device arguments. Use `--interface=litepcie` or `--interface=liteeth` only when you want the legacy shorthand/default transport to favor one side during local testing.
    - If you also want the optional SDL/OpenGL GUI tools (`m2sdr_check` / `m2sdr_scan`), first populate the pinned `cimgui` submodule:
    ```
    git submodule update --init --recursive litex_m2sdr/software/user/cimgui
@@ -295,6 +297,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 
 - **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
+- **Runtime transport selection**: The installed user tools and SoapySDR module support both transports in one build. Use `--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234` with the CLI tools, and `driver=LiteXM2SDR,path=/dev/m2sdr0` or `driver=LiteXM2SDR,eth_ip=192.168.1.50` with SoapySDR.
 - **PCIe PTM host-time sync**: Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`.
@@ -450,7 +453,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
      exercise the stream path before starting Soapy/Gqrx:
    ```
    cd litex_m2sdr/software/user
-   make m2sdr_util INTERFACE=USE_LITEETH
+   make m2sdr_util
    ./m2sdr_util -i 192.168.1.50 --duration 4 --pace=rx --sample-rate 1920000 --window 32 fpga-phy-loopback-test
    ./m2sdr_util -i 192.168.1.50 --duration 8 --pace=rx --sample-rate 1920000 --window 32 ad9361-loopback-test
    ```
@@ -463,7 +466,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
    ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
    cd litex_m2sdr/software/user
-   make m2sdr_sata INTERFACE=USE_LITEETH
+   make m2sdr_sata
    ./m2sdr_sata -i 192.168.1.50 status
    ```
    - For Ethernet PTP time-discipline tests on the baseboard:
@@ -471,7 +474,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
    sudo ptp4l -i <host-eth-iface> -4 -E -S -m
    cd litex_m2sdr/software/user
-   make m2sdr_util INTERFACE=USE_LITEETH
+   make m2sdr_util
    ./m2sdr_util -i 192.168.1.50 info
    ./m2sdr_util -i 192.168.1.50 --watch ptp-status
    ```
@@ -482,7 +485,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --with-eth-ptp-rfic-clock --eth-sfp=0 --build --load
    sudo ptp4l -i <host-eth-iface> -4 -E -S -m
    cd litex_m2sdr/software/user
-   make m2sdr_util INTERFACE=USE_LITEETH
+   make m2sdr_util
    ./m2sdr_util -i 192.168.1.50 ptp-clock10-config
    ./m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on
    ./m2sdr_util -i 192.168.1.50 ptp-clock10-config align

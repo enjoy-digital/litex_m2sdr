@@ -37,6 +37,7 @@ extern "C" {
  * - PARSE: malformed text input (device identifiers, legacy mode strings).
  * - RANGE: numeric value outside supported device/library limits.
  * - STATE: API call ordering/state preconditions not met.
+ * - OVERFLOW/UNDERFLOW: streaming ring lost RX/TX continuity.
  */
 enum m2sdr_error {
     M2SDR_ERR_OK         =  0,
@@ -49,6 +50,8 @@ enum m2sdr_error {
     M2SDR_ERR_PARSE      = -7,
     M2SDR_ERR_RANGE      = -8,
     M2SDR_ERR_STATE      = -9,
+    M2SDR_ERR_OVERFLOW   = -10,
+    M2SDR_ERR_UNDERFLOW  = -11,
 };
 
 /* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
@@ -163,6 +166,16 @@ struct m2sdr_liteeth_udp_stats {
     int so_sndbuf_actual;
 };
 
+struct m2sdr_stream_info {
+    /* Payload bytes visible to the caller, excluding stripped DMA headers. */
+    size_t buffer_bytes;
+    size_t buffer_count;
+    /* Backend stride between direct buffers. May include transport headers. */
+    size_t buffer_stride;
+    /* Backend-owned direct buffer base when available. */
+    void *buffer_base;
+};
+
 struct m2sdr_devinfo {
     /* Stable serial string when available. */
     char serial[M2SDR_SERIAL_MAX];
@@ -172,6 +185,33 @@ struct m2sdr_devinfo {
     char path[M2SDR_DEVICE_STR_MAX];
     /* "litepcie" or "liteeth". */
     char transport[16];
+};
+
+struct m2sdr_device_addr {
+    enum m2sdr_transport_kind transport;
+    /* Canonical identifier accepted by m2sdr_open(), eg pcie:/dev/m2sdr0. */
+    char identifier[M2SDR_DEVICE_STR_MAX];
+    char path[M2SDR_DEVICE_STR_MAX];
+    char ip[64];
+    uint16_t port;
+};
+
+struct m2sdr_discovery_config {
+    bool enable_pcie;
+    bool enable_liteeth;
+    unsigned pcie_first;
+    unsigned pcie_count;
+    /* Comma- or semicolon-separated list of ip[:port] or eth:ip[:port] targets.
+     * NULL selects the library default Ethernet target. */
+    const char *liteeth_targets;
+    /* Default port for Ethernet targets without an explicit port. Use 0 for
+     * the library default. */
+    uint16_t liteeth_port;
+};
+
+struct m2sdr_discovered_device {
+    struct m2sdr_device_addr addr;
+    struct m2sdr_devinfo info;
 };
 
 struct m2sdr_capabilities {
@@ -422,6 +462,13 @@ enum m2sdr_clock_source {
     M2SDR_CLOCK_SOURCE_SI5351C_FPGA  = 2,
 };
 
+enum m2sdr_rx_gain_mode {
+    M2SDR_RX_GAIN_MODE_MANUAL = 0,
+    M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC = 1,
+    M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC = 2,
+    M2SDR_RX_GAIN_MODE_HYBRID_AGC = 3,
+};
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     /* Common TX/RX sample rate in SPS. */
@@ -470,14 +517,31 @@ struct m2sdr_dev;
  * The parser also accepts the shorthand forms "/dev/m2sdr0" and
  * "192.168.1.50:1234". Passing NULL selects the backend default.
  */
+int  m2sdr_resolve_device_identifier(const char *device_identifier,
+                                      struct m2sdr_device_addr *addr);
 int  m2sdr_open(struct m2sdr_dev **dev, const char *device_identifier);
 void m2sdr_close(struct m2sdr_dev *dev);
 
-/* Enumerate reachable devices for the active backend.
+/* Initialize discovery policy with the library defaults:
+ * PCIe /dev/m2sdr0..7 followed by Ethernet target 192.168.1.50:1234. */
+void m2sdr_discovery_config_init(struct m2sdr_discovery_config *config);
+
+/* Expand a discovery policy into canonical candidate identifiers. This does
+ * not open devices; use m2sdr_get_device_list_ex() to probe reachability. */
+int  m2sdr_get_discovery_targets(const struct m2sdr_discovery_config *config,
+                                 struct m2sdr_device_addr *targets,
+                                 size_t max,
+                                 size_t *count);
+
+/* Enumerate reachable devices for a configured discovery policy.
  *
- * PCIe currently probes /dev/m2sdr0..7. LiteEth currently probes only the
- * default target address rather than performing subnet discovery.
+ * Discovery is bounded to the configured PCIe indices and Ethernet targets; it
+ * never performs a subnet scan.
  */
+int  m2sdr_get_device_list_ex(const struct m2sdr_discovery_config *config,
+                              struct m2sdr_discovered_device *list,
+                              size_t max,
+                              size_t *count);
 int  m2sdr_get_device_list(struct m2sdr_devinfo *list, size_t max, size_t *count);
 
 /* Read stable transport/path/serial/identifier metadata from an open device. */
@@ -497,13 +561,13 @@ int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 
 /* Low-level transport handle access for advanced integrations.
  *
- * `m2sdr_get_fd()` is meaningful only on LitePCIe builds.
- * `m2sdr_get_eb_handle()` is meaningful only on LiteEth builds.
+ * `m2sdr_get_fd()` returns a valid descriptor only for LitePCIe devices.
+ * `m2sdr_get_eb_handle()` returns a valid handle only for LiteEth devices.
  * `m2sdr_get_transport()` is the preferred way to branch on active backend.
  * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
  * or the Etherbone connection handle, depending on the active backend. On
- * LitePCIe builds this value is an integer fd reinterpreted as a pointer; it is
- * only for passing through opaque APIs and must not be dereferenced. Prefer
+ * LitePCIe devices this value is an integer fd reinterpreted as a pointer; it
+ * is only for passing through opaque APIs and must not be dereferenced. Prefer
  * backend-specific accessors in new code.
  */
 int  m2sdr_get_fd(struct m2sdr_dev *dev);
@@ -566,6 +630,12 @@ int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, 
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+int  m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
+                            unsigned rx_channel, unsigned tx_channel);
+int  m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                            enum m2sdr_rx_gain_mode mode);
+int  m2sdr_get_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
+                            enum m2sdr_rx_gain_mode *mode);
 /* Convenience RF setters for the common one-direction case. */
 int  m2sdr_set_rx_frequency(struct m2sdr_dev *dev, uint64_t freq);
 int  m2sdr_set_tx_frequency(struct m2sdr_dev *dev, uint64_t freq);
@@ -601,6 +671,11 @@ void m2sdr_stream_config_init(m2sdr_stream_config_t *config);
 int m2sdr_sync_config_ex(struct m2sdr_dev *dev, const struct m2sdr_sync_params *params);
 /* Alias of m2sdr_sync_config_ex() for the public stream-config name. */
 int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *config);
+int m2sdr_stream_get_info(struct m2sdr_dev *dev,
+                          enum m2sdr_direction direction,
+                          struct m2sdr_stream_info *info);
+int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
+int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 
 /* LiteEth stream-control helpers.
  *
@@ -635,10 +710,12 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
 
 /* Zero-copy buffer API.
  *
- * These helpers expose backend-owned buffers directly. RX buffers are valid
- * until the next acquire on the same stream; TX buffers must be submitted with
+ * These helpers expose backend-owned buffers directly. RX buffers must be
+ * returned with m2sdr_release_buffer(); TX buffers must be submitted with
  * m2sdr_submit_buffer(). Passing timeout_ms=0 uses the timeout configured by
- * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ * m2sdr_sync_config()/m2sdr_sync_config_ex(). m2sdr_try_get_buffer() is
+ * non-blocking and returns M2SDR_ERR_TIMEOUT when no buffer is immediately
+ * available.
  *
  * DMA header layout (when enabled):
  * - Total size: 16 bytes.
@@ -653,6 +730,11 @@ int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      unsigned *num_samples,
                      unsigned timeout_ms);
 
+int m2sdr_try_get_buffer(struct m2sdr_dev *dev,
+                         enum m2sdr_direction direction,
+                         void **buffer,
+                         unsigned *num_samples);
+
 int m2sdr_submit_buffer(struct m2sdr_dev *dev,
                         enum m2sdr_direction direction,
                         void *buffer,
@@ -665,9 +747,10 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
 
 /* Backend notes for zero-copy submit/release:
  *
- * - m2sdr_submit_buffer() performs an explicit enqueue on LiteEth, while on
- *   LitePCIe the DMA ring already owns the buffer and submit is a no-op.
- * - m2sdr_release_buffer() is currently a no-op kept for API symmetry.
+ * - m2sdr_submit_buffer() performs an explicit enqueue on LiteEth and advances
+ *   the kernel-visible TX ring on LitePCIe zero-copy streams.
+ * - m2sdr_release_buffer() advances the kernel-visible RX ring on LitePCIe
+ *   zero-copy streams; other current paths advance on read.
  */
 
 /* Small utility helpers for buffer sizing and allocation. */

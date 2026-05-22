@@ -1412,6 +1412,35 @@ static void info(void)
     m2sdr_close_dev(conn);
 }
 
+static void list_devices(void)
+{
+    struct m2sdr_discovered_device devices[16];
+    size_t count = 0;
+    int rc;
+
+    rc = m2sdr_get_device_list_ex(NULL, devices,
+                                  sizeof(devices) / sizeof(devices[0]),
+                                  &count);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "Device discovery failed: %s\n", m2sdr_strerror(rc));
+        exit(1);
+    }
+
+    if (count == 0) {
+        printf("No M2SDR devices found.\n");
+        return;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        printf("Device %zu:\n", i);
+        printf("  dev_id         : %s\n", devices[i].addr.identifier);
+        printf("  transport      : %s\n", devices[i].info.transport);
+        printf("  path           : %s\n", devices[i].info.path);
+        printf("  serial         : %s\n", devices[i].info.serial);
+        printf("  identification : %s\n", devices[i].info.identification);
+    }
+}
+
 
 /* FPGA Reg Access */
 /*-----------------*/
@@ -1766,11 +1795,18 @@ static void find_best_rx_delay(const uint32_t * restrict buf, uint32_t mask, int
 static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width, int auto_rx_delay, int duration, int warmup_buffers)
 {
     static struct litepcie_dma_ctrl dma = {.use_reader = 1, .use_writer = 1};
+    const char *pcie_path;
     dma.loopback = external_loopback ? 0 : 1;
     keep_running = 1;
 
     if (!m2sdr_cli_finalize_device(&g_cli_dev))
         exit(1);
+    pcie_path = m2sdr_cli_pcie_path(&g_cli_dev);
+    if (!pcie_path || pcie_path[0] == '\0') {
+        fprintf(stderr, "dma_test requires a LitePCIe device; selected device is %s\n",
+                m2sdr_cli_device_id(&g_cli_dev));
+        return 1;
+    }
 
     if (unlikely(data_width > 32 || data_width < 1)) {
         fprintf(stderr, "Invalid data width %d\n", data_width);
@@ -1810,7 +1846,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
     printf("\e[1m[> DMA loopback test:\e[0m\n");
     printf("---------------------\n");
 
-    if (unlikely(litepcie_dma_init(&dma, m2sdr_cli_pcie_path(&g_cli_dev), zero_copy)))
+    if (unlikely(litepcie_dma_init(&dma, pcie_path, zero_copy)))
         exit(1);
 
     dma.reader_enable = 1;
@@ -3833,6 +3869,8 @@ static void help(void)
 #endif
            "\n"
            "device commands:\n"
+           "  list | devices\n"
+           "      Discover reachable PCIe and configured Ethernet boards.\n"
            "  info | show-info\n"
            "      Show board information.\n"
            "  reg-read OFFSET\n"
@@ -4112,7 +4150,9 @@ int main(int argc, char **argv)
     cmd = argv[optind++];
 
     /* Info cmds. */
-    if (cmd_is(cmd, "info", "show-info"))
+    if (cmd_is(cmd, "list", "devices"))
+        list_devices();
+    else if (cmd_is(cmd, "info", "show-info"))
         info();
 
     /* PTP cmds. */

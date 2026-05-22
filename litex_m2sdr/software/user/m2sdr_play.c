@@ -98,24 +98,41 @@ static int read_next_play_frame(FILE *fi, int close_fi, uint32_t *current_loop, 
     return 0;
 }
 
+static void prepare_play_metadata(const uint8_t *raw_buf, unsigned header_bytes,
+                                  struct m2sdr_metadata *meta)
+{
+    memset(meta, 0, sizeof(*meta));
+
+    if (header_bytes > 0 && m2sdr_tool_parse_dma_header(raw_buf, &meta->timestamp))
+        meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+}
+
+static const uint8_t *prepare_play_sync_buffer(const uint8_t *raw_buf, uint8_t *payload_buf,
+                                               size_t frame_bytes, unsigned header_bytes,
+                                               struct m2sdr_metadata *meta)
+{
+    prepare_play_metadata(raw_buf, header_bytes, meta);
+
+    if (header_bytes == 0)
+        return raw_buf;
+
+    memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
+    return payload_buf;
+}
+
 #ifdef USE_LITEPCIE
-static void fill_play_frame(uint8_t *dst, const uint8_t *src, size_t frame_bytes,
-                            unsigned header_bytes, struct m2sdr_metadata *meta)
+static void fill_play_dma_frame(uint8_t *dst, const uint8_t *raw_buf, size_t frame_bytes,
+                                unsigned header_bytes, const struct m2sdr_metadata *meta)
 {
     memset(dst, 0, frame_bytes);
 
-    if (header_bytes > 0) {
-        uint64_t timestamp = 0;
-
-        if (m2sdr_tool_parse_dma_header(src, &timestamp)) {
-            meta->timestamp = timestamp;
-            meta->flags |= M2SDR_META_FLAG_HAS_TIME;
-        }
-        memcpy(dst + header_bytes, src + header_bytes, frame_bytes - header_bytes);
-        m2sdr_tool_write_dma_header(dst, (meta->flags & M2SDR_META_FLAG_HAS_TIME) ? meta->timestamp : 0);
-    } else {
-        memcpy(dst, src, frame_bytes);
+    if (header_bytes == 0) {
+        memcpy(dst, raw_buf, frame_bytes);
+        return;
     }
+
+    memcpy(dst + header_bytes, raw_buf + header_bytes, frame_bytes - header_bytes);
+    m2sdr_tool_write_dma_header(dst, (meta->flags & M2SDR_META_FLAG_HAS_TIME) ? meta->timestamp : 0);
 }
 #endif
 
@@ -285,7 +302,8 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                     break;
                 }
 
-                fill_play_frame((uint8_t *)dma_buf, raw_buf, frame_bytes, header_bytes, &meta);
+                prepare_play_metadata(raw_buf, header_bytes, &meta);
+                fill_play_dma_frame((uint8_t *)dma_buf, raw_buf, frame_bytes, header_bytes, &meta);
             }
             total_buffers = (uint64_t)dma.reader_sw_count;
         } else
@@ -293,6 +311,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         {
             int rc;
             struct m2sdr_metadata meta = {0};
+            const uint8_t *tx_data;
 
             if (!keep_running)
                 break;
@@ -305,15 +324,9 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             if (rc > 0)
                 break;
 
-            if (header_bytes > 0) {
-                if (m2sdr_tool_parse_dma_header(raw_buf, &meta.timestamp))
-                    meta.flags |= M2SDR_META_FLAG_HAS_TIME;
-                memcpy(payload_buf, raw_buf + header_bytes, frame_bytes - header_bytes);
-            } else {
-                memcpy(payload_buf, raw_buf, frame_bytes);
-            }
+            tx_data = prepare_play_sync_buffer(raw_buf, payload_buf, frame_bytes, header_bytes, &meta);
 
-            rc = m2sdr_sync_tx(dev, header_bytes > 0 ? payload_buf : raw_buf, samples_per_buf,
+            rc = m2sdr_sync_tx(dev, tx_data, samples_per_buf,
                                header_bytes > 0 ? &meta : NULL, 0);
             if (rc != 0) {
                 fprintf(stderr, "m2sdr_sync_tx failed: %s\n", m2sdr_strerror(rc));

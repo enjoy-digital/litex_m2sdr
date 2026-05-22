@@ -9,8 +9,10 @@
 
 The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating with:
 - **`litepcie`** kernel driver for DMA-based streaming over PCIe.
-- **Etherbone** routines for optional remote or UDP-based data transfer.
+- **Etherbone/LiteEth UDP** routines for remote control and UDP/VRT streaming over Ethernet.
 - M2SDR board-specific controls (sample rate, frequency, gains, etc.).
+
+The module is built once and selects PCIe or Ethernet at runtime from the device arguments.
 
 For building and installing instructions, **refer to the main LiteX-M2SDR README** which covers the general software setup. Once you have all dependencies and environment ready, simply build this module with your usual CMake workflow.
 
@@ -20,11 +22,35 @@ For building and installing instructions, **refer to the main LiteX-M2SDR README
 
 Once installed, the driver will be automatically loaded by SoapySDR. You can then:
 
-1. **Probe SoapySDR**
+1. **Find/Probe SoapySDR**
+   ```bash
+   SoapySDRUtil --find="driver=LiteXM2SDR"
+   ```
+   This enumerates PCIe devices and probes the default Ethernet target
+   (`192.168.1.50:1234`) so a mixed PCIe/Ethernet setup can appear in one
+   Soapy device list.
+
+   To scan specific Ethernet targets during discovery, pass a semicolon-separated
+   list or set the matching environment variable:
+   ```bash
+   SoapySDRUtil --find="driver=LiteXM2SDR,eth_ips=192.168.1.50;192.168.1.51:1234"
+   LITEXM2SDR_ETH_IPS=192.168.1.50,192.168.1.51 SoapySDRUtil --find="driver=LiteXM2SDR"
+   ```
+
    ```bash
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
-   This should list the capabilities and configuration parameters of your M2SDR board.
+   This probes the first discovered M2SDR board and should list the capabilities and configuration parameters.
+
+   For an Ethernet board, pass the board IP explicitly:
+   ```bash
+   SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50"
+   ```
+
+   For a specific PCIe node, pass the device path explicitly:
+   ```bash
+   SoapySDRUtil --probe="driver=LiteXM2SDR,path=/dev/m2sdr1"
+   ```
 
 2. **Run SoapySDR Applications**
    - **GNU Radio**: Load `Soapy` blocks in GRC or run `gnuradio-companion`. Select `SoapySDR` source/sink blocks with `driver=LiteXM2SDR`.
@@ -38,6 +64,8 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
+- **Device selection**: `path=/dev/m2sdr0` for PCIe, `eth_ip=192.168.1.50` for Ethernet, or `dev_id=pcie:/dev/m2sdr0` / `dev_id=eth:192.168.1.50:1234` for an explicit libm2sdr identifier.
+- **Ethernet discovery**: default discovery probes `192.168.1.50:1234` after PCIe. Use `eth_ips=ip[;ip[:port]...]` or `LITEXM2SDR_ETH_IPS` to override the discovery list, and `eth_discovery=0` to disable Ethernet discovery.
 - **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`
   The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
 - **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
@@ -52,7 +80,7 @@ You can pass device arguments to configure the driver. These are most useful whe
     On Ethernet PTP builds that also enable `--with-eth-ptp-rfic-clock`, use
     `m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on` and wait for
     the clk10 loop to lock before opening SoapySDR with `clock_source=fpga`.
-- **Ethernet RX mode** (Etherbone builds): `eth_mode=udp|vrt`
+- **Ethernet RX mode** (Ethernet devices): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
 - **VRT UDP port override** (Etherbone + `eth_mode=vrt`): `vrt_port=4991`
@@ -90,6 +118,12 @@ Example:
 SoapySDRUtil --probe="driver=LiteXM2SDR"
 ```
 The probe output will list the available time sources and the additional PTP sensors when Ethernet PTP support is present in the FPGA image.
+
+For PCIe/PTM host-time synchronization, build the gateware with
+`--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run
+`scripts/m2sdr_pcie_time_sync.py` on the host. The helper drives the M2SDR PHC
+from `CLOCK_REALTIME` through `phc2sys`; Soapy then observes the same board
+hardware time as the rest of the host stack.
 
 ---
 
@@ -148,7 +182,7 @@ This repository includes several Python utilities to help test and demonstrate t
   Handles SoapySDR plugin registration and device enumeration.
 
 - **LiteXM2SDRStreaming.cpp**
-  Implements SoapySDR streaming methods (activateStream, readStream, writeStream…) using the PCIe DMA path, with the optional network receive path handled in the current driver sources.
+  Implements SoapySDR streaming methods (activateStream, readStream, writeStream…) with runtime dispatch between PCIe DMA and LiteEth UDP/VRT paths.
 
 - **test_play.py, test_record.py, test_time.py**
   Python scripts to test and demonstrate transmission, recording, and hardware time functionality using the LiteXM2SDR SoapySDR driver.
@@ -157,8 +191,9 @@ This repository includes several Python utilities to help test and demonstrate t
 
 ## Notes & Tips
 
-- **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates each. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,device=1`).
-- **Ethernet/Etherbone**: For network-based streaming, confirm the appropriate IP or addresses if you plan to use Etherbone.
+- **Single module**: The installed SoapySDR module handles PCIe DMA and Ethernet UDP/VRT paths. Select the transport with `path=`, `eth_ip=`, or `dev_id=`.
+- **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates PCIe devices and the configured Ethernet discovery targets. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,path=/dev/m2sdr1` or `driver=LiteXM2SDR,dev_id=eth:192.168.1.50:1234`).
+- **Ethernet/Etherbone**: Ethernet discovery is bounded to configured targets, not a subnet scan. Use `eth_ips=...` or `LITEXM2SDR_ETH_IPS=...` for non-default Ethernet addresses.
 
 ---
 

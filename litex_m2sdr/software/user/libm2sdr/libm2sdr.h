@@ -29,27 +29,29 @@ extern "C" {
 #define ICAP_BOOTSTS_VALID    (1 << 0)
 #define ICAP_BOOTSTS_FALLBACK (1 << 1)
 
-/* Macros */
+/* Legacy raw-handle helpers. */
 
-#ifdef USE_LITEPCIE
+static inline int m2sdr_legacy_handle_is_fd(void *conn)
+{
+    intptr_t value = (intptr_t)conn;
 
-#define m2sdr_conn_type int
-#define m2sdr_conn_cast(conn) ((m2sdr_conn_type)(intptr_t)(conn))
-#define m2sdr_writel(conn, addr, val) litepcie_writel(m2sdr_conn_cast(conn), addr, val)
-#define m2sdr_readl(conn, addr)       litepcie_readl(m2sdr_conn_cast(conn), addr)
+    return value >= 0 && value < 1048576;
+}
 
-#elif USE_LITEETH
+static inline void m2sdr_writel(void *conn, uint32_t addr, uint32_t val)
+{
+    if (m2sdr_legacy_handle_is_fd(conn))
+        litepcie_writel((int)(intptr_t)conn, addr, val);
+    else
+        eb_write32((struct eb_connection *)conn, val, addr);
+}
 
-#define m2sdr_conn_type struct eb_connection *
-#define m2sdr_conn_cast(conn) ((m2sdr_conn_type)(conn))
-#define m2sdr_writel(conn, addr, val) eb_write32(m2sdr_conn_cast(conn), val, addr)
-#define m2sdr_readl(conn, addr)       eb_read32(m2sdr_conn_cast(conn), addr)
-
-#else
-
-#error "Define USE_LITEPCIE or USE_LITEETH for build configuration"
-
-#endif
+static inline uint32_t m2sdr_readl(void *conn, uint32_t addr)
+{
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return litepcie_readl((int)(intptr_t)conn, addr);
+    return eb_read32((struct eb_connection *)conn, addr);
+}
 
 /* Libs */
 

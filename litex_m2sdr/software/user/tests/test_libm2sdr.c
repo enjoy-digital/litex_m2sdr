@@ -30,6 +30,128 @@ static int test_parse_identifier_invalid_ports(void)
     return 0;
 }
 
+static int test_parse_identifier_forms(void)
+{
+    uint16_t port = 1234;
+    struct m2sdr_device_addr addr;
+
+    if (m2sdr_test_parse_identifier(NULL, &port) != 0 || port != 1234)
+        return -1;
+    if (m2sdr_test_parse_identifier("pcie:/dev/m2sdr3", &port) != 0)
+        return -1;
+    if (m2sdr_test_parse_identifier("/dev/m2sdr2", &port) != 0)
+        return -1;
+    if (m2sdr_test_parse_identifier("eth:192.168.1.10:2345", &port) != 0 || port != 2345)
+        return -1;
+    port = 1234;
+    if (m2sdr_test_parse_identifier("192.168.1.10:3456", &port) != 0 || port != 3456)
+        return -1;
+
+    if (m2sdr_resolve_device_identifier("pcie:/dev/m2sdr3", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (addr.transport != M2SDR_TRANSPORT_KIND_LITEPCIE)
+        return -1;
+    if (strcmp(addr.identifier, "pcie:/dev/m2sdr3") != 0 || strcmp(addr.path, "/dev/m2sdr3") != 0)
+        return -1;
+
+    if (m2sdr_resolve_device_identifier("192.168.1.10:3456", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (addr.transport != M2SDR_TRANSPORT_KIND_LITEETH)
+        return -1;
+    if (strcmp(addr.identifier, "eth:192.168.1.10:3456") != 0 || strcmp(addr.ip, "192.168.1.10") != 0)
+        return -1;
+    if (addr.port != 3456)
+        return -1;
+
+    return 0;
+}
+
+static int test_cli_device_selection(void)
+{
+    struct m2sdr_cli_device dev;
+
+    m2sdr_cli_device_init(&dev);
+    if (!m2sdr_cli_finalize_device(&dev))
+        return -1;
+#ifdef M2SDR_DEFAULT_TRANSPORT_LITEETH
+    if (strcmp(m2sdr_cli_device_id(&dev), "eth:192.168.1.50:1234") != 0)
+        return -1;
+#else
+    if (strcmp(m2sdr_cli_device_id(&dev), "pcie:/dev/m2sdr0") != 0)
+        return -1;
+    if (strcmp(m2sdr_cli_pcie_path(&dev), "/dev/m2sdr0") != 0)
+        return -1;
+#endif
+
+    m2sdr_cli_device_init(&dev);
+    if (m2sdr_cli_handle_device_option(&dev, 'i', "192.168.1.10") != 0)
+        return -1;
+    if (m2sdr_cli_handle_device_option(&dev, 'p', "2345") != 0)
+        return -1;
+    if (!m2sdr_cli_finalize_device(&dev))
+        return -1;
+    if (strcmp(m2sdr_cli_device_id(&dev), "eth:192.168.1.10:2345") != 0)
+        return -1;
+
+    m2sdr_cli_device_init(&dev);
+    if (m2sdr_cli_handle_device_option(&dev, 'c', "2") != 0)
+        return -1;
+    if (!m2sdr_cli_finalize_device(&dev))
+        return -1;
+    if (strcmp(m2sdr_cli_device_id(&dev), "pcie:/dev/m2sdr2") != 0)
+        return -1;
+
+    m2sdr_cli_device_init(&dev);
+    if (m2sdr_cli_set_device_id(&dev, "/dev/m2sdr3") != 0)
+        return -1;
+    if (!m2sdr_cli_finalize_device(&dev))
+        return -1;
+    if (strcmp(m2sdr_cli_device_id(&dev), "pcie:/dev/m2sdr3") != 0)
+        return -1;
+    if (strcmp(m2sdr_cli_pcie_path(&dev), "/dev/m2sdr3") != 0)
+        return -1;
+
+    return 0;
+}
+
+static int test_discovery_targets(void)
+{
+    struct m2sdr_discovery_config cfg;
+    struct m2sdr_device_addr targets[4];
+    size_t count = 0;
+
+    m2sdr_discovery_config_init(&cfg);
+    cfg.enable_pcie = false;
+    cfg.liteeth_targets = "192.168.1.10; eth:192.168.1.11:2345, 192.168.1.10";
+    cfg.liteeth_port = 1234;
+    if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
+        return -1;
+    if (count != 2)
+        return -1;
+    if (strcmp(targets[0].identifier, "eth:192.168.1.10:1234") != 0)
+        return -1;
+    if (strcmp(targets[1].identifier, "eth:192.168.1.11:2345") != 0)
+        return -1;
+
+    m2sdr_discovery_config_init(&cfg);
+    cfg.enable_liteeth = false;
+    cfg.pcie_first = 2;
+    cfg.pcie_count = 2;
+    if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
+        return -1;
+    if (count != 2)
+        return -1;
+    if (strcmp(targets[0].identifier, "pcie:/dev/m2sdr2") != 0)
+        return -1;
+    if (strcmp(targets[1].identifier, "pcie:/dev/m2sdr3") != 0)
+        return -1;
+
+    if (m2sdr_get_discovery_targets(&cfg, targets, 1, &count) != M2SDR_ERR_RANGE)
+        return -1;
+
+    return 0;
+}
+
 static int test_cli_numeric_parser(void)
 {
     int64_t value = 0;
@@ -225,6 +347,8 @@ static int test_stream_direction_validation(void)
         return -1;
     if (m2sdr_get_buffer(&dev, (enum m2sdr_direction)42, (void **)&params, &params.buffer_size, 1) != M2SDR_ERR_INVAL)
         return -1;
+    if (m2sdr_try_get_buffer(&dev, (enum m2sdr_direction)42, (void **)&params, &params.buffer_size) != M2SDR_ERR_INVAL)
+        return -1;
     if (m2sdr_sync_rx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)
         return -1;
     if (m2sdr_sync_tx(&dev, samples, 8, NULL, 1) != M2SDR_ERR_STATE)
@@ -237,6 +361,7 @@ static int test_rf_range_validation(void)
 {
     struct m2sdr_dev dev;
     struct m2sdr_config cfg;
+    enum m2sdr_rx_gain_mode gain_mode = M2SDR_RX_GAIN_MODE_MANUAL;
 
     memset(&dev, 0, sizeof(dev));
     m2sdr_config_init(&cfg);
@@ -260,6 +385,33 @@ static int test_rf_range_validation(void)
     if (m2sdr_set_bandwidth(&dev, -1) != M2SDR_ERR_RANGE)
         return -1;
 
+    if (m2sdr_set_channel_mode(NULL, 2, 0, 0) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 3, 0, 0) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 2, 2, 0) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_channel_mode(&dev, 2, 0, 0) != M2SDR_ERR_STATE)
+        return -1;
+
+    if (m2sdr_set_rx_gain_mode(NULL, 0, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 2, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 0, (enum m2sdr_rx_gain_mode)99) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_set_rx_gain_mode(&dev, 0, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_STATE)
+        return -1;
+
+    if (m2sdr_get_rx_gain_mode(NULL, 0, &gain_mode) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 0, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 2, &gain_mode) != M2SDR_ERR_RANGE)
+        return -1;
+    if (m2sdr_get_rx_gain_mode(&dev, 0, &gain_mode) != M2SDR_ERR_STATE)
+        return -1;
+
     return 0;
 }
 
@@ -270,12 +422,31 @@ static int test_transport_helpers(void)
 
     memset(&dev, 0, sizeof(dev));
     dev.transport = M2SDR_TRANSPORT_LITEPCIE;
+    dev.fd = 42;
     if (m2sdr_get_transport(&dev, &kind) != M2SDR_ERR_OK)
         return -1;
     if (kind != M2SDR_TRANSPORT_KIND_LITEPCIE)
         return -1;
+    if (m2sdr_get_fd(&dev) != 42)
+        return -1;
     if (m2sdr_get_eb_handle(&dev) != NULL)
         return -1;
+    if ((intptr_t)m2sdr_get_handle(&dev) != 42)
+        return -1;
+
+    dev.transport = M2SDR_TRANSPORT_LITEETH;
+    dev.eb = (struct eb_connection *)(uintptr_t)0x10000;
+    if (m2sdr_get_transport(&dev, &kind) != M2SDR_ERR_OK)
+        return -1;
+    if (kind != M2SDR_TRANSPORT_KIND_LITEETH)
+        return -1;
+    if (m2sdr_get_fd(&dev) != -1)
+        return -1;
+    if (m2sdr_get_eb_handle(&dev) != dev.eb)
+        return -1;
+    if (m2sdr_get_handle(&dev) != dev.eb)
+        return -1;
+
     if (m2sdr_get_transport(NULL, &kind) != M2SDR_ERR_INVAL)
         return -1;
     if (m2sdr_get_transport(&dev, NULL) != M2SDR_ERR_INVAL)
@@ -288,6 +459,18 @@ int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
         fprintf(stderr, "test_parse_identifier_invalid_ports failed\n");
+        return 1;
+    }
+    if (test_parse_identifier_forms() != 0) {
+        fprintf(stderr, "test_parse_identifier_forms failed\n");
+        return 1;
+    }
+    if (test_cli_device_selection() != 0) {
+        fprintf(stderr, "test_cli_device_selection failed\n");
+        return 1;
+    }
+    if (test_discovery_targets() != 0) {
+        fprintf(stderr, "test_discovery_targets failed\n");
         return 1;
     }
     if (test_cli_numeric_parser() != 0) {
