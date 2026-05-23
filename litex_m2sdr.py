@@ -785,7 +785,10 @@ class BaseSoC(SoCMini):
 
             # Host-accessible SATA DMA staging buffer.
             # ----------------------------------------
-            self.sata_host_buffer = SATAHostBuffer(size=SATA_HOST_BUFFER_SIZE)
+            self.sata_host_buffer = SATAHostBuffer(
+                size          = SATA_HOST_BUFFER_SIZE,
+                with_dma_port = hasattr(self, "dma_bus"),
+            )
             self.bus.add_slave(name="sata_host_buffer",
                 slave  = self.sata_host_buffer.host_bus,
                 region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)

@@ -22,9 +22,10 @@ SATA_HOST_BUFFER_SIZE = 64 * 1024
 
 
 class SATAHostBuffer(LiteXModule):
-    def __init__(self, size=SATA_HOST_BUFFER_SIZE):
+    def __init__(self, size=SATA_HOST_BUFFER_SIZE, with_dma_port=True):
         self.host_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
-        self.dma_bus  = wishbone.Interface(data_width=32, address_width=32, addressing="word")
+        if with_dma_port:
+            self.dma_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
 
         # # #
 
@@ -33,7 +34,8 @@ class SATAHostBuffer(LiteXModule):
         self.specials += mem
 
         self._add_port(mem, self.host_bus)
-        self._add_port(mem, self.dma_bus)
+        if with_dma_port:
+            self._add_port(mem, self.dma_bus)
 
     def _add_port(self, mem, bus):
         port = mem.get_port(write_capable=True, we_granularity=8, mode=WRITE_FIRST)
