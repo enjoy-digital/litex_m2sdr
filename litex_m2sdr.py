@@ -65,7 +65,8 @@ from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
-from litex_m2sdr.gateware.sata        import SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer
+from litex_m2sdr.gateware.sata        import (
+    SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer, install_litesata_dma_patches)
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -760,6 +761,8 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
+            install_litesata_dma_patches()
+
             # PHY.
             # ----
             self.sata_phy = LiteSATAPHY(platform.device,
