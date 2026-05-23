@@ -348,7 +348,6 @@ enum sata_pattern_kind {
 };
 
 #define SATA_SECTOR_BYTES 512u
-#define SATA_HOST_IO_MAX_SECTORS_PER_HW_OP 1u
 #if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
     defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
 #define SATA_HOST_IO_AVAILABLE 1
@@ -626,12 +625,7 @@ static bool check_pattern(const uint8_t *buf, size_t len, uint64_t start_byte,
 
 static uint32_t sata_host_buffer_max_sectors(void)
 {
-    uint32_t buffer_sectors = (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
-
-    /* The current host staging path is correctness-first: issue one sector per
-     * LiteSATA DMA command until the multi-sector staging-buffer path is fixed. */
-    return buffer_sectors < SATA_HOST_IO_MAX_SECTORS_PER_HW_OP ?
-        buffer_sectors : SATA_HOST_IO_MAX_SECTORS_PER_HW_OP;
+    return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
 }
 
 static void sata_host_buffer_write(void *conn, const uint8_t *buf, size_t bytes)
