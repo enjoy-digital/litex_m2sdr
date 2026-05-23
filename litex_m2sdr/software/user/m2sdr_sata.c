@@ -444,6 +444,23 @@ static void sata_tx_start(void *conn)
     m2sdr_write32(conn, CSR_SATA_TX_STREAMER_START_ADDR, 1);
 }
 
+static int sata_streamers_reset(void *conn, bool rx, bool tx)
+{
+#ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
+    uint32_t control = 0;
+
+    if (rx)
+        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
+    if (tx)
+        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
+    m2sdr_write32(conn, M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR, control);
+    return 0;
+#else
+    (void)conn; (void)rx; (void)tx;
+    return -1;
+#endif
+}
+
 static uint32_t sata_rx_done(void *conn)
 {
     return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR);
@@ -486,12 +503,13 @@ static uint32_t sata_mem2sector_error(void *conn)
 }
 #endif
 
-static enum sata_wait_result wait_done(const char *name,
-                                       uint32_t (*done_fn)(void *),
-                                       uint32_t (*err_fn)(void *),
-                                       void *conn,
-                                       int timeout_ms,
-                                       uint64_t nsectors)
+static enum sata_wait_result wait_done_report(const char *name,
+                                              uint32_t (*done_fn)(void *),
+                                              uint32_t (*err_fn)(void *),
+                                              void *conn,
+                                              int timeout_ms,
+                                              uint64_t nsectors,
+                                              bool report)
 {
     int elapsed = 0;
     int64_t start = m2sdr_sata_get_time_ms();
@@ -504,8 +522,10 @@ static enum sata_wait_result wait_done(const char *name,
         uint32_t done = done_fn(conn);
         uint32_t err  = err_fn(conn);
         if (done) {
-            if (err) printf("%s: done (error=1)\n", name);
-            else     printf("%s: done\n", name);
+            if (report) {
+                if (err) printf("%s: done (error=1)\n", name);
+                else     printf("%s: done\n", name);
+            }
             return SATA_WAIT_OK;
         }
         if (timeout_ms >= 0 && elapsed >= timeout_ms) {
@@ -513,7 +533,7 @@ static enum sata_wait_result wait_done(const char *name,
             return SATA_WAIT_TIMEOUT;
         }
         int64_t now = m2sdr_sata_get_time_ms();
-        if (now - last >= 500) {
+        if (report && now - last >= 500) {
             double mb = (double)nsectors * 512.0 / (1024.0 * 1024.0);
             double s  = (double)(now - start) / 1000.0;
             double mbps = (s > 0.0) ? (mb / s) : 0.0;
@@ -523,6 +543,25 @@ static enum sata_wait_result wait_done(const char *name,
         msleep(10);
         elapsed += 10;
     }
+}
+
+static enum sata_wait_result wait_done(const char *name,
+                                       uint32_t (*done_fn)(void *),
+                                       uint32_t (*err_fn)(void *),
+                                       void *conn,
+                                       int timeout_ms,
+                                       uint64_t nsectors)
+{
+    return wait_done_report(name, done_fn, err_fn, conn, timeout_ms, nsectors, true);
+}
+
+static enum sata_wait_result wait_done_quiet(const char *name,
+                                             uint32_t (*done_fn)(void *),
+                                             uint32_t (*err_fn)(void *),
+                                             void *conn,
+                                             int timeout_ms)
+{
+    return wait_done_report(name, done_fn, err_fn, conn, timeout_ms, 1, false);
 }
 
 static void print_planned_transfer(const char *name,
@@ -1067,33 +1106,54 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
+    enum sata_wait_result tx_rc = SATA_WAIT_OK;
+    enum sata_wait_result rx_rc = SATA_WAIT_OK;
+    int rc = 0;
 
     /* SSD -> SSD:
      * SATA_TX_STREAMER -> TX -> loopback -> RX -> SATA_RX_STREAMER.
+     *
+     * Sequence one sector at a time. The RX streamer stages one full sector
+     * before writing it, and issuing the next SATA read before that write has
+     * completed can deadlock the shared SATA core during disk-to-disk copies.
      */
     crossbar_set(conn, TXSRC_SATA, RXDST_SATA);
     txrx_loopback_set(conn, 1);
 
-    /* Start RX first. */
-    sata_rx_program(conn, dst_sector, nsectors);
-    sata_tx_program(conn, src_sector, nsectors);
     if (dry_run) {
         print_planned_transfer("copy", src_sector, dst_sector, nsectors, TXSRC_SATA, RXDST_SATA, 1, timeout_ms);
         sata_operation_finish(&op);
         return 0;
     }
 
-    sata_rx_start(conn);
-    msleep(5);
-    sata_tx_start(conn);
+    for (uint32_t i = 0; i < nsectors; i++) {
+        sata_rx_program(conn, dst_sector + i, 1);
+        sata_tx_program(conn, src_sector + i, 1);
 
-    enum sata_wait_result tx_rc =
-        wait_done("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
-    enum sata_wait_result rx_rc = SATA_WAIT_OK;
-    if (tx_rc == SATA_WAIT_OK)
-        rx_rc = wait_done("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+        /* Start RX first so the looped-back stream always has a sink. */
+        sata_rx_start(conn);
+        msleep(5);
+        sata_tx_start(conn);
+
+        tx_rc = wait_done_quiet("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms);
+        if (tx_rc == SATA_WAIT_OK)
+            rx_rc = wait_done_quiet("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms);
+
+        if (tx_rc != SATA_WAIT_OK || rx_rc != SATA_WAIT_OK) {
+            sata_streamers_reset(conn, true, true);
+            rc = 1;
+            break;
+        }
+
+        if (nsectors > 1 && (((i + 1) % 64) == 0 || (i + 1) == nsectors))
+            printf("SATA_COPY(copy): copied %" PRIu32 "/%" PRIu32 " sectors\n", i + 1, nsectors);
+    }
+
+    if (rc == 0)
+        printf("SATA_COPY(copy): done\n");
+
     sata_operation_finish(&op);
-    return (tx_rc == SATA_WAIT_OK && rx_rc == SATA_WAIT_OK) ? 0 : 1;
+    return rc;
 }
 
 static int parse_stream_selector(const char *label, const char *text, bool *rx, bool *tx)
@@ -1125,7 +1185,6 @@ static int do_stream_stop(const char *which_s)
 {
     bool rx = false;
     bool tx = false;
-    uint32_t control = 0;
     struct m2sdr_dev *conn;
 
     if (parse_stream_selector("stream", which_s, &rx, &tx) != 0)
@@ -1135,16 +1194,11 @@ static int do_stream_stop(const char *which_s)
     sata_require_csrs();
 
 #ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
-    if (rx)
-        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
-    if (tx)
-        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
-    m2sdr_write32(conn, M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR, control);
+    sata_streamers_reset(conn, rx, tx);
     printf("SATA streamer reset: %s\n", which_s);
     m2sdr_close_dev(conn);
     return 0;
 #else
-    (void)control;
     fprintf(stderr,
         "SATA streamer stop is not supported by this gateware/software header. "
         "Rebuild and load gateware with CSR_SATA_STREAMER_CONTROL.\n");
@@ -1273,7 +1327,7 @@ static void help(void)
            "  -c, --device-num N             Select the device (default: 0).\n"
            "  -i, --ip ADDR                  Target IP address for Etherbone.\n"
            "  -p, --port PORT                Port number (default: 1234).\n"
-           "      --timeout-ms MS            Timeout for streamer operations (default: 10000, -1=infinite).\n"
+           "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
            "      --pattern NAME             Pattern for write-pattern/verify-pattern: zero|counter|prbs.\n"
            "\n"
@@ -1344,7 +1398,7 @@ int main(int argc, char **argv)
     int c;
     int option_index = 0;
 
-    int timeout_ms = 10000;
+    int timeout_ms = 30000;
     bool dry_run = false;
     const char *pattern_name = "counter";
     m2sdr_cli_device_init(&g_cli_dev);
