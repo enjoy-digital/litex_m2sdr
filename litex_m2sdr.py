@@ -1137,6 +1137,10 @@ class BaseSoC(SoCMini):
             "set_property CLOCK_DEDICATED_ROUTE FALSE "
             "[get_nets -hierarchical -quiet {{*crg_s7mmcm_clkout_buf*}}]"
         )
+        platform.add_platform_command(
+            "set_property CLOCK_DEDICATED_ROUTE FALSE "
+            "[get_nets -hierarchical -quiet {{clk10_clk}}]"
+        )
 
         # Low-Speed Peripheral Control Outputs (registered/static outputs, no external timing budget modeled).
         platform.add_platform_command(
