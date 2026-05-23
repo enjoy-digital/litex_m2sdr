@@ -483,6 +483,7 @@ Example usage:
 
 ### m2sdr_sata
 Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform slow host-side sector I/O through PCIe or Ethernet register access when the gateware exposes the SATA host staging buffer.
+Named captures use a small SATA catalog at sector `0x800`; automatic data allocation starts at sector `0x100000`.
 
 **Usage**:
 ~~~~
@@ -518,6 +519,30 @@ m2sdr_sata [options] cmd [args...]
   Fill sectors with `--pattern zero|counter|prbs`.
 - **verify-pattern `SRC_SECTOR NSECTORS`**
   Verify sectors against `--pattern zero|counter|prbs`.
+- **catalog-init**
+  Initialize/reset the named SATA capture catalog.
+- **list**
+  List named captures.
+- **show `NAME`**
+  Show the sector range and RF/sample metadata for a named capture.
+- **delete `NAME`**
+  Remove a named capture from the catalog without erasing its sectors.
+- **fsck**
+  Check catalog names and sector overlaps.
+- **capture `NAME --seconds SEC|--sectors N [RF options]`**
+  Configure RF, record RX to SATA, and add a named catalog entry.
+- **capture-start `NAME --seconds SEC|--sectors N [RF options]`**
+  Start a named RX-to-SATA capture and return immediately.
+- **capture-status**
+  Alias for `stream-status`.
+- **import `NAME FILE [metadata options]`**
+  Write a host file to SATA and catalog it.
+- **export `NAME FILE|-`**
+  Read a named capture back to a host file.
+- **replay-host `NAME --dst pcie|eth`**
+  Replay SATA contents through loopback to the normal host RX path for tools such as GQRX/Soapy.
+- **replay-rf `NAME [RF overrides]`**
+  Replay SATA contents to the RF TX path.
 - **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
   Raw header control (writes HEADER CSR enable bits).
 
@@ -536,6 +561,14 @@ Example usage:
 ./m2sdr_sata --pattern counter verify-pattern 0x8000 4096
 ./m2sdr_sata read-file 0x8000 4096 /tmp/m2sdr-sata.bin
 ./m2sdr_sata write-file /tmp/m2sdr-sata.bin 0x9000
+
+./m2sdr_sata -i 192.168.1.50 catalog-init
+./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
+./m2sdr_sata -i 192.168.1.50 list
+./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
+./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
+./m2sdr_sata -i 192.168.1.50 replay-host fm_test --dst eth
 ~~~~
 
 ---

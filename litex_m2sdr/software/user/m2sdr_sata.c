@@ -27,6 +27,8 @@
 #include <getopt.h>
 #include <errno.h>
 #include <sys/file.h>
+#include <sys/stat.h>
+#include <math.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -90,6 +92,57 @@ static int parse_bool01(const char *label, const char *s)
         exit(1);
     }
     return (int)v;
+}
+
+static int64_t parse_i64(const char *label, const char *s)
+{
+    int64_t v = 0;
+
+    if (m2sdr_cli_parse_int64(s, &v) != 0) {
+        m2sdr_cli_error("invalid %s '%s'", label ? label : "value", s ? s : "(null)");
+        exit(1);
+    }
+    return v;
+}
+
+static double parse_double_arg(const char *label, const char *s)
+{
+    double v = 0.0;
+
+    if (m2sdr_cli_parse_double(s, &v) != 0) {
+        m2sdr_cli_error("invalid %s '%s'", label ? label : "value", s ? s : "(null)");
+        exit(1);
+    }
+    return v;
+}
+
+static const char *format_name(enum m2sdr_format format)
+{
+    return m2sdr_cli_format_name(format);
+}
+
+static const char *channel_layout_name(enum m2sdr_channel_layout layout)
+{
+    switch (layout) {
+    case M2SDR_CHANNEL_LAYOUT_1T1R: return "1t1r";
+    case M2SDR_CHANNEL_LAYOUT_2T2R: return "2t2r";
+    default:                        return "unknown";
+    }
+}
+
+static enum m2sdr_channel_layout parse_channel_layout(const char *text)
+{
+    if (text && strcmp(text, "1t1r") == 0)
+        return M2SDR_CHANNEL_LAYOUT_1T1R;
+    if (text && strcmp(text, "2t2r") == 0)
+        return M2SDR_CHANNEL_LAYOUT_2T2R;
+    m2sdr_cli_invalid_choice("channel layout", text, "1t1r or 2t2r");
+    exit(1);
+}
+
+static unsigned channel_layout_count(enum m2sdr_channel_layout layout)
+{
+    return layout == M2SDR_CHANNEL_LAYOUT_1T1R ? 1u : 2u;
 }
 
 /* Connection functions ------------------------------------------------------ */
@@ -348,6 +401,12 @@ enum sata_pattern_kind {
 };
 
 #define SATA_SECTOR_BYTES 512u
+#define SATA_CATALOG_SECTOR  0x800ull
+#define SATA_CATALOG_SECTORS 64u
+#define SATA_DATA_START      0x100000ull
+#define SATA_CAPTURE_NAME_MAX 64
+#define SATA_CAPTURE_NOTES_MAX 128
+#define SATA_CATALOG_MAX_ENTRIES 64
 #if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
     defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
 #define SATA_HOST_IO_AVAILABLE 1
@@ -946,6 +1005,815 @@ out_close_dev:
     return rc;
 }
 
+/* Named capture catalog ----------------------------------------------------- */
+
+struct sata_capture_entry {
+    bool used;
+    char name[SATA_CAPTURE_NAME_MAX];
+    uint64_t sector;
+    uint32_t nsectors;
+    uint64_t bytes;
+    int64_t sample_rate;
+    char format[16];
+    char channel_layout[16];
+    uint64_t rx_freq;
+    uint64_t tx_freq;
+    uint64_t bandwidth;
+    int64_t rx_gain;
+    int64_t tx_att;
+    uint64_t created;
+    char notes[SATA_CAPTURE_NOTES_MAX];
+};
+
+struct sata_catalog {
+    bool initialized;
+    struct sata_capture_entry entries[SATA_CATALOG_MAX_ENTRIES];
+};
+
+static int sata_read_to_host_buffer_quiet(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+{
+    sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
+    m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
+    return wait_done_quiet("SATA_SECTOR2MEM(catalog)",
+        sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
+}
+
+static int sata_write_from_host_buffer_quiet(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+{
+    sata_mem2sector_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
+    m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_START_ADDR, 1);
+    return wait_done_quiet("SATA_MEM2SECTOR(catalog)",
+        sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
+}
+
+static int catalog_buffer_check(void)
+{
+    if (SATA_CATALOG_SECTORS > sata_host_buffer_max_sectors()) {
+        fprintf(stderr, "Catalog region is larger than SATA host buffer.\n");
+        return 1;
+    }
+    return 0;
+}
+
+static void catalog_clear(struct sata_catalog *cat)
+{
+    memset(cat, 0, sizeof(*cat));
+    cat->initialized = true;
+}
+
+static int catalog_name_valid(const char *name)
+{
+    if (!name || !name[0] || strlen(name) >= SATA_CAPTURE_NAME_MAX)
+        return 0;
+    for (const char *p = name; *p; p++) {
+        if (*p == '|' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ' ')
+            return 0;
+    }
+    return 1;
+}
+
+static int catalog_text_valid(const char *text, size_t max_len)
+{
+    if (!text)
+        return 1;
+    if (strlen(text) >= max_len)
+        return 0;
+    for (const char *p = text; *p; p++) {
+        if (*p == '|' || *p == '\n' || *p == '\r')
+            return 0;
+    }
+    return 1;
+}
+
+static void catalog_copy(char *dst, size_t dst_len, const char *src)
+{
+    if (!dst || dst_len == 0)
+        return;
+    if (!src)
+        src = "";
+    snprintf(dst, dst_len, "%s", src);
+}
+
+static char *catalog_next_field(char **save)
+{
+    char *field = *save;
+    char *sep;
+
+    if (!field)
+        return NULL;
+    sep = strchr(field, '|');
+    if (sep) {
+        *sep = '\0';
+        *save = sep + 1;
+    } else {
+        *save = NULL;
+    }
+    return field;
+}
+
+static int catalog_parse_entry(struct sata_catalog *cat, char *line)
+{
+    char *save = line;
+    char *field;
+    struct sata_capture_entry e;
+    int slot = -1;
+
+    memset(&e, 0, sizeof(e));
+    field = catalog_next_field(&save);
+    if (!field || strcmp(field, "entry") != 0)
+        return 0;
+
+    field = catalog_next_field(&save);
+    if (!catalog_name_valid(field))
+        return -1;
+    catalog_copy(e.name, sizeof(e.name), field);
+
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.sector) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u32(field, &e.nsectors) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.bytes) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_int64(field, &e.sample_rate) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!catalog_text_valid(field, sizeof(e.format)))
+        return -1;
+    catalog_copy(e.format, sizeof(e.format), field);
+    field = catalog_next_field(&save);
+    if (!catalog_text_valid(field, sizeof(e.channel_layout)))
+        return -1;
+    catalog_copy(e.channel_layout, sizeof(e.channel_layout), field);
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.rx_freq) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.tx_freq) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.bandwidth) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_int64(field, &e.rx_gain) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_int64(field, &e.tx_att) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!field || m2sdr_cli_parse_u64(field, &e.created) != 0)
+        return -1;
+    field = catalog_next_field(&save);
+    if (!catalog_text_valid(field, sizeof(e.notes)))
+        return -1;
+    catalog_copy(e.notes, sizeof(e.notes), field ? field : "");
+
+    e.used = true;
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        if (!cat->entries[i].used) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        return -1;
+    cat->entries[slot] = e;
+    return 0;
+}
+
+static int catalog_load_from_conn(void *conn, struct sata_catalog *cat, int timeout_ms)
+{
+    uint32_t bytes = SATA_CATALOG_SECTORS * SATA_SECTOR_BYTES;
+    uint8_t *buf;
+    char *text;
+    char *line;
+    char *save;
+    int rc = 1;
+
+    memset(cat, 0, sizeof(*cat));
+    if (catalog_buffer_check() != 0)
+        return 1;
+
+    buf = calloc(1, bytes + 1u);
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate catalog buffer.\n");
+        return 1;
+    }
+    if (sata_read_to_host_buffer_quiet(conn, SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, timeout_ms) != 0)
+        goto out;
+    sata_host_buffer_read(conn, buf, bytes);
+    text = (char *)buf;
+    text[bytes] = '\0';
+
+    line = strtok_r(text, "\n", &save);
+    if (!line || strcmp(line, "M2SDR_SATA_CATALOG_V1") != 0) {
+        rc = 0;
+        goto out;
+    }
+    cat->initialized = true;
+    while ((line = strtok_r(NULL, "\n", &save)) != NULL) {
+        if (strncmp(line, "entry|", 6) == 0 && catalog_parse_entry(cat, line) != 0) {
+            fprintf(stderr, "Invalid SATA catalog entry.\n");
+            goto out;
+        }
+    }
+    rc = 0;
+
+out:
+    free(buf);
+    return rc;
+}
+
+static int catalog_appendf(char *buf, size_t buf_len, size_t *used, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (*used >= buf_len)
+        return -1;
+    va_start(ap, fmt);
+    n = vsnprintf(buf + *used, buf_len - *used, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= buf_len - *used)
+        return -1;
+    *used += (size_t)n;
+    return 0;
+}
+
+static int catalog_save_to_conn(void *conn, const struct sata_catalog *cat, int timeout_ms)
+{
+    uint32_t bytes = SATA_CATALOG_SECTORS * SATA_SECTOR_BYTES;
+    uint8_t *buf;
+    size_t used = 0;
+    int rc = 1;
+
+    if (catalog_buffer_check() != 0)
+        return 1;
+    buf = calloc(1, bytes);
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate catalog buffer.\n");
+        return 1;
+    }
+
+    if (catalog_appendf((char *)buf, bytes, &used,
+            "M2SDR_SATA_CATALOG_V1\n"
+            "catalog_sector=%" PRIu64 "\n"
+            "catalog_sectors=%u\n"
+            "data_start=%" PRIu64 "\n",
+            (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS,
+            (uint64_t)SATA_DATA_START) != 0)
+        goto out;
+
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *e = &cat->entries[i];
+        if (!e->used)
+            continue;
+        if (catalog_appendf((char *)buf, bytes, &used,
+                "entry|%s|%" PRIu64 "|%" PRIu32 "|%" PRIu64 "|%" PRId64
+                "|%s|%s|%" PRIu64 "|%" PRIu64 "|%" PRIu64 "|%" PRId64
+                "|%" PRId64 "|%" PRIu64 "|%s\n",
+                e->name, e->sector, e->nsectors, e->bytes, e->sample_rate,
+                e->format, e->channel_layout, e->rx_freq, e->tx_freq,
+                e->bandwidth, e->rx_gain, e->tx_att, e->created, e->notes) != 0) {
+            fprintf(stderr, "SATA catalog is full.\n");
+            goto out;
+        }
+    }
+
+    sata_host_buffer_write(conn, buf, bytes);
+    if (sata_write_from_host_buffer_quiet(conn, SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, timeout_ms) != 0)
+        goto out;
+    rc = 0;
+
+out:
+    free(buf);
+    return rc;
+}
+
+static int catalog_load(struct sata_catalog *cat, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rc;
+
+    sata_require_csrs();
+    rc = catalog_load_from_conn(conn, cat, timeout_ms);
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int catalog_save(const struct sata_catalog *cat, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rc;
+
+    sata_require_csrs();
+    rc = catalog_save_to_conn(conn, cat, timeout_ms);
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int catalog_require(struct sata_catalog *cat, int timeout_ms)
+{
+    if (catalog_load(cat, timeout_ms) != 0)
+        return 1;
+    if (!cat->initialized) {
+        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata catalog-init\n");
+        return 1;
+    }
+    return 0;
+}
+
+static struct sata_capture_entry *catalog_find(struct sata_catalog *cat, const char *name)
+{
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        if (cat->entries[i].used && strcmp(cat->entries[i].name, name) == 0)
+            return &cat->entries[i];
+    }
+    return NULL;
+}
+
+static int catalog_first_free(struct sata_catalog *cat)
+{
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        if (!cat->entries[i].used)
+            return i;
+    }
+    return -1;
+}
+
+static uint64_t catalog_end_sector(const struct sata_capture_entry *e)
+{
+    return e->sector + (uint64_t)e->nsectors;
+}
+
+static bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
+                                    uint64_t b_start, uint64_t b_count)
+{
+    uint64_t a_end = a_start + a_count;
+    uint64_t b_end = b_start + b_count;
+
+    return a_start < b_end && b_start < a_end;
+}
+
+static int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
+                                       uint64_t sector, uint32_t nsectors)
+{
+    if (!catalog_name_valid(name)) {
+        fprintf(stderr, "Invalid capture name. Use a short name without spaces or '|'.\n");
+        return 1;
+    }
+    if (catalog_find(cat, name)) {
+        fprintf(stderr, "Capture '%s' already exists.\n", name);
+        return 1;
+    }
+    if (nsectors == 0) {
+        fprintf(stderr, "Capture sector count must be greater than zero.\n");
+        return 1;
+    }
+    if (sector < SATA_DATA_START) {
+        fprintf(stderr, "Capture sector 0x%016" PRIx64 " is before data start 0x%016" PRIx64 ".\n",
+            sector, (uint64_t)SATA_DATA_START);
+        return 1;
+    }
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *e = &cat->entries[i];
+        if (!e->used)
+            continue;
+        if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors)) {
+            fprintf(stderr, "Capture overlaps '%s' at 0x%016" PRIx64 "..0x%016" PRIx64 ".\n",
+                e->name, e->sector, catalog_end_sector(e));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors)
+{
+    uint64_t sector = SATA_DATA_START;
+
+    for (;;) {
+        bool moved = false;
+        for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+            const struct sata_capture_entry *e = &cat->entries[i];
+            if (!e->used)
+                continue;
+            if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors)) {
+                sector = catalog_end_sector(e);
+                moved = true;
+            }
+        }
+        if (!moved)
+            return sector;
+    }
+}
+
+static void catalog_entry_print(const struct sata_capture_entry *e)
+{
+    printf("Name           : %s\n", e->name);
+    printf("Sector         : 0x%016" PRIx64 "\n", e->sector);
+    printf("Sectors        : %" PRIu32 "\n", e->nsectors);
+    printf("Bytes          : %" PRIu64 "\n", e->bytes);
+    printf("Sample Rate    : %" PRId64 "\n", e->sample_rate);
+    printf("Format         : %s\n", e->format);
+    printf("Channel Layout : %s\n", e->channel_layout);
+    printf("RX Frequency   : %" PRIu64 "\n", e->rx_freq);
+    printf("TX Frequency   : %" PRIu64 "\n", e->tx_freq);
+    printf("Bandwidth      : %" PRIu64 "\n", e->bandwidth);
+    printf("RX Gain        : %" PRId64 "\n", e->rx_gain);
+    printf("TX Attenuation : %" PRId64 "\n", e->tx_att);
+    printf("Created        : %" PRIu64 "\n", e->created);
+    if (e->notes[0])
+        printf("Notes          : %s\n", e->notes);
+}
+
+static int catalog_add_entry(struct sata_catalog *cat, const struct sata_capture_entry *entry)
+{
+    int slot = catalog_first_free(cat);
+
+    if (slot < 0) {
+        fprintf(stderr, "SATA catalog is full.\n");
+        return 1;
+    }
+    cat->entries[slot] = *entry;
+    cat->entries[slot].used = true;
+    return 0;
+}
+
+static int do_catalog_init(int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct m2sdr_dev *conn;
+    int rc;
+
+    catalog_clear(&cat);
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    rc = catalog_save_to_conn(conn, &cat, timeout_ms);
+    m2sdr_close_dev(conn);
+    if (rc != 0)
+        return 1;
+    printf("Initialized SATA catalog at sector 0x%016" PRIx64 " (%u sectors).\n",
+        (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS);
+    return 0;
+}
+
+static int do_catalog_list(int timeout_ms)
+{
+    struct sata_catalog cat;
+    int count = 0;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+
+    printf("%-24s %-18s %-10s %-12s %-8s %-8s\n",
+        "NAME", "SECTOR", "SECTORS", "RATE", "FORMAT", "CHANS");
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *e = &cat.entries[i];
+        if (!e->used)
+            continue;
+        printf("%-24s 0x%016" PRIx64 " %-10" PRIu32 " %-12" PRId64 " %-8s %-8s\n",
+            e->name, e->sector, e->nsectors, e->sample_rate, e->format, e->channel_layout);
+        count++;
+    }
+    if (count == 0)
+        printf("(empty)\n");
+    return 0;
+}
+
+static int do_catalog_show(const char *name, int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+    catalog_entry_print(e);
+    return 0;
+}
+
+static int do_catalog_delete(const char *name, int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+    struct m2sdr_dev *conn;
+    int rc;
+
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    rc = catalog_load_from_conn(conn, &cat, timeout_ms);
+    if (rc != 0) {
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+    if (!cat.initialized) {
+        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata catalog-init\n");
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+    memset(e, 0, sizeof(*e));
+    rc = catalog_save_to_conn(conn, &cat, timeout_ms);
+    m2sdr_close_dev(conn);
+    if (rc != 0)
+        return 1;
+    printf("Deleted capture '%s' from catalog. Data sectors were not erased.\n", name);
+    return 0;
+}
+
+static int do_catalog_fsck(int timeout_ms)
+{
+    struct sata_catalog cat;
+    int errors = 0;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *a = &cat.entries[i];
+        if (!a->used)
+            continue;
+        if (!catalog_name_valid(a->name) || a->nsectors == 0 || a->sector < SATA_DATA_START) {
+            fprintf(stderr, "Invalid entry: %s\n", a->name);
+            errors++;
+        }
+        for (int j = i + 1; j < SATA_CATALOG_MAX_ENTRIES; j++) {
+            const struct sata_capture_entry *b = &cat.entries[j];
+            if (!b->used)
+                continue;
+            if (strcmp(a->name, b->name) == 0) {
+                fprintf(stderr, "Duplicate name: %s\n", a->name);
+                errors++;
+            }
+            if (catalog_regions_overlap(a->sector, a->nsectors, b->sector, b->nsectors)) {
+                fprintf(stderr, "Overlap: %s and %s\n", a->name, b->name);
+                errors++;
+            }
+        }
+    }
+    if (errors == 0) {
+        printf("SATA catalog OK.\n");
+        return 0;
+    }
+    fprintf(stderr, "SATA catalog has %d error(s).\n", errors);
+    return 1;
+}
+
+static int do_export_capture(const char *name, const char *path, int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+    struct m2sdr_dev *conn;
+    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint8_t *buf;
+    uint32_t done = 0;
+    uint64_t remaining;
+    bool close_out = false;
+    FILE *out;
+    int rc = 1;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+
+    remaining = e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
+    buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate export buffer.\n");
+        return 1;
+    }
+    out = open_stdio_or_file(path, "wb", &close_out);
+    if (!out)
+        goto out_free;
+
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    while (done < e->nsectors && remaining > 0) {
+        uint32_t chunk = e->nsectors - done;
+        size_t chunk_bytes;
+        size_t write_bytes;
+
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        chunk_bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        if (sata_read_to_host_buffer_quiet(conn, e->sector + done, chunk, timeout_ms) != 0)
+            goto out_close_dev;
+        sata_host_buffer_read(conn, buf, chunk_bytes);
+        write_bytes = remaining < chunk_bytes ? (size_t)remaining : chunk_bytes;
+        if (fwrite(buf, 1, write_bytes, out) != write_bytes) {
+            perror(path);
+            goto out_close_dev;
+        }
+        remaining -= write_bytes;
+        done += chunk;
+    }
+    rc = 0;
+    printf("Exported '%s' to %s (%" PRIu64 " bytes).\n",
+        name, path, e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
+
+out_close_dev:
+    m2sdr_close_dev(conn);
+    if (close_out)
+        fclose(out);
+out_free:
+    free(buf);
+    return rc;
+}
+
+static uint64_t file_size_bytes(const char *path)
+{
+    struct stat st;
+
+    if (!path || !strcmp(path, "-")) {
+        fprintf(stderr, "Named import requires a regular file path, not '-'.\n");
+        exit(1);
+    }
+    if (stat(path, &st) != 0) {
+        perror(path);
+        exit(1);
+    }
+    if (!S_ISREG(st.st_mode)) {
+        fprintf(stderr, "%s is not a regular file.\n", path);
+        exit(1);
+    }
+    return (uint64_t)st.st_size;
+}
+
+struct named_transfer_options {
+    bool have_sector;
+    uint64_t sector;
+    int64_t sample_rate;
+    enum m2sdr_format format;
+    enum m2sdr_channel_layout channel_layout;
+    uint64_t rx_freq;
+    uint64_t tx_freq;
+    uint64_t bandwidth;
+    int64_t rx_gain;
+    int64_t tx_att;
+    char notes[SATA_CAPTURE_NOTES_MAX];
+};
+
+static void named_transfer_options_init(struct named_transfer_options *opts)
+{
+    struct m2sdr_config cfg;
+
+    memset(opts, 0, sizeof(*opts));
+    m2sdr_config_init(&cfg);
+    opts->sample_rate = cfg.sample_rate;
+    opts->format = M2SDR_FORMAT_SC16_Q11;
+    opts->channel_layout = cfg.channel_layout;
+    opts->rx_freq = (uint64_t)cfg.rx_freq;
+    opts->tx_freq = (uint64_t)cfg.tx_freq;
+    opts->bandwidth = (uint64_t)cfg.bandwidth;
+    opts->rx_gain = cfg.rx_gain1;
+    opts->tx_att = cfg.tx_att;
+}
+
+static int parse_named_option(struct named_transfer_options *opts, int argc, char **argv, int *index)
+{
+    const char *opt = argv[*index];
+    const char *value = NULL;
+
+    if (strncmp(opt, "--", 2) != 0)
+        return 0;
+    if (*index + 1 >= argc) {
+        fprintf(stderr, "Missing value for %s\n", opt);
+        exit(1);
+    }
+    value = argv[++(*index)];
+
+    if (!strcmp(opt, "--sector")) {
+        opts->sector = parse_u64(value);
+        opts->have_sector = true;
+    } else if (!strcmp(opt, "--sample-rate") || !strcmp(opt, "--samplerate")) {
+        opts->sample_rate = parse_i64("sample rate", value);
+    } else if (!strcmp(opt, "--format")) {
+        if (m2sdr_cli_parse_format(value, &opts->format) != 0) {
+            m2sdr_cli_invalid_choice("format", value, "sc16 or sc8");
+            exit(1);
+        }
+    } else if (!strcmp(opt, "--channel-layout") || !strcmp(opt, "--chan")) {
+        opts->channel_layout = parse_channel_layout(value);
+    } else if (!strcmp(opt, "--rx-freq") || !strcmp(opt, "--rx_freq")) {
+        opts->rx_freq = (uint64_t)parse_i64("RX frequency", value);
+    } else if (!strcmp(opt, "--tx-freq") || !strcmp(opt, "--tx_freq")) {
+        opts->tx_freq = (uint64_t)parse_i64("TX frequency", value);
+    } else if (!strcmp(opt, "--bandwidth")) {
+        opts->bandwidth = (uint64_t)parse_i64("bandwidth", value);
+    } else if (!strcmp(opt, "--rx-gain") || !strcmp(opt, "--rx_gain")) {
+        opts->rx_gain = parse_i64("RX gain", value);
+    } else if (!strcmp(opt, "--tx-att") || !strcmp(opt, "--tx_att")) {
+        opts->tx_att = parse_i64("TX attenuation", value);
+    } else if (!strcmp(opt, "--notes")) {
+        if (!catalog_text_valid(value, sizeof(opts->notes))) {
+            fprintf(stderr, "Notes are too long or contain '|'/newline.\n");
+            exit(1);
+        }
+        catalog_copy(opts->notes, sizeof(opts->notes), value);
+    } else {
+        fprintf(stderr, "Unknown option: %s\n", opt);
+        exit(1);
+    }
+    return 1;
+}
+
+static void catalog_entry_from_options(struct sata_capture_entry *e,
+                                       const char *name,
+                                       const struct named_transfer_options *opts,
+                                       uint64_t sector,
+                                       uint32_t nsectors,
+                                       uint64_t bytes)
+{
+    memset(e, 0, sizeof(*e));
+    e->used = true;
+    catalog_copy(e->name, sizeof(e->name), name);
+    e->sector = sector;
+    e->nsectors = nsectors;
+    e->bytes = bytes;
+    e->sample_rate = opts->sample_rate;
+    catalog_copy(e->format, sizeof(e->format), format_name(opts->format));
+    catalog_copy(e->channel_layout, sizeof(e->channel_layout), channel_layout_name(opts->channel_layout));
+    e->rx_freq = opts->rx_freq;
+    e->tx_freq = opts->tx_freq;
+    e->bandwidth = opts->bandwidth;
+    e->rx_gain = opts->rx_gain;
+    e->tx_att = opts->tx_att;
+    e->created = (uint64_t)time(NULL);
+    catalog_copy(e->notes, sizeof(e->notes), opts->notes);
+}
+
+static int do_import_capture(const char *name, const char *path, int argc, char **argv,
+                             int argi, int timeout_ms, bool dry_run)
+{
+    struct sata_catalog cat;
+    struct named_transfer_options opts;
+    struct sata_capture_entry entry;
+    uint64_t bytes = file_size_bytes(path);
+    uint32_t nsectors;
+    uint64_t sector;
+
+    if (bytes == 0) {
+        fprintf(stderr, "%s is empty.\n", path);
+        return 1;
+    }
+    nsectors = (uint32_t)((bytes + SATA_SECTOR_BYTES - 1u) / SATA_SECTOR_BYTES);
+    if ((uint64_t)nsectors * SATA_SECTOR_BYTES < bytes) {
+        fprintf(stderr, "Import file is too large.\n");
+        return 1;
+    }
+
+    named_transfer_options_init(&opts);
+    while (argi < argc) {
+        if (!parse_named_option(&opts, argc, argv, &argi)) {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            return 1;
+        }
+        argi++;
+    }
+
+    if (catalog_load(&cat, timeout_ms) != 0)
+        return 1;
+    if (!cat.initialized)
+        catalog_clear(&cat);
+    sector = opts.have_sector ? opts.sector : catalog_alloc_sector(&cat, nsectors);
+    if (catalog_validate_new_region(&cat, name, sector, nsectors) != 0)
+        return 1;
+    if (dry_run) {
+        printf("import dry-run: name=%s path=%s sector=0x%016" PRIx64
+               " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
+            name, path, sector, nsectors, bytes);
+        return 0;
+    }
+
+    if (do_write_file(path, sector, nsectors, true, timeout_ms) != 0)
+        return 1;
+    catalog_entry_from_options(&entry, name, &opts, sector, nsectors, bytes);
+    if (catalog_add_entry(&cat, &entry) != 0)
+        return 1;
+    if (catalog_save(&cat, timeout_ms) != 0)
+        return 1;
+    printf("Imported '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
+        name, sector, nsectors);
+    return 0;
+}
+
+
 #else
 
 static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path, int timeout_ms)
@@ -1207,6 +2075,292 @@ static int do_stream_stop(const char *which_s)
 #endif
 }
 
+#ifdef SATA_HOST_IO_AVAILABLE
+
+struct capture_options {
+    struct named_transfer_options named;
+    bool have_seconds;
+    double seconds;
+    bool have_sectors;
+    uint32_t sectors;
+};
+
+static void capture_options_init(struct capture_options *opts)
+{
+    memset(opts, 0, sizeof(*opts));
+    named_transfer_options_init(&opts->named);
+}
+
+static int parse_capture_option(struct capture_options *opts, int argc, char **argv, int *index)
+{
+    const char *opt = argv[*index];
+    const char *value = NULL;
+
+    if (strcmp(opt, "--seconds") == 0 || strcmp(opt, "--secs") == 0) {
+        if (*index + 1 >= argc) {
+            fprintf(stderr, "Missing value for %s\n", opt);
+            exit(1);
+        }
+        value = argv[++(*index)];
+        opts->seconds = parse_double_arg("seconds", value);
+        if (opts->seconds <= 0.0) {
+            fprintf(stderr, "seconds must be greater than zero.\n");
+            exit(1);
+        }
+        opts->have_seconds = true;
+        return 1;
+    }
+    if (strcmp(opt, "--sectors") == 0) {
+        if (*index + 1 >= argc) {
+            fprintf(stderr, "Missing value for %s\n", opt);
+            exit(1);
+        }
+        value = argv[++(*index)];
+        opts->sectors = parse_u32(value);
+        if (opts->sectors == 0) {
+            fprintf(stderr, "sectors must be greater than zero.\n");
+            exit(1);
+        }
+        opts->have_sectors = true;
+        return 1;
+    }
+    return parse_named_option(&opts->named, argc, argv, index);
+}
+
+static int capture_compute_size(const struct capture_options *opts,
+                                uint32_t *nsectors,
+                                uint64_t *bytes)
+{
+    if (opts->have_seconds && opts->have_sectors) {
+        fprintf(stderr, "Use either --seconds or --sectors, not both.\n");
+        return 1;
+    }
+    if (!opts->have_seconds && !opts->have_sectors) {
+        fprintf(stderr, "capture requires --seconds SEC or --sectors N.\n");
+        return 1;
+    }
+    if (opts->have_sectors) {
+        *nsectors = opts->sectors;
+        *bytes = (uint64_t)opts->sectors * SATA_SECTOR_BYTES;
+        return 0;
+    }
+    {
+        unsigned channels = channel_layout_count(opts->named.channel_layout);
+        size_t format_bytes = m2sdr_format_size(opts->named.format);
+        long double exact_bytes;
+
+        if (opts->named.sample_rate <= 0 || format_bytes == 0) {
+            fprintf(stderr, "Invalid capture sample rate or format.\n");
+            return 1;
+        }
+        exact_bytes = (long double)opts->seconds *
+                      (long double)opts->named.sample_rate *
+                      (long double)channels *
+                      (long double)format_bytes;
+        if (exact_bytes <= 0.0L || exact_bytes > (long double)UINT64_MAX) {
+            fprintf(stderr, "Capture size is out of range.\n");
+            return 1;
+        }
+        {
+            long double whole = floorl(exact_bytes);
+            long double frac = exact_bytes - whole;
+            *bytes = (uint64_t)((frac < 1e-6L) ? whole : ceill(exact_bytes));
+        }
+        *nsectors = (uint32_t)((*bytes + SATA_SECTOR_BYTES - 1u) / SATA_SECTOR_BYTES);
+        if (*nsectors == 0 || (uint64_t)*nsectors * SATA_SECTOR_BYTES < *bytes) {
+            fprintf(stderr, "Capture sector count is out of range.\n");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int apply_rf_config_from_options(const struct named_transfer_options *opts)
+{
+    struct m2sdr_config cfg;
+    struct m2sdr_dev *dev;
+    int rc;
+
+    m2sdr_config_init(&cfg);
+    cfg.sample_rate = opts->sample_rate;
+    cfg.bandwidth = (int64_t)opts->bandwidth;
+    cfg.rx_freq = (int64_t)opts->rx_freq;
+    cfg.tx_freq = (int64_t)opts->tx_freq;
+    cfg.rx_gain1 = opts->rx_gain;
+    cfg.rx_gain2 = opts->rx_gain;
+    cfg.tx_att = opts->tx_att;
+    cfg.program_rx_gains = true;
+    cfg.enable_8bit_mode = (opts->format == M2SDR_FORMAT_SC8_Q7);
+    cfg.channel_layout = opts->channel_layout;
+    cfg.chan_mode = channel_layout_name(opts->channel_layout);
+
+    dev = m2sdr_open_dev();
+    rc = m2sdr_apply_config(dev, &cfg);
+    if (rc != M2SDR_ERR_OK)
+        fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+    m2sdr_close_dev(dev);
+    return rc == M2SDR_ERR_OK ? 0 : 1;
+}
+
+static int catalog_entry_to_options(const struct sata_capture_entry *e,
+                                    struct named_transfer_options *opts)
+{
+    named_transfer_options_init(opts);
+    opts->sample_rate = e->sample_rate;
+    if (m2sdr_cli_parse_format(e->format, &opts->format) != 0) {
+        fprintf(stderr, "Capture '%s' has invalid format '%s'.\n", e->name, e->format);
+        return 1;
+    }
+    opts->channel_layout = parse_channel_layout(e->channel_layout);
+    opts->rx_freq = e->rx_freq;
+    opts->tx_freq = e->tx_freq;
+    opts->bandwidth = e->bandwidth;
+    opts->rx_gain = e->rx_gain;
+    opts->tx_att = e->tx_att;
+    catalog_copy(opts->notes, sizeof(opts->notes), e->notes);
+    return 0;
+}
+
+static void parse_replay_rf_overrides(struct named_transfer_options *opts,
+                                      int argc, char **argv, int argi)
+{
+    while (argi < argc) {
+        if (!parse_named_option(opts, argc, argv, &argi)) {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            exit(1);
+        }
+        argi++;
+    }
+}
+
+static int do_capture_named(const char *name, int argc, char **argv, int argi,
+                            int timeout_ms, bool start_only, bool dry_run)
+{
+    struct sata_catalog cat;
+    struct capture_options opts;
+    struct sata_capture_entry entry;
+    uint64_t bytes = 0;
+    uint32_t nsectors = 0;
+    uint64_t sector;
+
+    capture_options_init(&opts);
+    while (argi < argc) {
+        if (!parse_capture_option(&opts, argc, argv, &argi)) {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            return 1;
+        }
+        argi++;
+    }
+    if (capture_compute_size(&opts, &nsectors, &bytes) != 0)
+        return 1;
+    if (catalog_load(&cat, timeout_ms) != 0)
+        return 1;
+    if (!cat.initialized)
+        catalog_clear(&cat);
+    sector = opts.named.have_sector ? opts.named.sector : catalog_alloc_sector(&cat, nsectors);
+    if (catalog_validate_new_region(&cat, name, sector, nsectors) != 0)
+        return 1;
+    if (dry_run) {
+        printf("%s dry-run: name=%s sector=0x%016" PRIx64 " nsectors=%" PRIu32
+               " bytes=%" PRIu64 " sample_rate=%" PRId64 " format=%s channels=%s\n",
+            start_only ? "capture-start" : "capture",
+            name, sector, nsectors, bytes, opts.named.sample_rate,
+            format_name(opts.named.format), channel_layout_name(opts.named.channel_layout));
+        return 0;
+    }
+
+    if (apply_rf_config_from_options(&opts.named) != 0)
+        return 1;
+    if (start_only) {
+        catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes);
+        if (catalog_add_entry(&cat, &entry) != 0)
+            return 1;
+        if (catalog_save(&cat, timeout_ms) != 0)
+            return 1;
+        if (do_record_start(sector, nsectors, timeout_ms, false) != 0)
+            return 1;
+        printf("Started capture '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
+            name, sector, nsectors);
+        return 0;
+    } else {
+        if (do_record(sector, nsectors, timeout_ms, false) != 0)
+            return 1;
+    }
+
+    catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes);
+    if (catalog_add_entry(&cat, &entry) != 0)
+        return 1;
+    if (catalog_save(&cat, timeout_ms) != 0)
+        return 1;
+    printf("Recorded capture '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
+        name, sector, nsectors);
+    return 0;
+}
+
+static int do_replay_host_named(const char *name, int argc, char **argv, int argi,
+                                int timeout_ms, bool dry_run)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+    const char *dst = NULL;
+
+    while (argi < argc) {
+        if (!strcmp(argv[argi], "--dst")) {
+            if (argi + 1 >= argc) {
+                fprintf(stderr, "Missing value for --dst\n");
+                return 1;
+            }
+            dst = argv[++argi];
+        } else {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            return 1;
+        }
+        argi++;
+    }
+    if (!dst) {
+        fprintf(stderr, "replay-host requires --dst pcie|eth.\n");
+        return 1;
+    }
+    if (strcmp(dst, "pcie") != 0 && strcmp(dst, "eth") != 0) {
+        m2sdr_cli_invalid_choice("replay-host destination", dst, "pcie or eth");
+        return 1;
+    }
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+    return do_replay(e->sector, e->nsectors, dst, timeout_ms, dry_run);
+}
+
+static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
+                              int timeout_ms, bool dry_run)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+    struct named_transfer_options opts;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+    if (catalog_entry_to_options(e, &opts) != 0)
+        return 1;
+    parse_replay_rf_overrides(&opts, argc, argv, argi);
+    if (dry_run)
+        return do_play(e->sector, e->nsectors, timeout_ms, true);
+    if (apply_rf_config_from_options(&opts) != 0)
+        return 1;
+    return do_play(e->sector, e->nsectors, timeout_ms, false);
+}
+
+#endif /* SATA_HOST_IO_AVAILABLE */
+
 #endif /* CSR_SATA_PHY_BASE */
 
 /* Status ------------------------------------------------------------------- */
@@ -1379,6 +2533,48 @@ static void help(void)
            "verify-pattern SRC_SECTOR NSECTORS\n"
            "    Read sectors and compare against the selected --pattern.\n"
            "\n"
+#ifdef SATA_HOST_IO_AVAILABLE
+           "catalog-init\n"
+           "    Initialize/reset the named capture catalog.\n"
+           "\n"
+           "list\n"
+           "    List named captures from the SATA catalog.\n"
+           "\n"
+           "show NAME\n"
+           "    Show metadata for one named capture.\n"
+           "\n"
+           "delete NAME\n"
+           "    Remove one capture from the catalog without erasing data sectors.\n"
+           "\n"
+           "fsck\n"
+           "    Check catalog names and sector overlap.\n"
+           "\n"
+           "capture NAME --seconds SEC|--sectors N [RF options]\n"
+           "    Tune RF, record RX stream to SATA, and catalog it.\n"
+           "\n"
+           "capture-start NAME --seconds SEC|--sectors N [RF options]\n"
+           "    Start a named RX-to-SATA capture and return immediately.\n"
+           "\n"
+           "capture-status\n"
+           "    Alias for stream-status.\n"
+           "\n"
+           "import NAME FILE [metadata options]\n"
+           "    Write a host file to SATA and catalog it.\n"
+           "\n"
+           "export NAME FILE|-\n"
+           "    Read a named capture to a host file.\n"
+           "\n"
+           "replay-host NAME --dst pcie|eth\n"
+           "    Replay SATA content through loopback to a normal host RX stream.\n"
+           "\n"
+           "replay-rf NAME [RF overrides]\n"
+           "    Replay SATA content to the RF TX path.\n"
+           "\n"
+           "Named capture/RF options: --sector, --sample-rate, --format sc16|sc8,\n"
+           "    --channel-layout 1t1r|2t2r, --rx-freq, --tx-freq, --bandwidth,\n"
+           "    --rx-gain, --tx-att, --notes.\n"
+           "\n"
+#endif
 #else
            "record/play/replay/copy/read-file/write-file/write-pattern/verify-pattern\n"
            "    Not available: SATA not present in this gateware.\n"
@@ -1416,7 +2612,7 @@ int main(int argc, char **argv)
 
     signal(SIGINT, int_handler);
     for (;;) {
-        c = getopt_long(argc, argv, "hd:c:i:p:T:nP:", options, &option_index);
+        c = getopt_long(argc, argv, "+hd:c:i:p:T:nP:", options, &option_index);
         if (c == -1)
             break;
         switch (c) {
@@ -1454,7 +2650,7 @@ int main(int argc, char **argv)
 
     cmd = argv[optind++];
 
-    if (!strcmp(cmd, "status") || !strcmp(cmd, "stream-status")) {
+    if (!strcmp(cmd, "status") || !strcmp(cmd, "stream-status") || !strcmp(cmd, "capture-status")) {
         status();
         return 0;
     }
@@ -1617,6 +2813,68 @@ int main(int argc, char **argv)
         }
         return do_verify_pattern(src_sector, nsectors, parse_pattern(pattern_name), timeout_ms);
     }
+
+#ifdef SATA_HOST_IO_AVAILABLE
+    if (!strcmp(cmd, "catalog-init")) {
+        return do_catalog_init(timeout_ms);
+    }
+
+    if (!strcmp(cmd, "list")) {
+        return do_catalog_list(timeout_ms);
+    }
+
+    if (!strcmp(cmd, "show")) {
+        if (optind + 1 > argc) help();
+        return do_catalog_show(argv[optind++], timeout_ms);
+    }
+
+    if (!strcmp(cmd, "delete")) {
+        if (optind + 1 > argc) help();
+        return do_catalog_delete(argv[optind++], timeout_ms);
+    }
+
+    if (!strcmp(cmd, "fsck")) {
+        return do_catalog_fsck(timeout_ms);
+    }
+
+    if (!strcmp(cmd, "import")) {
+        if (optind + 2 > argc) help();
+        const char *name = argv[optind++];
+        const char *path = argv[optind++];
+        return do_import_capture(name, path, argc, argv, optind, timeout_ms, dry_run);
+    }
+
+    if (!strcmp(cmd, "export")) {
+        if (optind + 2 > argc) help();
+        const char *name = argv[optind++];
+        const char *path = argv[optind++];
+        return do_export_capture(name, path, timeout_ms);
+    }
+
+    if (!strcmp(cmd, "capture")) {
+        if (optind + 1 > argc) help();
+        const char *name = argv[optind++];
+        return do_capture_named(name, argc, argv, optind, timeout_ms, false, dry_run);
+    }
+
+    if (!strcmp(cmd, "capture-start")) {
+        if (optind + 1 > argc) help();
+        const char *name = argv[optind++];
+        return do_capture_named(name, argc, argv, optind, timeout_ms, true, dry_run);
+    }
+
+    if (!strcmp(cmd, "replay-host")) {
+        if (optind + 1 > argc) help();
+        const char *name = argv[optind++];
+        return do_replay_host_named(name, argc, argv, optind, timeout_ms, dry_run);
+    }
+
+    if (!strcmp(cmd, "replay-rf")) {
+        if (optind + 1 > argc) help();
+        const char *name = argv[optind++];
+        return do_replay_rf_named(name, argc, argv, optind, timeout_ms, dry_run);
+    }
+#endif
 #else
     if (!strcmp(cmd, "record") || !strcmp(cmd, "record-start") ||
         !strcmp(cmd, "play") || !strcmp(cmd, "play-start") ||
