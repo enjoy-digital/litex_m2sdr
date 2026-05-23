@@ -42,8 +42,6 @@ from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 from liteeth.core.ptp         import LiteEthPTP
 
 from litesata.phy import LiteSATAPHY
-from litesata.frontend.stream import LiteSATAStream2Sectors, LiteSATASectors2Stream
-
 from litescope import LiteScopeAnalyzer
 
 from litex_m2sdr import Platform, _io_baseboard
@@ -66,7 +64,9 @@ from litex_m2sdr.gateware.loopback    import TXRXLoopback
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 from litex_m2sdr.gateware.sata        import (
-    SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer, install_litesata_dma_patches)
+    SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer,
+    M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream,
+    install_litesata_dma_patches)
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -798,8 +798,8 @@ class BaseSoC(SoCMini):
 
             # Streamers.
             # ----------
-            self.sata_rx_streamer = ResetInserter()(LiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
-            self.sata_tx_streamer = ResetInserter()(LiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
+            self.sata_rx_streamer = ResetInserter()(M2SDRLiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
+            self.sata_tx_streamer = ResetInserter()(M2SDRLiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
             self.sata_streamer_control = CSRStorage(fields=[
                 CSRField("rx_reset", size=1, offset=0, pulse=True,
                     description="Pulse reset on the SATA Stream2Sectors streamer."),

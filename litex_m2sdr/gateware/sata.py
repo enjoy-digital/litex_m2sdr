@@ -272,6 +272,215 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
         )
 
 
+class M2SDRLiteSATAStream2Sectors(LiteXModule):
+    """LiteSATA Stream2Sectors with staged, valid-gated SATA writes."""
+    def __init__(self, port, data_width=64):
+        self.port     = port
+        self.sector   = CSRStorage(48)
+        self.nsectors = CSRStorage(32)
+        self.start    = CSR()
+        self.done     = CSRStatus()
+        self.error    = CSRStatus()
+        self.irq      = Signal()
+
+        self.sink     = stream.Endpoint([("data", data_width)])
+
+        # # #
+
+        port_bytes   = port.dw//8
+        stream_bytes = data_width//8
+
+        # Full-sector writes: require exact 512B chunks.
+        assert (logical_sector_size % stream_bytes) == 0
+
+        words_per_sector = logical_sector_size//port_bytes
+
+        count   = Signal(max=words_per_sector)
+        crt_sec = Signal(48)
+
+        # Converter.
+        self.conv = conv = stream.Converter(nbits_from=data_width, nbits_to=port.dw)
+
+        # Sector buffer.
+        self.buf = buf = stream.SyncFIFO([("data", port.dw)], words_per_sector)
+
+        # Connect Stream to Converter.
+        self.comb += self.sink.connect(conv.sink, keep={"valid", "ready", "data", "last"})
+
+        # Control FSM.
+        self.fsm = fsm = FSM(reset_state="IDLE")
+        fsm.act("IDLE",
+            If(self.start.re,
+                NextValue(count,             0),
+                NextValue(crt_sec,           self.sector.storage),
+                NextValue(self.error.status, 0),
+                NextState("FILL-SECTOR")
+            ).Else(
+                self.done.status.eq(1)
+            ),
+            conv.source.ready.eq(1)
+        )
+        fsm.act("FILL-SECTOR",
+            # Stage exactly one sector before issuing the SATA write command.
+            # This decouples SATA reads feeding the stream from SATA writes.
+            buf.sink.valid.eq(conv.source.valid),
+            buf.sink.data.eq(conv.source.data),
+            conv.source.ready.eq(buf.sink.ready),
+            If(buf.sink.valid & buf.sink.ready,
+                NextValue(count, count + 1),
+                If(count == (words_per_sector - 1),
+                    NextValue(count, 0),
+                    NextState("SEND-CMD-AND-DATA")
+                )
+            )
+        )
+        fsm.act("SEND-CMD-AND-DATA",
+            # Send write command/data for 1 sector. Gate valid with buffered
+            # data so SATA never samples stale stream data.
+            port.sink.valid.eq(buf.source.valid),
+            port.sink.last.eq(count == (words_per_sector - 1)),
+            port.sink.write.eq(1),
+            port.sink.sector.eq(crt_sec),
+            port.sink.count.eq(1),
+            port.sink.data.eq(reverse_bytes(buf.source.data)),
+            buf.source.ready.eq(port.sink.ready),
+            If(port.sink.valid & port.sink.ready,
+                NextValue(count, count + 1),
+                If(port.sink.last,
+                    NextState("WAIT-ACK")
+                )
+            ),
+
+            # Monitor errors.
+            port.source.ready.eq(1),
+            If(port.source.valid & port.source.ready & port.source.failed,
+                self.irq.eq(1),
+                NextValue(self.error.status, 1),
+                NextState("IDLE"),
+            )
+        )
+        fsm.act("WAIT-ACK",
+            port.source.ready.eq(1),
+            If(port.source.valid,
+                If(port.source.failed,
+                    NextValue(self.error.status, 1),
+                    self.irq.eq(1),
+                    NextState("IDLE")
+                ).Elif(crt_sec == (self.sector.storage + self.nsectors.storage - 1),
+                    self.irq.eq(1),
+                    NextState("IDLE")
+                ).Else(
+                    NextValue(count,   0),
+                    NextValue(crt_sec, crt_sec + 1),
+                    NextState("FILL-SECTOR")
+                )
+            )
+        )
+
+
+class M2SDRLiteSATASectors2Stream(LiteXModule):
+    """LiteSATA Sectors2Stream with port-width byte ordering.
+
+    LiteSATA exposes a 32-bit port on the M2SDR design while the radio/PCIe
+    stream is 64-bit. Reverse bytes at the SATA-port word width before
+    up-conversion so the Stream2Sectors path is the exact inverse.
+    """
+    def __init__(self, port, data_width=64):
+        self.port     = port
+        self.sector   = CSRStorage(48)
+        self.nsectors = CSRStorage(32)
+        self.start    = CSR()
+        self.done     = CSRStatus()
+        self.error    = CSRStatus()
+        self.irq      = Signal()
+
+        self.source   = stream.Endpoint([("data", data_width)])
+
+        # # #
+
+        port_bytes   = port.dw//8
+        stream_bytes = data_width//8
+
+        # Whole-sector streaming.
+        assert (logical_sector_size % stream_bytes) == 0
+
+        crt_sec  = Signal(48)
+        last_sec = Signal(48)
+
+        # Sector buffer.
+        self.buf = buf = stream.SyncFIFO([("data", port.dw)], logical_sector_size//port_bytes)
+
+        # Converter.
+        self.conv = conv = stream.Converter(nbits_from=port.dw, nbits_to=data_width)
+
+        # Connect Port to Sector Buffer. Reverse per SATA word, not per output
+        # stream beat, so the down-conversion path writes the same words back.
+        self.comb += [
+            buf.sink.valid.eq(port.source.valid),
+            buf.sink.last.eq(port.source.last),
+            buf.sink.data.eq(reverse_bytes(port.source.data)),
+            port.source.ready.eq(buf.sink.ready),
+        ]
+
+        # Connect Sector Buffer to Converter.
+        self.comb += buf.source.connect(conv.sink)
+
+        # Control FSM.
+        self.fsm = fsm = FSM(reset_state="IDLE")
+        fsm.act("IDLE",
+            If(self.start.re,
+                NextValue(crt_sec,           self.sector.storage),
+                NextValue(last_sec,          self.sector.storage + self.nsectors.storage - 1),
+                NextValue(self.error.status, 0),
+                NextState("SEND-CMD")
+            ).Else(
+                self.done.status.eq(1)
+            ),
+            conv.source.ready.eq(1)
+        )
+        fsm.act("SEND-CMD",
+            # Send read command for 1 sector.
+            port.sink.valid.eq(1),
+            port.sink.last.eq(1),
+            port.sink.read.eq(1),
+            port.sink.sector.eq(crt_sec),
+            port.sink.count.eq(1),
+            If(port.sink.ready,
+                NextState("RECEIVE-DATA-STREAM")
+            )
+        )
+        fsm.act("RECEIVE-DATA-STREAM",
+            # Connect Converter to Stream.
+            self.source.valid.eq(conv.source.valid),
+            self.source.data.eq(conv.source.data),
+
+            # End-of-transfer framing:
+            # Assert last only on the last word of the last sector.
+            self.source.last.eq(conv.source.last & (crt_sec == last_sec)),
+
+            conv.source.ready.eq(self.source.ready),
+
+            If(self.source.valid & self.source.ready,
+                If(conv.source.last,
+                    If(crt_sec == last_sec,
+                        self.irq.eq(1),
+                        NextState("IDLE")
+                    ).Else(
+                        NextValue(crt_sec, crt_sec + 1),
+                        NextState("SEND-CMD")
+                    )
+                )
+            ),
+
+            # Monitor errors.
+            If(port.source.valid & port.source.ready & port.source.failed,
+                self.irq.eq(1),
+                NextValue(self.error.status, 1),
+                NextState("IDLE")
+            )
+        )
+
+
 def install_litesata_dma_patches():
     import litesata.frontend.dma
 
