@@ -90,6 +90,19 @@ per UDP packet would require gateware changes. With a standard Ethernet MTU,
 pipelining the expected incremental gain is mainly fewer packets/syscalls
 rather than a fundamental transfer-rate change.
 
+Additional software-only optimizations were prototyped after the pipelined read
+change and measured on a 16 MiB `read-file 0x128000 32768` transfer over
+Ethernet+SATA:
+
+| Variant | Read throughput |
+| ------- | --------------- |
+| Current pipelined Etherbone reads | 29.8, 32.4, 32.6 MiB/s |
+| Direct little-endian output buffer, larger Etherbone UDP socket buffers, Linux `sendmmsg`/`recvmmsg` batching | 30.6, 32.0, 31.5 MiB/s |
+| Direct little-endian output buffer and larger Etherbone UDP socket buffers only | 31.9, 32.4, 31.7 MiB/s |
+
+The exported data matched byte-for-byte in these runs, but the changes were
+within measurement noise and sometimes slower, so they were not kept.
+
 ### Notes
 
 - The catalog entries created for this run were deleted after validation. Data
