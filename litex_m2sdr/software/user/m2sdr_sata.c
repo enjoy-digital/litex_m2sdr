@@ -29,10 +29,12 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <math.h>
+#include <stdarg.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_sata_lowlevel.h"
 #include "csr.h"
 #include "mem.h"
 
@@ -41,9 +43,6 @@
 static struct m2sdr_cli_device g_cli_dev;
 static sig_atomic_t keep_running = 1;
 static int g_sata_lock_fd = -1;
-static bool g_no_bulk_etherbone = false;
-
-#define ETHERBONE_BULK_WORDS 128u
 
 static void int_handler(int dummy)
 {
@@ -227,267 +226,14 @@ static void m2sdr_close_dev(struct m2sdr_dev *dev)
     m2sdr_sata_unlock();
 }
 
-static uint32_t m2sdr_read32(struct m2sdr_dev *dev, uint32_t addr)
-{
-    uint32_t val = 0;
-    if (m2sdr_reg_read(dev, addr, &val) != 0) {
-        fprintf(stderr, "CSR read failed @0x%08x\n", addr);
-        exit(1);
-    }
-    return val;
-}
-
-static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
-{
-    if (m2sdr_reg_write(dev, addr, val) != 0) {
-        fprintf(stderr, "CSR write failed @0x%08x\n", addr);
-        exit(1);
-    }
-}
-
-/* Crossbar routing ---------------------------------------------------------- */
-
-enum {
-    TXSRC_PCIE = 0,
-    TXSRC_ETH  = 1,
-    TXSRC_SATA = 2,
-};
-
-enum {
-    RXDST_PCIE = 0,
-    RXDST_ETH  = 1,
-    RXDST_SATA = 2,
-};
-
-#if defined(CSR_SATA_PHY_BASE) && defined(CSR_TXRX_LOOPBACK_BASE)
-static void txrx_loopback_set(void *conn, int enable);
-#endif
-
-struct route_choice {
-    const char *name;
-    int value;
-};
-
-static const struct route_choice route_choices[] = {
-    { "pcie", TXSRC_PCIE },
-    { "eth",  TXSRC_ETH  },
-    { "sata", TXSRC_SATA },
-};
-
-static int parse_route_choice(const char *label, const char *text)
-{
-    for (size_t i = 0; i < sizeof(route_choices) / sizeof(route_choices[0]); i++) {
-        if (text && strcmp(text, route_choices[i].name) == 0)
-            return route_choices[i].value;
-    }
-
-    m2sdr_cli_invalid_choice(label, text, "pcie, eth, or sata");
-    exit(1);
-}
-
-static const char *route_choice_name(int route)
-{
-    switch (route) {
-    case TXSRC_PCIE: return "pcie";
-    case TXSRC_ETH:  return "eth";
-    case TXSRC_SATA: return "sata";
-    default:         return "unknown";
-    }
-}
-
-static int parse_txsrc(const char *s)
-{
-    return parse_route_choice("TX source", s);
-}
-
-static int parse_rxdst(const char *s)
-{
-    return parse_route_choice("RX destination", s);
-}
-
-static const char *txsrc_name(int txsrc)
-{
-    return route_choice_name(txsrc);
-}
-
-static const char *rxdst_name(int rxdst)
-{
-    return route_choice_name(rxdst);
-}
-
-static void crossbar_set(void *conn, int txsrc, int rxdst)
-{
-#ifdef CSR_CROSSBAR_BASE
-    m2sdr_write32(conn, CSR_CROSSBAR_MUX_SEL_ADDR,   (uint32_t)txsrc);
-    m2sdr_write32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR, (uint32_t)rxdst);
-#else
-    (void)conn; (void)txsrc; (void)rxdst;
-    fprintf(stderr, "Crossbar CSR not present in this gateware.\n");
-    exit(1);
-#endif
-}
-
 #ifdef CSR_SATA_PHY_BASE
-
-static void msleep(unsigned ms)
-{
-    usleep(ms * 1000);
-}
-
-static void sata_wait_sleep(int64_t elapsed_us)
-{
-    if (elapsed_us < 2000)
-        return;
-    if (elapsed_us < 20000) {
-        usleep(100);
-        return;
-    }
-    if (elapsed_us < 100000) {
-        usleep(1000);
-        return;
-    }
-    msleep(10);
-}
-
-static int64_t m2sdr_sata_get_time_us(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
-
-/* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4). */
-static void csr_write64(struct m2sdr_dev *dev, uint32_t addr, uint64_t v)
-{
-    m2sdr_reg_write(dev, addr + 0, (uint32_t)(v >> 32));
-    m2sdr_reg_write(dev, addr + 4, (uint32_t)(v >>  0));
-}
-
-static uint64_t csr_read64(struct m2sdr_dev *dev, uint32_t addr)
-{
-    uint32_t upper = 0;
-    uint32_t lower = 0;
-    m2sdr_reg_read(dev, addr + 0, &upper);
-    m2sdr_reg_read(dev, addr + 4, &lower);
-    return ((uint64_t)upper << 32) | (uint64_t)lower;
-}
-
-struct sata_route_state {
-    bool crossbar_valid;
-    bool loopback_valid;
-    int txsrc;
-    int rxdst;
-    int loopback_en;
-};
-
-static struct sata_route_state sata_route_state_capture(void *conn)
-{
-    struct sata_route_state state = {0};
-#ifdef CSR_CROSSBAR_BASE
-    state.crossbar_valid = true;
-    state.txsrc = (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
-    state.rxdst = (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
-#else
-    (void)conn;
-#endif
-#ifdef CSR_TXRX_LOOPBACK_BASE
-    state.loopback_valid = true;
-    state.loopback_en =
-        (int)((m2sdr_read32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR) >>
-              CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET) &
-              ((1u << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_SIZE) - 1));
-#endif
-    return state;
-}
-
-static void sata_route_state_restore(void *conn, const struct sata_route_state *state)
-{
-    if (state->crossbar_valid)
-        crossbar_set(conn, state->txsrc, state->rxdst);
-#ifdef CSR_TXRX_LOOPBACK_BASE
-    if (state->loopback_valid)
-        txrx_loopback_set(conn, state->loopback_en);
-#else
-    (void)conn;
-    (void)state;
-#endif
-}
 
 struct sata_operation {
     struct m2sdr_dev *conn;
     struct sata_route_state saved_route;
 };
 
-enum sata_wait_result {
-    SATA_WAIT_OK = 0,
-    SATA_WAIT_TIMEOUT = 1,
-    SATA_WAIT_INTERRUPTED = 2,
-};
-
-enum sata_pattern_kind {
-    SATA_PATTERN_ZERO = 0,
-    SATA_PATTERN_COUNTER,
-    SATA_PATTERN_PRBS,
-};
-
-#define SATA_SECTOR_BYTES 512u
-#define SATA_CATALOG_SECTOR  0x800ull
-#define SATA_CATALOG_SECTORS 64u
-#define SATA_DATA_START      0x100000ull
-#define SATA_CAPTURE_NAME_MAX 64
-#define SATA_CAPTURE_NOTES_MAX 128
-#define SATA_CATALOG_MAX_ENTRIES 64
-#if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
-    defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
-#define SATA_HOST_IO_AVAILABLE 1
-#endif
-#if defined(CSR_MAIN_SATA_STREAMER_CONTROL_ADDR)
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR            CSR_MAIN_SATA_STREAMER_CONTROL_ADDR
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET CSR_MAIN_SATA_STREAMER_CONTROL_RX_RESET_OFFSET
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET CSR_MAIN_SATA_STREAMER_CONTROL_TX_RESET_OFFSET
-#elif defined(CSR_SATA_STREAMER_CONTROL_ADDR)
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR            CSR_SATA_STREAMER_CONTROL_ADDR
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET
-#define M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET
-#endif
-#endif /* CSR_SATA_PHY_BASE */
-
-/* Optional header raw control ---------------------------------------------- */
-
-static void header_set_raw(void *conn, int which, int enable, int header_enable)
-{
-#ifdef CSR_HEADER_BASE
-    uint32_t v;
-
-    v  = 0;
-    v |= (enable        ? 1u : 0u) << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET;
-    v |= (header_enable ? 1u : 0u) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET;
-    if (which == 0 || which == 2)
-        m2sdr_write32(conn, CSR_HEADER_TX_CONTROL_ADDR, v);
-
-    v  = 0;
-    v |= (enable        ? 1u : 0u) << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET;
-    v |= (header_enable ? 1u : 0u) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET;
-    if (which == 1 || which == 2)
-        m2sdr_write32(conn, CSR_HEADER_RX_CONTROL_ADDR, v);
-#else
-    (void)conn; (void)which; (void)enable; (void)header_enable;
-    fprintf(stderr, "Header CSR not present.\n");
-    exit(1);
-#endif
-}
-
 /* SATA control (guarded) ---------------------------------------------------- */
-
-#ifdef CSR_SATA_PHY_BASE
-
-static void sata_require_csrs(void)
-{
-#if !defined(CSR_SATA_RX_STREAMER_BASE) || !defined(CSR_SATA_TX_STREAMER_BASE) || !defined(CSR_TXRX_LOOPBACK_BASE)
-    fprintf(stderr, "SATA blocks not fully present in this gateware.\n");
-    exit(1);
-#endif
-}
 
 static struct sata_operation sata_operation_begin(void)
 {
@@ -503,94 +249,6 @@ static void sata_operation_finish(struct sata_operation *op)
     sata_route_state_restore(op->conn, &op->saved_route);
     m2sdr_close_dev(op->conn);
 }
-
-static void txrx_loopback_set(void *conn, int enable)
-{
-    uint32_t v = 0;
-    v |= (enable ? 1u : 0u) << CSR_TXRX_LOOPBACK_CONTROL_ENABLE_OFFSET;
-    m2sdr_write32(conn, CSR_TXRX_LOOPBACK_CONTROL_ADDR, v);
-}
-
-static void sata_rx_program(void *conn, uint64_t sector, uint32_t nsectors)
-{
-    csr_write64(conn, CSR_SATA_RX_STREAMER_SECTOR_ADDR, sector);
-    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_NSECTORS_ADDR, nsectors);
-}
-
-static void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
-{
-    csr_write64(conn, CSR_SATA_TX_STREAMER_SECTOR_ADDR, sector);
-    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
-}
-
-static void sata_rx_start(void *conn)
-{
-    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_START_ADDR, 1);
-}
-
-static void sata_tx_start(void *conn)
-{
-    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_START_ADDR, 1);
-}
-
-static int sata_streamers_reset(void *conn, bool rx, bool tx)
-{
-#ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
-    uint32_t control = 0;
-
-    if (rx)
-        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_RX_RESET_OFFSET;
-    if (tx)
-        control |= 1u << M2SDR_CSR_SATA_STREAMER_CONTROL_TX_RESET_OFFSET;
-    m2sdr_write32(conn, M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR, control);
-    return 0;
-#else
-    (void)conn; (void)rx; (void)tx;
-    return -1;
-#endif
-}
-
-static uint32_t sata_rx_done(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR);
-}
-
-static uint32_t sata_tx_done(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_DONE_ADDR);
-}
-
-static uint32_t sata_rx_error(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR);
-}
-
-static uint32_t sata_tx_error(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
-}
-
-#ifdef SATA_HOST_IO_AVAILABLE
-static uint32_t sata_sector2mem_done(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_SECTOR2MEM_DONE_ADDR);
-}
-
-static uint32_t sata_sector2mem_error(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_SECTOR2MEM_ERROR_ADDR);
-}
-
-static uint32_t sata_mem2sector_done(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_MEM2SECTOR_DONE_ADDR);
-}
-
-static uint32_t sata_mem2sector_error(void *conn)
-{
-    return m2sdr_read32(conn, CSR_SATA_MEM2SECTOR_ERROR_ADDR);
-}
-#endif
 
 static enum sata_wait_result wait_done_report(const char *name,
                                               uint32_t (*done_fn)(void *),
@@ -685,229 +343,10 @@ static void print_planned_transfer(const char *name,
     printf("  Timeout            %d ms\n", timeout_ms);
 }
 
-static enum sata_pattern_kind parse_pattern(const char *text)
-{
-    if (!text || !strcmp(text, "counter"))
-        return SATA_PATTERN_COUNTER;
-    if (!strcmp(text, "zero"))
-        return SATA_PATTERN_ZERO;
-    if (!strcmp(text, "prbs"))
-        return SATA_PATTERN_PRBS;
-
-    m2sdr_cli_invalid_choice("pattern", text, "zero, counter, or prbs");
-    exit(1);
-}
-
-#ifdef SATA_HOST_IO_AVAILABLE
-static uint32_t pattern_word(enum sata_pattern_kind pattern, uint64_t word_index)
-{
-    uint64_t x;
-
-    switch (pattern) {
-    case SATA_PATTERN_ZERO:
-        return 0;
-    case SATA_PATTERN_COUNTER:
-        return (uint32_t)word_index;
-    case SATA_PATTERN_PRBS:
-    default:
-        x = word_index + 0x9e3779b97f4a7c15ull;
-        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
-        x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
-        x = x ^ (x >> 31);
-        return (uint32_t)(x ^ (x >> 32));
-    }
-}
-
-static void put_le32(uint8_t *buf, uint32_t value)
-{
-    buf[0] = (uint8_t)((value >>  0) & 0xffu);
-    buf[1] = (uint8_t)((value >>  8) & 0xffu);
-    buf[2] = (uint8_t)((value >> 16) & 0xffu);
-    buf[3] = (uint8_t)((value >> 24) & 0xffu);
-}
-
-static uint32_t get_le32(const uint8_t *buf)
-{
-    return ((uint32_t)buf[0] <<  0) |
-           ((uint32_t)buf[1] <<  8) |
-           ((uint32_t)buf[2] << 16) |
-           ((uint32_t)buf[3] << 24);
-}
-
-static void fill_pattern(uint8_t *buf, size_t len, uint64_t start_byte,
-                         enum sata_pattern_kind pattern)
-{
-    uint64_t word_index = start_byte / 4u;
-
-    for (size_t off = 0; off < len; off += 4)
-        put_le32(&buf[off], pattern_word(pattern, word_index++));
-}
-
-static bool check_pattern(const uint8_t *buf, size_t len, uint64_t start_byte,
-                          enum sata_pattern_kind pattern, uint64_t *bad_offset,
-                          uint32_t *expected, uint32_t *actual)
-{
-    uint64_t word_index = start_byte / 4u;
-
-    for (size_t off = 0; off < len; off += 4) {
-        uint32_t exp = pattern_word(pattern, word_index++);
-        uint32_t got = get_le32(&buf[off]);
-        if (exp != got) {
-            if (bad_offset) *bad_offset = start_byte + off;
-            if (expected)   *expected = exp;
-            if (actual)     *actual = got;
-            return false;
-        }
-    }
-    return true;
-}
-
-static uint32_t sata_host_buffer_max_sectors(void)
-{
-    return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
-}
-
-static bool etherbone_is_liteeth(struct m2sdr_dev *conn)
-{
-    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
-
-    return m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK &&
-           transport == M2SDR_TRANSPORT_KIND_LITEETH;
-}
-
-static void etherbone_fill_test_words(uint32_t *words, uint32_t count)
-{
-    for (uint32_t i = 0; i < count; i++)
-        words[i] = 0x5a000000u ^ (count << 12) ^ (i * 0x01020408u) ^ i;
-}
-
-static bool etherbone_probe_burst_words(struct m2sdr_dev *conn, uint32_t count, bool verbose)
-{
-    uint32_t tx[ETHERBONE_BULK_WORDS];
-    uint32_t rx[ETHERBONE_BULK_WORDS];
-
-    if (count == 0 || count > ETHERBONE_BULK_WORDS ||
-        (size_t)count * sizeof(uint32_t) > SATA_HOST_BUFFER_SIZE) {
-        if (verbose)
-            fprintf(stderr, "Etherbone bulk probe: invalid count %" PRIu32 "\n", count);
-        return false;
-    }
-
-    etherbone_fill_test_words(tx, count);
-    memset(rx, 0, count * sizeof(uint32_t));
-
-    if (m2sdr_reg_write_bulk(conn, SATA_HOST_BUFFER_BASE, tx, count) != M2SDR_ERR_OK) {
-        if (verbose)
-            fprintf(stderr, "Etherbone bulk probe: write failed at %" PRIu32 " words\n", count);
-        return false;
-    }
-    if (m2sdr_reg_read_bulk(conn, SATA_HOST_BUFFER_BASE, rx, count) != M2SDR_ERR_OK) {
-        if (verbose)
-            fprintf(stderr, "Etherbone bulk probe: read failed at %" PRIu32 " words\n", count);
-        return false;
-    }
-    if (memcmp(tx, rx, count * sizeof(uint32_t)) != 0) {
-        if (verbose) {
-            for (uint32_t i = 0; i < count; i++) {
-                if (tx[i] != rx[i]) {
-                    fprintf(stderr,
-                            "Etherbone bulk probe: mismatch at %" PRIu32
-                            " words index %" PRIu32 " expected=0x%08" PRIx32
-                            " actual=0x%08" PRIx32 "\n",
-                            count, i, tx[i], rx[i]);
-                    break;
-                }
-            }
-        }
-        return false;
-    }
-
-    return true;
-}
-
-static uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn)
-{
-    static bool probed = false;
-    static uint32_t cached_words = 1;
-
-    if (g_no_bulk_etherbone)
-        return 1;
-    if (probed)
-        return cached_words;
-    if (!etherbone_is_liteeth(conn)) {
-        cached_words = ETHERBONE_BULK_WORDS;
-        probed = true;
-        return cached_words;
-    }
-
-    probed = true;
-    if (etherbone_probe_burst_words(conn, ETHERBONE_BULK_WORDS, true)) {
-        cached_words = ETHERBONE_BULK_WORDS;
-        fprintf(stderr, "Etherbone bulk burst: %" PRIu32 " words\n", cached_words);
-        return cached_words;
-    }
-
-    cached_words = 1;
-    fprintf(stderr, "Etherbone bulk burst probe failed; using legacy single-word access.\n");
-    return cached_words;
-}
-
-static void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t bytes)
-{
-    uint32_t burst = sata_host_buffer_bulk_words(conn);
-    uint32_t words[ETHERBONE_BULK_WORDS];
-
-    for (size_t off = 0; off < bytes; ) {
-        size_t remaining_words = (bytes - off) / sizeof(uint32_t);
-        size_t chunk_words = remaining_words < burst ? remaining_words : burst;
-
-        if (chunk_words == 0)
-            break;
-        if (chunk_words == 1) {
-            m2sdr_write32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off, get_le32(&buf[off]));
-        } else {
-            uint32_t addr = SATA_HOST_BUFFER_BASE + (uint32_t)off;
-
-            for (size_t i = 0; i < chunk_words; i++)
-                words[i] = get_le32(&buf[off + 4 * i]);
-            if (m2sdr_reg_write_bulk(conn, addr, words, chunk_words) != M2SDR_ERR_OK) {
-                fprintf(stderr, "Host buffer bulk write failed @0x%08" PRIx32 "\n", addr);
-                exit(1);
-            }
-        }
-        off += chunk_words * sizeof(uint32_t);
-    }
-}
-
-static void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
-{
-    uint32_t burst = sata_host_buffer_bulk_words(conn);
-    uint32_t words[ETHERBONE_BULK_WORDS];
-
-    for (size_t off = 0; off < bytes; ) {
-        size_t remaining_words = (bytes - off) / sizeof(uint32_t);
-        size_t chunk_words = remaining_words < burst ? remaining_words : burst;
-
-        if (chunk_words == 0)
-            break;
-        if (chunk_words == 1) {
-            put_le32(&buf[off], m2sdr_read32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off));
-        } else {
-            uint32_t addr = SATA_HOST_BUFFER_BASE + (uint32_t)off;
-
-            if (m2sdr_reg_read_bulk(conn, addr, words, chunk_words) != M2SDR_ERR_OK) {
-                fprintf(stderr, "Host buffer bulk read failed @0x%08" PRIx32 "\n", addr);
-                exit(1);
-            }
-            for (size_t i = 0; i < chunk_words; i++)
-                put_le32(&buf[off + 4 * i], words[i]);
-        }
-        off += chunk_words * sizeof(uint32_t);
-    }
-}
-
 static bool sata_try_pcie_dma_default(struct m2sdr_dev *conn);
 static void sata_print_pcie_dma_error(const char *op, int rc);
+
+#ifdef SATA_HOST_IO_AVAILABLE
 
 static int do_etherbone_bench(int argc, char **argv, int argi)
 {
@@ -1103,20 +542,6 @@ out_close:
     m2sdr_close_dev(conn);
     free(buf);
     return status;
-}
-
-static void sata_sector2mem_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
-{
-    csr_write64(conn, CSR_SATA_SECTOR2MEM_SECTOR_ADDR, sector);
-    m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_NSECTORS_ADDR, nsectors);
-    csr_write64(conn, CSR_SATA_SECTOR2MEM_BASE_ADDR, base);
-}
-
-static void sata_mem2sector_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
-{
-    csr_write64(conn, CSR_SATA_MEM2SECTOR_SECTOR_ADDR, sector);
-    m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_NSECTORS_ADDR, nsectors);
-    csr_write64(conn, CSR_SATA_MEM2SECTOR_BASE_ADDR, base);
 }
 
 static int sata_read_to_host_buffer(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
@@ -2462,7 +1887,7 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
 
         /* Start RX first so the looped-back stream always has a sink. */
         sata_rx_start(conn);
-        msleep(5);
+        usleep(5 * 1000);
         sata_tx_start(conn);
 
         tx_rc = wait_done_quiet("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms);
@@ -3106,7 +2531,7 @@ int main(int argc, char **argv)
             pattern_name = optarg;
             break;
         case 1000:
-            g_no_bulk_etherbone = true;
+            m2sdr_sata_set_no_bulk_etherbone(true);
             break;
         default:
             exit(1);
