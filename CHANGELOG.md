@@ -26,6 +26,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added date-named release archives with timing-gated packaging and manifests for the first supported PCIe/Ethernet image set.
 - Added a GitHub release helper that publishes the checked archive set with the same `YYYY_MM_DD` date used by archive names and release tags.
 - Added Ethernet TX validation and FM TX/RX utility support for baseboard Ethernet operation.
+- Removed the obsolete LiteSATA Linux block-device driver from `m2sdr.ko`; SATA host access is now through the supported userspace `m2sdr_sata` PCIe DMA ioctl and Ethernet CSR paths.
 - Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release artifact packaging, and Ethernet-enabled build defaults.
 
 [> 2026 Q1 (Jan - Mar)

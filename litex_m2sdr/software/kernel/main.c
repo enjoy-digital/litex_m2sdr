@@ -77,14 +77,6 @@
 extern int liteuart_init(void);
 extern void liteuart_exit(void);
 
-/* External functions for LiteSATA */
-extern int litesata_init(void);
-extern void litesata_exit(void);
-
-/* LiteSATA MSI notify hooks */
-extern void litesata_msi_signal_reader(void);
-extern void litesata_msi_signal_writer(void);
-
 /* -----------------------------------------------------------------------------------------------*/
 /*                                 Structs and Definitions                                        */
 /* -----------------------------------------------------------------------------------------------*/
@@ -126,7 +118,6 @@ struct litepcie_chan {
 struct litepcie_device {
 	struct pci_dev *dev;                          /* PCI device */
 	struct platform_device *uart;                 /* UART platform device */
-	struct platform_device *sata;                 /* SATA platform device */
 	resource_size_t bar0_size;                    /* Size of BAR0 */
 	phys_addr_t bar0_phys_addr;                   /* Physical address of BAR0 */
 	uint8_t *bar0_addr;                           /* Virtual address of BAR0 */
@@ -209,7 +200,7 @@ static bool litepcie_soc_has_sata(struct litepcie_device *s)
 #endif
 
 /* -----------------------------------------------------------------------------------------------*/
-/*                               LiteSATA Userspace DMA                                           */
+/*                               SATA Userspace DMA                                               */
 /* -----------------------------------------------------------------------------------------------*/
 
 #if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE) && defined(CSR_SATA_SECTOR2MEM_BASE)
@@ -701,16 +692,6 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	/* Clear ALL interrupts */
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
 	litepcie_writel(s, CSR_PCIE_MSI_CLEAR_ADDR, clear_mask);
-#endif
-
-	/* Signal SATA completions */
-#ifdef SATA_SECTOR2MEM_INTERRUPT
-	if (irq_vector & (1 << SATA_SECTOR2MEM_INTERRUPT))
-		litesata_msi_signal_reader();
-#endif
-#ifdef SATA_MEM2SECTOR_INTERRUPT
-	if (irq_vector & (1 << SATA_MEM2SECTOR_INTERRUPT))
-		litesata_msi_signal_writer();
 #endif
 
 	return IRQ_HANDLED;
@@ -1857,69 +1838,6 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	}
 #endif
 
-/* LiteSATA platform device */
-#ifdef CSR_SATA_PHY_BASE
-if (litepcie_soc_has_sata(litepcie_dev)) {
-	struct resource res[5];
-	struct platform_device *sata_pdev;
-	resource_size_t base = (resource_size_t)litepcie_dev->bar0_addr;
-
-#define FILL_REG_RES(_idx,_name,_csr,_size)                    \
-	do {                                                    \
-		res[_idx].name  = (_name);                      \
-		res[_idx].flags = IORESOURCE_REG;               \
-		res[_idx].start = base + (_csr) - CSR_BASE;     \
-		res[_idx].end   = res[_idx].start + (_size) - 1;\
-	} while (0)
-
-	FILL_REG_RES(0, "ident",  CSR_SATA_IDENTIFY_BASE,   0x100);
-	FILL_REG_RES(1, "phy",    CSR_SATA_PHY_BASE,        0x100);
-	FILL_REG_RES(2, "reader", CSR_SATA_SECTOR2MEM_BASE, 0x100);
-	FILL_REG_RES(3, "writer", CSR_SATA_MEM2SECTOR_BASE, 0x100);
-
-#undef FILL_REG_RES
-
-	/* Register with auto ID and set the PCI device as parent */
-	{
-		struct platform_device_info pinfo = {
-			.parent  = &dev->dev,
-			.name    = "litesata",
-			.id      = PLATFORM_DEVID_AUTO,
-			.res     = res,
-			.num_res = ARRAY_SIZE(res),
-		};
-
-		sata_pdev = platform_device_register_full(&pinfo);
-		if (IS_ERR(sata_pdev)) {
-			dev_warn(&dev->dev, "LiteSATA pdev registration failed: %ld\n",
-				 PTR_ERR(sata_pdev));
-		} else {
-			/* Ensure it’s always unregistered when the PCI dev goes away */
-			int r = devm_add_action_or_reset(&dev->dev,
-				(void (*)(void *))platform_device_unregister, sata_pdev);
-			if (r) {
-				dev_err(&dev->dev, "failed to hook litesata unregister (%d)\n", r);
-				return r;
-			}
-			dev_info(&dev->dev, "LiteSATA platform device registered (host-DMA)\n");
-			litepcie_dev->sata = sata_pdev;
-		}
-
-#if (LITESATA_FORCE_POLLING == 0)
-        /* Enable LiteSATA completion MSIs */
-#ifdef SATA_SECTOR2MEM_INTERRUPT
-        litepcie_enable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
-#endif
-#ifdef SATA_MEM2SECTOR_INTERRUPT
-        litepcie_enable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
-#endif
-#else
-        dev_info(&dev->dev, "LiteSATA: forcing polling; SATA MSIs not enabled\n");
-#endif /* LITESATA_FORCE_POLLING */
-	}
-}
-#endif
-
 	/* PTP setup */
 #ifdef CSR_PTM_REQUESTER_BASE
 	litepcie_dev->ptp_caps = litepcie_ptp_info;
@@ -2046,11 +1964,6 @@ static int __init litepcie_module_init(void)
 	if (res)
 		return res;
 
-	res = litesata_init();
-	if (res) {
-		return res;
-	}
-
 	#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 		litepcie_class = class_create(THIS_MODULE, LITEPCIE_NAME);
 	#else
@@ -2094,7 +2007,6 @@ static void __exit litepcie_module_exit(void)
 	class_destroy(litepcie_class);
 
 	liteuart_exit();
-	litesata_exit();
 }
 
 module_init(litepcie_module_init);
