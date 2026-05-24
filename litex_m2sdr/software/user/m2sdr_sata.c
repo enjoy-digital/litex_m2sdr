@@ -334,11 +334,19 @@ static void msleep(unsigned ms)
     usleep(ms * 1000);
 }
 
-static int64_t m2sdr_sata_get_time_ms(void)
+static void sata_wait_sleep(int64_t elapsed_us)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    if (elapsed_us < 2000)
+        return;
+    if (elapsed_us < 20000) {
+        usleep(100);
+        return;
+    }
+    if (elapsed_us < 100000) {
+        usleep(1000);
+        return;
+    }
+    msleep(10);
 }
 
 static int64_t m2sdr_sata_get_time_us(void)
@@ -592,37 +600,48 @@ static enum sata_wait_result wait_done_report(const char *name,
                                               uint64_t nsectors,
                                               bool report)
 {
-    int elapsed = 0;
-    int64_t start = m2sdr_sata_get_time_ms();
-    int64_t last  = start;
+    int64_t start_us = m2sdr_sata_get_time_us();
+    int64_t last_report_us = start_us;
+
     for (;;) {
+        int64_t now_us;
+        int64_t elapsed_us;
+
         if (!keep_running) {
             fprintf(stderr, "%s: interrupted\n", name);
             return SATA_WAIT_INTERRUPTED;
         }
+
         uint32_t done = done_fn(conn);
-        uint32_t err  = err_fn(conn);
         if (done) {
+            uint32_t err = err_fn(conn);
             if (report) {
                 if (err) printf("%s: done (error=1)\n", name);
                 else     printf("%s: done\n", name);
             }
             return SATA_WAIT_OK;
         }
-        if (timeout_ms >= 0 && elapsed >= timeout_ms) {
-            fprintf(stderr, "%s: timeout\n", name);
+
+        now_us = m2sdr_sata_get_time_us();
+        elapsed_us = now_us - start_us;
+        if (timeout_ms >= 0 && elapsed_us >= (int64_t)timeout_ms * 1000) {
+            uint32_t err = err_fn(conn);
+            if (err)
+                fprintf(stderr, "%s: timeout (error=1)\n", name);
+            else
+                fprintf(stderr, "%s: timeout\n", name);
             return SATA_WAIT_TIMEOUT;
         }
-        int64_t now = m2sdr_sata_get_time_ms();
-        if (report && now - last >= 500) {
+
+        if (report && now_us - last_report_us >= 500000) {
             double mb = (double)nsectors * 512.0 / (1024.0 * 1024.0);
-            double s  = (double)(now - start) / 1000.0;
+            double s  = (double)elapsed_us / 1000000.0;
             double mbps = (s > 0.0) ? (mb / s) : 0.0;
             fprintf(stderr, "%s: in progress (%.1f MB, %.2f MB/s)\n", name, mb, mbps);
-            last = now;
+            last_report_us = now_us;
         }
-        msleep(10);
-        elapsed += 10;
+
+        sata_wait_sleep(elapsed_us);
     }
 }
 
