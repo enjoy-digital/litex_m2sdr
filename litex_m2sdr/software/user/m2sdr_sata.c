@@ -1012,16 +1012,16 @@ static int sata_read_to_host_buffer(struct m2sdr_dev *conn, uint64_t sector, uin
     (void)sata_host_buffer_bulk_words(conn);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
-    return wait_done("SATA_SECTOR2MEM(read-file)",
-        sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms, nsectors) == SATA_WAIT_OK ? 0 : 1;
+    return wait_done_quiet("SATA_SECTOR2MEM(read-file)",
+        sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
 static int sata_write_from_host_buffer(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
     sata_mem2sector_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_START_ADDR, 1);
-    return wait_done("SATA_MEM2SECTOR(write-file)",
-        sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms, nsectors) == SATA_WAIT_OK ? 0 : 1;
+    return wait_done_quiet("SATA_MEM2SECTOR(write-file)",
+        sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
 static FILE *open_stdio_or_file(const char *path, const char *mode, bool *need_close)
