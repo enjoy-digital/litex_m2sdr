@@ -267,11 +267,13 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
 
         # # #
 
-        dma_bytes  = bus.data_width//8
-        port_bytes = port.dw//8
-        count      = Signal(max=logical_sector_size//min(dma_bytes, port_bytes))
-        crt_sec    = Signal(48)
-        crt_base   = Signal(64)
+        dma_bytes        = bus.data_width//8
+        port_bytes       = port.dw//8
+        read_count       = Signal(32)
+        send_count       = Signal(32)
+        total_dma_words  = Signal(32)
+        total_port_words = Signal(32)
+        dma_active       = Signal()
 
         # DMA.
         self.dma = dma = WishboneDMAReader(bus, with_csr=False, endianness=endianness)
@@ -288,13 +290,23 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
         # Connect Sector Buffer to Converter.
         self.comb += buf.source.connect(conv.sink)
 
+        self.comb += [
+            total_dma_words.eq(self.nsectors.storage * (logical_sector_size//dma_bytes)),
+            total_port_words.eq(self.nsectors.storage * (logical_sector_size//port_bytes)),
+        ]
+
+        self.comb += [
+            dma.sink.valid.eq(dma_active & (read_count != total_dma_words)),
+            dma.sink.last.eq(read_count == (total_dma_words - 1)),
+            dma.sink.address.eq(self.base.storage[int(log2(dma_bytes)):] + read_count),
+        ]
+
         # Control FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(self.start.re,
-                NextValue(count,             0),
-                NextValue(crt_sec,           self.sector.storage),
-                NextValue(crt_base,          self.base.storage),
+                NextValue(read_count,        0),
+                NextValue(send_count,        0),
                 NextValue(self.done.status,  0),
                 NextValue(self.error.status, 0),
                 NextState("READ-DATA-DMA")
@@ -302,29 +314,32 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
             conv.source.ready.eq(1)
         )
         fsm.act("READ-DATA-DMA",
-            # Read sector data over DMA.
-            dma.sink.valid.eq(1),
-            dma.sink.address.eq(crt_base[int(log2(dma_bytes)):] + count),
+            # Start filling the DMA reader FIFO so the SATA command can be
+            # followed immediately by data once the drive activates DMA.
+            dma_active.eq(1),
             If(dma.sink.valid & dma.sink.ready,
-                NextValue(count, count + 1),
-                If(count == (logical_sector_size//dma_bytes - 1),
-                    NextValue(count, 0),
-                    NextState("SEND-CMD-AND-DATA")
-                )
+                NextValue(read_count, read_count + 1),
+            ),
+            If(conv.source.valid,
+                NextState("SEND-CMD-AND-DATA")
             )
         )
         fsm.act("SEND-CMD-AND-DATA",
-            # Send write command/data for 1 sector. Gate valid with the
+            # Send one write command/data stream for the full request. Gate valid with the
             # converter output so the first SATA beat cannot use stale data.
+            dma_active.eq(1),
             port.sink.valid.eq(conv.source.valid),
-            port.sink.last.eq(count == (logical_sector_size//port_bytes - 1)),
+            port.sink.last.eq(send_count == (total_port_words - 1)),
             port.sink.write.eq(1),
-            port.sink.sector.eq(crt_sec),
-            port.sink.count.eq(1),
+            port.sink.sector.eq(self.sector.storage),
+            port.sink.count.eq(self.nsectors.storage),
             port.sink.data.eq(reverse_bytes(conv.source.data)),
+            If(dma.sink.valid & dma.sink.ready,
+                NextValue(read_count, read_count + 1),
+            ),
             If(port.sink.valid & port.sink.ready,
                 conv.source.ready.eq(1),
-                NextValue(count, count + 1),
+                NextValue(send_count, send_count + 1),
                 If(port.sink.last,
                     NextState("WAIT-ACK")
                 )
@@ -347,15 +362,10 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
                     NextValue(self.done.status, 1),
                     self.irq.eq(1),
                     NextState("IDLE")
-                ).Elif(crt_sec == (self.sector.storage + self.nsectors.storage - 1),
+                ).Else(
                     self.irq.eq(1),
                     NextValue(self.done.status, 1),
                     NextState("IDLE")
-                ).Else(
-                    NextValue(count,    0),
-                    NextValue(crt_sec,  crt_sec + 1),
-                    NextValue(crt_base, crt_base + 512),
-                    NextState("READ-DATA-DMA")
                 )
             )
         )
