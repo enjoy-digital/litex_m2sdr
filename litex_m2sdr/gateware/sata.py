@@ -5,7 +5,6 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 
 from migen import *
-from math import log2
 
 from litex.gen import *
 from litex.gen.common import reverse_bytes
@@ -17,9 +16,13 @@ from litex.soc.interconnect import wishbone
 from litesata.common import logical_sector_size
 
 
+# Constants ----------------------------------------------------------------------------------------
+
 SATA_HOST_BUFFER_BASE = 0x00020000
 SATA_HOST_BUFFER_SIZE = 64 * 1024
 
+
+# SATA Host Buffer ---------------------------------------------------------------------------------
 
 class SATAHostBuffer(LiteXModule):
     def __init__(self, size=SATA_HOST_BUFFER_SIZE, with_dma_port=True):
@@ -57,6 +60,8 @@ class SATAHostBuffer(LiteXModule):
         ]
 
 
+# SATA DMA Memory Router ---------------------------------------------------------------------------
+
 class SATADMAMemoryRouter(LiteXModule):
     def __init__(self, local_bus, remote_bus, local_origin, local_size):
         if local_bus.addressing != remote_bus.addressing:
@@ -72,7 +77,7 @@ class SATADMAMemoryRouter(LiteXModule):
 
         # # #
 
-        word_shift = int(log2(local_bus.data_width//8)) if bus.addressing == "word" else 0
+        word_shift = log2_int(local_bus.data_width//8) if bus.addressing == "word" else 0
         bus_addr = Signal(bus.address_width)
         local_sel = Signal()
         self.comb += [
@@ -104,17 +109,19 @@ class SATADMAMemoryRouter(LiteXModule):
         ]
 
 
+# SATA Sector2Mem DMA ------------------------------------------------------------------------------
+
 class M2SDRLiteSATASector2MemDMA(LiteXModule):
     """LiteSATA Sector2Mem DMA with contiguous multi-sector host-buffer reads."""
     def __init__(self, port, bus, endianness="little"):
         self.port     = port
         self.bus      = bus
-        self.sector   = CSRStorage(48)
-        self.nsectors = CSRStorage(16)
-        self.base     = CSRStorage(64)
+        self.sector   = CSRStorage(48, description="First SATA sector.")
+        self.nsectors = CSRStorage(16, description="Number of SATA sectors to transfer.")
+        self.base     = CSRStorage(64, description="Destination Wishbone base address.")
         self.start    = CSR()
-        self.done     = CSRStatus(reset=1)
-        self.error    = CSRStatus()
+        self.done     = CSRStatus(reset=1, description="Asserted when the transfer has completed.")
+        self.error    = CSRStatus(description="Asserted when the transfer has failed.")
         self.irq      = Signal()
 
         # # #
@@ -196,7 +203,7 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
             # Connect Converter to DMA.
             dma.sink.valid.eq(conv.source.valid),
             dma.sink.last.eq(count == (total_words - 1)),
-            dma.sink.address.eq(self.base.storage[int(log2(dma_bytes)):] + count),
+            dma.sink.address.eq(self.base.storage[log2_int(dma_bytes):] + count),
             dma.sink.data.eq(reverse_bytes(conv.source.data)),
             conv.source.ready.eq(dma.sink.ready),
             If(dma.sink.valid & dma.sink.ready,
@@ -237,7 +244,7 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
         fsm.act("FLUSH-HOST-WRITES",
             fence_dma.sink.valid.eq(1),
             fence_dma.sink.last.eq(1),
-            fence_dma.sink.address.eq(self.base.storage[int(log2(dma_bytes)):]),
+            fence_dma.sink.address.eq(self.base.storage[log2_int(dma_bytes):]),
             If(fence_dma.sink.ready,
                 NextState("WAIT-FLUSH")
             )
@@ -252,17 +259,19 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
         )
 
 
+# SATA Mem2Sector DMA ------------------------------------------------------------------------------
+
 class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
     """LiteSATA Mem2Sector DMA with valid-gated SATA sink handshakes."""
     def __init__(self, bus, port, endianness="little"):
         self.bus      = bus
         self.port     = port
-        self.sector   = CSRStorage(48)
-        self.nsectors = CSRStorage(16)
-        self.base     = CSRStorage(64)
+        self.sector   = CSRStorage(48, description="First SATA sector.")
+        self.nsectors = CSRStorage(16, description="Number of SATA sectors to transfer.")
+        self.base     = CSRStorage(64, description="Source Wishbone base address.")
         self.start    = CSR()
-        self.done     = CSRStatus(reset=1)
-        self.error    = CSRStatus()
+        self.done     = CSRStatus(reset=1, description="Asserted when the transfer has completed.")
+        self.error    = CSRStatus(description="Asserted when the transfer has failed.")
         self.irq      = Signal()
 
         # # #
@@ -298,7 +307,7 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
         self.comb += [
             dma.sink.valid.eq(dma_active & (read_count != total_dma_words)),
             dma.sink.last.eq(read_count == (total_dma_words - 1)),
-            dma.sink.address.eq(self.base.storage[int(log2(dma_bytes)):] + read_count),
+            dma.sink.address.eq(self.base.storage[log2_int(dma_bytes):] + read_count),
         ]
 
         # Control FSM.
@@ -371,15 +380,17 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
         )
 
 
+# SATA Stream2Sectors ------------------------------------------------------------------------------
+
 class M2SDRLiteSATAStream2Sectors(LiteXModule):
     """LiteSATA Stream2Sectors with staged, valid-gated SATA writes."""
     def __init__(self, port, data_width=64):
         self.port     = port
-        self.sector   = CSRStorage(48)
-        self.nsectors = CSRStorage(32)
+        self.sector   = CSRStorage(48, description="First SATA sector.")
+        self.nsectors = CSRStorage(32, description="Number of SATA sectors to record.")
         self.start    = CSR()
-        self.done     = CSRStatus(reset=1)
-        self.error    = CSRStatus()
+        self.done     = CSRStatus(reset=1, description="Asserted when recording has completed.")
+        self.error    = CSRStatus(description="Asserted when recording has failed.")
         self.irq      = Signal()
 
         self.sink     = stream.Endpoint([("data", data_width)])
@@ -479,6 +490,8 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         )
 
 
+# SATA Sectors2Stream ------------------------------------------------------------------------------
+
 class M2SDRLiteSATASectors2Stream(LiteXModule):
     """LiteSATA Sectors2Stream with port-width byte ordering.
 
@@ -488,11 +501,11 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
     """
     def __init__(self, port, data_width=64):
         self.port     = port
-        self.sector   = CSRStorage(48)
-        self.nsectors = CSRStorage(32)
+        self.sector   = CSRStorage(48, description="First SATA sector.")
+        self.nsectors = CSRStorage(32, description="Number of SATA sectors to play.")
         self.start    = CSR()
-        self.done     = CSRStatus(reset=1)
-        self.error    = CSRStatus()
+        self.done     = CSRStatus(reset=1, description="Asserted when playback has completed.")
+        self.error    = CSRStatus(description="Asserted when playback has failed.")
         self.irq      = Signal()
 
         self.source   = stream.Endpoint([("data", data_width)])
@@ -581,4 +594,3 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
                 NextState("IDLE")
             )
         )
-
