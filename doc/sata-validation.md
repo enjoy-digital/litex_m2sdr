@@ -105,22 +105,23 @@ within measurement noise and sometimes slower, so they were not kept.
 
 ### Host file transfer path
 
-These measurements use the user-visible file commands, not the lower-level
-microbenchmarks. Each run wrote a 16 MiB host file to SATA at sector `0x150000`
-with `write-file`, then read it back with `read-file`; every readback matched
-the input file with `cmp`.
+These measurements use the user-visible host file/SigMF import/export commands,
+not just the lower-level microbenchmarks. Ethernet/Etherbone used `write-file`
+and `read-file` on a 16 MiB host file at sector `0x150000`; every readback
+matched the input file with `cmp`. PCIe uses the SATA PCIe DMA path exercised by
+the SigMF import/export flow, which calls the same sector copy helpers used by
+plain file transfers.
 
-| Transport | Command | Size | Wall time | Throughput |
-| --------- | ------- | ---- | --------- | ---------- |
-| Ethernet/Etherbone | `write-file` | 16 MiB | 1.709 s, 1.740 s, 1.719 s | 9.4, 9.2, 9.3 MiB/s |
-| Ethernet/Etherbone | `read-file` | 16 MiB | 0.539 s, 0.520 s, 0.492 s | 29.7, 30.8, 32.5 MiB/s |
-| PCIe host-buffer fallback | `write-file` | 16 MiB | 2.264 s, 2.256 s, 2.272 s | 7.1, 7.1, 7.0 MiB/s |
-| PCIe host-buffer fallback | `read-file` | 16 MiB | 7.175 s, 6.996 s, 7.259 s | 2.2, 2.3, 2.2 MiB/s |
+| Transport | Host-to-SATA write | SATA-to-host read |
+| --------- | ------------------ | ----------------- |
+| Ethernet/Etherbone, `write-file`/`read-file`, 16 MiB | 1.709 s, 1.740 s, 1.719 s; 9.4, 9.2, 9.3 MiB/s | 0.539 s, 0.520 s, 0.492 s; 29.7, 30.8, 32.5 MiB/s |
+| PCIe DMA-backed file path, SigMF import/export, 8 MiB | 0.112 s; about 71.4 MiB/s | 0.133 s; about 60.2 MiB/s |
+| PCIe DMA microbenchmark, `pcie-dma-bench`, 16 MiB | 93.202 MiB/s | 63.391 MiB/s |
 
-The PCIe file-transfer run used the host-buffer fallback path: in this setup,
-`./m2sdr_sata -c 0 pcie-dma-bench 0x160000 32768` reported `unsupported`.
-When the kernel/driver exposes the SATA PCIe DMA ioctl, the lower-level
-`pcie-dma-bench` result above is the expected reference for the faster path.
+A later PCIe check with a stale `m2sdr.ko` reported `pcie-dma-bench` as
+`unsupported` and fell back to the CSR host-buffer path. That fallback measured
+only about 7.0 MiB/s write and 2.2 MiB/s read, so it is a diagnostic symptom of
+the DMA ioctl not being available, not the expected PCIe performance.
 
 ### Notes
 
