@@ -29,6 +29,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <math.h>
+#include <ctype.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -62,6 +63,65 @@ static uint64_t parse_u64(const char *s)
         exit(1);
     }
     return v;
+}
+
+static uint64_t parse_size_bytes(const char *label, const char *s)
+{
+    char *end = NULL;
+    long double value;
+    long double scale = 1.0L;
+
+    if (!s) {
+        m2sdr_cli_error("invalid %s '(null)'", label ? label : "size");
+        exit(1);
+    }
+
+    errno = 0;
+    value = strtold(s, &end);
+    if (end == s || errno == ERANGE || value < 0.0L || !isfinite((double)value)) {
+        m2sdr_cli_error("invalid %s '%s'", label ? label : "size", s);
+        exit(1);
+    }
+
+    while (*end && isspace((unsigned char)*end))
+        end++;
+    if (*end) {
+        char suffix[4] = {0, 0, 0, 0};
+        unsigned n = 0;
+
+        while (*end && !isspace((unsigned char)*end) && n < sizeof(suffix) - 1u)
+            suffix[n++] = (char)tolower((unsigned char)*end++);
+        while (*end && isspace((unsigned char)*end))
+            end++;
+        if (*end) {
+            m2sdr_cli_error("invalid %s suffix in '%s'", label ? label : "size", s);
+            exit(1);
+        }
+
+        if (!strcmp(suffix, "k") || !strcmp(suffix, "kb"))
+            scale = 1000.0L;
+        else if (!strcmp(suffix, "m") || !strcmp(suffix, "mb"))
+            scale = 1000.0L * 1000.0L;
+        else if (!strcmp(suffix, "g") || !strcmp(suffix, "gb"))
+            scale = 1000.0L * 1000.0L * 1000.0L;
+        else if (!strcmp(suffix, "ki") || !strcmp(suffix, "kib"))
+            scale = 1024.0L;
+        else if (!strcmp(suffix, "mi") || !strcmp(suffix, "mib"))
+            scale = 1024.0L * 1024.0L;
+        else if (!strcmp(suffix, "gi") || !strcmp(suffix, "gib"))
+            scale = 1024.0L * 1024.0L * 1024.0L;
+        else {
+            m2sdr_cli_error("invalid %s suffix in '%s'", label ? label : "size", s);
+            exit(1);
+        }
+    }
+
+    value *= scale;
+    if (value < 0.0L || value > (long double)UINT64_MAX) {
+        m2sdr_cli_error("%s out of range: '%s'", label ? label : "size", s);
+        exit(1);
+    }
+    return (uint64_t)ceill(value);
 }
 
 static uint32_t parse_u32(const char *s)
@@ -158,6 +218,22 @@ static enum m2sdr_channel_layout parse_channel_layout(const char *text)
 static unsigned channel_layout_count(enum m2sdr_channel_layout layout)
 {
     return layout == M2SDR_CHANNEL_LAYOUT_1T1R ? 1u : 2u;
+}
+
+static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t sector_size)
+{
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+    long double value = (long double)sectors * (long double)sector_size;
+    unsigned unit = 0;
+
+    while (value >= 1024.0L && unit + 1 < sizeof(units)/sizeof(units[0])) {
+        value /= 1024.0L;
+        unit++;
+    }
+    if (unit == 0)
+        snprintf(buf, len, "%.0Lf %s", value, units[unit]);
+    else
+        snprintf(buf, len, "%.2Lf %s", value, units[unit]);
 }
 
 /* Connection functions ------------------------------------------------------ */
@@ -550,7 +626,7 @@ static int sata_read_to_host_buffer(struct m2sdr_dev *conn, uint64_t sector, uin
     (void)sata_host_buffer_bulk_words(conn);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
-    return wait_done_quiet("SATA_SECTOR2MEM(read-file)",
+    return wait_done_quiet("SATA_SECTOR2MEM(diag read)",
         sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
@@ -558,7 +634,7 @@ static int sata_write_from_host_buffer(void *conn, uint64_t sector, uint32_t nse
 {
     sata_mem2sector_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_START_ADDR, 1);
-    return wait_done_quiet("SATA_MEM2SECTOR(write-file)",
+    return wait_done_quiet("SATA_MEM2SECTOR(diag write)",
         sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
@@ -598,6 +674,22 @@ static const char *sata_transport_name(struct m2sdr_dev *conn)
     case M2SDR_TRANSPORT_KIND_LITEETH:  return "ethernet";
     default:                            return NULL;
     }
+}
+
+static const char *sata_default_host_destination(void)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+    const char *dst = NULL;
+
+    if (m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK) {
+        if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+            dst = "pcie";
+        else if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
+            dst = "eth";
+    }
+    m2sdr_close_dev(conn);
+    return dst;
 }
 
 static uint32_t sata_file_chunk_sectors(bool try_pcie_dma)
@@ -1028,7 +1120,7 @@ static int catalog_require(struct sata_catalog *cat, int timeout_ms)
     if (catalog_load(cat, timeout_ms) != 0)
         return 1;
     if (!cat->initialized) {
-        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata catalog-init\n");
+        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata init\n");
         return 1;
     }
     return 0;
@@ -1106,7 +1198,7 @@ static int do_catalog_delete(const char *name, int timeout_ms)
         return 1;
     }
     if (!cat.initialized) {
-        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata catalog-init\n");
+        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata init\n");
         m2sdr_close_dev(conn);
         return 1;
     }
@@ -1763,7 +1855,7 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
                                    nsectors, &sector, &meta_sector) != 0)
         goto out_close_dev;
     if (dry_run) {
-        printf("import-sigmf dry-run: name=%s meta=%s data=%s sector=0x%016" PRIx64
+        printf("import dry-run: name=%s meta=%s data=%s sector=0x%016" PRIx64
                " nsectors=%" PRIu32 " bytes=%" PRIu64
                " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u\n",
             name, input_path, source_data_path, sector, nsectors, bytes,
@@ -1802,6 +1894,17 @@ out_close_dev:
     if (conn)
         m2sdr_close_dev(conn);
     return rc;
+}
+
+static int do_import_auto(const char *name, const char *input_path,
+                          int argc, char **argv, int argi,
+                          int timeout_ms, bool dry_run)
+{
+    struct m2sdr_sigmf_meta meta;
+
+    if (m2sdr_sigmf_read(input_path, &meta) == 0)
+        return do_import_sigmf_capture(name, input_path, argc, argv, argi, timeout_ms, dry_run);
+    return do_import_capture(name, input_path, argc, argv, argi, timeout_ms, dry_run);
 }
 
 
@@ -2072,8 +2175,8 @@ struct capture_options {
     struct named_transfer_options named;
     bool have_seconds;
     double seconds;
-    bool have_sectors;
-    uint32_t sectors;
+    bool have_size;
+    uint64_t size_bytes;
 };
 
 static void capture_options_init(struct capture_options *opts)
@@ -2101,18 +2204,18 @@ static int parse_capture_option(struct capture_options *opts, int argc, char **a
         opts->have_seconds = true;
         return 1;
     }
-    if (strcmp(opt, "--sectors") == 0) {
+    if (strcmp(opt, "--size") == 0 || strcmp(opt, "--bytes") == 0) {
         if (*index + 1 >= argc) {
             fprintf(stderr, "Missing value for %s\n", opt);
             exit(1);
         }
         value = argv[++(*index)];
-        opts->sectors = parse_u32(value);
-        if (opts->sectors == 0) {
-            fprintf(stderr, "sectors must be greater than zero.\n");
+        opts->size_bytes = parse_size_bytes("capture size", value);
+        if (opts->size_bytes == 0) {
+            fprintf(stderr, "capture size must be greater than zero.\n");
             exit(1);
         }
-        opts->have_sectors = true;
+        opts->have_size = true;
         return 1;
     }
     return parse_named_option(&opts->named, argc, argv, index);
@@ -2122,17 +2225,21 @@ static int capture_compute_size(const struct capture_options *opts,
                                 uint32_t *nsectors,
                                 uint64_t *bytes)
 {
-    if (opts->have_seconds && opts->have_sectors) {
-        fprintf(stderr, "Use either --seconds or --sectors, not both.\n");
+    if (opts->have_seconds && opts->have_size) {
+        fprintf(stderr, "Use either --seconds or --size, not both.\n");
         return 1;
     }
-    if (!opts->have_seconds && !opts->have_sectors) {
-        fprintf(stderr, "capture requires --seconds SEC or --sectors N.\n");
+    if (!opts->have_seconds && !opts->have_size) {
+        fprintf(stderr, "capture requires --seconds SEC or --size BYTES.\n");
         return 1;
     }
-    if (opts->have_sectors) {
-        *nsectors = opts->sectors;
-        *bytes = (uint64_t)opts->sectors * SATA_SECTOR_BYTES;
+    if (opts->have_size) {
+        *bytes = opts->size_bytes;
+        *nsectors = m2sdr_sata_bytes_to_sectors(*bytes);
+        if (*nsectors == 0 || (uint64_t)*nsectors * SATA_SECTOR_BYTES < *bytes) {
+            fprintf(stderr, "Capture size is out of range.\n");
+            return 1;
+        }
         return 0;
     }
     {
@@ -2346,12 +2453,14 @@ static int do_replay_host_named(const char *name, int argc, char **argv, int arg
         }
         argi++;
     }
+    if (!dst)
+        dst = sata_default_host_destination();
     if (!dst) {
-        fprintf(stderr, "replay-host requires --dst pcie|eth.\n");
+        fprintf(stderr, "serve could not infer host destination; use --dst pcie|eth.\n");
         return 1;
     }
     if (strcmp(dst, "pcie") != 0 && strcmp(dst, "eth") != 0) {
-        m2sdr_cli_invalid_choice("replay-host destination", dst, "pcie or eth");
+        m2sdr_cli_invalid_choice("serve destination", dst, "pcie or eth");
         return 1;
     }
     if (catalog_require(&cat, timeout_ms) != 0)
@@ -2404,6 +2513,16 @@ static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
 static void status(void)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+    printf("Device:\n");
+    if (m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK) {
+        printf("  Transport          %s\n",
+            transport == M2SDR_TRANSPORT_KIND_LITEPCIE ? "pcie" :
+            transport == M2SDR_TRANSPORT_KIND_LITEETH  ? "ethernet" : "unknown");
+    } else {
+        printf("  Transport          unknown\n");
+    }
 
 #ifdef CSR_CROSSBAR_BASE
     uint32_t txsel = m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
@@ -2417,27 +2536,36 @@ static void status(void)
 #endif
 
 #ifdef CSR_SATA_PHY_BASE
-    printf("SATA:\n");
-    printf("  PHY enable         %" PRIu32 "\n", m2sdr_read32(conn, CSR_SATA_PHY_ENABLE_ADDR));
     {
-        uint32_t st = m2sdr_read32(conn, CSR_SATA_PHY_STATUS_ADDR);
-        uint32_t ready =
-            (st >> CSR_SATA_PHY_STATUS_READY_OFFSET) &
-            ((1u << CSR_SATA_PHY_STATUS_READY_SIZE) - 1);
-        uint32_t tx_ready =
-            (st >> CSR_SATA_PHY_STATUS_TX_READY_OFFSET) &
-            ((1u << CSR_SATA_PHY_STATUS_TX_READY_SIZE) - 1);
-        uint32_t rx_ready =
-            (st >> CSR_SATA_PHY_STATUS_RX_READY_OFFSET) &
-            ((1u << CSR_SATA_PHY_STATUS_RX_READY_SIZE) - 1);
-        uint32_t ctrl_ready =
-            (st >> CSR_SATA_PHY_STATUS_CTRL_READY_OFFSET) &
-            ((1u << CSR_SATA_PHY_STATUS_CTRL_READY_SIZE) - 1);
-        printf("  PHY status         0x%08" PRIx32 "\n", st);
-        printf("  PHY ready          %s\n", ready ? "yes" : "no");
-        printf("  TX ready           %s\n", tx_ready ? "yes" : "no");
-        printf("  RX ready           %s\n", rx_ready ? "yes" : "no");
-        printf("  CTRL ready         %s\n", ctrl_ready ? "yes" : "no");
+        struct m2sdr_sata_info sata_info;
+        int sata_rc = m2sdr_get_sata_info(conn, &sata_info, 1000);
+
+        printf("SATA:\n");
+        if (sata_rc == M2SDR_ERR_OK) {
+            printf("  PHY enable         %s\n", sata_info.phy_enabled ? "yes" : "no");
+            printf("  PHY status         0x%08" PRIx32 "\n", sata_info.phy_status);
+            printf("  PHY ready          %s\n", sata_info.phy_ready ? "yes" : "no");
+            printf("  TX ready           %s\n", sata_info.tx_ready ? "yes" : "no");
+            printf("  RX ready           %s\n", sata_info.rx_ready ? "yes" : "no");
+            printf("  CTRL ready         %s\n", sata_info.ctrl_ready ? "yes" : "no");
+            printf("  Drive              %s\n", sata_info.drive_present ? "present" : "not present");
+            if (sata_info.drive_present) {
+                char capacity[32];
+                uint32_t sector_size = sata_info.logical_sector_size ? sata_info.logical_sector_size : SATA_SECTOR_BYTES;
+
+                format_capacity(capacity, sizeof(capacity), sata_info.sector_count, sector_size);
+                printf("  Model              %s\n", sata_info.model[0] ? sata_info.model : "unknown");
+                printf("  Serial             %s\n", sata_info.serial[0] ? sata_info.serial : "unknown");
+                printf("  Firmware           %s\n", sata_info.firmware[0] ? sata_info.firmware : "unknown");
+                printf("  Sectors            %" PRIu64 "\n", sata_info.sector_count);
+                printf("  Sector size        %" PRIu32 " bytes\n", sector_size);
+                printf("  Capacity           %s\n", capacity);
+            }
+        } else if (sata_rc == M2SDR_ERR_UNSUPPORTED) {
+            printf("  Identify           not supported by this gateware/software header\n");
+        } else {
+            printf("  Identify           failed (%s)\n", m2sdr_strerror(sata_rc));
+        }
     }
 
 #ifdef CSR_TXRX_LOOPBACK_BASE
@@ -2463,6 +2591,36 @@ static void status(void)
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_NSECTORS_ADDR),
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_DONE_ADDR),
         m2sdr_read32(conn, CSR_SATA_RX_STREAMER_ERROR_ADDR));
+#endif
+
+#ifdef SATA_HOST_IO_AVAILABLE
+    printf("Host I/O:\n");
+    if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        printf("  Path               PCIe userspace DMA\n");
+        printf("  Chunk sectors      %u\n", M2SDR_SATA_PCIE_DMA_MAX_SECTORS);
+    } else {
+        printf("  Path               Etherbone host staging buffer\n");
+        printf("  Host buffer        %u bytes (%u sectors)\n",
+            SATA_HOST_BUFFER_SIZE, sata_host_buffer_max_sectors());
+        if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
+            printf("  Etherbone burst    %" PRIu32 " words\n", sata_host_buffer_bulk_words(conn));
+    }
+    {
+        struct sata_catalog cat;
+        if (catalog_load_from_conn(conn, &cat, 1000) == 0) {
+            unsigned used = 0;
+            for (unsigned i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++)
+                if (cat.entries[i].used)
+                    used++;
+            printf("Catalog:\n");
+            printf("  State              %s\n", cat.initialized ? "initialized" : "not initialized");
+            printf("  Sector             0x%016" PRIx64 "\n", (uint64_t)SATA_CATALOG_SECTOR);
+            printf("  Entries            %u/%u\n", used, SATA_CATALOG_MAX_ENTRIES);
+        } else {
+            printf("Catalog:\n");
+            printf("  State              unreadable or not initialized\n");
+        }
+    }
 #endif
 
 #else
@@ -2519,120 +2677,87 @@ static void help(void)
            "  -p, --port PORT                Port number (default: 1234).\n"
            "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
-           "      --pattern NAME             Pattern for write-pattern/verify-pattern: zero|counter|prbs.\n"
+           "      --pattern NAME             Diagnostic pattern: zero|counter|prbs.\n"
            "      --no-bulk-etherbone        Disable multi-word Etherbone host-buffer access.\n"
            "\n"
-           "commands:\n"
-           "status\n"
-           "    Show crossbar + (if present) SATA/loopback/streamer status.\n"
+           "workflow commands:\n"
+           "info\n"
+           "    Show transport, SATA link, drive, catalog and host I/O status.\n"
            "\n"
-           "route TXSRC RXDST [LOOPBACK]\n"
-           "    Set routing:\n"
-           "      txsrc: pcie|eth|sata\n"
-           "      rxdst: pcie|eth|sata\n"
-           "      loopback: 0|1 (optional, only if SATA present)\n"
-           "\n"
-#ifdef CSR_SATA_PHY_BASE
-           "record DST_SECTOR NSECTORS\n"
-           "    RX stream -> SSD (SATA_RX_STREAMER).\n"
-           "\n"
-           "record-start DST_SECTOR NSECTORS\n"
-           "    Start RX stream -> SSD and return immediately.\n"
-           "\n"
-           "play SRC_SECTOR NSECTORS\n"
-           "    SSD -> TX stream (SATA_TX_STREAMER).\n"
-           "\n"
-           "play-start SRC_SECTOR NSECTORS\n"
-           "    Start SSD -> TX stream and return immediately.\n"
-           "\n"
-           "stream-status\n"
-           "    Alias for status, useful after nonblocking starts.\n"
-           "\n"
-           "stream-stop RX|TX|BOTH\n"
-           "    Reset the selected SATA streamer(s) when the gateware exposes the stop CSR.\n"
-           "\n"
-           "replay SRC_SECTOR NSECTORS DST\n"
-           "    SSD -> TX -> loopback -> RX destination.\n"
-           "    dst: pcie|eth|sata\n"
-           "\n"
-           "copy SRC_SECTOR DST_SECTOR NSECTORS\n"
-           "    SSD -> SSD copy using loopback.\n"
-           "\n"
-           "read-file SRC_SECTOR NSECTORS FILE|-\n"
-           "    Read sectors from SSD to a host file.\n"
-           "\n"
-           "write-file FILE|- DST_SECTOR [NSECTORS]\n"
-           "    Write a host file to SSD sectors.\n"
-           "\n"
-           "write-pattern DST_SECTOR NSECTORS\n"
-           "    Fill sectors with the selected --pattern.\n"
-           "\n"
-           "verify-pattern SRC_SECTOR NSECTORS\n"
-           "    Read sectors and compare against the selected --pattern.\n"
-           "\n"
-#ifdef SATA_HOST_IO_AVAILABLE
-           "etherbone-bench [--iterations N]\n"
-           "    Sweep Etherbone host-buffer burst sizes and report write/read throughput.\n"
-           "\n"
-           "pcie-dma-bench SECTOR NSECTORS\n"
-           "    Benchmark PCIe DMA-backed host <-> SATA copy and verify data.\n"
-           "\n"
-           "catalog-init\n"
-           "    Initialize/reset the named capture catalog.\n"
+           "init\n"
+           "    Initialize/reset the named SATA catalog.\n"
            "\n"
            "list\n"
-           "    List named captures from the SATA catalog.\n"
+           "    List named SATA entries.\n"
            "\n"
            "show NAME\n"
-           "    Show metadata for one named capture.\n"
+           "    Show catalog and SigMF metadata for one entry.\n"
            "\n"
            "delete NAME\n"
-           "    Remove one capture from the catalog without erasing data sectors.\n"
+           "    Remove one entry from the catalog without erasing sectors.\n"
            "\n"
-           "fsck\n"
-           "    Check catalog names and sector overlap.\n"
+           "check\n"
+           "    Check catalog names, sector ranges and overlaps.\n"
            "\n"
-           "capture NAME --seconds SEC|--sectors N [RF options]\n"
-           "    Tune RF, record RX stream to SATA, and catalog it.\n"
+#ifdef CSR_SATA_PHY_BASE
+           "capture NAME --seconds SEC|--size BYTES [RF options]\n"
+           "    Tune RF, record RX stream to SATA, and store SigMF metadata.\n"
            "\n"
-           "capture-start NAME --seconds SEC|--sectors N [RF options]\n"
+           "capture-start NAME --seconds SEC|--size BYTES [RF options]\n"
            "    Start a named RX-to-SATA capture and return immediately.\n"
            "\n"
-           "capture-status\n"
-           "    Alias for stream-status.\n"
+           "import NAME FILE|SIGMF [metadata options]\n"
+           "    Import a raw file or SigMF dataset to SATA and catalog it.\n"
            "\n"
-           "import NAME FILE [metadata options]\n"
-           "    Write a host file to SATA and catalog it.\n"
+           "export NAME PATH [--raw]\n"
+           "    Export as SigMF metadata+data by default; --raw writes payload only.\n"
            "\n"
-           "import-sigmf NAME META|BASENAME [--sector SECTOR]\n"
-           "    Write a SigMF dataset to SATA and preserve its metadata.\n"
-           "\n"
-           "export NAME FILE|-\n"
-           "    Read a named capture to a host file.\n"
-           "\n"
-           "export-sigmf NAME META|BASENAME\n"
-           "    Export a named capture as .sigmf-meta + .sigmf-data.\n"
-           "\n"
-           "replay-host NAME --dst pcie|eth\n"
-           "    Replay SATA content through loopback to a normal host RX stream.\n"
-           "\n"
-           "replay-rf NAME [RF overrides]\n"
+           "play NAME [RF overrides]\n"
            "    Replay SATA content to the RF TX path.\n"
            "\n"
-           "Named capture/RF options: --sector, --sample-rate, --format sc16|sc8,\n"
+           "serve NAME [--dst pcie|eth]\n"
+           "    Replay SATA content into the normal host RX path for Soapy/GQRX.\n"
+           "\n"
+           "stop RX|TX|BOTH\n"
+           "    Reset the selected SATA streamer(s).\n"
+           "\n"
+           "RF/metadata options: --sector, --sample-rate, --format sc16|sc8,\n"
            "    --channel-layout 1t1r|2t2r, --rx-freq, --tx-freq, --bandwidth,\n"
            "    --rx-gain, --tx-att, --notes.\n"
            "\n"
-#endif
-#else
-           "record/play/replay/copy/read-file/write-file/write-pattern/verify-pattern\n"
-           "    Not available: SATA not present in this gateware.\n"
+           "diagnostics:\n"
+           "diag route TXSRC RXDST [LOOPBACK]\n"
+           "    Set raw crossbar routing; txsrc/rxdst: pcie|eth|sata.\n"
+           "\n"
+           "diag record DST_SECTOR NSECTORS\n"
+           "diag record-start DST_SECTOR NSECTORS\n"
+           "diag play SRC_SECTOR NSECTORS\n"
+           "diag play-start SRC_SECTOR NSECTORS\n"
+           "diag replay SRC_SECTOR NSECTORS pcie|eth|sata\n"
+           "diag copy SRC_SECTOR DST_SECTOR NSECTORS\n"
+           "    Raw sector streamer diagnostics.\n"
+           "\n"
+           "diag read SECTOR NSECTORS FILE|-\n"
+           "diag write FILE|- SECTOR [NSECTORS]\n"
+           "    Raw host file <-> SATA sector diagnostics.\n"
+           "\n"
+           "diag pattern-write SECTOR NSECTORS\n"
+           "diag pattern-check SECTOR NSECTORS\n"
+           "    Fill/check sectors with --pattern.\n"
+           "\n"
+#ifdef SATA_HOST_IO_AVAILABLE
+           "diag etherbone-bench [--iterations N]\n"
+           "diag pcie-dma-bench SECTOR NSECTORS\n"
+           "    Host I/O performance diagnostics.\n"
            "\n"
 #endif
-           "header TX|RX|BOTH ENABLE HEADER_ENABLE\n"
+#else
+           "SATA workflow commands are not available with this software header.\n"
+           "\n"
+#endif
+           "diag header TX|RX|BOTH ENABLE HEADER_ENABLE\n"
            "    Raw header control bits (writes CSR_HEADER_*_CONTROL).\n"
            "\n");
-    exit(1);
 }
 
 /* Main --------------------------------------------------------------------- */
@@ -2693,190 +2818,21 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc)
+    if (optind >= argc) {
         help();
-
-#ifndef CSR_SATA_PHY_BASE
-    (void)timeout_ms;
-    (void)dry_run;
-#endif
+        return 1;
+    }
 
     cmd = argv[optind++];
 
-    if (!strcmp(cmd, "status") || !strcmp(cmd, "stream-status") || !strcmp(cmd, "capture-status")) {
+    if (!strcmp(cmd, "info")) {
         status();
         return 0;
     }
 
-    if (!strcmp(cmd, "route")) {
-        if (optind + 2 > argc) help();
-        const char *txsrc = argv[optind++];
-        const char *rxdst = argv[optind++];
-        int loopback = -1;
-        if (optind < argc)
-            loopback = parse_bool01("loopback", argv[optind++]);
-        do_route(txsrc, rxdst, loopback);
-        return 0;
-    }
-
 #ifdef CSR_SATA_PHY_BASE
-    if (!strcmp(cmd, "record")) {
-        if (optind + 2 > argc) help();
-        uint64_t dst_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_record(dst_sector, nsectors, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "record-start")) {
-        if (optind + 2 > argc) help();
-        uint64_t dst_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "play")) {
-        if (optind + 2 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_play(src_sector, nsectors, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "play-start")) {
-        if (optind + 2 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_play_start(src_sector, nsectors, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "stream-stop")) {
-        if (optind + 1 > argc) help();
-        return do_stream_stop(argv[optind++]);
-    }
-
-    if (!strcmp(cmd, "replay")) {
-        if (optind + 3 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        const char *dst     = argv[optind++];
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_replay(src_sector, nsectors, dst, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "copy")) {
-        if (optind + 3 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint64_t dst_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "read-file")) {
-        if (optind + 3 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        const char *path    = argv[optind++];
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        if (dry_run) {
-            printf("read-file dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " path=%s\n",
-                src_sector, nsectors, path);
-            return 0;
-        }
-        return do_read_file(src_sector, nsectors, path, timeout_ms);
-    }
-
-    if (!strcmp(cmd, "write-file")) {
-        if (optind + 2 > argc) help();
-        const char *path      = argv[optind++];
-        uint64_t dst_sector   = parse_u64(argv[optind++]);
-        uint32_t nsectors     = 0;
-        bool limit_sectors    = false;
-        if (optind < argc) {
-            nsectors = parse_u32(argv[optind++]);
-            if (nsectors == 0) {
-                m2sdr_cli_error("nsectors must be greater than zero");
-                return 1;
-            }
-            limit_sectors = true;
-        }
-        if (dry_run) {
-            printf("write-file dry-run: path=%s sector=0x%016" PRIx64,
-                path, dst_sector);
-            if (limit_sectors)
-                printf(" nsectors=%" PRIu32, nsectors);
-            printf("\n");
-            return 0;
-        }
-        return do_write_file(path, dst_sector, nsectors, limit_sectors, timeout_ms);
-    }
-
-    if (!strcmp(cmd, "write-pattern")) {
-        if (optind + 2 > argc) help();
-        uint64_t dst_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        if (dry_run) {
-            printf("write-pattern dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
-                dst_sector, nsectors, pattern_name);
-            return 0;
-        }
-        return do_write_pattern(dst_sector, nsectors, parse_pattern(pattern_name), timeout_ms);
-    }
-
-    if (!strcmp(cmd, "verify-pattern")) {
-        if (optind + 2 > argc) help();
-        uint64_t src_sector = parse_u64(argv[optind++]);
-        uint32_t nsectors   = parse_u32(argv[optind++]);
-        if (nsectors == 0) {
-            m2sdr_cli_error("nsectors must be greater than zero");
-            return 1;
-        }
-        if (dry_run) {
-            printf("verify-pattern dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
-                src_sector, nsectors, pattern_name);
-            return 0;
-        }
-        return do_verify_pattern(src_sector, nsectors, parse_pattern(pattern_name), timeout_ms);
-    }
-
 #ifdef SATA_HOST_IO_AVAILABLE
-    if (!strcmp(cmd, "etherbone-bench")) {
-        return do_etherbone_bench(argc, argv, optind);
-    }
-
-    if (!strcmp(cmd, "pcie-dma-bench")) {
-        return do_pcie_dma_bench(argc, argv, optind, timeout_ms);
-    }
-
-    if (!strcmp(cmd, "catalog-init")) {
+    if (!strcmp(cmd, "init")) {
         return do_catalog_init(timeout_ms);
     }
 
@@ -2885,102 +2841,303 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(cmd, "show")) {
-        if (optind + 1 > argc) help();
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
         return do_catalog_show(argv[optind++], timeout_ms);
     }
 
     if (!strcmp(cmd, "delete")) {
-        if (optind + 1 > argc) help();
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
         return do_catalog_delete(argv[optind++], timeout_ms);
     }
 
-    if (!strcmp(cmd, "fsck")) {
+    if (!strcmp(cmd, "check")) {
         return do_catalog_fsck(timeout_ms);
     }
 
-    if (!strcmp(cmd, "import")) {
-        if (optind + 2 > argc) help();
-        const char *name = argv[optind++];
-        const char *path = argv[optind++];
-        return do_import_capture(name, path, argc, argv, optind, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "import-sigmf")) {
-        if (optind + 2 > argc) help();
-        const char *name = argv[optind++];
-        const char *path = argv[optind++];
-        return do_import_sigmf_capture(name, path, argc, argv, optind, timeout_ms, dry_run);
-    }
-
-    if (!strcmp(cmd, "export")) {
-        if (optind + 2 > argc) help();
-        const char *name = argv[optind++];
-        const char *path = argv[optind++];
-        return do_export_capture(name, path, timeout_ms);
-    }
-
-    if (!strcmp(cmd, "export-sigmf")) {
-        if (optind + 2 > argc) help();
-        const char *name = argv[optind++];
-        const char *path = argv[optind++];
-        return do_export_sigmf_capture(name, path, timeout_ms);
-    }
-
     if (!strcmp(cmd, "capture")) {
-        if (optind + 1 > argc) help();
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
         const char *name = argv[optind++];
         return do_capture_named(name, argc, argv, optind, timeout_ms, false, dry_run);
     }
 
     if (!strcmp(cmd, "capture-start")) {
-        if (optind + 1 > argc) help();
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
         const char *name = argv[optind++];
         return do_capture_named(name, argc, argv, optind, timeout_ms, true, dry_run);
     }
 
-    if (!strcmp(cmd, "replay-host")) {
-        if (optind + 1 > argc) help();
+    if (!strcmp(cmd, "import")) {
+        if (argc - optind < 2) {
+            help();
+            return 1;
+        }
         const char *name = argv[optind++];
-        return do_replay_host_named(name, argc, argv, optind, timeout_ms, dry_run);
+        const char *path = argv[optind++];
+        return do_import_auto(name, path, argc, argv, optind, timeout_ms, dry_run);
     }
 
-    if (!strcmp(cmd, "replay-rf")) {
-        if (optind + 1 > argc) help();
+    if (!strcmp(cmd, "export")) {
+        bool raw = false;
+        if (argc - optind < 2) {
+            help();
+            return 1;
+        }
+        const char *name = argv[optind++];
+        const char *path = argv[optind++];
+        while (optind < argc) {
+            if (!strcmp(argv[optind], "--raw"))
+                raw = true;
+            else {
+                fprintf(stderr, "Unexpected argument: %s\n", argv[optind]);
+                return 1;
+            }
+            optind++;
+        }
+        return raw ? do_export_capture(name, path, timeout_ms) :
+                     do_export_sigmf_capture(name, path, timeout_ms);
+    }
+
+    if (!strcmp(cmd, "play")) {
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
         const char *name = argv[optind++];
         return do_replay_rf_named(name, argc, argv, optind, timeout_ms, dry_run);
     }
+
+    if (!strcmp(cmd, "serve")) {
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
+        const char *name = argv[optind++];
+        return do_replay_host_named(name, argc, argv, optind, timeout_ms, dry_run);
+    }
 #endif
+
+    if (!strcmp(cmd, "stop")) {
+        if (argc - optind < 1) {
+            help();
+            return 1;
+        }
+        return do_stream_stop(argv[optind++]);
+    }
+
 #else
-    if (!strcmp(cmd, "record") || !strcmp(cmd, "record-start") ||
-        !strcmp(cmd, "play") || !strcmp(cmd, "play-start") ||
-        !strcmp(cmd, "stream-stop") || !strcmp(cmd, "replay") || !strcmp(cmd, "copy") ||
-        !strcmp(cmd, "read-file") || !strcmp(cmd, "write-file") ||
-        !strcmp(cmd, "write-pattern") || !strcmp(cmd, "verify-pattern")) {
+    if (!strcmp(cmd, "init") || !strcmp(cmd, "list") || !strcmp(cmd, "show") ||
+        !strcmp(cmd, "delete") || !strcmp(cmd, "check") || !strcmp(cmd, "capture") ||
+        !strcmp(cmd, "capture-start") || !strcmp(cmd, "import") || !strcmp(cmd, "export") ||
+        !strcmp(cmd, "play") || !strcmp(cmd, "serve") || !strcmp(cmd, "stop")) {
         fprintf(stderr, "Command '%s' not available: SATA not present in this gateware.\n", cmd);
         return 1;
     }
 #endif
 
-    if (!strcmp(cmd, "header")) {
-        if (optind + 3 > argc) help();
-        const char *which_s = argv[optind++];
-        int which = 0;
-        if (!strcmp(which_s, "tx")) which = 0;
-        else if (!strcmp(which_s, "rx")) which = 1;
-        else if (!strcmp(which_s, "both")) which = 2;
-        else {
-            m2sdr_cli_invalid_choice("header target", which_s, "tx, rx, or both");
+    if (!strcmp(cmd, "diag")) {
+        const char *diag_cmd;
+
+        if (optind >= argc) {
+            help();
             return 1;
         }
-        int enable        = parse_bool01("header enable", argv[optind++]);
-        int header_enable = parse_bool01("header header_enable", argv[optind++]);
+        diag_cmd = argv[optind++];
 
-        struct m2sdr_dev *conn = m2sdr_open_dev();
-        header_set_raw(conn, which, enable, header_enable);
-        m2sdr_close_dev(conn);
-        return 0;
+        if (!strcmp(diag_cmd, "header")) {
+            if (argc - optind < 3) {
+                help();
+                return 1;
+            }
+            const char *which_s = argv[optind++];
+            int which = 0;
+            if (!strcmp(which_s, "tx")) which = 0;
+            else if (!strcmp(which_s, "rx")) which = 1;
+            else if (!strcmp(which_s, "both")) which = 2;
+            else {
+                m2sdr_cli_invalid_choice("header target", which_s, "tx, rx, or both");
+                return 1;
+            }
+            int enable        = parse_bool01("header enable", argv[optind++]);
+            int header_enable = parse_bool01("header header_enable", argv[optind++]);
+
+            struct m2sdr_dev *conn = m2sdr_open_dev();
+            header_set_raw(conn, which, enable, header_enable);
+            m2sdr_close_dev(conn);
+            return 0;
+        }
+
+#ifdef CSR_SATA_PHY_BASE
+        if (!strcmp(diag_cmd, "route")) {
+            if (argc - optind < 2) {
+                help();
+                return 1;
+            }
+            const char *txsrc = argv[optind++];
+            const char *rxdst = argv[optind++];
+            int loopback = -1;
+            if (optind < argc)
+                loopback = parse_bool01("loopback", argv[optind++]);
+            do_route(txsrc, rxdst, loopback);
+            return 0;
+        }
+
+        if (!strcmp(diag_cmd, "record") || !strcmp(diag_cmd, "record-start")) {
+            if (argc - optind < 2) {
+                help();
+                return 1;
+            }
+            uint64_t dst_sector = parse_u64(argv[optind++]);
+            uint32_t nsectors   = parse_u32(argv[optind++]);
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            return !strcmp(diag_cmd, "record") ?
+                do_record(dst_sector, nsectors, timeout_ms, dry_run) :
+                do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
+        }
+
+        if (!strcmp(diag_cmd, "play") || !strcmp(diag_cmd, "play-start")) {
+            if (argc - optind < 2) {
+                help();
+                return 1;
+            }
+            uint64_t src_sector = parse_u64(argv[optind++]);
+            uint32_t nsectors   = parse_u32(argv[optind++]);
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            return !strcmp(diag_cmd, "play") ?
+                do_play(src_sector, nsectors, timeout_ms, dry_run) :
+                do_play_start(src_sector, nsectors, timeout_ms, dry_run);
+        }
+
+        if (!strcmp(diag_cmd, "replay")) {
+            if (argc - optind < 3) {
+                help();
+                return 1;
+            }
+            uint64_t src_sector = parse_u64(argv[optind++]);
+            uint32_t nsectors   = parse_u32(argv[optind++]);
+            const char *dst     = argv[optind++];
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            return do_replay(src_sector, nsectors, dst, timeout_ms, dry_run);
+        }
+
+        if (!strcmp(diag_cmd, "copy")) {
+            if (argc - optind < 3) {
+                help();
+                return 1;
+            }
+            uint64_t src_sector = parse_u64(argv[optind++]);
+            uint64_t dst_sector = parse_u64(argv[optind++]);
+            uint32_t nsectors   = parse_u32(argv[optind++]);
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
+        }
+
+#ifdef SATA_HOST_IO_AVAILABLE
+        if (!strcmp(diag_cmd, "read")) {
+            if (argc - optind < 3) {
+                help();
+                return 1;
+            }
+            uint64_t src_sector = parse_u64(argv[optind++]);
+            uint32_t nsectors   = parse_u32(argv[optind++]);
+            const char *path    = argv[optind++];
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            if (dry_run) {
+                printf("diag read dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " path=%s\n",
+                    src_sector, nsectors, path);
+                return 0;
+            }
+            return do_read_file(src_sector, nsectors, path, timeout_ms);
+        }
+
+        if (!strcmp(diag_cmd, "write")) {
+            if (argc - optind < 2) {
+                help();
+                return 1;
+            }
+            const char *path      = argv[optind++];
+            uint64_t dst_sector   = parse_u64(argv[optind++]);
+            uint32_t nsectors     = 0;
+            bool limit_sectors    = false;
+            if (optind < argc) {
+                nsectors = parse_u32(argv[optind++]);
+                if (nsectors == 0) {
+                    m2sdr_cli_error("nsectors must be greater than zero");
+                    return 1;
+                }
+                limit_sectors = true;
+            }
+            if (dry_run) {
+                printf("diag write dry-run: path=%s sector=0x%016" PRIx64,
+                    path, dst_sector);
+                if (limit_sectors)
+                    printf(" nsectors=%" PRIu32, nsectors);
+                printf("\n");
+                return 0;
+            }
+            return do_write_file(path, dst_sector, nsectors, limit_sectors, timeout_ms);
+        }
+
+        if (!strcmp(diag_cmd, "pattern-write") || !strcmp(diag_cmd, "pattern-check")) {
+            if (argc - optind < 2) {
+                help();
+                return 1;
+            }
+            uint64_t sector = parse_u64(argv[optind++]);
+            uint32_t nsectors = parse_u32(argv[optind++]);
+            if (nsectors == 0) {
+                m2sdr_cli_error("nsectors must be greater than zero");
+                return 1;
+            }
+            if (dry_run) {
+                printf("diag %s dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
+                    diag_cmd, sector, nsectors, pattern_name);
+                return 0;
+            }
+            return !strcmp(diag_cmd, "pattern-write") ?
+                do_write_pattern(sector, nsectors, parse_pattern(pattern_name), timeout_ms) :
+                do_verify_pattern(sector, nsectors, parse_pattern(pattern_name), timeout_ms);
+        }
+
+        if (!strcmp(diag_cmd, "etherbone-bench"))
+            return do_etherbone_bench(argc, argv, optind);
+
+        if (!strcmp(diag_cmd, "pcie-dma-bench"))
+            return do_pcie_dma_bench(argc, argv, optind, timeout_ms);
+#endif
+#endif
+
+        fprintf(stderr, "Unknown diagnostic command: %s\n", diag_cmd);
+        return 1;
     }
 
+    fprintf(stderr, "Unknown command: %s\n", cmd);
     help();
-    return 0;
+    return 1;
 }
