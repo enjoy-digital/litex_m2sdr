@@ -35,7 +35,6 @@ from litex.build.generic_platform import IOStandard
 
 from litepcie.common            import *
 from litepcie.phy.s7pciephy     import S7PCIEPHY
-from litepcie.frontend.wishbone import LitePCIeWishboneSlave
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 from liteeth.core.ptp         import LiteEthPTP
@@ -54,7 +53,7 @@ from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
 from litex_m2sdr.gateware.pps         import PPSGenerator
-from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround
+from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround, LitePCIeWishboneBurstReadSlave
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
@@ -539,7 +538,7 @@ class BaseSoC(SoCMini):
                     address_width = 32,
                     bursting      = False,
                 )
-                self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
+                self.pcie_slave = LitePCIeWishboneBurstReadSlave(self.pcie_endpoint,
                     address_width = 32,
                     data_width    = 32,
                     # SATA DMA engines emit Wishbone word addresses after
