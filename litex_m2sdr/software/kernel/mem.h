@@ -6,7 +6,7 @@
 
 #ifndef SATA_HOST_BUFFER_BASE
 #define SATA_HOST_BUFFER_BASE 0x00020000L
-#define SATA_HOST_BUFFER_SIZE 0x00010000
+#define SATA_HOST_BUFFER_SIZE 0x00020000
 #endif
 
 #ifndef CSR_BASE
@@ -15,10 +15,10 @@
 #endif
 
 #ifndef MEM_REGIONS
-#define MEM_REGIONS "SATA_HOST_BUFFER  0x00020000 0x10000 \nCSR               0x00000000 0x20000 "
+#define MEM_REGIONS "SATA_HOST_BUFFER  0x00020000 0x20000 \nCSR               0x00000000 0x20000 "
 #endif
 
 #ifndef MEM_REGIONS_DETAILS
-#define MEM_REGIONS_DETAILS "Region           Origin     End        Size \nSATA_HOST_BUFFER 0x00020000 0x0002ffff 0x10000 \nCSR              0x00000000 0x0001ffff 0x20000 "
+#define MEM_REGIONS_DETAILS "Region           Origin     End        Size \nSATA_HOST_BUFFER 0x00020000 0x0003ffff 0x20000 \nCSR              0x00000000 0x0001ffff 0x20000 "
 #endif
 #endif

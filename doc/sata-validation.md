@@ -77,6 +77,7 @@ Measured SigMF round-trip throughput:
 | ---- | ---- | ------------ | ----------- |
 | SigMF round-trip over Etherbone | 8 MiB | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
 | SigMF round-trip over Etherbone, pipelined reads | 8 MiB | 0.882 s, about 9.1 MiB/s | 0.303-0.308 s, about 26.0-26.4 MiB/s |
+| SigMF round-trip over Etherbone, 128 KiB SATA host buffer | 8 MiB | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s |
 
 The pipelined read run kept the 128-word Etherbone bulk burst size and used an
 8-request software read window. Three repeated exports matched the original
@@ -103,6 +104,11 @@ Ethernet+SATA:
 The exported data matched byte-for-byte in these runs, but the changes were
 within measurement noise and sometimes slower, so they were not kept.
 
+The 128 KiB SATA host-buffer run reduces the number of SATA `MEM2SECTOR`
+transactions for Ethernet imports. A 256 KiB host buffer was also tried but hit
+a Vivado DRC failure on cascaded RAMB36 address pins, so 128 KiB is the
+validated larger default.
+
 ### Host file transfer path
 
 These measurements use the user-visible host file/SigMF import/export commands,
@@ -115,6 +121,7 @@ plain file transfers.
 | Transport | Host-to-SATA write | SATA-to-host read |
 | --------- | ------------------ | ----------------- |
 | Ethernet/Etherbone, `write-file`/`read-file`, 16 MiB | 1.709 s, 1.740 s, 1.719 s; 9.4, 9.2, 9.3 MiB/s | 0.539 s, 0.520 s, 0.492 s; 29.7, 30.8, 32.5 MiB/s |
+| Ethernet/Etherbone, 128 KiB SATA host buffer, `write-file`/`read-file`, 16 MiB | 0.348 s, 0.299 s, 0.299 s; 46.0, 53.5, 53.5 MiB/s | 0.509 s, 0.470 s, 0.471 s; 31.5, 34.0, 34.0 MiB/s |
 | PCIe DMA-backed file path, SigMF import/export, 8 MiB | 0.112 s; about 71.4 MiB/s | 0.133 s; about 60.2 MiB/s |
 | PCIe DMA microbenchmark, `pcie-dma-bench`, 16 MiB | 93.202 MiB/s | 63.391 MiB/s |
 

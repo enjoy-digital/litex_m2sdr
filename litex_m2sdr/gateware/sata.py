@@ -19,7 +19,7 @@ from litesata.common import logical_sector_size
 # Constants ----------------------------------------------------------------------------------------
 
 SATA_HOST_BUFFER_BASE = 0x00020000
-SATA_HOST_BUFFER_SIZE = 64 * 1024
+SATA_HOST_BUFFER_SIZE = 128 * 1024
 
 
 # SATA Host Buffer ---------------------------------------------------------------------------------
