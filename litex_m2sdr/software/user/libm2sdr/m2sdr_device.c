@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #include "csr.h"
 #include "m2sdr_internal.h"
@@ -871,6 +872,58 @@ int m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *v
         if (rc != M2SDR_ERR_OK)
             return rc;
     }
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
+                             enum m2sdr_sata_dma_direction direction,
+                             uint64_t sector,
+                             uint32_t nsectors,
+                             void *buf,
+                             int timeout_ms,
+                             uint32_t *transferred)
+{
+    struct litepcie_ioctl_sata_dma m;
+
+    if (transferred)
+        *transferred = 0;
+    if (!dev || !buf || nsectors == 0)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE || dev->fd < 0)
+        return M2SDR_ERR_UNSUPPORTED;
+    if (direction != M2SDR_SATA_DMA_HOST_TO_DEVICE &&
+        direction != M2SDR_SATA_DMA_DEVICE_TO_HOST)
+        return M2SDR_ERR_INVAL;
+
+    memset(&m, 0, sizeof(m));
+    m.user_addr  = (uint64_t)(uintptr_t)buf;
+    m.sector     = sector;
+    m.nsectors   = nsectors;
+    m.timeout_ms = timeout_ms;
+    m.direction  = (direction == M2SDR_SATA_DMA_HOST_TO_DEVICE) ?
+        LITEPCIE_SATA_DMA_HOST_TO_DEVICE : LITEPCIE_SATA_DMA_DEVICE_TO_HOST;
+
+    if (ioctl(dev->fd, LITEPCIE_IOCTL_SATA_DMA, &m) < 0) {
+        int saved_errno = errno;
+        if (transferred)
+            *transferred = m.transferred;
+        if (saved_errno == ENOTTY || saved_errno == ENODEV || saved_errno == ENOSYS)
+            return M2SDR_ERR_UNSUPPORTED;
+        if (saved_errno == ETIMEDOUT)
+            return M2SDR_ERR_TIMEOUT;
+        if (saved_errno == EINVAL || saved_errno == EFAULT)
+            return M2SDR_ERR_INVAL;
+        if (saved_errno == ENOMEM)
+            return M2SDR_ERR_NO_MEM;
+        return M2SDR_ERR_IO;
+    }
+
+    if (transferred)
+        *transferred = m.transferred;
+    if (m.status == -ETIMEDOUT)
+        return M2SDR_ERR_TIMEOUT;
+    if (m.status)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 

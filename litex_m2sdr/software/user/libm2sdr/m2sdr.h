@@ -85,6 +85,13 @@ enum m2sdr_transport_kind {
     M2SDR_TRANSPORT_KIND_LITEETH = 2,
 };
 
+enum m2sdr_sata_dma_direction {
+    M2SDR_SATA_DMA_HOST_TO_DEVICE = 0,
+    M2SDR_SATA_DMA_DEVICE_TO_HOST = 1,
+};
+
+#define M2SDR_SATA_PCIE_DMA_MAX_SECTORS 4096u
+
 /* Backward-compatible alias for older code. */
 typedef enum m2sdr_direction m2sdr_module_t;
 
@@ -581,6 +588,13 @@ int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 int  m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
 int  m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
+int  m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
+                              enum m2sdr_sata_dma_direction direction,
+                              uint64_t sector,
+                              uint32_t nsectors,
+                              void *buf,
+                              int timeout_ms,
+                              uint32_t *transferred);
 
 /* Low-level transport handle access for advanced integrations.
  *
