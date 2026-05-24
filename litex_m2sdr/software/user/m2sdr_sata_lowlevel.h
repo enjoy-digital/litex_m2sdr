@@ -20,6 +20,7 @@
 #include "mem.h"
 
 #define ETHERBONE_BULK_WORDS 128u
+#define ETHERBONE_READ_WINDOW 8u
 
 enum {
     TXSRC_PCIE = 0,

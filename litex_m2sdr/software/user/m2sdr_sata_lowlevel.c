@@ -19,6 +19,7 @@
 
 #include "m2sdr_sata_lowlevel.h"
 #include "m2sdr_cli.h"
+#include "etherbone.h"
 
 static bool no_bulk_etherbone = false;
 
@@ -542,6 +543,26 @@ void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 {
     uint32_t burst = sata_host_buffer_bulk_words(conn);
     uint32_t words[ETHERBONE_BULK_WORDS];
+
+    if (burst > 1 && etherbone_is_liteeth(conn) && (bytes % sizeof(uint32_t)) == 0) {
+        struct eb_connection *eb = m2sdr_get_eb_handle(conn);
+        size_t word_count = bytes / sizeof(uint32_t);
+        uint32_t *pipeline_words = malloc(word_count * sizeof(uint32_t));
+
+        if (eb && pipeline_words) {
+            int rc = eb_read32_bulk_pipeline_checked(eb, SATA_HOST_BUFFER_BASE,
+                pipeline_words, word_count, burst, ETHERBONE_READ_WINDOW);
+
+            if (rc == EB_ERR_OK) {
+                for (size_t i = 0; i < word_count; i++)
+                    put_le32(&buf[4 * i], pipeline_words[i]);
+                free(pipeline_words);
+                return;
+            }
+            fprintf(stderr, "Host buffer pipelined read failed; using stop-and-wait reads.\n");
+        }
+        free(pipeline_words);
+    }
 
     for (size_t off = 0; off < bytes; ) {
         size_t remaining_words = (bytes - off) / sizeof(uint32_t);
