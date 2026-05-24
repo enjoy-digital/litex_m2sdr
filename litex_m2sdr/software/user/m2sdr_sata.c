@@ -730,10 +730,10 @@ out_close_dev:
     return rc;
 }
 
-static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsectors,
-                         bool limit_sectors, int timeout_ms)
+static int write_file_to_conn(struct m2sdr_dev *conn, const char *path,
+                              uint64_t dst_sector, uint32_t nsectors,
+                              bool limit_sectors, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
     bool try_pcie_dma = sata_try_pcie_dma_default(conn);
     uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
@@ -745,7 +745,7 @@ static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsector
     sata_require_csrs();
     if (!buf) {
         fprintf(stderr, "Failed to allocate host buffer.\n");
-        goto out_close_dev;
+        return 1;
     }
 
     in = open_stdio_or_file(path, "rb", &close_in);
@@ -805,7 +805,16 @@ out_file:
         fclose(in);
 out_free:
     free(buf);
-out_close_dev:
+    return rc;
+}
+
+static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsectors,
+                         bool limit_sectors, int timeout_ms)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rc;
+
+    rc = write_file_to_conn(conn, path, dst_sector, nsectors, limit_sectors, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
@@ -1268,6 +1277,7 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
     struct m2sdr_sigmf_meta meta;
     char data_path[1024];
     char meta_path[1024];
+    char transport[32];
 
     if (catalog_require(&cat, timeout_ms) != 0)
         return 1;
@@ -1286,12 +1296,14 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
         return 1;
 
     catalog_entry_get_sigmf_metadata(e, &meta, timeout_ms);
+    snprintf(transport, sizeof(transport), "%s",
+        meta.m2sdr_transport[0] ? meta.m2sdr_transport : "sata");
     snprintf(meta.data_path, sizeof(meta.data_path), "%s", data_path);
     snprintf(meta.meta_path, sizeof(meta.meta_path), "%s", meta_path);
     m2sdr_sata_sigmf_set_storage(&meta,
         e->sector, e->nsectors, e->bytes,
         e->meta_sector, e->meta_nsectors, e->meta_bytes,
-        "sata");
+        transport);
     if (m2sdr_sigmf_write(&meta) != 0) {
         fprintf(stderr, "Failed to write SigMF metadata: %s\n", meta_path);
         return 1;
@@ -1514,24 +1526,36 @@ out:
     return rc;
 }
 
+static int catalog_entry_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
+                                                      struct sata_capture_entry *entry,
+                                                      const char *name,
+                                                      int timeout_ms)
+{
+    struct m2sdr_sigmf_meta meta;
+
+    if (!entry || entry->meta_nsectors == 0)
+        return 0;
+
+    m2sdr_sata_sigmf_from_entry(&meta, name, entry);
+    return sata_write_sigmf_metadata_to_conn(conn, &meta,
+        entry->sector, entry->nsectors, entry->bytes,
+        entry->meta_sector, entry->meta_nsectors,
+        timeout_ms, &entry->meta_bytes);
+}
+
 static int catalog_entry_write_sigmf_metadata(struct sata_capture_entry *entry,
                                               const char *name,
                                               int timeout_ms)
 {
-    struct m2sdr_sigmf_meta meta;
     struct m2sdr_dev *conn;
     int rc;
 
     if (!entry || entry->meta_nsectors == 0)
         return 0;
 
-    m2sdr_sata_sigmf_from_entry(&meta, name, entry);
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    rc = sata_write_sigmf_metadata_to_conn(conn, &meta,
-        entry->sector, entry->nsectors, entry->bytes,
-        entry->meta_sector, entry->meta_nsectors,
-        timeout_ms, &entry->meta_bytes);
+    rc = catalog_entry_write_sigmf_metadata_to_conn(conn, entry, name, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
@@ -1615,6 +1639,8 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
     uint32_t nsectors;
     uint64_t sector;
     uint64_t meta_sector;
+    struct m2sdr_dev *conn = NULL;
+    int rc = 1;
 
     if (bytes == 0) {
         fprintf(stderr, "%s is empty.\n", path);
@@ -1635,35 +1661,43 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
         argi++;
     }
 
-    if (catalog_load(&cat, timeout_ms) != 0)
-        return 1;
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    if (catalog_load_from_conn(conn, &cat, timeout_ms) != 0)
+        goto out_close_dev;
     if (!cat.initialized)
         catalog_clear(&cat);
     if (catalog_assign_new_storage(&cat, name, opts.have_sector, opts.sector,
                                    nsectors, &sector, &meta_sector) != 0)
-        return 1;
+        goto out_close_dev;
     if (dry_run) {
         printf("import dry-run: name=%s path=%s sector=0x%016" PRIx64
                " nsectors=%" PRIu32 " bytes=%" PRIu64
                " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u\n",
             name, path, sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
-        return 0;
+        rc = 0;
+        goto out_close_dev;
     }
 
-    if (do_write_file(path, sector, nsectors, true, timeout_ms) != 0)
-        return 1;
+    if (write_file_to_conn(conn, path, sector, nsectors, true, timeout_ms) != 0)
+        goto out_close_dev;
     catalog_entry_from_options(&entry, name, &opts, sector, nsectors, bytes,
         meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
-    if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
-        return 1;
+    if (catalog_entry_write_sigmf_metadata_to_conn(conn, &entry, name, timeout_ms) != 0)
+        goto out_close_dev;
     if (catalog_add_entry(&cat, &entry) != 0)
-        return 1;
-    if (catalog_save(&cat, timeout_ms) != 0)
-        return 1;
+        goto out_close_dev;
+    if (catalog_save_to_conn(conn, &cat, timeout_ms) != 0)
+        goto out_close_dev;
     printf("Imported '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
-    return 0;
+    rc = 0;
+
+out_close_dev:
+    if (conn)
+        m2sdr_close_dev(conn);
+    return rc;
 }
 
 static int do_import_sigmf_capture(const char *name, const char *input_path,
@@ -1681,6 +1715,8 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
     uint64_t meta_sector;
     bool have_sector = false;
     uint64_t requested_sector = 0;
+    struct m2sdr_dev *conn = NULL;
+    int rc = 1;
 
     while (argi < argc) {
         if (!strcmp(argv[argi], "--sector")) {
@@ -1717,55 +1753,55 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
         return 1;
     }
 
-    if (catalog_load(&cat, timeout_ms) != 0)
-        return 1;
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    if (catalog_load_from_conn(conn, &cat, timeout_ms) != 0)
+        goto out_close_dev;
     if (!cat.initialized)
         catalog_clear(&cat);
     if (catalog_assign_new_storage(&cat, name, have_sector, requested_sector,
                                    nsectors, &sector, &meta_sector) != 0)
-        return 1;
+        goto out_close_dev;
     if (dry_run) {
         printf("import-sigmf dry-run: name=%s meta=%s data=%s sector=0x%016" PRIx64
                " nsectors=%" PRIu32 " bytes=%" PRIu64
                " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u\n",
             name, input_path, source_data_path, sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
-        return 0;
+        rc = 0;
+        goto out_close_dev;
     }
 
-    if (do_write_file(source_data_path, sector, nsectors, true, timeout_ms) != 0)
-        return 1;
+    if (write_file_to_conn(conn, source_data_path, sector, nsectors, true, timeout_ms) != 0)
+        goto out_close_dev;
 
     snprintf(meta.data_path, sizeof(meta.data_path), "%s.sigmf-data", name);
     snprintf(meta.meta_path, sizeof(meta.meta_path), "%s.sigmf-meta", name);
-    {
-        struct m2sdr_dev *conn = m2sdr_open_dev();
-        int rc;
-
-        sata_require_csrs();
-        rc = sata_write_sigmf_metadata_to_conn(conn, &meta,
-            sector, nsectors, bytes,
-            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
-            timeout_ms, &meta_bytes);
-        m2sdr_close_dev(conn);
-        if (rc != 0)
-            return 1;
-    }
+    if (sata_write_sigmf_metadata_to_conn(conn, &meta,
+        sector, nsectors, bytes,
+        meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
+        timeout_ms, &meta_bytes) != 0)
+        goto out_close_dev;
 
     if (m2sdr_sata_sigmf_entry_from_meta(&entry, name, &meta,
             sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
             meta_bytes) != 0) {
         fprintf(stderr, "Could not convert SigMF metadata to SATA catalog entry.\n");
-        return 1;
+        goto out_close_dev;
     }
     if (catalog_add_entry(&cat, &entry) != 0)
-        return 1;
-    if (catalog_save(&cat, timeout_ms) != 0)
-        return 1;
+        goto out_close_dev;
+    if (catalog_save_to_conn(conn, &cat, timeout_ms) != 0)
+        goto out_close_dev;
     printf("Imported SigMF '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
-    return 0;
+    rc = 0;
+
+out_close_dev:
+    if (conn)
+        m2sdr_close_dev(conn);
+    return rc;
 }
 
 
