@@ -1,62 +1,70 @@
 # SATA Hardware Validation
 
-This file records known-good SATA host I/O validation runs. Speeds are measured
-from the host utility wall time unless the command reports its own timing.
+This page records known-good SATA validation on the LiteX-M2SDR baseboard with
+the SATA SSD connected. Speeds are host utility wall-clock measurements unless a
+command reports its own throughput.
 
-## 2026-05-24, SigMF SATA round-trip
+SATA host access is through `m2sdr_sata`: PCIe uses the `LITEPCIE_IOCTL_SATA_DMA`
+userspace DMA path, while Ethernet uses Etherbone access to the SATA host
+staging buffer.
 
-Tested on the LiteX-M2SDR baseboard with the SATA SSD connected. Software was
-at `64b22db` (`m2sdr_sata: keep imports on one device session`) after the
-SigMF SATA workflow changes.
+## Current Hardware Numbers
 
-### PCIe + SATA
+These are the latest validated numbers from the 2026-05-24 hardware run.
 
-Gateware:
+| Transport | User-visible path | Host to SATA | SATA to host | Validation |
+| --------- | ----------------- | ------------ | ------------ | ---------- |
+| PCIe | SigMF import/export, 8 MiB | 0.112 s, about 71.4 MiB/s | 0.133 s, about 60.2 MiB/s | exported data matched with `cmp`; metadata validated |
+| PCIe | `pcie-dma-bench`, 16 MiB | 93.202 MiB/s | 63.391 MiB/s | benchmark write/read/verify passed |
+| Ethernet/Etherbone | SigMF import/export, 8 MiB | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s | exported data matched with `cmp`; metadata validated |
+| Ethernet/Etherbone | `write-file`/`read-file`, 16 MiB | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s | all readbacks matched with `cmp` |
+
+## Validated Commands
+
+PCIe + SATA gateware:
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --load
 sudo ./rescan.py
+cd litex_m2sdr/software/user
+./m2sdr_sata -c 0 status
+./m2sdr_sata -c 0 pcie-dma-bench 0x200000 32768
+./m2sdr_sata -c 0 --pattern counter write-pattern 0x240000 8192
+./m2sdr_sata -c 0 --pattern counter verify-pattern 0x240000 8192
 ```
 
-Validity:
-
-- `./m2sdr_sata -c 0 status`: SATA PHY, TX, RX, and CTRL all ready.
-- `./m2sdr_sata -c 0 pcie-dma-bench 0x200000 32768`: 16 MiB write/read/verify ok.
-- `./m2sdr_sata -c 0 --pattern counter write-pattern 0x240000 8192`
-  followed by `verify-pattern`: 4 MiB counter pattern verified.
-- 8 MiB SigMF `import-sigmf` + `export-sigmf`: exported data matched the input
-  with `cmp`; exported metadata passed `m2sdr_sigmf --validate`.
-
-Measured throughput:
-
-| Test | Size | Write/import | Read/export |
-| ---- | ---- | ------------ | ----------- |
-| `pcie-dma-bench` | 16 MiB | 93.202 MiB/s | 63.391 MiB/s |
-| SigMF round-trip | 8 MiB | 0.112 s, about 71.4 MiB/s | 0.133 s, about 60.2 MiB/s |
-
-### Ethernet + SATA
-
-Gateware:
+Ethernet + SATA gateware:
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --load
+cd litex_m2sdr/software/user
+./m2sdr_sata -i 192.168.1.50 status
+./m2sdr_sata -i 192.168.1.50 etherbone-bench --iterations 3
+./m2sdr_sata -i 192.168.1.50 --pattern counter write-pattern 0x260000 8192
+./m2sdr_sata -i 192.168.1.50 --pattern counter verify-pattern 0x260000 8192
 ```
 
-Reachability:
+In both cases, SATA PHY, TX, RX, and CTRL were ready. Pattern tests verified
+4 MiB of counter data. SigMF round-trips used `import-sigmf` and `export-sigmf`;
+the exported `.sigmf-data` matched the source data byte-for-byte and the
+exported metadata passed `m2sdr_sigmf --validate`.
 
-- `ping -c 2 192.168.1.50`: 2/2 replies, about 0.084 ms average.
-- `./m2sdr_sata -i 192.168.1.50 status`: SATA PHY, TX, RX, and CTRL all ready.
+## Ethernet Optimization History
 
-Validity:
+The current Ethernet numbers use a 128 KiB SATA host staging buffer and the
+default 128-word Etherbone burst size. Earlier measurements are kept here to
+show what changed.
 
-- `./m2sdr_sata -i 192.168.1.50 etherbone-bench --iterations 3`: all burst
-  sizes from 1 to 128 words passed.
-- `./m2sdr_sata -i 192.168.1.50 --pattern counter write-pattern 0x260000 8192`
-  followed by `verify-pattern`: 4 MiB counter pattern verified.
-- 8 MiB SigMF `import-sigmf` + `export-sigmf`: exported data matched the input
-  with `cmp`; exported metadata passed `m2sdr_sigmf --validate`.
-- Exported SigMF metadata kept the stored M2SDR extension fields, including
-  `m2sdr:transport` set to `ethernet`.
+| Ethernet path | Size | Host to SATA | SATA to host |
+| ------------- | ---- | ------------ | ------------ |
+| Original Etherbone path | 8 MiB SigMF | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
+| Pipelined Etherbone reads | 8 MiB SigMF | 0.882 s, about 9.1 MiB/s | 0.303-0.308 s, about 26.0-26.4 MiB/s |
+| 128 KiB SATA host buffer | 8 MiB SigMF | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s |
+| 128 KiB SATA host buffer | 16 MiB file | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s |
+
+The 128 KiB host buffer reduces the number of SATA `MEM2SECTOR` commands needed
+for Ethernet imports/writes. A 256 KiB buffer was tested first but rejected
+because Vivado DRC failed on cascaded RAMB36 address pins.
 
 Etherbone host-buffer burst benchmark:
 
@@ -71,68 +79,31 @@ Etherbone host-buffer burst benchmark:
 | 64 | 768 | 56.340 | 5.051 |
 | 128 | 1536 | 104.632 | 7.710 |
 
-Measured SigMF round-trip throughput:
+Multi-record Etherbone was reviewed but not implemented. LiteEth's Etherbone
+frontend currently documents one record per frame and no address space/flag
+support (`rca`, `bca`, `wca`, `wff`). With a standard Ethernet MTU, 128-word
+records would only pack about two records per frame, so after read pipelining
+the expected incremental gain is mostly fewer packets/syscalls rather than a
+fundamental transfer-rate change.
 
-| Test | Size | Write/import | Read/export |
-| ---- | ---- | ------------ | ----------- |
-| SigMF round-trip over Etherbone | 8 MiB | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
-| SigMF round-trip over Etherbone, pipelined reads | 8 MiB | 0.882 s, about 9.1 MiB/s | 0.303-0.308 s, about 26.0-26.4 MiB/s |
-| SigMF round-trip over Etherbone, 128 KiB SATA host buffer | 8 MiB | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s |
-
-The pipelined read run kept the 128-word Etherbone bulk burst size and used an
-8-request software read window. Three repeated exports matched the original
-data byte-for-byte and completed in 0.308 s, 0.303 s, and 0.303 s.
-
-Multi-record Etherbone was reviewed but not implemented here. LiteEth's
-Etherbone frontend currently documents one record per frame and no address
-space/flag support (`rca`, `bca`, `wca`, `wff`), so supporting several records
-per UDP packet would require gateware changes. With a standard Ethernet MTU,
-128-word records would only pack about two records per frame, so after
-pipelining the expected incremental gain is mainly fewer packets/syscalls
-rather than a fundamental transfer-rate change.
-
-Additional software-only optimizations were prototyped after the pipelined read
-change and measured on a 16 MiB `read-file 0x128000 32768` transfer over
-Ethernet+SATA:
+Additional software-only read optimizations were tested on a 16 MiB
+`read-file 0x128000 32768` transfer over Ethernet + SATA:
 
 | Variant | Read throughput |
 | ------- | --------------- |
 | Current pipelined Etherbone reads | 29.8, 32.4, 32.6 MiB/s |
-| Direct little-endian output buffer, larger Etherbone UDP socket buffers, Linux `sendmmsg`/`recvmmsg` batching | 30.6, 32.0, 31.5 MiB/s |
-| Direct little-endian output buffer and larger Etherbone UDP socket buffers only | 31.9, 32.4, 31.7 MiB/s |
+| Direct little-endian output buffer, larger UDP socket buffers, Linux `sendmmsg`/`recvmmsg` batching | 30.6, 32.0, 31.5 MiB/s |
+| Direct little-endian output buffer and larger UDP socket buffers only | 31.9, 32.4, 31.7 MiB/s |
 
 The exported data matched byte-for-byte in these runs, but the changes were
 within measurement noise and sometimes slower, so they were not kept.
 
-The 128 KiB SATA host-buffer run reduces the number of SATA `MEM2SECTOR`
-transactions for Ethernet imports. A 256 KiB host buffer was also tried but hit
-a Vivado DRC failure on cascaded RAMB36 address pins, so 128 KiB is the
-validated larger default.
+## Notes
 
-### Host file transfer path
-
-These measurements use the user-visible host file/SigMF import/export commands,
-not just the lower-level microbenchmarks. Ethernet/Etherbone used `write-file`
-and `read-file` on a 16 MiB host file at sector `0x150000`; every readback
-matched the input file with `cmp`. PCIe uses the SATA PCIe DMA path exercised by
-the SigMF import/export flow, which calls the same sector copy helpers used by
-plain file transfers.
-
-| Transport | Host-to-SATA write | SATA-to-host read |
-| --------- | ------------------ | ----------------- |
-| Ethernet/Etherbone, `write-file`/`read-file`, 16 MiB | 1.709 s, 1.740 s, 1.719 s; 9.4, 9.2, 9.3 MiB/s | 0.539 s, 0.520 s, 0.492 s; 29.7, 30.8, 32.5 MiB/s |
-| Ethernet/Etherbone, 128 KiB SATA host buffer, `write-file`/`read-file`, 16 MiB | 0.348 s, 0.299 s, 0.299 s; 46.0, 53.5, 53.5 MiB/s | 0.509 s, 0.470 s, 0.471 s; 31.5, 34.0, 34.0 MiB/s |
-| PCIe DMA-backed file path, SigMF import/export, 8 MiB | 0.112 s; about 71.4 MiB/s | 0.133 s; about 60.2 MiB/s |
-| PCIe DMA microbenchmark, `pcie-dma-bench`, 16 MiB | 93.202 MiB/s | 63.391 MiB/s |
-
-A later PCIe check with a stale `m2sdr.ko` reported `pcie-dma-bench` as
-`unsupported` and fell back to the CSR host-buffer path. That fallback measured
-only about 7.0 MiB/s write and 2.2 MiB/s read, so it is a diagnostic symptom of
-the DMA ioctl not being available, not the expected PCIe performance.
-
-### Notes
-
-- The catalog entries created for this run were deleted after validation. Data
+- The catalog entries created for validation were deleted after each run. Data
   sectors were not erased.
-- Reloading between Ethernet+SATA and PCIe+SATA requires a PCIe rescan before
-  `/dev/m2sdr0` can be used again.
+- Reloading between Ethernet + SATA and PCIe + SATA requires a PCIe rescan
+  before `/dev/m2sdr0` can be used again.
+- If `pcie-dma-bench` reports `unsupported`, the loaded `m2sdr.ko` does not
+  expose the SATA userspace DMA ioctl. That is a driver mismatch, not expected
+  PCIe SATA performance.

@@ -65,7 +65,7 @@ This removes:
   You can use `m2sdr_util`, `m2sdr_play`, or `m2sdr_record` to test DMA, or create custom applications interfacing with `/dev/m2sdrX`.
 - **SATA**
   SATA host access is exposed through the M2SDR userspace utilities, such as
-  `m2sdr_sata`, not as a Linux block device.
+  `m2sdr_sata`.
 - **Debug Logging**
   To enable detailed logs:
 ```

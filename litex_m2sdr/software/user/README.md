@@ -482,7 +482,7 @@ Example usage:
 ---
 
 ### m2sdr_sata
-Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform slow host-side sector I/O through PCIe or Ethernet register access when the gateware exposes the SATA host staging buffer.
+Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform host-side sector I/O through PCIe userspace DMA or the Ethernet/Etherbone SATA host staging buffer.
 Named captures use a small SATA catalog at sector `0x800`; automatic data allocation starts at sector `0x100000`. New named captures reserve a small SigMF metadata region next to their sample sectors so the SSD can carry the RF/sample description with the data.
 
 **Usage**:
