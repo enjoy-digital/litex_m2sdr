@@ -16,7 +16,8 @@ These are the latest validated numbers from the 2026-05-24 hardware run.
 | --------- | ----------------- | ------------ | ------------ | ---------- |
 | PCIe | SigMF import/export, 8 MiB | 0.112 s, about 71.4 MiB/s | 0.133 s, about 60.2 MiB/s | exported data matched with `cmp`; metadata validated |
 | PCIe | raw DMA benchmark, 16 MiB | 93.202 MiB/s | 63.391 MiB/s | `pcie-dma-bench` write/read/verify passed |
-| Ethernet/Etherbone | SigMF import/export, 8 MiB | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s | exported data matched with `cmp`; metadata validated |
+| Ethernet/Etherbone | SigMF import/export, 8 MiB small-file case | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s | exported data matched with `cmp`; metadata validated |
+| Ethernet/Etherbone | SigMF import/export, 64 MiB sustained case | 1.289 s, about 49.7 MiB/s | 1.882 s, about 34.0 MiB/s | exported data matched with `cmp`; metadata validated |
 | Ethernet/Etherbone | raw `write-file`/`read-file`, 16 MiB | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s | all readbacks matched with `cmp` |
 
 The Ethernet SigMF and raw file rows are not identical measurements. Both use
@@ -28,6 +29,10 @@ catalog lookup/update, SigMF metadata parsing/formatting, metadata sector I/O,
 and host `.sigmf-meta`/`.sigmf-data` file handling are included in the wall
 time. It also used an 8 MiB dataset instead of the 16 MiB raw file test, so
 fixed command overhead has more weight.
+
+For sustained Ethernet SigMF throughput, use the 64 MiB row. It amortizes the
+fixed catalog/metadata overhead and lands close to the raw payload transfer
+numbers: about 49.7 MiB/s host-to-SATA and 34.0 MiB/s SATA-to-host.
 
 ## Validated Commands
 
@@ -70,6 +75,7 @@ show what changed.
 | Original Etherbone path | 8 MiB SigMF | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
 | Pipelined Etherbone reads | 8 MiB SigMF | 0.882 s, about 9.1 MiB/s | 0.303-0.308 s, about 26.0-26.4 MiB/s |
 | 128 KiB SATA host buffer | 8 MiB SigMF | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s |
+| 128 KiB SATA host buffer | 64 MiB SigMF | 1.289 s, about 49.7 MiB/s | 1.882 s, about 34.0 MiB/s |
 | 128 KiB SATA host buffer | 16 MiB file | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s |
 
 The 128 KiB host buffer reduces the number of SATA `MEM2SECTOR` commands needed
