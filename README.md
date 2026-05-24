@@ -475,8 +475,11 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
    ./m2sdr_sata -i 192.168.1.50 list
    ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
+   ./m2sdr_sata -i 192.168.1.50 export-sigmf fm_test /tmp/fm_test.sigmf-meta
    ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+   ./m2sdr_sata -i 192.168.1.50 import-sigmf tx_sigmf /tmp/tx.sigmf-meta
    ./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
+   ./m2sdr_sata -i 192.168.1.50 replay-rf tx_sigmf
    ```
    To replay a stored capture into an existing SoapySDR/GQRX receive flow, start
    the RX application normally, then feed the Ethernet RX path from SATA:
@@ -484,7 +487,8 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./m2sdr_sata -i 192.168.1.50 replay-host fm_test --dst eth
    ```
    The named catalog is stored on the SATA disk at sector `0x800`; automatic
-   capture allocation starts at sector `0x100000`. See
+   capture allocation starts at sector `0x100000`, and named captures keep a
+   SigMF metadata region next to the sample data. See
    `litex_m2sdr/software/user/README.md` for the full `m2sdr_sata` command
    reference.
    - For PCIe + SATA source-build tests:
@@ -499,6 +503,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./m2sdr_sata -c 0 catalog-init
    ./m2sdr_sata -c 0 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
    ./m2sdr_sata -c 0 export fm_test /tmp/fm_test.sc16
+   ./m2sdr_sata -c 0 export-sigmf fm_test /tmp/fm_test.sigmf-meta
    ./m2sdr_sata -c 0 replay-host fm_test --dst pcie
    ```
    - For Ethernet PTP time-discipline tests on the baseboard:

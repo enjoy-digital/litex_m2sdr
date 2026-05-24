@@ -415,7 +415,7 @@ Example usage:
 ./m2sdr_record --sigmf --enable-header --strip-header --annotate-ts-jumps capture 2000000
 ~~~~
 
-Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
+Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and expects stripped sample payloads when DMA headers are enabled.
 
 ---
 
@@ -464,7 +464,7 @@ Example usage:
 ---
 
 ### m2sdr_sigmf
-Small text utility to inspect SigMF metadata without opening the GUI.
+Small text utility to inspect SigMF metadata without opening the GUI. It also reports M2SDR SATA extension fields when present.
 
 **Usage**:
 ~~~~
@@ -483,7 +483,7 @@ Example usage:
 
 ### m2sdr_sata
 Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform slow host-side sector I/O through PCIe or Ethernet register access when the gateware exposes the SATA host staging buffer.
-Named captures use a small SATA catalog at sector `0x800`; automatic data allocation starts at sector `0x100000`.
+Named captures use a small SATA catalog at sector `0x800`; automatic data allocation starts at sector `0x100000`. New named captures reserve a small SigMF metadata region next to their sample sectors so the SSD can carry the RF/sample description with the data.
 
 **Usage**:
 ~~~~
@@ -539,12 +539,16 @@ m2sdr_sata [options] cmd [args...]
   Alias for `stream-status`.
 - **import `NAME FILE [metadata options]`**
   Write a host file to SATA and catalog it.
+- **import-sigmf `NAME META|BASENAME [--sector SECTOR]`**
+  Write a SigMF dataset to SATA and preserve its metadata.
 - **export `NAME FILE|-`**
   Read a named capture back to a host file.
+- **export-sigmf `NAME META|BASENAME`**
+  Read a named capture back as a `.sigmf-meta` + `.sigmf-data` pair.
 - **replay-host `NAME --dst pcie|eth`**
   Replay SATA contents through loopback to the normal host RX path for tools such as GQRX/Soapy.
 - **replay-rf `NAME [RF overrides]`**
-  Replay SATA contents to the RF TX path.
+  Replay SATA contents to the RF TX path, using stored SigMF metadata when present.
 - **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
   Raw header control (writes HEADER CSR enable bits).
 
@@ -568,8 +572,11 @@ Example usage:
 ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
 ./m2sdr_sata -i 192.168.1.50 list
 ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
+./m2sdr_sata -i 192.168.1.50 export-sigmf fm_test /tmp/fm_test.sigmf-meta
 ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+./m2sdr_sata -i 192.168.1.50 import-sigmf tx_sigmf /tmp/tx.sigmf-meta
 ./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
+./m2sdr_sata -i 192.168.1.50 replay-rf tx_sigmf
 ./m2sdr_sata -i 192.168.1.50 replay-host fm_test --dst eth
 ~~~~
 
@@ -579,8 +586,8 @@ host-buffer burst size. From the repository root:
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
 cd litex_m2sdr/software/user
 ./m2sdr_sata -i 192.168.1.50 etherbone-bench
-./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
-./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r
+./m2sdr_sata -i 192.168.1.50 export-sigmf fm_test /tmp/fm_test.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 import-sigmf tx_test /tmp/tx.sigmf-meta
 ~~~~
 
 ---
