@@ -11,6 +11,8 @@
 
 #define M2SDR_SIGMF_MAX_ANNOTATIONS 64
 #define M2SDR_SIGMF_MAX_CAPTURES 64
+#define M2SDR_SIGMF_CORE_VERSION "1.2.6"
+#define M2SDR_SIGMF_M2SDR_EXTENSION_VERSION "0.1.0"
 
 struct m2sdr_sigmf_capture {
     uint64_t sample_start;
@@ -43,10 +45,17 @@ struct m2sdr_sigmf_meta {
     char hw[128];
     char recorder[128];
     char datetime[64];
+    char m2sdr_transport[32];
     double sample_rate;
     double center_freq;
     unsigned num_channels;
     unsigned header_bytes;
+    uint64_t m2sdr_sata_data_sector;
+    uint64_t m2sdr_sata_data_nsectors;
+    uint64_t m2sdr_sata_data_bytes;
+    uint64_t m2sdr_sata_meta_sector;
+    uint64_t m2sdr_sata_meta_nsectors;
+    uint64_t m2sdr_sata_meta_bytes;
     unsigned capture_count;
     struct m2sdr_sigmf_capture captures[M2SDR_SIGMF_MAX_CAPTURES];
     unsigned annotation_count;
@@ -56,6 +65,12 @@ struct m2sdr_sigmf_meta {
     bool has_num_channels;
     bool has_header_bytes;
     bool has_datetime;
+    bool has_m2sdr_sata_data_sector;
+    bool has_m2sdr_sata_data_nsectors;
+    bool has_m2sdr_sata_data_bytes;
+    bool has_m2sdr_sata_meta_sector;
+    bool has_m2sdr_sata_meta_nsectors;
+    bool has_m2sdr_sata_meta_bytes;
 };
 
 const char *m2sdr_sigmf_datatype_from_format(enum m2sdr_format format);
@@ -69,6 +84,10 @@ int m2sdr_sigmf_derive_paths(const char *input_path,
                              char *meta_path,
                              size_t meta_path_len);
 
+int m2sdr_sigmf_write_text(const struct m2sdr_sigmf_meta *meta, char *buf, size_t buf_len);
+int m2sdr_sigmf_read_text(const char *text, size_t text_len,
+                          const char *input_path_hint,
+                          struct m2sdr_sigmf_meta *meta);
 int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta);
 int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta);
 int m2sdr_sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
