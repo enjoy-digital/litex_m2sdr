@@ -54,12 +54,6 @@ struct sata_route_state {
 };
 
 #define SATA_SECTOR_BYTES 512u
-#define SATA_CATALOG_SECTOR  0x800ull
-#define SATA_CATALOG_SECTORS 64u
-#define SATA_DATA_START      0x100000ull
-#define SATA_CAPTURE_NAME_MAX 64
-#define SATA_CAPTURE_NOTES_MAX 128
-#define SATA_CATALOG_MAX_ENTRIES 64
 
 #if defined(SATA_HOST_BUFFER_BASE) && defined(SATA_HOST_BUFFER_SIZE) && \
     defined(CSR_SATA_SECTOR2MEM_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE)
