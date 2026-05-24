@@ -579,6 +579,8 @@ int  m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, un
  */
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+int  m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
+int  m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
 
 /* Low-level transport handle access for advanced integrations.
  *

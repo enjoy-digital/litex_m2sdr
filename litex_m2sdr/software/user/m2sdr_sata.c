@@ -41,6 +41,7 @@
 static struct m2sdr_cli_device g_cli_dev;
 static sig_atomic_t keep_running = 1;
 static int g_sata_lock_fd = -1;
+static bool g_no_bulk_etherbone = false;
 
 static void int_handler(int dummy)
 {
@@ -726,16 +727,108 @@ static uint32_t sata_host_buffer_max_sectors(void)
     return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
 }
 
-static void sata_host_buffer_write(void *conn, const uint8_t *buf, size_t bytes)
+static uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn)
 {
-    for (size_t off = 0; off < bytes; off += 4)
-        m2sdr_write32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off, get_le32(&buf[off]));
+    static bool probed = false;
+    static uint32_t cached_words = 1;
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+    static const uint32_t candidates[] = {1, 2, 4, 8};
+    uint32_t best_words = 0;
+    uint32_t tx[8];
+    uint32_t rx[8];
+
+    if (g_no_bulk_etherbone)
+        return 1;
+    if (probed)
+        return cached_words;
+    if (m2sdr_get_transport(conn, &transport) != M2SDR_ERR_OK ||
+        transport != M2SDR_TRANSPORT_KIND_LITEETH) {
+        cached_words = 255;
+        probed = true;
+        return cached_words;
+    }
+
+    for (size_t ci = 0; ci < sizeof(candidates) / sizeof(candidates[0]); ci++) {
+        uint32_t n = candidates[ci];
+
+        if ((size_t)n * sizeof(uint32_t) > SATA_HOST_BUFFER_SIZE)
+            continue;
+        for (uint32_t i = 0; i < n; i++)
+            tx[i] = 0x5a000000u ^ (n << 12) ^ i;
+        memset(rx, 0, n * sizeof(uint32_t));
+
+        if (m2sdr_reg_write_bulk(conn, SATA_HOST_BUFFER_BASE, tx, n) != M2SDR_ERR_OK)
+            continue;
+        if (m2sdr_reg_read_bulk(conn, SATA_HOST_BUFFER_BASE, rx, n) != M2SDR_ERR_OK)
+            continue;
+        if (memcmp(tx, rx, n * sizeof(uint32_t)) == 0)
+            best_words = n;
+    }
+
+    probed = true;
+    if (best_words) {
+        cached_words = best_words;
+        fprintf(stderr, "Etherbone bulk burst: %" PRIu32 " words\n", cached_words);
+        return cached_words;
+    }
+
+    cached_words = 1;
+    fprintf(stderr, "Etherbone bulk burst probe failed; using legacy single-word access.\n");
+    return cached_words;
 }
 
-static void sata_host_buffer_read(void *conn, uint8_t *buf, size_t bytes)
+static void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t bytes)
 {
-    for (size_t off = 0; off < bytes; off += 4)
-        put_le32(&buf[off], m2sdr_read32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off));
+    uint32_t burst = sata_host_buffer_bulk_words(conn);
+    uint32_t words[255];
+
+    for (size_t off = 0; off < bytes; ) {
+        size_t remaining_words = (bytes - off) / sizeof(uint32_t);
+        size_t chunk_words = remaining_words < burst ? remaining_words : burst;
+
+        if (chunk_words == 0)
+            break;
+        if (chunk_words == 1) {
+            m2sdr_write32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off, get_le32(&buf[off]));
+        } else {
+            uint32_t addr = SATA_HOST_BUFFER_BASE + (uint32_t)off;
+
+            for (size_t i = 0; i < chunk_words; i++)
+                words[i] = get_le32(&buf[off + 4 * i]);
+            if (m2sdr_reg_write_bulk(conn, addr, words, chunk_words) != M2SDR_ERR_OK) {
+                fprintf(stderr, "Host buffer bulk write failed @0x%08" PRIx32 "\n", addr);
+                exit(1);
+            }
+        }
+        off += chunk_words * sizeof(uint32_t);
+    }
+}
+
+static void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
+{
+    uint32_t burst = sata_host_buffer_bulk_words(conn);
+    uint32_t words[255];
+
+    for (size_t off = 0; off < bytes; ) {
+        size_t remaining_words = (bytes - off) / sizeof(uint32_t);
+        size_t chunk_words = remaining_words < burst ? remaining_words : burst;
+
+        if (chunk_words == 0)
+            break;
+        if (chunk_words == 1) {
+            put_le32(&buf[off], m2sdr_read32(conn, SATA_HOST_BUFFER_BASE + (uint32_t)off));
+        } else {
+            uint32_t addr = SATA_HOST_BUFFER_BASE + (uint32_t)off;
+
+            if (m2sdr_reg_read_bulk(conn, addr, words, chunk_words) != M2SDR_ERR_OK) {
+                fprintf(stderr, "Host buffer bulk read failed @0x%08" PRIx32 "\n", addr);
+                exit(1);
+            }
+            for (size_t i = 0; i < chunk_words; i++)
+                put_le32(&buf[off + 4 * i], words[i]);
+        }
+        off += chunk_words * sizeof(uint32_t);
+    }
 }
 
 static void sata_sector2mem_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
@@ -752,8 +845,9 @@ static void sata_mem2sector_program(void *conn, uint64_t sector, uint32_t nsecto
     csr_write64(conn, CSR_SATA_MEM2SECTOR_BASE_ADDR, base);
 }
 
-static int sata_read_to_host_buffer(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+static int sata_read_to_host_buffer(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
+    (void)sata_host_buffer_bulk_words(conn);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
     return wait_done("SATA_SECTOR2MEM(read-file)",
@@ -1030,8 +1124,9 @@ struct sata_catalog {
     struct sata_capture_entry entries[SATA_CATALOG_MAX_ENTRIES];
 };
 
-static int sata_read_to_host_buffer_quiet(void *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
+static int sata_read_to_host_buffer_quiet(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
+    (void)sata_host_buffer_bulk_words(conn);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
     return wait_done_quiet("SATA_SECTOR2MEM(catalog)",
@@ -2484,6 +2579,7 @@ static void help(void)
            "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
            "      --pattern NAME             Pattern for write-pattern/verify-pattern: zero|counter|prbs.\n"
+           "      --no-bulk-etherbone        Disable multi-word Etherbone host-buffer access.\n"
            "\n"
            "commands:\n"
            "status\n"
@@ -2607,6 +2703,7 @@ int main(int argc, char **argv)
         { "timeout-ms", required_argument, NULL, 'T' },
         { "dry-run", no_argument, NULL, 'n' },
         { "pattern", required_argument, NULL, 'P' },
+        { "no-bulk-etherbone", no_argument, NULL, 1000 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -2634,6 +2731,9 @@ int main(int argc, char **argv)
             break;
         case 'P':
             pattern_name = optarg;
+            break;
+        case 1000:
+            g_no_bulk_etherbone = true;
             break;
         default:
             exit(1);

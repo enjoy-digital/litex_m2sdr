@@ -16,6 +16,7 @@ extern "C" {
 #endif /* __cplusplus */
 
 #include <stdint.h>
+#include <stddef.h>
 
 /*
 
@@ -85,6 +86,8 @@ int eb_set_timeout(struct eb_connection *conn, int timeout_ms);
 int eb_get_last_error(struct eb_connection *conn);
 int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val);
 int eb_write32_checked(struct eb_connection *conn, uint32_t val, uint32_t addr);
+int eb_read32_bulk_checked(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count);
+int eb_write32_bulk_checked(struct eb_connection *conn, uint32_t addr, const uint32_t *vals, size_t count);
 uint32_t eb_read32(struct eb_connection *conn, uint32_t addr);
 void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr);
 

@@ -31,6 +31,8 @@ enum m2sdr_transport {
 struct m2sdr_backend_ops {
     int (*readl)(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
     int (*writel)(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+    int (*readl_bulk)(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
+    int (*writel_bulk)(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
 };
 
 /* Internal device object shared by the transport, stream, and RF layers. */

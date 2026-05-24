@@ -840,6 +840,40 @@ int m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
     return dev->ops->writel(dev, addr, val);
 }
 
+int m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count)
+{
+    if (!dev || !vals || !dev->ops || !dev->ops->readl)
+        return M2SDR_ERR_INVAL;
+    if (count == 0)
+        return M2SDR_ERR_OK;
+    if (dev->ops->readl_bulk)
+        return dev->ops->readl_bulk(dev, addr, vals, count);
+
+    for (size_t i = 0; i < count; i++) {
+        int rc = dev->ops->readl(dev, addr + (uint32_t)(4 * i), &vals[i]);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count)
+{
+    if (!dev || !vals || !dev->ops || !dev->ops->writel)
+        return M2SDR_ERR_INVAL;
+    if (count == 0)
+        return M2SDR_ERR_OK;
+    if (dev->ops->writel_bulk)
+        return dev->ops->writel_bulk(dev, addr, vals, count);
+
+    for (size_t i = 0; i < count; i++) {
+        int rc = dev->ops->writel(dev, addr + (uint32_t)(4 * i), vals[i]);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    return M2SDR_ERR_OK;
+}
+
 /* Legacy escape hatches kept for Soapy and advanced utilities. */
 /* Return the underlying PCIe file descriptor when available. */
 int m2sdr_get_fd(struct m2sdr_dev *dev)
