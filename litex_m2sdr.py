@@ -36,7 +36,6 @@ from litex.build.generic_platform import IOStandard
 from litepcie.common            import *
 from litepcie.phy.s7pciephy     import S7PCIEPHY
 from litepcie.frontend.wishbone import LitePCIeWishboneSlave
-
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 from liteeth.core.ptp         import LiteEthPTP
@@ -65,6 +64,7 @@ from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 from litex_m2sdr.gateware.sata        import (
     SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer,
+    SATADMAMemoryRouter,
     M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream,
     install_litesata_dma_patches)
 
@@ -74,26 +74,6 @@ from litex_m2sdr.software import generate_litepcie_software
 ETH_ETHERBONE_BUFFER_DEPTH = 160
 
 # White Rabbit Integration Loader ------------------------------------------------------------------
-
-def _iter_aligned_power2_regions(origin, size):
-    while size:
-        block = 1 << (size.bit_length() - 1)
-        while origin & (block - 1):
-            block >>= 1
-        while block > size:
-            block >>= 1
-        yield origin, block
-        origin += block
-        size   -= block
-
-def _add_dma_slave_window(bus, slave, prefix, origin, size, index):
-    for region_origin, region_size in _iter_aligned_power2_regions(origin, size):
-        bus.add_slave(name=f"{prefix}{index}",
-            slave  = slave,
-            region = SoCRegion(origin=region_origin, size=region_size)
-        )
-        index += 1
-    return index
 
 def _iter_wr_nic_import_candidates(root_dir, wr_nic_dir=None):
     candidates = []
@@ -562,15 +542,11 @@ class BaseSoC(SoCMini):
                 self.pcie_slave = LitePCIeWishboneSlave(self.pcie_endpoint,
                     address_width = 32,
                     data_width    = 32,
-                    addressing    = "byte",
+                    # SATA DMA engines emit Wishbone word addresses after
+                    # shifting byte bases by bus word size. Reconstruct byte
+                    # addresses for PCIe TLPs at the Wishbone slave boundary.
+                    addressing    = "word",
                 )
-                dma_index = 0
-                dma_index = _add_dma_slave_window(self.dma_bus, self.pcie_slave.bus, "dma", 0x00000000,
-                    SATA_HOST_BUFFER_BASE, dma_index)
-                dma_index = _add_dma_slave_window(self.dma_bus, self.pcie_slave.bus, "dma",
-                    SATA_HOST_BUFFER_BASE + SATA_HOST_BUFFER_SIZE,
-                    0x1_0000_0000 - (SATA_HOST_BUFFER_BASE + SATA_HOST_BUFFER_SIZE),
-                    dma_index)
 
             # PTM.
             # ----
@@ -781,6 +757,10 @@ class BaseSoC(SoCMini):
             # Core.
             # -----
             self.add_sata(phy=self.sata_phy, mode="read+write", with_irq=False)
+            if hasattr(self.sata_sector2mem, "fence_bus"):
+                dma_bus = getattr(self, "dma_bus", self.bus)
+                dma_bus.add_master(name="sata_sector2mem_fence",
+                    master=self.sata_sector2mem.fence_bus)
             if with_pcie:
                 self.comb += [
                     pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
@@ -798,9 +778,15 @@ class BaseSoC(SoCMini):
                 region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
             )
             if hasattr(self, "dma_bus"):
-                self.dma_bus.add_slave(name="sata_host_buffer",
-                    slave  = self.sata_host_buffer.dma_bus,
-                    region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE)
+                self.sata_dma_mem = SATADMAMemoryRouter(
+                    local_bus    = self.sata_host_buffer.dma_bus,
+                    remote_bus   = self.pcie_slave.bus,
+                    local_origin = SATA_HOST_BUFFER_BASE,
+                    local_size   = SATA_HOST_BUFFER_SIZE,
+                )
+                self.dma_bus.add_slave(name="sata_dma_mem",
+                    slave  = self.sata_dma_mem.bus,
+                    region = SoCRegion(origin=0x00000000, size=0x1_0000_0000)
                 )
 
             # Streamers.

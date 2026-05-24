@@ -57,6 +57,53 @@ class SATAHostBuffer(LiteXModule):
         ]
 
 
+class SATADMAMemoryRouter(LiteXModule):
+    def __init__(self, local_bus, remote_bus, local_origin, local_size):
+        if local_bus.addressing != remote_bus.addressing:
+            raise ValueError("SATA DMA local/remote bus addressing mismatch.")
+        if local_bus.data_width != remote_bus.data_width:
+            raise ValueError("SATA DMA local/remote bus data width mismatch.")
+
+        self.bus = bus = wishbone.Interface(
+            data_width    = local_bus.data_width,
+            address_width = local_bus.address_width,
+            addressing    = local_bus.addressing,
+        )
+
+        # # #
+
+        word_shift = int(log2(local_bus.data_width//8)) if bus.addressing == "word" else 0
+        bus_addr = Signal(bus.address_width)
+        local_sel = Signal()
+        self.comb += [
+            bus_addr.eq(bus.adr << word_shift),
+            local_sel.eq((bus_addr >= local_origin) & (bus_addr < (local_origin + local_size))),
+        ]
+
+        local_origin_words = local_origin >> word_shift
+
+        self.comb += [
+            local_bus.adr.eq(bus.adr - local_origin_words),
+            remote_bus.adr.eq(bus.adr),
+        ]
+        for target_bus, target_sel in [(local_bus, local_sel), (remote_bus, ~local_sel)]:
+            self.comb += [
+                target_bus.dat_w.eq(bus.dat_w),
+                target_bus.sel.eq(bus.sel),
+                target_bus.we.eq(bus.we),
+                target_bus.cti.eq(bus.cti),
+                target_bus.bte.eq(bus.bte),
+                target_bus.stb.eq(bus.stb),
+                target_bus.cyc.eq(bus.cyc & target_sel),
+            ]
+
+        self.comb += [
+            bus.ack.eq((local_bus.ack & local_sel) | (remote_bus.ack & ~local_sel)),
+            bus.err.eq((local_bus.err & local_sel) | (remote_bus.err & ~local_sel)),
+            bus.dat_r.eq(Mux(local_sel, local_bus.dat_r, remote_bus.dat_r)),
+        ]
+
+
 class M2SDRLiteSATASector2MemDMA(LiteXModule):
     """LiteSATA Sector2Mem DMA with contiguous multi-sector host-buffer reads."""
     def __init__(self, port, bus, endianness="little"):
@@ -66,7 +113,7 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
         self.nsectors = CSRStorage(16)
         self.base     = CSRStorage(64)
         self.start    = CSR()
-        self.done     = CSRStatus()
+        self.done     = CSRStatus(reset=1)
         self.error    = CSRStatus()
         self.irq      = Signal()
 
@@ -101,16 +148,33 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
         # DMA.
         self.dma = dma = WishboneDMAWriter(bus, with_csr=False, endianness=endianness)
 
+        # Fence bus.
+        # PCIe memory writes are posted. When this DMA targets host memory through
+        # LitePCIe, the final Wishbone write ACK only means the MWr TLP was
+        # accepted by the endpoint. A following MRd completion provides a
+        # low-cost ordering fence before software observes done.
+        self.fence_bus = fence_bus = wishbone.Interface(
+            data_width    = bus.data_width,
+            address_width = bus.address_width,
+            bursting      = bus.bursting,
+            addressing    = bus.addressing,
+            mode          = "r",
+        )
+        self.fence_dma = fence_dma = WishboneDMAReader(
+            fence_bus,
+            with_csr   = False,
+            endianness = endianness,
+        )
+
         # Control FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(self.start.re,
                 NextValue(count,             0),
                 NextValue(total_words,       self.nsectors.storage * (logical_sector_size//dma_bytes)),
+                NextValue(self.done.status,  0),
                 NextValue(self.error.status, 0),
                 NextState("SEND-CMD")
-            ).Else(
-                self.done.status.eq(1)
             ),
             conv.source.ready.eq(1)
         )
@@ -146,6 +210,7 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
             # Monitor errors.
             If(port.source.valid & port.source.ready & port.source.failed,
                 self.irq.eq(1),
+                NextValue(self.done.status, 1),
                 NextValue(self.error.status, 1),
                 NextState("IDLE"),
             )
@@ -155,14 +220,34 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
             If(port.source.valid & port.source.ready & port.source.read & port.source.end,
                 If(port.source.failed,
                     NextValue(self.error.status, 1),
+                    self.irq.eq(1),
+                    NextValue(self.done.status, 1),
+                    NextState("IDLE")
+                ).Else(
+                    NextState("FLUSH-HOST-WRITES")
                 ),
-                self.irq.eq(1),
-                NextState("IDLE")
             ),
             If(port.source.valid & port.source.ready & port.source.failed,
                 self.irq.eq(1),
+                NextValue(self.done.status, 1),
                 NextValue(self.error.status, 1),
                 NextState("IDLE"),
+            )
+        )
+        fsm.act("FLUSH-HOST-WRITES",
+            fence_dma.sink.valid.eq(1),
+            fence_dma.sink.last.eq(1),
+            fence_dma.sink.address.eq(self.base.storage[int(log2(dma_bytes)):]),
+            If(fence_dma.sink.ready,
+                NextState("WAIT-FLUSH")
+            )
+        )
+        fsm.act("WAIT-FLUSH",
+            fence_dma.source.ready.eq(1),
+            If(fence_dma.source.valid,
+                self.irq.eq(1),
+                NextValue(self.done.status, 1),
+                NextState("IDLE")
             )
         )
 
@@ -176,7 +261,7 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
         self.nsectors = CSRStorage(16)
         self.base     = CSRStorage(64)
         self.start    = CSR()
-        self.done     = CSRStatus()
+        self.done     = CSRStatus(reset=1)
         self.error    = CSRStatus()
         self.irq      = Signal()
 
@@ -210,10 +295,9 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
                 NextValue(count,             0),
                 NextValue(crt_sec,           self.sector.storage),
                 NextValue(crt_base,          self.base.storage),
+                NextValue(self.done.status,  0),
                 NextValue(self.error.status, 0),
                 NextState("READ-DATA-DMA")
-            ).Else(
-                self.done.status.eq(1)
             ),
             conv.source.ready.eq(1)
         )
@@ -250,6 +334,7 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
             port.source.ready.eq(1),
             If(port.source.valid & port.source.ready & port.source.failed,
                 self.irq.eq(1),
+                NextValue(self.done.status, 1),
                 NextValue(self.error.status, 1),
                 NextState("IDLE"),
             )
@@ -259,10 +344,12 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
             If(port.source.valid,
                 If(port.source.failed,
                     NextValue(self.error.status, 1),
+                    NextValue(self.done.status, 1),
                     self.irq.eq(1),
                     NextState("IDLE")
                 ).Elif(crt_sec == (self.sector.storage + self.nsectors.storage - 1),
                     self.irq.eq(1),
+                    NextValue(self.done.status, 1),
                     NextState("IDLE")
                 ).Else(
                     NextValue(count,    0),
@@ -281,7 +368,7 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         self.sector   = CSRStorage(48)
         self.nsectors = CSRStorage(32)
         self.start    = CSR()
-        self.done     = CSRStatus()
+        self.done     = CSRStatus(reset=1)
         self.error    = CSRStatus()
         self.irq      = Signal()
 
@@ -315,10 +402,9 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
             If(self.start.re,
                 NextValue(count,             0),
                 NextValue(crt_sec,           self.sector.storage),
+                NextValue(self.done.status,  0),
                 NextValue(self.error.status, 0),
                 NextState("FILL-SECTOR")
-            ).Else(
-                self.done.status.eq(1)
             ),
             conv.source.ready.eq(1)
         )
@@ -357,6 +443,7 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
             port.source.ready.eq(1),
             If(port.source.valid & port.source.ready & port.source.failed,
                 self.irq.eq(1),
+                NextValue(self.done.status, 1),
                 NextValue(self.error.status, 1),
                 NextState("IDLE"),
             )
@@ -366,10 +453,12 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
             If(port.source.valid,
                 If(port.source.failed,
                     NextValue(self.error.status, 1),
+                    NextValue(self.done.status, 1),
                     self.irq.eq(1),
                     NextState("IDLE")
                 ).Elif(crt_sec == (self.sector.storage + self.nsectors.storage - 1),
                     self.irq.eq(1),
+                    NextValue(self.done.status, 1),
                     NextState("IDLE")
                 ).Else(
                     NextValue(count,   0),
@@ -392,7 +481,7 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
         self.sector   = CSRStorage(48)
         self.nsectors = CSRStorage(32)
         self.start    = CSR()
-        self.done     = CSRStatus()
+        self.done     = CSRStatus(reset=1)
         self.error    = CSRStatus()
         self.irq      = Signal()
 
@@ -433,10 +522,9 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
             If(self.start.re,
                 NextValue(crt_sec,           self.sector.storage),
                 NextValue(last_sec,          self.sector.storage + self.nsectors.storage - 1),
+                NextValue(self.done.status,  0),
                 NextValue(self.error.status, 0),
                 NextState("SEND-CMD")
-            ).Else(
-                self.done.status.eq(1)
             ),
             conv.source.ready.eq(1)
         )
@@ -466,6 +554,7 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
                 If(conv.source.last,
                     If(crt_sec == last_sec,
                         self.irq.eq(1),
+                        NextValue(self.done.status, 1),
                         NextState("IDLE")
                     ).Else(
                         NextValue(crt_sec, crt_sec + 1),
@@ -477,6 +566,7 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
             # Monitor errors.
             If(port.source.valid & port.source.ready & port.source.failed,
                 self.irq.eq(1),
+                NextValue(self.done.status, 1),
                 NextValue(self.error.status, 1),
                 NextState("IDLE")
             )

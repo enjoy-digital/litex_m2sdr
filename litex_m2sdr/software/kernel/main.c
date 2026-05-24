@@ -340,6 +340,8 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 				CSR_SATA_MEM2SECTOR_ERROR_ADDR,
 				m->timeout_ms);
 		} else {
+			memset(s->sata_dma_cpu, 0xa5, bytes);
+			wmb();
 			litepcie_sata_program_dma(s, CSR_SATA_SECTOR2MEM_BASE,
 						  m->sector + done, chunk,
 						  s->sata_dma_handle);
