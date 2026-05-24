@@ -743,131 +743,12 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
-            # PHY.
-            # ----
-            self.sata_phy = LiteSATAPHY(platform.device,
-                refclk     = ClockSignal("refclk_sata"),
-                pads       = platform.request("sata"),
-                gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
-                clk_freq   = sys_clk_freq,
-                data_width = 16,
-                qpll       = self.qpll.get_channel("sata"),
-            )
-
-            # Core.
-            # -----
-            sata_clk_freqs = {
-                1 :  75e6,
-                2 : 150e6,
-                3 : 300e6,
-            }
-            required_sys_clk = sata_clk_freqs[sata_gen] * 16 / self.bus.data_width
-            if self.clk_freq < required_sys_clk:
-                raise ValueError(
-                    "SATA Gen{} requires sys_clk_freq ({:.1f}MHz) >= {:.1f}MHz on a {}-bit bus.".format(
-                        sata_gen, self.clk_freq/1e6, required_sys_clk/1e6, self.bus.data_width
-                    )
-                )
-
-            self.sata_core     = LiteSATACore(self.sata_phy)
-            self.sata_crossbar = LiteSATACrossbar(self.sata_core)
-
-            # Identify.
-            # ---------
-            self.sata_identify = LiteSATAIdentifyCSR(LiteSATAIdentify(self.sata_crossbar.get_port()))
-
-            # DMA.
-            # ----
-            sata_dma_bus = getattr(self, "dma_bus", self.bus)
-
-            sata_sector2mem_bus = wishbone.Interface(
-                data_width = self.bus.data_width,
-                adr_width  = self.bus.get_address_width(standard="wishbone"),
-                addressing = "word",
-                mode       = "w",
-            )
-            self.sata_sector2mem = M2SDRLiteSATASector2MemDMA(
-                port       = self.sata_crossbar.get_port(),
-                bus        = sata_sector2mem_bus,
-                endianness = self.cpu.endianness,
-            )
-            sata_dma_bus.add_master(name="sata_sector2mem", master=sata_sector2mem_bus)
-
-            sata_mem2sector_bus = wishbone.Interface(
-                data_width = self.bus.data_width,
-                adr_width  = self.bus.get_address_width(standard="wishbone"),
-                addressing = "word",
-                mode       = "r",
-            )
-            self.sata_mem2sector = M2SDRLiteSATAMem2SectorDMA(
-                bus        = sata_mem2sector_bus,
-                port       = self.sata_crossbar.get_port(),
-                endianness = self.cpu.endianness,
-            )
-            sata_dma_bus.add_master(name="sata_mem2sector", master=sata_mem2sector_bus)
-            if hasattr(self.sata_sector2mem, "fence_bus"):
-                sata_dma_bus.add_master(name="sata_sector2mem_fence",
-                    master=self.sata_sector2mem.fence_bus)
-
-            if with_pcie:
-                self.comb += [
-                    pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
-                    pcie_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
-                ]
-
-            # Host-accessible SATA DMA staging buffer.
-            # ----------------------------------------
-            self.sata_host_buffer = SATAHostBuffer(
-                size          = SATA_HOST_BUFFER_SIZE,
-                with_dma_port = hasattr(self, "dma_bus"),
-            )
-            self.bus.add_slave(name="sata_host_buffer",
-                slave  = self.sata_host_buffer.host_bus,
-                region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
-            )
-            if hasattr(self, "dma_bus"):
-                self.sata_dma_mem = SATADMAMemoryRouter(
-                    local_bus    = self.sata_host_buffer.dma_bus,
-                    remote_bus   = self.pcie_slave.bus,
-                    local_origin = SATA_HOST_BUFFER_BASE,
-                    local_size   = SATA_HOST_BUFFER_SIZE,
-                )
-                self.dma_bus.add_slave(name="sata_dma_mem",
-                    slave  = self.sata_dma_mem.bus,
-                    region = SoCRegion(origin=0x00000000, size=0x1_0000_0000)
-                )
-
-            # Streamers.
-            # ----------
-            self.sata_rx_streamer = ResetInserter()(M2SDRLiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
-            self.sata_tx_streamer = ResetInserter()(M2SDRLiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
-            self.sata_streamer_control = CSRStorage(fields=[
-                CSRField("rx_reset", size=1, offset=0, pulse=True,
-                    description="Pulse reset on the SATA Stream2Sectors streamer."),
-                CSRField("tx_reset", size=1, offset=1, pulse=True,
-                    description="Pulse reset on the SATA Sectors2Stream streamer."),
-            ], description="SATA streamer control.")
-            self.comb += [
-                self.sata_rx_streamer.reset.eq(self.sata_streamer_control.fields.rx_reset),
-                self.sata_tx_streamer.reset.eq(self.sata_streamer_control.fields.tx_reset),
-            ]
-
-            # IRQs.
-            # -----
-            if with_pcie:
-                self.comb += [
-                    pcie_msis["SATA_STREAM2SECT"].eq(self.sata_rx_streamer.irq),
-                    pcie_msis["SATA_SECT2STREAM"].eq(self.sata_tx_streamer.irq),
-                ]
-
-            # Timing constraints.
-            # -------------------
-            self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_tx.clk, 1e9/sata_clk_freqs[sata_gen])
-            self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_rx.clk, 1e9/sata_clk_freqs[sata_gen])
-            self.platform.add_false_path_constraints(
-                self.crg.cd_sys.clk,
-                self.sata_phy.crg.cd_sata_tx.clk,
-                self.sata_phy.crg.cd_sata_rx.clk,
+            self.add_sata(
+                platform     = platform,
+                sys_clk_freq = sys_clk_freq,
+                sata_gen     = sata_gen,
+                with_pcie    = with_pcie,
+                pcie_msis    = pcie_msis if with_pcie else None,
             )
 
         # AD9361 RFIC ------------------------------------------------------------------------------
@@ -1251,6 +1132,137 @@ class BaseSoC(SoCMini):
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
+
+    # SATA -----------------------------------------------------------------------------------------
+
+    def _sata_dma_wishbone_bus(self, mode):
+        return wishbone.Interface(
+            data_width = self.bus.data_width,
+            adr_width  = self.bus.get_address_width(standard="wishbone"),
+            addressing = "word",
+            mode       = mode,
+        )
+
+    def add_sata(self, platform, sys_clk_freq, sata_gen=2, with_pcie=False, pcie_msis=None):
+        if with_pcie and pcie_msis is None:
+            raise ValueError("PCIe MSI map is required when SATA and PCIe are enabled.")
+
+        # PHY.
+        # ----
+        self.sata_phy = LiteSATAPHY(platform.device,
+            refclk     = ClockSignal("refclk_sata"),
+            pads       = platform.request("sata"),
+            gen        = {1: "gen1", 2: "gen2", 3: "gen3"}[sata_gen],
+            clk_freq   = sys_clk_freq,
+            data_width = 16,
+            qpll       = self.qpll.get_channel("sata"),
+        )
+
+        # Core.
+        # -----
+        sata_clk_freqs = {
+            1 :  75e6,
+            2 : 150e6,
+            3 : 300e6,
+        }
+        required_sys_clk = sata_clk_freqs[sata_gen] * 16 / self.bus.data_width
+        if self.clk_freq < required_sys_clk:
+            raise ValueError(
+                "SATA Gen{} requires sys_clk_freq ({:.1f}MHz) >= {:.1f}MHz on a {}-bit bus.".format(
+                    sata_gen, self.clk_freq/1e6, required_sys_clk/1e6, self.bus.data_width
+                )
+            )
+
+        self.sata_core     = LiteSATACore(self.sata_phy)
+        self.sata_crossbar = LiteSATACrossbar(self.sata_core)
+
+        # Identify.
+        # ---------
+        self.sata_identify = LiteSATAIdentifyCSR(LiteSATAIdentify(self.sata_crossbar.get_port()))
+
+        # DMA.
+        # ----
+        sata_dma_bus = getattr(self, "dma_bus", self.bus)
+
+        sata_sector2mem_bus = self._sata_dma_wishbone_bus(mode="w")
+        self.sata_sector2mem = M2SDRLiteSATASector2MemDMA(
+            port       = self.sata_crossbar.get_port(),
+            bus        = sata_sector2mem_bus,
+            endianness = self.cpu.endianness,
+        )
+        sata_dma_bus.add_master(name="sata_sector2mem", master=sata_sector2mem_bus)
+
+        sata_mem2sector_bus = self._sata_dma_wishbone_bus(mode="r")
+        self.sata_mem2sector = M2SDRLiteSATAMem2SectorDMA(
+            bus        = sata_mem2sector_bus,
+            port       = self.sata_crossbar.get_port(),
+            endianness = self.cpu.endianness,
+        )
+        sata_dma_bus.add_master(name="sata_mem2sector", master=sata_mem2sector_bus)
+        if hasattr(self.sata_sector2mem, "fence_bus"):
+            sata_dma_bus.add_master(name="sata_sector2mem_fence",
+                master=self.sata_sector2mem.fence_bus)
+
+        if with_pcie:
+            self.comb += [
+                pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
+                pcie_msis["SATA_MEM2SECTOR"].eq(self.sata_mem2sector.irq),
+            ]
+
+        # Host-accessible SATA DMA staging buffer.
+        # ----------------------------------------
+        self.sata_host_buffer = SATAHostBuffer(
+            size          = SATA_HOST_BUFFER_SIZE,
+            with_dma_port = hasattr(self, "dma_bus"),
+        )
+        self.bus.add_slave(name="sata_host_buffer",
+            slave  = self.sata_host_buffer.host_bus,
+            region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
+        )
+        if hasattr(self, "dma_bus"):
+            self.sata_dma_mem = SATADMAMemoryRouter(
+                local_bus    = self.sata_host_buffer.dma_bus,
+                remote_bus   = self.pcie_slave.bus,
+                local_origin = SATA_HOST_BUFFER_BASE,
+                local_size   = SATA_HOST_BUFFER_SIZE,
+            )
+            self.dma_bus.add_slave(name="sata_dma_mem",
+                slave  = self.sata_dma_mem.bus,
+                region = SoCRegion(origin=0x00000000, size=2**32)
+            )
+
+        # Streamers.
+        # ----------
+        self.sata_rx_streamer = ResetInserter()(M2SDRLiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
+        self.sata_tx_streamer = ResetInserter()(M2SDRLiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
+        self.sata_streamer_control = CSRStorage(fields=[
+            CSRField("rx_reset", size=1, offset=0, pulse=True,
+                description="Pulse reset on the SATA Stream2Sectors streamer."),
+            CSRField("tx_reset", size=1, offset=1, pulse=True,
+                description="Pulse reset on the SATA Sectors2Stream streamer."),
+        ], description="SATA streamer control.")
+        self.comb += [
+            self.sata_rx_streamer.reset.eq(self.sata_streamer_control.fields.rx_reset),
+            self.sata_tx_streamer.reset.eq(self.sata_streamer_control.fields.tx_reset),
+        ]
+
+        # IRQs.
+        # -----
+        if with_pcie:
+            self.comb += [
+                pcie_msis["SATA_STREAM2SECT"].eq(self.sata_rx_streamer.irq),
+                pcie_msis["SATA_SECT2STREAM"].eq(self.sata_tx_streamer.irq),
+            ]
+
+        # Timing constraints.
+        # -------------------
+        self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_tx.clk, 1e9/sata_clk_freqs[sata_gen])
+        self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_rx.clk, 1e9/sata_clk_freqs[sata_gen])
+        self.platform.add_false_path_constraints(
+            self.crg.cd_sys.clk,
+            self.sata_phy.crg.cd_sata_tx.clk,
+            self.sata_phy.crg.cd_sata_rx.clk,
+        )
 
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
