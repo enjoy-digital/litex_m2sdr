@@ -15,9 +15,19 @@ These are the latest validated numbers from the 2026-05-24 hardware run.
 | Transport | User-visible path | Host to SATA | SATA to host | Validation |
 | --------- | ----------------- | ------------ | ------------ | ---------- |
 | PCIe | SigMF import/export, 8 MiB | 0.112 s, about 71.4 MiB/s | 0.133 s, about 60.2 MiB/s | exported data matched with `cmp`; metadata validated |
-| PCIe | `pcie-dma-bench`, 16 MiB | 93.202 MiB/s | 63.391 MiB/s | benchmark write/read/verify passed |
+| PCIe | raw DMA benchmark, 16 MiB | 93.202 MiB/s | 63.391 MiB/s | `pcie-dma-bench` write/read/verify passed |
 | Ethernet/Etherbone | SigMF import/export, 8 MiB | 0.167 s, about 47.8 MiB/s | 0.314 s, about 25.5 MiB/s | exported data matched with `cmp`; metadata validated |
-| Ethernet/Etherbone | `write-file`/`read-file`, 16 MiB | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s | all readbacks matched with `cmp` |
+| Ethernet/Etherbone | raw `write-file`/`read-file`, 16 MiB | 46.0, 53.5, 53.5 MiB/s | 31.5, 34.0, 34.0 MiB/s | all readbacks matched with `cmp` |
+
+The Ethernet SigMF and raw file rows are not identical measurements. Both use
+the same Etherbone host-buffer transfer and SATA sector-copy helpers, but
+`write-file`/`read-file` moves only a raw sector payload to/from a fixed sector
+range and is the clearest host-to-SATA/SATA-to-host payload throughput number.
+`import-sigmf`/`export-sigmf` measures the end-to-end named-capture workflow:
+catalog lookup/update, SigMF metadata parsing/formatting, metadata sector I/O,
+and host `.sigmf-meta`/`.sigmf-data` file handling are included in the wall
+time. It also used an 8 MiB dataset instead of the 16 MiB raw file test, so
+fixed command overhead has more weight.
 
 ## Validated Commands
 
