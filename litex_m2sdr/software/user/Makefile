@@ -231,8 +231,8 @@ m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_sigmf.o
 m2sdr_gpio: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_gpio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_gpio.o $(M2SDR_LINK_LIBS)
 
-m2sdr_sata: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_catalog.o m2sdr_sata_lowlevel.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_catalog.o m2sdr_sata_lowlevel.o $(M2SDR_LINK_LIBS)
+m2sdr_sata: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_catalog.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_catalog.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o $(M2SDR_LINK_LIBS)
 
 ifeq ($(HAVE_SDL2),1)
 m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sdr_check.o $(M2SDR_IMGUI_OBJS)
