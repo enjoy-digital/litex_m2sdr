@@ -19,12 +19,21 @@ from litesata.common import logical_sector_size
 # Constants ----------------------------------------------------------------------------------------
 
 SATA_HOST_BUFFER_BASE = 0x00020000
+# 128KiB gives the Ethernet path 256-sector staging chunks while keeping the
+# inferred RAM topology simple. 256KiB was tested and caused RAMB cascade DRC
+# issues on the current Artix-7 target.
 SATA_HOST_BUFFER_SIZE = 128 * 1024
 
 
 # SATA Host Buffer ---------------------------------------------------------------------------------
 
 class SATAHostBuffer(LiteXModule):
+    """Host-visible scratch RAM used to stage SATA transfers.
+
+    The host port is mapped on the SoC Wishbone bus. The optional DMA port lets
+    the SATA DMA engines reach the same RAM directly, or through a small router
+    when PCIe host memory is also visible.
+    """
     def __init__(self, size=SATA_HOST_BUFFER_SIZE, with_dma_port=True):
         self.host_bus = wishbone.Interface(data_width=32, address_width=32, addressing="word")
         if with_dma_port:
@@ -32,7 +41,13 @@ class SATAHostBuffer(LiteXModule):
 
         # # #
 
-        depth = size // 4
+        data_bytes = self.host_bus.data_width//8
+        assert size > 0
+        assert (size % data_bytes) == 0
+        assert (size % logical_sector_size) == 0
+        assert (size & (size - 1)) == 0
+
+        depth = size // data_bytes
         mem = Memory(32, depth, name="sata_host_buffer")
         self.specials += mem
 
@@ -52,6 +67,7 @@ class SATAHostBuffer(LiteXModule):
             port.we[i].eq(bus.cyc & bus.stb & bus.we & bus.sel[i])
             for i in range(4)
         ]
+        # Single-cycle registered ACK, matching the usual LiteX SRAM behavior.
         self.sync += [
             bus.ack.eq(0),
             If(bus.cyc & bus.stb & ~bus.ack,
@@ -63,11 +79,17 @@ class SATAHostBuffer(LiteXModule):
 # SATA DMA Memory Router ---------------------------------------------------------------------------
 
 class SATADMAMemoryRouter(LiteXModule):
+    """Route SATA DMA accesses between local staging RAM and host memory."""
     def __init__(self, local_bus, remote_bus, local_origin, local_size):
         if local_bus.addressing != remote_bus.addressing:
             raise ValueError("SATA DMA local/remote bus addressing mismatch.")
         if local_bus.data_width != remote_bus.data_width:
             raise ValueError("SATA DMA local/remote bus data width mismatch.")
+        bus_bytes = local_bus.data_width//8
+        if local_origin % bus_bytes:
+            raise ValueError("SATA DMA local origin must be bus-word aligned.")
+        if local_size % bus_bytes:
+            raise ValueError("SATA DMA local size must be bus-word aligned.")
 
         self.bus = bus = wishbone.Interface(
             data_width    = local_bus.data_width,
@@ -80,9 +102,10 @@ class SATADMAMemoryRouter(LiteXModule):
         word_shift = log2_int(local_bus.data_width//8) if bus.addressing == "word" else 0
         bus_addr = Signal(bus.address_width)
         local_sel = Signal()
+        local_limit = local_origin + local_size
         self.comb += [
             bus_addr.eq(bus.adr << word_shift),
-            local_sel.eq((bus_addr >= local_origin) & (bus_addr < (local_origin + local_size))),
+            local_sel.eq((bus_addr >= local_origin) & (bus_addr < local_limit)),
         ]
 
         local_origin_words = local_origin >> word_shift
