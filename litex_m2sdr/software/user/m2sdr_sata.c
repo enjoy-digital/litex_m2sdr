@@ -1117,6 +1117,17 @@ static int do_catalog_fsck(int timeout_ms)
             fprintf(stderr, "Invalid entry: %s\n", a->name);
             errors++;
         }
+        if (a->meta_nsectors != 0 &&
+            (a->meta_sector < SATA_DATA_START ||
+             a->meta_bytes > (uint64_t)a->meta_nsectors * SATA_SECTOR_BYTES)) {
+            fprintf(stderr, "Invalid SigMF metadata region: %s\n", a->name);
+            errors++;
+        }
+        if (a->meta_nsectors != 0 &&
+            catalog_regions_overlap(a->sector, a->nsectors, a->meta_sector, a->meta_nsectors)) {
+            fprintf(stderr, "Self-overlap between data and metadata: %s\n", a->name);
+            errors++;
+        }
         for (int j = i + 1; j < SATA_CATALOG_MAX_ENTRIES; j++) {
             const struct sata_capture_entry *b = &cat.entries[j];
             if (!b->used)
@@ -1127,6 +1138,22 @@ static int do_catalog_fsck(int timeout_ms)
             }
             if (catalog_regions_overlap(a->sector, a->nsectors, b->sector, b->nsectors)) {
                 fprintf(stderr, "Overlap: %s and %s\n", a->name, b->name);
+                errors++;
+            }
+            if (a->meta_nsectors != 0 &&
+                catalog_regions_overlap(a->meta_sector, a->meta_nsectors, b->sector, b->nsectors)) {
+                fprintf(stderr, "Metadata/data overlap: %s and %s\n", a->name, b->name);
+                errors++;
+            }
+            if (b->meta_nsectors != 0 &&
+                catalog_regions_overlap(a->sector, a->nsectors, b->meta_sector, b->meta_nsectors)) {
+                fprintf(stderr, "Data/metadata overlap: %s and %s\n", a->name, b->name);
+                errors++;
+            }
+            if (a->meta_nsectors != 0 && b->meta_nsectors != 0 &&
+                catalog_regions_overlap(a->meta_sector, a->meta_nsectors,
+                                        b->meta_sector, b->meta_nsectors)) {
+                fprintf(stderr, "Metadata overlap: %s and %s\n", a->name, b->name);
                 errors++;
             }
         }

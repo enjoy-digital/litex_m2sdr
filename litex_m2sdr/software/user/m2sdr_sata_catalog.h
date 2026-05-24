@@ -28,6 +28,9 @@ struct sata_capture_entry {
     uint64_t sector;
     uint32_t nsectors;
     uint64_t bytes;
+    uint64_t meta_sector;
+    uint32_t meta_nsectors;
+    uint64_t meta_bytes;
     int64_t sample_rate;
     char format[16];
     char channel_layout[16];
@@ -55,10 +58,15 @@ int catalog_format_text(const struct sata_catalog *cat, char *buf, size_t buf_le
 
 struct sata_capture_entry *catalog_find(struct sata_catalog *cat, const char *name);
 uint64_t catalog_end_sector(const struct sata_capture_entry *e);
+uint64_t catalog_meta_end_sector(const struct sata_capture_entry *e);
+uint64_t catalog_storage_end_sector(const struct sata_capture_entry *e);
 bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
                              uint64_t b_start, uint64_t b_count);
 int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
                                 uint64_t sector, uint32_t nsectors);
+int catalog_validate_new_storage(struct sata_catalog *cat, const char *name,
+                                 uint64_t sector, uint32_t nsectors,
+                                 uint64_t meta_sector, uint32_t meta_nsectors);
 uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors);
 void catalog_entry_print(const struct sata_capture_entry *e);
 int catalog_add_entry(struct sata_catalog *cat, const struct sata_capture_entry *entry);

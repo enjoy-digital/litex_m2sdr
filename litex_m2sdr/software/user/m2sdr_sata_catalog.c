@@ -131,6 +131,17 @@ static int catalog_parse_entry(struct sata_catalog *cat, char *line)
     if (!catalog_text_valid(field, sizeof(e.notes)))
         return -1;
     catalog_copy(e.notes, sizeof(e.notes), field ? field : "");
+    field = catalog_next_field(&save);
+    if (field) {
+        if (m2sdr_cli_parse_u64(field, &e.meta_sector) != 0)
+            return -1;
+        field = catalog_next_field(&save);
+        if (!field || m2sdr_cli_parse_u32(field, &e.meta_nsectors) != 0)
+            return -1;
+        field = catalog_next_field(&save);
+        if (!field || m2sdr_cli_parse_u64(field, &e.meta_bytes) != 0)
+            return -1;
+    }
 
     e.used = true;
     for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
@@ -199,10 +210,11 @@ int catalog_format_text(const struct sata_catalog *cat, char *buf, size_t buf_le
         if (catalog_appendf(buf, buf_len, &used,
                 "entry|%s|%" PRIu64 "|%" PRIu32 "|%" PRIu64 "|%" PRId64
                 "|%s|%s|%" PRIu64 "|%" PRIu64 "|%" PRIu64 "|%" PRId64
-                "|%" PRId64 "|%" PRIu64 "|%s\n",
+                "|%" PRId64 "|%" PRIu64 "|%s|%" PRIu64 "|%" PRIu32 "|%" PRIu64 "\n",
                 e->name, e->sector, e->nsectors, e->bytes, e->sample_rate,
                 e->format, e->channel_layout, e->rx_freq, e->tx_freq,
-                e->bandwidth, e->rx_gain, e->tx_att, e->created, e->notes) != 0)
+                e->bandwidth, e->rx_gain, e->tx_att, e->created, e->notes,
+                e->meta_sector, e->meta_nsectors, e->meta_bytes) != 0)
             return -1;
     }
     return 0;
@@ -231,6 +243,19 @@ uint64_t catalog_end_sector(const struct sata_capture_entry *e)
     return e->sector + (uint64_t)e->nsectors;
 }
 
+uint64_t catalog_meta_end_sector(const struct sata_capture_entry *e)
+{
+    return e->meta_sector + (uint64_t)e->meta_nsectors;
+}
+
+uint64_t catalog_storage_end_sector(const struct sata_capture_entry *e)
+{
+    uint64_t end = catalog_end_sector(e);
+    uint64_t meta_end = catalog_meta_end_sector(e);
+
+    return meta_end > end ? meta_end : end;
+}
+
 bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
                              uint64_t b_start, uint64_t b_count)
 {
@@ -240,8 +265,20 @@ bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
     return a_start < b_end && b_start < a_end;
 }
 
-int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
-                                uint64_t sector, uint32_t nsectors)
+static bool catalog_entry_overlaps_region(const struct sata_capture_entry *e,
+                                          uint64_t sector, uint32_t nsectors)
+{
+    if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors))
+        return true;
+    if (e->meta_nsectors != 0 &&
+        catalog_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors))
+        return true;
+    return false;
+}
+
+int catalog_validate_new_storage(struct sata_catalog *cat, const char *name,
+                                 uint64_t sector, uint32_t nsectors,
+                                 uint64_t meta_sector, uint32_t meta_nsectors)
 {
     if (!catalog_name_valid(name)) {
         fprintf(stderr, "Invalid capture name. Use a short name without spaces or '|'.\n");
@@ -260,17 +297,37 @@ int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
             sector, (uint64_t)SATA_DATA_START);
         return 1;
     }
+    if (meta_nsectors != 0 && meta_sector < SATA_DATA_START) {
+        fprintf(stderr, "Metadata sector 0x%016" PRIx64 " is before data start 0x%016" PRIx64 ".\n",
+            meta_sector, (uint64_t)SATA_DATA_START);
+        return 1;
+    }
+    if (meta_nsectors != 0 && catalog_regions_overlap(sector, nsectors, meta_sector, meta_nsectors)) {
+        fprintf(stderr, "Capture data and metadata regions overlap.\n");
+        return 1;
+    }
     for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
         const struct sata_capture_entry *e = &cat->entries[i];
         if (!e->used)
             continue;
-        if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors)) {
+        if (catalog_entry_overlaps_region(e, sector, nsectors)) {
             fprintf(stderr, "Capture overlaps '%s' at 0x%016" PRIx64 "..0x%016" PRIx64 ".\n",
-                e->name, e->sector, catalog_end_sector(e));
+                e->name, e->sector, catalog_storage_end_sector(e));
+            return 1;
+        }
+        if (meta_nsectors != 0 && catalog_entry_overlaps_region(e, meta_sector, meta_nsectors)) {
+            fprintf(stderr, "Capture metadata overlaps '%s' at 0x%016" PRIx64 "..0x%016" PRIx64 ".\n",
+                e->name, e->sector, catalog_storage_end_sector(e));
             return 1;
         }
     }
     return 0;
+}
+
+int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
+                                uint64_t sector, uint32_t nsectors)
+{
+    return catalog_validate_new_storage(cat, name, sector, nsectors, 0, 0);
 }
 
 uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors)
@@ -288,6 +345,11 @@ uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors)
                 sector = catalog_end_sector(e);
                 moved = true;
             }
+            if (e->meta_nsectors != 0 &&
+                catalog_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors)) {
+                sector = catalog_meta_end_sector(e);
+                moved = true;
+            }
         }
         if (!moved)
             return sector;
@@ -300,6 +362,11 @@ void catalog_entry_print(const struct sata_capture_entry *e)
     printf("Sector         : 0x%016" PRIx64 "\n", e->sector);
     printf("Sectors        : %" PRIu32 "\n", e->nsectors);
     printf("Bytes          : %" PRIu64 "\n", e->bytes);
+    if (e->meta_nsectors != 0) {
+        printf("SigMF Sector   : 0x%016" PRIx64 "\n", e->meta_sector);
+        printf("SigMF Sectors  : %" PRIu32 "\n", e->meta_nsectors);
+        printf("SigMF Bytes    : %" PRIu64 "\n", e->meta_bytes);
+    }
     printf("Sample Rate    : %" PRId64 "\n", e->sample_rate);
     printf("Format         : %s\n", e->format);
     printf("Channel Layout : %s\n", e->channel_layout);
