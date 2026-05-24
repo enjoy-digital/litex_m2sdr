@@ -16,6 +16,10 @@ make m2sdr_sata
 ./m2sdr_sata -i 192.168.1.50 init
 ```
 
+`init` creates the catalog when it is missing. If the catalog already contains
+entries, `init` refuses to reset it unless `--force` is provided. Resetting the
+catalog never erases sample data sectors.
+
 PCIe:
 
 ```sh
@@ -32,6 +36,15 @@ make m2sdr_sata
 Record RF samples directly to SATA:
 
 ```sh
+./m2sdr_sata -i 192.168.1.50 --dry-run capture fm_test \
+    --seconds 2 \
+    --sample-rate 4M \
+    --format sc16 \
+    --channel-layout 1t1r \
+    --rx-freq 100M \
+    --rx-gain 20 \
+    --bandwidth 5M
+
 ./m2sdr_sata -i 192.168.1.50 capture fm_test \
     --seconds 2 \
     --sample-rate 4M \
@@ -45,6 +58,7 @@ Record RF samples directly to SATA:
 List and inspect the catalog:
 
 ```sh
+./m2sdr_sata -i 192.168.1.50 info
 ./m2sdr_sata -i 192.168.1.50 list
 ./m2sdr_sata -i 192.168.1.50 show fm_test
 ./m2sdr_sata -i 192.168.1.50 check
@@ -53,6 +67,7 @@ List and inspect the catalog:
 Export a capture as SigMF, or raw payload only:
 
 ```sh
+./m2sdr_sata -i 192.168.1.50 --dry-run export fm_test /tmp/fm_test.sigmf-meta
 ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
 ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
 ```
@@ -62,6 +77,13 @@ Export a capture as SigMF, or raw payload only:
 Import a raw file with metadata:
 
 ```sh
+./m2sdr_sata -i 192.168.1.50 --dry-run import tx_test /tmp/tx.sc16 \
+    --sample-rate 4M \
+    --format sc16 \
+    --channel-layout 1t1r \
+    --tx-freq 2400M \
+    --tx-att 20
+
 ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 \
     --sample-rate 4M \
     --format sc16 \

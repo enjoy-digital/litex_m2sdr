@@ -494,12 +494,12 @@ m2sdr_sata [options] cmd [args...]
 **Commands** include:
 - **info**
   Show transport, SATA link, drive, catalog, and host I/O status.
-- **init**
-  Initialize/reset the named SATA capture catalog.
+- **init `[--force]`**
+  Initialize the named SATA capture catalog. Use `--force` to reset a non-empty catalog; data sectors are not erased.
 - **list**
-  List named captures.
+  List named captures with size and estimated duration when metadata is available.
 - **show `NAME`**
-  Show the sector range and RF/sample metadata for a named capture.
+  Show sector ranges, SigMF metadata storage, and RF/sample metadata for a named capture.
 - **delete `NAME`**
   Remove a named capture from the catalog without erasing its sectors.
 - **check**
@@ -525,8 +525,10 @@ Example usage:
 ~~~~
 ./m2sdr_sata -i 192.168.1.50 info
 ./m2sdr_sata -i 192.168.1.50 init
+./m2sdr_sata -i 192.168.1.50 --dry-run capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
 ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
 ./m2sdr_sata -i 192.168.1.50 list
+./m2sdr_sata -i 192.168.1.50 show fm_test
 ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
 ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
 ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
