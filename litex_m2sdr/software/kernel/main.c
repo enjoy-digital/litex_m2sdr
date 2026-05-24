@@ -31,11 +31,14 @@
 #include <linux/wait.h>
 #include <linux/log2.h>
 #include <linux/poll.h>
+#include <linux/mutex.h>
+#include <linux/jiffies.h>
 #include <linux/cdev.h>
 #include <linux/platform_device.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
+#include <linux/uaccess.h>
 #if defined(__arm__) || defined(__aarch64__)
 #include <linux/dma-direct.h>
 #endif
@@ -65,6 +68,10 @@
 //#define DEBUG_POLL
 //#define DEBUG_READ
 //#define DEBUG_WRITE
+
+#define LITEPCIE_SATA_SECTOR_SIZE 512U
+#define LITEPCIE_SATA_DMA_BUFFER_SIZE \
+	(LITEPCIE_SATA_DMA_MAX_SECTORS * LITEPCIE_SATA_SECTOR_SIZE)
 
 /* External functions for LiteUART */
 extern int liteuart_init(void);
@@ -128,6 +135,10 @@ struct litepcie_device {
 	int minor_base;                               /* Base minor number for the device */
 	int irqs;                                     /* Number of IRQs */
 	int channels;                                 /* Number of DMA channels */
+	struct mutex sata_dma_lock;                   /* Serialize SATA userspace DMA copies */
+	void *sata_dma_cpu;                           /* Coherent buffer for SATA userspace DMA */
+	dma_addr_t sata_dma_handle;                   /* Bus address for SATA userspace DMA */
+	size_t sata_dma_size;                         /* Size of SATA userspace DMA buffer */
 
 	/* PTP/PTM */
 	spinlock_t tmreg_lock;
@@ -193,6 +204,186 @@ static bool litepcie_soc_has_sata(struct litepcie_device *s)
 	/* Old bitstreams may not include the capability block; keep old behavior. */
 	return false;
 #endif
+}
+
+#endif
+
+/* -----------------------------------------------------------------------------------------------*/
+/*                               LiteSATA Userspace DMA                                           */
+/* -----------------------------------------------------------------------------------------------*/
+
+#if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE) && defined(CSR_SATA_SECTOR2MEM_BASE)
+
+static inline void litepcie_write64(struct litepcie_device *s, uint32_t addr, uint64_t val)
+{
+	litepcie_writel(s, addr + 0, (uint32_t)(val >> 32));
+	litepcie_writel(s, addr + 4, (uint32_t)(val >>  0));
+}
+
+static int litepcie_sata_dma_alloc(struct litepcie_device *s)
+{
+	s->sata_dma_size = LITEPCIE_SATA_DMA_BUFFER_SIZE;
+	s->sata_dma_cpu = dmam_alloc_coherent(&s->dev->dev, s->sata_dma_size,
+					      &s->sata_dma_handle,
+					      GFP_KERNEL | GFP_DMA32);
+	if (!s->sata_dma_cpu) {
+		s->sata_dma_size = 0;
+		dev_warn(&s->dev->dev, "Failed to allocate SATA userspace DMA buffer\n");
+		return -ENOMEM;
+	}
+
+	if (upper_32_bits(s->sata_dma_handle)) {
+		dev_warn(&s->dev->dev,
+			 "SATA userspace DMA buffer above 4GiB: 0x%llx\n",
+			 (unsigned long long)s->sata_dma_handle);
+		dmam_free_coherent(&s->dev->dev, s->sata_dma_size,
+				   s->sata_dma_cpu, s->sata_dma_handle);
+		s->sata_dma_cpu = NULL;
+		s->sata_dma_handle = 0;
+		s->sata_dma_size = 0;
+		return -EIO;
+	}
+
+	dev_info(&s->dev->dev,
+		 "SATA userspace DMA buffer: %zu bytes @ 0x%llx\n",
+		 s->sata_dma_size, (unsigned long long)s->sata_dma_handle);
+	return 0;
+}
+
+static int litepcie_sata_wait_done(struct litepcie_device *s,
+				   uint32_t done_addr, uint32_t error_addr,
+				   int timeout_ms)
+{
+	unsigned long deadline = 0;
+	unsigned int spins = 0;
+
+	if (timeout_ms >= 0)
+		deadline = jiffies + msecs_to_jiffies(timeout_ms);
+
+	while ((litepcie_readl(s, done_addr) & 0x1) == 0) {
+		if (timeout_ms >= 0 && time_after(jiffies, deadline))
+			return -ETIMEDOUT;
+		if (++spins < 4096) {
+			cpu_relax();
+		} else {
+			usleep_range(50, 100);
+			spins = 0;
+		}
+	}
+
+	if (litepcie_readl(s, error_addr) & 0x1)
+		return -EIO;
+
+	return 0;
+}
+
+static int litepcie_sata_program_dma(struct litepcie_device *s,
+				     uint32_t base, uint64_t sector,
+				     uint32_t nsectors, uint64_t host_addr)
+{
+	litepcie_write64(s, base + 0x00, sector);
+	litepcie_writel(s, base + 0x08, nsectors);
+	litepcie_write64(s, base + 0x0c, host_addr);
+	wmb();
+	litepcie_writel(s, base + 0x14, 1);
+	return 0;
+}
+
+static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
+				   struct litepcie_ioctl_sata_dma *m)
+{
+	struct litepcie_device *s = chan->litepcie_dev;
+	uint8_t __user *user = (uint8_t __user *)(uintptr_t)m->user_addr;
+	uint32_t max_sectors;
+	uint32_t done = 0;
+	int ret = 0;
+
+	m->transferred = 0;
+	m->status = 0;
+
+	if (!s->sata_dma_cpu || s->sata_dma_size < LITEPCIE_SATA_SECTOR_SIZE)
+		return -ENOMEM;
+	if (!litepcie_soc_has_sata(s))
+		return -ENODEV;
+	if (!user || m->nsectors == 0)
+		return -EINVAL;
+	if (m->direction != LITEPCIE_SATA_DMA_HOST_TO_DEVICE &&
+	    m->direction != LITEPCIE_SATA_DMA_DEVICE_TO_HOST)
+		return -EINVAL;
+
+	max_sectors = s->sata_dma_size / LITEPCIE_SATA_SECTOR_SIZE;
+	if (max_sectors > LITEPCIE_SATA_DMA_MAX_SECTORS)
+		max_sectors = LITEPCIE_SATA_DMA_MAX_SECTORS;
+
+	mutex_lock(&s->sata_dma_lock);
+	while (done < m->nsectors) {
+		uint32_t chunk = m->nsectors - done;
+		size_t bytes;
+
+		if (chunk > max_sectors)
+			chunk = max_sectors;
+		bytes = (size_t)chunk * LITEPCIE_SATA_SECTOR_SIZE;
+
+		if (m->direction == LITEPCIE_SATA_DMA_HOST_TO_DEVICE) {
+			if (copy_from_user(s->sata_dma_cpu,
+					   user + (done * LITEPCIE_SATA_SECTOR_SIZE),
+					   bytes)) {
+				ret = -EFAULT;
+				break;
+			}
+			wmb();
+			litepcie_sata_program_dma(s, CSR_SATA_MEM2SECTOR_BASE,
+						  m->sector + done, chunk,
+						  s->sata_dma_handle);
+			ret = litepcie_sata_wait_done(s,
+				CSR_SATA_MEM2SECTOR_DONE_ADDR,
+				CSR_SATA_MEM2SECTOR_ERROR_ADDR,
+				m->timeout_ms);
+		} else {
+			litepcie_sata_program_dma(s, CSR_SATA_SECTOR2MEM_BASE,
+						  m->sector + done, chunk,
+						  s->sata_dma_handle);
+			ret = litepcie_sata_wait_done(s,
+				CSR_SATA_SECTOR2MEM_DONE_ADDR,
+				CSR_SATA_SECTOR2MEM_ERROR_ADDR,
+				m->timeout_ms);
+			if (ret)
+				break;
+			rmb();
+			if (copy_to_user(user + (done * LITEPCIE_SATA_SECTOR_SIZE),
+					 s->sata_dma_cpu, bytes)) {
+				ret = -EFAULT;
+				break;
+			}
+		}
+
+		if (ret)
+			break;
+
+		done += chunk;
+		m->transferred = done;
+	}
+	mutex_unlock(&s->sata_dma_lock);
+
+	m->status = ret;
+	return ret;
+}
+
+#else
+
+static int litepcie_sata_dma_alloc(struct litepcie_device *s)
+{
+	(void)s;
+	return -ENODEV;
+}
+
+static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
+				   struct litepcie_ioctl_sata_dma *m)
+{
+	(void)chan;
+	m->transferred = 0;
+	m->status = -ENODEV;
+	return -ENODEV;
 }
 
 #endif
@@ -942,6 +1133,22 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		chan->dma.reader_sw_count = m.sw_count;
 	}
 	break;
+	case LITEPCIE_IOCTL_SATA_DMA:
+	{
+		struct litepcie_ioctl_sata_dma m;
+
+		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = litepcie_ioctl_sata_dma(chan, &m);
+		if (copy_to_user((void *)arg, &m, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
+	}
+	break;
 	case LITEPCIE_IOCTL_LOCK:
 	{
 		struct litepcie_ioctl_lock m;
@@ -1474,6 +1681,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	pci_set_drvdata(dev, litepcie_dev);
 	litepcie_dev->dev = dev;
 	spin_lock_init(&litepcie_dev->lock);
+	mutex_init(&litepcie_dev->sata_dma_lock);
 
 	/* Enable the PCI device */
 	ret = pcim_enable_device(dev);
@@ -1625,6 +1833,11 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		dev_err(&dev->dev, "Failed to allocate DMA\n");
 		goto fail3;
 	}
+
+#ifdef CSR_SATA_PHY_BASE
+	if (litepcie_soc_has_sata(litepcie_dev))
+		litepcie_sata_dma_alloc(litepcie_dev);
+#endif
 
 	/* LiteUART platform device */
 #ifdef CSR_UART_XOVER_RXTX_ADDR
