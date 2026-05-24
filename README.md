@@ -490,7 +490,8 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    capture allocation starts at sector `0x100000`, and named captures keep a
    SigMF metadata region next to the sample data. See
    `litex_m2sdr/software/user/README.md` for the full `m2sdr_sata` command
-   reference.
+   reference and [SATA Hardware Validation](doc/sata-validation.md) for
+   measured PCIe/Ethernet validity and throughput results.
    - For PCIe + SATA source-build tests:
    ```
    ./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --build --load

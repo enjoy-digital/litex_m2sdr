@@ -590,6 +590,9 @@ cd litex_m2sdr/software/user
 ./m2sdr_sata -i 192.168.1.50 import-sigmf tx_test /tmp/tx.sigmf-meta
 ~~~~
 
+Known-good PCIe/Ethernet SATA validation results are logged in
+[`doc/sata-validation.md`](../../../doc/sata-validation.md).
+
 ---
 
 ### m2sdr_gpio

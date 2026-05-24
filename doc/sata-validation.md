@@ -1,0 +1,85 @@
+# SATA Hardware Validation
+
+This file records known-good SATA host I/O validation runs. Speeds are measured
+from the host utility wall time unless the command reports its own timing.
+
+## 2026-05-24, SigMF SATA round-trip
+
+Tested on the LiteX-M2SDR baseboard with the SATA SSD connected. Software was
+at `64b22db` (`m2sdr_sata: keep imports on one device session`) after the
+SigMF SATA workflow changes.
+
+### PCIe + SATA
+
+Gateware:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --load
+sudo ./rescan.py
+```
+
+Validity:
+
+- `./m2sdr_sata -c 0 status`: SATA PHY, TX, RX, and CTRL all ready.
+- `./m2sdr_sata -c 0 pcie-dma-bench 0x200000 32768`: 16 MiB write/read/verify ok.
+- `./m2sdr_sata -c 0 --pattern counter write-pattern 0x240000 8192`
+  followed by `verify-pattern`: 4 MiB counter pattern verified.
+- 8 MiB SigMF `import-sigmf` + `export-sigmf`: exported data matched the input
+  with `cmp`; exported metadata passed `m2sdr_sigmf --validate`.
+
+Measured throughput:
+
+| Test | Size | Write/import | Read/export |
+| ---- | ---- | ------------ | ----------- |
+| `pcie-dma-bench` | 16 MiB | 93.202 MiB/s | 63.391 MiB/s |
+| SigMF round-trip | 8 MiB | 0.112 s, about 71.4 MiB/s | 0.133 s, about 60.2 MiB/s |
+
+### Ethernet + SATA
+
+Gateware:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --load
+```
+
+Reachability:
+
+- `ping -c 2 192.168.1.50`: 2/2 replies, about 0.084 ms average.
+- `./m2sdr_sata -i 192.168.1.50 status`: SATA PHY, TX, RX, and CTRL all ready.
+
+Validity:
+
+- `./m2sdr_sata -i 192.168.1.50 etherbone-bench --iterations 3`: all burst
+  sizes from 1 to 128 words passed.
+- `./m2sdr_sata -i 192.168.1.50 --pattern counter write-pattern 0x260000 8192`
+  followed by `verify-pattern`: 4 MiB counter pattern verified.
+- 8 MiB SigMF `import-sigmf` + `export-sigmf`: exported data matched the input
+  with `cmp`; exported metadata passed `m2sdr_sigmf --validate`.
+- Exported SigMF metadata kept the stored M2SDR extension fields, including
+  `m2sdr:transport` set to `ethernet`.
+
+Etherbone host-buffer burst benchmark:
+
+| Words | Bytes | Write MiB/s | Read MiB/s |
+| ----: | ----: | ----------: | ---------: |
+| 1 | 12 | 0.880 | 0.107 |
+| 2 | 24 | 1.272 | 0.214 |
+| 4 | 48 | 3.270 | 0.428 |
+| 8 | 96 | 6.539 | 0.864 |
+| 16 | 192 | 14.085 | 1.695 |
+| 32 | 384 | 26.158 | 2.977 |
+| 64 | 768 | 56.340 | 5.051 |
+| 128 | 1536 | 104.632 | 7.710 |
+
+Measured SigMF round-trip throughput:
+
+| Test | Size | Write/import | Read/export |
+| ---- | ---- | ------------ | ----------- |
+| SigMF round-trip over Etherbone | 8 MiB | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
+
+### Notes
+
+- The catalog entries created for this run were deleted after validation. Data
+  sectors were not erased.
+- Reloading between Ethernet+SATA and PCIe+SATA requires a PCIe rescan before
+  `/dev/m2sdr0` can be used again.
