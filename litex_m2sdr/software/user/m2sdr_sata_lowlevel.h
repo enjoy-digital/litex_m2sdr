@@ -19,8 +19,8 @@
 #include "csr.h"
 #include "mem.h"
 
-#define ETHERBONE_BULK_WORDS 128u
-#define ETHERBONE_READ_WINDOW 8u
+#define M2SDR_SATA_ETHERBONE_BULK_WORDS  128u
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW 8u
 
 enum {
     TXSRC_PCIE = 0,

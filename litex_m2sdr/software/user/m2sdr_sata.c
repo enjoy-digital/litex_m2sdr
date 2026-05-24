@@ -351,7 +351,7 @@ static void sata_print_pcie_dma_error(const char *op, int rc);
 
 static int do_etherbone_bench(int argc, char **argv, int argi)
 {
-    static const uint32_t candidates[] = {1, 2, 4, 8, 16, 32, 64, ETHERBONE_BULK_WORDS};
+    static const uint32_t candidates[] = {1, 2, 4, 8, 16, 32, 64, M2SDR_SATA_ETHERBONE_BULK_WORDS};
     uint32_t iterations = 1024;
     struct m2sdr_dev *conn;
     int status = 0;
@@ -376,8 +376,8 @@ static int do_etherbone_bench(int argc, char **argv, int argi)
 
     for (size_t ci = 0; ci < sizeof(candidates) / sizeof(candidates[0]) && keep_running; ci++) {
         uint32_t n = candidates[ci];
-        uint32_t tx[ETHERBONE_BULK_WORDS];
-        uint32_t rx[ETHERBONE_BULK_WORDS];
+        uint32_t tx[M2SDR_SATA_ETHERBONE_BULK_WORDS];
+        uint32_t rx[M2SDR_SATA_ETHERBONE_BULK_WORDS];
         uint64_t bytes = (uint64_t)iterations * n * sizeof(uint32_t);
         int64_t start_us;
         int64_t write_us;

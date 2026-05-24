@@ -443,10 +443,10 @@ void etherbone_fill_test_words(uint32_t *words, uint32_t count)
 
 bool etherbone_probe_burst_words(struct m2sdr_dev *conn, uint32_t count, bool verbose)
 {
-    uint32_t tx[ETHERBONE_BULK_WORDS];
-    uint32_t rx[ETHERBONE_BULK_WORDS];
+    uint32_t tx[M2SDR_SATA_ETHERBONE_BULK_WORDS];
+    uint32_t rx[M2SDR_SATA_ETHERBONE_BULK_WORDS];
 
-    if (count == 0 || count > ETHERBONE_BULK_WORDS ||
+    if (count == 0 || count > M2SDR_SATA_ETHERBONE_BULK_WORDS ||
         (size_t)count * sizeof(uint32_t) > SATA_HOST_BUFFER_SIZE) {
         if (verbose)
             fprintf(stderr, "Etherbone bulk probe: invalid count %" PRIu32 "\n", count);
@@ -495,14 +495,14 @@ uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn)
     if (probed)
         return cached_words;
     if (!etherbone_is_liteeth(conn)) {
-        cached_words = ETHERBONE_BULK_WORDS;
+        cached_words = M2SDR_SATA_ETHERBONE_BULK_WORDS;
         probed = true;
         return cached_words;
     }
 
     probed = true;
-    if (etherbone_probe_burst_words(conn, ETHERBONE_BULK_WORDS, true)) {
-        cached_words = ETHERBONE_BULK_WORDS;
+    if (etherbone_probe_burst_words(conn, M2SDR_SATA_ETHERBONE_BULK_WORDS, true)) {
+        cached_words = M2SDR_SATA_ETHERBONE_BULK_WORDS;
         fprintf(stderr, "Etherbone bulk burst: %" PRIu32 " words\n", cached_words);
         return cached_words;
     }
@@ -515,7 +515,7 @@ uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn)
 void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t bytes)
 {
     uint32_t burst = sata_host_buffer_bulk_words(conn);
-    uint32_t words[ETHERBONE_BULK_WORDS];
+    uint32_t words[M2SDR_SATA_ETHERBONE_BULK_WORDS];
 
     for (size_t off = 0; off < bytes; ) {
         size_t remaining_words = (bytes - off) / sizeof(uint32_t);
@@ -542,7 +542,7 @@ void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t b
 void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 {
     uint32_t burst = sata_host_buffer_bulk_words(conn);
-    uint32_t words[ETHERBONE_BULK_WORDS];
+    uint32_t words[M2SDR_SATA_ETHERBONE_BULK_WORDS];
 
     if (burst > 1 && etherbone_is_liteeth(conn) && (bytes % sizeof(uint32_t)) == 0) {
         struct eb_connection *eb = m2sdr_get_eb_handle(conn);
@@ -551,7 +551,7 @@ void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 
         if (eb && pipeline_words) {
             int rc = eb_read32_bulk_pipeline_checked(eb, SATA_HOST_BUFFER_BASE,
-                pipeline_words, word_count, burst, ETHERBONE_READ_WINDOW);
+                pipeline_words, word_count, burst, M2SDR_SATA_ETHERBONE_READ_WINDOW);
 
             if (rc == EB_ERR_OK) {
                 for (size_t i = 0; i < word_count; i++)
