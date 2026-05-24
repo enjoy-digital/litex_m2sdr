@@ -8,6 +8,33 @@ SATA host access is through `m2sdr_sata`: PCIe uses the `LITEPCIE_IOCTL_SATA_DMA
 userspace DMA path, while Ethernet uses Etherbone access to the SATA host
 staging buffer.
 
+## Architecture Notes
+
+The SATA integration is split between the board target and reusable gateware
+helpers:
+
+- `BaseSoC.add_sata()` wires the board-specific PHY, LiteSATA core, identify
+  CSR, DMA masters, host staging buffer, RF streamers, IRQs, and timing
+  constraints.
+- `litex_m2sdr/gateware/sata.py` contains the M2SDR-specific LiteSATA wrappers
+  and the host-buffer/router helpers.
+- Existing SATA CSR names and bit meanings are part of the userspace ABI.
+  Prefer comments, helper functions, and tests over CSR renaming or repacking.
+
+Direction names are used consistently in gateware and userspace:
+
+| Name | Direction |
+| ---- | --------- |
+| `Sector2Mem` | SATA sectors to host memory/staging buffer |
+| `Mem2Sector` | host memory/staging buffer to SATA sectors |
+| `Stream2Sectors` | RF receive stream to SATA sectors |
+| `Sectors2Stream` | SATA sectors to RF transmit or host replay stream |
+
+The default host staging buffer is 128 KiB. It provides 256-sector SATA chunks
+for host-buffer workflows and avoids the RAMB cascade DRC issue observed with a
+256 KiB buffer on the current Artix-7 target. Ethernet host-buffer transfers use
+128-word Etherbone bursts by default.
+
 ## Current Hardware Numbers
 
 These are the latest validated numbers from the 2026-05-24 hardware run.
