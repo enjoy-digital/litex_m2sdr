@@ -76,6 +76,19 @@ Measured SigMF round-trip throughput:
 | Test | Size | Write/import | Read/export |
 | ---- | ---- | ------------ | ----------- |
 | SigMF round-trip over Etherbone | 8 MiB | 0.877 s, about 9.1 MiB/s | 1.099 s, about 7.3 MiB/s |
+| SigMF round-trip over Etherbone, pipelined reads | 8 MiB | 0.882 s, about 9.1 MiB/s | 0.303-0.308 s, about 26.0-26.4 MiB/s |
+
+The pipelined read run kept the 128-word Etherbone bulk burst size and used an
+8-request software read window. Three repeated exports matched the original
+data byte-for-byte and completed in 0.308 s, 0.303 s, and 0.303 s.
+
+Multi-record Etherbone was reviewed but not implemented here. LiteEth's
+Etherbone frontend currently documents one record per frame and no address
+space/flag support (`rca`, `bca`, `wca`, `wff`), so supporting several records
+per UDP packet would require gateware changes. With a standard Ethernet MTU,
+128-word records would only pack about two records per frame, so after
+pipelining the expected incremental gain is mainly fewer packets/syscalls
+rather than a fundamental transfer-rate change.
 
 ### Notes
 
