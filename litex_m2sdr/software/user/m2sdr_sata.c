@@ -35,6 +35,7 @@
 #include "m2sdr_cli.h"
 #include "m2sdr_sata_catalog.h"
 #include "m2sdr_sata_lowlevel.h"
+#include "m2sdr_sata_sigmf.h"
 #include "csr.h"
 #include "mem.h"
 
@@ -584,6 +585,19 @@ static bool sata_try_pcie_dma_default(struct m2sdr_dev *conn)
     if (m2sdr_get_transport(conn, &transport) != M2SDR_ERR_OK)
         return false;
     return transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
+}
+
+static const char *sata_transport_name(struct m2sdr_dev *conn)
+{
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+    if (m2sdr_get_transport(conn, &transport) != M2SDR_ERR_OK)
+        return NULL;
+    switch (transport) {
+    case M2SDR_TRANSPORT_KIND_LITEPCIE: return "pcie";
+    case M2SDR_TRANSPORT_KIND_LITEETH:  return "ethernet";
+    default:                            return NULL;
+    }
 }
 
 static uint32_t sata_file_chunk_sectors(bool try_pcie_dma)
@@ -1166,10 +1180,12 @@ static int do_catalog_fsck(int timeout_ms)
     return 1;
 }
 
-static int do_export_capture(const char *name, const char *path, int timeout_ms)
+static void catalog_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
+                                             struct m2sdr_sigmf_meta *meta,
+                                             int timeout_ms);
+
+static int export_entry_data(const struct sata_capture_entry *e, const char *path, int timeout_ms)
 {
-    struct sata_catalog cat;
-    struct sata_capture_entry *e;
     struct m2sdr_dev *conn;
     uint32_t max_sectors;
     uint8_t *buf;
@@ -1180,13 +1196,8 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
     FILE *out = NULL;
     int rc = 1;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (!e)
         return 1;
-    e = catalog_find(&cat, name);
-    if (!e) {
-        fprintf(stderr, "Capture '%s' not found.\n", name);
-        return 1;
-    }
 
     remaining = e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
     conn = m2sdr_open_dev();
@@ -1222,8 +1233,6 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
         done += chunk;
     }
     rc = 0;
-    printf("Exported '%s' to %s (%" PRIu64 " bytes).\n",
-        name, path, e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
 
 out_close_dev:
     m2sdr_close_dev(conn);
@@ -1231,6 +1240,67 @@ out_close_dev:
         fclose(out);
     free(buf);
     return rc;
+}
+
+static int do_export_capture(const char *name, const char *path, int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+    if (export_entry_data(e, path, timeout_ms) != 0)
+        return 1;
+    printf("Exported '%s' to %s (%" PRIu64 " bytes).\n",
+        name, path, e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
+    return 0;
+}
+
+static int do_export_sigmf_capture(const char *name, const char *path, int timeout_ms)
+{
+    struct sata_catalog cat;
+    struct sata_capture_entry *e;
+    struct m2sdr_sigmf_meta meta;
+    char data_path[1024];
+    char meta_path[1024];
+
+    if (catalog_require(&cat, timeout_ms) != 0)
+        return 1;
+    e = catalog_find(&cat, name);
+    if (!e) {
+        fprintf(stderr, "Capture '%s' not found.\n", name);
+        return 1;
+    }
+    if (m2sdr_sigmf_derive_paths(path, data_path, sizeof(data_path),
+                                 meta_path, sizeof(meta_path)) != 0) {
+        fprintf(stderr, "Could not derive SigMF paths from %s\n", path);
+        return 1;
+    }
+
+    if (export_entry_data(e, data_path, timeout_ms) != 0)
+        return 1;
+
+    catalog_entry_get_sigmf_metadata(e, &meta, timeout_ms);
+    snprintf(meta.data_path, sizeof(meta.data_path), "%s", data_path);
+    snprintf(meta.meta_path, sizeof(meta.meta_path), "%s", meta_path);
+    m2sdr_sata_sigmf_set_storage(&meta,
+        e->sector, e->nsectors, e->bytes,
+        e->meta_sector, e->meta_nsectors, e->meta_bytes,
+        "sata");
+    if (m2sdr_sigmf_write(&meta) != 0) {
+        fprintf(stderr, "Failed to write SigMF metadata: %s\n", meta_path);
+        return 1;
+    }
+
+    printf("Exported SigMF '%s' to %s + %s (%" PRIu64 " bytes).\n",
+        name, meta_path, data_path,
+        e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
+    return 0;
 }
 
 static uint64_t file_size_bytes(const char *path)
@@ -1335,7 +1405,10 @@ static void catalog_entry_from_options(struct sata_capture_entry *e,
                                        const struct named_transfer_options *opts,
                                        uint64_t sector,
                                        uint32_t nsectors,
-                                       uint64_t bytes)
+                                       uint64_t bytes,
+                                       uint64_t meta_sector,
+                                       uint32_t meta_nsectors,
+                                       uint64_t meta_bytes)
 {
     memset(e, 0, sizeof(*e));
     e->used = true;
@@ -1343,6 +1416,9 @@ static void catalog_entry_from_options(struct sata_capture_entry *e,
     e->sector = sector;
     e->nsectors = nsectors;
     e->bytes = bytes;
+    e->meta_sector = meta_sector;
+    e->meta_nsectors = meta_nsectors;
+    e->meta_bytes = meta_bytes;
     e->sample_rate = opts->sample_rate;
     catalog_copy(e->format, sizeof(e->format), format_name(opts->format));
     catalog_copy(e->channel_layout, sizeof(e->channel_layout), channel_layout_name(opts->channel_layout));
@@ -1355,6 +1431,180 @@ static void catalog_entry_from_options(struct sata_capture_entry *e,
     catalog_copy(e->notes, sizeof(e->notes), opts->notes);
 }
 
+static int catalog_assign_new_storage(struct sata_catalog *cat,
+                                      const char *name,
+                                      bool have_sector,
+                                      uint64_t requested_sector,
+                                      uint32_t data_nsectors,
+                                      uint64_t *data_sector,
+                                      uint64_t *meta_sector)
+{
+    if (data_nsectors > UINT32_MAX - M2SDR_SATA_SIGMF_META_SECTORS) {
+        fprintf(stderr, "Capture is too large to reserve SigMF metadata sectors.\n");
+        return 1;
+    }
+
+    *data_sector = have_sector ? requested_sector :
+        catalog_alloc_sector(cat, data_nsectors + M2SDR_SATA_SIGMF_META_SECTORS);
+    *meta_sector = *data_sector + data_nsectors;
+    return catalog_validate_new_storage(cat, name,
+        *data_sector, data_nsectors,
+        *meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
+}
+
+static int sata_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
+                                             struct m2sdr_sigmf_meta *meta,
+                                             uint64_t data_sector,
+                                             uint32_t data_nsectors,
+                                             uint64_t data_bytes,
+                                             uint64_t meta_sector,
+                                             uint32_t meta_nsectors,
+                                             int timeout_ms,
+                                             uint64_t *meta_bytes)
+{
+    uint64_t capacity = (uint64_t)meta_nsectors * SATA_SECTOR_BYTES;
+    uint64_t last_bytes = UINT64_MAX;
+    uint8_t *buf;
+    bool try_pcie_dma;
+    int rc = 1;
+
+    if (capacity == 0 || capacity > SIZE_MAX) {
+        fprintf(stderr, "Invalid SigMF metadata region size.\n");
+        return 1;
+    }
+
+    buf = calloc(1, (size_t)capacity);
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate SigMF metadata buffer.\n");
+        return 1;
+    }
+
+    if (meta_bytes)
+        *meta_bytes = 0;
+    for (unsigned pass = 0; pass < 4; pass++) {
+        uint64_t current_bytes;
+
+        memset(buf, 0, (size_t)capacity);
+        m2sdr_sata_sigmf_set_storage(meta,
+            data_sector, data_nsectors, data_bytes,
+            meta_sector, meta_nsectors,
+            meta_bytes ? *meta_bytes : 0,
+            sata_transport_name(conn));
+        if (m2sdr_sigmf_write_text(meta, (char *)buf, (size_t)capacity) != 0) {
+            fprintf(stderr, "SigMF metadata does not fit in %" PRIu32 " SATA sectors.\n",
+                meta_nsectors);
+            goto out;
+        }
+        current_bytes = strlen((char *)buf);
+        if (meta_bytes)
+            *meta_bytes = current_bytes;
+        if (current_bytes == last_bytes)
+            break;
+        last_bytes = current_bytes;
+    }
+
+    try_pcie_dma = sata_try_pcie_dma_default(conn);
+    if (sata_write_sectors_from_buffer(conn, meta_sector, meta_nsectors, buf,
+                                       timeout_ms, &try_pcie_dma) != 0)
+        goto out;
+    rc = 0;
+
+out:
+    free(buf);
+    return rc;
+}
+
+static int catalog_entry_write_sigmf_metadata(struct sata_capture_entry *entry,
+                                              const char *name,
+                                              int timeout_ms)
+{
+    struct m2sdr_sigmf_meta meta;
+    struct m2sdr_dev *conn;
+    int rc;
+
+    if (!entry || entry->meta_nsectors == 0)
+        return 0;
+
+    m2sdr_sata_sigmf_from_entry(&meta, name, entry);
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    rc = sata_write_sigmf_metadata_to_conn(conn, &meta,
+        entry->sector, entry->nsectors, entry->bytes,
+        entry->meta_sector, entry->meta_nsectors,
+        timeout_ms, &entry->meta_bytes);
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static int catalog_entry_read_sigmf_metadata_from_conn(struct m2sdr_dev *conn,
+                                                       const struct sata_capture_entry *entry,
+                                                       struct m2sdr_sigmf_meta *meta,
+                                                       int timeout_ms)
+{
+    uint64_t capacity;
+    uint8_t *buf;
+    bool try_pcie_dma;
+    size_t text_len;
+    char hint[256];
+    int rc = 1;
+
+    if (!entry || !meta || entry->meta_nsectors == 0)
+        return -1;
+
+    capacity = (uint64_t)entry->meta_nsectors * SATA_SECTOR_BYTES;
+    if (capacity == 0 || capacity > SIZE_MAX - 1u)
+        return -1;
+
+    buf = calloc(1, (size_t)capacity + 1u);
+    if (!buf)
+        return -1;
+    try_pcie_dma = sata_try_pcie_dma_default(conn);
+    if (sata_read_sectors_to_buffer(conn, entry->meta_sector, entry->meta_nsectors,
+                                    buf, timeout_ms, &try_pcie_dma) != 0)
+        goto out;
+
+    if (entry->meta_bytes != 0 && entry->meta_bytes <= capacity)
+        text_len = (size_t)entry->meta_bytes;
+    else
+        text_len = strnlen((char *)buf, (size_t)capacity);
+    if (text_len == 0)
+        goto out;
+
+    snprintf(hint, sizeof(hint), "%s.sigmf-meta", entry->name);
+    if (m2sdr_sigmf_read_text((char *)buf, text_len, hint, meta) != 0)
+        goto out;
+    rc = 0;
+
+out:
+    free(buf);
+    return rc;
+}
+
+static int catalog_entry_read_sigmf_metadata(const struct sata_capture_entry *entry,
+                                             struct m2sdr_sigmf_meta *meta,
+                                             int timeout_ms)
+{
+    struct m2sdr_dev *conn;
+    int rc;
+
+    if (!entry || !meta || entry->meta_nsectors == 0)
+        return -1;
+
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    rc = catalog_entry_read_sigmf_metadata_from_conn(conn, entry, meta, timeout_ms);
+    m2sdr_close_dev(conn);
+    return rc;
+}
+
+static void catalog_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
+                                             struct m2sdr_sigmf_meta *meta,
+                                             int timeout_ms)
+{
+    if (catalog_entry_read_sigmf_metadata(entry, meta, timeout_ms) != 0)
+        m2sdr_sata_sigmf_from_entry(meta, entry ? entry->name : NULL, entry);
+}
+
 static int do_import_capture(const char *name, const char *path, int argc, char **argv,
                              int argi, int timeout_ms, bool dry_run)
 {
@@ -1364,6 +1614,7 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
     uint64_t bytes = file_size_bytes(path);
     uint32_t nsectors;
     uint64_t sector;
+    uint64_t meta_sector;
 
     if (bytes == 0) {
         fprintf(stderr, "%s is empty.\n", path);
@@ -1388,24 +1639,131 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
         return 1;
     if (!cat.initialized)
         catalog_clear(&cat);
-    sector = opts.have_sector ? opts.sector : catalog_alloc_sector(&cat, nsectors);
-    if (catalog_validate_new_region(&cat, name, sector, nsectors) != 0)
+    if (catalog_assign_new_storage(&cat, name, opts.have_sector, opts.sector,
+                                   nsectors, &sector, &meta_sector) != 0)
         return 1;
     if (dry_run) {
         printf("import dry-run: name=%s path=%s sector=0x%016" PRIx64
-               " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
-            name, path, sector, nsectors, bytes);
+               " nsectors=%" PRIu32 " bytes=%" PRIu64
+               " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u\n",
+            name, path, sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
         return 0;
     }
 
     if (do_write_file(path, sector, nsectors, true, timeout_ms) != 0)
         return 1;
-    catalog_entry_from_options(&entry, name, &opts, sector, nsectors, bytes);
+    catalog_entry_from_options(&entry, name, &opts, sector, nsectors, bytes,
+        meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
+    if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
+        return 1;
     if (catalog_add_entry(&cat, &entry) != 0)
         return 1;
     if (catalog_save(&cat, timeout_ms) != 0)
         return 1;
     printf("Imported '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
+        name, sector, nsectors);
+    return 0;
+}
+
+static int do_import_sigmf_capture(const char *name, const char *input_path,
+                                   int argc, char **argv, int argi,
+                                   int timeout_ms, bool dry_run)
+{
+    struct sata_catalog cat;
+    struct m2sdr_sigmf_meta meta;
+    struct sata_capture_entry entry;
+    char source_data_path[1024];
+    uint64_t bytes;
+    uint64_t meta_bytes = 0;
+    uint32_t nsectors;
+    uint64_t sector;
+    uint64_t meta_sector;
+    bool have_sector = false;
+    uint64_t requested_sector = 0;
+
+    while (argi < argc) {
+        if (!strcmp(argv[argi], "--sector")) {
+            if (argi + 1 >= argc) {
+                fprintf(stderr, "Missing value for --sector\n");
+                return 1;
+            }
+            requested_sector = parse_u64(argv[++argi]);
+            have_sector = true;
+        } else {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            return 1;
+        }
+        argi++;
+    }
+
+    if (m2sdr_sigmf_read(input_path, &meta) != 0) {
+        fprintf(stderr, "Could not read SigMF metadata from %s\n", input_path);
+        return 1;
+    }
+    if (m2sdr_sigmf_format_from_datatype(meta.datatype) == (enum m2sdr_format)-1) {
+        fprintf(stderr, "Unsupported SigMF datatype '%s'.\n", meta.datatype);
+        return 1;
+    }
+    snprintf(source_data_path, sizeof(source_data_path), "%s", meta.data_path);
+    bytes = file_size_bytes(source_data_path);
+    if (bytes == 0) {
+        fprintf(stderr, "%s is empty.\n", source_data_path);
+        return 1;
+    }
+    nsectors = m2sdr_sata_bytes_to_sectors(bytes);
+    if ((uint64_t)nsectors * SATA_SECTOR_BYTES < bytes) {
+        fprintf(stderr, "SigMF dataset is too large.\n");
+        return 1;
+    }
+
+    if (catalog_load(&cat, timeout_ms) != 0)
+        return 1;
+    if (!cat.initialized)
+        catalog_clear(&cat);
+    if (catalog_assign_new_storage(&cat, name, have_sector, requested_sector,
+                                   nsectors, &sector, &meta_sector) != 0)
+        return 1;
+    if (dry_run) {
+        printf("import-sigmf dry-run: name=%s meta=%s data=%s sector=0x%016" PRIx64
+               " nsectors=%" PRIu32 " bytes=%" PRIu64
+               " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u\n",
+            name, input_path, source_data_path, sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
+        return 0;
+    }
+
+    if (do_write_file(source_data_path, sector, nsectors, true, timeout_ms) != 0)
+        return 1;
+
+    snprintf(meta.data_path, sizeof(meta.data_path), "%s.sigmf-data", name);
+    snprintf(meta.meta_path, sizeof(meta.meta_path), "%s.sigmf-meta", name);
+    {
+        struct m2sdr_dev *conn = m2sdr_open_dev();
+        int rc;
+
+        sata_require_csrs();
+        rc = sata_write_sigmf_metadata_to_conn(conn, &meta,
+            sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
+            timeout_ms, &meta_bytes);
+        m2sdr_close_dev(conn);
+        if (rc != 0)
+            return 1;
+    }
+
+    if (m2sdr_sata_sigmf_entry_from_meta(&entry, name, &meta,
+            sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
+            meta_bytes) != 0) {
+        fprintf(stderr, "Could not convert SigMF metadata to SATA catalog entry.\n");
+        return 1;
+    }
+    if (catalog_add_entry(&cat, &entry) != 0)
+        return 1;
+    if (catalog_save(&cat, timeout_ms) != 0)
+        return 1;
+    printf("Imported SigMF '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
     return 0;
 }
@@ -1818,6 +2176,34 @@ static int catalog_entry_to_options(const struct sata_capture_entry *e,
     return 0;
 }
 
+static int sigmf_meta_to_options(const char *name,
+                                 const struct m2sdr_sigmf_meta *meta,
+                                 struct named_transfer_options *opts)
+{
+    enum m2sdr_format format;
+
+    named_transfer_options_init(opts);
+    format = m2sdr_sigmf_format_from_datatype(meta->datatype);
+    if (format == (enum m2sdr_format)-1) {
+        fprintf(stderr, "Capture '%s' has unsupported SigMF datatype '%s'.\n",
+            name, meta->datatype);
+        return 1;
+    }
+    opts->format = format;
+    if (meta->has_sample_rate)
+        opts->sample_rate = (int64_t)meta->sample_rate;
+    if (meta->has_num_channels)
+        opts->channel_layout = meta->num_channels <= 1 ?
+            M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
+    if (meta->has_center_freq) {
+        opts->rx_freq = (uint64_t)meta->center_freq;
+        opts->tx_freq = (uint64_t)meta->center_freq;
+    }
+    if (meta->description[0])
+        catalog_copy(opts->notes, sizeof(opts->notes), meta->description);
+    return 0;
+}
+
 static void parse_replay_rf_overrides(struct named_transfer_options *opts,
                                       int argc, char **argv, int argi)
 {
@@ -1839,6 +2225,7 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     uint64_t bytes = 0;
     uint32_t nsectors = 0;
     uint64_t sector;
+    uint64_t meta_sector;
 
     capture_options_init(&opts);
     while (argi < argc) {
@@ -1854,14 +2241,17 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
         return 1;
     if (!cat.initialized)
         catalog_clear(&cat);
-    sector = opts.named.have_sector ? opts.named.sector : catalog_alloc_sector(&cat, nsectors);
-    if (catalog_validate_new_region(&cat, name, sector, nsectors) != 0)
+    if (catalog_assign_new_storage(&cat, name, opts.named.have_sector, opts.named.sector,
+                                   nsectors, &sector, &meta_sector) != 0)
         return 1;
     if (dry_run) {
         printf("%s dry-run: name=%s sector=0x%016" PRIx64 " nsectors=%" PRIu32
-               " bytes=%" PRIu64 " sample_rate=%" PRId64 " format=%s channels=%s\n",
+               " bytes=%" PRIu64 " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u"
+               " sample_rate=%" PRId64 " format=%s channels=%s\n",
             start_only ? "capture-start" : "capture",
-            name, sector, nsectors, bytes, opts.named.sample_rate,
+            name, sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
+            opts.named.sample_rate,
             format_name(opts.named.format), channel_layout_name(opts.named.channel_layout));
         return 0;
     }
@@ -1869,7 +2259,10 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     if (apply_rf_config_from_options(&opts.named) != 0)
         return 1;
     if (start_only) {
-        catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes);
+        catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
+            meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
+        if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
+            return 1;
         if (catalog_add_entry(&cat, &entry) != 0)
             return 1;
         if (catalog_save(&cat, timeout_ms) != 0)
@@ -1884,7 +2277,10 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
             return 1;
     }
 
-    catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes);
+    catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
+        meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
+    if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
+        return 1;
     if (catalog_add_entry(&cat, &entry) != 0)
         return 1;
     if (catalog_save(&cat, timeout_ms) != 0)
@@ -1937,7 +2333,9 @@ static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
 {
     struct sata_catalog cat;
     struct sata_capture_entry *e;
+    struct m2sdr_sigmf_meta meta;
     struct named_transfer_options opts;
+    bool have_sigmf_options = false;
 
     if (catalog_require(&cat, timeout_ms) != 0)
         return 1;
@@ -1946,7 +2344,12 @@ static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
     }
-    if (catalog_entry_to_options(e, &opts) != 0)
+    if (catalog_entry_read_sigmf_metadata(e, &meta, timeout_ms) == 0) {
+        if (sigmf_meta_to_options(name, &meta, &opts) != 0)
+            return 1;
+        have_sigmf_options = true;
+    }
+    if (!have_sigmf_options && catalog_entry_to_options(e, &opts) != 0)
         return 1;
     parse_replay_rf_overrides(&opts, argc, argv, argi);
     if (dry_run)
@@ -2165,8 +2568,14 @@ static void help(void)
            "import NAME FILE [metadata options]\n"
            "    Write a host file to SATA and catalog it.\n"
            "\n"
+           "import-sigmf NAME META|BASENAME [--sector SECTOR]\n"
+           "    Write a SigMF dataset to SATA and preserve its metadata.\n"
+           "\n"
            "export NAME FILE|-\n"
            "    Read a named capture to a host file.\n"
+           "\n"
+           "export-sigmf NAME META|BASENAME\n"
+           "    Export a named capture as .sigmf-meta + .sigmf-data.\n"
            "\n"
            "replay-host NAME --dst pcie|eth\n"
            "    Replay SATA content through loopback to a normal host RX stream.\n"
@@ -2460,11 +2869,25 @@ int main(int argc, char **argv)
         return do_import_capture(name, path, argc, argv, optind, timeout_ms, dry_run);
     }
 
+    if (!strcmp(cmd, "import-sigmf")) {
+        if (optind + 2 > argc) help();
+        const char *name = argv[optind++];
+        const char *path = argv[optind++];
+        return do_import_sigmf_capture(name, path, argc, argv, optind, timeout_ms, dry_run);
+    }
+
     if (!strcmp(cmd, "export")) {
         if (optind + 2 > argc) help();
         const char *name = argv[optind++];
         const char *path = argv[optind++];
         return do_export_capture(name, path, timeout_ms);
+    }
+
+    if (!strcmp(cmd, "export-sigmf")) {
+        if (optind + 2 > argc) help();
+        const char *name = argv[optind++];
+        const char *path = argv[optind++];
+        return do_export_sigmf_capture(name, path, timeout_ms);
     }
 
     if (!strcmp(cmd, "capture")) {
