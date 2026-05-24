@@ -519,6 +519,8 @@ m2sdr_sata [options] cmd [args...]
   Fill sectors with `--pattern zero|counter|prbs`.
 - **verify-pattern `SRC_SECTOR NSECTORS`**
   Verify sectors against `--pattern zero|counter|prbs`.
+- **etherbone-bench `[--min-words N] [--max-words N] [--iterations N]`**
+  Sweep Ethernet host-buffer burst sizes and report read/write throughput.
 - **catalog-init**
   Initialize/reset the named SATA capture catalog.
 - **list**
@@ -569,6 +571,18 @@ Example usage:
 ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
 ./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
 ./m2sdr_sata -i 192.168.1.50 replay-host fm_test --dst eth
+~~~~
+
+For faster Ethernet host import/export, build the Ethernet+SATA gateware with
+deeper Etherbone record FIFOs and then select the larger burst sizes that pass
+`etherbone-bench` and representative import/export tests on the target setup.
+From the repository root:
+~~~~
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --eth-etherbone-buffer-depth=256 --build --load
+cd litex_m2sdr/software/user
+./m2sdr_sata -i 192.168.1.50 etherbone-bench --max-words 255
+./m2sdr_sata -i 192.168.1.50 --etherbone-read-burst-words 255 --etherbone-write-burst-words 192 export fm_test /tmp/fm_test.sc16
+./m2sdr_sata -i 192.168.1.50 --etherbone-read-burst-words 255 --etherbone-write-burst-words 192 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r
 ~~~~
 
 ---

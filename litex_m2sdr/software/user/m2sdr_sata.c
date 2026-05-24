@@ -42,6 +42,12 @@ static struct m2sdr_cli_device g_cli_dev;
 static sig_atomic_t keep_running = 1;
 static int g_sata_lock_fd = -1;
 static bool g_no_bulk_etherbone = false;
+static uint32_t g_etherbone_read_burst_words = 0;
+static uint32_t g_etherbone_write_burst_words = 0;
+static uint32_t g_etherbone_read_max_burst_words = 8;
+static uint32_t g_etherbone_write_max_burst_words = 8;
+
+#define ETHERBONE_BULK_MAX_WORDS 255u
 
 static void int_handler(int dummy)
 {
@@ -68,6 +74,18 @@ static uint32_t parse_u32(const char *s)
 
     if (m2sdr_cli_parse_u32(s, &v) != 0) {
         m2sdr_cli_error("invalid u32 value '%s'", s ? s : "(null)");
+        exit(1);
+    }
+    return v;
+}
+
+static uint32_t parse_u32_range_arg(const char *label, const char *s, uint32_t min, uint32_t max)
+{
+    uint32_t v = 0;
+
+    if (m2sdr_cli_parse_u32(s, &v) != 0 || v < min || v > max) {
+        m2sdr_cli_error("invalid %s '%s' (expected %" PRIu32 "..%" PRIu32 ")",
+                        label ? label : "value", s ? s : "(null)", min, max);
         exit(1);
     }
     return v;
@@ -325,6 +343,13 @@ static int64_t m2sdr_sata_get_time_ms(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int64_t m2sdr_sata_get_time_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 /* 64-bit CSR access (LiteX ordering: upper @ base+0, lower @ base+4). */
@@ -727,59 +752,189 @@ static uint32_t sata_host_buffer_max_sectors(void)
     return (uint32_t)(SATA_HOST_BUFFER_SIZE / SATA_SECTOR_BYTES);
 }
 
-static uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn)
+static bool etherbone_is_liteeth(struct m2sdr_dev *conn)
 {
-    static bool probed = false;
-    static uint32_t cached_words = 1;
     enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
-    static const uint32_t candidates[] = {1, 2, 4, 8};
+
+    return m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK &&
+           transport == M2SDR_TRANSPORT_KIND_LITEETH;
+}
+
+static bool etherbone_append_candidate(uint32_t *candidates,
+                                       size_t *count,
+                                       size_t max_count,
+                                       uint32_t value)
+{
+    if (value == 0 || value > ETHERBONE_BULK_MAX_WORDS)
+        return false;
+    for (size_t i = 0; i < *count; i++) {
+        if (candidates[i] == value)
+            return true;
+    }
+    if (*count >= max_count)
+        return false;
+    candidates[(*count)++] = value;
+    return true;
+}
+
+static void etherbone_sort_candidates(uint32_t *candidates, size_t count)
+{
+    for (size_t i = 1; i < count; i++) {
+        uint32_t value = candidates[i];
+        size_t j = i;
+
+        while (j > 0 && candidates[j - 1] > value) {
+            candidates[j] = candidates[j - 1];
+            j--;
+        }
+        candidates[j] = value;
+    }
+}
+
+static size_t etherbone_make_candidates(uint32_t min_words,
+                                        uint32_t max_words,
+                                        uint32_t *candidates,
+                                        size_t max_count)
+{
+    static const uint32_t preferred[] = {1, 2, 4, 8, 16, 32, 64, 128, 192, 255};
+    size_t count = 0;
+
+    if (min_words < 1)
+        min_words = 1;
+    if (max_words > ETHERBONE_BULK_MAX_WORDS)
+        max_words = ETHERBONE_BULK_MAX_WORDS;
+    if (min_words > max_words)
+        min_words = max_words;
+
+    etherbone_append_candidate(candidates, &count, max_count, min_words);
+    for (size_t i = 0; i < sizeof(preferred) / sizeof(preferred[0]); i++) {
+        if (preferred[i] >= min_words && preferred[i] <= max_words)
+            etherbone_append_candidate(candidates, &count, max_count, preferred[i]);
+    }
+    etherbone_append_candidate(candidates, &count, max_count, max_words);
+    etherbone_sort_candidates(candidates, count);
+    return count;
+}
+
+static void etherbone_fill_test_words(uint32_t *words, uint32_t count)
+{
+    for (uint32_t i = 0; i < count; i++)
+        words[i] = 0x5a000000u ^ (count << 12) ^ (i * 0x01020408u) ^ i;
+}
+
+static bool etherbone_probe_burst_words(struct m2sdr_dev *conn, uint32_t count, bool verbose)
+{
+    uint32_t tx[ETHERBONE_BULK_MAX_WORDS];
+    uint32_t rx[ETHERBONE_BULK_MAX_WORDS];
+
+    if (count == 0 || count > ETHERBONE_BULK_MAX_WORDS ||
+        (size_t)count * sizeof(uint32_t) > SATA_HOST_BUFFER_SIZE) {
+        if (verbose)
+            fprintf(stderr, "Etherbone bulk probe: invalid count %" PRIu32 "\n", count);
+        return false;
+    }
+
+    etherbone_fill_test_words(tx, count);
+    memset(rx, 0, count * sizeof(uint32_t));
+
+    if (m2sdr_reg_write_bulk(conn, SATA_HOST_BUFFER_BASE, tx, count) != M2SDR_ERR_OK) {
+        if (verbose)
+            fprintf(stderr, "Etherbone bulk probe: write failed at %" PRIu32 " words\n", count);
+        return false;
+    }
+    if (m2sdr_reg_read_bulk(conn, SATA_HOST_BUFFER_BASE, rx, count) != M2SDR_ERR_OK) {
+        if (verbose)
+            fprintf(stderr, "Etherbone bulk probe: read failed at %" PRIu32 " words\n", count);
+        return false;
+    }
+    if (memcmp(tx, rx, count * sizeof(uint32_t)) != 0) {
+        if (verbose) {
+            for (uint32_t i = 0; i < count; i++) {
+                if (tx[i] != rx[i]) {
+                    fprintf(stderr,
+                            "Etherbone bulk probe: mismatch at %" PRIu32
+                            " words index %" PRIu32 " expected=0x%08" PRIx32
+                            " actual=0x%08" PRIx32 "\n",
+                            count, i, tx[i], rx[i]);
+                    break;
+                }
+            }
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static uint32_t sata_host_buffer_bulk_words(struct m2sdr_dev *conn, bool write_side)
+{
+    static bool read_probed = false;
+    static bool write_probed = false;
+    static uint32_t cached_read_words = 1;
+    static uint32_t cached_write_words = 1;
+    bool *probed = write_side ? &write_probed : &read_probed;
+    uint32_t *cached_words = write_side ? &cached_write_words : &cached_read_words;
+    uint32_t forced_words = write_side ? g_etherbone_write_burst_words : g_etherbone_read_burst_words;
+    uint32_t max_words = write_side ? g_etherbone_write_max_burst_words : g_etherbone_read_max_burst_words;
+    const char *label = write_side ? "write" : "read";
+    uint32_t candidates[12];
     uint32_t best_words = 0;
-    uint32_t tx[8];
-    uint32_t rx[8];
+    size_t candidate_count;
 
     if (g_no_bulk_etherbone)
         return 1;
-    if (probed)
-        return cached_words;
-    if (m2sdr_get_transport(conn, &transport) != M2SDR_ERR_OK ||
-        transport != M2SDR_TRANSPORT_KIND_LITEETH) {
-        cached_words = 255;
-        probed = true;
-        return cached_words;
+    if (*probed)
+        return *cached_words;
+    if (!etherbone_is_liteeth(conn)) {
+        *cached_words = forced_words ? forced_words : ETHERBONE_BULK_MAX_WORDS;
+        *probed = true;
+        return *cached_words;
     }
 
-    for (size_t ci = 0; ci < sizeof(candidates) / sizeof(candidates[0]); ci++) {
+    *probed = true;
+    if (forced_words) {
+        if (etherbone_probe_burst_words(conn, forced_words, true)) {
+            *cached_words = forced_words;
+            fprintf(stderr, "Etherbone %s bulk burst: %" PRIu32 " words (forced)\n",
+                    label, *cached_words);
+            return *cached_words;
+        }
+        *cached_words = 1;
+        fprintf(stderr,
+                "Etherbone forced %s bulk burst failed; using legacy single-word access.\n",
+                label);
+        return *cached_words;
+    }
+
+    candidate_count = etherbone_make_candidates(1, max_words,
+                                                candidates,
+                                                sizeof(candidates) / sizeof(candidates[0]));
+    for (size_t ci = 0; ci < candidate_count; ci++) {
         uint32_t n = candidates[ci];
 
-        if ((size_t)n * sizeof(uint32_t) > SATA_HOST_BUFFER_SIZE)
-            continue;
-        for (uint32_t i = 0; i < n; i++)
-            tx[i] = 0x5a000000u ^ (n << 12) ^ i;
-        memset(rx, 0, n * sizeof(uint32_t));
-
-        if (m2sdr_reg_write_bulk(conn, SATA_HOST_BUFFER_BASE, tx, n) != M2SDR_ERR_OK)
-            continue;
-        if (m2sdr_reg_read_bulk(conn, SATA_HOST_BUFFER_BASE, rx, n) != M2SDR_ERR_OK)
-            continue;
-        if (memcmp(tx, rx, n * sizeof(uint32_t)) == 0)
+        if (etherbone_probe_burst_words(conn, n, false))
             best_words = n;
+        else
+            break;
     }
 
-    probed = true;
     if (best_words) {
-        cached_words = best_words;
-        fprintf(stderr, "Etherbone bulk burst: %" PRIu32 " words\n", cached_words);
-        return cached_words;
+        *cached_words = best_words;
+        fprintf(stderr, "Etherbone %s bulk burst: %" PRIu32 " words\n",
+                label, *cached_words);
+        return *cached_words;
     }
 
-    cached_words = 1;
-    fprintf(stderr, "Etherbone bulk burst probe failed; using legacy single-word access.\n");
-    return cached_words;
+    *cached_words = 1;
+    fprintf(stderr,
+            "Etherbone %s bulk burst probe failed; using legacy single-word access.\n",
+            label);
+    return *cached_words;
 }
 
 static void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t bytes)
 {
-    uint32_t burst = sata_host_buffer_bulk_words(conn);
+    uint32_t burst = sata_host_buffer_bulk_words(conn, true);
     uint32_t words[255];
 
     for (size_t off = 0; off < bytes; ) {
@@ -806,7 +961,7 @@ static void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, s
 
 static void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 {
-    uint32_t burst = sata_host_buffer_bulk_words(conn);
+    uint32_t burst = sata_host_buffer_bulk_words(conn, false);
     uint32_t words[255];
 
     for (size_t off = 0; off < bytes; ) {
@@ -831,6 +986,135 @@ static void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t b
     }
 }
 
+static int do_etherbone_bench(int argc, char **argv, int argi)
+{
+    uint32_t min_words = 1;
+    uint32_t max_words = g_etherbone_read_max_burst_words;
+    uint32_t iterations = 1024;
+    bool csv = false;
+    bool continue_on_fail = false;
+    uint32_t candidates[12];
+    size_t candidate_count;
+    struct m2sdr_dev *conn;
+    int status = 0;
+
+    while (argi < argc) {
+        if (!strcmp(argv[argi], "--min-words")) {
+            if (argi + 1 >= argc) {
+                fprintf(stderr, "Missing value for --min-words\n");
+                return 1;
+            }
+            min_words = parse_u32_range_arg("min words", argv[++argi], 1, ETHERBONE_BULK_MAX_WORDS);
+        } else if (!strcmp(argv[argi], "--max-words")) {
+            if (argi + 1 >= argc) {
+                fprintf(stderr, "Missing value for --max-words\n");
+                return 1;
+            }
+            max_words = parse_u32_range_arg("max words", argv[++argi], 1, ETHERBONE_BULK_MAX_WORDS);
+        } else if (!strcmp(argv[argi], "--iterations")) {
+            if (argi + 1 >= argc) {
+                fprintf(stderr, "Missing value for --iterations\n");
+                return 1;
+            }
+            iterations = parse_u32_range_arg("iterations", argv[++argi], 1, 1000000);
+        } else if (!strcmp(argv[argi], "--csv")) {
+            csv = true;
+        } else if (!strcmp(argv[argi], "--continue-on-fail")) {
+            continue_on_fail = true;
+        } else {
+            fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+            return 1;
+        }
+        argi++;
+    }
+
+    if (min_words > max_words) {
+        fprintf(stderr, "--min-words must be <= --max-words\n");
+        return 1;
+    }
+
+    candidate_count = etherbone_make_candidates(min_words, max_words,
+                                                candidates,
+                                                sizeof(candidates) / sizeof(candidates[0]));
+    conn = m2sdr_open_dev();
+
+    if (!csv) {
+        printf("Etherbone burst benchmark: iterations=%" PRIu32 "\n", iterations);
+        printf("%8s %12s %12s %12s %s\n", "words", "bytes", "write MiB/s", "read MiB/s", "status");
+    } else {
+        printf("words,bytes,write_mib_s,read_mib_s,status\n");
+    }
+
+    for (size_t ci = 0; ci < candidate_count && keep_running; ci++) {
+        uint32_t n = candidates[ci];
+        uint32_t tx[ETHERBONE_BULK_MAX_WORDS];
+        uint32_t rx[ETHERBONE_BULK_MAX_WORDS];
+        uint64_t bytes = (uint64_t)iterations * n * sizeof(uint32_t);
+        int64_t start_us;
+        int64_t write_us;
+        int64_t read_us;
+        bool ok = true;
+
+        etherbone_fill_test_words(tx, n);
+        memset(rx, 0, n * sizeof(uint32_t));
+
+        if (!etherbone_probe_burst_words(conn, n, true)) {
+            ok = false;
+        } else {
+            start_us = m2sdr_sata_get_time_us();
+            for (uint32_t i = 0; i < iterations; i++) {
+                if (m2sdr_reg_write_bulk(conn, SATA_HOST_BUFFER_BASE, tx, n) != M2SDR_ERR_OK) {
+                    ok = false;
+                    break;
+                }
+            }
+            write_us = m2sdr_sata_get_time_us() - start_us;
+
+            if (ok) {
+                start_us = m2sdr_sata_get_time_us();
+                for (uint32_t i = 0; i < iterations; i++) {
+                    if (m2sdr_reg_read_bulk(conn, SATA_HOST_BUFFER_BASE, rx, n) != M2SDR_ERR_OK) {
+                        ok = false;
+                        break;
+                    }
+                }
+                read_us = m2sdr_sata_get_time_us() - start_us;
+            } else {
+                read_us = 0;
+            }
+
+            if (ok && memcmp(tx, rx, n * sizeof(uint32_t)) != 0)
+                ok = false;
+        }
+
+        if (ok) {
+            double mib = (double)bytes / (1024.0 * 1024.0);
+            double write_mibs = write_us > 0 ? mib * 1000000.0 / (double)write_us : 0.0;
+            double read_mibs  = read_us  > 0 ? mib * 1000000.0 / (double)read_us  : 0.0;
+
+            if (csv)
+                printf("%" PRIu32 ",%" PRIu64 ",%.3f,%.3f,ok\n",
+                       n, bytes, write_mibs, read_mibs);
+            else
+                printf("%8" PRIu32 " %12" PRIu64 " %12.3f %12.3f ok\n",
+                       n, bytes, write_mibs, read_mibs);
+        } else {
+            status = 1;
+            if (csv)
+                printf("%" PRIu32 ",%" PRIu64 ",0.000,0.000,fail\n", n, bytes);
+            else
+                printf("%8" PRIu32 " %12" PRIu64 " %12s %12s fail\n",
+                       n, bytes, "-", "-");
+            if (!continue_on_fail)
+                break;
+        }
+        fflush(stdout);
+    }
+
+    m2sdr_close_dev(conn);
+    return status;
+}
+
 static void sata_sector2mem_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
 {
     csr_write64(conn, CSR_SATA_SECTOR2MEM_SECTOR_ADDR, sector);
@@ -847,7 +1131,7 @@ static void sata_mem2sector_program(void *conn, uint64_t sector, uint32_t nsecto
 
 static int sata_read_to_host_buffer(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
-    (void)sata_host_buffer_bulk_words(conn);
+    (void)sata_host_buffer_bulk_words(conn, false);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
     return wait_done("SATA_SECTOR2MEM(read-file)",
@@ -1126,7 +1410,7 @@ struct sata_catalog {
 
 static int sata_read_to_host_buffer_quiet(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
-    (void)sata_host_buffer_bulk_words(conn);
+    (void)sata_host_buffer_bulk_words(conn, false);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
     return wait_done_quiet("SATA_SECTOR2MEM(catalog)",
@@ -2580,6 +2864,17 @@ static void help(void)
            "      --dry-run                  Show planned operation without starting the streamer.\n"
            "      --pattern NAME             Pattern for write-pattern/verify-pattern: zero|counter|prbs.\n"
            "      --no-bulk-etherbone        Disable multi-word Etherbone host-buffer access.\n"
+           "      --etherbone-burst-words N  Force the same fixed Etherbone read/write burst size.\n"
+           "      --etherbone-max-burst-words N\n"
+           "                                  Same maximum for automatic read/write probing (default: 8).\n"
+           "      --etherbone-read-burst-words N\n"
+           "                                  Force a fixed Etherbone burst size for host reads.\n"
+           "      --etherbone-write-burst-words N\n"
+           "                                  Force a fixed Etherbone burst size for host writes.\n"
+           "      --etherbone-read-max-burst-words N\n"
+           "                                  Maximum auto-probed burst size for host reads.\n"
+           "      --etherbone-write-max-burst-words N\n"
+           "                                  Maximum auto-probed burst size for host writes.\n"
            "\n"
            "commands:\n"
            "status\n"
@@ -2630,6 +2925,9 @@ static void help(void)
            "    Read sectors and compare against the selected --pattern.\n"
            "\n"
 #ifdef SATA_HOST_IO_AVAILABLE
+           "etherbone-bench [--min-words N] [--max-words N] [--iterations N] [--csv] [--continue-on-fail]\n"
+           "    Sweep Etherbone host-buffer burst sizes and report write/read throughput.\n"
+           "\n"
            "catalog-init\n"
            "    Initialize/reset the named capture catalog.\n"
            "\n"
@@ -2704,6 +3002,12 @@ int main(int argc, char **argv)
         { "dry-run", no_argument, NULL, 'n' },
         { "pattern", required_argument, NULL, 'P' },
         { "no-bulk-etherbone", no_argument, NULL, 1000 },
+        { "etherbone-burst-words", required_argument, NULL, 1001 },
+        { "etherbone-max-burst-words", required_argument, NULL, 1002 },
+        { "etherbone-read-burst-words", required_argument, NULL, 1003 },
+        { "etherbone-write-burst-words", required_argument, NULL, 1004 },
+        { "etherbone-read-max-burst-words", required_argument, NULL, 1005 },
+        { "etherbone-write-max-burst-words", required_argument, NULL, 1006 },
         { NULL, 0, NULL, 0 }
     };
 
@@ -2734,6 +3038,32 @@ int main(int argc, char **argv)
             break;
         case 1000:
             g_no_bulk_etherbone = true;
+            break;
+        case 1001:
+            g_etherbone_read_burst_words = parse_u32_range_arg("Etherbone burst words",
+                                                               optarg, 1, ETHERBONE_BULK_MAX_WORDS);
+            g_etherbone_write_burst_words = g_etherbone_read_burst_words;
+            break;
+        case 1002:
+            g_etherbone_read_max_burst_words = parse_u32_range_arg("Etherbone max burst words",
+                                                                   optarg, 1, ETHERBONE_BULK_MAX_WORDS);
+            g_etherbone_write_max_burst_words = g_etherbone_read_max_burst_words;
+            break;
+        case 1003:
+            g_etherbone_read_burst_words = parse_u32_range_arg("Etherbone read burst words",
+                                                               optarg, 1, ETHERBONE_BULK_MAX_WORDS);
+            break;
+        case 1004:
+            g_etherbone_write_burst_words = parse_u32_range_arg("Etherbone write burst words",
+                                                                optarg, 1, ETHERBONE_BULK_MAX_WORDS);
+            break;
+        case 1005:
+            g_etherbone_read_max_burst_words = parse_u32_range_arg("Etherbone read max burst words",
+                                                                   optarg, 1, ETHERBONE_BULK_MAX_WORDS);
+            break;
+        case 1006:
+            g_etherbone_write_max_burst_words = parse_u32_range_arg("Etherbone write max burst words",
+                                                                    optarg, 1, ETHERBONE_BULK_MAX_WORDS);
             break;
         default:
             exit(1);
@@ -2915,6 +3245,10 @@ int main(int argc, char **argv)
     }
 
 #ifdef SATA_HOST_IO_AVAILABLE
+    if (!strcmp(cmd, "etherbone-bench")) {
+        return do_etherbone_bench(argc, argv, optind);
+    }
+
     if (!strcmp(cmd, "catalog-init")) {
         return do_catalog_init(timeout_ms);
     }
