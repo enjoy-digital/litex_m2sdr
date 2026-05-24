@@ -236,6 +236,100 @@ static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t se
         snprintf(buf, len, "%.2Lf %s", value, units[unit]);
 }
 
+static void format_bytes(char *buf, size_t len, uint64_t bytes)
+{
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+    long double value = (long double)bytes;
+    unsigned unit = 0;
+
+    while (value >= 1024.0L && unit + 1 < sizeof(units)/sizeof(units[0])) {
+        value /= 1024.0L;
+        unit++;
+    }
+    if (unit == 0)
+        snprintf(buf, len, "%.0Lf %s", value, units[unit]);
+    else
+        snprintf(buf, len, "%.2Lf %s", value, units[unit]);
+}
+
+static unsigned catalog_used_count(const struct sata_catalog *cat)
+{
+    unsigned used = 0;
+
+    if (!cat)
+        return 0;
+    for (unsigned i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++)
+        if (cat->entries[i].used)
+            used++;
+    return used;
+}
+
+static uint64_t catalog_entry_payload_bytes(const struct sata_capture_entry *e)
+{
+    if (!e)
+        return 0;
+    return e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
+}
+
+static unsigned catalog_entry_channel_count(const struct sata_capture_entry *e)
+{
+    if (!e)
+        return 0;
+    if (!strcmp(e->channel_layout, "1t1r"))
+        return 1;
+    if (!strcmp(e->channel_layout, "2t2r"))
+        return 2;
+    return 0;
+}
+
+static void format_catalog_duration(char *buf, size_t len, const struct sata_capture_entry *e)
+{
+    enum m2sdr_format format;
+    unsigned channels;
+    size_t sample_bytes;
+    uint64_t bytes;
+    long double seconds;
+
+    if (!e || e->sample_rate <= 0 ||
+        m2sdr_cli_parse_format(e->format, &format) != 0) {
+        snprintf(buf, len, "-");
+        return;
+    }
+    channels = catalog_entry_channel_count(e);
+    sample_bytes = m2sdr_format_size(format);
+    bytes = catalog_entry_payload_bytes(e);
+    if (channels == 0 || sample_bytes == 0 || bytes == 0) {
+        snprintf(buf, len, "-");
+        return;
+    }
+    seconds = (long double)bytes /
+              ((long double)e->sample_rate * (long double)channels * (long double)sample_bytes);
+    snprintf(buf, len, "%.3Lfs", seconds);
+}
+
+static int reject_extra_args(int argc, char **argv, int argi)
+{
+    if (argi < argc) {
+        fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_force_args(int argc, char **argv, int *argi, bool *force)
+{
+    while (*argi < argc) {
+        if (!strcmp(argv[*argi], "--force")) {
+            *force = true;
+            (*argi)++;
+            continue;
+        }
+        fprintf(stderr, "Unexpected argument: %s\n", argv[*argi]);
+        return 1;
+    }
+    return 0;
+}
+
 /* Connection functions ------------------------------------------------------ */
 
 static void m2sdr_sata_unlock(void)
@@ -1120,26 +1214,66 @@ static int catalog_require(struct sata_catalog *cat, int timeout_ms)
     if (catalog_load(cat, timeout_ms) != 0)
         return 1;
     if (!cat->initialized) {
-        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata init\n");
+        fprintf(stderr,
+            "SATA catalog is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
         return 1;
     }
     return 0;
 }
 
-static int do_catalog_init(int timeout_ms)
+static int do_catalog_init(int timeout_ms, bool force, bool dry_run)
 {
     struct sata_catalog cat;
+    struct sata_catalog current;
     struct m2sdr_dev *conn;
+    unsigned used = 0;
+    bool overwriting = false;
     int rc;
 
-    catalog_clear(&cat);
     conn = m2sdr_open_dev();
     sata_require_csrs();
+    memset(&current, 0, sizeof(current));
+    rc = catalog_load_from_conn(conn, &current, timeout_ms);
+    if (rc != 0) {
+        if (!force) {
+            fprintf(stderr,
+                "Could not validate the existing SATA catalog. Use `m2sdr_sata init --force` to overwrite only the catalog sectors.\n");
+            m2sdr_close_dev(conn);
+            return 1;
+        }
+        fprintf(stderr,
+            "Existing SATA catalog could not be validated; --force will overwrite only the catalog sectors.\n");
+        overwriting = true;
+    }
+
+    if (current.initialized) {
+        overwriting = true;
+        used = catalog_used_count(&current);
+        if (used != 0 && !force) {
+            fprintf(stderr,
+                "SATA catalog already contains %u entr%s; refusing to reset without --force.\n",
+                used, used == 1 ? "y" : "ies");
+            fprintf(stderr,
+                "Use `m2sdr_sata list` to inspect entries or `m2sdr_sata init --force` to reset only the catalog.\n");
+            m2sdr_close_dev(conn);
+            return 1;
+        }
+    }
+
+    if (dry_run) {
+        printf("init dry-run: catalog sector=0x%016" PRIx64 " sectors=%u existing_entries=%u force=%s\n",
+            (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, used, force ? "yes" : "no");
+        m2sdr_close_dev(conn);
+        return 0;
+    }
+
+    catalog_clear(&cat);
     rc = catalog_save_to_conn(conn, &cat, timeout_ms);
     m2sdr_close_dev(conn);
     if (rc != 0)
         return 1;
-    printf("Initialized SATA catalog at sector 0x%016" PRIx64 " (%u sectors).\n",
+    printf("%s SATA catalog at sector 0x%016" PRIx64 " (%u sectors). Data sectors were not erased.\n",
+        overwriting ? "Reset" : "Initialized",
         (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS);
     return 0;
 }
@@ -1152,14 +1286,20 @@ static int do_catalog_list(int timeout_ms)
     if (catalog_require(&cat, timeout_ms) != 0)
         return 1;
 
-    printf("%-24s %-18s %-10s %-12s %-8s %-8s\n",
-        "NAME", "SECTOR", "SECTORS", "RATE", "FORMAT", "CHANS");
+    printf("%-24s %-18s %-11s %-10s %-12s %-8s %-8s\n",
+        "NAME", "SECTOR", "SIZE", "DURATION", "RATE", "FORMAT", "CHANS");
     for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
         const struct sata_capture_entry *e = &cat.entries[i];
+        char size_s[32];
+        char duration_s[32];
+
         if (!e->used)
             continue;
-        printf("%-24s 0x%016" PRIx64 " %-10" PRIu32 " %-12" PRId64 " %-8s %-8s\n",
-            e->name, e->sector, e->nsectors, e->sample_rate, e->format, e->channel_layout);
+        format_bytes(size_s, sizeof(size_s), catalog_entry_payload_bytes(e));
+        format_catalog_duration(duration_s, sizeof(duration_s), e);
+        printf("%-24s 0x%016" PRIx64 " %-11s %-10s %-12" PRId64 " %-8s %-8s\n",
+            e->name, e->sector, size_s, duration_s,
+            e->sample_rate, e->format, e->channel_layout);
         count++;
     }
     if (count == 0)
@@ -1180,6 +1320,15 @@ static int do_catalog_show(const char *name, int timeout_ms)
         return 1;
     }
     catalog_entry_print(e);
+    printf("Data Range     : 0x%016" PRIx64 "..0x%016" PRIx64 "\n",
+        e->sector, catalog_end_sector(e));
+    if (e->meta_nsectors != 0) {
+        printf("SigMF Metadata : stored at 0x%016" PRIx64 "..0x%016" PRIx64
+               " (%" PRIu64 " bytes)\n",
+            e->meta_sector, catalog_meta_end_sector(e), e->meta_bytes);
+    } else {
+        printf("SigMF Metadata : not stored\n");
+    }
     return 0;
 }
 
@@ -1198,7 +1347,8 @@ static int do_catalog_delete(const char *name, int timeout_ms)
         return 1;
     }
     if (!cat.initialized) {
-        fprintf(stderr, "SATA catalog is not initialized. Run: m2sdr_sata init\n");
+        fprintf(stderr,
+            "SATA catalog is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
         m2sdr_close_dev(conn);
         return 1;
     }
@@ -1208,6 +1358,12 @@ static int do_catalog_delete(const char *name, int timeout_ms)
         m2sdr_close_dev(conn);
         return 1;
     }
+    printf("Deleting capture '%s': data=0x%016" PRIx64 "..0x%016" PRIx64,
+        name, e->sector, catalog_end_sector(e));
+    if (e->meta_nsectors != 0)
+        printf(" sigmf=0x%016" PRIx64 "..0x%016" PRIx64,
+            e->meta_sector, catalog_meta_end_sector(e));
+    printf("\n");
     memset(e, 0, sizeof(*e));
     rc = catalog_save_to_conn(conn, &cat, timeout_ms);
     m2sdr_close_dev(conn);
@@ -1343,7 +1499,7 @@ out_close_dev:
     return rc;
 }
 
-static int do_export_capture(const char *name, const char *path, int timeout_ms)
+static int do_export_capture(const char *name, const char *path, int timeout_ms, bool dry_run)
 {
     struct sata_catalog cat;
     struct sata_capture_entry *e;
@@ -1355,14 +1511,20 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
     }
+    if (dry_run) {
+        printf("export dry-run: mode=raw name=%s path=%s sector=0x%016" PRIx64
+               " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
+            name, path, e->sector, e->nsectors, catalog_entry_payload_bytes(e));
+        return 0;
+    }
     if (export_entry_data(e, path, timeout_ms) != 0)
         return 1;
     printf("Exported '%s' to %s (%" PRIu64 " bytes).\n",
-        name, path, e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
+        name, path, catalog_entry_payload_bytes(e));
     return 0;
 }
 
-static int do_export_sigmf_capture(const char *name, const char *path, int timeout_ms)
+static int do_export_sigmf_capture(const char *name, const char *path, int timeout_ms, bool dry_run)
 {
     struct sata_catalog cat;
     struct sata_capture_entry *e;
@@ -1384,6 +1546,13 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
         return 1;
     }
 
+    if (dry_run) {
+        printf("export dry-run: mode=sigmf name=%s meta=%s data=%s sector=0x%016" PRIx64
+               " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
+            name, meta_path, data_path, e->sector, e->nsectors, catalog_entry_payload_bytes(e));
+        return 0;
+    }
+
     if (export_entry_data(e, data_path, timeout_ms) != 0)
         return 1;
 
@@ -1402,8 +1571,7 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
     }
 
     printf("Exported SigMF '%s' to %s + %s (%" PRIu64 " bytes).\n",
-        name, meta_path, data_path,
-        e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES);
+        name, meta_path, data_path, catalog_entry_payload_bytes(e));
     return 0;
 }
 
@@ -1830,7 +1998,9 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
         return 1;
     }
     if (m2sdr_sigmf_format_from_datatype(meta.datatype) == (enum m2sdr_format)-1) {
-        fprintf(stderr, "Unsupported SigMF datatype '%s'.\n", meta.datatype);
+        fprintf(stderr,
+            "Unsupported SigMF datatype '%s'. Expected a datatype compatible with sc16 or sc8 samples.\n",
+            meta.datatype);
         return 1;
     }
     snprintf(source_data_path, sizeof(source_data_path), "%s", meta.data_path);
@@ -1902,8 +2072,11 @@ static int do_import_auto(const char *name, const char *input_path,
 {
     struct m2sdr_sigmf_meta meta;
 
-    if (m2sdr_sigmf_read(input_path, &meta) == 0)
+    if (m2sdr_sigmf_read(input_path, &meta) == 0) {
+        printf("Import mode: SigMF\n");
         return do_import_sigmf_capture(name, input_path, argc, argv, argi, timeout_ms, dry_run);
+    }
+    printf("Import mode: raw\n");
     return do_import_capture(name, input_path, argc, argv, argi, timeout_ms, dry_run);
 }
 
@@ -2143,7 +2316,7 @@ static int parse_stream_selector(const char *label, const char *text, bool *rx, 
     return -1;
 }
 
-static int do_stream_stop(const char *which_s)
+static int do_stream_stop(const char *which_s, bool dry_run)
 {
     bool rx = false;
     bool tx = false;
@@ -2151,6 +2324,11 @@ static int do_stream_stop(const char *which_s)
 
     if (parse_stream_selector("stream", which_s, &rx, &tx) != 0)
         return 1;
+    if (dry_run) {
+        printf("stop dry-run: target=%s rx=%s tx=%s\n",
+            which_s, rx ? "yes" : "no", tx ? "yes" : "no");
+        return 0;
+    }
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
@@ -2328,7 +2506,8 @@ static int sigmf_meta_to_options(const char *name,
     named_transfer_options_init(opts);
     format = m2sdr_sigmf_format_from_datatype(meta->datatype);
     if (format == (enum m2sdr_format)-1) {
-        fprintf(stderr, "Capture '%s' has unsupported SigMF datatype '%s'.\n",
+        fprintf(stderr,
+            "Capture '%s' has unsupported SigMF datatype '%s'. Expected sc16/sc8-compatible samples.\n",
             name, meta->datatype);
         return 1;
     }
@@ -2542,6 +2721,10 @@ static void status(void)
 
         printf("SATA:\n");
         if (sata_rc == M2SDR_ERR_OK) {
+            bool ready = sata_info.phy_ready && sata_info.tx_ready &&
+                         sata_info.rx_ready && sata_info.ctrl_ready &&
+                         sata_info.drive_present;
+
             printf("  PHY enable         %s\n", sata_info.phy_enabled ? "yes" : "no");
             printf("  PHY status         0x%08" PRIx32 "\n", sata_info.phy_status);
             printf("  PHY ready          %s\n", sata_info.phy_ready ? "yes" : "no");
@@ -2549,6 +2732,7 @@ static void status(void)
             printf("  RX ready           %s\n", sata_info.rx_ready ? "yes" : "no");
             printf("  CTRL ready         %s\n", sata_info.ctrl_ready ? "yes" : "no");
             printf("  Drive              %s\n", sata_info.drive_present ? "present" : "not present");
+            printf("  Ready              %s\n", ready ? "yes" : "no");
             if (sata_info.drive_present) {
                 char capacity[32];
                 uint32_t sector_size = sata_info.logical_sector_size ? sata_info.logical_sector_size : SATA_SECTOR_BYTES;
@@ -2608,10 +2792,7 @@ static void status(void)
     {
         struct sata_catalog cat;
         if (catalog_load_from_conn(conn, &cat, 1000) == 0) {
-            unsigned used = 0;
-            for (unsigned i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++)
-                if (cat.entries[i].used)
-                    used++;
+            unsigned used = catalog_used_count(&cat);
             printf("Catalog:\n");
             printf("  State              %s\n", cat.initialized ? "initialized" : "not initialized");
             printf("  Sector             0x%016" PRIx64 "\n", (uint64_t)SATA_CATALOG_SECTOR);
@@ -2677,6 +2858,7 @@ static void help(void)
            "  -p, --port PORT                Port number (default: 1234).\n"
            "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
+           "      --force                    Allow catalog reset for commands that require confirmation.\n"
            "      --pattern NAME             Diagnostic pattern: zero|counter|prbs.\n"
            "      --no-bulk-etherbone        Disable multi-word Etherbone host-buffer access.\n"
            "\n"
@@ -2684,8 +2866,8 @@ static void help(void)
            "info\n"
            "    Show transport, SATA link, drive, catalog and host I/O status.\n"
            "\n"
-           "init\n"
-           "    Initialize/reset the named SATA catalog.\n"
+           "init [--force]\n"
+           "    Initialize the named SATA catalog; --force resets a non-empty catalog.\n"
            "\n"
            "list\n"
            "    List named SATA entries.\n"
@@ -2724,6 +2906,12 @@ static void help(void)
            "RF/metadata options: --sector, --sample-rate, --format sc16|sc8,\n"
            "    --channel-layout 1t1r|2t2r, --rx-freq, --tx-freq, --bandwidth,\n"
            "    --rx-gain, --tx-att, --notes.\n"
+           "\n"
+           "safe workflow examples:\n"
+           "    m2sdr_sata info\n"
+           "    m2sdr_sata list\n"
+           "    m2sdr_sata --dry-run capture test --seconds 1 --sample-rate 4M --format sc16\n"
+           "    m2sdr_sata --dry-run export test /tmp/test.sigmf-meta\n"
            "\n"
            "diagnostics:\n"
            "diag route TXSRC RXDST [LOOPBACK]\n"
@@ -2770,6 +2958,7 @@ int main(int argc, char **argv)
 
     int timeout_ms = 30000;
     bool dry_run = false;
+    bool force = false;
     const char *pattern_name = "counter";
     m2sdr_cli_device_init(&g_cli_dev);
     static struct option options[] = {
@@ -2781,6 +2970,7 @@ int main(int argc, char **argv)
         { "timeout-ms", required_argument, NULL, 'T' },
         { "dry-run", no_argument, NULL, 'n' },
         { "pattern", required_argument, NULL, 'P' },
+        { "force", no_argument, NULL, 1001 },
         { "no-bulk-etherbone", no_argument, NULL, 1000 },
         { NULL, 0, NULL, 0 }
     };
@@ -2810,6 +3000,9 @@ int main(int argc, char **argv)
         case 'P':
             pattern_name = optarg;
             break;
+        case 1001:
+            force = true;
+            break;
         case 1000:
             m2sdr_sata_set_no_bulk_etherbone(true);
             break;
@@ -2826,6 +3019,8 @@ int main(int argc, char **argv)
     cmd = argv[optind++];
 
     if (!strcmp(cmd, "info")) {
+        if (reject_extra_args(argc, argv, optind) != 0)
+            return 1;
         status();
         return 0;
     }
@@ -2833,10 +3028,16 @@ int main(int argc, char **argv)
 #ifdef CSR_SATA_PHY_BASE
 #ifdef SATA_HOST_IO_AVAILABLE
     if (!strcmp(cmd, "init")) {
-        return do_catalog_init(timeout_ms);
+        bool init_force = force;
+
+        if (parse_force_args(argc, argv, &optind, &init_force) != 0)
+            return 1;
+        return do_catalog_init(timeout_ms, init_force, dry_run);
     }
 
     if (!strcmp(cmd, "list")) {
+        if (reject_extra_args(argc, argv, optind) != 0)
+            return 1;
         return do_catalog_list(timeout_ms);
     }
 
@@ -2845,6 +3046,8 @@ int main(int argc, char **argv)
             help();
             return 1;
         }
+        if (reject_extra_args(argc, argv, optind + 1) != 0)
+            return 1;
         return do_catalog_show(argv[optind++], timeout_ms);
     }
 
@@ -2853,10 +3056,14 @@ int main(int argc, char **argv)
             help();
             return 1;
         }
+        if (reject_extra_args(argc, argv, optind + 1) != 0)
+            return 1;
         return do_catalog_delete(argv[optind++], timeout_ms);
     }
 
     if (!strcmp(cmd, "check")) {
+        if (reject_extra_args(argc, argv, optind) != 0)
+            return 1;
         return do_catalog_fsck(timeout_ms);
     }
 
@@ -2905,8 +3112,8 @@ int main(int argc, char **argv)
             }
             optind++;
         }
-        return raw ? do_export_capture(name, path, timeout_ms) :
-                     do_export_sigmf_capture(name, path, timeout_ms);
+        return raw ? do_export_capture(name, path, timeout_ms, dry_run) :
+                     do_export_sigmf_capture(name, path, timeout_ms, dry_run);
     }
 
     if (!strcmp(cmd, "play")) {
@@ -2933,7 +3140,9 @@ int main(int argc, char **argv)
             help();
             return 1;
         }
-        return do_stream_stop(argv[optind++]);
+        if (reject_extra_args(argc, argv, optind + 1) != 0)
+            return 1;
+        return do_stream_stop(argv[optind++], dry_run);
     }
 
 #else
@@ -2971,6 +3180,8 @@ int main(int argc, char **argv)
             }
             int enable        = parse_bool01("header enable", argv[optind++]);
             int header_enable = parse_bool01("header header_enable", argv[optind++]);
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
 
             struct m2sdr_dev *conn = m2sdr_open_dev();
             header_set_raw(conn, which, enable, header_enable);
@@ -2989,6 +3200,8 @@ int main(int argc, char **argv)
             int loopback = -1;
             if (optind < argc)
                 loopback = parse_bool01("loopback", argv[optind++]);
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             do_route(txsrc, rxdst, loopback);
             return 0;
         }
@@ -3004,6 +3217,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             return !strcmp(diag_cmd, "record") ?
                 do_record(dst_sector, nsectors, timeout_ms, dry_run) :
                 do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
@@ -3020,6 +3235,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             return !strcmp(diag_cmd, "play") ?
                 do_play(src_sector, nsectors, timeout_ms, dry_run) :
                 do_play_start(src_sector, nsectors, timeout_ms, dry_run);
@@ -3037,6 +3254,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             return do_replay(src_sector, nsectors, dst, timeout_ms, dry_run);
         }
 
@@ -3052,6 +3271,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             return do_copy(src_sector, dst_sector, nsectors, timeout_ms, dry_run);
         }
 
@@ -3068,6 +3289,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             if (dry_run) {
                 printf("diag read dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " path=%s\n",
                     src_sector, nsectors, path);
@@ -3093,6 +3316,8 @@ int main(int argc, char **argv)
                 }
                 limit_sectors = true;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             if (dry_run) {
                 printf("diag write dry-run: path=%s sector=0x%016" PRIx64,
                     path, dst_sector);
@@ -3115,6 +3340,8 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("nsectors must be greater than zero");
                 return 1;
             }
+            if (reject_extra_args(argc, argv, optind) != 0)
+                return 1;
             if (dry_run) {
                 printf("diag %s dry-run: sector=0x%016" PRIx64 " nsectors=%" PRIu32 " pattern=%s\n",
                     diag_cmd, sector, nsectors, pattern_name);

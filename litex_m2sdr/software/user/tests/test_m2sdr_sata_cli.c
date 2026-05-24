@@ -36,7 +36,23 @@ int main(void)
 {
     if (run_and_check("./m2sdr_sata --help 2>&1", "workflow commands:", 0) != 0)
         return 1;
+    if (run_and_check("./m2sdr_sata --help 2>&1", "--force", 0) != 0)
+        return 1;
+    if (run_and_check("./m2sdr_sata --help 2>&1", "safe workflow examples:", 0) != 0)
+        return 1;
     if (run_and_check("./m2sdr_sata --help 2>&1", "diag read SECTOR NSECTORS FILE|-", 0) != 0)
+        return 1;
+    if (run_and_check("./m2sdr_sata info extra 2>&1",
+                      "Unexpected argument: extra", 1) != 0)
+        return 1;
+    if (run_and_check("./m2sdr_sata init extra 2>&1",
+                      "Unexpected argument: extra", 1) != 0)
+        return 1;
+    if (run_and_check("./m2sdr_sata show test extra 2>&1",
+                      "Unexpected argument: extra", 1) != 0)
+        return 1;
+    if (run_and_check("./m2sdr_sata --dry-run stop rx 2>&1",
+                      "stop dry-run: target=rx", 0) != 0)
         return 1;
     if (run_and_check("./m2sdr_sata --dry-run diag read 0x1000 2 /tmp/x 2>&1",
                       "diag read dry-run", 0) != 0)
