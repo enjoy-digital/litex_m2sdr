@@ -906,6 +906,9 @@ static void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t b
     }
 }
 
+static bool sata_try_pcie_dma_default(struct m2sdr_dev *conn);
+static void sata_print_pcie_dma_error(const char *op, int rc);
+
 static int do_etherbone_bench(int argc, char **argv, int argi)
 {
     static const uint32_t candidates[] = {1, 2, 4, 8, 16, 32, 64, ETHERBONE_BULK_WORDS};
@@ -993,6 +996,115 @@ static int do_etherbone_bench(int argc, char **argv, int argi)
     return status;
 }
 
+static int do_pcie_dma_bench(int argc, char **argv, int argi, int timeout_ms)
+{
+    struct m2sdr_dev *conn;
+    uint64_t sector;
+    uint32_t nsectors;
+    uint32_t max_sectors = M2SDR_SATA_PCIE_DMA_MAX_SECTORS;
+    uint8_t *buf;
+    uint32_t done = 0;
+    int64_t write_us = 0;
+    int64_t read_us = 0;
+    int status = 1;
+
+    if (argc - argi != 2) {
+        fprintf(stderr, "usage: pcie-dma-bench SECTOR NSECTORS\n");
+        return 1;
+    }
+
+    sector = parse_u64(argv[argi++]);
+    nsectors = parse_u32(argv[argi++]);
+    if (nsectors == 0) {
+        m2sdr_cli_error("nsectors must be greater than zero");
+        return 1;
+    }
+
+    buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
+    if (!buf) {
+        fprintf(stderr, "Failed to allocate PCIe DMA benchmark buffer.\n");
+        return 1;
+    }
+
+    conn = m2sdr_open_dev();
+    if (!sata_try_pcie_dma_default(conn)) {
+        fprintf(stderr, "pcie-dma-bench requires a PCIe device.\n");
+        goto out_close;
+    }
+
+    while (done < nsectors) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+        int64_t start_us;
+        int rc;
+
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        fill_pattern(buf, bytes, (sector + done) * SATA_SECTOR_BYTES, SATA_PATTERN_COUNTER);
+        start_us = m2sdr_sata_get_time_us();
+        rc = m2sdr_sata_pcie_dma_copy(conn, M2SDR_SATA_DMA_HOST_TO_DEVICE,
+            sector + done, chunk, buf, timeout_ms, NULL);
+        write_us += m2sdr_sata_get_time_us() - start_us;
+        if (rc != M2SDR_ERR_OK) {
+            sata_print_pcie_dma_error("PCIe DMA benchmark write", rc);
+            goto out_close;
+        }
+        done += chunk;
+    }
+
+    done = 0;
+    while (done < nsectors) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+        uint64_t bad_offset = 0;
+        uint32_t expected = 0;
+        uint32_t actual = 0;
+        int64_t start_us;
+        int rc;
+
+        if (chunk > max_sectors)
+            chunk = max_sectors;
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        memset(buf, 0, bytes);
+        start_us = m2sdr_sata_get_time_us();
+        rc = m2sdr_sata_pcie_dma_copy(conn, M2SDR_SATA_DMA_DEVICE_TO_HOST,
+            sector + done, chunk, buf, timeout_ms, NULL);
+        read_us += m2sdr_sata_get_time_us() - start_us;
+        if (rc != M2SDR_ERR_OK) {
+            sata_print_pcie_dma_error("PCIe DMA benchmark read", rc);
+            goto out_close;
+        }
+        if (!check_pattern(buf, bytes, (sector + done) * SATA_SECTOR_BYTES,
+                           SATA_PATTERN_COUNTER, &bad_offset, &expected, &actual)) {
+            fprintf(stderr,
+                "Pattern mismatch at byte 0x%016" PRIx64 ": expected=0x%08" PRIx32
+                " actual=0x%08" PRIx32 "\n",
+                bad_offset, expected, actual);
+            goto out_close;
+        }
+        done += chunk;
+    }
+
+    {
+        double mib = ((double)nsectors * SATA_SECTOR_BYTES) / (1024.0 * 1024.0);
+        double write_mibs = write_us > 0 ? mib * 1000000.0 / (double)write_us : 0.0;
+        double read_mibs = read_us > 0 ? mib * 1000000.0 / (double)read_us : 0.0;
+
+        printf("PCIe SATA DMA benchmark: sector=0x%016" PRIx64 " nsectors=%" PRIu32 "\n",
+            sector, nsectors);
+        printf("  write %.3f MiB/s (%0.3f s)\n", write_mibs, (double)write_us / 1000000.0);
+        printf("  read  %.3f MiB/s (%0.3f s)\n", read_mibs, (double)read_us / 1000000.0);
+        printf("  verify ok\n");
+    }
+    status = 0;
+
+out_close:
+    m2sdr_close_dev(conn);
+    free(buf);
+    return status;
+}
+
 static void sata_sector2mem_program(void *conn, uint64_t sector, uint32_t nsectors, uint64_t base)
 {
     csr_write64(conn, CSR_SATA_SECTOR2MEM_SECTOR_ADDR, sector);
@@ -1040,10 +1152,98 @@ static FILE *open_stdio_or_file(const char *path, const char *mode, bool *need_c
     return f;
 }
 
+static bool sata_try_pcie_dma_default(struct m2sdr_dev *conn)
+{
+    enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+    if (m2sdr_get_transport(conn, &transport) != M2SDR_ERR_OK)
+        return false;
+    return transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
+}
+
+static uint32_t sata_file_chunk_sectors(bool try_pcie_dma)
+{
+    return try_pcie_dma ? M2SDR_SATA_PCIE_DMA_MAX_SECTORS : sata_host_buffer_max_sectors();
+}
+
+static void sata_print_pcie_dma_error(const char *op, int rc)
+{
+    fprintf(stderr, "%s PCIe DMA failed: %s\n", op, m2sdr_strerror(rc));
+}
+
+static int sata_read_sectors_to_buffer(struct m2sdr_dev *conn,
+                                       uint64_t sector,
+                                       uint32_t nsectors,
+                                       uint8_t *buf,
+                                       int timeout_ms,
+                                       bool *try_pcie_dma)
+{
+    if (try_pcie_dma && *try_pcie_dma) {
+        int rc = m2sdr_sata_pcie_dma_copy(conn, M2SDR_SATA_DMA_DEVICE_TO_HOST,
+            sector, nsectors, buf, timeout_ms, NULL);
+        if (rc == M2SDR_ERR_OK)
+            return 0;
+        if (rc != M2SDR_ERR_UNSUPPORTED) {
+            sata_print_pcie_dma_error("SATA read", rc);
+            return 1;
+        }
+        *try_pcie_dma = false;
+    }
+
+    for (uint32_t done = 0; done < nsectors;) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+
+        if (chunk > sata_host_buffer_max_sectors())
+            chunk = sata_host_buffer_max_sectors();
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        if (sata_read_to_host_buffer(conn, sector + done, chunk, timeout_ms) != 0)
+            return 1;
+        sata_host_buffer_read(conn, buf + (size_t)done * SATA_SECTOR_BYTES, bytes);
+        done += chunk;
+    }
+    return 0;
+}
+
+static int sata_write_sectors_from_buffer(struct m2sdr_dev *conn,
+                                          uint64_t sector,
+                                          uint32_t nsectors,
+                                          uint8_t *buf,
+                                          int timeout_ms,
+                                          bool *try_pcie_dma)
+{
+    if (try_pcie_dma && *try_pcie_dma) {
+        int rc = m2sdr_sata_pcie_dma_copy(conn, M2SDR_SATA_DMA_HOST_TO_DEVICE,
+            sector, nsectors, buf, timeout_ms, NULL);
+        if (rc == M2SDR_ERR_OK)
+            return 0;
+        if (rc != M2SDR_ERR_UNSUPPORTED) {
+            sata_print_pcie_dma_error("SATA write", rc);
+            return 1;
+        }
+        *try_pcie_dma = false;
+    }
+
+    for (uint32_t done = 0; done < nsectors;) {
+        uint32_t chunk = nsectors - done;
+        size_t bytes;
+
+        if (chunk > sata_host_buffer_max_sectors())
+            chunk = sata_host_buffer_max_sectors();
+        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+        sata_host_buffer_write(conn, buf + (size_t)done * SATA_SECTOR_BYTES, bytes);
+        if (sata_write_from_host_buffer(conn, sector + done, chunk, timeout_ms) != 0)
+            return 1;
+        done += chunk;
+    }
+    return 0;
+}
+
 static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
-    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
     uint32_t done = 0;
     bool close_out = false;
@@ -1067,9 +1267,9 @@ static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path
             chunk = max_sectors;
         bytes = (size_t)chunk * SATA_SECTOR_BYTES;
 
-        if (sata_read_to_host_buffer(conn, src_sector + done, chunk, timeout_ms) != 0)
+        if (sata_read_sectors_to_buffer(conn, src_sector + done, chunk, buf,
+                                        timeout_ms, &try_pcie_dma) != 0)
             goto out_file;
-        sata_host_buffer_read(conn, buf, bytes);
         if (fwrite(buf, 1, bytes, out) != bytes) {
             perror(path);
             goto out_file;
@@ -1095,7 +1295,8 @@ static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsector
                          bool limit_sectors, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
-    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
     uint32_t done = 0;
     bool close_in = false;
@@ -1143,8 +1344,8 @@ static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsector
             bytes = (size_t)chunk * SATA_SECTOR_BYTES;
         }
 
-        sata_host_buffer_write(conn, buf, bytes);
-        if (sata_write_from_host_buffer(conn, dst_sector + done, chunk, timeout_ms) != 0)
+        if (sata_write_sectors_from_buffer(conn, dst_sector + done, chunk, buf,
+                                           timeout_ms, &try_pcie_dma) != 0)
             goto out_file;
         done += chunk;
 
@@ -1174,7 +1375,8 @@ static int do_write_pattern(uint64_t dst_sector, uint32_t nsectors,
                             enum sata_pattern_kind pattern, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
-    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
     uint32_t done = 0;
     int rc = 1;
@@ -1193,8 +1395,8 @@ static int do_write_pattern(uint64_t dst_sector, uint32_t nsectors,
         bytes = (size_t)chunk * SATA_SECTOR_BYTES;
 
         fill_pattern(buf, bytes, (dst_sector + done) * SATA_SECTOR_BYTES, pattern);
-        sata_host_buffer_write(conn, buf, bytes);
-        if (sata_write_from_host_buffer(conn, dst_sector + done, chunk, timeout_ms) != 0)
+        if (sata_write_sectors_from_buffer(conn, dst_sector + done, chunk, buf,
+                                           timeout_ms, &try_pcie_dma) != 0)
             goto out_free;
         done += chunk;
     }
@@ -1214,7 +1416,8 @@ static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
                              enum sata_pattern_kind pattern, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
-    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
     uint32_t done = 0;
     int rc = 1;
@@ -1236,9 +1439,9 @@ static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
             chunk = max_sectors;
         bytes = (size_t)chunk * SATA_SECTOR_BYTES;
 
-        if (sata_read_to_host_buffer(conn, src_sector + done, chunk, timeout_ms) != 0)
+        if (sata_read_sectors_to_buffer(conn, src_sector + done, chunk, buf,
+                                        timeout_ms, &try_pcie_dma) != 0)
             goto out_free;
-        sata_host_buffer_read(conn, buf, bytes);
         if (!check_pattern(buf, bytes, (src_sector + done) * SATA_SECTOR_BYTES,
                            pattern, &bad_offset, &expected, &actual)) {
             fprintf(stderr,
@@ -1833,12 +2036,13 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
     struct sata_catalog cat;
     struct sata_capture_entry *e;
     struct m2sdr_dev *conn;
-    uint32_t max_sectors = sata_host_buffer_max_sectors();
+    uint32_t max_sectors;
     uint8_t *buf;
     uint32_t done = 0;
     uint64_t remaining;
+    bool try_pcie_dma;
     bool close_out = false;
-    FILE *out;
+    FILE *out = NULL;
     int rc = 1;
 
     if (catalog_require(&cat, timeout_ms) != 0)
@@ -1850,17 +2054,19 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
     }
 
     remaining = e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
+    conn = m2sdr_open_dev();
+    sata_require_csrs();
+    try_pcie_dma = sata_try_pcie_dma_default(conn);
+    max_sectors = sata_file_chunk_sectors(try_pcie_dma);
     buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
     if (!buf) {
         fprintf(stderr, "Failed to allocate export buffer.\n");
-        return 1;
+        goto out_close_dev;
     }
     out = open_stdio_or_file(path, "wb", &close_out);
     if (!out)
-        goto out_free;
+        goto out_close_dev;
 
-    conn = m2sdr_open_dev();
-    sata_require_csrs();
     while (done < e->nsectors && remaining > 0) {
         uint32_t chunk = e->nsectors - done;
         size_t chunk_bytes;
@@ -1869,9 +2075,9 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms)
         if (chunk > max_sectors)
             chunk = max_sectors;
         chunk_bytes = (size_t)chunk * SATA_SECTOR_BYTES;
-        if (sata_read_to_host_buffer_quiet(conn, e->sector + done, chunk, timeout_ms) != 0)
+        if (sata_read_sectors_to_buffer(conn, e->sector + done, chunk, buf,
+                                        timeout_ms, &try_pcie_dma) != 0)
             goto out_close_dev;
-        sata_host_buffer_read(conn, buf, chunk_bytes);
         write_bytes = remaining < chunk_bytes ? (size_t)remaining : chunk_bytes;
         if (fwrite(buf, 1, write_bytes, out) != write_bytes) {
             perror(path);
@@ -1888,7 +2094,6 @@ out_close_dev:
     m2sdr_close_dev(conn);
     if (close_out)
         fclose(out);
-out_free:
     free(buf);
     return rc;
 }
@@ -2780,10 +2985,10 @@ static void help(void)
            "    SSD -> SSD copy using loopback.\n"
            "\n"
            "read-file SRC_SECTOR NSECTORS FILE|-\n"
-           "    Read sectors from SSD through the host staging buffer.\n"
+           "    Read sectors from SSD to a host file.\n"
            "\n"
            "write-file FILE|- DST_SECTOR [NSECTORS]\n"
-           "    Write sectors to SSD through the host staging buffer.\n"
+           "    Write a host file to SSD sectors.\n"
            "\n"
            "write-pattern DST_SECTOR NSECTORS\n"
            "    Fill sectors with the selected --pattern.\n"
@@ -2794,6 +2999,9 @@ static void help(void)
 #ifdef SATA_HOST_IO_AVAILABLE
            "etherbone-bench [--iterations N]\n"
            "    Sweep Etherbone host-buffer burst sizes and report write/read throughput.\n"
+           "\n"
+           "pcie-dma-bench SECTOR NSECTORS\n"
+           "    Benchmark PCIe DMA-backed host <-> SATA copy and verify data.\n"
            "\n"
            "catalog-init\n"
            "    Initialize/reset the named capture catalog.\n"
@@ -3082,6 +3290,10 @@ int main(int argc, char **argv)
 #ifdef SATA_HOST_IO_AVAILABLE
     if (!strcmp(cmd, "etherbone-bench")) {
         return do_etherbone_bench(argc, argv, optind);
+    }
+
+    if (!strcmp(cmd, "pcie-dma-bench")) {
+        return do_pcie_dma_bench(argc, argv, optind, timeout_ms);
     }
 
     if (!strcmp(cmd, "catalog-init")) {
