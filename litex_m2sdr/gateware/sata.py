@@ -582,9 +582,3 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
             )
         )
 
-
-def install_litesata_dma_patches():
-    import litesata.frontend.dma
-
-    litesata.frontend.dma.LiteSATASector2MemDMA = M2SDRLiteSATASector2MemDMA
-    litesata.frontend.dma.LiteSATAMem2SectorDMA = M2SDRLiteSATAMem2SectorDMA

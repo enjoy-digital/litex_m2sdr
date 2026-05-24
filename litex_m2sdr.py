@@ -17,7 +17,7 @@ from litex.gen import *
 from litex.build.generic_platform import Subsignal, Pins
 
 from litex.soc.interconnect.csr import *
-from litex.soc.interconnect     import stream
+from litex.soc.interconnect     import stream, wishbone
 
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder  import *
@@ -39,7 +39,10 @@ from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 from liteeth.core.ptp         import LiteEthPTP
 
-from litesata.phy import LiteSATAPHY
+from litesata.phy                  import LiteSATAPHY
+from litesata.core                 import LiteSATACore
+from litesata.frontend.arbitration import LiteSATACrossbar
+from litesata.frontend.identify    import LiteSATAIdentify, LiteSATAIdentifyCSR
 from litescope import LiteScopeAnalyzer
 
 from litex_m2sdr import Platform, _io_baseboard
@@ -64,8 +67,8 @@ from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 from litex_m2sdr.gateware.sata        import (
     SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer,
     SATADMAMemoryRouter,
-    M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream,
-    install_litesata_dma_patches)
+    M2SDRLiteSATASector2MemDMA, M2SDRLiteSATAMem2SectorDMA,
+    M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream)
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -740,8 +743,6 @@ class BaseSoC(SoCMini):
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
-            install_litesata_dma_patches()
-
             # PHY.
             # ----
             self.sata_phy = LiteSATAPHY(platform.device,
@@ -755,11 +756,59 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_sata(phy=self.sata_phy, mode="read+write", with_irq=False)
+            sata_clk_freqs = {
+                1 :  75e6,
+                2 : 150e6,
+                3 : 300e6,
+            }
+            required_sys_clk = sata_clk_freqs[sata_gen] * 16 / self.bus.data_width
+            if self.clk_freq < required_sys_clk:
+                raise ValueError(
+                    "SATA Gen{} requires sys_clk_freq ({:.1f}MHz) >= {:.1f}MHz on a {}-bit bus.".format(
+                        sata_gen, self.clk_freq/1e6, required_sys_clk/1e6, self.bus.data_width
+                    )
+                )
+
+            self.sata_core     = LiteSATACore(self.sata_phy)
+            self.sata_crossbar = LiteSATACrossbar(self.sata_core)
+
+            # Identify.
+            # ---------
+            self.sata_identify = LiteSATAIdentifyCSR(LiteSATAIdentify(self.sata_crossbar.get_port()))
+
+            # DMA.
+            # ----
+            sata_dma_bus = getattr(self, "dma_bus", self.bus)
+
+            sata_sector2mem_bus = wishbone.Interface(
+                data_width = self.bus.data_width,
+                adr_width  = self.bus.get_address_width(standard="wishbone"),
+                addressing = "word",
+                mode       = "w",
+            )
+            self.sata_sector2mem = M2SDRLiteSATASector2MemDMA(
+                port       = self.sata_crossbar.get_port(),
+                bus        = sata_sector2mem_bus,
+                endianness = self.cpu.endianness,
+            )
+            sata_dma_bus.add_master(name="sata_sector2mem", master=sata_sector2mem_bus)
+
+            sata_mem2sector_bus = wishbone.Interface(
+                data_width = self.bus.data_width,
+                adr_width  = self.bus.get_address_width(standard="wishbone"),
+                addressing = "word",
+                mode       = "r",
+            )
+            self.sata_mem2sector = M2SDRLiteSATAMem2SectorDMA(
+                bus        = sata_mem2sector_bus,
+                port       = self.sata_crossbar.get_port(),
+                endianness = self.cpu.endianness,
+            )
+            sata_dma_bus.add_master(name="sata_mem2sector", master=sata_mem2sector_bus)
             if hasattr(self.sata_sector2mem, "fence_bus"):
-                dma_bus = getattr(self, "dma_bus", self.bus)
-                dma_bus.add_master(name="sata_sector2mem_fence",
+                sata_dma_bus.add_master(name="sata_sector2mem_fence",
                     master=self.sata_sector2mem.fence_bus)
+
             if with_pcie:
                 self.comb += [
                     pcie_msis["SATA_SECTOR2MEM"].eq(self.sata_sector2mem.irq),
@@ -810,6 +859,16 @@ class BaseSoC(SoCMini):
                     pcie_msis["SATA_STREAM2SECT"].eq(self.sata_rx_streamer.irq),
                     pcie_msis["SATA_SECT2STREAM"].eq(self.sata_tx_streamer.irq),
                 ]
+
+            # Timing constraints.
+            # -------------------
+            self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_tx.clk, 1e9/sata_clk_freqs[sata_gen])
+            self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_rx.clk, 1e9/sata_clk_freqs[sata_gen])
+            self.platform.add_false_path_constraints(
+                self.crg.cd_sys.clk,
+                self.sata_phy.crg.cd_sata_tx.clk,
+                self.sata_phy.crg.cd_sata_rx.clk,
+            )
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
