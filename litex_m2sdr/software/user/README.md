@@ -482,8 +482,9 @@ Example usage:
 ---
 
 ### m2sdr_sata
-Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, supports replay through the TX/RX loopback, and can perform host-side sector I/O through PCIe userspace DMA or the Ethernet/Etherbone SATA host staging buffer.
-Named captures use a small SATA catalog at sector `0x800`; automatic data allocation starts at sector `0x100000`. New named captures reserve a small SigMF metadata region next to their sample sectors so the SSD can carry the RF/sample description with the data.
+Workflow-first tool for SATA capture, host import/export, and RF/host replay.
+Named entries carry SigMF metadata by default. Raw sector operations are still
+available under the `diag` namespace for validation and debugging.
 
 **Usage**:
 ~~~~
@@ -491,37 +492,9 @@ m2sdr_sata [options] cmd [args...]
 ~~~~
 
 **Commands** include:
-- **status**
-  Show crossbar + SATA/loopback/streamer status.
-- **route `TXSRC RXDST [LOOPBACK]`**
-  Set routing with optional loopback (0/1).
-- **record `DST_SECTOR NSECTORS`**
-  RX stream → SSD (SATA_RX_STREAMER).
-- **record-start `DST_SECTOR NSECTORS`**
-  Start RX stream → SSD and return immediately.
-- **play `SRC_SECTOR NSECTORS`**
-  SSD → TX stream (SATA_TX_STREAMER).
-- **play-start `SRC_SECTOR NSECTORS`**
-  Start SSD → TX stream and return immediately.
-- **stream-status**
-  Alias for `status`, useful after nonblocking starts.
-- **stream-stop `RX|TX|BOTH`**
-  Reset selected SATA streamer(s) when the loaded gateware exposes the stop CSR.
-- **replay `SRC_SECTOR NSECTORS DST`**
-  SSD → TX → loopback → RX destination (`pcie|eth|sata`).
-- **copy `SRC_SECTOR DST_SECTOR NSECTORS`**
-  SSD → SSD using loopback.
-- **read-file `SRC_SECTOR NSECTORS FILE|-`**
-  Read sectors from SSD through the host staging buffer.
-- **write-file `FILE|- DST_SECTOR [NSECTORS]`**
-  Write sectors to SSD through the host staging buffer.
-- **write-pattern `DST_SECTOR NSECTORS`**
-  Fill sectors with `--pattern zero|counter|prbs`.
-- **verify-pattern `SRC_SECTOR NSECTORS`**
-  Verify sectors against `--pattern zero|counter|prbs`.
-- **etherbone-bench `[--iterations N]`**
-  Sweep Ethernet host-buffer burst sizes and report read/write throughput.
-- **catalog-init**
+- **info**
+  Show transport, SATA link, drive, catalog, and host I/O status.
+- **init**
   Initialize/reset the named SATA capture catalog.
 - **list**
   List named captures.
@@ -529,55 +502,37 @@ m2sdr_sata [options] cmd [args...]
   Show the sector range and RF/sample metadata for a named capture.
 - **delete `NAME`**
   Remove a named capture from the catalog without erasing its sectors.
-- **fsck**
+- **check**
   Check catalog names and sector overlaps.
-- **capture `NAME --seconds SEC|--sectors N [RF options]`**
+- **capture `NAME --seconds SEC|--size BYTES [RF options]`**
   Configure RF, record RX to SATA, and add a named catalog entry.
-- **capture-start `NAME --seconds SEC|--sectors N [RF options]`**
+- **capture-start `NAME --seconds SEC|--size BYTES [RF options]`**
   Start a named RX-to-SATA capture and return immediately.
-- **capture-status**
-  Alias for `stream-status`.
-- **import `NAME FILE [metadata options]`**
-  Write a host file to SATA and catalog it.
-- **import-sigmf `NAME META|BASENAME [--sector SECTOR]`**
-  Write a SigMF dataset to SATA and preserve its metadata.
-- **export `NAME FILE|-`**
-  Read a named capture back to a host file.
-- **export-sigmf `NAME META|BASENAME`**
-  Read a named capture back as a `.sigmf-meta` + `.sigmf-data` pair.
-- **replay-host `NAME --dst pcie|eth`**
-  Replay SATA contents through loopback to the normal host RX path for tools such as GQRX/Soapy.
-- **replay-rf `NAME [RF overrides]`**
+- **import `NAME FILE|SIGMF [metadata options]`**
+  Import a raw file or SigMF dataset and catalog it.
+- **export `NAME PATH [--raw]`**
+  Export SigMF metadata+data by default; `--raw` writes only sample payload.
+- **play `NAME [RF overrides]`**
   Replay SATA contents to the RF TX path, using stored SigMF metadata when present.
-- **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
-  Raw header control (writes HEADER CSR enable bits).
+- **serve `NAME [--dst pcie|eth]`**
+  Replay SATA contents through loopback to the normal host RX path for tools such as GQRX/Soapy.
+- **stop `RX|TX|BOTH`**
+  Reset selected SATA streamer(s).
+- **diag `...`**
+  Raw sector, route, pattern, header, and throughput diagnostics.
 
 Example usage:
 ~~~~
-./m2sdr_sata status
-./m2sdr_sata route pcie sata 0
-./m2sdr_sata record 0x1000 8192
-./m2sdr_sata record-start 0x1000 8192
-./m2sdr_sata stream-status
-./m2sdr_sata stream-stop rx
-./m2sdr_sata play 0x1000 8192
-./m2sdr_sata replay 0x1000 8192 pcie
-./m2sdr_sata copy 0x2000 0x4000 4096
-./m2sdr_sata --pattern counter write-pattern 0x8000 4096
-./m2sdr_sata --pattern counter verify-pattern 0x8000 4096
-./m2sdr_sata read-file 0x8000 4096 /tmp/m2sdr-sata.bin
-./m2sdr_sata write-file /tmp/m2sdr-sata.bin 0x9000
-
-./m2sdr_sata -i 192.168.1.50 catalog-init
+./m2sdr_sata -i 192.168.1.50 info
+./m2sdr_sata -i 192.168.1.50 init
 ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
 ./m2sdr_sata -i 192.168.1.50 list
-./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
-./m2sdr_sata -i 192.168.1.50 export-sigmf fm_test /tmp/fm_test.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
 ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
-./m2sdr_sata -i 192.168.1.50 import-sigmf tx_sigmf /tmp/tx.sigmf-meta
-./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
-./m2sdr_sata -i 192.168.1.50 replay-rf tx_sigmf
-./m2sdr_sata -i 192.168.1.50 replay-host fm_test --dst eth
+./m2sdr_sata -i 192.168.1.50 import tx_sigmf /tmp/tx.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 play tx_sigmf
+./m2sdr_sata -i 192.168.1.50 serve fm_test
 ~~~~
 
 Ethernet+SATA builds include enough Etherbone buffering for the default
@@ -585,12 +540,13 @@ host-buffer burst size. From the repository root:
 ~~~~
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
 cd litex_m2sdr/software/user
-./m2sdr_sata -i 192.168.1.50 etherbone-bench
-./m2sdr_sata -i 192.168.1.50 export-sigmf fm_test /tmp/fm_test.sigmf-meta
-./m2sdr_sata -i 192.168.1.50 import-sigmf tx_test /tmp/tx.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 diag etherbone-bench
+./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-write 0x260000 8192
+./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-check 0x260000 8192
 ~~~~
 
-Known-good PCIe/Ethernet SATA validation results are logged in
+See [`doc/sata-workflows.md`](../../../doc/sata-workflows.md) for the complete
+workflow. Known-good PCIe/Ethernet SATA validation results are logged in
 [`doc/sata-validation.md`](../../../doc/sata-validation.md).
 
 ---
