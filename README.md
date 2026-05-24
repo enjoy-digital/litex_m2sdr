@@ -464,18 +464,18 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
      for the full loopback workflow.
    - For Ethernet + SATA source-build tests:
    ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --eth-etherbone-buffer-depth=256 --build --load
+   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
    cd litex_m2sdr/software/user
    make m2sdr_sata
    ./m2sdr_sata -i 192.168.1.50 status
-   ./m2sdr_sata -i 192.168.1.50 etherbone-bench --max-words 255
+   ./m2sdr_sata -i 192.168.1.50 etherbone-bench
    ./m2sdr_sata -i 192.168.1.50 --pattern counter write-pattern 0x8000 4096
    ./m2sdr_sata -i 192.168.1.50 --pattern counter verify-pattern 0x8000 4096
    ./m2sdr_sata -i 192.168.1.50 catalog-init
    ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
    ./m2sdr_sata -i 192.168.1.50 list
-   ./m2sdr_sata -i 192.168.1.50 --etherbone-read-burst-words 255 --etherbone-write-burst-words 192 export fm_test /tmp/fm_test.sc16
-   ./m2sdr_sata -i 192.168.1.50 --etherbone-read-burst-words 255 --etherbone-write-burst-words 192 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+   ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16
+   ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
    ./m2sdr_sata -i 192.168.1.50 replay-rf tx_test
    ```
    To replay a stored capture into an existing SoapySDR/GQRX receive flow, start

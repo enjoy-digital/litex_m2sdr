@@ -70,6 +70,9 @@ from litex_m2sdr.gateware.sata        import (
 
 from litex_m2sdr.software import generate_litepcie_software
 
+# Supports 128-word host-buffer records plus Etherbone address/header margin.
+ETH_ETHERBONE_BUFFER_DEPTH = 160
+
 # White Rabbit Integration Loader ------------------------------------------------------------------
 
 def _iter_aligned_power2_regions(origin, size):
@@ -301,7 +304,6 @@ class BaseSoC(SoCMini):
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
         with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
-        eth_etherbone_buffer_depth = 16,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_igmp=True, eth_ptp_igmp_interval=2,
         with_eth_ptp_rfic_clock = False,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
@@ -345,8 +347,6 @@ class BaseSoC(SoCMini):
             raise ValueError("PTP RFIC clock discipline requires --with-eth-ptp.")
         if with_eth_ptp_rfic_clock and with_white_rabbit:
             raise ValueError("PTP RFIC clock discipline uses the non-White-Rabbit clk10 MMCM path.")
-        if not 1 <= eth_etherbone_buffer_depth <= 256:
-            raise ValueError("Etherbone buffer depth must be in the 1..256 range.")
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -615,7 +615,7 @@ class BaseSoC(SoCMini):
                 ip_address   = eth_local_ip,
                 data_width   = 32,
                 arp_entries  = 4,
-                buffer_depth = eth_etherbone_buffer_depth,
+                buffer_depth = ETH_ETHERBONE_BUFFER_DEPTH,
             )
             ptp_igmp_groups = None
             if with_eth_ptp and eth_ptp_igmp:
@@ -1360,7 +1360,6 @@ def main():
     parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
-    parser.add_argument("--eth-etherbone-buffer-depth", default=16, type=int, help="Etherbone record FIFO depth (max 256).")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
     parser.add_argument("--eth-ptp-p2p",     action="store_true",     help="Use PTP peer-to-peer delay mode instead of end-to-end.")
     parser.add_argument("--eth-ptp-no-igmp", action="store_true",     help="Disable PTP multicast IGMP reports.")
@@ -1455,7 +1454,6 @@ def main():
         eth_phy       = args.eth_phy,
         eth_local_ip  = args.eth_local_ip,
         eth_udp_port  = args.eth_udp_port,
-        eth_etherbone_buffer_depth = args.eth_etherbone_buffer_depth,
         with_eth_ptp  = args.with_eth_ptp,
         eth_ptp_p2p   = args.eth_ptp_p2p,
         eth_ptp_igmp  = not args.eth_ptp_no_igmp,
