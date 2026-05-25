@@ -3834,6 +3834,117 @@ cleanup:
 #endif
 #endif
 
+/* AGC helpers */
+/*-------------*/
+
+static const char *agc_detector_name(enum m2sdr_agc_detector detector)
+{
+    switch (detector) {
+    case M2SDR_AGC_DETECTOR_RX1_LOW:  return "rx1_low";
+    case M2SDR_AGC_DETECTOR_RX1_HIGH: return "rx1_high";
+    case M2SDR_AGC_DETECTOR_RX2_LOW:  return "rx2_low";
+    case M2SDR_AGC_DETECTOR_RX2_HIGH: return "rx2_high";
+    default:                          return "unknown";
+    }
+}
+
+static bool parse_agc_detector(const char *text, enum m2sdr_agc_detector *detector)
+{
+    if (!text || !detector)
+        return false;
+
+    if (!strcmp(text, "rx1_low") || !strcmp(text, "rx1-low")) {
+        *detector = M2SDR_AGC_DETECTOR_RX1_LOW;
+        return true;
+    }
+    if (!strcmp(text, "rx1_high") || !strcmp(text, "rx1-high")) {
+        *detector = M2SDR_AGC_DETECTOR_RX1_HIGH;
+        return true;
+    }
+    if (!strcmp(text, "rx2_low") || !strcmp(text, "rx2-low")) {
+        *detector = M2SDR_AGC_DETECTOR_RX2_LOW;
+        return true;
+    }
+    if (!strcmp(text, "rx2_high") || !strcmp(text, "rx2-high")) {
+        *detector = M2SDR_AGC_DETECTOR_RX2_HIGH;
+        return true;
+    }
+
+    return false;
+}
+
+static void agc_status(void)
+{
+    static const enum m2sdr_agc_detector detectors[] = {
+        M2SDR_AGC_DETECTOR_RX1_LOW,
+        M2SDR_AGC_DETECTOR_RX1_HIGH,
+        M2SDR_AGC_DETECTOR_RX2_LOW,
+        M2SDR_AGC_DETECTOR_RX2_HIGH,
+    };
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    bool agc_pin = false;
+    int rc;
+
+    printf("\e[1m[> AGC Status:\e[0m\n");
+    printf("-------------\n");
+
+    rc = m2sdr_get_agc_pin(conn, &agc_pin);
+    if (rc == M2SDR_ERR_OK)
+        printf("EN_AGC pin       : %s\n", agc_pin ? "enabled" : "disabled");
+    else
+        printf("EN_AGC pin       : unavailable (%s)\n", m2sdr_strerror(rc));
+
+    for (unsigned i = 0; i < sizeof(detectors) / sizeof(detectors[0]); i++) {
+        uint32_t count = 0;
+        rc = m2sdr_get_agc_count(conn, detectors[i], &count);
+        if (rc == M2SDR_ERR_OK)
+            printf("%-16s: %" PRIu32 "\n", agc_detector_name(detectors[i]), count);
+        else
+            printf("%-16s: unavailable (%s)\n", agc_detector_name(detectors[i]), m2sdr_strerror(rc));
+    }
+
+    m2sdr_close_dev(conn);
+}
+
+static int agc_counter_configure(enum m2sdr_agc_detector detector, uint16_t threshold, bool enable)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct m2sdr_agc_counter_config config = {
+        .enable = enable,
+        .clear = true,
+        .threshold = threshold,
+    };
+    int rc = m2sdr_configure_agc_counter(conn, detector, &config);
+
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_configure_agc_counter(%s) failed: %s\n",
+            agc_detector_name(detector), m2sdr_strerror(rc));
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+
+    printf("%s threshold=%u enable=%s\n",
+        agc_detector_name(detector), threshold, enable ? "yes" : "no");
+    m2sdr_close_dev(conn);
+    return 0;
+}
+
+static int agc_counter_clear(enum m2sdr_agc_detector detector)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rc = m2sdr_clear_agc_counter(conn, detector);
+
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_clear_agc_counter(%s) failed: %s\n",
+            agc_detector_name(detector), m2sdr_strerror(rc));
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+
+    m2sdr_close_dev(conn);
+    return 0;
+}
+
 /* Help */
 /*------*/
 
@@ -3877,6 +3988,12 @@ static void help(void)
            "      Read an FPGA register.\n"
            "  reg-write OFFSET VALUE\n"
            "      Write an FPGA register.\n"
+           "  agc-status\n"
+           "      Show RF_EN_AGC pin state and FPGA AGC saturation counters.\n"
+           "  agc-counter DETECTOR THRESHOLD [enable|disable]\n"
+           "      Configure an AGC counter threshold and clear it. DETECTOR: rx1_low, rx1_high, rx2_low, rx2_high.\n"
+           "  agc-clear [DETECTOR|all]\n"
+           "      Clear one or all FPGA AGC saturation counters.\n"
            "\n"
            "ptp commands:\n"
            "  ptp-status\n"
@@ -4214,6 +4331,59 @@ int main(int argc, char **argv)
         if (!parse_next_u32_arg("offset", argv, &optind, &offset))
             exit(1);
         test_reg_read(offset);
+    }
+    else if (cmd_is(cmd, "agc_status", "agc-status")) {
+        if (optind < argc)
+            goto show_help;
+        agc_status();
+    }
+    else if (cmd_is(cmd, "agc_counter", "agc-counter")) {
+        enum m2sdr_agc_detector detector;
+        uint16_t threshold;
+        bool enable = true;
+
+        if (!have_args(optind, argc, 2))
+            goto show_help;
+        if (!parse_agc_detector(argv[optind++], &detector)) {
+            fprintf(stderr, "Invalid AGC detector (expected rx1_low, rx1_high, rx2_low, or rx2_high)\n");
+            exit(1);
+        }
+        if (m2sdr_cli_parse_u16(argv[optind++], &threshold) != 0) {
+            fprintf(stderr, "Invalid AGC threshold\n");
+            exit(1);
+        }
+        if (optind < argc && m2sdr_cli_parse_bool(argv[optind++], &enable) != 0) {
+            fprintf(stderr, "Invalid AGC counter enable value\n");
+            exit(1);
+        }
+        if (optind < argc)
+            goto show_help;
+        return agc_counter_configure(detector, threshold, enable);
+    }
+    else if (cmd_is(cmd, "agc_clear", "agc-clear")) {
+        static const enum m2sdr_agc_detector detectors[] = {
+            M2SDR_AGC_DETECTOR_RX1_LOW,
+            M2SDR_AGC_DETECTOR_RX1_HIGH,
+            M2SDR_AGC_DETECTOR_RX2_LOW,
+            M2SDR_AGC_DETECTOR_RX2_HIGH,
+        };
+        const char *selection = optind < argc ? argv[optind++] : "all";
+
+        if (optind < argc)
+            goto show_help;
+        if (!strcmp(selection, "all")) {
+            for (unsigned i = 0; i < sizeof(detectors) / sizeof(detectors[0]); i++) {
+                if (agc_counter_clear(detectors[i]) != 0)
+                    return 1;
+            }
+        } else {
+            enum m2sdr_agc_detector detector;
+            if (!parse_agc_detector(selection, &detector)) {
+                fprintf(stderr, "Invalid AGC detector (expected rx1_low, rx1_high, rx2_low, rx2_high, or all)\n");
+                return 1;
+            }
+            return agc_counter_clear(detector);
+        }
     }
 
     /* Scratch cmds. */

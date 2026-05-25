@@ -311,6 +311,41 @@ static int test_cli_format_parser(void)
     return 0;
 }
 
+static int test_rx_gain_mode_helpers(void)
+{
+    enum m2sdr_rx_gain_mode mode = M2SDR_RX_GAIN_MODE_MANUAL;
+
+    if (m2sdr_parse_rx_gain_mode("manual", &mode) != M2SDR_ERR_OK ||
+        mode != M2SDR_RX_GAIN_MODE_MANUAL)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode("slow", &mode) != M2SDR_ERR_OK ||
+        mode != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode("fast-attack", &mode) != M2SDR_ERR_OK ||
+        mode != M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode("hybrid", &mode) != M2SDR_ERR_OK ||
+        mode != M2SDR_RX_GAIN_MODE_HYBRID_AGC)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode("bad", &mode) != M2SDR_ERR_PARSE)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode(NULL, &mode) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_parse_rx_gain_mode("slow", NULL) != M2SDR_ERR_INVAL)
+        return -1;
+
+    if (strcmp(m2sdr_rx_gain_mode_name(M2SDR_RX_GAIN_MODE_MANUAL), "manual") != 0)
+        return -1;
+    if (strcmp(m2sdr_rx_gain_mode_name(M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC), "slow") != 0)
+        return -1;
+    if (strcmp(m2sdr_rx_gain_mode_name(M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC), "fast") != 0)
+        return -1;
+    if (strcmp(m2sdr_rx_gain_mode_name(M2SDR_RX_GAIN_MODE_HYBRID_AGC), "hybrid") != 0)
+        return -1;
+
+    return 0;
+}
+
 static int test_dma_header_helper(void)
 {
     uint8_t header[16];
@@ -396,6 +431,8 @@ static int test_rf_range_validation(void)
 
     if (m2sdr_set_rx_gain_mode(NULL, 0, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_INVAL)
         return -1;
+    if (m2sdr_set_rx_gain_mode_all(NULL, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_INVAL)
+        return -1;
     if (m2sdr_set_rx_gain_mode(&dev, 2, M2SDR_RX_GAIN_MODE_MANUAL) != M2SDR_ERR_RANGE)
         return -1;
     if (m2sdr_set_rx_gain_mode(&dev, 0, (enum m2sdr_rx_gain_mode)99) != M2SDR_ERR_INVAL)
@@ -410,6 +447,26 @@ static int test_rf_range_validation(void)
     if (m2sdr_get_rx_gain_mode(&dev, 2, &gain_mode) != M2SDR_ERR_RANGE)
         return -1;
     if (m2sdr_get_rx_gain_mode(&dev, 0, &gain_mode) != M2SDR_ERR_STATE)
+        return -1;
+
+    m2sdr_config_init(&cfg);
+    if (cfg.program_rx_gain_modes || cfg.rx_gain_mode1 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC ||
+        cfg.rx_gain_mode2 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC)
+        return -1;
+    cfg.program_rx_gain_modes = true;
+    cfg.rx_gain_mode1 = (enum m2sdr_rx_gain_mode)99;
+    if (m2sdr_apply_config(&dev, &cfg) != M2SDR_ERR_INVAL)
+        return -1;
+
+    if (m2sdr_set_agc_pin(NULL, true) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_agc_pin(NULL, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_configure_agc_counter(NULL, M2SDR_AGC_DETECTOR_RX1_LOW, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_clear_agc_counter(NULL, M2SDR_AGC_DETECTOR_RX1_LOW) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_agc_count(NULL, M2SDR_AGC_DETECTOR_RX1_LOW, NULL) != M2SDR_ERR_INVAL)
         return -1;
 
     return 0;
@@ -479,6 +536,10 @@ int main(void)
     }
     if (test_cli_format_parser() != 0) {
         fprintf(stderr, "test_cli_format_parser failed\n");
+        return 1;
+    }
+    if (test_rx_gain_mode_helpers() != 0) {
+        fprintf(stderr, "test_rx_gain_mode_helpers failed\n");
         return 1;
     }
     if (test_dma_header_helper() != 0) {

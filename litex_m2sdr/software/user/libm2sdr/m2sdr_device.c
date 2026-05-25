@@ -1783,6 +1783,176 @@ static void m2sdr_reset_keep_error(int rc, int *status)
         *status = rc;
 }
 
+/* Drive the FPGA-connected AD9361 EN_AGC pin without disturbing the other
+ * AD9361 config bits in the same CSR. */
+int m2sdr_set_agc_pin(struct m2sdr_dev *dev, bool enable)
+{
+#if defined(CSR_AD9361_CONFIG_ADDR) && defined(CSR_AD9361_CONFIG_EN_AGC_OFFSET)
+    uint32_t value;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_reg_read(dev, CSR_AD9361_CONFIG_ADDR, &value);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (enable)
+        value |= (1u << CSR_AD9361_CONFIG_EN_AGC_OFFSET);
+    else
+        value &= ~(1u << CSR_AD9361_CONFIG_EN_AGC_OFFSET);
+
+    return m2sdr_reg_write(dev, CSR_AD9361_CONFIG_ADDR, value);
+#else
+    (void)dev;
+    (void)enable;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_agc_pin(struct m2sdr_dev *dev, bool *enabled)
+{
+#if defined(CSR_AD9361_CONFIG_ADDR) && defined(CSR_AD9361_CONFIG_EN_AGC_OFFSET)
+    uint32_t value;
+    int rc;
+
+    if (!dev || !enabled)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_reg_read(dev, CSR_AD9361_CONFIG_ADDR, &value);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    *enabled = (value & (1u << CSR_AD9361_CONFIG_EN_AGC_OFFSET)) != 0;
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)enabled;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+struct m2sdr_agc_counter_regs {
+    uint32_t control_addr;
+    uint32_t status_addr;
+};
+
+static int m2sdr_agc_counter_regs(enum m2sdr_agc_detector detector,
+                                  struct m2sdr_agc_counter_regs *regs)
+{
+    if (!regs)
+        return M2SDR_ERR_INVAL;
+
+#if defined(CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ADDR)
+    switch (detector) {
+    case M2SDR_AGC_DETECTOR_RX1_LOW:
+        regs->control_addr = CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ADDR;
+        regs->status_addr  = CSR_AD9361_AGC_COUNT_RX1_LOW_STATUS_ADDR;
+        return M2SDR_ERR_OK;
+    case M2SDR_AGC_DETECTOR_RX1_HIGH:
+        regs->control_addr = CSR_AD9361_AGC_COUNT_RX1_HIGH_CONTROL_ADDR;
+        regs->status_addr  = CSR_AD9361_AGC_COUNT_RX1_HIGH_STATUS_ADDR;
+        return M2SDR_ERR_OK;
+    case M2SDR_AGC_DETECTOR_RX2_LOW:
+        regs->control_addr = CSR_AD9361_AGC_COUNT_RX2_LOW_CONTROL_ADDR;
+        regs->status_addr  = CSR_AD9361_AGC_COUNT_RX2_LOW_STATUS_ADDR;
+        return M2SDR_ERR_OK;
+    case M2SDR_AGC_DETECTOR_RX2_HIGH:
+        regs->control_addr = CSR_AD9361_AGC_COUNT_RX2_HIGH_CONTROL_ADDR;
+        regs->status_addr  = CSR_AD9361_AGC_COUNT_RX2_HIGH_STATUS_ADDR;
+        return M2SDR_ERR_OK;
+    default:
+        return M2SDR_ERR_RANGE;
+    }
+#else
+    (void)detector;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_configure_agc_counter(struct m2sdr_dev *dev,
+                                enum m2sdr_agc_detector detector,
+                                const struct m2sdr_agc_counter_config *config)
+{
+#if defined(CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ADDR)
+    struct m2sdr_agc_counter_regs regs;
+    uint32_t control = 0;
+    int rc;
+
+    if (!dev || !config)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_agc_counter_regs(detector, &regs);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (config->enable)
+        control |= (1u << CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ENABLE_OFFSET);
+    if (config->clear)
+        control |= (1u << CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_CLEAR_OFFSET);
+    control |= ((uint32_t)config->threshold <<
+        CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_THRESHOLD_OFFSET);
+
+    return m2sdr_reg_write(dev, regs.control_addr, control);
+#else
+    (void)dev;
+    (void)detector;
+    (void)config;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_clear_agc_counter(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector)
+{
+#if defined(CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ADDR)
+    struct m2sdr_agc_counter_regs regs;
+    uint32_t control;
+    int rc;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_agc_counter_regs(detector, &regs);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    rc = m2sdr_reg_read(dev, regs.control_addr, &control);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    control |= (1u << CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_CLEAR_OFFSET);
+    return m2sdr_reg_write(dev, regs.control_addr, control);
+#else
+    (void)dev;
+    (void)detector;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+int m2sdr_get_agc_count(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector,
+                        uint32_t *count)
+{
+#if defined(CSR_AD9361_AGC_COUNT_RX1_LOW_CONTROL_ADDR)
+    struct m2sdr_agc_counter_regs regs;
+    int rc;
+
+    if (!dev || !count)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_agc_counter_regs(detector, &regs);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    return m2sdr_reg_read(dev, regs.status_addr, count);
+#else
+    (void)dev;
+    (void)detector;
+    (void)count;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
 /* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
 int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
 {

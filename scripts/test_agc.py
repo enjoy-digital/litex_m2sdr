@@ -21,6 +21,13 @@ CONTROL_THRESHOLD_OFFSET  = 16
 CONTROL_THRESHOLD_SIZE    = 16
 STATUS_COUNT_OFFSET       = 0
 STATUS_COUNT_SIZE         = 32
+AGC_DEFAULT_LOW_THRESHOLD = 1536
+AGC_DEFAULT_HIGH_THRESHOLD = 2016
+
+def default_agc_threshold(name):
+    if name and name.endswith("_low"):
+        return AGC_DEFAULT_LOW_THRESHOLD
+    return AGC_DEFAULT_HIGH_THRESHOLD
 
 # Helper function to set a field within a register value.
 def set_field(reg_value, offset, size, value):
@@ -44,7 +51,7 @@ class AGCDriver:
         self.status  = getattr(self.bus.regs, f"{name}_status")
         # Internal state for the control fields.
         self._enable    = 0
-        self._threshold = 0
+        self._threshold = default_agc_threshold(name)
         self._clear     = 0
 
     def _update_control(self):
@@ -90,7 +97,7 @@ class AGCDriver:
 
 # Test AGC ------------------------------------------------------------------------------------------
 
-def test_agc(num_measurements=10, delay=1.0, threshold=1000, enable=1, clear=False, agc_selection="rx1_low"):
+def test_agc(num_measurements=10, delay=1.0, threshold=None, enable=1, clear=False, agc_selection="rx1_low"):
     bus = RemoteClient()
     bus.open()
 
@@ -98,6 +105,8 @@ def test_agc(num_measurements=10, delay=1.0, threshold=1000, enable=1, clear=Fal
     # For example, if agc_selection is "rx1_low", then the full CSR name is "ad9361_agc_count_rx1_low".
     agc_instance = f"ad9361_agc_count_{agc_selection}"
     agc = AGCDriver(bus, name=agc_instance)
+    if threshold is None:
+        threshold = default_agc_threshold(agc_instance)
 
     if enable:
         agc.enable()
@@ -122,7 +131,7 @@ def main():
     parser = argparse.ArgumentParser(description="AGC Saturation Count Test Script")
     parser.add_argument("--num",       default=10,    type=int,   help="Number of measurements")
     parser.add_argument("--delay",     default=1.0,   type=float, help="Delay between measurements (seconds)")
-    parser.add_argument("--threshold", default=1000,  type=int,   help="Saturation threshold (absolute value)")
+    parser.add_argument("--threshold", default=None,  type=int,   help="Saturation threshold (absolute value)")
     parser.add_argument("--enable",    default=1,     type=int,   help="Enable AGC (1=enabled, 0=disabled)")
     parser.add_argument("--clear",     action="store_true",       help="Clear saturation count at start")
     parser.add_argument("--agc",       default="rx1_low",         help="AGC selection: rx1_low, rx1_high, rx2_low, rx2_high")

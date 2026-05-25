@@ -64,6 +64,8 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
+  Use `rx_agc_mode0`/`rx_agc_mode1` or `rx0_agc_mode`/`rx1_agc_mode` for per-channel defaults.
+- **RX AGC pin**: `rx_agc_pin=on|off` drives the FPGA-connected AD9361 `RF_EN_AGC` pin for pin-controlled gain flows.
 - **Device selection**: `path=/dev/m2sdr0` for PCIe, `eth_ip=192.168.1.50` for Ethernet, or `dev_id=pcie:/dev/m2sdr0` / `dev_id=eth:192.168.1.50:1234` for an explicit libm2sdr identifier.
 - **Ethernet discovery**: default discovery probes `192.168.1.50:1234` after PCIe. Use `eth_ips=ip[;ip[:port]...]` or `LITEXM2SDR_ETH_IPS` to override the discovery list, and `eth_discovery=0` to disable Ethernet discovery.
 - **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`

@@ -47,9 +47,13 @@ static void help(void)
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
            "      --tx-att DB        Set TX attenuation in dB (default: %d).\n"
+           "      --rx-gain-mode M   Set both RX gain modes: manual, slow, fast, or hybrid.\n"
+           "      --rx-gain-mode1 M  Set RX1 gain mode.\n"
+           "      --rx-gain-mode2 M  Set RX2 gain mode.\n"
            "      --rx-gain DB       Set both RX gains in dB and force manual gain mode.\n"
            "      --rx-gain1 DB      Set RX gain 1 in dB and force manual gain mode.\n"
            "      --rx-gain2 DB      Set RX gain 2 in dB and force manual gain mode.\n"
+           "      --rx-agc-pin BOOL  Drive the FPGA-connected AD9361 EN_AGC pin.\n"
            "      --loopback N       Set internal loopback (default: %d).\n"
            "      --bist-tx-tone     Run TX tone test.\n"
            "      --bist-rx-tone     Run RX tone test.\n"
@@ -116,6 +120,14 @@ int main(int argc, char **argv)
         { "rx_gain1", required_argument, NULL, 13 },
         { "rx-gain2", required_argument, NULL, 14 },
         { "rx_gain2", required_argument, NULL, 14 },
+        { "rx-gain-mode", required_argument, NULL, 21 },
+        { "rx_gain_mode", required_argument, NULL, 21 },
+        { "rx-gain-mode1", required_argument, NULL, 22 },
+        { "rx_gain_mode1", required_argument, NULL, 22 },
+        { "rx-gain-mode2", required_argument, NULL, 23 },
+        { "rx_gain_mode2", required_argument, NULL, 23 },
+        { "rx-agc-pin", required_argument, NULL, 24 },
+        { "rx_agc_pin", required_argument, NULL, 24 },
         { "loopback", required_argument, NULL, 15 },
         { "bist-tx-tone", no_argument, NULL, 16 },
         { "bist_tx_tone", no_argument, NULL, 16 },
@@ -233,6 +245,35 @@ int main(int argc, char **argv)
             if (parse_i64_option("RX gain 2", optarg, &cfg.rx_gain2) != 0)
                 return 1;
             cfg.program_rx_gains = true;
+            break;
+        case 21:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode1) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.rx_gain_mode2 = cfg.rx_gain_mode1;
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 22:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode1) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode 1", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 23:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode2) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode 2", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 24:
+            if (m2sdr_cli_parse_bool(optarg, &cfg.agc_pin_enable) != 0) {
+                m2sdr_cli_invalid_choice("RX AGC pin", optarg, "0/1, true/false, on/off, or yes/no");
+                return 1;
+            }
+            cfg.program_agc_pin = true;
             break;
         case 15:
             {
