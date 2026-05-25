@@ -27,6 +27,8 @@ size_t m2sdr_format_size(enum m2sdr_format format)
         return 4;
     case M2SDR_FORMAT_SC8_Q7:
         return 2;
+    case M2SDR_FORMAT_BFP8_Q11:
+        return M2SDR_BFP8_BLOCK_BYTES;
     default:
         return 0;
     }

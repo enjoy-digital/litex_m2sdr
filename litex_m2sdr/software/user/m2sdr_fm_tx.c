@@ -444,7 +444,7 @@ int main(int argc, char **argv) {
             bits_set = true;
             break;
         case 1:
-            if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+            if (m2sdr_cli_parse_format(optarg, &format) != 0 || format == M2SDR_FORMAT_BFP8_Q11) {
                 m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }

@@ -21,8 +21,9 @@ def rows_by_format(**kwargs):
         samples=8192,
         cycles=37.25,
         amplitudes=[0.0, -20.0],
-        block_complex_samples=kwargs.get("block_complex_samples", 256),
+        block_complex_samples=kwargs.get("block_complex_samples", 254),
         header_bytes=kwargs.get("header_bytes", 8),
+        channels=kwargs.get("channels", 2),
     )
     return {row["format"]: row for row in fmt.format_rows(args)}
 
@@ -39,11 +40,6 @@ def test_bfp8_preserves_low_level_tones_better_than_fixed_sc8():
     assert gain > 15.0
 
 
-def test_bfp4_is_lower_quality_than_bfp8():
-    rows = rows_by_format()
-    assert rows["BFP4"]["snr_0dbfs"] < rows["BFP8"]["snr_0dbfs"]
-
-
 def test_bfp_header_overhead_is_accounted_per_complex_sample():
-    rows = rows_by_format(block_complex_samples=256, header_bytes=8)
-    assert rows["BFP8"]["bytes_per_complex"] == 2.03125
+    rows = rows_by_format(block_complex_samples=254, header_bytes=8)
+    assert rows["BFP8"]["bytes_per_complex"] == 2 + 8 / (254 * 2)

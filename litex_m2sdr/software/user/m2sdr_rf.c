@@ -35,7 +35,7 @@ static void help(void)
            "  -c, --device-num N     Select PCIe device number (default: 0).\n"
            "  -i, --ip ADDR          Target IP address for Etherbone.\n"
            "  -p, --port PORT        Port number (default: 1234).\n"
-           "      --format FMT       Sample format: sc16 or sc8 (default: sc16).\n"
+           "      --format FMT       Sample format: sc16, sc8 or bfp8 (default: sc16).\n"
            "      --8bit             Legacy alias for --format sc8.\n"
            "      --oversample       Enable oversample mode.\n"
            "      --channel-layout M Channel mode: 1t1r or 2t2r (default: 2t2r).\n"
@@ -155,14 +155,16 @@ int main(int argc, char **argv)
                 enum m2sdr_format format;
 
                 if (m2sdr_cli_parse_format(optarg, &format) != 0) {
-                    m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                    m2sdr_cli_invalid_choice("format", optarg, "sc16, sc8 or bfp8");
                     return 1;
                 }
+                cfg.sample_format = format;
                 cfg.enable_8bit_mode = (format == M2SDR_FORMAT_SC8_Q7);
             }
             break;
         case 2:
             cfg.enable_8bit_mode = true;
+            cfg.sample_format = M2SDR_FORMAT_SC8_Q7;
             break;
         case 3:
             cfg.enable_oversample = true;

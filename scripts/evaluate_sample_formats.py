@@ -106,9 +106,9 @@ def snr_db(reference, decoded_q11):
     return 10.0 * math.log10(signal_power / noise_power)
 
 
-def bfp_bytes_per_complex(mantissa_bits, block_complex_samples, header_bytes):
+def bfp_bytes_per_complex(mantissa_bits, block_complex_samples, header_bytes, channels):
     payload_bytes = 2.0 * mantissa_bits / 8.0
-    return payload_bytes + header_bytes / block_complex_samples
+    return payload_bytes + header_bytes / (block_complex_samples * channels)
 
 
 def format_rows(args):
@@ -123,18 +123,8 @@ def format_rows(args):
         ("SC8 rounded", 2.0, lambda samples: quantize_sc8_round(samples)),
         (
             "BFP8",
-            bfp_bytes_per_complex(8, args.block_complex_samples, args.header_bytes),
+            bfp_bytes_per_complex(8, args.block_complex_samples, args.header_bytes, args.channels),
             lambda samples: quantize_bfp(samples, 8, block_components),
-        ),
-        (
-            "BFP6",
-            bfp_bytes_per_complex(6, args.block_complex_samples, args.header_bytes),
-            lambda samples: quantize_bfp(samples, 6, block_components),
-        ),
-        (
-            "BFP4",
-            bfp_bytes_per_complex(4, args.block_complex_samples, args.header_bytes),
-            lambda samples: quantize_bfp(samples, 4, block_components),
         ),
     ]
 
@@ -209,7 +199,7 @@ def main():
     parser.add_argument(
         "--block-complex-samples",
         type=int,
-        default=256,
+        default=254,
         help="Complex samples covered by one BFP exponent/header.",
     )
     parser.add_argument(
@@ -218,6 +208,7 @@ def main():
         default=8,
         help="BFP metadata/header bytes per block.",
     )
+    parser.add_argument("--channels", type=int, default=2, help="Channels sharing one BFP block header.")
     parser.add_argument("--csv", action="store_true", help="Emit CSV instead of Markdown.")
     args = parser.parse_args()
 
@@ -227,6 +218,8 @@ def main():
         parser.error("--block-complex-samples must be positive")
     if args.header_bytes < 0:
         parser.error("--header-bytes must be non-negative")
+    if args.channels <= 0:
+        parser.error("--channels must be positive")
 
     rows = format_rows(args)
     if args.csv:

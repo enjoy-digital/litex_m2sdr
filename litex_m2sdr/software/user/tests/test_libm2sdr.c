@@ -297,6 +297,8 @@ static int test_cli_format_parser(void)
         return -1;
     if (m2sdr_cli_parse_format("sc8", &format) != 0 || format != M2SDR_FORMAT_SC8_Q7)
         return -1;
+    if (m2sdr_cli_parse_format("bfp8", &format) != 0 || format != M2SDR_FORMAT_BFP8_Q11)
+        return -1;
     if (m2sdr_cli_parse_format("ci16", &format) == 0)
         return -1;
     if (m2sdr_cli_parse_format(NULL, &format) == 0)
@@ -307,7 +309,25 @@ static int test_cli_format_parser(void)
         return -1;
     if (strcmp(m2sdr_cli_format_name(M2SDR_FORMAT_SC8_Q7), "sc8") != 0)
         return -1;
+    if (strcmp(m2sdr_cli_format_name(M2SDR_FORMAT_BFP8_Q11), "bfp8") != 0)
+        return -1;
 
+    return 0;
+}
+
+static int test_format_size_helpers(void)
+{
+    if (m2sdr_format_size(M2SDR_FORMAT_SC16_Q11) != 4)
+        return -1;
+    if (m2sdr_format_size(M2SDR_FORMAT_SC8_Q7) != 2)
+        return -1;
+    if (m2sdr_format_size(M2SDR_FORMAT_BFP8_Q11) != M2SDR_BFP8_BLOCK_BYTES)
+        return -1;
+    if (m2sdr_bytes_to_samples(M2SDR_FORMAT_BFP8_Q11, M2SDR_BUFFER_BYTES) !=
+        M2SDR_BUFFER_BYTES / M2SDR_BFP8_BLOCK_BYTES)
+        return -1;
+    if (m2sdr_samples_to_bytes(M2SDR_FORMAT_BFP8_Q11, 2) != 2 * M2SDR_BFP8_BLOCK_BYTES)
+        return -1;
     return 0;
 }
 
@@ -479,6 +499,10 @@ int main(void)
     }
     if (test_cli_format_parser() != 0) {
         fprintf(stderr, "test_cli_format_parser failed\n");
+        return 1;
+    }
+    if (test_format_size_helpers() != 0) {
+        fprintf(stderr, "test_format_size_helpers failed\n");
         return 1;
     }
     if (test_dma_header_helper() != 0) {

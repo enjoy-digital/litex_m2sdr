@@ -7,7 +7,6 @@ LiteX-M2SDR keeps the AD9361 LVDS interface in its native 12-bit two's-complemen
 - Use SC16/Q11 when link bandwidth is available.
 - Use rounded SC8/Q7 for the current Ethernet bandwidth-saving mode.
 - Evaluate BFP8 as the next transport mode when weak-signal quality matters more than the small metadata overhead.
-- Treat BFP4 as a monitoring-only option unless a specific application can tolerate large quantization loss.
 
 ## BFP8 Model
 
@@ -18,14 +17,12 @@ The initial BFP8 model uses signed int8 mantissas with one shared power-of-two e
 - The exponent is capped to the source/mantissa width delta, so BFP8 does not get worse than fixed SC8 at full scale.
 - Decoding reconstructs `sample_q11 = mantissa << exponent`.
 
-The model is implemented in `scripts/evaluate_sample_formats.py`. The default overhead assumes an 8-byte stream header per 256 complex samples, so BFP8 is about 2.031 bytes per complex sample per channel instead of exactly 2.000 for SC8.
+The implemented FPGA framing uses one 64-bit header word followed by 127 64-bit payload words. Each payload word carries two RFIC beats, so a BFP8 block covers 254 complex samples per channel and occupies exactly 1024 bytes. A normal 8192-byte DMA/UDP payload contains 8 BFP8 blocks. This makes BFP8 about 2.016 bytes per complex sample per channel instead of exactly 2.000 for SC8.
+
+The model is implemented in `scripts/evaluate_sample_formats.py`.
 
 ## Integration Constraint
 
-True BFP transport needs metadata. The current libm2sdr streaming API treats formats as fixed bytes-per-complex-sample values, which works for SC16 and SC8 but not for BFP blocks with headers. A production BFP8 path should first define one of these wire/API choices:
+True BFP transport needs metadata. The initial API exposes BFP8 as an encoded block format: one public BFP8 "sample" is one 1024-byte BFP8 block, not one decoded complex sample. Higher-level tools that want normal complex samples should decode BFP8 blocks explicitly.
 
-- In-band block headers in the stream, with sync/recovery rules and adjusted buffer sizing.
-- A metadata sideband tied to existing stream headers.
-- A fixed block framing API where callers pass encoded blocks rather than plain complex samples.
-
-The simulator should be used to choose block size and header overhead before adding the public format enum.
+The current implementation deliberately avoids hiding this overhead behind the plain SC8/SC16 complex-sample API. That keeps record/play and low-level streaming able to move raw BFP8 blocks while leaving decoded CF32/CS16 integration to a later host-side codec layer. Since BFP8 block alignment is fixed, raw BFP8 record/play does not combine with the optional 16-byte DMA timestamp header.

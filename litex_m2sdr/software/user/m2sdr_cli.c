@@ -383,6 +383,10 @@ int m2sdr_cli_parse_format(const char *text, enum m2sdr_format *format)
         *format = M2SDR_FORMAT_SC8_Q7;
         return 0;
     }
+    if (strcmp(text, "bfp8") == 0) {
+        *format = M2SDR_FORMAT_BFP8_Q11;
+        return 0;
+    }
 
     return -1;
 }
@@ -394,6 +398,8 @@ const char *m2sdr_cli_format_name(enum m2sdr_format format)
         return "sc16";
     case M2SDR_FORMAT_SC8_Q7:
         return "sc8";
+    case M2SDR_FORMAT_BFP8_Q11:
+        return "bfp8";
     default:
         return "unknown";
     }

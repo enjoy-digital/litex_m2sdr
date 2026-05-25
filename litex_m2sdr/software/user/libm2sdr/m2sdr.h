@@ -31,6 +31,9 @@ extern "C" {
 #define M2SDR_IDENT_MAX      256
 #define M2SDR_BUFFER_BYTES   8192u
 #define M2SDR_HEADER_BYTES   16u
+#define M2SDR_BFP8_BLOCK_BYTES 1024u
+#define M2SDR_BFP8_PAYLOAD_WORDS 127u
+#define M2SDR_BFP8_SAMPLES_PER_CHANNEL 254u
 
 /* Error codes (0 on success, negative on failure).
  *
@@ -94,6 +97,8 @@ enum m2sdr_format {
     M2SDR_FORMAT_SC16_Q11 = 0,
     /* 8-bit I/Q interleaved (SC8 Q7 style) */
     M2SDR_FORMAT_SC8_Q7  = 1,
+    /* Encoded BFP8 blocks: 1x64-bit header + 127x64-bit int8 mantissa payload words. */
+    M2SDR_FORMAT_BFP8_Q11 = 2,
 };
 
 struct m2sdr_metadata {
@@ -497,6 +502,7 @@ struct m2sdr_config {
     bool    calibrate_interface_delay;
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
+    enum m2sdr_format sample_format;
     bool    enable_oversample;
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
@@ -597,6 +603,7 @@ int  m2sdr_set_ptp_clock10_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_
 int  m2sdr_clear_ptp_clock10_counters(struct m2sdr_dev *dev);
 /* Queue a clk10 marker realignment; hardware applies it on the next PTP reference edge. */
 int  m2sdr_align_ptp_clock10(struct m2sdr_dev *dev);
+int  m2sdr_set_sample_format(struct m2sdr_dev *dev, enum m2sdr_format format);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
@@ -651,7 +658,8 @@ int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.
  *
- * buffer_size is expressed in samples per buffer. Use
+ * buffer_size is expressed in samples per buffer. For BFP8, one sample is one
+ * encoded M2SDR_BFP8_BLOCK_BYTES block. Use
  * m2sdr_bytes_to_samples(M2SDR_FORMAT_..., M2SDR_BUFFER_BYTES)
  * for the default DMA payload size.
  */
