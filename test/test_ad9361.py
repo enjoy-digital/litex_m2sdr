@@ -134,6 +134,48 @@ def test_ad9361_rx_bitmode_8bit_packing():
     run_simulation(dut, [gen(), mon()])
     assert out == [0x0B0A09080F0E0D0C]
 
+
+def test_ad9361_rx_bitmode_8bit_rounding_and_saturation():
+    """Verify RX 8-bit mode rounds 12-bit samples and clamps positive overflow."""
+    dut = AD9361RXBitMode()
+    out = []
+
+    def pack_sample12(value):
+        value &= 0xfff
+        return value | (0xf000 if value & 0x800 else 0)
+
+    def pack_word(samples):
+        word = 0
+        for i, sample in enumerate(samples):
+            word |= pack_sample12(sample) << (16 * i)
+        return word
+
+    def gen():
+        yield dut.mode.eq(1)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(0)
+        yield dut.sink.data.eq(pack_word([0x007, 0x008, 0xff9, 0xff8]))
+        yield
+        yield dut.sink.first.eq(0)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(pack_word([0x7f7, 0x7f8, 0xff7, 0x800]))
+        yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert out == [0x80FF7F7FFF000100]
+
 # AD9361 PRBS Tests -------------------------------------------------------------------------------
 
 

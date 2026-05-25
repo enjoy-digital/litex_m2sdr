@@ -20,6 +20,12 @@ _8_BIT_MODE  = 1
 def _sign_extend(data, nbits=16):
     return Cat(data, Replicate(data[-1], nbits - len(data)))
 
+def _round_shift_12_to_8(module, data):
+    # Signed round-to-nearest for Q11 -> Q7; negative ties round away from zero.
+    rounded = Signal(13)
+    module.comb += rounded.eq(_sign_extend(data, 13) + Mux(data[-1], 7, 8))
+    return Mux((data[4:12] == 0x7f) & data[3], 0x7f, rounded[4:12])
+
 # AD9361 TX BitMode --------------------------------------------------------------------------------
 
 class AD9361TXBitMode(LiteXModule):
@@ -65,9 +71,9 @@ class AD9361RXBitMode(LiteXModule):
         self.conv = conv = stream.Converter(32, 64)
         self.comb += If(mode == _8_BIT_MODE,
             sink.connect(conv.sink, omit={"data"}),
-            conv.sink.data[0*8:1*8].eq(sink.data[0*16+4:1*16]),
-            conv.sink.data[1*8:2*8].eq(sink.data[1*16+4:2*16]),
-            conv.sink.data[2*8:3*8].eq(sink.data[2*16+4:3*16]),
-            conv.sink.data[3*8:4*8].eq(sink.data[3*16+4:4*16]),
+            conv.sink.data[0*8:1*8].eq(_round_shift_12_to_8(self, sink.data[0*16:0*16+12])),
+            conv.sink.data[1*8:2*8].eq(_round_shift_12_to_8(self, sink.data[1*16:1*16+12])),
+            conv.sink.data[2*8:3*8].eq(_round_shift_12_to_8(self, sink.data[2*16:2*16+12])),
+            conv.sink.data[3*8:4*8].eq(_round_shift_12_to_8(self, sink.data[3*16:3*16+12])),
             conv.source.connect(source),
         )
