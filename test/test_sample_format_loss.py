@@ -9,6 +9,8 @@ import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "evaluate_sample_formats.py"
 spec = importlib.util.spec_from_file_location("evaluate_sample_formats", SCRIPT)
@@ -43,3 +45,21 @@ def test_bfp8_preserves_low_level_tones_better_than_fixed_sc8():
 def test_bfp_header_overhead_is_accounted_per_complex_sample():
     rows = rows_by_format(block_complex_samples=254, header_bytes=8)
     assert rows["BFP8"]["bytes_per_complex"] == 2 + 8 / (254 * 2)
+
+
+def test_format_loss_plot_can_be_generated(tmp_path):
+    pytest.importorskip("matplotlib")
+    args = SimpleNamespace(
+        samples=8192,
+        cycles=37.25,
+        amplitudes=[0.0, -6.0, -20.0, -40.0],
+        block_complex_samples=254,
+        header_bytes=8,
+        channels=2,
+    )
+    output = tmp_path / "format-loss.png"
+
+    fmt.plot_rows(fmt.format_rows(args), args.amplitudes, str(output))
+
+    assert output.exists()
+    assert output.stat().st_size > 0

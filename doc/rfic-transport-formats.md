@@ -8,6 +8,16 @@ LiteX-M2SDR keeps the AD9361 LVDS interface in its native 12-bit two's-complemen
 - Use rounded SC8/Q7 for the current Ethernet bandwidth-saving mode.
 - Evaluate BFP8 as the next transport mode when weak-signal quality matters more than the small metadata overhead.
 
+## Compression/Loss Plot
+
+![RFIC transport format compression and SNR loss](rfic-transport-format-loss.png)
+
+Regenerate the plot with:
+
+```sh
+python3 scripts/evaluate_sample_formats.py --plot doc/rfic-transport-format-loss.png
+```
+
 ## BFP8 Model
 
 The initial BFP8 model uses signed int8 mantissas with one shared power-of-two exponent per block:

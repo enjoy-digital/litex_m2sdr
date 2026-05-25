@@ -8,6 +8,7 @@
 import argparse
 import csv
 import math
+import os
 import sys
 
 
@@ -183,6 +184,75 @@ def print_csv(rows, amplitudes):
         writer.writerow(row)
 
 
+def plot_rows(rows, amplitudes, output_path):
+    mplconfig = os.environ.setdefault("MPLCONFIGDIR", "/tmp/litex_m2sdr_matplotlib")
+    os.makedirs(mplconfig, exist_ok=True)
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    plot_amplitudes = sorted(amplitudes)
+    colors = {
+        "SC16/Q11": "#4c78a8",
+        "SC8 trunc": "#f58518",
+        "SC8 rounded": "#54a24b",
+        "BFP8": "#b279a2",
+    }
+
+    fig = plt.figure(figsize=(13.5, 7.2), constrained_layout=True)
+    grid = fig.add_gridspec(2, 2, width_ratios=[1.45, 1.0])
+    ax_snr = fig.add_subplot(grid[0, 0])
+    ax_loss = fig.add_subplot(grid[1, 0], sharex=ax_snr)
+    ax_bytes = fig.add_subplot(grid[:, 1])
+
+    for row in rows:
+        name = row["format"]
+        snr = [row[f"snr_{amplitude:g}dbfs"] for amplitude in plot_amplitudes]
+        loss = [row[f"loss_{amplitude:g}db"] for amplitude in plot_amplitudes]
+        ax_snr.plot(plot_amplitudes, snr, marker="o", linewidth=2.0, label=name, color=colors.get(name))
+        ax_loss.plot(plot_amplitudes, loss, marker="o", linewidth=2.0, label=name, color=colors.get(name))
+
+    ax_snr.set_title("Quantized SNR vs Input Level")
+    ax_snr.set_ylabel("SNR (dB)")
+    ax_snr.grid(True, alpha=0.25)
+    ax_snr.legend(loc="upper left", ncol=2, fontsize=9)
+
+    ax_loss.set_title("SNR Loss vs SC16/Q11")
+    ax_loss.set_xlabel("Tone amplitude (dBFS)")
+    ax_loss.set_ylabel("Loss (dB)")
+    ax_loss.grid(True, alpha=0.25)
+    ax_loss.axhline(0.0, color="#333333", linewidth=0.8)
+
+    names = [row["format"] for row in rows]
+    bytes_per_complex = [row["bytes_per_complex"] for row in rows]
+    baseline_bytes = bytes_per_complex[0]
+    bar_colors = [colors.get(name, "#777777") for name in names]
+    bars = ax_bytes.bar(names, bytes_per_complex, color=bar_colors)
+    ax_bytes.set_title("Transport Bandwidth")
+    ax_bytes.set_ylabel("Bytes / complex / channel")
+    ax_bytes.set_ylim(0.0, baseline_bytes * 1.18)
+    ax_bytes.grid(True, axis="y", alpha=0.25)
+    ax_bytes.tick_params(axis="x", rotation=25)
+
+    for bar, value in zip(bars, bytes_per_complex):
+        pct = 100.0 * value / baseline_bytes
+        ax_bytes.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            value + baseline_bytes * 0.025,
+            f"{value:.3f} B\n{pct:.1f}% of SC16",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    fig.suptitle("RFIC Transport Format Compression/Loss Model", fontsize=15, weight="bold")
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Evaluate SC16/SC8/BFP transport quantization loss."
@@ -210,6 +280,7 @@ def main():
     )
     parser.add_argument("--channels", type=int, default=2, help="Channels sharing one BFP block header.")
     parser.add_argument("--csv", action="store_true", help="Emit CSV instead of Markdown.")
+    parser.add_argument("--plot", help="Write a PNG/SVG/PDF plot of compression and SNR loss.")
     args = parser.parse_args()
 
     if args.samples <= 0:
@@ -226,6 +297,9 @@ def main():
         print_csv(rows, args.amplitudes)
     else:
         print_markdown(rows, args.amplitudes)
+    if args.plot:
+        plot_rows(rows, args.amplitudes, args.plot)
+        print(f"Wrote plot to {args.plot}", file=sys.stderr)
 
 
 if __name__ == "__main__":
