@@ -344,19 +344,17 @@ static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
 
 static __attribute__((unused)) int m2sdr_has_ptp_clock10(struct m2sdr_dev *dev, bool *present)
 {
-    struct m2sdr_capabilities caps;
-
     if (!dev || !present)
         return M2SDR_ERR_INVAL;
 
     *present = false;
 #if defined(CSR_PTP_CLK10_DISCIPLINE_STATUS_ADDR)
+    struct m2sdr_capabilities caps;
+
     if (m2sdr_get_capabilities(dev, &caps) != 0)
         return M2SDR_ERR_IO;
 
     *present = (caps.features & M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK_MASK) != 0;
-#else
-    (void)caps;
 #endif
     return M2SDR_ERR_OK;
 }
