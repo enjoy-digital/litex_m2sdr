@@ -56,7 +56,7 @@
 static int m2sdr_log_enabled = M2SDR_LOG_ENABLED ? 1 : 0;
 #define M2SDR_LOGF(...) do { if (m2sdr_log_enabled) fprintf(stderr, __VA_ARGS__); } while (0)
 
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32)
 #define M2SDR_WEAK __attribute__((weak))
 #else
 #define M2SDR_WEAK
