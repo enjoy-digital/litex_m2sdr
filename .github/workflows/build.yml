@@ -71,3 +71,57 @@ jobs:
         run: cmake --build litex_m2sdr/software/user/build-liteeth --config Release
       - name: Test Ethernet-only user stack
         run: ctest --test-dir litex_m2sdr/software/user/build-liteeth --output-on-failure -C Release
+
+  cmake-liteeth-soapy:
+    name: cmake-liteeth-soapy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SoapySDR dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsoapysdr-dev soapysdr-tools
+      - name: Install SoapySDR dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install soapysdr
+      - name: Configure Ethernet-only Soapy stack
+        run: cmake -S litex_m2sdr/software/user -B litex_m2sdr/software/user/build-liteeth-soapy -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=ON
+      - name: Build Ethernet-only Soapy stack
+        run: cmake --build litex_m2sdr/software/user/build-liteeth-soapy --config Release
+      - name: Verify Soapy fake-target test is registered
+        run: ctest --test-dir litex_m2sdr/software/user/build-liteeth-soapy -N | grep -q test_fake_liteeth_soapy
+      - name: Test Ethernet-only Soapy stack
+        run: ctest --test-dir litex_m2sdr/software/user/build-liteeth-soapy --output-on-failure -C Release
+
+  cmake-liteeth-soapy-windows:
+    name: cmake-liteeth-soapy (windows-latest, MSYS2 UCRT64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          pacboy: >-
+            gcc:p
+            cmake:p
+            ninja:p
+            soapysdr:p
+            python:p
+      - name: Configure Ethernet-only Soapy stack
+        shell: msys2 {0}
+        run: cmake -S litex_m2sdr/software/user -B litex_m2sdr/software/user/build-liteeth-soapy -G Ninja -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Build Ethernet-only Soapy stack
+        shell: msys2 {0}
+        run: cmake --build litex_m2sdr/software/user/build-liteeth-soapy
+      - name: Verify Soapy fake-target test is registered
+        shell: msys2 {0}
+        run: ctest --test-dir litex_m2sdr/software/user/build-liteeth-soapy -N | grep -q test_fake_liteeth_soapy
+      - name: Test Ethernet-only Soapy stack
+        shell: msys2 {0}
+        run: ctest --test-dir litex_m2sdr/software/user/build-liteeth-soapy --output-on-failure
