@@ -46,6 +46,12 @@ typedef __int64 off_t;
 #ifndef usleep
 #define usleep(usec) m2sdr_sleep_us((unsigned int)(usec))
 #endif
+#ifndef sleep
+#define sleep(seconds) m2sdr_sleep((unsigned int)(seconds))
+#endif
+#ifndef nanosleep
+#define nanosleep(req, rem) m2sdr_nanosleep((req), (rem))
+#endif
 #ifndef clock_gettime
 #define clock_gettime m2sdr_clock_gettime
 #endif
@@ -178,6 +184,8 @@ int m2sdr_socket_last_error(void);
 int m2sdr_socket_error_is_would_block(int err);
 int m2sdr_socket_error_is_interrupted(int err);
 void m2sdr_sleep_us(unsigned int usec);
+unsigned int m2sdr_sleep(unsigned int seconds);
+int m2sdr_nanosleep(const struct timespec *req, struct timespec *rem);
 uint64_t m2sdr_monotonic_us(void);
 int64_t m2sdr_monotonic_ms(void);
 void *m2sdr_aligned_malloc(size_t alignment, size_t size);

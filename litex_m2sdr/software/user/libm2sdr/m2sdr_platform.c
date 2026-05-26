@@ -9,6 +9,16 @@
 
 static int m2sdr_winsock_refs;
 
+static void m2sdr_sleep_ms(uint64_t ms)
+{
+    while (ms > 0) {
+        DWORD chunk = ms > 0x7fffffffULL ? 0x7fffffffUL : (DWORD)ms;
+
+        Sleep(chunk);
+        ms -= chunk;
+    }
+}
+
 int m2sdr_platform_socket_init(void)
 {
     WSADATA wsa;
@@ -96,9 +106,32 @@ int m2sdr_socket_error_is_interrupted(int err)
 
 void m2sdr_sleep_us(unsigned int usec)
 {
-    DWORD ms = (DWORD)((usec + 999u) / 1000u);
+    m2sdr_sleep_ms(((uint64_t)usec + 999ULL) / 1000ULL);
+}
 
-    Sleep(ms);
+unsigned int m2sdr_sleep(unsigned int seconds)
+{
+    m2sdr_sleep_ms((uint64_t)seconds * 1000ULL);
+    return 0;
+}
+
+int m2sdr_nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    uint64_t ms;
+
+    if (!req || req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (rem) {
+        rem->tv_sec = 0;
+        rem->tv_nsec = 0;
+    }
+
+    ms = (uint64_t)req->tv_sec * 1000ULL + ((uint64_t)req->tv_nsec + 999999ULL) / 1000000ULL;
+    m2sdr_sleep_ms(ms);
+    return 0;
 }
 
 uint64_t m2sdr_monotonic_us(void)
@@ -176,6 +209,16 @@ int m2sdr_socket_error_is_interrupted(int err)
 void m2sdr_sleep_us(unsigned int usec)
 {
     usleep(usec);
+}
+
+unsigned int m2sdr_sleep(unsigned int seconds)
+{
+    return sleep(seconds);
+}
+
+int m2sdr_nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    return nanosleep(req, rem);
 }
 
 uint64_t m2sdr_monotonic_us(void)
