@@ -59,9 +59,13 @@
 #if (__cplusplus >= 201703L)
 /* pass */
 #else
+#ifndef min
 #define min(x, y)								(((x) < (y)) ? (x) : (y))
+#endif
 #define min_t(type, x, y)						(type)min((type)(x), (type)(y))
+#ifndef max
 #define max(x, y)								(((x) > (y)) ? (x) : (y))
+#endif
 #define max_t(type, x, y)						(type)max((type)(x), (type)(y))
 #define clamp(val, min_val, max_val)			(max(min((val), (max_val)), (min_val)))
 #define clamp_t(type, val, min_val, max_val)	(type)clamp((type)(val), (type)(min_val), (type)(max_val))
@@ -72,6 +76,23 @@
 #define CLK_IGNORE_UNUSED						BIT(3)
 #define CLK_GET_RATE_NOCACHE					BIT(6)
 
+#if defined(_MSC_VER)
+#if defined(HAVE_VERBOSE_MESSAGES)
+#define dev_err(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#define dev_warn(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#if defined(HAVE_DEBUG_MESSAGES)
+#define dev_dbg(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#else
+#define dev_dbg(...)			((void)0)
+#endif
+#define printk(...)				printf(__VA_ARGS__)
+#else
+#define dev_err(...)			((void)0)
+#define dev_warn(...)			((void)0)
+#define dev_dbg(...)			((void)0)
+#define printk(...)				((void)0)
+#endif
+#else
 #if defined(HAVE_VERBOSE_MESSAGES)
 #define dev_err(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
 #define dev_warn(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
@@ -87,8 +108,12 @@
 #define dev_dbg(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
 #define printk(format, ...)			({ if (0) printf(format, ## __VA_ARGS__); })
 #endif
+#endif
 
 struct device {
+#if defined(_MSC_VER)
+	int unused;
+#endif
 };
 
 struct spi_device {

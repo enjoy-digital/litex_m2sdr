@@ -40,14 +40,21 @@
 
 static int m2sdr_ad9361_spi_timeout_us(void *conn)
 {
-    return m2sdr_legacy_handle_is_fd(conn) ?
-        AD9361_SPI_TIMEOUT_PCIE_US : AD9361_SPI_TIMEOUT_ETH_US;
+#ifdef USE_LITEPCIE
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return AD9361_SPI_TIMEOUT_PCIE_US;
+#else
+    (void)conn;
+#endif
+    return AD9361_SPI_TIMEOUT_ETH_US;
 }
 
 static bool m2sdr_ad9361_bus_ok(void *conn)
 {
+#ifdef USE_LITEPCIE
     if (m2sdr_legacy_handle_is_fd(conn))
         return true;
+#endif
 
     return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
 }

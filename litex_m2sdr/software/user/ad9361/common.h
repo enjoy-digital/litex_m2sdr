@@ -44,23 +44,42 @@
 /******************************************************************************/
 #include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
 
 /******************************************************************************/
 /********************** Macros and Constants Definitions **********************/
 /******************************************************************************/
+#ifndef false
 #define false	0
+#endif
+#ifndef true
 #define true	1
+#endif
 
+#ifndef EIO
 #define EIO			5	/* I/O error */
+#endif
+#ifndef EAGAIN
 #define EAGAIN		11	/* Try again */
+#endif
+#ifndef ENOMEM
 #define ENOMEM		12	/* Out of memory */
+#endif
+#ifndef EFAULT
 #define EFAULT		14	/* Bad address */
+#endif
+#ifndef ENODEV
 #define ENODEV		19	/* No such device */
+#endif
+#ifndef EINVAL
 #define EINVAL		22	/* Invalid argument */
+#endif
 #ifndef EOPNOTSUPP
 #define EOPNOTSUPP	45	/* Operation not supported on transport endpoint */
 #endif
+#ifndef ETIMEDOUT
 #define ETIMEDOUT	110	/* Connection timed out */
+#endif
 
 /******************************************************************************/
 /*************************** Types Declarations *******************************/
