@@ -68,6 +68,9 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
+      - name: Configure macOS loopback alias for fake LiteEth target
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 255.255.255.255
       - name: Configure Ethernet-only user stack
         run: cmake -S litex_m2sdr/software/user -B litex_m2sdr/software/user/build-liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=OFF
       - name: Build Ethernet-only user stack
@@ -84,6 +87,9 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
+      - name: Configure macOS loopback alias for fake LiteEth target
+        if: runner.os == 'macOS'
+        run: sudo ifconfig lo0 alias 127.0.0.2 255.255.255.255
       - name: Install SoapySDR dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
