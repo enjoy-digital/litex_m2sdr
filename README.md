@@ -486,11 +486,14 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
    ./m2sdr_sata -i 192.168.1.50 serve fm_test
    ```
-   The named catalog is stored on the SATA disk at sector `0x800`; automatic
-   capture allocation starts at sector `0x100000`, and named captures keep a
-   SigMF metadata region next to the sample data. `init` refuses to reset a
-   non-empty catalog unless `--force` is provided; it does not erase sample
-   data sectors. See
+   The SATA Capture Volume is stored on the SATA disk at sector `0x800`;
+   automatic capture allocation starts at sector `0x100000`, and named
+   captures keep a SigMF metadata region next to the sample data. It is a small
+   capture index, not a general file system: captures stay in contiguous sector
+   ranges for the SATA streamers, SigMF provides interchange metadata, and
+   avoiding FAT/ext keeps validation and recovery simple. `init` refuses to
+   reset a non-empty volume unless `--force` is provided; it does not erase
+   sample data sectors. See
    [SATA Workflows](doc/sata-workflows.md) for the full `m2sdr_sata` workflow
    and [SATA Hardware Validation](doc/sata-validation.md) for measured
    PCIe/Ethernet validity and throughput results.

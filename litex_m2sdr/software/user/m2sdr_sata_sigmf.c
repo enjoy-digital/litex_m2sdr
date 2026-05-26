@@ -20,14 +20,14 @@ uint32_t m2sdr_sata_bytes_to_sectors(uint64_t bytes)
     return (uint32_t)((bytes + SATA_SECTOR_BYTES - 1u) / SATA_SECTOR_BYTES);
 }
 
-static const char *catalog_format_to_datatype(const char *format)
+static const char *capture_volume_format_to_datatype(const char *format)
 {
     if (format && strcmp(format, "sc8") == 0)
         return "ci8";
     return "ci16_le";
 }
 
-static const char *datatype_to_catalog_format(const char *datatype)
+static const char *datatype_to_capture_volume_format(const char *datatype)
 {
     if (datatype && strcmp(datatype, "ci8") == 0)
         return "sc8";
@@ -36,14 +36,14 @@ static const char *datatype_to_catalog_format(const char *datatype)
     return NULL;
 }
 
-static unsigned catalog_layout_to_channels(const char *layout)
+static unsigned capture_volume_layout_to_channels(const char *layout)
 {
     if (layout && strcmp(layout, "1t1r") == 0)
         return 1;
     return 2;
 }
 
-static const char *channels_to_catalog_layout(unsigned channels)
+static const char *channels_to_capture_volume_layout(unsigned channels)
 {
     return channels <= 1 ? "1t1r" : "2t2r";
 }
@@ -91,7 +91,7 @@ void m2sdr_sata_sigmf_from_entry(struct m2sdr_sigmf_meta *meta,
 
     memset(meta, 0, sizeof(*meta));
     m2sdr_sata_sigmf_set_paths(meta, name ? name : entry->name);
-    snprintf(meta->datatype, sizeof(meta->datatype), "%s", catalog_format_to_datatype(entry->format));
+    snprintf(meta->datatype, sizeof(meta->datatype), "%s", capture_volume_format_to_datatype(entry->format));
     snprintf(meta->recorder, sizeof(meta->recorder), "m2sdr_sata");
     if (entry->notes[0])
         snprintf(meta->description, sizeof(meta->description), "%s", entry->notes);
@@ -102,7 +102,7 @@ void m2sdr_sata_sigmf_from_entry(struct m2sdr_sigmf_meta *meta,
         meta->sample_rate = (double)entry->sample_rate;
         meta->has_sample_rate = true;
     }
-    meta->num_channels = catalog_layout_to_channels(entry->channel_layout);
+    meta->num_channels = capture_volume_layout_to_channels(entry->channel_layout);
     meta->has_num_channels = true;
 
     meta->capture_count = 1;
@@ -134,13 +134,13 @@ int m2sdr_sata_sigmf_entry_from_meta(struct sata_capture_entry *entry,
 
     if (!entry || !name || !meta)
         return -1;
-    format = datatype_to_catalog_format(meta->datatype);
+    format = datatype_to_capture_volume_format(meta->datatype);
     if (!format)
         return -1;
 
     memset(entry, 0, sizeof(*entry));
     entry->used = true;
-    catalog_copy(entry->name, sizeof(entry->name), name);
+    capture_volume_copy(entry->name, sizeof(entry->name), name);
     entry->sector = data_sector;
     entry->nsectors = data_nsectors;
     entry->bytes = data_bytes;
@@ -148,15 +148,15 @@ int m2sdr_sata_sigmf_entry_from_meta(struct sata_capture_entry *entry,
     entry->meta_nsectors = meta_nsectors;
     entry->meta_bytes = meta_bytes;
     entry->sample_rate = meta->has_sample_rate ? (int64_t)meta->sample_rate : 0;
-    catalog_copy(entry->format, sizeof(entry->format), format);
-    catalog_copy(entry->channel_layout, sizeof(entry->channel_layout),
-                 channels_to_catalog_layout(meta->has_num_channels ? meta->num_channels : 2));
+    capture_volume_copy(entry->format, sizeof(entry->format), format);
+    capture_volume_copy(entry->channel_layout, sizeof(entry->channel_layout),
+                 channels_to_capture_volume_layout(meta->has_num_channels ? meta->num_channels : 2));
     if (meta->has_center_freq) {
         entry->rx_freq = (uint64_t)meta->center_freq;
         entry->tx_freq = (uint64_t)meta->center_freq;
     }
     entry->created = (uint64_t)time(NULL);
     if (meta->description[0])
-        catalog_copy(entry->notes, sizeof(entry->notes), meta->description);
+        capture_volume_copy(entry->notes, sizeof(entry->notes), meta->description);
     return 0;
 }

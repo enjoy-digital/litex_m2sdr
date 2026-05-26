@@ -38,6 +38,8 @@ int main(void)
         return 1;
     if (run_and_check("./m2sdr_sata --help 2>&1", "--force", 0) != 0)
         return 1;
+    if (run_and_check("./m2sdr_sata --help 2>&1", "SATA Capture Volume", 0) != 0)
+        return 1;
     if (run_and_check("./m2sdr_sata --help 2>&1", "safe workflow examples:", 0) != 0)
         return 1;
     if (run_and_check("./m2sdr_sata --help 2>&1", "diag read SECTOR NSECTORS FILE|-", 0) != 0)

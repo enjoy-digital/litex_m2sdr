@@ -486,6 +486,11 @@ Workflow-first tool for SATA capture, host import/export, and RF/host replay.
 Named entries carry SigMF metadata by default. Raw sector operations are still
 available under the `diag` namespace for validation and debugging.
 
+The named capture area is called the SATA Capture Volume. It deliberately stays
+smaller than a general file system: it records contiguous sector ranges for the
+hardware streamers, keeps SigMF metadata beside each capture for interoperability,
+and avoids FAT/ext complexity so validation and recovery remain straightforward.
+
 **Usage**:
 ~~~~
 m2sdr_sata [options] cmd [args...]
@@ -493,23 +498,23 @@ m2sdr_sata [options] cmd [args...]
 
 **Commands** include:
 - **info**
-  Show transport, SATA link, drive, catalog, and host I/O status.
+  Show transport, SATA link, drive, SATA Capture Volume, and host I/O status.
 - **init `[--force]`**
-  Initialize the named SATA capture catalog. Use `--force` to reset a non-empty catalog; data sectors are not erased.
+  Initialize the SATA Capture Volume. Use `--force` to reset a non-empty volume; data sectors are not erased.
 - **list**
   List named captures with size and estimated duration when metadata is available.
 - **show `NAME`**
   Show sector ranges, SigMF metadata storage, and RF/sample metadata for a named capture.
 - **delete `NAME`**
-  Remove a named capture from the catalog without erasing its sectors.
+  Remove a named capture from the SATA Capture Volume without erasing its sectors.
 - **check**
-  Check catalog names and sector overlaps.
+  Check capture volume names and sector overlaps.
 - **capture `NAME --seconds SEC|--size BYTES [RF options]`**
-  Configure RF, record RX to SATA, and add a named catalog entry.
+  Configure RF, record RX to SATA, and add a named SATA Capture Volume entry.
 - **capture-start `NAME --seconds SEC|--size BYTES [RF options]`**
   Start a named RX-to-SATA capture and return immediately.
 - **import `NAME FILE|SIGMF [metadata options]`**
-  Import a raw file or SigMF dataset and catalog it.
+  Import a raw file or SigMF dataset and register it.
 - **export `NAME PATH [--raw]`**
   Export SigMF metadata+data by default; `--raw` writes only sample payload.
 - **play `NAME [RF overrides]`**

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR SATA named capture catalog helpers.
+ * M2SDR SATA Capture Volume helpers.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -13,16 +13,22 @@
 #include <stdarg.h>
 #include <inttypes.h>
 
-#include "m2sdr_sata_catalog.h"
+#include "m2sdr_sata_capture_volume.h"
 #include "m2sdr_cli.h"
 
-void catalog_clear(struct sata_catalog *cat)
+/*
+ * Keep the original V1 marker and serialized field names so existing disks
+ * remain readable after the user-facing rename from catalog to Capture Volume.
+ */
+#define SATA_CAPTURE_VOLUME_MAGIC_V1 "M2SDR_SATA_CATALOG_V1"
+
+void capture_volume_clear(struct sata_capture_volume *volume)
 {
-    memset(cat, 0, sizeof(*cat));
-    cat->initialized = true;
+    memset(volume, 0, sizeof(*volume));
+    volume->initialized = true;
 }
 
-int catalog_name_valid(const char *name)
+int capture_volume_name_valid(const char *name)
 {
     if (!name || !name[0] || strlen(name) >= SATA_CAPTURE_NAME_MAX)
         return 0;
@@ -33,7 +39,7 @@ int catalog_name_valid(const char *name)
     return 1;
 }
 
-int catalog_text_valid(const char *text, size_t max_len)
+int capture_volume_text_valid(const char *text, size_t max_len)
 {
     if (!text)
         return 1;
@@ -46,7 +52,7 @@ int catalog_text_valid(const char *text, size_t max_len)
     return 1;
 }
 
-void catalog_copy(char *dst, size_t dst_len, const char *src)
+void capture_volume_copy(char *dst, size_t dst_len, const char *src)
 {
     if (!dst || dst_len == 0)
         return;
@@ -55,7 +61,7 @@ void catalog_copy(char *dst, size_t dst_len, const char *src)
     snprintf(dst, dst_len, "%s", src);
 }
 
-static char *catalog_next_field(char **save)
+static char *capture_volume_next_field(char **save)
 {
     char *field = *save;
     char *sep;
@@ -72,7 +78,7 @@ static char *catalog_next_field(char **save)
     return field;
 }
 
-static int catalog_parse_entry(struct sata_catalog *cat, char *line)
+static int capture_volume_parse_entry(struct sata_capture_volume *volume, char *line)
 {
     char *save = line;
     char *field;
@@ -80,101 +86,101 @@ static int catalog_parse_entry(struct sata_catalog *cat, char *line)
     int slot = -1;
 
     memset(&e, 0, sizeof(e));
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || strcmp(field, "entry") != 0)
         return 0;
 
-    field = catalog_next_field(&save);
-    if (!catalog_name_valid(field))
+    field = capture_volume_next_field(&save);
+    if (!capture_volume_name_valid(field))
         return -1;
-    catalog_copy(e.name, sizeof(e.name), field);
+    capture_volume_copy(e.name, sizeof(e.name), field);
 
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.sector) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u32(field, &e.nsectors) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.bytes) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_int64(field, &e.sample_rate) != 0)
         return -1;
-    field = catalog_next_field(&save);
-    if (!catalog_text_valid(field, sizeof(e.format)))
+    field = capture_volume_next_field(&save);
+    if (!capture_volume_text_valid(field, sizeof(e.format)))
         return -1;
-    catalog_copy(e.format, sizeof(e.format), field);
-    field = catalog_next_field(&save);
-    if (!catalog_text_valid(field, sizeof(e.channel_layout)))
+    capture_volume_copy(e.format, sizeof(e.format), field);
+    field = capture_volume_next_field(&save);
+    if (!capture_volume_text_valid(field, sizeof(e.channel_layout)))
         return -1;
-    catalog_copy(e.channel_layout, sizeof(e.channel_layout), field);
-    field = catalog_next_field(&save);
+    capture_volume_copy(e.channel_layout, sizeof(e.channel_layout), field);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.rx_freq) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.tx_freq) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.bandwidth) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_int64(field, &e.rx_gain) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_int64(field, &e.tx_att) != 0)
         return -1;
-    field = catalog_next_field(&save);
+    field = capture_volume_next_field(&save);
     if (!field || m2sdr_cli_parse_u64(field, &e.created) != 0)
         return -1;
-    field = catalog_next_field(&save);
-    if (!catalog_text_valid(field, sizeof(e.notes)))
+    field = capture_volume_next_field(&save);
+    if (!capture_volume_text_valid(field, sizeof(e.notes)))
         return -1;
-    catalog_copy(e.notes, sizeof(e.notes), field ? field : "");
-    field = catalog_next_field(&save);
+    capture_volume_copy(e.notes, sizeof(e.notes), field ? field : "");
+    field = capture_volume_next_field(&save);
     if (field) {
         if (m2sdr_cli_parse_u64(field, &e.meta_sector) != 0)
             return -1;
-        field = catalog_next_field(&save);
+        field = capture_volume_next_field(&save);
         if (!field || m2sdr_cli_parse_u32(field, &e.meta_nsectors) != 0)
             return -1;
-        field = catalog_next_field(&save);
+        field = capture_volume_next_field(&save);
         if (!field || m2sdr_cli_parse_u64(field, &e.meta_bytes) != 0)
             return -1;
     }
 
     e.used = true;
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-        if (!cat->entries[i].used) {
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+        if (!volume->entries[i].used) {
             slot = i;
             break;
         }
     }
     if (slot < 0)
         return -1;
-    cat->entries[slot] = e;
+    volume->entries[slot] = e;
     return 0;
 }
 
-int catalog_parse_text(struct sata_catalog *cat, char *text)
+int capture_volume_parse_text(struct sata_capture_volume *volume, char *text)
 {
     char *line;
     char *save;
 
-    memset(cat, 0, sizeof(*cat));
+    memset(volume, 0, sizeof(*volume));
     line = strtok_r(text, "\n", &save);
-    if (!line || strcmp(line, "M2SDR_SATA_CATALOG_V1") != 0)
+    if (!line || strcmp(line, SATA_CAPTURE_VOLUME_MAGIC_V1) != 0)
         return 0;
 
-    cat->initialized = true;
+    volume->initialized = true;
     while ((line = strtok_r(NULL, "\n", &save)) != NULL) {
-        if (strncmp(line, "entry|", 6) == 0 && catalog_parse_entry(cat, line) != 0)
+        if (strncmp(line, "entry|", 6) == 0 && capture_volume_parse_entry(volume, line) != 0)
             return -1;
     }
     return 0;
 }
 
-static int catalog_appendf(char *buf, size_t buf_len, size_t *used, const char *fmt, ...)
+static int capture_volume_appendf(char *buf, size_t buf_len, size_t *used, const char *fmt, ...)
 {
     va_list ap;
     int n;
@@ -190,24 +196,24 @@ static int catalog_appendf(char *buf, size_t buf_len, size_t *used, const char *
     return 0;
 }
 
-int catalog_format_text(const struct sata_catalog *cat, char *buf, size_t buf_len)
+int capture_volume_format_text(const struct sata_capture_volume *volume, char *buf, size_t buf_len)
 {
     size_t used = 0;
 
-    if (catalog_appendf(buf, buf_len, &used,
-            "M2SDR_SATA_CATALOG_V1\n"
+    if (capture_volume_appendf(buf, buf_len, &used,
+            SATA_CAPTURE_VOLUME_MAGIC_V1 "\n"
             "catalog_sector=%" PRIu64 "\n"
             "catalog_sectors=%u\n"
             "data_start=%" PRIu64 "\n",
-            (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS,
+            (uint64_t)SATA_CAPTURE_VOLUME_SECTOR, SATA_CAPTURE_VOLUME_SECTORS,
             (uint64_t)SATA_DATA_START) != 0)
         return -1;
 
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-        const struct sata_capture_entry *e = &cat->entries[i];
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *e = &volume->entries[i];
         if (!e->used)
             continue;
-        if (catalog_appendf(buf, buf_len, &used,
+        if (capture_volume_appendf(buf, buf_len, &used,
                 "entry|%s|%" PRIu64 "|%" PRIu32 "|%" PRIu64 "|%" PRId64
                 "|%s|%s|%" PRIu64 "|%" PRIu64 "|%" PRIu64 "|%" PRId64
                 "|%" PRId64 "|%" PRIu64 "|%s|%" PRIu64 "|%" PRIu32 "|%" PRIu64 "\n",
@@ -220,43 +226,43 @@ int catalog_format_text(const struct sata_catalog *cat, char *buf, size_t buf_le
     return 0;
 }
 
-struct sata_capture_entry *catalog_find(struct sata_catalog *cat, const char *name)
+struct sata_capture_entry *capture_volume_find(struct sata_capture_volume *volume, const char *name)
 {
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-        if (cat->entries[i].used && strcmp(cat->entries[i].name, name) == 0)
-            return &cat->entries[i];
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+        if (volume->entries[i].used && strcmp(volume->entries[i].name, name) == 0)
+            return &volume->entries[i];
     }
     return NULL;
 }
 
-static int catalog_first_free(struct sata_catalog *cat)
+static int capture_volume_first_free(struct sata_capture_volume *volume)
 {
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-        if (!cat->entries[i].used)
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+        if (!volume->entries[i].used)
             return i;
     }
     return -1;
 }
 
-uint64_t catalog_end_sector(const struct sata_capture_entry *e)
+uint64_t capture_volume_end_sector(const struct sata_capture_entry *e)
 {
     return e->sector + (uint64_t)e->nsectors;
 }
 
-uint64_t catalog_meta_end_sector(const struct sata_capture_entry *e)
+uint64_t capture_volume_meta_end_sector(const struct sata_capture_entry *e)
 {
     return e->meta_sector + (uint64_t)e->meta_nsectors;
 }
 
-uint64_t catalog_storage_end_sector(const struct sata_capture_entry *e)
+uint64_t capture_volume_storage_end_sector(const struct sata_capture_entry *e)
 {
-    uint64_t end = catalog_end_sector(e);
-    uint64_t meta_end = catalog_meta_end_sector(e);
+    uint64_t end = capture_volume_end_sector(e);
+    uint64_t meta_end = capture_volume_meta_end_sector(e);
 
     return meta_end > end ? meta_end : end;
 }
 
-bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
+bool capture_volume_regions_overlap(uint64_t a_start, uint64_t a_count,
                              uint64_t b_start, uint64_t b_count)
 {
     uint64_t a_end = a_start + a_count;
@@ -265,26 +271,26 @@ bool catalog_regions_overlap(uint64_t a_start, uint64_t a_count,
     return a_start < b_end && b_start < a_end;
 }
 
-static bool catalog_entry_overlaps_region(const struct sata_capture_entry *e,
+static bool capture_volume_entry_overlaps_region(const struct sata_capture_entry *e,
                                           uint64_t sector, uint32_t nsectors)
 {
-    if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors))
+    if (capture_volume_regions_overlap(sector, nsectors, e->sector, e->nsectors))
         return true;
     if (e->meta_nsectors != 0 &&
-        catalog_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors))
+        capture_volume_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors))
         return true;
     return false;
 }
 
-int catalog_validate_new_storage(struct sata_catalog *cat, const char *name,
+int capture_volume_validate_new_storage(struct sata_capture_volume *volume, const char *name,
                                  uint64_t sector, uint32_t nsectors,
                                  uint64_t meta_sector, uint32_t meta_nsectors)
 {
-    if (!catalog_name_valid(name)) {
+    if (!capture_volume_name_valid(name)) {
         fprintf(stderr, "Invalid capture name. Use a short name without spaces or '|'.\n");
         return 1;
     }
-    if (catalog_find(cat, name)) {
+    if (capture_volume_find(volume, name)) {
         fprintf(stderr, "Capture '%s' already exists.\n", name);
         return 1;
     }
@@ -302,52 +308,52 @@ int catalog_validate_new_storage(struct sata_catalog *cat, const char *name,
             meta_sector, (uint64_t)SATA_DATA_START);
         return 1;
     }
-    if (meta_nsectors != 0 && catalog_regions_overlap(sector, nsectors, meta_sector, meta_nsectors)) {
+    if (meta_nsectors != 0 && capture_volume_regions_overlap(sector, nsectors, meta_sector, meta_nsectors)) {
         fprintf(stderr, "Capture data and metadata regions overlap.\n");
         return 1;
     }
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-        const struct sata_capture_entry *e = &cat->entries[i];
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+        const struct sata_capture_entry *e = &volume->entries[i];
         if (!e->used)
             continue;
-        if (catalog_entry_overlaps_region(e, sector, nsectors)) {
+        if (capture_volume_entry_overlaps_region(e, sector, nsectors)) {
             fprintf(stderr, "Capture overlaps '%s' at 0x%016" PRIx64 "..0x%016" PRIx64 ".\n",
-                e->name, e->sector, catalog_storage_end_sector(e));
+                e->name, e->sector, capture_volume_storage_end_sector(e));
             return 1;
         }
-        if (meta_nsectors != 0 && catalog_entry_overlaps_region(e, meta_sector, meta_nsectors)) {
+        if (meta_nsectors != 0 && capture_volume_entry_overlaps_region(e, meta_sector, meta_nsectors)) {
             fprintf(stderr, "Capture metadata overlaps '%s' at 0x%016" PRIx64 "..0x%016" PRIx64 ".\n",
-                e->name, e->sector, catalog_storage_end_sector(e));
+                e->name, e->sector, capture_volume_storage_end_sector(e));
             return 1;
         }
     }
     return 0;
 }
 
-int catalog_validate_new_region(struct sata_catalog *cat, const char *name,
+int capture_volume_validate_new_region(struct sata_capture_volume *volume, const char *name,
                                 uint64_t sector, uint32_t nsectors)
 {
-    return catalog_validate_new_storage(cat, name, sector, nsectors, 0, 0);
+    return capture_volume_validate_new_storage(volume, name, sector, nsectors, 0, 0);
 }
 
-uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors)
+uint64_t capture_volume_alloc_sector(struct sata_capture_volume *volume, uint32_t nsectors)
 {
     uint64_t sector = SATA_DATA_START;
 
     for (;;) {
         bool moved = false;
 
-        for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
-            const struct sata_capture_entry *e = &cat->entries[i];
+        for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
+            const struct sata_capture_entry *e = &volume->entries[i];
             if (!e->used)
                 continue;
-            if (catalog_regions_overlap(sector, nsectors, e->sector, e->nsectors)) {
-                sector = catalog_end_sector(e);
+            if (capture_volume_regions_overlap(sector, nsectors, e->sector, e->nsectors)) {
+                sector = capture_volume_end_sector(e);
                 moved = true;
             }
             if (e->meta_nsectors != 0 &&
-                catalog_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors)) {
-                sector = catalog_meta_end_sector(e);
+                capture_volume_regions_overlap(sector, nsectors, e->meta_sector, e->meta_nsectors)) {
+                sector = capture_volume_meta_end_sector(e);
                 moved = true;
             }
         }
@@ -356,7 +362,7 @@ uint64_t catalog_alloc_sector(struct sata_catalog *cat, uint32_t nsectors)
     }
 }
 
-void catalog_entry_print(const struct sata_capture_entry *e)
+void capture_volume_entry_print(const struct sata_capture_entry *e)
 {
     printf("Name           : %s\n", e->name);
     printf("Sector         : 0x%016" PRIx64 "\n", e->sector);
@@ -380,15 +386,15 @@ void catalog_entry_print(const struct sata_capture_entry *e)
         printf("Notes          : %s\n", e->notes);
 }
 
-int catalog_add_entry(struct sata_catalog *cat, const struct sata_capture_entry *entry)
+int capture_volume_add_entry(struct sata_capture_volume *volume, const struct sata_capture_entry *entry)
 {
-    int slot = catalog_first_free(cat);
+    int slot = capture_volume_first_free(volume);
 
     if (slot < 0) {
-        fprintf(stderr, "SATA catalog is full.\n");
+        fprintf(stderr, "SATA Capture Volume is full.\n");
         return 1;
     }
-    cat->entries[slot] = *entry;
-    cat->entries[slot].used = true;
+    volume->entries[slot] = *entry;
+    volume->entries[slot].used = true;
     return 0;
 }

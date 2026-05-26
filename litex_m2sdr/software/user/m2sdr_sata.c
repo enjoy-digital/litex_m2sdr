@@ -34,7 +34,7 @@
 #include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
-#include "m2sdr_sata_catalog.h"
+#include "m2sdr_sata_capture_volume.h"
 #include "m2sdr_sata_lowlevel.h"
 #include "m2sdr_sata_sigmf.h"
 #include "csr.h"
@@ -252,26 +252,26 @@ static void format_bytes(char *buf, size_t len, uint64_t bytes)
         snprintf(buf, len, "%.2Lf %s", value, units[unit]);
 }
 
-static unsigned catalog_used_count(const struct sata_catalog *cat)
+static unsigned capture_volume_used_count(const struct sata_capture_volume *cat)
 {
     unsigned used = 0;
 
     if (!cat)
         return 0;
-    for (unsigned i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++)
+    for (unsigned i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++)
         if (cat->entries[i].used)
             used++;
     return used;
 }
 
-static uint64_t catalog_entry_payload_bytes(const struct sata_capture_entry *e)
+static uint64_t capture_volume_entry_payload_bytes(const struct sata_capture_entry *e)
 {
     if (!e)
         return 0;
     return e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
 }
 
-static unsigned catalog_entry_channel_count(const struct sata_capture_entry *e)
+static unsigned capture_volume_entry_channel_count(const struct sata_capture_entry *e)
 {
     if (!e)
         return 0;
@@ -282,7 +282,7 @@ static unsigned catalog_entry_channel_count(const struct sata_capture_entry *e)
     return 0;
 }
 
-static void format_catalog_duration(char *buf, size_t len, const struct sata_capture_entry *e)
+static void format_capture_duration(char *buf, size_t len, const struct sata_capture_entry *e)
 {
     enum m2sdr_format format;
     unsigned channels;
@@ -295,9 +295,9 @@ static void format_catalog_duration(char *buf, size_t len, const struct sata_cap
         snprintf(buf, len, "-");
         return;
     }
-    channels = catalog_entry_channel_count(e);
+    channels = capture_volume_entry_channel_count(e);
     sample_bytes = m2sdr_format_size(format);
-    bytes = catalog_entry_payload_bytes(e);
+    bytes = capture_volume_entry_payload_bytes(e);
     if (channels == 0 || sample_bytes == 0 || bytes == 0) {
         snprintf(buf, len, "-");
         return;
@@ -1098,14 +1098,14 @@ out_close_dev:
     return rc;
 }
 
-/* Named capture catalog storage -------------------------------------------- */
+/* SATA Capture Volume storage ---------------------------------------------- */
 
 static int sata_read_to_host_buffer_quiet(struct m2sdr_dev *conn, uint64_t sector, uint32_t nsectors, int timeout_ms)
 {
     (void)sata_host_buffer_bulk_words(conn);
     sata_sector2mem_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_SECTOR2MEM_START_ADDR, 1);
-    return wait_done_quiet("SATA_SECTOR2MEM(catalog)",
+    return wait_done_quiet("SATA_SECTOR2MEM(capture-volume)",
         sata_sector2mem_done, sata_sector2mem_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
@@ -1113,42 +1113,42 @@ static int sata_write_from_host_buffer_quiet(void *conn, uint64_t sector, uint32
 {
     sata_mem2sector_program(conn, sector, nsectors, SATA_HOST_BUFFER_BASE);
     m2sdr_write32(conn, CSR_SATA_MEM2SECTOR_START_ADDR, 1);
-    return wait_done_quiet("SATA_MEM2SECTOR(catalog)",
+    return wait_done_quiet("SATA_MEM2SECTOR(capture-volume)",
         sata_mem2sector_done, sata_mem2sector_error, conn, timeout_ms) == SATA_WAIT_OK ? 0 : 1;
 }
 
-static int catalog_buffer_check(void)
+static int capture_volume_buffer_check(void)
 {
-    if (SATA_CATALOG_SECTORS > sata_host_buffer_max_sectors()) {
-        fprintf(stderr, "Catalog region is larger than SATA host buffer.\n");
+    if (SATA_CAPTURE_VOLUME_SECTORS > sata_host_buffer_max_sectors()) {
+        fprintf(stderr, "SATA Capture Volume region is larger than SATA host buffer.\n");
         return 1;
     }
     return 0;
 }
 
-static int catalog_load_from_conn(void *conn, struct sata_catalog *cat, int timeout_ms)
+static int capture_volume_load_from_conn(void *conn, struct sata_capture_volume *cat, int timeout_ms)
 {
-    uint32_t bytes = SATA_CATALOG_SECTORS * SATA_SECTOR_BYTES;
+    uint32_t bytes = SATA_CAPTURE_VOLUME_SECTORS * SATA_SECTOR_BYTES;
     uint8_t *buf;
     char *text;
     int rc = 1;
 
-    if (catalog_buffer_check() != 0)
+    if (capture_volume_buffer_check() != 0)
         return 1;
 
     buf = calloc(1, bytes + 1u);
     if (!buf) {
-        fprintf(stderr, "Failed to allocate catalog buffer.\n");
+        fprintf(stderr, "Failed to allocate SATA Capture Volume buffer.\n");
         return 1;
     }
-    if (sata_read_to_host_buffer_quiet(conn, SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, timeout_ms) != 0)
+    if (sata_read_to_host_buffer_quiet(conn, SATA_CAPTURE_VOLUME_SECTOR, SATA_CAPTURE_VOLUME_SECTORS, timeout_ms) != 0)
         goto out;
     sata_host_buffer_read(conn, buf, bytes);
     text = (char *)buf;
     text[bytes] = '\0';
 
-    if (catalog_parse_text(cat, text) != 0) {
-        fprintf(stderr, "Invalid SATA catalog entry.\n");
+    if (capture_volume_parse_text(cat, text) != 0) {
+        fprintf(stderr, "Invalid SATA Capture Volume entry.\n");
         goto out;
     }
     rc = 0;
@@ -1158,27 +1158,27 @@ out:
     return rc;
 }
 
-static int catalog_save_to_conn(void *conn, const struct sata_catalog *cat, int timeout_ms)
+static int capture_volume_save_to_conn(void *conn, const struct sata_capture_volume *cat, int timeout_ms)
 {
-    uint32_t bytes = SATA_CATALOG_SECTORS * SATA_SECTOR_BYTES;
+    uint32_t bytes = SATA_CAPTURE_VOLUME_SECTORS * SATA_SECTOR_BYTES;
     uint8_t *buf;
     int rc = 1;
 
-    if (catalog_buffer_check() != 0)
+    if (capture_volume_buffer_check() != 0)
         return 1;
     buf = calloc(1, bytes);
     if (!buf) {
-        fprintf(stderr, "Failed to allocate catalog buffer.\n");
+        fprintf(stderr, "Failed to allocate SATA Capture Volume buffer.\n");
         return 1;
     }
 
-    if (catalog_format_text(cat, (char *)buf, bytes) != 0) {
-        fprintf(stderr, "SATA catalog is full.\n");
+    if (capture_volume_format_text(cat, (char *)buf, bytes) != 0) {
+        fprintf(stderr, "SATA Capture Volume is full.\n");
         goto out;
     }
 
     sata_host_buffer_write(conn, buf, bytes);
-    if (sata_write_from_host_buffer_quiet(conn, SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, timeout_ms) != 0)
+    if (sata_write_from_host_buffer_quiet(conn, SATA_CAPTURE_VOLUME_SECTOR, SATA_CAPTURE_VOLUME_SECTORS, timeout_ms) != 0)
         goto out;
     rc = 0;
 
@@ -1187,44 +1187,44 @@ out:
     return rc;
 }
 
-static int catalog_load(struct sata_catalog *cat, int timeout_ms)
+static int capture_volume_load(struct sata_capture_volume *cat, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
     int rc;
 
     sata_require_csrs();
-    rc = catalog_load_from_conn(conn, cat, timeout_ms);
+    rc = capture_volume_load_from_conn(conn, cat, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
 
-static int catalog_save(const struct sata_catalog *cat, int timeout_ms)
+static int capture_volume_save(const struct sata_capture_volume *cat, int timeout_ms)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
     int rc;
 
     sata_require_csrs();
-    rc = catalog_save_to_conn(conn, cat, timeout_ms);
+    rc = capture_volume_save_to_conn(conn, cat, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
 
-static int catalog_require(struct sata_catalog *cat, int timeout_ms)
+static int capture_volume_require(struct sata_capture_volume *cat, int timeout_ms)
 {
-    if (catalog_load(cat, timeout_ms) != 0)
+    if (capture_volume_load(cat, timeout_ms) != 0)
         return 1;
     if (!cat->initialized) {
         fprintf(stderr,
-            "SATA catalog is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
+            "SATA Capture Volume is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
         return 1;
     }
     return 0;
 }
 
-static int do_catalog_init(int timeout_ms, bool force, bool dry_run)
+static int do_capture_volume_init(int timeout_ms, bool force, bool dry_run)
 {
-    struct sata_catalog cat;
-    struct sata_catalog current;
+    struct sata_capture_volume cat;
+    struct sata_capture_volume current;
     struct m2sdr_dev *conn;
     unsigned used = 0;
     bool overwriting = false;
@@ -1233,70 +1233,70 @@ static int do_catalog_init(int timeout_ms, bool force, bool dry_run)
     conn = m2sdr_open_dev();
     sata_require_csrs();
     memset(&current, 0, sizeof(current));
-    rc = catalog_load_from_conn(conn, &current, timeout_ms);
+    rc = capture_volume_load_from_conn(conn, &current, timeout_ms);
     if (rc != 0) {
         if (!force) {
             fprintf(stderr,
-                "Could not validate the existing SATA catalog. Use `m2sdr_sata init --force` to overwrite only the catalog sectors.\n");
+                "Could not validate the existing SATA Capture Volume. Use `m2sdr_sata init --force` to overwrite only the capture volume metadata sectors.\n");
             m2sdr_close_dev(conn);
             return 1;
         }
         fprintf(stderr,
-            "Existing SATA catalog could not be validated; --force will overwrite only the catalog sectors.\n");
+            "Existing SATA Capture Volume could not be validated; --force will overwrite only the capture volume metadata sectors.\n");
         overwriting = true;
     }
 
     if (current.initialized) {
         overwriting = true;
-        used = catalog_used_count(&current);
+        used = capture_volume_used_count(&current);
         if (used != 0 && !force) {
             fprintf(stderr,
-                "SATA catalog already contains %u entr%s; refusing to reset without --force.\n",
+                "SATA Capture Volume already contains %u entr%s; refusing to reset without --force.\n",
                 used, used == 1 ? "y" : "ies");
             fprintf(stderr,
-                "Use `m2sdr_sata list` to inspect entries or `m2sdr_sata init --force` to reset only the catalog.\n");
+                "Use `m2sdr_sata list` to inspect entries or `m2sdr_sata init --force` to reset only the SATA Capture Volume.\n");
             m2sdr_close_dev(conn);
             return 1;
         }
     }
 
     if (dry_run) {
-        printf("init dry-run: catalog sector=0x%016" PRIx64 " sectors=%u existing_entries=%u force=%s\n",
-            (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS, used, force ? "yes" : "no");
+        printf("init dry-run: capture-volume sector=0x%016" PRIx64 " sectors=%u existing_entries=%u force=%s\n",
+            (uint64_t)SATA_CAPTURE_VOLUME_SECTOR, SATA_CAPTURE_VOLUME_SECTORS, used, force ? "yes" : "no");
         m2sdr_close_dev(conn);
         return 0;
     }
 
-    catalog_clear(&cat);
-    rc = catalog_save_to_conn(conn, &cat, timeout_ms);
+    capture_volume_clear(&cat);
+    rc = capture_volume_save_to_conn(conn, &cat, timeout_ms);
     m2sdr_close_dev(conn);
     if (rc != 0)
         return 1;
-    printf("%s SATA catalog at sector 0x%016" PRIx64 " (%u sectors). Data sectors were not erased.\n",
+    printf("%s SATA Capture Volume at sector 0x%016" PRIx64 " (%u sectors). Data sectors were not erased.\n",
         overwriting ? "Reset" : "Initialized",
-        (uint64_t)SATA_CATALOG_SECTOR, SATA_CATALOG_SECTORS);
+        (uint64_t)SATA_CAPTURE_VOLUME_SECTOR, SATA_CAPTURE_VOLUME_SECTORS);
     return 0;
 }
 
-static int do_catalog_list(int timeout_ms)
+static int do_capture_volume_list(int timeout_ms)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     int count = 0;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
 
     printf("%-24s %-18s %-11s %-10s %-12s %-8s %-8s\n",
         "NAME", "SECTOR", "SIZE", "DURATION", "RATE", "FORMAT", "CHANS");
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
         const struct sata_capture_entry *e = &cat.entries[i];
         char size_s[32];
         char duration_s[32];
 
         if (!e->used)
             continue;
-        format_bytes(size_s, sizeof(size_s), catalog_entry_payload_bytes(e));
-        format_catalog_duration(duration_s, sizeof(duration_s), e);
+        format_bytes(size_s, sizeof(size_s), capture_volume_entry_payload_bytes(e));
+        format_capture_duration(duration_s, sizeof(duration_s), e);
         printf("%-24s 0x%016" PRIx64 " %-11s %-10s %-12" PRId64 " %-8s %-8s\n",
             e->name, e->sector, size_s, duration_s,
             e->sample_rate, e->format, e->channel_layout);
@@ -1307,84 +1307,84 @@ static int do_catalog_list(int timeout_ms)
     return 0;
 }
 
-static int do_catalog_show(const char *name, int timeout_ms)
+static int do_capture_volume_show(const char *name, int timeout_ms)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
     }
-    catalog_entry_print(e);
+    capture_volume_entry_print(e);
     printf("Data Range     : 0x%016" PRIx64 "..0x%016" PRIx64 "\n",
-        e->sector, catalog_end_sector(e));
+        e->sector, capture_volume_end_sector(e));
     if (e->meta_nsectors != 0) {
         printf("SigMF Metadata : stored at 0x%016" PRIx64 "..0x%016" PRIx64
                " (%" PRIu64 " bytes)\n",
-            e->meta_sector, catalog_meta_end_sector(e), e->meta_bytes);
+            e->meta_sector, capture_volume_meta_end_sector(e), e->meta_bytes);
     } else {
         printf("SigMF Metadata : not stored\n");
     }
     return 0;
 }
 
-static int do_catalog_delete(const char *name, int timeout_ms)
+static int do_capture_volume_delete(const char *name, int timeout_ms)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
     struct m2sdr_dev *conn;
     int rc;
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    rc = catalog_load_from_conn(conn, &cat, timeout_ms);
+    rc = capture_volume_load_from_conn(conn, &cat, timeout_ms);
     if (rc != 0) {
         m2sdr_close_dev(conn);
         return 1;
     }
     if (!cat.initialized) {
         fprintf(stderr,
-            "SATA catalog is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
+            "SATA Capture Volume is not initialized. Run `m2sdr_sata info` to verify the disk, then `m2sdr_sata init`.\n");
         m2sdr_close_dev(conn);
         return 1;
     }
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         m2sdr_close_dev(conn);
         return 1;
     }
     printf("Deleting capture '%s': data=0x%016" PRIx64 "..0x%016" PRIx64,
-        name, e->sector, catalog_end_sector(e));
+        name, e->sector, capture_volume_end_sector(e));
     if (e->meta_nsectors != 0)
         printf(" sigmf=0x%016" PRIx64 "..0x%016" PRIx64,
-            e->meta_sector, catalog_meta_end_sector(e));
+            e->meta_sector, capture_volume_meta_end_sector(e));
     printf("\n");
     memset(e, 0, sizeof(*e));
-    rc = catalog_save_to_conn(conn, &cat, timeout_ms);
+    rc = capture_volume_save_to_conn(conn, &cat, timeout_ms);
     m2sdr_close_dev(conn);
     if (rc != 0)
         return 1;
-    printf("Deleted capture '%s' from catalog. Data sectors were not erased.\n", name);
+    printf("Deleted capture '%s' from SATA Capture Volume. Data sectors were not erased.\n", name);
     return 0;
 }
 
-static int do_catalog_check(int timeout_ms)
+static int do_capture_volume_check(int timeout_ms)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     int errors = 0;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    for (int i = 0; i < SATA_CATALOG_MAX_ENTRIES; i++) {
+    for (int i = 0; i < SATA_CAPTURE_VOLUME_MAX_ENTRIES; i++) {
         const struct sata_capture_entry *a = &cat.entries[i];
         if (!a->used)
             continue;
-        if (!catalog_name_valid(a->name) || a->nsectors == 0 || a->sector < SATA_DATA_START) {
+        if (!capture_volume_name_valid(a->name) || a->nsectors == 0 || a->sector < SATA_DATA_START) {
             fprintf(stderr, "Invalid entry: %s\n", a->name);
             errors++;
         }
@@ -1395,11 +1395,11 @@ static int do_catalog_check(int timeout_ms)
             errors++;
         }
         if (a->meta_nsectors != 0 &&
-            catalog_regions_overlap(a->sector, a->nsectors, a->meta_sector, a->meta_nsectors)) {
+            capture_volume_regions_overlap(a->sector, a->nsectors, a->meta_sector, a->meta_nsectors)) {
             fprintf(stderr, "Self-overlap between data and metadata: %s\n", a->name);
             errors++;
         }
-        for (int j = i + 1; j < SATA_CATALOG_MAX_ENTRIES; j++) {
+        for (int j = i + 1; j < SATA_CAPTURE_VOLUME_MAX_ENTRIES; j++) {
             const struct sata_capture_entry *b = &cat.entries[j];
             if (!b->used)
                 continue;
@@ -1407,22 +1407,22 @@ static int do_catalog_check(int timeout_ms)
                 fprintf(stderr, "Duplicate name: %s\n", a->name);
                 errors++;
             }
-            if (catalog_regions_overlap(a->sector, a->nsectors, b->sector, b->nsectors)) {
+            if (capture_volume_regions_overlap(a->sector, a->nsectors, b->sector, b->nsectors)) {
                 fprintf(stderr, "Overlap: %s and %s\n", a->name, b->name);
                 errors++;
             }
             if (a->meta_nsectors != 0 &&
-                catalog_regions_overlap(a->meta_sector, a->meta_nsectors, b->sector, b->nsectors)) {
+                capture_volume_regions_overlap(a->meta_sector, a->meta_nsectors, b->sector, b->nsectors)) {
                 fprintf(stderr, "Metadata/data overlap: %s and %s\n", a->name, b->name);
                 errors++;
             }
             if (b->meta_nsectors != 0 &&
-                catalog_regions_overlap(a->sector, a->nsectors, b->meta_sector, b->meta_nsectors)) {
+                capture_volume_regions_overlap(a->sector, a->nsectors, b->meta_sector, b->meta_nsectors)) {
                 fprintf(stderr, "Data/metadata overlap: %s and %s\n", a->name, b->name);
                 errors++;
             }
             if (a->meta_nsectors != 0 && b->meta_nsectors != 0 &&
-                catalog_regions_overlap(a->meta_sector, a->meta_nsectors,
+                capture_volume_regions_overlap(a->meta_sector, a->meta_nsectors,
                                         b->meta_sector, b->meta_nsectors)) {
                 fprintf(stderr, "Metadata overlap: %s and %s\n", a->name, b->name);
                 errors++;
@@ -1430,14 +1430,14 @@ static int do_catalog_check(int timeout_ms)
         }
     }
     if (errors == 0) {
-        printf("SATA catalog OK.\n");
+        printf("SATA Capture Volume OK.\n");
         return 0;
     }
-    fprintf(stderr, "SATA catalog has %d error(s).\n", errors);
+    fprintf(stderr, "SATA Capture Volume has %d error(s).\n", errors);
     return 1;
 }
 
-static void catalog_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
+static void capture_volume_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
                                              struct m2sdr_sigmf_meta *meta,
                                              int timeout_ms);
 
@@ -1501,12 +1501,12 @@ out_close_dev:
 
 static int do_export_capture(const char *name, const char *path, int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
@@ -1514,28 +1514,28 @@ static int do_export_capture(const char *name, const char *path, int timeout_ms,
     if (dry_run) {
         printf("export dry-run: mode=raw name=%s path=%s sector=0x%016" PRIx64
                " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
-            name, path, e->sector, e->nsectors, catalog_entry_payload_bytes(e));
+            name, path, e->sector, e->nsectors, capture_volume_entry_payload_bytes(e));
         return 0;
     }
     if (export_entry_data(e, path, timeout_ms) != 0)
         return 1;
     printf("Exported '%s' to %s (%" PRIu64 " bytes).\n",
-        name, path, catalog_entry_payload_bytes(e));
+        name, path, capture_volume_entry_payload_bytes(e));
     return 0;
 }
 
 static int do_export_sigmf_capture(const char *name, const char *path, int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
     struct m2sdr_sigmf_meta meta;
     char data_path[1024];
     char meta_path[1024];
     char transport[32];
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
@@ -1549,14 +1549,14 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
     if (dry_run) {
         printf("export dry-run: mode=sigmf name=%s meta=%s data=%s sector=0x%016" PRIx64
                " nsectors=%" PRIu32 " bytes=%" PRIu64 "\n",
-            name, meta_path, data_path, e->sector, e->nsectors, catalog_entry_payload_bytes(e));
+            name, meta_path, data_path, e->sector, e->nsectors, capture_volume_entry_payload_bytes(e));
         return 0;
     }
 
     if (export_entry_data(e, data_path, timeout_ms) != 0)
         return 1;
 
-    catalog_entry_get_sigmf_metadata(e, &meta, timeout_ms);
+    capture_volume_entry_get_sigmf_metadata(e, &meta, timeout_ms);
     snprintf(transport, sizeof(transport), "%s",
         meta.m2sdr_transport[0] ? meta.m2sdr_transport : "sata");
     snprintf(meta.data_path, sizeof(meta.data_path), "%s", data_path);
@@ -1571,7 +1571,7 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
     }
 
     printf("Exported SigMF '%s' to %s + %s (%" PRIu64 " bytes).\n",
-        name, meta_path, data_path, catalog_entry_payload_bytes(e));
+        name, meta_path, data_path, capture_volume_entry_payload_bytes(e));
     return 0;
 }
 
@@ -1660,11 +1660,11 @@ static int parse_named_option(struct named_transfer_options *opts, int argc, cha
     } else if (!strcmp(opt, "--tx-att") || !strcmp(opt, "--tx_att")) {
         opts->tx_att = parse_i64("TX attenuation", value);
     } else if (!strcmp(opt, "--notes")) {
-        if (!catalog_text_valid(value, sizeof(opts->notes))) {
+        if (!capture_volume_text_valid(value, sizeof(opts->notes))) {
             fprintf(stderr, "Notes are too long or contain '|'/newline.\n");
             exit(1);
         }
-        catalog_copy(opts->notes, sizeof(opts->notes), value);
+        capture_volume_copy(opts->notes, sizeof(opts->notes), value);
     } else {
         fprintf(stderr, "Unknown option: %s\n", opt);
         exit(1);
@@ -1672,7 +1672,7 @@ static int parse_named_option(struct named_transfer_options *opts, int argc, cha
     return 1;
 }
 
-static void catalog_entry_from_options(struct sata_capture_entry *e,
+static void capture_volume_entry_from_options(struct sata_capture_entry *e,
                                        const char *name,
                                        const struct named_transfer_options *opts,
                                        uint64_t sector,
@@ -1684,7 +1684,7 @@ static void catalog_entry_from_options(struct sata_capture_entry *e,
 {
     memset(e, 0, sizeof(*e));
     e->used = true;
-    catalog_copy(e->name, sizeof(e->name), name);
+    capture_volume_copy(e->name, sizeof(e->name), name);
     e->sector = sector;
     e->nsectors = nsectors;
     e->bytes = bytes;
@@ -1692,18 +1692,18 @@ static void catalog_entry_from_options(struct sata_capture_entry *e,
     e->meta_nsectors = meta_nsectors;
     e->meta_bytes = meta_bytes;
     e->sample_rate = opts->sample_rate;
-    catalog_copy(e->format, sizeof(e->format), format_name(opts->format));
-    catalog_copy(e->channel_layout, sizeof(e->channel_layout), channel_layout_name(opts->channel_layout));
+    capture_volume_copy(e->format, sizeof(e->format), format_name(opts->format));
+    capture_volume_copy(e->channel_layout, sizeof(e->channel_layout), channel_layout_name(opts->channel_layout));
     e->rx_freq = opts->rx_freq;
     e->tx_freq = opts->tx_freq;
     e->bandwidth = opts->bandwidth;
     e->rx_gain = opts->rx_gain;
     e->tx_att = opts->tx_att;
     e->created = (uint64_t)time(NULL);
-    catalog_copy(e->notes, sizeof(e->notes), opts->notes);
+    capture_volume_copy(e->notes, sizeof(e->notes), opts->notes);
 }
 
-static int catalog_assign_new_storage(struct sata_catalog *cat,
+static int capture_volume_assign_new_storage(struct sata_capture_volume *cat,
                                       const char *name,
                                       bool have_sector,
                                       uint64_t requested_sector,
@@ -1717,9 +1717,9 @@ static int catalog_assign_new_storage(struct sata_catalog *cat,
     }
 
     *data_sector = have_sector ? requested_sector :
-        catalog_alloc_sector(cat, data_nsectors + M2SDR_SATA_SIGMF_META_SECTORS);
+        capture_volume_alloc_sector(cat, data_nsectors + M2SDR_SATA_SIGMF_META_SECTORS);
     *meta_sector = *data_sector + data_nsectors;
-    return catalog_validate_new_storage(cat, name,
+    return capture_volume_validate_new_storage(cat, name,
         *data_sector, data_nsectors,
         *meta_sector, M2SDR_SATA_SIGMF_META_SECTORS);
 }
@@ -1786,7 +1786,7 @@ out:
     return rc;
 }
 
-static int catalog_entry_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
+static int capture_volume_entry_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
                                                       struct sata_capture_entry *entry,
                                                       const char *name,
                                                       int timeout_ms)
@@ -1803,7 +1803,7 @@ static int catalog_entry_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
         timeout_ms, &entry->meta_bytes);
 }
 
-static int catalog_entry_write_sigmf_metadata(struct sata_capture_entry *entry,
+static int capture_volume_entry_write_sigmf_metadata(struct sata_capture_entry *entry,
                                               const char *name,
                                               int timeout_ms)
 {
@@ -1815,12 +1815,12 @@ static int catalog_entry_write_sigmf_metadata(struct sata_capture_entry *entry,
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    rc = catalog_entry_write_sigmf_metadata_to_conn(conn, entry, name, timeout_ms);
+    rc = capture_volume_entry_write_sigmf_metadata_to_conn(conn, entry, name, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
 
-static int catalog_entry_read_sigmf_metadata_from_conn(struct m2sdr_dev *conn,
+static int capture_volume_entry_read_sigmf_metadata_from_conn(struct m2sdr_dev *conn,
                                                        const struct sata_capture_entry *entry,
                                                        struct m2sdr_sigmf_meta *meta,
                                                        int timeout_ms)
@@ -1864,7 +1864,7 @@ out:
     return rc;
 }
 
-static int catalog_entry_read_sigmf_metadata(const struct sata_capture_entry *entry,
+static int capture_volume_entry_read_sigmf_metadata(const struct sata_capture_entry *entry,
                                              struct m2sdr_sigmf_meta *meta,
                                              int timeout_ms)
 {
@@ -1876,23 +1876,23 @@ static int catalog_entry_read_sigmf_metadata(const struct sata_capture_entry *en
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    rc = catalog_entry_read_sigmf_metadata_from_conn(conn, entry, meta, timeout_ms);
+    rc = capture_volume_entry_read_sigmf_metadata_from_conn(conn, entry, meta, timeout_ms);
     m2sdr_close_dev(conn);
     return rc;
 }
 
-static void catalog_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
+static void capture_volume_entry_get_sigmf_metadata(const struct sata_capture_entry *entry,
                                              struct m2sdr_sigmf_meta *meta,
                                              int timeout_ms)
 {
-    if (catalog_entry_read_sigmf_metadata(entry, meta, timeout_ms) != 0)
+    if (capture_volume_entry_read_sigmf_metadata(entry, meta, timeout_ms) != 0)
         m2sdr_sata_sigmf_from_entry(meta, entry ? entry->name : NULL, entry);
 }
 
 static int do_import_capture(const char *name, const char *path, int argc, char **argv,
                              int argi, int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct named_transfer_options opts;
     struct sata_capture_entry entry;
     uint64_t bytes = file_size_bytes(path);
@@ -1923,11 +1923,11 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    if (catalog_load_from_conn(conn, &cat, timeout_ms) != 0)
+    if (capture_volume_load_from_conn(conn, &cat, timeout_ms) != 0)
         goto out_close_dev;
     if (!cat.initialized)
-        catalog_clear(&cat);
-    if (catalog_assign_new_storage(&cat, name, opts.have_sector, opts.sector,
+        capture_volume_clear(&cat);
+    if (capture_volume_assign_new_storage(&cat, name, opts.have_sector, opts.sector,
                                    nsectors, &sector, &meta_sector) != 0)
         goto out_close_dev;
     if (dry_run) {
@@ -1942,13 +1942,13 @@ static int do_import_capture(const char *name, const char *path, int argc, char 
 
     if (write_file_to_conn(conn, path, sector, nsectors, true, timeout_ms) != 0)
         goto out_close_dev;
-    catalog_entry_from_options(&entry, name, &opts, sector, nsectors, bytes,
+    capture_volume_entry_from_options(&entry, name, &opts, sector, nsectors, bytes,
         meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
-    if (catalog_entry_write_sigmf_metadata_to_conn(conn, &entry, name, timeout_ms) != 0)
+    if (capture_volume_entry_write_sigmf_metadata_to_conn(conn, &entry, name, timeout_ms) != 0)
         goto out_close_dev;
-    if (catalog_add_entry(&cat, &entry) != 0)
+    if (capture_volume_add_entry(&cat, &entry) != 0)
         goto out_close_dev;
-    if (catalog_save_to_conn(conn, &cat, timeout_ms) != 0)
+    if (capture_volume_save_to_conn(conn, &cat, timeout_ms) != 0)
         goto out_close_dev;
     printf("Imported '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
@@ -1964,7 +1964,7 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
                                    int argc, char **argv, int argi,
                                    int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct m2sdr_sigmf_meta meta;
     struct sata_capture_entry entry;
     char source_data_path[1024];
@@ -2017,11 +2017,11 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
-    if (catalog_load_from_conn(conn, &cat, timeout_ms) != 0)
+    if (capture_volume_load_from_conn(conn, &cat, timeout_ms) != 0)
         goto out_close_dev;
     if (!cat.initialized)
-        catalog_clear(&cat);
-    if (catalog_assign_new_storage(&cat, name, have_sector, requested_sector,
+        capture_volume_clear(&cat);
+    if (capture_volume_assign_new_storage(&cat, name, have_sector, requested_sector,
                                    nsectors, &sector, &meta_sector) != 0)
         goto out_close_dev;
     if (dry_run) {
@@ -2049,12 +2049,12 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
             sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
             meta_bytes) != 0) {
-        fprintf(stderr, "Could not convert SigMF metadata to SATA catalog entry.\n");
+        fprintf(stderr, "Could not convert SigMF metadata to SATA Capture Volume entry.\n");
         goto out_close_dev;
     }
-    if (catalog_add_entry(&cat, &entry) != 0)
+    if (capture_volume_add_entry(&cat, &entry) != 0)
         goto out_close_dev;
-    if (catalog_save_to_conn(conn, &cat, timeout_ms) != 0)
+    if (capture_volume_save_to_conn(conn, &cat, timeout_ms) != 0)
         goto out_close_dev;
     printf("Imported SigMF '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
@@ -2478,7 +2478,7 @@ static int apply_rf_config_from_options(const struct named_transfer_options *opt
     return rc == M2SDR_ERR_OK ? 0 : 1;
 }
 
-static int catalog_entry_to_options(const struct sata_capture_entry *e,
+static int capture_volume_entry_to_options(const struct sata_capture_entry *e,
                                     struct named_transfer_options *opts)
 {
     named_transfer_options_init(opts);
@@ -2493,7 +2493,7 @@ static int catalog_entry_to_options(const struct sata_capture_entry *e,
     opts->bandwidth = e->bandwidth;
     opts->rx_gain = e->rx_gain;
     opts->tx_att = e->tx_att;
-    catalog_copy(opts->notes, sizeof(opts->notes), e->notes);
+    capture_volume_copy(opts->notes, sizeof(opts->notes), e->notes);
     return 0;
 }
 
@@ -2522,7 +2522,7 @@ static int sigmf_meta_to_options(const char *name,
         opts->tx_freq = (uint64_t)meta->center_freq;
     }
     if (meta->description[0])
-        catalog_copy(opts->notes, sizeof(opts->notes), meta->description);
+        capture_volume_copy(opts->notes, sizeof(opts->notes), meta->description);
     return 0;
 }
 
@@ -2541,7 +2541,7 @@ static void parse_replay_rf_overrides(struct named_transfer_options *opts,
 static int do_capture_named(const char *name, int argc, char **argv, int argi,
                             int timeout_ms, bool start_only, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct capture_options opts;
     struct sata_capture_entry entry;
     uint64_t bytes = 0;
@@ -2559,11 +2559,11 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     }
     if (capture_compute_size(&opts, &nsectors, &bytes) != 0)
         return 1;
-    if (catalog_load(&cat, timeout_ms) != 0)
+    if (capture_volume_load(&cat, timeout_ms) != 0)
         return 1;
     if (!cat.initialized)
-        catalog_clear(&cat);
-    if (catalog_assign_new_storage(&cat, name, opts.named.have_sector, opts.named.sector,
+        capture_volume_clear(&cat);
+    if (capture_volume_assign_new_storage(&cat, name, opts.named.have_sector, opts.named.sector,
                                    nsectors, &sector, &meta_sector) != 0)
         return 1;
     if (dry_run) {
@@ -2581,13 +2581,13 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     if (apply_rf_config_from_options(&opts.named) != 0)
         return 1;
     if (start_only) {
-        catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
+        capture_volume_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
-        if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
+        if (capture_volume_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
             return 1;
-        if (catalog_add_entry(&cat, &entry) != 0)
+        if (capture_volume_add_entry(&cat, &entry) != 0)
             return 1;
-        if (catalog_save(&cat, timeout_ms) != 0)
+        if (capture_volume_save(&cat, timeout_ms) != 0)
             return 1;
         if (do_record_start(sector, nsectors, timeout_ms, false) != 0)
             return 1;
@@ -2599,13 +2599,13 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
             return 1;
     }
 
-    catalog_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
+    capture_volume_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
         meta_sector, M2SDR_SATA_SIGMF_META_SECTORS, 0);
-    if (catalog_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
+    if (capture_volume_entry_write_sigmf_metadata(&entry, name, timeout_ms) != 0)
         return 1;
-    if (catalog_add_entry(&cat, &entry) != 0)
+    if (capture_volume_add_entry(&cat, &entry) != 0)
         return 1;
-    if (catalog_save(&cat, timeout_ms) != 0)
+    if (capture_volume_save(&cat, timeout_ms) != 0)
         return 1;
     printf("Recorded capture '%s' at sector 0x%016" PRIx64 " (%" PRIu32 " sectors).\n",
         name, sector, nsectors);
@@ -2615,7 +2615,7 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
 static int do_replay_host_named(const char *name, int argc, char **argv, int argi,
                                 int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
     const char *dst = NULL;
 
@@ -2642,9 +2642,9 @@ static int do_replay_host_named(const char *name, int argc, char **argv, int arg
         m2sdr_cli_invalid_choice("serve destination", dst, "pcie or eth");
         return 1;
     }
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
@@ -2655,25 +2655,25 @@ static int do_replay_host_named(const char *name, int argc, char **argv, int arg
 static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
                               int timeout_ms, bool dry_run)
 {
-    struct sata_catalog cat;
+    struct sata_capture_volume cat;
     struct sata_capture_entry *e;
     struct m2sdr_sigmf_meta meta;
     struct named_transfer_options opts;
     bool have_sigmf_options = false;
 
-    if (catalog_require(&cat, timeout_ms) != 0)
+    if (capture_volume_require(&cat, timeout_ms) != 0)
         return 1;
-    e = catalog_find(&cat, name);
+    e = capture_volume_find(&cat, name);
     if (!e) {
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
     }
-    if (catalog_entry_read_sigmf_metadata(e, &meta, timeout_ms) == 0) {
+    if (capture_volume_entry_read_sigmf_metadata(e, &meta, timeout_ms) == 0) {
         if (sigmf_meta_to_options(name, &meta, &opts) != 0)
             return 1;
         have_sigmf_options = true;
     }
-    if (!have_sigmf_options && catalog_entry_to_options(e, &opts) != 0)
+    if (!have_sigmf_options && capture_volume_entry_to_options(e, &opts) != 0)
         return 1;
     parse_replay_rf_overrides(&opts, argc, argv, argi);
     if (dry_run)
@@ -2790,15 +2790,15 @@ static void status(void)
             printf("  Etherbone burst    %" PRIu32 " words\n", sata_host_buffer_bulk_words(conn));
     }
     {
-        struct sata_catalog cat;
-        if (catalog_load_from_conn(conn, &cat, 1000) == 0) {
-            unsigned used = catalog_used_count(&cat);
-            printf("Catalog:\n");
+        struct sata_capture_volume cat;
+        if (capture_volume_load_from_conn(conn, &cat, 1000) == 0) {
+            unsigned used = capture_volume_used_count(&cat);
+            printf("SATA Capture Volume:\n");
             printf("  State              %s\n", cat.initialized ? "initialized" : "not initialized");
-            printf("  Sector             0x%016" PRIx64 "\n", (uint64_t)SATA_CATALOG_SECTOR);
-            printf("  Entries            %u/%u\n", used, SATA_CATALOG_MAX_ENTRIES);
+            printf("  Sector             0x%016" PRIx64 "\n", (uint64_t)SATA_CAPTURE_VOLUME_SECTOR);
+            printf("  Entries            %u/%u\n", used, SATA_CAPTURE_VOLUME_MAX_ENTRIES);
         } else {
-            printf("Catalog:\n");
+            printf("SATA Capture Volume:\n");
             printf("  State              unreadable or not initialized\n");
         }
     }
@@ -2858,28 +2858,28 @@ static void help(void)
            "  -p, --port PORT                Port number (default: 1234).\n"
            "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
-           "      --force                    Allow catalog reset for commands that require confirmation.\n"
+           "      --force                    Allow SATA Capture Volume reset for commands that require confirmation.\n"
            "      --pattern NAME             Diagnostic pattern: zero|counter|prbs.\n"
            "      --no-bulk-etherbone        Disable multi-word Etherbone host-buffer access.\n"
            "\n"
            "workflow commands:\n"
            "info\n"
-           "    Show transport, SATA link, drive, catalog and host I/O status.\n"
+           "    Show transport, SATA link, drive, SATA Capture Volume and host I/O status.\n"
            "\n"
            "init [--force]\n"
-           "    Initialize the named SATA catalog; --force resets a non-empty catalog.\n"
+           "    Initialize the SATA Capture Volume; --force resets a non-empty volume.\n"
            "\n"
            "list\n"
-           "    List named SATA entries.\n"
+           "    List named SATA Capture Volume entries.\n"
            "\n"
            "show NAME\n"
-           "    Show catalog and SigMF metadata for one entry.\n"
+           "    Show capture volume and SigMF metadata for one entry.\n"
            "\n"
            "delete NAME\n"
-           "    Remove one entry from the catalog without erasing sectors.\n"
+           "    Remove one entry from the SATA Capture Volume without erasing sectors.\n"
            "\n"
            "check\n"
-           "    Check catalog names, sector ranges and overlaps.\n"
+           "    Check capture volume names, sector ranges and overlaps.\n"
            "\n"
 #ifdef CSR_SATA_PHY_BASE
            "capture NAME --seconds SEC|--size BYTES [RF options]\n"
@@ -2889,7 +2889,7 @@ static void help(void)
            "    Start a named RX-to-SATA capture and return immediately.\n"
            "\n"
            "import NAME FILE|SIGMF [metadata options]\n"
-           "    Import a raw file or SigMF dataset to SATA and catalog it.\n"
+           "    Import a raw file or SigMF dataset to SATA and register it.\n"
            "\n"
            "export NAME PATH [--raw]\n"
            "    Export as SigMF metadata+data by default; --raw writes payload only.\n"
@@ -3032,13 +3032,13 @@ int main(int argc, char **argv)
 
         if (parse_force_args(argc, argv, &optind, &init_force) != 0)
             return 1;
-        return do_catalog_init(timeout_ms, init_force, dry_run);
+        return do_capture_volume_init(timeout_ms, init_force, dry_run);
     }
 
     if (!strcmp(cmd, "list")) {
         if (reject_extra_args(argc, argv, optind) != 0)
             return 1;
-        return do_catalog_list(timeout_ms);
+        return do_capture_volume_list(timeout_ms);
     }
 
     if (!strcmp(cmd, "show")) {
@@ -3048,7 +3048,7 @@ int main(int argc, char **argv)
         }
         if (reject_extra_args(argc, argv, optind + 1) != 0)
             return 1;
-        return do_catalog_show(argv[optind++], timeout_ms);
+        return do_capture_volume_show(argv[optind++], timeout_ms);
     }
 
     if (!strcmp(cmd, "delete")) {
@@ -3058,13 +3058,13 @@ int main(int argc, char **argv)
         }
         if (reject_extra_args(argc, argv, optind + 1) != 0)
             return 1;
-        return do_catalog_delete(argv[optind++], timeout_ms);
+        return do_capture_volume_delete(argv[optind++], timeout_ms);
     }
 
     if (!strcmp(cmd, "check")) {
         if (reject_extra_args(argc, argv, optind) != 0)
             return 1;
-        return do_catalog_check(timeout_ms);
+        return do_capture_volume_check(timeout_ms);
     }
 
     if (!strcmp(cmd, "capture")) {

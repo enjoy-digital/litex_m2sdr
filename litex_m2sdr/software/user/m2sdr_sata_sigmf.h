@@ -13,7 +13,7 @@
 
 #include <stdint.h>
 
-#include "m2sdr_sata_catalog.h"
+#include "m2sdr_sata_capture_volume.h"
 #include "m2sdr_sigmf.h"
 
 #define M2SDR_SATA_SIGMF_META_SECTORS 64u
