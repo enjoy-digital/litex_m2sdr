@@ -1373,7 +1373,7 @@ static int do_catalog_delete(const char *name, int timeout_ms)
     return 0;
 }
 
-static int do_catalog_fsck(int timeout_ms)
+static int do_catalog_check(int timeout_ms)
 {
     struct sata_catalog cat;
     int errors = 0;
@@ -3064,7 +3064,7 @@ int main(int argc, char **argv)
     if (!strcmp(cmd, "check")) {
         if (reject_extra_args(argc, argv, optind) != 0)
             return 1;
-        return do_catalog_fsck(timeout_ms);
+        return do_catalog_check(timeout_ms);
     }
 
     if (!strcmp(cmd, "capture")) {
