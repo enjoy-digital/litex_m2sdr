@@ -12,7 +12,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake cppcheck pkg-config libsdl2-dev libgl1-mesa-dev libpng-dev libsoapysdr-dev libsndfile1-dev libsamplerate0-dev
+          sudo apt-get install -y cmake cppcheck pkg-config libsdl2-dev libgl1-mesa-dev libpng-dev libsoapysdr-dev soapysdr-tools libsndfile1-dev libsamplerate0-dev
       - name: Fetch pinned cimgui submodule
         run: git submodule update --init --recursive litex_m2sdr/software/user/cimgui
       - name: Build user (PCIe)
@@ -49,6 +49,12 @@ jobs:
         run: |
           cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build_liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON
           cmake --build litex_m2sdr/software/soapysdr/build_liteeth
+      - name: Probe fake LiteEth target with Soapy
+        run: |
+          python3 litex_m2sdr/software/user/tests/test_fake_liteeth.py \
+            --m2sdr-util litex_m2sdr/software/user/m2sdr_util \
+            --soapy-util SoapySDRUtil \
+            --soapy-plugin-dir litex_m2sdr/software/soapysdr/build_liteeth
 
   cmake-liteeth:
     name: cmake-liteeth (${{ matrix.os }})
@@ -64,5 +70,4 @@ jobs:
       - name: Build Ethernet-only user stack
         run: cmake --build litex_m2sdr/software/user/build-liteeth --config Release
       - name: Test Ethernet-only user stack
-        if: runner.os != 'Windows'
         run: ctest --test-dir litex_m2sdr/software/user/build-liteeth --output-on-failure -C Release

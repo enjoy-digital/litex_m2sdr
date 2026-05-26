@@ -27,6 +27,7 @@ jobs:
             libgl1-mesa-dev \
             libpng-dev \
             libsoapysdr-dev \
+            soapysdr-tools \
             libsndfile1-dev \
             libsamplerate0-dev
 
@@ -75,6 +76,13 @@ jobs:
           test -f build/libSoapyLiteXM2SDR.so
           ldd build/libSoapyLiteXM2SDR.so | tee /tmp/ldd_soapylitexm2sdr.txt
           ! grep -q "not found" /tmp/ldd_soapylitexm2sdr.txt
+
+      - name: Probe fake LiteEth target with SoapySDR
+        run: |
+          python3 litex_m2sdr/software/user/tests/test_fake_liteeth.py \
+            --m2sdr-util litex_m2sdr/software/user/m2sdr_util \
+            --soapy-util SoapySDRUtil \
+            --soapy-plugin-dir litex_m2sdr/software/soapysdr/build
 
   build:
     runs-on: ubuntu-22.04

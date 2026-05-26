@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(litex_m2sdr_user VERSION 1.0.0 LANGUAGES C CXX)
 
+find_package(Python3 COMPONENTS Interpreter QUIET)
+
 set(M2SDR_ENABLE_LITEPCIE AUTO CACHE STRING "Enable LitePCIe backend: AUTO, ON, or OFF")
 set_property(CACHE M2SDR_ENABLE_LITEPCIE PROPERTY STRINGS AUTO ON OFF)
 option(M2SDR_ENABLE_LITEETH "Enable LiteEth/Etherbone backend" ON)
@@ -142,29 +144,55 @@ if(M2SDR_BUILD_TOOLS)
     m2sdr_add_tool(m2sdr_sigmf m2sdr_getopt.c m2sdr_sigmf.c)
 endif()
 
-if(M2SDR_BUILD_TESTS AND NOT WIN32)
+if(M2SDR_BUILD_TESTS)
     enable_testing()
 
-    m2sdr_add_tool(test_libm2sdr ${M2SDR_CLI_SOURCES} m2sdr_tool.c tests/test_libm2sdr.c)
-    m2sdr_add_tool(test_m2sdr_sigmf tests/test_m2sdr_sigmf.c)
-    m2sdr_add_tool(test_sigmf_capture_smoke tests/test_sigmf_capture_smoke.c)
-    add_executable(test_sigmf_cli tests/test_sigmf_cli.c)
-
-    add_test(NAME test_libm2sdr COMMAND test_libm2sdr)
-    add_test(NAME test_m2sdr_sigmf COMMAND test_m2sdr_sigmf)
-    add_test(NAME test_sigmf_capture_smoke COMMAND test_sigmf_capture_smoke)
-    if(M2SDR_BUILD_TOOLS)
-        add_test(NAME test_sigmf_cli COMMAND test_sigmf_cli)
-        set_tests_properties(test_sigmf_cli PROPERTIES
-            ENVIRONMENT "M2SDR_SIGMF_TOOL=$<TARGET_FILE:m2sdr_sigmf>"
+    if(M2SDR_BUILD_TOOLS AND Python3_FOUND)
+        add_test(NAME test_fake_liteeth_cli
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fake_liteeth.py
+                --m2sdr-util $<TARGET_FILE:m2sdr_util>
         )
     endif()
+
+    if(NOT WIN32)
+        m2sdr_add_tool(test_libm2sdr ${M2SDR_CLI_SOURCES} m2sdr_tool.c tests/test_libm2sdr.c)
+        m2sdr_add_tool(test_m2sdr_sigmf tests/test_m2sdr_sigmf.c)
+        m2sdr_add_tool(test_sigmf_capture_smoke tests/test_sigmf_capture_smoke.c)
+        add_executable(test_sigmf_cli tests/test_sigmf_cli.c)
+
+        add_test(NAME test_libm2sdr COMMAND test_libm2sdr)
+        add_test(NAME test_m2sdr_sigmf COMMAND test_m2sdr_sigmf)
+        add_test(NAME test_sigmf_capture_smoke COMMAND test_sigmf_capture_smoke)
+        if(M2SDR_BUILD_TOOLS)
+            add_test(NAME test_sigmf_cli COMMAND test_sigmf_cli)
+            set_tests_properties(test_sigmf_cli PROPERTIES
+                ENVIRONMENT "M2SDR_SIGMF_TOOL=$<TARGET_FILE:m2sdr_sigmf>"
+            )
+        endif()
+    endif()
 endif()
+
+function(m2sdr_add_fake_liteeth_soapy_test)
+    if(M2SDR_BUILD_TESTS AND Python3_FOUND AND M2SDR_BUILD_TOOLS AND TARGET SoapyLiteXM2SDR)
+        find_program(SOAPY_SDR_UTIL_EXECUTABLE SoapySDRUtil)
+        if(SOAPY_SDR_UTIL_EXECUTABLE)
+            add_test(NAME test_fake_liteeth_soapy
+                COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fake_liteeth.py
+                    --m2sdr-util $<TARGET_FILE:m2sdr_util>
+                    --soapy-util ${SOAPY_SDR_UTIL_EXECUTABLE}
+                    --soapy-plugin-dir $<TARGET_FILE_DIR:SoapyLiteXM2SDR>
+            )
+        endif()
+    endif()
+endfunction()
 
 if(M2SDR_BUILD_SOAPY STREQUAL "ON" OR M2SDR_BUILD_SOAPY STREQUAL "AUTO")
     find_package(SoapySDR CONFIG QUIET)
     if(SoapySDR_FOUND)
         add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../soapysdr ${CMAKE_CURRENT_BINARY_DIR}/soapysdr)
+        m2sdr_add_fake_liteeth_soapy_test()
     elseif(M2SDR_BUILD_SOAPY STREQUAL "ON")
         message(FATAL_ERROR "SoapySDR was requested but was not found")
     endif()
