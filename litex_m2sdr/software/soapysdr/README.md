@@ -12,9 +12,23 @@ The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating wi
 - **Etherbone/LiteEth UDP** routines for remote control and UDP/VRT streaming over Ethernet.
 - M2SDR board-specific controls (sample rate, frequency, gains, etc.).
 
-The module is built once and selects PCIe or Ethernet at runtime from the device arguments.
+On Linux the module can be built with both PCIe and Ethernet support and selects the transport at runtime from the device arguments. On macOS and Windows, build Ethernet-only; PCIe depends on the Linux LitePCIe kernel driver and `/dev/m2sdrN`.
 
-For building and installing instructions, **refer to the main LiteX-M2SDR README** which covers the general software setup. Once you have all dependencies and environment ready, simply build this module with your usual CMake workflow.
+For building and installing instructions, **refer to the main LiteX-M2SDR README** which covers the general software setup. Once you have all dependencies and environment ready, build this module with CMake.
+
+Ethernet-only standalone build:
+
+```bash
+cmake -S . -B build -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON
+cmake --build build
+```
+
+In-tree build together with `libm2sdr`:
+
+```bash
+cmake -S ../user -B ../user/build-soapy -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=ON
+cmake --build ../user/build-soapy --target SoapyLiteXM2SDR
+```
 
 ---
 
@@ -51,6 +65,8 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
    ```bash
    SoapySDRUtil --probe="driver=LiteXM2SDR,path=/dev/m2sdr1"
    ```
+
+   PCIe device paths are only valid in Linux builds with LitePCIe enabled. Use `eth_ip=` or `dev_id=eth:...` on macOS/Windows.
 
 2. **Run SoapySDR Applications**
    - **GNU Radio**: Load `Soapy` blocks in GRC or run `gnuradio-companion`. Select `SoapySDR` source/sink blocks with `driver=LiteXM2SDR`.
@@ -191,7 +207,7 @@ This repository includes several Python utilities to help test and demonstrate t
 
 ## Notes & Tips
 
-- **Single module**: The installed SoapySDR module handles PCIe DMA and Ethernet UDP/VRT paths. Select the transport with `path=`, `eth_ip=`, or `dev_id=`.
+- **Single module**: A Linux build can handle PCIe DMA and Ethernet UDP/VRT paths. An Ethernet-only build handles only `eth_ip=` / `dev_id=eth:...`.
 - **Multiple Boards**: If multiple M2SDR boards are present, SoapySDR enumerates PCIe devices and the configured Ethernet discovery targets. Specify which one to use via device arguments (e.g. `driver=LiteXM2SDR,path=/dev/m2sdr1` or `driver=LiteXM2SDR,dev_id=eth:192.168.1.50:1234`).
 - **Ethernet/Etherbone**: Ethernet discovery is bounded to configured targets, not a subnet scan. Use `eth_ips=...` or `LITEXM2SDR_ETH_IPS=...` for non-default Ethernet addresses.
 

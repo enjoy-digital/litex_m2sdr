@@ -47,5 +47,22 @@ jobs:
         run: make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEETH
       - name: Build Soapy (LiteETH)
         run: |
-          cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build_liteeth -DUSE_LITEETH=ON
+          cmake -S litex_m2sdr/software/soapysdr -B litex_m2sdr/software/soapysdr/build_liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON
           cmake --build litex_m2sdr/software/soapysdr/build_liteeth
+
+  cmake-liteeth:
+    name: cmake-liteeth (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Ethernet-only user stack
+        run: cmake -S litex_m2sdr/software/user -B litex_m2sdr/software/user/build-liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=OFF
+      - name: Build Ethernet-only user stack
+        run: cmake --build litex_m2sdr/software/user/build-liteeth --config Release
+      - name: Test Ethernet-only user stack
+        if: runner.os != 'Windows'
+        run: ctest --test-dir litex_m2sdr/software/user/build-liteeth --output-on-failure -C Release
