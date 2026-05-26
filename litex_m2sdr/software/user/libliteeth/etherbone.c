@@ -82,6 +82,21 @@ static bool eb_validate_read_reply(const uint8_t *pkt, size_t len)
     return true;
 }
 
+static bool eb_direct_loopback_peer(const struct sockaddr *addr)
+{
+    const struct sockaddr_in *sin;
+    uint32_t ip;
+
+    if (!addr || addr->sa_family != AF_INET)
+        return false;
+
+    sin = (const struct sockaddr_in *)addr;
+    ip = ntohl(sin->sin_addr.s_addr);
+
+    return (ip & 0xff000000u) == 0x7f000000u &&
+           ip != INADDR_LOOPBACK;
+}
+
 static int eb_wait_fd(struct eb_connection *conn, m2sdr_socket_t fd, short events)
 {
     m2sdr_pollfd pfd;
@@ -453,11 +468,20 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     if (is_direct) {
         // Rx half
         struct sockaddr_in si_me;
+        struct in_addr direct_local_addr;
 
         memset((char *) &si_me, 0, sizeof(si_me));
+        memset(&direct_local_addr, 0, sizeof(direct_local_addr));
+        /* Keep same-port fake loopback tests on separate local addresses.
+         * Wildcard binds can steal packets from 127.0.0.2 on macOS. */
+        if (eb_direct_loopback_peer(res->ai_addr))
+            direct_local_addr.s_addr = htonl(INADDR_LOOPBACK);
+        else
+            direct_local_addr.s_addr = htonl(INADDR_ANY);
+
         si_me.sin_family = res->ai_family;
         si_me.sin_port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
-        si_me.sin_addr.s_addr = htobe32(INADDR_ANY);
+        si_me.sin_addr = direct_local_addr;
 
         if ((rx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == M2SDR_SOCKET_INVALID) {
             fprintf(stderr, "Unable to create Rx socket: %s\n", strerror(errno));
@@ -488,6 +512,18 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0) {
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on tx_socket failed: %s\n", strerror(errno));
             goto error;
+        }
+        if (direct_local_addr.s_addr != htonl(INADDR_ANY)) {
+            struct sockaddr_in tx_local;
+
+            memset(&tx_local, 0, sizeof(tx_local));
+            tx_local.sin_family = res->ai_family;
+            tx_local.sin_port = 0;
+            tx_local.sin_addr = direct_local_addr;
+            if (bind(tx_socket, (struct sockaddr *)&tx_local, sizeof(tx_local)) == -1) {
+                fprintf(stderr, "Unable to bind Tx socket to loopback source: %s\n", strerror(errno));
+                goto error;
+            }
         }
 
         conn->read_fd = rx_socket;
