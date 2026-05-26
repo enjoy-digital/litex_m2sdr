@@ -73,7 +73,7 @@ elseif(TARGET m2sdr)
     list(APPEND M2SDR_SOAPY_LIBS m2sdr)
 else()
     find_library(LIBM2SDR_LIBRARY
-        NAMES m2sdr libm2sdr.a
+        NAMES libm2sdr.a m2sdr
         REQUIRED
         HINTS ${M2SDR_TREE_ROOT}
         PATH_SUFFIXES litex_m2sdr/libm2sdr software/user/libm2sdr

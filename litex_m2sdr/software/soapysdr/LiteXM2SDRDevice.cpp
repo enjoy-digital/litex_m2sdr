@@ -682,6 +682,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("rx_agc_mode") > 0)
         _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
 
+    /* Keep bypass_init usable for discovery/probing without touching RFIC state. */
+    _rx_stream.samplerate   = 30.72e6;
+    _tx_stream.samplerate   = 30.72e6;
+    _rx_stream.frequency    = 1e6;
+    _tx_stream.frequency    = 1e6;
+    _rx_stream.bandwidth    = 30.72e6;
+    _tx_stream.bandwidth    = 30.72e6;
+    _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+    _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    _rx_stream.gainMode[0]  = true;
+    _rx_stream.gain[0]      = 0;
+    _tx_stream.gain[0]      = 20;
+    _rx_stream.iqbalance[0] = 1.0;
+    _tx_stream.iqbalance[0] = 1.0;
+    _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+    _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    _rx_stream.gainMode[1]  = true;
+    _rx_stream.gain[1]      = 0;
+    _tx_stream.gain[1]      = 20;
+    _rx_stream.iqbalance[1] = 1.0;
+    _tx_stream.iqbalance[1] = 1.0;
+
     /* RefClk Selection */
     int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
     std::string clock_source = "internal"; /* Default XO. */
@@ -791,34 +813,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         this->setClockSource("internal");
 
-        /* Common for TX1/TX2 and RX1/RX2 */
-        _rx_stream.samplerate   = 30.72e6;
-        _tx_stream.samplerate   = 30.72e6;
-        _rx_stream.frequency    = 1e6;
-        _tx_stream.frequency    = 1e6;
-        _rx_stream.bandwidth    = 30.72e6;
-        _tx_stream.bandwidth    = 30.72e6;
-
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[0]  = true;
-        _rx_stream.gain[0]      = 0;
-        _tx_stream.gain[0]      = 20;
-        _rx_stream.iqbalance[0] = 1.0;
-        _tx_stream.iqbalance[0] = 1.0;
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 0");
         channel_configure(SOAPY_SDR_RX, 0);
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[1]  = true;
-        _rx_stream.gain[1]      = 0;
-        _tx_stream.gain[1]      = 20;
-        _rx_stream.iqbalance[1] = 1.0;
-        _tx_stream.iqbalance[1] = 1.0;
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 1");
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);
