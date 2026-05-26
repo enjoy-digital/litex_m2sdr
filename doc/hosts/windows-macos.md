@@ -14,6 +14,21 @@ The examples below assume an Ethernet bitstream built with `--with-eth`, a board
 IP of `192.168.1.50`, and the default Etherbone/stream port `1234`. Replace the
 address if your gateware or network setup uses a different one.
 
+## SoapySDR Plugin Model
+
+Installing SoapySDR from Homebrew or MSYS2 installs the SoapySDR runtime, the
+development files, `SoapySDRUtil`, and the plugin loader. It does not include
+the LiteX-M2SDR driver.
+
+The LiteX-M2SDR driver is built from this repository as a SoapySDR plugin module
+named `SoapyLiteXM2SDR`. Configure with `-DM2SDR_BUILD_SOAPY=ON` to build that
+module. Then either install it into the SoapySDR module directory with
+`cmake --install ...`, or point `SOAPY_SDR_PLUGIN_PATH` at the in-tree build
+directory while testing.
+
+Once the plugin is visible to SoapySDR, applications select it with
+`driver=LiteXM2SDR`.
+
 ## Network Setup
 
 Connect the board Ethernet port to the host or to the same private network as

@@ -14,6 +14,12 @@ The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating wi
 
 On Linux the module can be built with both PCIe and Ethernet support and selects the transport at runtime from the device arguments. On macOS and Windows, build Ethernet-only; PCIe depends on the Linux LitePCIe kernel driver and `/dev/m2sdrN`.
 
+Installing the regular SoapySDR package only provides the runtime, headers,
+`SoapySDRUtil`, and module loader. The LiteX-M2SDR driver is this repository's
+`SoapyLiteXM2SDR` plugin module. Build it with CMake, then either install it
+with `cmake --install ...` or set `SOAPY_SDR_PLUGIN_PATH` to the build
+`soapysdr` directory while testing.
+
 For building and installing instructions, **refer to the main LiteX-M2SDR README** which covers the general software setup. Once you have all dependencies and environment ready, build this module with CMake.
 
 Ethernet-only standalone build:
