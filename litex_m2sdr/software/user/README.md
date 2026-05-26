@@ -75,7 +75,7 @@ cmake --build build-liteeth
 ctest --test-dir build-liteeth --output-on-failure
 ~~~~
 
-On Windows, use a normal CMake generator such as Visual Studio or Ninja. The supported Windows/macOS target is Ethernet-only: `--device eth:192.168.1.50:1234`, `--ip 192.168.1.50`, and Soapy `eth_ip=...` work; `pcie:/dev/m2sdr0`, `-c`, and `dma-test` require Linux PCIe support.
+On Windows, use a normal CMake generator such as Visual Studio or Ninja. The supported Windows/macOS target is Ethernet-only: `--device eth:192.168.1.50:1234`, `--ip 192.168.1.50`, and Soapy `eth_ip=...` work; `pcie:/dev/m2sdr0`, `-c`, and `dma-test` require Linux PCIe support. See the [Windows/macOS install tutorial](../../../doc/hosts/windows-macos.md) for the host setup flow.
 
 ## Build dependencies
 
