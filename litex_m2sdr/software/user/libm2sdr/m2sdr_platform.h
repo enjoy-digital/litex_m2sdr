@@ -39,8 +39,9 @@ typedef WSAPOLLFD m2sdr_pollfd;
 typedef SSIZE_T ssize_t;
 #define _SSIZE_T_DEFINED
 #endif
-#if defined(_MSC_VER)
+#if !defined(_USECONDS_T_DEFINED) && !defined(_USECONDS_T_DECLARED) && !defined(__useconds_t_defined)
 typedef unsigned int useconds_t;
+#define _USECONDS_T_DEFINED
 #endif
 #if defined(_MSC_VER) && !defined(_OFF_T_DEFINED)
 typedef __int64 off_t;
