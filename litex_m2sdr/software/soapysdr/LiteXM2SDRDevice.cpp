@@ -6,18 +6,19 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <unistd.h>
 #include <memory>
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 #include <stdexcept>
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
 #include <inttypes.h>
-#include <time.h>
+#include <chrono>
+#include <thread>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -53,9 +54,14 @@ bool spi_warned_fallback = false;
 
 static bool soapy_handle_is_fd(void *conn)
 {
+#if USE_LITEPCIE
     intptr_t value = (intptr_t)conn;
 
     return value >= 0 && value < 1048576;
+#else
+    (void)conn;
+    return false;
+#endif
 }
 
 uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
@@ -277,13 +283,9 @@ thread_local unsigned soapy_rf_op_depth = 0;
 
 uint64_t monotonic_time_us()
 {
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-        return 0;
-
-    return static_cast<uint64_t>(ts.tv_sec) * 1000000u +
-           static_cast<uint64_t>(ts.tv_nsec) / 1000u;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(now).count());
 }
 
 class LiteEthRfOpTimeout {
@@ -459,17 +461,17 @@ int spi_write_then_read(struct spi_device *spi,
 
 void udelay(unsigned long usecs)
 {
-    usleep(usecs);
+    std::this_thread::sleep_for(std::chrono::microseconds(usecs));
 }
 
 void mdelay(unsigned long msecs)
 {
-    usleep(msecs * 1000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
 
 unsigned long msleep_interruptible(unsigned int msecs)
 {
-    usleep(msecs * 1000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
     return 0;
 }
 
