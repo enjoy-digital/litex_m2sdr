@@ -12,10 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
-#include <getopt.h>
-
+#include "m2sdr_getopt.h"
 #include "m2sdr_sigmf.h"
 
 static void help(void)

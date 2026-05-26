@@ -7,36 +7,23 @@
  * Copyright (c) 2025-2026 Enjoy-Digital <enjoy-digital.fr>
  */
 
+#ifndef _WIN32
 #define _GNU_SOURCE
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <time.h>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-
 #include "liteeth_udp.h"
+#include "m2sdr_platform.h"
 
 #define LITEETH_UDP_TX_CHUNK_BYTES 1024u
 
 /* Utilities */
 
-static int set_nonblock(int fd, int nb)
-{
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0) return -1;
-    if (nb) flags |= O_NONBLOCK; else flags &= ~O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags);
-}
-
-static int bind_any(int sock, const char *ip, uint16_t port)
+static int bind_any(m2sdr_socket_t sock, const char *ip, uint16_t port)
 {
     struct sockaddr_in sa;
     memset(&sa, 0, sizeof(sa));
@@ -50,20 +37,13 @@ static int bind_any(int sock, const char *ip, uint16_t port)
     return bind(sock, (struct sockaddr *)&sa, sizeof(sa));
 }
 
-static void *alloc_aligned(size_t size)
-{
-    void *p = NULL;
-    if (posix_memalign(&p, 64, size) != 0) return NULL;
-    return p;
-}
-
 static int refresh_socket_buffer(struct liteeth_udp_ctrl *u, int optname, int *dst)
 {
     socklen_t len = sizeof(*dst);
 
-    if (!u || !dst || u->sock < 0)
+    if (!u || !dst || u->sock == M2SDR_SOCKET_INVALID)
         return -1;
-    if (getsockopt(u->sock, SOL_SOCKET, optname, dst, &len) < 0)
+    if (getsockopt(u->sock, SOL_SOCKET, optname, (char *)dst, &len) < 0)
         return -1;
     return 0;
 }
@@ -89,19 +69,12 @@ static int rx_source_allowed(const struct liteeth_udp_ctrl *u,
     return 1;
 }
 
-static int64_t get_time_ms(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
 static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t len)
 {
     for (;;) {
         struct sockaddr_storage src_addr;
         socklen_t src_len = sizeof(src_addr);
-#ifdef SO_RXQ_OVFL
+#if defined(SO_RXQ_OVFL) && !defined(_WIN32)
         char cmsgbuf[CMSG_SPACE(sizeof(uint32_t))];
         struct iovec iov;
         struct msghdr msg;
@@ -143,7 +116,7 @@ static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t l
         ssize_t nb;
 
         memset(&src_addr, 0, sizeof(src_addr));
-        nb = recvfrom(u->sock, dst, len, MSG_DONTWAIT,
+        nb = recvfrom(u->sock, (char *)dst, (int)len, 0,
                       (struct sockaddr *)&src_addr, &src_len);
 #endif
         if (nb >= 0 && !rx_source_allowed(u, &src_addr, src_len)) {
@@ -164,6 +137,12 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
                      int nonblock)
 {
     memset(u, 0, sizeof(*u));
+    u->sock = M2SDR_SOCKET_INVALID;
+
+    if (m2sdr_platform_socket_init() != 0) {
+        fprintf(stderr, "liteeth_udp: socket init failed\n");
+        return -1;
+    }
 
     /* config */
     u->rx_enable = rx_enable    ? 1 : 0;
@@ -174,7 +153,7 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
 
     /* rings */
     if (u->rx_enable) {
-        u->buf_rd = (uint8_t *)alloc_aligned(u->buf_size * u->buf_count);
+        u->buf_rd = (uint8_t *)m2sdr_aligned_malloc(64, u->buf_size * u->buf_count);
         if (!u->buf_rd) {
             fprintf(stderr, "liteeth_udp: RX alloc failed\n");
             goto fail_mem;
@@ -183,7 +162,7 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
     }
 
     if (u->tx_enable) {
-        u->buf_wr = (uint8_t *)alloc_aligned(u->buf_size * u->buf_count);
+        u->buf_wr = (uint8_t *)m2sdr_aligned_malloc(64, u->buf_size * u->buf_count);
         if (!u->buf_wr) {
             fprintf(stderr, "liteeth_udp: TX alloc failed\n");
             goto fail_mem;
@@ -195,27 +174,25 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
 
     /* socket */
     u->sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (u->sock < 0) {
+    if (u->sock == M2SDR_SOCKET_INVALID) {
         perror("liteeth_udp: socket");
         goto fail_sock;
     }
 
     int yes = 1;
-    (void)setsockopt(u->sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-#ifdef SO_RXQ_OVFL
-    (void)setsockopt(u->sock, SOL_SOCKET, SO_RXQ_OVFL, &yes, sizeof(yes));
+    (void)setsockopt(u->sock, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(yes));
+#if defined(SO_RXQ_OVFL) && !defined(_WIN32)
+    (void)setsockopt(u->sock, SOL_SOCKET, SO_RXQ_OVFL, (const char *)&yes, sizeof(yes));
 #endif
 
-    if (u->nonblock) {
-        if (set_nonblock(u->sock, 1) < 0) {
-            perror("liteeth_udp: fcntl(O_NONBLOCK)");
-            goto fail_sock;
-        }
+    if (m2sdr_socket_set_nonblock(u->sock, 1) < 0) {
+        perror("liteeth_udp: nonblock");
+        goto fail_sock;
     }
     if (u->so_rcvbuf_bytes > 0)
-        (void)setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, &u->so_rcvbuf_bytes, sizeof(int));
+        (void)setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, (const char *)&u->so_rcvbuf_bytes, sizeof(int));
     if (u->so_sndbuf_bytes > 0)
-        (void)setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, &u->so_sndbuf_bytes, sizeof(int));
+        (void)setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, (const char *)&u->so_sndbuf_bytes, sizeof(int));
     (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
     (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
 
@@ -246,21 +223,27 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
     return 0;
 
 fail_sock:
-    if (u->sock >= 0) close(u->sock);
+    if (u->sock != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close(u->sock);
 fail_mem:
-    free(u->buf_wr);
-    free(u->buf_rd);
+    m2sdr_aligned_free(u->buf_wr);
+    m2sdr_aligned_free(u->buf_rd);
     memset(u, 0, sizeof(*u));
+    u->sock = M2SDR_SOCKET_INVALID;
+    m2sdr_platform_socket_cleanup();
     return -1;
 }
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u)
 {
     if (!u) return;
-    if (u->sock >= 0) close(u->sock);
-    free(u->buf_rd);
-    free(u->buf_wr);
+    if (u->sock != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close(u->sock);
+    m2sdr_aligned_free(u->buf_rd);
+    m2sdr_aligned_free(u->buf_wr);
     memset(u, 0, sizeof(*u));
+    u->sock = M2SDR_SOCKET_INVALID;
+    m2sdr_platform_socket_cleanup();
 }
 
 /* RX Path */
@@ -273,9 +256,11 @@ static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
     while (u->rx_assembling_bytes < u->buf_size) {
         ssize_t nb = udp_recv_dontwait(u, dst, u->buf_size - u->rx_assembling_bytes);
         if (nb < 0) {
-            if (errno == EINTR)
+            int err = m2sdr_socket_last_error();
+
+            if (m2sdr_socket_error_is_interrupted(err))
                 continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            if (m2sdr_socket_error_is_would_block(err))
                 return 0; /* try later */
             u->rx_recv_errors++;
             perror("liteeth_udp: recvfrom");
@@ -298,7 +283,7 @@ void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms)
 
     int produced = 0;
     const int wait_forever = timeout_ms < 0;
-    const int64_t deadline = wait_forever ? 0 : get_time_ms() + timeout_ms;
+    const int64_t deadline = wait_forever ? 0 : m2sdr_monotonic_ms() + timeout_ms;
 
     while (u->buffers_available_read < (int)u->buf_count) {
         size_t slot = (u->writer_sw_count + u->buffers_available_read) % u->buf_count;
@@ -317,15 +302,17 @@ void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms)
 
         int remaining_ms = -1;
         if (!wait_forever) {
-            int64_t now = get_time_ms();
+            int64_t now = m2sdr_monotonic_ms();
             if (now >= deadline)
                 return;
             remaining_ms = (int)(deadline - now);
         }
 
-        int ret = poll(&u->pfd, 1, remaining_ms);
+        int ret = m2sdr_poll(&u->pfd, 1, remaining_ms);
         if (ret < 0) {
-            if (errno == EINTR)
+            int err = m2sdr_socket_last_error();
+
+            if (m2sdr_socket_error_is_interrupted(err))
                 continue;
             perror("liteeth_udp: poll");
             return;
@@ -361,7 +348,7 @@ void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u)
     u->usr_read_buf_offset = 0;
     u->rx_assembling_bytes = 0;
 
-    if (u->sock < 0)
+    if (u->sock == M2SDR_SOCKET_INVALID)
         return;
 
     while (1) {
@@ -370,7 +357,7 @@ void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u)
             flushed += (uint64_t)nb;
             continue;
         }
-        if (nb < 0 && errno == EINTR)
+        if (nb < 0 && m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
             continue;
         break;
     }
@@ -422,10 +409,10 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
             chunk = LITEETH_UDP_TX_CHUNK_BYTES;
 
         while (chunk) {
-            ssize_t nb = sendto(u->sock, chunk_src, chunk, 0,
+            ssize_t nb = sendto(u->sock, (const char *)chunk_src, (int)chunk, 0,
                                 (struct sockaddr *)&u->remote, sizeof(u->remote));
             if (nb < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                if (m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()))
                     continue; /* retry */
                 u->tx_send_errors++;
                 perror("liteeth_udp: sendto");
@@ -481,8 +468,8 @@ int liteeth_udp_set_rx_source_filter(struct liteeth_udp_ctrl *u,
 int liteeth_udp_set_so_rcvbuf(struct liteeth_udp_ctrl *u, int bytes)
 {
     u->so_rcvbuf_bytes = bytes;
-    if (u->sock >= 0) {
-        int rc = setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, &bytes, sizeof(int));
+    if (u->sock != M2SDR_SOCKET_INVALID) {
+        int rc = setsockopt(u->sock, SOL_SOCKET, SO_RCVBUF, (const char *)&bytes, sizeof(int));
         (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
         return rc;
     }
@@ -492,8 +479,8 @@ int liteeth_udp_set_so_rcvbuf(struct liteeth_udp_ctrl *u, int bytes)
 int liteeth_udp_set_so_sndbuf(struct liteeth_udp_ctrl *u, int bytes)
 {
     u->so_sndbuf_bytes = bytes;
-    if (u->sock >= 0) {
-        int rc = setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, &bytes, sizeof(int));
+    if (u->sock != M2SDR_SOCKET_INVALID) {
+        int rc = setsockopt(u->sock, SOL_SOCKET, SO_SNDBUF, (const char *)&bytes, sizeof(int));
         (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
         return rc;
     }
@@ -504,7 +491,7 @@ int liteeth_udp_get_so_rcvbuf(struct liteeth_udp_ctrl *u, int *bytes)
 {
     if (!u || !bytes)
         return -1;
-    if (u->sock >= 0)
+    if (u->sock != M2SDR_SOCKET_INVALID)
         (void)refresh_socket_buffer(u, SO_RCVBUF, &u->so_rcvbuf_actual_bytes);
     *bytes = u->so_rcvbuf_actual_bytes;
     return 0;
@@ -514,7 +501,7 @@ int liteeth_udp_get_so_sndbuf(struct liteeth_udp_ctrl *u, int *bytes)
 {
     if (!u || !bytes)
         return -1;
-    if (u->sock >= 0)
+    if (u->sock != M2SDR_SOCKET_INVALID)
         (void)refresh_socket_buffer(u, SO_SNDBUF, &u->so_sndbuf_actual_bytes);
     *bytes = u->so_sndbuf_actual_bytes;
     return 0;

@@ -19,16 +19,18 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 #include <stdint.h>
 #include <time.h>
 #include <signal.h>
-#include <getopt.h>
 
-#include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 #include "csr.h"
 
 /* Connection options -------------------------------------------------------- */

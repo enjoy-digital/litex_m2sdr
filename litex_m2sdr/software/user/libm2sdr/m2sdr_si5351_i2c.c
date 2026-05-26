@@ -11,11 +11,13 @@
 /*----------*/
 
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdint.h>
 
 #include "libm2sdr.h"
-#include "liblitepcie.h"
+#include "m2sdr_platform.h"
 
 #include "m2sdr_si5351_i2c.h"
 
@@ -105,7 +107,7 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
         if (timeout-- <= 0) {
             return false;
         }
-        usleep(1);
+        m2sdr_sleep_us(1);
     } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET)));
 
     /* Check NACK. */
@@ -126,7 +128,7 @@ bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const 
         if (timeout-- <= 0) {
             return false;
         }
-        usleep(1);
+        m2sdr_sleep_us(1);
     } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET)));
 
     /* Check NACK. */
@@ -172,7 +174,7 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
         if (timeout-- <= 0) {
             return false;
         }
-        usleep(1);
+        m2sdr_sleep_us(1);
     } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET)));
 
     /* Check NACK. */
@@ -193,7 +195,7 @@ bool m2sdr_si5351_i2c_read(void *conn, uint8_t slave_addr, uint8_t addr, uint8_t
         if (timeout-- <= 0) {
             return false;
         }
-        usleep(1);
+        m2sdr_sleep_us(1);
     } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)));
 
     /* Check NACK. */
@@ -255,7 +257,7 @@ bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t
         fprintf(stderr, "SI5351 I2C reset failed during config.\n");
         return false;
     }
-    usleep(100);
+    m2sdr_sleep_us(100);
 
     /* Wait for the SI5351 internal SYS_INIT flag to clear before pushing the
      * full clock tree configuration. */
@@ -268,7 +270,7 @@ bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t
             fprintf(stderr, "SI5351 SYS_INIT poll failed during config.\n");
             return false;
         }
-        usleep(1000);
+        m2sdr_sleep_us(1000);
     }
     if (timeout <= 0) {
         fprintf(stderr, "SI5351 SYS_INIT did not clear during config (status 0x%02x).\n", data);
@@ -327,7 +329,7 @@ bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t
             fprintf(stderr, "SI5351 PLLB lock poll failed during config.\n");
             return false;
         }
-        usleep(1000);
+        m2sdr_sleep_us(1000);
     }
     if (timeout <= 0) {
         fprintf(stderr, "SI5351 PLLB did not lock during config (status 0x%02x).\n", data);

@@ -111,12 +111,16 @@ struct axiadc_converter {
 	uint32_t				scratch_reg[16];
 };
 
-#ifdef WIN32
-#include "basetsd.h"
+#ifdef _WIN32
+#include <BaseTsd.h>
+#ifndef _SSIZE_T_DEFINED
 typedef SSIZE_T ssize_t;
+#define _SSIZE_T_DEFINED
+#endif
 #define strsep(s, ct)				0
-#define snprintf(s, n, format, ...)	0
+#if !defined(__func__)
 #define __func__ __FUNCTION__
+#endif
 #endif
 
 /******************************************************************************/

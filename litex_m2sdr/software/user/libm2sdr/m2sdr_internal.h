@@ -17,9 +17,28 @@
 #include <stdint.h>
 
 #include "m2sdr.h"
+#include "m2sdr_platform.h"
+#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
+#define M2SDR_HAVE_LITEPCIE 1
+#else
+#define M2SDR_HAVE_LITEPCIE 0
+struct litepcie_dma_ctrl {
+    int unused;
+};
+#endif
+
+#ifdef USE_LITEETH
 #include "etherbone.h"
 #include "liteeth_udp.h"
+#define M2SDR_HAVE_LITEETH 1
+#else
+#define M2SDR_HAVE_LITEETH 0
+struct eb_connection;
+struct liteeth_udp_ctrl {
+    int unused;
+};
+#endif
 
 struct ad9361_rf_phy;
 
