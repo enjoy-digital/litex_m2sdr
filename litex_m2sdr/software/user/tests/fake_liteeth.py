@@ -44,6 +44,8 @@ class FakeLiteEthTarget:
         self.host = host
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.sock.bind((host, port))
         self.sock.settimeout(0.1)
         self.port = self.sock.getsockname()[1]

@@ -469,6 +469,9 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on rx_socket failed: %s\n", strerror(errno));
             goto error;
         }
+#ifdef SO_REUSEPORT
+        (void)setsockopt(rx_socket, SOL_SOCKET, SO_REUSEPORT, (const char *)&opt, sizeof(opt));
+#endif
         (void)m2sdr_socket_set_nonblock(rx_socket, 1);
         if (bind(rx_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
             fprintf(stderr, "Unable to bind Rx socket to port: %s\n", strerror(errno));

@@ -4,11 +4,14 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install deps
         run: |
           sudo apt-get update
@@ -64,7 +67,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Configure Ethernet-only user stack
         run: cmake -S litex_m2sdr/software/user -B litex_m2sdr/software/user/build-liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON -DM2SDR_BUILD_SOAPY=OFF
       - name: Build Ethernet-only user stack
@@ -80,7 +83,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install SoapySDR dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -102,7 +105,7 @@ jobs:
     name: cmake-liteeth-soapy (windows-latest, MSYS2 UCRT64)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64

@@ -89,7 +89,12 @@ if(M2SDR_LITEPCIE_ENABLED)
     endif()
 endif()
 if(WIN32)
-    target_compile_definitions(m2sdr_objects PUBLIC WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES)
+    target_compile_definitions(m2sdr_objects PUBLIC
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        _WIN32_WINNT=0x0600
+        _USE_MATH_DEFINES
+    )
 endif()
 
 add_library(m2sdr_static STATIC $<TARGET_OBJECTS:m2sdr_objects>)
@@ -123,7 +128,12 @@ function(m2sdr_add_tool name)
     target_link_libraries(${name} PRIVATE m2sdr_static)
     target_compile_features(${name} PRIVATE c_std_11)
     if(WIN32)
-        target_compile_definitions(${name} PRIVATE WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES)
+        target_compile_definitions(${name} PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+            _WIN32_WINNT=0x0600
+            _USE_MATH_DEFINES
+        )
         target_link_libraries(${name} PRIVATE ws2_32)
     elseif(NOT MSVC)
         target_link_libraries(${name} PRIVATE m)

@@ -105,7 +105,12 @@ target_compile_definitions(SoapyLiteXM2SDR PRIVATE
 )
 
 if(WIN32)
-    target_compile_definitions(SoapyLiteXM2SDR PRIVATE WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES)
+    target_compile_definitions(SoapyLiteXM2SDR PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        _WIN32_WINNT=0x0600
+        _USE_MATH_DEFINES
+    )
     target_link_libraries(SoapyLiteXM2SDR PRIVATE ws2_32)
 elseif(NOT MSVC)
     target_link_libraries(SoapyLiteXM2SDR PRIVATE m)
