@@ -18,6 +18,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <malloc.h>
+#include <io.h>
 #include <BaseTsd.h>
 
 #define M2SDR_PLATFORM_WINDOWS 1
@@ -60,6 +61,32 @@ typedef __int64 off_t;
 #endif
 #ifndef ftello
 #define ftello _ftelli64
+#endif
+#ifndef access
+#define access _access
+#endif
+#ifndef isatty
+#define isatty _isatty
+#endif
+
+#ifndef STDIN_FILENO
+#define STDIN_FILENO 0
+#endif
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
+#ifndef R_OK
+#define R_OK 4
+#endif
+#ifndef F_OK
+#define F_OK 0
+#endif
+
+#ifndef aligned_alloc
+#define aligned_alloc(alignment, size) m2sdr_aligned_malloc((alignment), (size))
 #endif
 
 static inline size_t m2sdr_strnlen(const char *s, size_t maxlen)

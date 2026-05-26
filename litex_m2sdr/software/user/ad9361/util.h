@@ -46,6 +46,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "ad9361.h"
 #include "common.h"
 #include "config.h"
@@ -142,7 +143,24 @@ struct axiadc_converter {
 typedef SSIZE_T ssize_t;
 #define _SSIZE_T_DEFINED
 #endif
-#define strsep(s, ct)				0
+static inline char *ad9361_strsep(char **stringp, const char *delim)
+{
+	char *start;
+	char *p;
+
+	if (!stringp || !*stringp)
+		return NULL;
+	start = *stringp;
+	p = start + strcspn(start, delim);
+	if (*p) {
+		*p++ = '\0';
+		*stringp = p;
+	} else {
+		*stringp = NULL;
+	}
+	return start;
+}
+#define strsep(s, ct)				ad9361_strsep((s), (ct))
 #if !defined(__func__)
 #define __func__ __FUNCTION__
 #endif

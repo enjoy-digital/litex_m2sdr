@@ -17,6 +17,7 @@
 #endif
 
 #include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_sigmf.h"
 
 static void help(void)

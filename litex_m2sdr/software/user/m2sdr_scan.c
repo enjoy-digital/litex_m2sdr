@@ -38,7 +38,13 @@
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
 
+#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
+#else
+struct litepcie_dma_ctrl {
+    int unused;
+};
+#endif
 #include "libm2sdr.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
@@ -1581,6 +1587,10 @@ static bool scan_stream_init(struct scan_state *s)
         return true;
     }
 
+#ifndef USE_LITEPCIE
+    fprintf(stderr, "LitePCIe transport is not available in this build\n");
+    return false;
+#else
     memset(&s->dma, 0, sizeof(s->dma));
     s->dma.shared_fd = 1;
     s->dma.use_writer = 1;
@@ -1612,6 +1622,7 @@ static bool scan_stream_init(struct scan_state *s)
     s->use_pcie_dma = true;
     s->stream_active = true;
     return true;
+#endif
 }
 
 static void scan_stream_cleanup(struct scan_state *s)
@@ -1620,7 +1631,9 @@ static void scan_stream_cleanup(struct scan_state *s)
         return;
 
     if (s->use_pcie_dma) {
+#ifdef USE_LITEPCIE
         litepcie_dma_cleanup(&s->dma);
+#endif
     } else {
         (void)m2sdr_stream_release(g_dev, M2SDR_RX);
         m2sdr_free_buffer(s->rx_buf);
@@ -1656,6 +1669,9 @@ static bool capture_iq_block(struct scan_state *s)
         return got == s->fft_len;
     }
 
+#ifndef USE_LITEPCIE
+    return false;
+#else
     while (g_keep_running && got < s->fft_len) {
         litepcie_dma_process(&s->dma);
 
@@ -1680,6 +1696,7 @@ static bool capture_iq_block(struct scan_state *s)
     }
 
     return got == s->fft_len;
+#endif
 }
 
 static bool discard_iq_samples(struct scan_state *s, int nsamples)
@@ -1704,6 +1721,9 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
         return got >= nsamples;
     }
 
+#ifndef USE_LITEPCIE
+    return false;
+#else
     while (g_keep_running && got < nsamples) {
         litepcie_dma_process(&s->dma);
 
@@ -1724,6 +1744,7 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
     }
 
     return got == nsamples;
+#endif
 }
 
 static bool retune_rx(int64_t freq_hz)
