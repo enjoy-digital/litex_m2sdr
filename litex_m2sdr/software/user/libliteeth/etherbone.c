@@ -603,37 +603,56 @@ static uint32_t eb_next_read_counter(struct eb_connection *conn)
     return base_ret_addr;
 }
 
-static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
+/* Build and send one bulk-read request (rcount records, each returning to the
+ * matching base_ret_addr tag). Used by both the single-shot and pipelined readers. */
+static int eb_send_bulk_read_request(struct eb_connection *conn,
+                                     uint32_t addr,
+                                     size_t count,
+                                     uint32_t base_ret_addr)
 {
     uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
-    uint32_t base_ret_addr;
     size_t len;
 
-    if (eb_validate_bulk_count(conn, vals, count) != EB_ERR_OK)
-        return EB_ERR_IO;
+    if (!conn || count == 0 || count > EB_MAX_BURST_WORDS)
+        return eb_fail(conn, EB_ERR_IO);
 
     len = eb_bulk_packet_len(count);
-    base_ret_addr = eb_next_read_counter(conn);
-
     eb_fill_header(raw_pkt);
     eb_fill_record_header(raw_pkt, 0, (uint8_t)count);
     eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], base_ret_addr);
     for (size_t i = 0; i < count; i++)
         eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], addr + (uint32_t)(4 * i));
 
+    if (eb_send(conn, raw_pkt, len) < 0) {
+        fprintf(stderr, "eb_bulk_read: send failed\n");
+        return eb_get_last_error(conn);
+    }
+    return EB_ERR_OK;
+}
+
+static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
+{
+    uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
+    uint32_t base_ret_addr;
+    size_t len;
+    int err;
+
+    if (eb_validate_bulk_count(conn, vals, count) != EB_ERR_OK)
+        return EB_ERR_IO;
+
+    len           = eb_bulk_packet_len(count);
+    base_ret_addr = eb_next_read_counter(conn);
+
     if (conn->is_direct)
         eb_drain_direct_rx(conn);
 
-    if (eb_send(conn, raw_pkt, len) < 0) {
-        fprintf(stderr, "eb_read32_bulk: send failed\n");
-        return eb_get_last_error(conn);
-    }
+    err = eb_send_bulk_read_request(conn, addr, count, base_ret_addr);
+    if (err != EB_ERR_OK)
+        return err;
 
-    {
-        int err = eb_recv_bulk_read_reply(conn, raw_pkt, len, base_ret_addr, count);
-        if (err != EB_ERR_OK)
-            return err;
-    }
+    err = eb_recv_bulk_read_reply(conn, raw_pkt, len, base_ret_addr, count);
+    if (err != EB_ERR_OK)
+        return err;
 
     for (size_t i = 0; i < count; i++)
         vals[i] = eb_get_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i]);
@@ -662,31 +681,6 @@ struct eb_pipeline_read {
     size_t offset;
     size_t count;
 };
-
-static int eb_send_bulk_read_request(struct eb_connection *conn,
-                                     uint32_t addr,
-                                     size_t count,
-                                     uint32_t base_ret_addr)
-{
-    uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
-    size_t len;
-
-    if (!conn || count == 0 || count > EB_MAX_BURST_WORDS)
-        return eb_fail(conn, EB_ERR_IO);
-
-    len = eb_bulk_packet_len(count);
-    eb_fill_header(raw_pkt);
-    eb_fill_record_header(raw_pkt, 0, (uint8_t)count);
-    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], base_ret_addr);
-    for (size_t i = 0; i < count; i++)
-        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], addr + (uint32_t)(4 * i));
-
-    if (eb_send(conn, raw_pkt, len) < 0) {
-        fprintf(stderr, "eb_read32_bulk_pipeline: send failed\n");
-        return eb_get_last_error(conn);
-    }
-    return EB_ERR_OK;
-}
 
 static int eb_read32_bulk_pipeline_once(struct eb_connection *conn,
                                         uint32_t addr,
