@@ -183,7 +183,7 @@ class M2SDRLiteSATASector2MemDMA(LiteXModule):
 
         # # #
 
-        dma_bytes  = bus.data_width//8
+        dma_bytes   = bus.data_width//8
         count       = Signal(32)
         total_words = Signal(32)
 

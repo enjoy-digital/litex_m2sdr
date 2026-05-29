@@ -1182,7 +1182,9 @@ class BaseSoC(SoCMini):
 
         # DMA.
         # ----
-        sata_dma_bus = getattr(self, "dma_bus", self.bus)
+        # With PCIe the SATA DMA masters reach host memory through the LitePCIe dma_bus;
+        # otherwise they target the SoC bus (local staging buffer only).
+        sata_dma_bus = self.dma_bus if with_pcie else self.bus
 
         sata_sector2mem_bus = self._sata_dma_wishbone_bus(mode="w")
         self.sata_sector2mem = M2SDRLiteSATASector2MemDMA(
@@ -1199,9 +1201,8 @@ class BaseSoC(SoCMini):
             endianness = self.cpu.endianness,
         )
         sata_dma_bus.add_master(name="sata_mem2sector", master=sata_mem2sector_bus)
-        if hasattr(self.sata_sector2mem, "fence_bus"):
-            sata_dma_bus.add_master(name="sata_sector2mem_fence",
-                master=self.sata_sector2mem.fence_bus)
+        # Write-ordering fence read-back (see M2SDRLiteSATASector2MemDMA).
+        sata_dma_bus.add_master(name="sata_sector2mem_fence", master=self.sata_sector2mem.fence_bus)
 
         if with_pcie:
             self.comb += [
@@ -1213,13 +1214,13 @@ class BaseSoC(SoCMini):
         # ----------------------------------------
         self.sata_host_buffer = SATAHostBuffer(
             size          = SATA_HOST_BUFFER_SIZE,
-            with_dma_port = hasattr(self, "dma_bus"),
+            with_dma_port = with_pcie,
         )
         self.bus.add_slave(name="sata_host_buffer",
             slave  = self.sata_host_buffer.host_bus,
             region = SoCRegion(origin=SATA_HOST_BUFFER_BASE, size=SATA_HOST_BUFFER_SIZE, cached=False)
         )
-        if hasattr(self, "dma_bus"):
+        if with_pcie:
             self.sata_dma_mem = SATADMAMemoryRouter(
                 local_bus    = self.sata_host_buffer.dma_bus,
                 remote_bus   = self.pcie_slave.bus,
@@ -1256,6 +1257,8 @@ class BaseSoC(SoCMini):
 
         # Timing constraints.
         # -------------------
+        # Constrain the SATA TX/RX clocks (period in ns = 1e9/freq) and treat their crossings
+        # with sys_clk as asynchronous (handled by CDC), so P&R does not try to meet them.
         self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_tx.clk, 1e9/sata_clk_freqs[sata_gen])
         self.platform.add_period_constraint(self.sata_phy.crg.cd_sata_rx.clk, 1e9/sata_clk_freqs[sata_gen])
         self.platform.add_false_path_constraints(

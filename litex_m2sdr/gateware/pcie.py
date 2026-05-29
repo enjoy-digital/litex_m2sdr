@@ -57,7 +57,7 @@ class LitePCIeWishboneBurstReadSlave(LiteXModule):
                  read_burst_dwords=128):
         assert data_width == 32
 
-        self.bus = self.wishbone = bus = wishbone.Interface(
+        self.bus = bus = wishbone.Interface(
             address_width = address_width,
             data_width    = data_width,
             addressing    = addressing,
@@ -121,9 +121,10 @@ class LitePCIeWishboneBurstReadSlave(LiteXModule):
             port.source.dat.eq(bus.dat_w),
         ]
 
-        # Timeouts.
-        self.req_timeout = req_timeout = WaitTimer(2**16)
-        self.cmp_timeout = cmp_timeout = WaitTimer(2**18)
+        # Timeouts (cycle-count guards so a lost PCIe request/completion cannot stall the
+        # Wishbone bus forever; on timeout the access is acked with bus.err set).
+        self.req_timeout = req_timeout = WaitTimer(2**16) # Issuing the read/write request.
+        self.cmp_timeout = cmp_timeout = WaitTimer(2**18) # Waiting for the first completion.
 
         # FSM.
         fsm = FSM(reset_state="IDLE")
