@@ -41,6 +41,8 @@ static void sata_decode_string(char *dst, size_t dst_len,
     if (!dst || dst_len == 0)
         return;
 
+    /* ATA IDENTIFY string fields are byte-swapped: the high byte of each
+     * 16-bit word holds the first character. */
     for (unsigned i = 0; i < word_count && out + 1 < dst_len; i++) {
         uint16_t word = words[first_word + i];
         dst[out++] = (char)((word >> 8) & 0xff);
@@ -53,6 +55,7 @@ static void sata_decode_string(char *dst, size_t dst_len,
     dst[out] = '\0';
 }
 
+/* ATA IDENTIFY integers span consecutive little-endian 16-bit words. */
 static uint64_t sata_ident_u64(const uint16_t *words, unsigned first_word)
 {
     return ((uint64_t)words[first_word + 0] <<  0) |
@@ -61,10 +64,10 @@ static uint64_t sata_ident_u64(const uint16_t *words, unsigned first_word)
            ((uint64_t)words[first_word + 3] << 48);
 }
 
-static uint64_t sata_ident_u32(const uint16_t *words, unsigned first_word)
+static uint32_t sata_ident_u32(const uint16_t *words, unsigned first_word)
 {
-    return ((uint64_t)words[first_word + 0] <<  0) |
-           ((uint64_t)words[first_word + 1] << 16);
+    return ((uint32_t)words[first_word + 0] <<  0) |
+           ((uint32_t)words[first_word + 1] << 16);
 }
 
 static void sata_decode_identify(struct m2sdr_sata_info *info, const uint16_t *words)
@@ -172,8 +175,9 @@ int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, uns
     return M2SDR_ERR_OK;
 #else
     (void)dev;
-    (void)info;
     (void)timeout_ms;
+    if (info)
+        memset(info, 0, sizeof(*info));
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 }

@@ -237,19 +237,19 @@ struct m2sdr_capabilities {
 #define M2SDR_SATA_MODEL_MAX    41
 
 struct m2sdr_sata_info {
-    bool phy_enabled;
-    uint32_t phy_status;
-    bool phy_ready;
-    bool tx_ready;
-    bool rx_ready;
-    bool ctrl_ready;
-    bool drive_present;
-    bool identify_done;
-    char serial[M2SDR_SATA_SERIAL_MAX];
-    char firmware[M2SDR_SATA_FIRMWARE_MAX];
-    char model[M2SDR_SATA_MODEL_MAX];
-    uint64_t sector_count;
-    uint32_t logical_sector_size;
+    bool     phy_enabled;         /* SATA PHY enable bit is set.                  */
+    uint32_t phy_status;          /* Raw SATA_PHY_STATUS register value.          */
+    bool     phy_ready;           /* Decoded from phy_status.                     */
+    bool     tx_ready;            /* Decoded from phy_status.                     */
+    bool     rx_ready;            /* Decoded from phy_status.                     */
+    bool     ctrl_ready;          /* Decoded from phy_status.                     */
+    bool     drive_present;       /* identify_done and a non-zero sector count.   */
+    bool     identify_done;       /* ATA IDENTIFY completed.                      */
+    char     serial[M2SDR_SATA_SERIAL_MAX];     /* NUL-terminated, trimmed.       */
+    char     firmware[M2SDR_SATA_FIRMWARE_MAX]; /* NUL-terminated, trimmed.       */
+    char     model[M2SDR_SATA_MODEL_MAX];       /* NUL-terminated, trimmed.       */
+    uint64_t sector_count;        /* Logical sector count (LBA48, else LBA28).    */
+    uint32_t logical_sector_size; /* Bytes per logical sector (512 unless > 512). */
 };
 
 struct m2sdr_clock_info {
@@ -588,6 +588,14 @@ int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
 int  m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
 int  m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
+
+/* Copy SATA sectors to/from host memory using the LitePCIe userspace DMA path.
+ *
+ * 'buf' must hold at least nsectors * 512 bytes. 'timeout_ms' bounds each DMA
+ * chunk (< 0 waits forever). On return '*transferred' (if non-NULL) holds the
+ * number of sectors actually copied, even on error, so a partial transfer can
+ * be resumed. Returns M2SDR_ERR_UNSUPPORTED on non-PCIe transports.
+ */
 int  m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
                               enum m2sdr_sata_dma_direction direction,
                               uint64_t sector,
