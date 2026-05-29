@@ -36,6 +36,7 @@
 #include "m2sdr_cli.h"
 #include "m2sdr_sata_capture_volume.h"
 #include "m2sdr_sata_lowlevel.h"
+#include "m2sdr_sata_hostio.h"
 #include "m2sdr_sata_sigmf.h"
 #include "csr.h"
 #include "mem.h"
@@ -875,43 +876,105 @@ static int sata_write_sectors_from_buffer(struct m2sdr_dev *conn,
     return 0;
 }
 
+/* Host I/O engine drive backend: wrap the per-chunk drive transfers above so
+ * the engine stays transport-agnostic (it picks PCIe DMA vs Etherbone here). */
+static int cli_drive_read(void *dev, uint64_t sector, uint32_t nsectors, uint8_t *buf, int timeout_ms)
+{
+    struct m2sdr_dev *conn = dev;
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    return sata_read_sectors_to_buffer(conn, sector, nsectors, buf, timeout_ms, &try_pcie_dma);
+}
+
+static int cli_drive_write(void *dev, uint64_t sector, uint32_t nsectors, const uint8_t *buf, int timeout_ms)
+{
+    struct m2sdr_dev *conn = dev;
+    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
+    return sata_write_sectors_from_buffer(conn, sector, nsectors, (uint8_t *)buf, timeout_ms, &try_pcie_dma);
+}
+
+static const struct sata_drive_ops cli_drive_ops = { cli_drive_read, cli_drive_write };
+
+/* Open the device and set up a host I/O engine over it. Returns 0 on success,
+ * else closes the device and returns 1 (after printing). */
+static int sata_host_io_open(struct sata_host_io *io, struct m2sdr_dev **conn)
+{
+    *conn = m2sdr_open_dev();
+    sata_require_csrs();
+    if (sata_host_io_init(io, *conn, &cli_drive_ops,
+                          sata_file_chunk_sectors(sata_try_pcie_dma_default(*conn))) != 0) {
+        fprintf(stderr, "Failed to allocate host buffer.\n");
+        m2sdr_close_dev(*conn);
+        return 1;
+    }
+    return 0;
+}
+
+/* Chunk callbacks for the host I/O engine. */
+
+/* READ sink: append each chunk to a file, honoring an optional byte limit
+ * (remaining == UINT64_MAX means "no limit"). */
+struct file_sink_ctx { FILE *out; const char *path; uint64_t remaining; };
+static int file_sink_chunk(uint8_t *buf, size_t bytes, uint64_t sector, uint32_t nsectors, void *ctx)
+{
+    struct file_sink_ctx *c = ctx;
+    size_t w = (c->remaining < bytes) ? (size_t)c->remaining : bytes;
+    (void)sector; (void)nsectors;
+    if (w && fwrite(buf, 1, w, c->out) != w) {
+        perror(c->path);
+        return 1;
+    }
+    c->remaining -= w;
+    return 0;
+}
+
+/* WRITE source: fill each chunk with a test pattern. */
+static int pattern_fill_chunk(uint8_t *buf, size_t bytes, uint64_t sector, uint32_t nsectors, void *ctx)
+{
+    enum sata_pattern_kind pattern = *(const enum sata_pattern_kind *)ctx;
+    (void)nsectors;
+    fill_pattern(buf, bytes, sector * SATA_SECTOR_BYTES, pattern);
+    return 0;
+}
+
+/* READ sink: verify each chunk against a test pattern. */
+static int pattern_check_chunk(uint8_t *buf, size_t bytes, uint64_t sector, uint32_t nsectors, void *ctx)
+{
+    enum sata_pattern_kind pattern = *(const enum sata_pattern_kind *)ctx;
+    uint64_t bad_offset = 0;
+    uint32_t expected = 0;
+    uint32_t actual = 0;
+    (void)nsectors;
+
+    if (!check_pattern(buf, bytes, sector * SATA_SECTOR_BYTES, pattern,
+                       &bad_offset, &expected, &actual)) {
+        fprintf(stderr,
+            "Pattern mismatch at byte 0x%016" PRIx64 ": expected=0x%08" PRIx32
+            " actual=0x%08" PRIx32 "\n", bad_offset, expected, actual);
+        return 1;
+    }
+    return 0;
+}
+
 static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
-    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
-    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
-    uint32_t done = 0;
+    struct sata_host_io io;
+    struct m2sdr_dev *conn;
+    struct file_sink_ctx fc;
     bool close_out = false;
     FILE *out;
     int rc = 1;
 
-    sata_require_csrs();
-    if (!buf) {
-        fprintf(stderr, "Failed to allocate host buffer.\n");
-        goto out_close_dev;
-    }
+    if (sata_host_io_open(&io, &conn) != 0)
+        return 1;
 
     out = open_stdio_or_file(path, "wb", &close_out);
     if (!out)
-        goto out_free;
+        goto out_dev;
 
-    while (done < nsectors) {
-        uint32_t chunk = nsectors - done;
-        size_t bytes;
-        if (chunk > max_sectors)
-            chunk = max_sectors;
-        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
-
-        if (sata_read_sectors_to_buffer(conn, src_sector + done, chunk, buf,
-                                        timeout_ms, &try_pcie_dma) != 0)
-            goto out_file;
-        if (fwrite(buf, 1, bytes, out) != bytes) {
-            perror(path);
-            goto out_file;
-        }
-        done += chunk;
-    }
+    fc.out = out; fc.path = path; fc.remaining = UINT64_MAX;
+    if (sata_host_io_run(&io, SATA_HOST_IO_READ, src_sector, nsectors, timeout_ms,
+                         file_sink_chunk, &fc) != 0)
+        goto out_file;
 
     rc = 0;
     printf("Read %" PRIu32 " sectors from 0x%016" PRIx64 " to %s\n",
@@ -920,9 +983,8 @@ static int do_read_file(uint64_t src_sector, uint32_t nsectors, const char *path
 out_file:
     if (close_out)
         fclose(out);
-out_free:
-    free(buf);
-out_close_dev:
+out_dev:
+    sata_host_io_cleanup(&io);
     m2sdr_close_dev(conn);
     return rc;
 }
@@ -1019,94 +1081,43 @@ static int do_write_file(const char *path, uint64_t dst_sector, uint32_t nsector
 static int do_write_pattern(uint64_t dst_sector, uint32_t nsectors,
                             enum sata_pattern_kind pattern, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
-    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
-    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
-    uint32_t done = 0;
-    int rc = 1;
+    struct sata_host_io io;
+    struct m2sdr_dev *conn;
+    int rc;
 
-    sata_require_csrs();
-    if (!buf) {
-        fprintf(stderr, "Failed to allocate host buffer.\n");
-        goto out_close_dev;
-    }
+    if (sata_host_io_open(&io, &conn) != 0)
+        return 1;
 
-    while (done < nsectors) {
-        uint32_t chunk = nsectors - done;
-        size_t bytes;
-        if (chunk > max_sectors)
-            chunk = max_sectors;
-        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
+    rc = sata_host_io_run(&io, SATA_HOST_IO_WRITE, dst_sector, nsectors, timeout_ms,
+                          pattern_fill_chunk, &pattern);
+    if (rc == 0)
+        printf("Wrote pattern to %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
+            nsectors, dst_sector);
 
-        fill_pattern(buf, bytes, (dst_sector + done) * SATA_SECTOR_BYTES, pattern);
-        if (sata_write_sectors_from_buffer(conn, dst_sector + done, chunk, buf,
-                                           timeout_ms, &try_pcie_dma) != 0)
-            goto out_free;
-        done += chunk;
-    }
-
-    rc = 0;
-    printf("Wrote pattern to %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
-        nsectors, dst_sector);
-
-out_free:
-    free(buf);
-out_close_dev:
+    sata_host_io_cleanup(&io);
     m2sdr_close_dev(conn);
-    return rc;
+    return rc ? 1 : 0;
 }
 
 static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
                              enum sata_pattern_kind pattern, int timeout_ms)
 {
-    struct m2sdr_dev *conn = m2sdr_open_dev();
-    bool try_pcie_dma = sata_try_pcie_dma_default(conn);
-    uint32_t max_sectors = sata_file_chunk_sectors(try_pcie_dma);
-    uint8_t *buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
-    uint32_t done = 0;
-    int rc = 1;
+    struct sata_host_io io;
+    struct m2sdr_dev *conn;
+    int rc;
 
-    sata_require_csrs();
-    if (!buf) {
-        fprintf(stderr, "Failed to allocate host buffer.\n");
-        goto out_close_dev;
-    }
+    if (sata_host_io_open(&io, &conn) != 0)
+        return 1;
 
-    while (done < nsectors) {
-        uint32_t chunk = nsectors - done;
-        size_t bytes;
-        uint64_t bad_offset = 0;
-        uint32_t expected = 0;
-        uint32_t actual = 0;
+    rc = sata_host_io_run(&io, SATA_HOST_IO_READ, src_sector, nsectors, timeout_ms,
+                          pattern_check_chunk, &pattern);
+    if (rc == 0)
+        printf("Verified pattern over %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
+            nsectors, src_sector);
 
-        if (chunk > max_sectors)
-            chunk = max_sectors;
-        bytes = (size_t)chunk * SATA_SECTOR_BYTES;
-
-        if (sata_read_sectors_to_buffer(conn, src_sector + done, chunk, buf,
-                                        timeout_ms, &try_pcie_dma) != 0)
-            goto out_free;
-        if (!check_pattern(buf, bytes, (src_sector + done) * SATA_SECTOR_BYTES,
-                           pattern, &bad_offset, &expected, &actual)) {
-            fprintf(stderr,
-                "Pattern mismatch at byte 0x%016" PRIx64 ": expected=0x%08" PRIx32
-                " actual=0x%08" PRIx32 "\n",
-                bad_offset, expected, actual);
-            goto out_free;
-        }
-        done += chunk;
-    }
-
-    rc = 0;
-    printf("Verified pattern over %" PRIu32 " sectors at 0x%016" PRIx64 "\n",
-        nsectors, src_sector);
-
-out_free:
-    free(buf);
-out_close_dev:
+    sata_host_io_cleanup(&io);
     m2sdr_close_dev(conn);
-    return rc;
+    return rc ? 1 : 0;
 }
 
 /* SATA Capture Volume storage ---------------------------------------------- */
@@ -1454,59 +1465,35 @@ static void capture_volume_entry_get_sigmf_metadata(const struct sata_capture_en
 
 static int export_entry_data(const struct sata_capture_entry *e, const char *path, int timeout_ms)
 {
+    struct sata_host_io io;
     struct m2sdr_dev *conn;
-    uint32_t max_sectors;
-    uint8_t *buf;
-    uint32_t done = 0;
-    uint64_t remaining;
-    bool try_pcie_dma;
+    struct file_sink_ctx fc;
     bool close_out = false;
     FILE *out = NULL;
     int rc = 1;
 
     if (!e)
         return 1;
+    if (sata_host_io_open(&io, &conn) != 0)
+        return 1;
 
-    remaining = e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
-    conn = m2sdr_open_dev();
-    sata_require_csrs();
-    try_pcie_dma = sata_try_pcie_dma_default(conn);
-    max_sectors = sata_file_chunk_sectors(try_pcie_dma);
-    buf = malloc((size_t)max_sectors * SATA_SECTOR_BYTES);
-    if (!buf) {
-        fprintf(stderr, "Failed to allocate export buffer.\n");
-        goto out_close_dev;
-    }
     out = open_stdio_or_file(path, "wb", &close_out);
     if (!out)
         goto out_close_dev;
 
-    while (done < e->nsectors && remaining > 0) {
-        uint32_t chunk = e->nsectors - done;
-        size_t chunk_bytes;
-        size_t write_bytes;
-
-        if (chunk > max_sectors)
-            chunk = max_sectors;
-        chunk_bytes = (size_t)chunk * SATA_SECTOR_BYTES;
-        if (sata_read_sectors_to_buffer(conn, e->sector + done, chunk, buf,
-                                        timeout_ms, &try_pcie_dma) != 0)
-            goto out_close_dev;
-        write_bytes = remaining < chunk_bytes ? (size_t)remaining : chunk_bytes;
-        if (fwrite(buf, 1, write_bytes, out) != write_bytes) {
-            perror(path);
-            goto out_close_dev;
-        }
-        remaining -= write_bytes;
-        done += chunk;
-    }
+    /* Stop writing once e->bytes have been emitted (the last sector may be partial). */
+    fc.out = out; fc.path = path;
+    fc.remaining = e->bytes ? e->bytes : (uint64_t)e->nsectors * SATA_SECTOR_BYTES;
+    if (sata_host_io_run(&io, SATA_HOST_IO_READ, e->sector, e->nsectors, timeout_ms,
+                         file_sink_chunk, &fc) != 0)
+        goto out_close_dev;
     rc = 0;
 
 out_close_dev:
+    sata_host_io_cleanup(&io);
     m2sdr_close_dev(conn);
     if (close_out)
         fclose(out);
-    free(buf);
     return rc;
 }
 
