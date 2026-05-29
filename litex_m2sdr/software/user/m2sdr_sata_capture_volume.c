@@ -22,6 +22,10 @@
  */
 #define SATA_CAPTURE_VOLUME_MAGIC_V1 "M2SDR_SATA_CATALOG_V1"
 
+/* Each entry is one '|'-separated record per line; the separator is therefore
+ * forbidden inside names and free-text fields. */
+#define SATA_CAPTURE_VOLUME_FIELD_SEP '|'
+
 void capture_volume_clear(struct sata_capture_volume *volume)
 {
     memset(volume, 0, sizeof(*volume));
@@ -33,7 +37,8 @@ int capture_volume_name_valid(const char *name)
     if (!name || !name[0] || strlen(name) >= SATA_CAPTURE_NAME_MAX)
         return 0;
     for (const char *p = name; *p; p++) {
-        if (*p == '|' || *p == '\n' || *p == '\r' || *p == '\t' || *p == ' ')
+        if (*p == SATA_CAPTURE_VOLUME_FIELD_SEP ||
+            *p == '\n' || *p == '\r' || *p == '\t' || *p == ' ')
             return 0;
     }
     return 1;
@@ -46,7 +51,7 @@ int capture_volume_text_valid(const char *text, size_t max_len)
     if (strlen(text) >= max_len)
         return 0;
     for (const char *p = text; *p; p++) {
-        if (*p == '|' || *p == '\n' || *p == '\r')
+        if (*p == SATA_CAPTURE_VOLUME_FIELD_SEP || *p == '\n' || *p == '\r')
             return 0;
     }
     return 1;
@@ -68,7 +73,7 @@ static char *capture_volume_next_field(char **save)
 
     if (!field)
         return NULL;
-    sep = strchr(field, '|');
+    sep = strchr(field, SATA_CAPTURE_VOLUME_FIELD_SEP);
     if (sep) {
         *sep = '\0';
         *save = sep + 1;

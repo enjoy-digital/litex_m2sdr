@@ -40,6 +40,17 @@
 #include "csr.h"
 #include "mem.h"
 
+/* Tunables ------------------------------------------------------------------ */
+
+/* Delay between starting the RX and TX streamers in a per-sector disk-to-disk
+ * copy, giving the looped-back stream a sink before data flows. */
+#define SATA_COPY_RX_TX_START_DELAY_US (5 * 1000)
+/* Emit a progress line every N sectors during long copies. */
+#define SATA_COPY_PROGRESS_SECTORS     64
+/* SigMF metadata embeds its own byte length, so serialization is a fixed point:
+ * re-serialize until the length stops growing, bounded by this many passes. */
+#define SATA_SIGMF_SERIALIZE_PASSES    4
+
 /* Connection options -------------------------------------------------------- */
 
 static struct m2sdr_cli_device g_cli_dev;
@@ -1753,7 +1764,9 @@ static int sata_write_sigmf_metadata_to_conn(struct m2sdr_dev *conn,
 
     if (meta_bytes)
         *meta_bytes = 0;
-    for (unsigned pass = 0; pass < 4; pass++) {
+    /* Re-serialize until the encoded "meta_bytes" length converges (it feeds
+     * back into the metadata it describes), bounded by a fixed pass count. */
+    for (unsigned pass = 0; pass < SATA_SIGMF_SERIALIZE_PASSES; pass++) {
         uint64_t current_bytes;
 
         memset(buf, 0, (size_t)capacity);
@@ -1960,6 +1973,37 @@ out_close_dev:
     return rc;
 }
 
+/* Read the SigMF input and resolve its dataset path/size into 'bytes' and
+ * 'nsectors'. Returns 0 on success, 1 (after printing) on any error. */
+static int sigmf_import_prepare(const char *input_path,
+                                struct m2sdr_sigmf_meta *meta,
+                                char *data_path, size_t data_path_len,
+                                uint64_t *bytes, uint32_t *nsectors)
+{
+    if (m2sdr_sigmf_read(input_path, meta) != 0) {
+        fprintf(stderr, "Could not read SigMF metadata from %s\n", input_path);
+        return 1;
+    }
+    if (m2sdr_sigmf_format_from_datatype(meta->datatype) == (enum m2sdr_format)-1) {
+        fprintf(stderr,
+            "Unsupported SigMF datatype '%s'. Expected a datatype compatible with sc16 or sc8 samples.\n",
+            meta->datatype);
+        return 1;
+    }
+    snprintf(data_path, data_path_len, "%s", meta->data_path);
+    *bytes = file_size_bytes(data_path);
+    if (*bytes == 0) {
+        fprintf(stderr, "%s is empty.\n", data_path);
+        return 1;
+    }
+    *nsectors = m2sdr_sata_bytes_to_sectors(*bytes);
+    if ((uint64_t)*nsectors * SATA_SECTOR_BYTES < *bytes) {
+        fprintf(stderr, "SigMF dataset is too large.\n");
+        return 1;
+    }
+    return 0;
+}
+
 static int do_import_sigmf_capture(const char *name, const char *input_path,
                                    int argc, char **argv, int argi,
                                    int timeout_ms, bool dry_run)
@@ -1993,27 +2037,9 @@ static int do_import_sigmf_capture(const char *name, const char *input_path,
         argi++;
     }
 
-    if (m2sdr_sigmf_read(input_path, &meta) != 0) {
-        fprintf(stderr, "Could not read SigMF metadata from %s\n", input_path);
+    if (sigmf_import_prepare(input_path, &meta, source_data_path,
+                             sizeof(source_data_path), &bytes, &nsectors) != 0)
         return 1;
-    }
-    if (m2sdr_sigmf_format_from_datatype(meta.datatype) == (enum m2sdr_format)-1) {
-        fprintf(stderr,
-            "Unsupported SigMF datatype '%s'. Expected a datatype compatible with sc16 or sc8 samples.\n",
-            meta.datatype);
-        return 1;
-    }
-    snprintf(source_data_path, sizeof(source_data_path), "%s", meta.data_path);
-    bytes = file_size_bytes(source_data_path);
-    if (bytes == 0) {
-        fprintf(stderr, "%s is empty.\n", source_data_path);
-        return 1;
-    }
-    nsectors = m2sdr_sata_bytes_to_sectors(bytes);
-    if ((uint64_t)nsectors * SATA_SECTOR_BYTES < bytes) {
-        fprintf(stderr, "SigMF dataset is too large.\n");
-        return 1;
-    }
 
     conn = m2sdr_open_dev();
     sata_require_csrs();
@@ -2267,7 +2293,7 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
 
         /* Start RX first so the looped-back stream always has a sink. */
         sata_rx_start(conn);
-        usleep(5 * 1000);
+        usleep(SATA_COPY_RX_TX_START_DELAY_US);
         sata_tx_start(conn);
 
         tx_rc = wait_done_quiet("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms);
@@ -2280,7 +2306,7 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
             break;
         }
 
-        if (nsectors > 1 && (((i + 1) % 64) == 0 || (i + 1) == nsectors))
+        if (nsectors > 1 && (((i + 1) % SATA_COPY_PROGRESS_SECTORS) == 0 || (i + 1) == nsectors))
             printf("SATA_COPY(copy): copied %" PRIu32 "/%" PRIu32 " sectors\n", i + 1, nsectors);
     }
 
