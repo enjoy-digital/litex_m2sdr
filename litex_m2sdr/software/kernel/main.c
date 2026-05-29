@@ -73,6 +73,14 @@
 #define LITEPCIE_SATA_DMA_BUFFER_SIZE \
 	(LITEPCIE_SATA_DMA_MAX_SECTORS * LITEPCIE_SATA_SECTOR_SIZE)
 
+/* SATADMA engine register offsets, relative to each engine's CSR base. The
+ * layout is identical for the Mem2Sector and Sector2Mem engines (see csr.h). */
+#define LITEPCIE_SATA_DMA_SECTOR_OFFSET   0x00 /* 64-bit start sector (LBA).         */
+#define LITEPCIE_SATA_DMA_NSECTORS_OFFSET 0x08 /* Sector count for the transfer.     */
+#define LITEPCIE_SATA_DMA_BASE_OFFSET     0x0c /* 64-bit host DMA buffer address.    */
+#define LITEPCIE_SATA_DMA_START_OFFSET    0x14 /* Write 1 to start the transfer.     */
+#define LITEPCIE_SATA_DMA_STATUS_BIT      0x01 /* Bit 0 of the done/error registers. */
+
 /* External functions for LiteUART */
 extern int liteuart_init(void);
 extern void liteuart_exit(void);
@@ -205,6 +213,7 @@ static bool litepcie_soc_has_sata(struct litepcie_device *s)
 
 #if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE) && defined(CSR_SATA_SECTOR2MEM_BASE)
 
+/* LiteX maps 64-bit CSRs as two 32-bit words, most-significant word first. */
 static inline void litepcie_write64(struct litepcie_device *s, uint32_t addr, uint64_t val)
 {
 	litepcie_writel(s, addr + 0, (uint32_t)(val >> 32));
@@ -248,10 +257,11 @@ static int litepcie_sata_wait_done(struct litepcie_device *s,
 	unsigned long deadline = 0;
 	unsigned int spins = 0;
 
+	/* timeout_ms < 0 means wait forever. */
 	if (timeout_ms >= 0)
 		deadline = jiffies + msecs_to_jiffies(timeout_ms);
 
-	while ((litepcie_readl(s, done_addr) & 0x1) == 0) {
+	while ((litepcie_readl(s, done_addr) & LITEPCIE_SATA_DMA_STATUS_BIT) == 0) {
 		if (timeout_ms >= 0 && time_after(jiffies, deadline))
 			return -ETIMEDOUT;
 		if (++spins < 4096) {
@@ -262,7 +272,7 @@ static int litepcie_sata_wait_done(struct litepcie_device *s,
 		}
 	}
 
-	if (litepcie_readl(s, error_addr) & 0x1)
+	if (litepcie_readl(s, error_addr) & LITEPCIE_SATA_DMA_STATUS_BIT)
 		return -EIO;
 
 	return 0;
@@ -272,11 +282,11 @@ static int litepcie_sata_program_dma(struct litepcie_device *s,
 				     uint32_t base, uint64_t sector,
 				     uint32_t nsectors, uint64_t host_addr)
 {
-	litepcie_write64(s, base + 0x00, sector);
-	litepcie_writel(s, base + 0x08, nsectors);
-	litepcie_write64(s, base + 0x0c, host_addr);
+	litepcie_write64(s, base + LITEPCIE_SATA_DMA_SECTOR_OFFSET,   sector);
+	litepcie_writel( s, base + LITEPCIE_SATA_DMA_NSECTORS_OFFSET, nsectors);
+	litepcie_write64(s, base + LITEPCIE_SATA_DMA_BASE_OFFSET,     host_addr);
 	wmb();
-	litepcie_writel(s, base + 0x14, 1);
+	litepcie_writel( s, base + LITEPCIE_SATA_DMA_START_OFFSET,    1);
 	return 0;
 }
 
@@ -331,8 +341,6 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 				CSR_SATA_MEM2SECTOR_ERROR_ADDR,
 				m->timeout_ms);
 		} else {
-			memset(s->sata_dma_cpu, 0xa5, bytes);
-			wmb();
 			litepcie_sata_program_dma(s, CSR_SATA_SECTOR2MEM_BASE,
 						  m->sector + done, chunk,
 						  s->sata_dma_handle);

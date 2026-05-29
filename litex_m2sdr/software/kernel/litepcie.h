@@ -69,14 +69,14 @@ enum litepcie_ioctl_sata_dma_direction {
 #define LITEPCIE_SATA_DMA_MAX_SECTORS 4096U
 
 struct litepcie_ioctl_sata_dma {
-	uint64_t user_addr;
-	uint64_t sector;
-	uint32_t nsectors;
-	int32_t timeout_ms;
-	uint32_t direction;
-	uint32_t transferred;
-	int32_t status;
-	uint32_t reserved;
+	uint64_t user_addr;   /* In:  user buffer (>= nsectors * 512 bytes).         */
+	uint64_t sector;      /* In:  first SATA sector (64-bit LBA).                */
+	uint32_t nsectors;    /* In:  number of 512-byte sectors to transfer.        */
+	int32_t  timeout_ms;  /* In:  per-chunk timeout, < 0 to wait forever.        */
+	uint32_t direction;   /* In:  enum litepcie_ioctl_sata_dma_direction.        */
+	uint32_t transferred; /* Out: sectors actually transferred.                 */
+	int32_t  status;      /* Out: 0 on success, else negative errno.             */
+	uint32_t reserved;    /* Reserved for future use, must be 0.                 */
 };
 
 #define LITEPCIE_IOCTL 'S'
