@@ -1,8 +1,8 @@
-# SPDX-License-Identifier: BSD-2-Clause
 #
 # This file is part of LiteX-M2SDR.
 #
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
+# SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
 
