@@ -40,6 +40,10 @@
 #define EB_ADDR_BYTES 4
 #define EB_MIN_PACKET_BYTES (EB_PACKET_HEADER_BYTES + EB_RECORD_HEADER_BYTES + EB_ADDR_BYTES)
 
+/* Byte offsets into an Etherbone packet: header | record header | address | data. */
+#define EB_ADDR_OFFSET (EB_PACKET_HEADER_BYTES + EB_RECORD_HEADER_BYTES) /* 12 */
+#define EB_DATA_OFFSET (EB_ADDR_OFFSET + EB_ADDR_BYTES)                  /* 16 */
+
 struct eb_connection {
     int fd;
     int read_fd;
@@ -162,7 +166,7 @@ static bool eb_validate_bulk_read_reply(const uint8_t *pkt,
         return false;
     if (pkt[10] != expected_count || pkt[11] != 0)
         return false;
-    if (eb_get_be32(&pkt[12]) != expected_base_addr)
+    if (eb_get_be32(&pkt[EB_ADDR_OFFSET]) != expected_base_addr)
         return false;
     return true;
 }
@@ -195,7 +199,7 @@ static bool eb_validate_bulk_read_reply_header(const uint8_t *pkt,
         return false;
 
     if (base_ret_addr)
-        *base_ret_addr = eb_get_be32(&pkt[12]);
+        *base_ret_addr = eb_get_be32(&pkt[EB_ADDR_OFFSET]);
     if (count)
         *count = c;
     return true;
@@ -440,10 +444,12 @@ int eb_write32_bulk_checked(struct eb_connection *conn, uint32_t addr, const uin
 
     len = eb_bulk_packet_len(count);
     eb_fill_header(raw_pkt);
+    /* Write record only (rcount = 0): Etherbone sends no reply, so this is
+     * fire-and-forget and we cannot confirm the writes landed. */
     eb_fill_record_header(raw_pkt, (uint8_t)count, 0);
-    eb_put_be32(&raw_pkt[12], addr);
+    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], addr);
     for (size_t i = 0; i < count; i++)
-        eb_put_be32(&raw_pkt[16 + 4 * i], vals[i]);
+        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], vals[i]);
 
     if (eb_send(conn, raw_pkt, len) < 0) {
         fprintf(stderr, "eb_write32_bulk: send failed\n");
@@ -586,6 +592,17 @@ static int eb_recv_bulk_read_reply(struct eb_connection *conn,
     return EB_ERR_OK;
 }
 
+/* Allocate the next reply-matching tag. 0 is reserved as a "no reply parsed
+ * yet" sentinel in the pipelined reader, so it is skipped on wrap-around. */
+static uint32_t eb_next_read_counter(struct eb_connection *conn)
+{
+    uint32_t base_ret_addr = ++conn->read_counter;
+
+    if (base_ret_addr == 0)
+        base_ret_addr = ++conn->read_counter;
+    return base_ret_addr;
+}
+
 static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
 {
     uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
@@ -596,15 +613,13 @@ static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32
         return EB_ERR_IO;
 
     len = eb_bulk_packet_len(count);
-    base_ret_addr = ++conn->read_counter;
-    if (base_ret_addr == 0)
-        base_ret_addr = ++conn->read_counter;
+    base_ret_addr = eb_next_read_counter(conn);
 
     eb_fill_header(raw_pkt);
     eb_fill_record_header(raw_pkt, 0, (uint8_t)count);
-    eb_put_be32(&raw_pkt[12], base_ret_addr);
+    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], base_ret_addr);
     for (size_t i = 0; i < count; i++)
-        eb_put_be32(&raw_pkt[16 + 4 * i], addr + (uint32_t)(4 * i));
+        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], addr + (uint32_t)(4 * i));
 
     if (conn->is_direct)
         eb_drain_direct_rx(conn);
@@ -621,7 +636,7 @@ static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32
     }
 
     for (size_t i = 0; i < count; i++)
-        vals[i] = eb_get_be32(&raw_pkt[16 + 4 * i]);
+        vals[i] = eb_get_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i]);
     conn->last_error = EB_ERR_OK;
     return EB_ERR_OK;
 }
@@ -648,15 +663,6 @@ struct eb_pipeline_read {
     size_t count;
 };
 
-static uint32_t eb_next_read_counter(struct eb_connection *conn)
-{
-    uint32_t base_ret_addr = ++conn->read_counter;
-
-    if (base_ret_addr == 0)
-        base_ret_addr = ++conn->read_counter;
-    return base_ret_addr;
-}
-
 static int eb_send_bulk_read_request(struct eb_connection *conn,
                                      uint32_t addr,
                                      size_t count,
@@ -671,9 +677,9 @@ static int eb_send_bulk_read_request(struct eb_connection *conn,
     len = eb_bulk_packet_len(count);
     eb_fill_header(raw_pkt);
     eb_fill_record_header(raw_pkt, 0, (uint8_t)count);
-    eb_put_be32(&raw_pkt[12], base_ret_addr);
+    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], base_ret_addr);
     for (size_t i = 0; i < count; i++)
-        eb_put_be32(&raw_pkt[16 + 4 * i], addr + (uint32_t)(4 * i));
+        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], addr + (uint32_t)(4 * i));
 
     if (eb_send(conn, raw_pkt, len) < 0) {
         fprintf(stderr, "eb_read32_bulk_pipeline: send failed\n");
@@ -769,7 +775,7 @@ static int eb_read32_bulk_pipeline_once(struct eb_connection *conn,
             }
 
             for (size_t i = 0; i < reply_count; i++)
-                vals[pending[pending_index].offset + i] = eb_get_be32(&raw_pkt[16 + 4 * i]);
+                vals[pending[pending_index].offset + i] = eb_get_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i]);
 
             completed += reply_count;
             pending[pending_index] = pending[pending_count - 1];
