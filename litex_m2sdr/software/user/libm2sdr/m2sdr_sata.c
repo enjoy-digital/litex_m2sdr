@@ -31,6 +31,12 @@ static void sata_msleep(unsigned ms)
     usleep(ms * 1000u);
 }
 
+/* Extract a CSR sub-field given its bit offset and size. */
+static bool sata_status_field(uint32_t status, unsigned offset, unsigned size)
+{
+    return ((status >> offset) & ((1u << size) - 1u)) != 0;
+}
+
 static void sata_decode_string(char *dst, size_t dst_len,
                                const uint16_t *words,
                                unsigned first_word,
@@ -120,18 +126,14 @@ int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, uns
     for (;;) {
         if (sata_read32(dev, CSR_SATA_PHY_STATUS_ADDR, &info->phy_status) != 0)
             return M2SDR_ERR_IO;
-        info->phy_ready =
-            ((info->phy_status >> CSR_SATA_PHY_STATUS_READY_OFFSET) &
-             ((1u << CSR_SATA_PHY_STATUS_READY_SIZE) - 1u)) != 0;
-        info->tx_ready =
-            ((info->phy_status >> CSR_SATA_PHY_STATUS_TX_READY_OFFSET) &
-             ((1u << CSR_SATA_PHY_STATUS_TX_READY_SIZE) - 1u)) != 0;
-        info->rx_ready =
-            ((info->phy_status >> CSR_SATA_PHY_STATUS_RX_READY_OFFSET) &
-             ((1u << CSR_SATA_PHY_STATUS_RX_READY_SIZE) - 1u)) != 0;
-        info->ctrl_ready =
-            ((info->phy_status >> CSR_SATA_PHY_STATUS_CTRL_READY_OFFSET) &
-             ((1u << CSR_SATA_PHY_STATUS_CTRL_READY_SIZE) - 1u)) != 0;
+        info->phy_ready  = sata_status_field(info->phy_status,
+            CSR_SATA_PHY_STATUS_READY_OFFSET,      CSR_SATA_PHY_STATUS_READY_SIZE);
+        info->tx_ready   = sata_status_field(info->phy_status,
+            CSR_SATA_PHY_STATUS_TX_READY_OFFSET,   CSR_SATA_PHY_STATUS_TX_READY_SIZE);
+        info->rx_ready   = sata_status_field(info->phy_status,
+            CSR_SATA_PHY_STATUS_RX_READY_OFFSET,   CSR_SATA_PHY_STATUS_RX_READY_SIZE);
+        info->ctrl_ready = sata_status_field(info->phy_status,
+            CSR_SATA_PHY_STATUS_CTRL_READY_OFFSET, CSR_SATA_PHY_STATUS_CTRL_READY_SIZE);
 
         if (info->phy_ready)
             break;
