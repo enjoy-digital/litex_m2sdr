@@ -9,6 +9,8 @@ By loading the **m2sdr** kernel module, you gain access to:
 - **DMA channels (TX/RX)** for high-speed data transfer.
 - **Control/status registers** to configure and monitor hardware.
 - **Interrupt handling** for a responsive data flow.
+- **SATA userspace DMA ioctl** when the loaded bitstream exposes the M2SDR SATA
+  CSR block.
 
 Its lightweight design aims to be simple to maintain and straightforward to customize for your specific needs. 🚀
 
@@ -61,6 +63,9 @@ This removes:
   Each DMA channel appears as its own `/dev/m2sdrX` device (e.g., `/dev/m2sdr0`, `/dev/m2sdr1`, etc.).
 - **User-Space Tools**
   You can use `m2sdr_util`, `m2sdr_play`, or `m2sdr_record` to test DMA, or create custom applications interfacing with `/dev/m2sdrX`.
+- **SATA**
+  SATA host access is exposed through the M2SDR userspace utilities, such as
+  `m2sdr_sata`.
 - **Debug Logging**
   To enable detailed logs:
 ```
@@ -81,6 +86,7 @@ sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
   - DMA buffer allocation
   - Interrupt registration
   - `/dev/m2sdrX` char device operations
+  - SATA userspace DMA ioctl handling
 
 ---
 

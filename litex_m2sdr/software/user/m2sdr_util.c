@@ -259,6 +259,23 @@ static double monotonic_seconds(void)
     return (double)ts.tv_sec + ((double)ts.tv_nsec / 1e9);
 }
 
+static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t sector_size)
+{
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+    double bytes = (double)sectors * (double)sector_size;
+    unsigned unit = 0;
+
+    if (!buf || len == 0)
+        return;
+
+    while (bytes >= 1024.0 && unit + 1 < sizeof(units) / sizeof(units[0])) {
+        bytes /= 1024.0;
+        unit++;
+    }
+
+    snprintf(buf, len, "%.2f %s", bytes, units[unit]);
+}
+
 static void sleep_seconds(double seconds)
 {
     struct timespec req;
@@ -1213,7 +1230,6 @@ static uint32_t icap_read(void *conn, uint32_t reg)
 
 static void info(void)
 {
-    int i;
     unsigned char soc_identifier[256];
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
@@ -1222,8 +1238,13 @@ static void info(void)
     printf("\e[1m[> SoC Info:\e[0m\n");
     printf("------------\n");
 
-    for (i = 0; i < 256; i ++)
-        soc_identifier[i] = m2sdr_read32(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+    if (m2sdr_get_identifier(conn, (char *)soc_identifier, sizeof(soc_identifier)) != M2SDR_ERR_OK) {
+        fprintf(stderr,
+            "Failed to read SoC identifier. If this is PCIe after loading a "
+            "new bitstream, rescan the PCIe bus/driver before using the board.\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
     printf("SoC Identifier   : %s.\n", soc_identifier);
 
 #ifdef CSR_CAPABILITY_BASE
@@ -1310,6 +1331,34 @@ static void info(void)
         const char *sata_mode_str[] = {"Read-only", "Write-only", "Read+Write", "Reserved"};
         const char *sata_mode_name = (sata_mode < 4) ? sata_mode_str[sata_mode] : "Unknown";
         printf("  SATA Mode      : %s\n", sata_mode_name);
+        {
+            struct m2sdr_sata_info sata_info;
+            int sata_rc = m2sdr_get_sata_info(conn, &sata_info, 1000);
+            if (sata_rc == M2SDR_ERR_OK) {
+                printf("  SATA PHY       : %s (status=0x%08" PRIx32 ")\n",
+                    sata_info.phy_ready ? "Ready" : "Not ready",
+                    sata_info.phy_status);
+                printf("  SATA Disk      : %s\n",
+                    sata_info.drive_present ? "Present" : "Not present");
+                if (sata_info.drive_present) {
+                    char capacity[32];
+                    format_capacity(capacity, sizeof(capacity),
+                        sata_info.sector_count,
+                        sata_info.logical_sector_size ? sata_info.logical_sector_size : 512);
+                    printf("  SATA Model     : %s\n", sata_info.model[0] ? sata_info.model : "Unknown");
+                    printf("  SATA Serial    : %s\n", sata_info.serial[0] ? sata_info.serial : "Unknown");
+                    printf("  SATA Firmware  : %s\n", sata_info.firmware[0] ? sata_info.firmware : "Unknown");
+                    printf("  SATA Sectors   : %" PRIu64 "\n", sata_info.sector_count);
+                    printf("  SATA Sector Sz : %" PRIu32 " bytes\n",
+                        sata_info.logical_sector_size ? sata_info.logical_sector_size : 512);
+                    printf("  SATA Capacity  : %s\n", capacity);
+                }
+            } else if (sata_rc == M2SDR_ERR_UNSUPPORTED) {
+                printf("  SATA Disk      : Identify CSR not present\n");
+            } else {
+                printf("  SATA Disk      : Identify failed (%s)\n", m2sdr_strerror(sata_rc));
+            }
+        }
     }
 
     if (wr_enabled) {

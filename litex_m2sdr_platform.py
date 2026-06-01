@@ -239,7 +239,7 @@ class Platform(Xilinx7SeriesPlatform):
 
     def detect_ftdi_chip(self):
         lsusb_log = subprocess.run(['lsusb'], capture_output=True, text=True)
-        for ftdi_chip in ["ft232", "ft2232", "ft4232"]:
+        for ftdi_chip in ["ft4232", "ft2232", "ft232"]:
             if f"Future Technology Devices International, Ltd {ftdi_chip.upper()}" in lsusb_log.stdout:
                 return ftdi_chip
         return None

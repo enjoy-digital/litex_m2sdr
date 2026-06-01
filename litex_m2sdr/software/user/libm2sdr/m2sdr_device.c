@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #include "csr.h"
 #include "m2sdr_internal.h"
@@ -69,6 +70,16 @@ static void m2sdr_trim_nl(char *s)
         s[n - 1] = '\0';
         n--;
     }
+}
+
+static bool m2sdr_identifier_char_is_valid(uint32_t value)
+{
+    unsigned char c = value & 0xffu;
+
+    if (value == 0xffffffffu)
+        return false;
+    return c == '\0' || c == '\t' || c == '\n' || c == '\r' ||
+        (c >= 0x20 && c <= 0x7e);
 }
 
 /* Return the backend-specific default identifier used when the caller does
@@ -333,19 +344,17 @@ static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
 
 static __attribute__((unused)) int m2sdr_has_ptp_clock10(struct m2sdr_dev *dev, bool *present)
 {
-    struct m2sdr_capabilities caps;
-
     if (!dev || !present)
         return M2SDR_ERR_INVAL;
 
     *present = false;
 #if defined(CSR_PTP_CLK10_DISCIPLINE_STATUS_ADDR)
+    struct m2sdr_capabilities caps;
+
     if (m2sdr_get_capabilities(dev, &caps) != 0)
         return M2SDR_ERR_IO;
 
     *present = (caps.features & M2SDR_FEATURE_ETH_PTP_RFIC_CLOCK_MASK) != 0;
-#else
-    (void)caps;
 #endif
     return M2SDR_ERR_OK;
 }
@@ -528,6 +537,10 @@ static int m2sdr_read_identifier_mem(struct m2sdr_dev *dev, char *buf, size_t le
 
         if (m2sdr_reg_read(dev, CSR_IDENTIFIER_MEM_BASE + 4 * i, &value) != 0)
             return M2SDR_ERR_IO;
+        if (!m2sdr_identifier_char_is_valid(value)) {
+            buf[0] = '\0';
+            return M2SDR_ERR_IO;
+        }
 
         buf[i] = (char)(value & 0xff);
         if (buf[i] == '\0')
@@ -826,6 +839,92 @@ int m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
     return dev->ops->writel(dev, addr, val);
 }
 
+int m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count)
+{
+    if (!dev || !vals || !dev->ops || !dev->ops->readl)
+        return M2SDR_ERR_INVAL;
+    if (count == 0)
+        return M2SDR_ERR_OK;
+    if (dev->ops->readl_bulk)
+        return dev->ops->readl_bulk(dev, addr, vals, count);
+
+    for (size_t i = 0; i < count; i++) {
+        int rc = dev->ops->readl(dev, addr + (uint32_t)(4 * i), &vals[i]);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count)
+{
+    if (!dev || !vals || !dev->ops || !dev->ops->writel)
+        return M2SDR_ERR_INVAL;
+    if (count == 0)
+        return M2SDR_ERR_OK;
+    if (dev->ops->writel_bulk)
+        return dev->ops->writel_bulk(dev, addr, vals, count);
+
+    for (size_t i = 0; i < count; i++) {
+        int rc = dev->ops->writel(dev, addr + (uint32_t)(4 * i), vals[i]);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
+                             enum m2sdr_sata_dma_direction direction,
+                             uint64_t sector,
+                             uint32_t nsectors,
+                             void *buf,
+                             int timeout_ms,
+                             uint32_t *transferred)
+{
+    struct litepcie_ioctl_sata_dma m;
+
+    if (transferred)
+        *transferred = 0;
+    if (!dev || !buf || nsectors == 0)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE || dev->fd < 0)
+        return M2SDR_ERR_UNSUPPORTED;
+    if (direction != M2SDR_SATA_DMA_HOST_TO_DEVICE &&
+        direction != M2SDR_SATA_DMA_DEVICE_TO_HOST)
+        return M2SDR_ERR_INVAL;
+
+    memset(&m, 0, sizeof(m));
+    m.user_addr  = (uint64_t)(uintptr_t)buf;
+    m.sector     = sector;
+    m.nsectors   = nsectors;
+    m.timeout_ms = timeout_ms;
+    m.direction  = (direction == M2SDR_SATA_DMA_HOST_TO_DEVICE) ?
+        LITEPCIE_SATA_DMA_HOST_TO_DEVICE : LITEPCIE_SATA_DMA_DEVICE_TO_HOST;
+
+    if (ioctl(dev->fd, LITEPCIE_IOCTL_SATA_DMA, &m) < 0) {
+        int saved_errno = errno;
+        if (transferred)
+            *transferred = m.transferred;
+        if (saved_errno == ENOTTY || saved_errno == ENODEV || saved_errno == ENOSYS)
+            return M2SDR_ERR_UNSUPPORTED;
+        if (saved_errno == ETIMEDOUT)
+            return M2SDR_ERR_TIMEOUT;
+        if (saved_errno == EINVAL || saved_errno == EFAULT)
+            return M2SDR_ERR_INVAL;
+        if (saved_errno == ENOMEM)
+            return M2SDR_ERR_NO_MEM;
+        return M2SDR_ERR_IO;
+    }
+
+    if (transferred)
+        *transferred = m.transferred;
+    if (m.status == -ETIMEDOUT)
+        return M2SDR_ERR_TIMEOUT;
+    if (m.status)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
 /* Legacy escape hatches kept for Soapy and advanced utilities. */
 /* Return the underlying PCIe file descriptor when available. */
 int m2sdr_get_fd(struct m2sdr_dev *dev)
@@ -884,6 +983,7 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev)
 int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
 {
     uint64_t dna = 0;
+    int rc;
 
     if (!dev || !info)
         return M2SDR_ERR_INVAL;
@@ -891,14 +991,16 @@ int m2sdr_get_device_info(struct m2sdr_dev *dev, struct m2sdr_devinfo *info)
     memset(info, 0, sizeof(*info));
     m2sdr_fill_transport_info(dev, info);
 
+#ifdef CSR_IDENTIFIER_MEM_BASE
+    rc = m2sdr_read_identifier_mem(dev, info->identification, sizeof(info->identification));
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+#endif
+
     /* The DNA-derived serial is the most stable identity exposed by current
      * gateware, so use it when available. */
     if (m2sdr_get_fpga_dna(dev, &dna) == M2SDR_ERR_OK)
         snprintf(info->serial, sizeof(info->serial), "%llx", (unsigned long long)dna);
-
-#ifdef CSR_IDENTIFIER_MEM_BASE
-    m2sdr_read_identifier_mem(dev, info->identification, sizeof(info->identification));
-#endif
 
     return M2SDR_ERR_OK;
 }
