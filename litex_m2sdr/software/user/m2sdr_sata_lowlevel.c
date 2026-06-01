@@ -305,6 +305,25 @@ uint32_t sata_tx_error(void *conn)
     return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_ERROR_ADDR);
 }
 
+bool sata_rx_progress_supported(void)
+{
+#ifdef CSR_SATA_RX_STREAMER_PROGRESS_ADDR
+    return true;
+#else
+    return false;
+#endif
+}
+
+uint32_t sata_rx_progress(void *conn)
+{
+#ifdef CSR_SATA_RX_STREAMER_PROGRESS_ADDR
+    return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_PROGRESS_ADDR);
+#else
+    (void)conn;
+    return 0;
+#endif
+}
+
 /* Pattern Helpers ----------------------------------------------------------- */
 
 enum sata_pattern_kind parse_pattern(const char *text)

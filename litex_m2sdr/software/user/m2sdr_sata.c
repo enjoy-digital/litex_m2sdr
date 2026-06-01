@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <math.h>
 #include <ctype.h>
+#include <limits.h>
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
@@ -46,6 +47,12 @@
 /* Delay between starting the RX and TX streamers in a per-sector disk-to-disk
  * copy, giving the looped-back stream a sink before data flows. */
 #define SATA_COPY_RX_TX_START_DELAY_US (5 * 1000)
+/* Default timeout for short SATA control/data operations. */
+#define SATA_DEFAULT_TIMEOUT_MS        30000
+/* Extra wall-clock slack added around duration-based RF captures. */
+#define SATA_CAPTURE_TIMEOUT_MARGIN_MS 10000
+/* Poll status often, but do not spam long-running streamer waits. */
+#define SATA_WAIT_REPORT_INTERVAL_US   1000000
 /* Emit a progress line every N sectors during long copies. */
 #define SATA_COPY_PROGRESS_SECTORS     64
 /* SigMF metadata embeds its own byte length, so serialization is a fixed point:
@@ -168,6 +175,16 @@ static int parse_timeout_ms(const char *s)
         exit(1);
     }
     return v;
+}
+
+static double sectors_to_mib(uint64_t nsectors)
+{
+    return (double)nsectors * (double)SATA_SECTOR_BYTES / (1024.0 * 1024.0);
+}
+
+static double bytes_to_mib(uint64_t bytes)
+{
+    return (double)bytes / (1024.0 * 1024.0);
 }
 
 static int parse_bool01(const char *label, const char *s)
@@ -436,17 +453,22 @@ static void sata_operation_finish(struct sata_operation *op)
 static enum sata_wait_result wait_done_report(const char *name,
                                               uint32_t (*done_fn)(void *),
                                               uint32_t (*err_fn)(void *),
+                                              uint32_t (*progress_fn)(void *),
                                               void *conn,
                                               int timeout_ms,
                                               uint64_t nsectors,
+                                              double capture_mibps,
+                                              double capture_seconds,
                                               bool report)
 {
     int64_t start_us = m2sdr_sata_get_time_us();
     int64_t last_report_us = start_us;
+    double target_mib = sectors_to_mib(nsectors);
 
     for (;;) {
-        int64_t now_us;
-        int64_t elapsed_us;
+        int64_t now_us = m2sdr_sata_get_time_us();
+        int64_t elapsed_us = now_us - start_us;
+        double elapsed_s = (double)elapsed_us / 1000000.0;
 
         if (!keep_running) {
             fprintf(stderr, "%s: interrupted\n", name);
@@ -457,28 +479,106 @@ static enum sata_wait_result wait_done_report(const char *name,
         if (done) {
             uint32_t err = err_fn(conn);
             if (report) {
-                if (err) printf("%s: done (error=1)\n", name);
-                else     printf("%s: done\n", name);
+                double mibps = (elapsed_s > 0.0) ? (target_mib / elapsed_s) : 0.0;
+                if (err) {
+                    printf("%s: done (error=1, target %.1f MiB, elapsed %.3f s, average %.2f MiB/s)\n",
+                        name, target_mib, elapsed_s, mibps);
+                } else {
+                    printf("%s: done (target %.1f MiB, elapsed %.3f s, average %.2f MiB/s)\n",
+                        name, target_mib, elapsed_s, mibps);
+                }
+                if (!err && capture_mibps > 0.0 && capture_seconds > 0.0) {
+                    double rate_error = mibps / capture_mibps;
+                    double time_error = elapsed_s - capture_seconds;
+
+                    if (rate_error < 0.95 || rate_error > 1.05) {
+                        fprintf(stderr,
+                            "%s: warning: stream average %.2f MiB/s differs from requested capture %.2f MiB/s; "
+                            "elapsed %.3f s vs requested %.3f s. Check RF clock/sample-rate configuration.\n",
+                            name, mibps, capture_mibps, elapsed_s, capture_seconds);
+                    } else if (time_error < -0.5 || time_error > 0.5) {
+                        fprintf(stderr,
+                            "%s: warning: elapsed %.3f s differs from requested %.3f s.\n",
+                            name, elapsed_s, capture_seconds);
+                    }
+                }
             }
             return SATA_WAIT_OK;
         }
 
-        now_us = m2sdr_sata_get_time_us();
-        elapsed_us = now_us - start_us;
         if (timeout_ms >= 0 && elapsed_us >= (int64_t)timeout_ms * 1000) {
             uint32_t err = err_fn(conn);
-            if (err)
-                fprintf(stderr, "%s: timeout (error=1)\n", name);
-            else
-                fprintf(stderr, "%s: timeout\n", name);
+            if (progress_fn) {
+                uint32_t progress_sectors = progress_fn(conn);
+                double progress_mib;
+                double progress_mibps;
+
+                if (progress_sectors > nsectors)
+                    progress_sectors = nsectors;
+                progress_mib = sectors_to_mib(progress_sectors);
+                progress_mibps = elapsed_s > 0.0 ? progress_mib / elapsed_s : 0.0;
+                if (err) {
+                    fprintf(stderr,
+                        "%s: timeout after %.3f s (error=1, actual %.1f/%.1f MiB, average %.2f MiB/s)\n",
+                        name, elapsed_s, progress_mib, target_mib, progress_mibps);
+                } else {
+                    fprintf(stderr,
+                        "%s: timeout after %.3f s (actual %.1f/%.1f MiB, average %.2f MiB/s)\n",
+                        name, elapsed_s, progress_mib, target_mib, progress_mibps);
+                }
+            } else if (err) {
+                fprintf(stderr, "%s: timeout after %.3f s (error=1, target %.1f MiB)\n",
+                    name, elapsed_s, target_mib);
+            } else {
+                fprintf(stderr, "%s: timeout after %.3f s (target %.1f MiB)\n",
+                    name, elapsed_s, target_mib);
+            }
             return SATA_WAIT_TIMEOUT;
         }
 
-        if (report && now_us - last_report_us >= 500000) {
-            double mb = (double)nsectors * 512.0 / (1024.0 * 1024.0);
-            double s  = (double)elapsed_us / 1000000.0;
-            double mbps = (s > 0.0) ? (mb / s) : 0.0;
-            fprintf(stderr, "%s: in progress (%.1f MB, %.2f MB/s)\n", name, mb, mbps);
+        if (report && now_us - last_report_us >= SATA_WAIT_REPORT_INTERVAL_US) {
+            if (progress_fn) {
+                uint32_t progress_sectors = progress_fn(conn);
+                double progress_mib;
+                double progress_mibps;
+
+                if (progress_sectors > nsectors)
+                    progress_sectors = nsectors;
+                progress_mib = sectors_to_mib(progress_sectors);
+                progress_mibps = elapsed_s > 0.0 ? progress_mib / elapsed_s : 0.0;
+                if (capture_mibps > 0.0 && capture_seconds > 0.0) {
+                    fprintf(stderr,
+                        "%s: in progress (actual %.1f/%.1f MiB, elapsed %.1f/%.1f s, average %.2f MiB/s, capture %.2f MiB/s)\n",
+                        name, progress_mib, target_mib, elapsed_s, capture_seconds,
+                        progress_mibps, capture_mibps);
+                } else {
+                    fprintf(stderr,
+                        "%s: in progress (actual %.1f/%.1f MiB, elapsed %.1f s, average %.2f MiB/s)\n",
+                        name, progress_mib, target_mib, elapsed_s, progress_mibps);
+                }
+            } else if (capture_mibps > 0.0 && capture_seconds > 0.0) {
+                double expected_mib = elapsed_s * capture_mibps;
+                if (expected_mib > target_mib)
+                    expected_mib = target_mib;
+                if (elapsed_s > capture_seconds) {
+                    fprintf(stderr,
+                        "%s: waiting for SATA completion (estimated %.1f/%.1f MiB by %.1f s, elapsed %.1f s, capture %.2f MiB/s)\n",
+                        name, expected_mib, target_mib, capture_seconds, elapsed_s, capture_mibps);
+                } else {
+                    fprintf(stderr,
+                        "%s: in progress (estimated %.1f/%.1f MiB, elapsed %.1f/%.1f s, capture %.2f MiB/s)\n",
+                        name, expected_mib, target_mib, elapsed_s, capture_seconds, capture_mibps);
+                }
+            } else if (capture_mibps > 0.0) {
+                double expected_mib = elapsed_s * capture_mibps;
+                if (expected_mib > target_mib)
+                    expected_mib = target_mib;
+                fprintf(stderr, "%s: in progress (estimated %.1f/%.1f MiB, elapsed %.1f s, capture %.2f MiB/s)\n",
+                    name, expected_mib, target_mib, elapsed_s, capture_mibps);
+            } else {
+                fprintf(stderr, "%s: in progress (target %.1f MiB, elapsed %.1f s)\n",
+                    name, target_mib, elapsed_s);
+            }
             last_report_us = now_us;
         }
 
@@ -493,7 +593,22 @@ static enum sata_wait_result wait_done(const char *name,
                                        int timeout_ms,
                                        uint64_t nsectors)
 {
-    return wait_done_report(name, done_fn, err_fn, conn, timeout_ms, nsectors, true);
+    return wait_done_report(name, done_fn, err_fn, NULL, conn, timeout_ms, nsectors,
+        0.0, 0.0, true);
+}
+
+static enum sata_wait_result wait_done_capture(const char *name,
+                                               uint32_t (*done_fn)(void *),
+                                               uint32_t (*err_fn)(void *),
+                                               uint32_t (*progress_fn)(void *),
+                                               void *conn,
+                                               int timeout_ms,
+                                               uint64_t nsectors,
+                                               double capture_mibps,
+                                               double capture_seconds)
+{
+    return wait_done_report(name, done_fn, err_fn, progress_fn, conn, timeout_ms, nsectors,
+        capture_mibps, capture_seconds, true);
 }
 
 static enum sata_wait_result wait_done_quiet(const char *name,
@@ -502,7 +617,8 @@ static enum sata_wait_result wait_done_quiet(const char *name,
                                              void *conn,
                                              int timeout_ms)
 {
-    return wait_done_report(name, done_fn, err_fn, conn, timeout_ms, 1, false);
+    return wait_done_report(name, done_fn, err_fn, NULL, conn, timeout_ms, 1,
+        0.0, 0.0, false);
 }
 
 static void print_planned_transfer(const char *name,
@@ -2129,7 +2245,8 @@ static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
 
 #endif
 
-static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, bool dry_run)
+static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms,
+                     bool dry_run, double capture_mibps, double capture_seconds)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
@@ -2150,8 +2267,17 @@ static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms, boo
     }
     sata_rx_start(conn);
 
-    enum sata_wait_result rc =
-        wait_done("SATA_RX(record)", sata_rx_done, sata_rx_error, conn, timeout_ms, nsectors);
+    uint32_t (*progress_fn)(void *) =
+        sata_rx_progress_supported() ? sata_rx_progress : NULL;
+    enum sata_wait_result rc;
+
+    if (capture_mibps > 0.0) {
+        rc = wait_done_capture("SATA_RX(record)", sata_rx_done, sata_rx_error,
+            progress_fn, conn, timeout_ms, nsectors, capture_mibps, capture_seconds);
+    } else {
+        rc = wait_done_report("SATA_RX(record)", sata_rx_done, sata_rx_error,
+            progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
+    }
     sata_operation_finish(&op);
     return rc == SATA_WAIT_OK ? 0 : 1;
 }
@@ -2464,6 +2590,74 @@ static int capture_compute_size(const struct capture_options *opts,
     return 0;
 }
 
+static bool capture_estimated_seconds(const struct capture_options *opts,
+                                      uint64_t bytes,
+                                      long double *seconds)
+{
+    unsigned channels = channel_layout_count(opts->named.channel_layout);
+    size_t format_bytes = m2sdr_format_size(opts->named.format);
+    long double bytes_per_second;
+
+    if (opts->have_seconds) {
+        *seconds = (long double)opts->seconds;
+        return true;
+    }
+
+    if (!opts->have_size || opts->named.sample_rate <= 0 ||
+        channels == 0 || format_bytes == 0)
+        return false;
+
+    bytes_per_second = (long double)opts->named.sample_rate *
+                       (long double)channels *
+                       (long double)format_bytes;
+    if (bytes_per_second <= 0.0L)
+        return false;
+
+    *seconds = (long double)bytes / bytes_per_second;
+    return true;
+}
+
+static int capture_adjust_timeout_ms(const struct capture_options *opts,
+                                     uint64_t bytes,
+                                     int timeout_ms,
+                                     bool timeout_explicit,
+                                     bool start_only,
+                                     bool dry_run)
+{
+    long double seconds;
+    long double needed_ms;
+    int adjusted_ms;
+
+    if (timeout_explicit || start_only || timeout_ms < 0)
+        return timeout_ms;
+    if (!capture_estimated_seconds(opts, bytes, &seconds))
+        return timeout_ms;
+
+    needed_ms = seconds * 1000.0L + (long double)SATA_CAPTURE_TIMEOUT_MARGIN_MS;
+    if (needed_ms > (long double)INT_MAX) {
+        adjusted_ms = -1;
+    } else {
+        adjusted_ms = (int)ceill(needed_ms);
+    }
+
+    if (adjusted_ms < 0 || adjusted_ms > timeout_ms) {
+        if (!dry_run) {
+            if (adjusted_ms < 0) {
+                fprintf(stderr,
+                    "capture: disabling default timeout for %.1Lf s stream; use --timeout-ms to override.\n",
+                    seconds);
+            } else {
+                fprintf(stderr,
+                    "capture: extending default timeout from %.1f s to %.1f s for %.1Lf s stream.\n",
+                    (double)timeout_ms / 1000.0, (double)adjusted_ms / 1000.0, seconds);
+            }
+        }
+        return adjusted_ms;
+    }
+
+    return timeout_ms;
+}
+
 static int apply_rf_config_from_options(const struct named_transfer_options *opts)
 {
     struct m2sdr_config cfg;
@@ -2552,7 +2746,8 @@ static void parse_replay_rf_overrides(struct named_transfer_options *opts,
 }
 
 static int do_capture_named(const char *name, int argc, char **argv, int argi,
-                            int timeout_ms, bool start_only, bool dry_run)
+                            int timeout_ms, bool timeout_explicit,
+                            bool start_only, bool dry_run)
 {
     struct sata_capture_volume cat;
     struct capture_options opts;
@@ -2561,6 +2756,9 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     uint32_t nsectors = 0;
     uint64_t sector;
     uint64_t meta_sector;
+    long double capture_seconds_ld = 0.0L;
+    double capture_seconds = 0.0;
+    double capture_mibps = 0.0;
 
     capture_options_init(&opts);
     while (argi < argc) {
@@ -2572,6 +2770,13 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     }
     if (capture_compute_size(&opts, &nsectors, &bytes) != 0)
         return 1;
+    if (capture_estimated_seconds(&opts, bytes, &capture_seconds_ld) &&
+        capture_seconds_ld > 0.0L) {
+        capture_seconds = (double)capture_seconds_ld;
+        capture_mibps = bytes_to_mib(bytes) / capture_seconds;
+    }
+    timeout_ms = capture_adjust_timeout_ms(&opts, bytes, timeout_ms,
+        timeout_explicit, start_only, dry_run);
     if (capture_volume_load(&cat, timeout_ms) != 0)
         return 1;
     if (!cat.initialized)
@@ -2582,12 +2787,13 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     if (dry_run) {
         printf("%s dry-run: name=%s sector=0x%016" PRIx64 " nsectors=%" PRIu32
                " bytes=%" PRIu64 " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u"
-               " sample_rate=%" PRId64 " format=%s channels=%s\n",
+               " sample_rate=%" PRId64 " format=%s channels=%s capture_rate=%.2f MiB/s\n",
             start_only ? "capture-start" : "capture",
             name, sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
             opts.named.sample_rate,
-            format_name(opts.named.format), channel_layout_name(opts.named.channel_layout));
+            format_name(opts.named.format), channel_layout_name(opts.named.channel_layout),
+            capture_mibps);
         return 0;
     }
 
@@ -2608,7 +2814,8 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
             name, sector, nsectors);
         return 0;
     } else {
-        if (do_record(sector, nsectors, timeout_ms, false) != 0)
+        if (do_record(sector, nsectors, timeout_ms, false,
+                      capture_mibps, capture_seconds) != 0)
             return 1;
     }
 
@@ -2869,7 +3076,8 @@ static void help(void)
            "  -c, --device-num N             Select the device (default: 0).\n"
            "  -i, --ip ADDR                  Target IP address for Etherbone.\n"
            "  -p, --port PORT                Port number (default: 1234).\n"
-           "      --timeout-ms MS            Timeout for streamer operations (default: 30000, -1=infinite).\n"
+           "      --timeout-ms MS            Timeout for streamer operations (default: %d, -1=infinite).\n"
+           "                                   Named captures extend the default to cover requested duration.\n"
            "      --dry-run                  Show planned operation without starting the streamer.\n"
            "      --force                    Allow SATA Capture Volume reset for commands that require confirmation.\n"
            "      --pattern NAME             Diagnostic pattern: zero|counter|prbs.\n"
@@ -2958,7 +3166,8 @@ static void help(void)
 #endif
            "diag header TX|RX|BOTH ENABLE HEADER_ENABLE\n"
            "    Raw header control bits (writes CSR_HEADER_*_CONTROL).\n"
-           "\n");
+           "\n",
+           SATA_DEFAULT_TIMEOUT_MS);
 }
 
 /* Main --------------------------------------------------------------------- */
@@ -2969,7 +3178,8 @@ int main(int argc, char **argv)
     int c;
     int option_index = 0;
 
-    int timeout_ms = 30000;
+    int timeout_ms = SATA_DEFAULT_TIMEOUT_MS;
+    bool timeout_explicit = false;
     bool dry_run = false;
     bool force = false;
     const char *pattern_name = "counter";
@@ -3006,6 +3216,7 @@ int main(int argc, char **argv)
             break;
         case 'T':
             timeout_ms = parse_timeout_ms(optarg);
+            timeout_explicit = true;
             break;
         case 'n':
             dry_run = true;
@@ -3086,7 +3297,8 @@ int main(int argc, char **argv)
             return 1;
         }
         const char *name = argv[optind++];
-        return do_capture_named(name, argc, argv, optind, timeout_ms, false, dry_run);
+        return do_capture_named(name, argc, argv, optind, timeout_ms,
+            timeout_explicit, false, dry_run);
     }
 
     if (!strcmp(cmd, "capture-start")) {
@@ -3095,7 +3307,8 @@ int main(int argc, char **argv)
             return 1;
         }
         const char *name = argv[optind++];
-        return do_capture_named(name, argc, argv, optind, timeout_ms, true, dry_run);
+        return do_capture_named(name, argc, argv, optind, timeout_ms,
+            timeout_explicit, true, dry_run);
     }
 
     if (!strcmp(cmd, "import")) {
@@ -3233,7 +3446,7 @@ int main(int argc, char **argv)
             if (reject_extra_args(argc, argv, optind) != 0)
                 return 1;
             return !strcmp(diag_cmd, "record") ?
-                do_record(dst_sector, nsectors, timeout_ms, dry_run) :
+                do_record(dst_sector, nsectors, timeout_ms, dry_run, 0.0, 0.0) :
                 do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
         }
 

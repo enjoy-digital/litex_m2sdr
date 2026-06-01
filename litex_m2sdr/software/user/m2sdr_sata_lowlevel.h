@@ -101,6 +101,8 @@ uint32_t sata_rx_done(void *conn);
 uint32_t sata_tx_done(void *conn);
 uint32_t sata_rx_error(void *conn);
 uint32_t sata_tx_error(void *conn);
+bool     sata_rx_progress_supported(void);
+uint32_t sata_rx_progress(void *conn);
 
 void m2sdr_sata_set_no_bulk_etherbone(bool no_bulk);
 enum sata_pattern_kind parse_pattern(const char *text);

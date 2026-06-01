@@ -23,6 +23,10 @@ SATA_HOST_BUFFER_BASE = 0x00020000
 # inferred RAM topology simple. 256KiB was tested and caused RAMB cascade DRC
 # issues on the current Artix-7 target.
 SATA_HOST_BUFFER_SIZE = 128 * 1024
+# Keep RF stream captures in multi-sector SATA commands. This avoids the
+# command/ACK overhead of issuing one write per 512-byte sector while keeping
+# progress and interrupt latency bounded.
+SATA_STREAM_BURST_SECTORS = 4096
 
 
 # Helpers ------------------------------------------------------------------------------------------
@@ -424,7 +428,7 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
 # SATA Stream2Sectors ------------------------------------------------------------------------------
 
 class M2SDRLiteSATAStream2Sectors(LiteXModule):
-    """LiteSATA Stream2Sectors with staged, valid-gated SATA writes."""
+    """LiteSATA Stream2Sectors with contiguous multi-sector SATA writes."""
     def __init__(self, port, data_width=64):
         self.port     = port
         self.sector   = CSRStorage(48, description="First SATA sector.")
@@ -432,6 +436,7 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         self.start    = CSR()
         self.done     = CSRStatus(reset=1, description="Asserted when recording has completed.")
         self.error    = CSRStatus(description="Asserted when recording has failed.")
+        self.progress = CSRStatus(32, description="Number of SATA sectors written in the current recording.")
         self.irq      = Signal()
 
         self.sink     = stream.Endpoint([("data", data_width)])
@@ -444,56 +449,61 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         assert (logical_sector_size % stream_bytes) == 0
 
         words_per_sector = _words_per_sector(port.dw)
+        max_burst_sectors = min(SATA_STREAM_BURST_SECTORS, 0xffff)
 
-        count   = Signal(max=words_per_sector)
-        crt_sec = Signal(48)
+        send_count        = Signal(32)
+        burst_words       = Signal(32)
+        burst_sectors     = Signal(16)
+        remaining_sectors = Signal(32)
+        crt_sec           = Signal(48)
+        progress          = Signal(32)
 
         # Converter.
         self.conv = conv = stream.Converter(nbits_from=data_width, nbits_to=port.dw)
 
-        # Sector buffer.
-        self.buf = buf = stream.SyncFIFO([("data", port.dw)], words_per_sector)
-
         # Connect Stream to Converter.
         self.comb += self.sink.connect(conv.sink, keep={"valid", "ready", "data", "last"})
+        self.comb += self.progress.status.eq(progress)
 
         # Control FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(self.start.re,
-                NextValue(count,   0),
-                NextValue(crt_sec, self.sector.storage),
+                NextValue(send_count,        0),
+                NextValue(burst_words,       0),
+                NextValue(burst_sectors,     0),
+                NextValue(remaining_sectors, self.nsectors.storage),
+                NextValue(crt_sec,           self.sector.storage),
+                NextValue(progress,          0),
                 *_clear_transfer_status(self.done, self.error),
-                NextState("FILL-SECTOR")
+                NextState("LOAD-BURST")
             ),
             conv.source.ready.eq(1)
         )
-        fsm.act("FILL-SECTOR",
-            # Stage exactly one sector before issuing the SATA write command.
-            # This decouples SATA reads feeding the stream from SATA writes.
-            buf.sink.valid.eq(conv.source.valid),
-            buf.sink.data.eq(conv.source.data),
-            conv.source.ready.eq(buf.sink.ready),
-            If(buf.sink.valid & buf.sink.ready,
-                NextValue(count, count + 1),
-                If(count == (words_per_sector - 1),
-                    NextValue(count, 0),
-                    NextState("SEND-CMD-AND-DATA")
-                )
-            )
+        fsm.act("LOAD-BURST",
+            NextValue(send_count, 0),
+            If(remaining_sectors > max_burst_sectors,
+                NextValue(burst_sectors, max_burst_sectors),
+                NextValue(burst_words,   max_burst_sectors * words_per_sector),
+            ).Else(
+                NextValue(burst_sectors, remaining_sectors[:16]),
+                NextValue(burst_words,   remaining_sectors * words_per_sector),
+            ),
+            NextState("SEND-CMD-AND-DATA")
         )
         fsm.act("SEND-CMD-AND-DATA",
-            # Send write command/data for 1 sector. Gate valid with buffered
-            # data so SATA never samples stale stream data.
-            port.sink.valid.eq(buf.source.valid),
-            port.sink.last.eq(count == (words_per_sector - 1)),
+            # Send one write command/data stream for the current burst. Gate
+            # valid with converter output so the first SATA beat cannot use
+            # stale data.
+            port.sink.valid.eq(conv.source.valid),
+            port.sink.last.eq(send_count == (burst_words - 1)),
             port.sink.write.eq(1),
             port.sink.sector.eq(crt_sec),
-            port.sink.count.eq(1),
-            port.sink.data.eq(_sata_word(buf.source.data)),
-            buf.source.ready.eq(port.sink.ready),
+            port.sink.count.eq(burst_sectors),
+            port.sink.data.eq(_sata_word(conv.source.data)),
+            conv.source.ready.eq(port.sink.ready),
             If(port.sink.valid & port.sink.ready,
-                NextValue(count, count + 1),
+                NextValue(send_count, send_count + 1),
                 If(port.sink.last,
                     NextState("WAIT-ACK")
                 )
@@ -512,13 +522,16 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
                 If(port.source.failed,
                     *_fail_transfer(self.done, self.error, self.irq),
                     NextState("IDLE")
-                ).Elif(crt_sec == (self.sector.storage + self.nsectors.storage - 1),
-                    *_finish_transfer(self.done, self.irq),
-                    NextState("IDLE")
                 ).Else(
-                    NextValue(count,   0),
-                    NextValue(crt_sec, crt_sec + 1),
-                    NextState("FILL-SECTOR")
+                    NextValue(progress, progress + burst_sectors),
+                    If(remaining_sectors <= burst_sectors,
+                        *_finish_transfer(self.done, self.irq),
+                        NextState("IDLE")
+                    ).Else(
+                        NextValue(remaining_sectors, remaining_sectors - burst_sectors),
+                        NextValue(crt_sec, crt_sec + burst_sectors),
+                        NextState("LOAD-BURST")
+                    )
                 )
             )
         )
