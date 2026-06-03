@@ -73,6 +73,10 @@
 #define LITEPCIE_SATA_DMA_BUFFER_SIZE \
 	(LITEPCIE_SATA_DMA_MAX_SECTORS * LITEPCIE_SATA_SECTOR_SIZE)
 
+#if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE) && defined(CSR_SATA_SECTOR2MEM_BASE)
+#define LITEPCIE_HAS_SATA_DMA 1
+#endif
+
 /* SATADMA engine register offsets, relative to each engine's CSR base. The
  * layout is identical for the Mem2Sector and Sector2Mem engines (see csr.h). */
 #define LITEPCIE_SATA_DMA_SECTOR_OFFSET   0x00 /* 64-bit start sector (LBA).         */
@@ -188,7 +192,7 @@ static inline void litepcie_writel(struct litepcie_device *s, uint32_t addr, uin
 /*                                 Capabilities                                                   */
 /* -----------------------------------------------------------------------------------------------*/
 
-#ifdef CSR_SATA_PHY_BASE
+#ifdef LITEPCIE_HAS_SATA_DMA
 
 /* Check if the SoC has SATA capability */
 static bool litepcie_soc_has_sata(struct litepcie_device *s)
@@ -211,7 +215,7 @@ static bool litepcie_soc_has_sata(struct litepcie_device *s)
 /*                               SATA Userspace DMA                                               */
 /* -----------------------------------------------------------------------------------------------*/
 
-#if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_MEM2SECTOR_BASE) && defined(CSR_SATA_SECTOR2MEM_BASE)
+#ifdef LITEPCIE_HAS_SATA_DMA
 
 /* LiteX maps 64-bit CSRs as two 32-bit words, most-significant word first. */
 static inline void litepcie_write64(struct litepcie_device *s, uint32_t addr, uint64_t val)
@@ -371,12 +375,6 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 }
 
 #else
-
-static int litepcie_sata_dma_alloc(struct litepcie_device *s)
-{
-	(void)s;
-	return -ENODEV;
-}
 
 static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 				   struct litepcie_ioctl_sata_dma *m)
@@ -1825,7 +1823,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		goto fail3;
 	}
 
-#ifdef CSR_SATA_PHY_BASE
+#ifdef LITEPCIE_HAS_SATA_DMA
 	if (litepcie_soc_has_sata(litepcie_dev))
 		litepcie_sata_dma_alloc(litepcie_dev);
 #endif

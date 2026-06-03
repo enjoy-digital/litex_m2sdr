@@ -73,6 +73,8 @@ static void int_handler(int dummy)
 
 /* Helpers ------------------------------------------------------------------- */
 
+#ifdef CSR_SATA_PHY_BASE
+
 static uint64_t parse_u64(const char *s)
 {
     uint64_t v = 0;
@@ -83,6 +85,8 @@ static uint64_t parse_u64(const char *s)
     }
     return v;
 }
+
+#ifdef SATA_HOST_IO_AVAILABLE
 
 static uint64_t parse_size_bytes(const char *label, const char *s)
 {
@@ -143,6 +147,8 @@ static uint64_t parse_size_bytes(const char *label, const char *s)
     return (uint64_t)ceill(value);
 }
 
+#endif
+
 static uint32_t parse_u32(const char *s)
 {
     uint32_t v = 0;
@@ -153,6 +159,8 @@ static uint32_t parse_u32(const char *s)
     }
     return v;
 }
+
+#ifdef SATA_HOST_IO_AVAILABLE
 
 static uint32_t parse_u32_range_arg(const char *label, const char *s, uint32_t min, uint32_t max)
 {
@@ -166,6 +174,10 @@ static uint32_t parse_u32_range_arg(const char *label, const char *s, uint32_t m
     return v;
 }
 
+#endif
+
+#endif /* CSR_SATA_PHY_BASE */
+
 static int parse_timeout_ms(const char *s)
 {
     int v = 0;
@@ -177,15 +189,23 @@ static int parse_timeout_ms(const char *s)
     return v;
 }
 
+#ifdef CSR_SATA_PHY_BASE
+
 static double sectors_to_mib(uint64_t nsectors)
 {
     return (double)nsectors * (double)SATA_SECTOR_BYTES / (1024.0 * 1024.0);
 }
 
+#ifdef SATA_HOST_IO_AVAILABLE
+
 static double bytes_to_mib(uint64_t bytes)
 {
     return (double)bytes / (1024.0 * 1024.0);
 }
+
+#endif
+
+#endif /* CSR_SATA_PHY_BASE */
 
 static int parse_bool01(const char *label, const char *s)
 {
@@ -197,6 +217,8 @@ static int parse_bool01(const char *label, const char *s)
     }
     return (int)v;
 }
+
+#if defined(CSR_SATA_PHY_BASE) && defined(SATA_HOST_IO_AVAILABLE)
 
 static int64_t parse_i64(const char *label, const char *s)
 {
@@ -249,6 +271,10 @@ static unsigned channel_layout_count(enum m2sdr_channel_layout layout)
     return layout == M2SDR_CHANNEL_LAYOUT_1T1R ? 1u : 2u;
 }
 
+#endif
+
+#ifdef CSR_SATA_PHY_BASE
+
 static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t sector_size)
 {
     static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
@@ -264,6 +290,10 @@ static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t se
     else
         snprintf(buf, len, "%.2Lf %s", value, units[unit]);
 }
+
+#endif
+
+#if defined(CSR_SATA_PHY_BASE) && defined(SATA_HOST_IO_AVAILABLE)
 
 static void format_bytes(char *buf, size_t len, uint64_t bytes)
 {
@@ -336,6 +366,8 @@ static void format_capture_duration(char *buf, size_t len, const struct sata_cap
     snprintf(buf, len, "%.3Lfs", seconds);
 }
 
+#endif
+
 static int reject_extra_args(int argc, char **argv, int argi)
 {
     if (argi < argc) {
@@ -344,6 +376,8 @@ static int reject_extra_args(int argc, char **argv, int argi)
     }
     return 0;
 }
+
+#if defined(CSR_SATA_PHY_BASE) && defined(SATA_HOST_IO_AVAILABLE)
 
 static int parse_force_args(int argc, char **argv, int *argi, bool *force)
 {
@@ -358,6 +392,8 @@ static int parse_force_args(int argc, char **argv, int *argi, bool *force)
     }
     return 0;
 }
+
+#endif
 
 /* Connection functions ------------------------------------------------------ */
 
@@ -3034,6 +3070,8 @@ static void status(void)
 
 /* Route (always available if crossbar exists) ------------------------------ */
 
+#ifdef CSR_SATA_PHY_BASE
+
 static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
 {
     struct m2sdr_dev *conn = m2sdr_open_dev();
@@ -3043,7 +3081,6 @@ static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
 
     crossbar_set(conn, txsrc, rxdst);
 
-#ifdef CSR_SATA_PHY_BASE
     if (loopback_en >= 0) {
         /* Only meaningful if loopback CSR is present. */
 #ifdef CSR_TXRX_LOOPBACK_BASE
@@ -3053,15 +3090,11 @@ static void do_route(const char *txsrc_s, const char *rxdst_s, int loopback_en)
         exit(1);
 #endif
     }
-#else
-    if (loopback_en >= 0) {
-        fprintf(stderr, "SATA/loopback not present in this gateware.\n");
-        exit(1);
-    }
-#endif
 
     m2sdr_close_dev(conn);
 }
+
+#endif
 
 /* Help --------------------------------------------------------------------- */
 
@@ -3241,6 +3274,18 @@ int main(int argc, char **argv)
     }
 
     cmd = argv[optind++];
+
+#ifndef CSR_SATA_PHY_BASE
+    (void)timeout_ms;
+    (void)timeout_explicit;
+    (void)dry_run;
+    (void)force;
+    (void)pattern_name;
+#elif !defined(SATA_HOST_IO_AVAILABLE)
+    (void)timeout_explicit;
+    (void)force;
+    (void)pattern_name;
+#endif
 
     if (!strcmp(cmd, "info")) {
         if (reject_extra_args(argc, argv, optind) != 0)

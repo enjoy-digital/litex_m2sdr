@@ -212,6 +212,7 @@ static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
     st->sample_index++;
 }
 
+#ifdef CSR_GPIO_BASE
 static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     if (m2sdr_reg_write(dev, addr, val) != 0) {
@@ -219,6 +220,7 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
         exit(1);
     }
 }
+#endif
 
 struct gen_signal_state {
     const char *signal_type;

@@ -13,6 +13,8 @@
 
 #include "m2sdr.h"
 
+#if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_IDENTIFY_BASE)
+
 #define SATA_IDENT_WORDS 128
 #define SATA_DEFAULT_IDENT_TIMEOUT_MS 1000u
 
@@ -96,6 +98,8 @@ static void sata_decode_identify(struct m2sdr_sata_info *info, const uint16_t *w
     }
     info->logical_sector_size = logical_sector_size;
 }
+
+#endif
 
 int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, unsigned timeout_ms)
 {
