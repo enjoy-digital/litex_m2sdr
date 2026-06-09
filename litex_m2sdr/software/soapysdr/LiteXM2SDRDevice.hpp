@@ -435,6 +435,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         std::string antenna[2];
 
         bool underflow = false;
+        bool time_error = false;
+        long long status_time_ns = 0;
 
         bool   burst_end   = false;
         int32_t burst_samps = 0;
@@ -442,6 +444,16 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool rate_pacing = true;
         std::chrono::steady_clock::time_point pace_start;
         uint64_t paced_buffers = 0;
+
+        bool timed_tx_enabled = true;
+        size_t timed_tx_lead_buffers = 8;
+        long long timed_tx_latency_ns = 0;
+        long long timed_tx_late_margin_ns = 0;
+        bool timed_tx_late_margin_configured = false;
+        bool tx_timeline_valid = false;
+        long long tx_next_time_ns = 0;
+        int remainderFlags = 0;
+        long long remainderTimeNs = 0;
     };
 
     RXStream _rx_stream;
@@ -475,6 +487,27 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     void stopRxStreamUnlocked();
     void stopTxStreamUnlocked();
     void cleanupLiteEthUdpIfIdleUnlocked();
+    void resetTimedTxTimeline();
+    void refreshTimedTxDefaults();
+    void initTimedTxTimeline();
+    int ensureTxRemainderBuffer(
+        SoapySDR::Stream *stream,
+        const long timeoutUs);
+    int submitTxRemainder(
+        SoapySDR::Stream *stream,
+        const bool force);
+    int appendTxZeros(
+        SoapySDR::Stream *stream,
+        size_t numElems,
+        const long timeoutUs);
+    int appendTxSamples(
+        SoapySDR::Stream *stream,
+        const void *const *buffs,
+        size_t numElems,
+        size_t userOffset,
+        bool holdLast,
+        const long timeoutUs);
+    void markTxRemainderTime(const long long payloadTimeNs);
     bool isLitePCIe() const {
         return _transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
     }

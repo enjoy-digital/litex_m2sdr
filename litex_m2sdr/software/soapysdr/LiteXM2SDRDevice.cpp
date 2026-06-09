@@ -1595,6 +1595,11 @@ void SoapyLiteXM2SDR::setSampleRate(
 
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
+        if (_tx_stream.opened) {
+            /* Sample-to-time conversion changed; rebuild TX timeline on next write. */
+            refreshTimedTxDefaults();
+            resetTimedTxTimeline();
+        }
     }
     if (direction == SOAPY_SDR_RX) {
         _rx_stream.samplerate = rate;

@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cmath>
+#include <cctype>
+#include <limits>
 
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
@@ -67,38 +69,6 @@ static std::vector<size_t> parse_channel_list(const std::string &channels_str)
 
 static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format);
 
-#if USE_LITEETH
-static constexpr size_t VRT_SIGNAL_HEADER_BYTES = 20;
-static constexpr size_t VRT_RX_DATA_WORDS_DEFAULT = 256;
-static constexpr size_t VRT_RX_PAYLOAD_BYTES_DEFAULT = VRT_RX_DATA_WORDS_DEFAULT * sizeof(uint32_t);
-static constexpr size_t VRT_RX_PACKET_BYTES_DEFAULT = VRT_SIGNAL_HEADER_BYTES + VRT_RX_PAYLOAD_BYTES_DEFAULT;
-
-static inline uint32_t read_be32(const uint8_t *p)
-{
-    return (static_cast<uint32_t>(p[0]) << 24) |
-           (static_cast<uint32_t>(p[1]) << 16) |
-           (static_cast<uint32_t>(p[2]) <<  8) |
-           (static_cast<uint32_t>(p[3]) <<  0);
-}
-
-static inline uint64_t read_be64(const uint8_t *p)
-{
-    return (static_cast<uint64_t>(read_be32(p + 0)) << 32) |
-           (static_cast<uint64_t>(read_be32(p + 4)) <<  0);
-}
-
-static void log_liteeth_socket_buffer(const char *name, int requested, int actual)
-{
-    SoapySDR::logf(SOAPY_SDR_INFO,
-        "LiteEth UDP %s: requested=%d actual=%d",
-        name, requested, actual);
-    if (requested > 0 && actual > 0 && actual < requested) {
-        SoapySDR::logf(SOAPY_SDR_WARNING,
-            "LiteEth UDP %s capped by Linux; increase net.core.%s_max for more headroom",
-            name, std::strcmp(name, "SO_RCVBUF") == 0 ? "rmem" : "wmem");
-    }
-}
-
 static std::string get_kwargs_string(
     const SoapySDR::Kwargs &stream_args,
     const SoapySDR::Kwargs &device_args,
@@ -140,6 +110,80 @@ static int get_kwargs_int(
         stream_args, device_args, key, fallback_value.c_str());
 
     return static_cast<int>(std::stol(value));
+}
+
+static long long get_kwargs_long_long(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key,
+    long long fallback)
+{
+    const std::string fallback_value = std::to_string(fallback);
+    const std::string value = get_kwargs_string(
+        stream_args, device_args, key, fallback_value.c_str());
+
+    return std::stoll(value);
+}
+
+static bool has_kwargs_key(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args,
+    const char *key)
+{
+    return stream_args.find(key) != stream_args.end() ||
+           device_args.find(key) != device_args.end();
+}
+
+static bool get_kwargs_timed_tx_enabled(
+    const SoapySDR::Kwargs &stream_args,
+    const SoapySDR::Kwargs &device_args)
+{
+    std::string value = get_kwargs_string(stream_args, device_args, "timed_tx", "software");
+    std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if (value == "software" || value == "sw" || value == "on" ||
+        value == "true" || value == "1") {
+        return true;
+    }
+    if (value == "off" || value == "none" || value == "false" ||
+        value == "0") {
+        return false;
+    }
+
+    throw std::runtime_error("Invalid timed_tx: " + value + " (supported: software, off)");
+}
+
+#if USE_LITEETH
+static constexpr size_t VRT_SIGNAL_HEADER_BYTES = 20;
+static constexpr size_t VRT_RX_DATA_WORDS_DEFAULT = 256;
+static constexpr size_t VRT_RX_PAYLOAD_BYTES_DEFAULT = VRT_RX_DATA_WORDS_DEFAULT * sizeof(uint32_t);
+static constexpr size_t VRT_RX_PACKET_BYTES_DEFAULT = VRT_SIGNAL_HEADER_BYTES + VRT_RX_PAYLOAD_BYTES_DEFAULT;
+
+static inline uint32_t read_be32(const uint8_t *p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) <<  8) |
+           (static_cast<uint32_t>(p[3]) <<  0);
+}
+
+static inline uint64_t read_be64(const uint8_t *p)
+{
+    return (static_cast<uint64_t>(read_be32(p + 0)) << 32) |
+           (static_cast<uint64_t>(read_be32(p + 4)) <<  0);
+}
+
+static void log_liteeth_socket_buffer(const char *name, int requested, int actual)
+{
+    SoapySDR::logf(SOAPY_SDR_INFO,
+        "LiteEth UDP %s: requested=%d actual=%d",
+        name, requested, actual);
+    if (requested > 0 && actual > 0 && actual < requested) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "LiteEth UDP %s capped by Linux; increase net.core.%s_max for more headroom",
+            name, std::strcmp(name, "SO_RCVBUF") == 0 ? "rmem" : "wmem");
+    }
 }
 
 static uint16_t get_kwargs_port(
@@ -533,9 +577,34 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.remainderHandle = -1;
         _tx_stream.remainderSamps  = 0;
         _tx_stream.remainderOffset = 0;
+        _tx_stream.remainderFlags  = 0;
+        _tx_stream.remainderTimeNs = 0;
 
         _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
+
+        _tx_stream.timed_tx_enabled = get_kwargs_timed_tx_enabled(searchArgs, _deviceArgs);
+        _tx_stream.timed_tx_lead_buffers =
+            get_kwargs_size(searchArgs, _deviceArgs, "tx_lead_buffers", 8);
+        _tx_stream.timed_tx_latency_ns =
+            get_kwargs_long_long(searchArgs, _deviceArgs, "tx_latency_ns", 0);
+        _tx_stream.timed_tx_late_margin_configured =
+            has_kwargs_key(searchArgs, _deviceArgs, "tx_late_margin_ns");
+        _tx_stream.timed_tx_late_margin_ns =
+            get_kwargs_long_long(searchArgs, _deviceArgs, "tx_late_margin_ns", 0);
+        if (_tx_stream.timed_tx_late_margin_ns < 0)
+            throw std::runtime_error("tx_late_margin_ns must be non-negative");
+        _tx_stream.tx_timeline_valid = false;
+        _tx_stream.time_error = false;
+        _tx_stream.status_time_ns = 0;
+        refreshTimedTxDefaults();
+
+        SoapySDR_logf(SOAPY_SDR_INFO,
+            "TX timed mode: %s lead_buffers=%zu latency_ns=%lld late_margin_ns=%lld",
+            _tx_stream.timed_tx_enabled ? "software" : "off",
+            _tx_stream.timed_tx_lead_buffers,
+            (long long)_tx_stream.timed_tx_latency_ns,
+            (long long)_tx_stream.timed_tx_late_margin_ns);
     } else {
         throw std::runtime_error("Invalid direction.");
     }
@@ -680,9 +749,19 @@ int SoapyLiteXM2SDR::activateStream(
         }
         _tx_stream.pendingWriteBufs.clear();
         _tx_stream.burst_end = false;
+        _tx_stream.remainderHandle = -1;
+        _tx_stream.remainderSamps = 0;
+        _tx_stream.remainderOffset = 0;
+        _tx_stream.remainderFlags = 0;
+        _tx_stream.remainderTimeNs = 0;
+        _tx_stream.time_error = false;
+        _tx_stream.status_time_ns = 0;
+        resetTimedTxTimeline();
+        if (_tx_stream.timed_tx_enabled)
+            initTimedTxTimeline();
         if (flags & SOAPY_SDR_HAS_TIME) {
             SoapySDR::logf(SOAPY_SDR_DEBUG,
-                "TX timed activation requested for %lld ns; timing is enforced on buffer submission",
+                "TX timed activation requested for %lld ns; timing is enforced by software TX placement",
                 (long long)timeNs);
         }
     }
@@ -748,6 +827,7 @@ void SoapyLiteXM2SDR::stopTxStreamUnlocked()
                 "LiteEth TX stream deactivation failed: %s", m2sdr_strerror(rc));
         }
     }
+    _tx_stream.tx_timeline_valid = false;
 }
 
 void SoapyLiteXM2SDR::cleanupLiteEthUdpIfIdleUnlocked()
@@ -820,6 +900,18 @@ static inline long long samples_to_ns(double sample_rate, long long samples)
     return static_cast<long long>(std::llround(ns));
 }
 
+static inline size_t ns_to_samples_ceil(double sample_rate, long long ns)
+{
+    if (sample_rate <= 0.0 || ns <= 0) {
+        return 0;
+    }
+    const double samples = (static_cast<double>(ns) * sample_rate) / 1e9;
+    if (samples >= static_cast<double>(std::numeric_limits<size_t>::max())) {
+        return std::numeric_limits<size_t>::max();
+    }
+    return static_cast<size_t>(std::ceil(samples));
+}
+
 static inline int timeout_us_to_ms(long timeout_us)
 {
     if (timeout_us <= 0)
@@ -830,6 +922,203 @@ static inline int timeout_us_to_ms(long timeout_us)
 static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format)
 {
     return format == SOAPY_SDR_CS8 ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
+}
+
+void SoapyLiteXM2SDR::refreshTimedTxDefaults()
+{
+    if (!_tx_stream.timed_tx_late_margin_configured) {
+        if (_tx_stream.samplerate <= 0.0 || _tx_buf_size == 0 || _nChannels == 0) {
+            _tx_stream.timed_tx_late_margin_ns = 0;
+            return;
+        }
+        _tx_stream.timed_tx_late_margin_ns =
+            samples_to_ns(_tx_stream.samplerate,
+                          static_cast<long long>(this->getStreamMTU(TX_STREAM)));
+    }
+}
+
+/* Software timed TX keeps a sample timeline anchored to board time. */
+void SoapyLiteXM2SDR::resetTimedTxTimeline()
+{
+    _tx_stream.tx_timeline_valid = false;
+    _tx_stream.tx_next_time_ns = 0;
+}
+
+void SoapyLiteXM2SDR::initTimedTxTimeline()
+{
+    if (_tx_stream.samplerate <= 0.0) {
+        resetTimedTxTimeline();
+        return;
+    }
+
+    refreshTimedTxDefaults();
+    const long long mtu_time_ns =
+        samples_to_ns(_tx_stream.samplerate,
+                      static_cast<long long>(this->getStreamMTU(TX_STREAM)));
+    const long long lead_ns =
+        samples_to_ns(_tx_stream.samplerate,
+                      static_cast<long long>(_tx_stream.timed_tx_lead_buffers) *
+                      static_cast<long long>(this->getStreamMTU(TX_STREAM)));
+    _tx_stream.tx_next_time_ns =
+        this->getHardwareTime("") + lead_ns + _tx_stream.timed_tx_latency_ns;
+    _tx_stream.tx_timeline_valid = true;
+
+    SoapySDR::logf(SOAPY_SDR_DEBUG,
+        "TX timed timeline initialized: next=%lld ns lead=%lld ns latency=%lld ns mtu_time=%lld ns",
+        (long long)_tx_stream.tx_next_time_ns,
+        (long long)lead_ns,
+        (long long)_tx_stream.timed_tx_latency_ns,
+        (long long)mtu_time_ns);
+}
+
+int SoapyLiteXM2SDR::ensureTxRemainderBuffer(
+    SoapySDR::Stream *stream,
+    const long timeoutUs)
+{
+    if (_tx_stream.remainderHandle >= 0)
+        return 0;
+
+    size_t handle;
+    int ret = this->acquireWriteBuffer(
+        stream,
+        handle,
+        (void **)&_tx_stream.remainderBuff,
+        timeoutUs);
+    if (ret < 0)
+        return ret;
+
+    _tx_stream.remainderHandle = static_cast<int32_t>(handle);
+    _tx_stream.remainderSamps = static_cast<size_t>(ret);
+    _tx_stream.remainderOffset = 0;
+    _tx_stream.remainderFlags = 0;
+    _tx_stream.remainderTimeNs = 0;
+    return 0;
+}
+
+/* Submit the current partial/full TX buffer; force is used for burst boundaries. */
+int SoapyLiteXM2SDR::submitTxRemainder(
+    SoapySDR::Stream *stream,
+    const bool force)
+{
+    if (_tx_stream.remainderHandle < 0)
+        return 0;
+    if (_tx_stream.remainderOffset == 0)
+        return 0;
+    if (!force && _tx_stream.remainderSamps != 0)
+        return 0;
+
+    int submit_flags = _tx_stream.remainderFlags;
+    const long long submit_time_ns = _tx_stream.remainderTimeNs;
+    this->releaseWriteBuffer(stream,
+                             _tx_stream.remainderHandle,
+                             _tx_stream.remainderOffset,
+                             submit_flags,
+                             submit_time_ns);
+    _tx_stream.remainderHandle = -1;
+    _tx_stream.remainderSamps = 0;
+    _tx_stream.remainderOffset = 0;
+    _tx_stream.remainderBuff = nullptr;
+    _tx_stream.remainderFlags = 0;
+    _tx_stream.remainderTimeNs = 0;
+    return 0;
+}
+
+/* Preserve timestamp metadata on the buffer containing the first payload sample. */
+void SoapyLiteXM2SDR::markTxRemainderTime(const long long payloadTimeNs)
+{
+    if (_tx_stream.remainderHandle < 0)
+        return;
+    if (_tx_stream.remainderFlags & SOAPY_SDR_HAS_TIME)
+        return;
+
+    _tx_stream.remainderFlags |= SOAPY_SDR_HAS_TIME;
+    _tx_stream.remainderTimeNs =
+        payloadTimeNs -
+        samples_to_ns(_tx_stream.samplerate,
+                      static_cast<long long>(_tx_stream.remainderOffset));
+}
+
+int SoapyLiteXM2SDR::appendTxZeros(
+    SoapySDR::Stream *stream,
+    size_t numElems,
+    const long timeoutUs)
+{
+    while (numElems > 0) {
+        int ret = ensureTxRemainderBuffer(stream, timeoutUs);
+        if (ret < 0)
+            return ret;
+
+        const size_t n = std::min(numElems, _tx_stream.remainderSamps);
+        const size_t offset_bytes =
+            _tx_stream.remainderOffset * _nChannels * _bytesPerComplex;
+        std::memset(_tx_stream.remainderBuff + offset_bytes,
+                    0,
+                    n * _nChannels * _bytesPerComplex);
+
+        _tx_stream.remainderSamps -= n;
+        _tx_stream.remainderOffset += n;
+        numElems -= n;
+
+        if (_tx_stream.timed_tx_enabled && _tx_stream.tx_timeline_valid) {
+            _tx_stream.tx_next_time_ns +=
+                samples_to_ns(_tx_stream.samplerate, static_cast<long long>(n));
+        }
+
+        ret = submitTxRemainder(stream, false);
+        if (ret < 0)
+            return ret;
+    }
+    return 0;
+}
+
+int SoapyLiteXM2SDR::appendTxSamples(
+    SoapySDR::Stream *stream,
+    const void *const *buffs,
+    size_t numElems,
+    size_t userOffset,
+    bool holdLast,
+    const long timeoutUs)
+{
+    size_t appended = 0;
+
+    while (numElems > 0) {
+        int ret = ensureTxRemainderBuffer(stream, timeoutUs);
+        if (ret < 0)
+            return appended ? static_cast<int>(appended) : ret;
+
+        const size_t n = std::min(numElems, _tx_stream.remainderSamps);
+        const size_t remainderOffset =
+            _tx_stream.remainderOffset * _nChannels * _bytesPerComplex;
+
+        for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
+            this->interleave(
+                buffs[i],
+                _tx_stream.remainderBuff + remainderOffset +
+                    (_tx_stream.channels[i] * _bytesPerComplex),
+                n,
+                _tx_stream.format,
+                userOffset + appended
+            );
+        }
+
+        _tx_stream.remainderSamps -= n;
+        _tx_stream.remainderOffset += n;
+        appended += n;
+        numElems -= n;
+
+        if (_tx_stream.timed_tx_enabled && _tx_stream.tx_timeline_valid) {
+            _tx_stream.tx_next_time_ns +=
+                samples_to_ns(_tx_stream.samplerate, static_cast<long long>(n));
+        }
+
+        if (!(holdLast && numElems == 0)) {
+            ret = submitTxRemainder(stream, false);
+            if (ret < 0)
+                return appended ? static_cast<int>(appended) : ret;
+        }
+    }
+
+    return static_cast<int>(appended);
 }
 
 /* Acquire a buffer for reading. */
@@ -1031,6 +1320,7 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
             return SOAPY_SDR_TIMEOUT;
         if (rc == M2SDR_ERR_UNDERFLOW) {
             _tx_stream.underflow = true;
+            resetTimedTxTimeline();
             return SOAPY_SDR_UNDERFLOW;
         }
         if (rc != M2SDR_ERR_OK) {
@@ -1064,18 +1354,6 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const size_t numElems,
     int &flags,
     const long long timeNs) {
-    if ((flags & SOAPY_SDR_HAS_TIME) && timeNs > 0) {
-        while (true) {
-            const long long now = this->getHardwareTime("");
-            if (now >= timeNs) {
-                break;
-            }
-            const long long delta = timeNs - now;
-            const long long sleep_us = std::min<long long>(1000, std::max<long long>(1, delta / 1000));
-            std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
-        }
-    }
-
     if (flags & SOAPY_SDR_END_BURST) {
         _tx_stream.burst_end = true;
     }
@@ -1123,6 +1401,7 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
                                          meta_ptr);
             if (rc != M2SDR_ERR_OK) {
                 _tx_stream.underflow = true;
+                resetTimedTxTimeline();
                 SoapySDR::logf(SOAPY_SDR_ERROR,
                     "m2sdr_submit_buffer(TX) failed: %s", m2sdr_strerror(rc));
             }
@@ -1148,6 +1427,7 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
         }
         if (liteeth_udp_write_submit(&_udp) < 0) {
             _tx_stream.underflow = true;
+            resetTimedTxTimeline();
             SoapySDR_logf(SOAPY_SDR_ERROR, "UDP write_submit failed.");
         } else {
             _tx_stream.paced_buffers++;
@@ -1516,94 +1796,98 @@ int SoapyLiteXM2SDR::writeStream(
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
-    /* Determine the number of samples to return, respecting the MTU. */
-    size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
+    const size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
+    const bool forceFlush = (flags & (SOAPY_SDR_END_BURST | SOAPY_SDR_ONE_PACKET)) != 0;
 
-    size_t samp_avail = 0;
+    /* Initialize/rebuild the software timeline before interpreting timed writes. */
+    if (_tx_stream.timed_tx_enabled && _tx_stream.samplerate > 0.0) {
+        refreshTimedTxDefaults();
+        if (!_tx_stream.tx_timeline_valid)
+            initTimedTxTimeline();
+    } else if (_tx_stream.timed_tx_enabled && (flags & SOAPY_SDR_HAS_TIME)) {
+        SoapySDR::log(SOAPY_SDR_ERROR,
+            "TX timed write requested before the TX sample rate was configured");
+        return SOAPY_SDR_STREAM_ERROR;
+    }
 
-    /* If there's a remainder buffer from a previous write, process that first. */
-    if (_tx_stream.remainderHandle >= 0) {
-        const size_t n = std::min(_tx_stream.remainderSamps, returnedElems);
-        const uint32_t remainderOffset = _tx_stream.remainderOffset * _nChannels * _bytesPerComplex;
-
-        if (n < returnedElems) {
-            samp_avail = n;
+    if (returnedElems == 0) {
+        if (forceFlush) {
+            if (flags & SOAPY_SDR_END_BURST)
+                _tx_stream.remainderFlags |= SOAPY_SDR_END_BURST;
+            int ret = submitTxRemainder(stream, true);
+            if (ret < 0)
+                return ret;
         }
+        return 0;
+    }
 
-        /* Write out channels to the remainder buffer. */
-        for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-            this->interleave(
-                buffs[i],
-                _tx_stream.remainderBuff + remainderOffset + (_tx_stream.channels[i] * _bytesPerComplex),
-                n,
-                _tx_stream.format,
-                0
-            );
-        }
-        /* UDP path: no mid-buffer send; submission happens in releaseWriteBuffer(). */
-        _tx_stream.remainderSamps -= n;
-        _tx_stream.remainderOffset += n;
+    /* For timed bursts, pad future gaps with zeros and reject bursts that are too late. */
+    if (flags & SOAPY_SDR_HAS_TIME) {
+        if (_tx_stream.timed_tx_enabled) {
+            if (!_tx_stream.tx_timeline_valid)
+                initTimedTxTimeline();
+            if (!_tx_stream.tx_timeline_valid) {
+                SoapySDR::log(SOAPY_SDR_ERROR,
+                    "TX timed timeline could not be initialized");
+                return SOAPY_SDR_STREAM_ERROR;
+            }
 
-        if (_tx_stream.remainderSamps == 0) {
-            this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
-            _tx_stream.remainderHandle = -1;
-            _tx_stream.remainderOffset = 0;
-        }
+            if (timeNs + _tx_stream.timed_tx_late_margin_ns <
+                _tx_stream.tx_next_time_ns) {
+                _tx_stream.time_error = true;
+                _tx_stream.status_time_ns = timeNs;
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "TX timed write is late: target=%lld next=%lld margin=%lld",
+                    (long long)timeNs,
+                    (long long)_tx_stream.tx_next_time_ns,
+                    (long long)_tx_stream.timed_tx_late_margin_ns);
+                return SOAPY_SDR_TIME_ERROR;
+            }
 
-        if (n == returnedElems) {
-            return returnedElems;
+            if (timeNs > _tx_stream.tx_next_time_ns) {
+                const long long gap_ns = timeNs - _tx_stream.tx_next_time_ns;
+                const size_t gap_samps =
+                    ns_to_samples_ceil(_tx_stream.samplerate, gap_ns);
+                int ret = appendTxZeros(stream, gap_samps, timeoutUs);
+                if (ret < 0)
+                    return ret;
+            }
+
+            int ret = ensureTxRemainderBuffer(stream, timeoutUs);
+            if (ret < 0)
+                return ret;
+            markTxRemainderTime(_tx_stream.tx_next_time_ns);
+        } else {
+            int ret = ensureTxRemainderBuffer(stream, timeoutUs);
+            if (ret < 0)
+                return ret;
+            markTxRemainderTime(timeNs);
         }
     }
 
-    /* Acquire a new write buffer from the DMA engine / UDP helper. */
-    size_t handle;
-
-    int ret = this->acquireWriteBuffer(
-        stream,
-        handle,
-        (void **)&_tx_stream.remainderBuff,
-        timeoutUs);
-    if (ret < 0) {
-        if ((ret == SOAPY_SDR_TIMEOUT) && (samp_avail > 0)) {
-            return samp_avail;
-        }
+    int ret = appendTxSamples(stream, buffs, returnedElems, 0, forceFlush, timeoutUs);
+    if (ret < 0)
         return ret;
+
+    const int accepted = ret;
+    /* srsRAN can end a burst with less than one MTU; submit that tail now. */
+    if (forceFlush && static_cast<size_t>(accepted) == returnedElems) {
+        if (flags & SOAPY_SDR_END_BURST)
+            _tx_stream.remainderFlags |= SOAPY_SDR_END_BURST;
+        ret = submitTxRemainder(stream, true);
+        if (ret < 0 && accepted == 0)
+            return ret;
     }
 
-    _tx_stream.remainderHandle = handle;
-    _tx_stream.remainderSamps = ret;
-
-    const size_t n = std::min((returnedElems - samp_avail), _tx_stream.remainderSamps);
-
-    /* Write out channels to the new buffer. */
-    for (size_t i = 0; i < _tx_stream.channels.size(); i++) {
-        this->interleave(
-            buffs[i],
-            _tx_stream.remainderBuff + (_tx_stream.channels[i] * _bytesPerComplex),
-            n,
-            _tx_stream.format,
-            samp_avail
-        );
-    }
-    /* UDP path: no mid-buffer send; submission happens in releaseWriteBuffer(). */
-    _tx_stream.remainderSamps -= n;
-    _tx_stream.remainderOffset += n;
-
-    if (_tx_stream.remainderSamps == 0) {
-        this->releaseWriteBuffer(stream, _tx_stream.remainderHandle, _tx_stream.remainderOffset, flags, timeNs);
-        _tx_stream.remainderHandle = -1;
-        _tx_stream.remainderOffset = 0;
-    }
-
-    return returnedElems;
+    return accepted;
 }
 
 /* Check the status of the TX/RX streams. */
 int SoapyLiteXM2SDR::readStreamStatus(
     SoapySDR::Stream *stream,
-    size_t &/*chanMask*/,
-    int &/*flags*/,
-    long long &/*timeNs*/,
+    size_t &chanMask,
+    int &flags,
+    long long &timeNs,
     const long timeoutUs){
 
     if (stream == RX_STREAM) {
@@ -1613,6 +1897,16 @@ int SoapyLiteXM2SDR::readStreamStatus(
             return SOAPY_SDR_OVERFLOW;
         }
     } else if (stream == TX_STREAM) {
+        chanMask = 0;
+        for (size_t chan : _tx_stream.channels)
+            chanMask |= (1u << chan);
+        if (_tx_stream.time_error) {
+            _tx_stream.time_error = false;
+            flags |= SOAPY_SDR_HAS_TIME;
+            timeNs = _tx_stream.status_time_ns;
+            SoapySDR::log(SOAPY_SDR_SSI, "T");
+            return SOAPY_SDR_TIME_ERROR;
+        }
         if (_tx_stream.underflow) {
             _tx_stream.underflow = false;
             SoapySDR::log(SOAPY_SDR_SSI, "U");
