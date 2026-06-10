@@ -758,7 +758,11 @@ int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable);
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats);
 
-/* Blocking sync receive/transmit helpers. */
+/* Blocking sync receive/transmit helpers.
+ *
+ * When RX headers are enabled, meta carries the hardware timestamp of the
+ * FIRST sample of the returned block (a request spanning several DMA buffers
+ * keeps the first buffer's timestamp). */
 int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   void *samples,
                   unsigned num_samples,

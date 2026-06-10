@@ -996,7 +996,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                 to_copy = total_bytes - copied;
             if (dev->rx_header_enable) {
                 uint64_t ts = 0;
-                if (m2sdr_parse_dma_header((const uint8_t *)buf, &ts) && meta) {
+                /* Keep the first buffer's timestamp: it corresponds to the
+                 * first sample of the block returned to the caller. */
+                if (meta && !(meta->flags & M2SDR_META_FLAG_HAS_TIME) &&
+                    m2sdr_parse_dma_header((const uint8_t *)buf, &ts)) {
                     meta->timestamp = ts;
                     meta->flags |= M2SDR_META_FLAG_HAS_TIME;
                 }
@@ -1024,7 +1027,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                 to_copy = total_bytes - copied;
             if (dev->rx_header_enable) {
                 uint64_t ts = 0;
-                if (m2sdr_parse_dma_header(buf, &ts) && meta) {
+                /* Keep the first buffer's timestamp: it corresponds to the
+                 * first sample of the block returned to the caller. */
+                if (meta && !(meta->flags & M2SDR_META_FLAG_HAS_TIME) &&
+                    m2sdr_parse_dma_header(buf, &ts)) {
                     meta->timestamp = ts;
                     meta->flags |= M2SDR_META_FLAG_HAS_TIME;
                 }
