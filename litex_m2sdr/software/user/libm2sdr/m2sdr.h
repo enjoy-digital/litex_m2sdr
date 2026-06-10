@@ -766,6 +766,9 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
 
 /* Blocking sync receive/transmit helpers.
  *
+ * timeout_ms = 0 uses the stream timeout configured through
+ * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ *
  * When RX headers are enabled, meta carries the hardware timestamp of the
  * FIRST sample of the returned block (a request spanning several DMA buffers
  * keeps the first buffer's timestamp). */

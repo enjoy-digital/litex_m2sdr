@@ -40,7 +40,10 @@ extern "C" {
  *                                    AD9361
  **************************************************************************************************/
 
-/* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
+/* Channel-layout switching is shared with m2sdr_rf through
+ * m2sdr_set_channel_mode()/m2sdr_rf_store_init_param(); the remaining
+ * duplication with m2sdr_apply_config() is the bring-up sequence below
+ * (SI5351 setup, AD9361 init-parameter configuration, FIR tables). */
 
 /* AD9361 SPI */
 
@@ -1573,7 +1576,9 @@ void SoapyLiteXM2SDR::setSampleMode() {
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
-        _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
+        /* 2047 (not 2048) so +full-scale maps exactly to +1.0; the single
+         * -2048 code lands at -1.0005, which downstream consumers accept. */
+        _samplesScaling  = 2047.0;
     }
 
     if (_bitModeHwApplied && _bitModeHw == bit_mode)

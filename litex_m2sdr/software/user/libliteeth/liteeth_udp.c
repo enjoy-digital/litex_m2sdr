@@ -42,7 +42,7 @@ static int bind_any(int sock, const char *ip, uint16_t port)
     memset(&sa, 0, sizeof(sa));
     sa.sin_family      = AF_INET;
     sa.sin_port        = htons(port);
-    sa.sin_addr.s_addr = (ip && *ip) ? 0 : htonl(INADDR_ANY);
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
     if (ip && *ip) {
         if (inet_pton(AF_INET, ip, &sa.sin_addr) != 1)
             return -1;
