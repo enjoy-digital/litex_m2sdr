@@ -722,7 +722,13 @@ int SoapyLiteXM2SDR::activateStream(
         _rx_stream.time0_ns = this->getHardwareTime("");
         _rx_stream.time0_count = _rx_stream.user_count;
         _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
-        _rx_stream.last_time_ns = _rx_stream.time0_ns;
+        /* Capture starts while activation is still configuring the datapath,
+         * so the first buffers can legitimately carry hardware timestamps
+         * slightly older than the anchor read above: only seed the
+         * monotonicity clamp when timestamps are synthesized from it. */
+        _rx_stream.last_time_ns = (_rx_dma_header_bytes != 0)
+            ? std::numeric_limits<long long>::min()
+            : _rx_stream.time0_ns;
         _rx_stream.time_warned = false;
         _rx_stream.hw_time_warned = false;
         if (flags & SOAPY_SDR_HAS_TIME) {
@@ -1283,7 +1289,10 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
             _rx_stream.time0_ns = this->getHardwareTime("");
             _rx_stream.time0_count = _rx_stream.user_count;
             _rx_stream.time_valid = (_rx_stream.samplerate > 0.0);
-            _rx_stream.last_time_ns = _rx_stream.time0_ns;
+            /* Hardware timestamps stay monotonic across drops on their own;
+             * only the synthesized fallback needs re-anchoring. */
+            if (_rx_dma_header_bytes == 0)
+                _rx_stream.last_time_ns = _rx_stream.time0_ns;
             _rx_stream.time_warned = false;
             return SOAPY_SDR_OVERFLOW;
         }
