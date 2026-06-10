@@ -331,8 +331,8 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
          * kept in sync or the datapath framing becomes inconsistent. */
         M2SDR_LOGF("Setting Channel Mode to 1T1R.\n");
         default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
+        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
+        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
         default_init_param.two_t_two_r_timing_enable     = 0;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
@@ -348,6 +348,35 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
     }
 
+    return M2SDR_ERR_OK;
+}
+
+/* The packed-stream divisor only applies to the init-time 1T1R configuration
+ * (m2sdr_apply_channel_layout), where the FPGA packs two consecutive samples
+ * of the single channel per frame and the stream runs at twice the AD9361
+ * rate. The runtime path (m2sdr_set_channel_mode) keeps unpacked framing
+ * where the stream rate equals the AD9361 rate. */
+static int m2sdr_stream_to_ad9361_sample_rate(int64_t stream_rate,
+                                              bool packed_stream,
+                                              bool enable_oversample,
+                                              uint32_t *ad9361_rate)
+{
+    uint64_t divisor = 1;
+    uint64_t rounded;
+
+    if (!ad9361_rate || stream_rate <= 0 || stream_rate > UINT32_MAX)
+        return M2SDR_ERR_RANGE;
+
+    if (packed_stream)
+        divisor *= 2;
+    if (enable_oversample)
+        divisor *= 2;
+
+    rounded = ((uint64_t)stream_rate + divisor / 2) / divisor;
+    if (rounded == 0 || rounded > UINT32_MAX)
+        return M2SDR_ERR_RANGE;
+
+    *ad9361_rate = (uint32_t)rounded;
     return M2SDR_ERR_OK;
 }
 
@@ -459,17 +488,30 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
 
 /* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
  * interpolation/decimation mode expected by the original utilities. */
-static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
+static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
+                                      const struct m2sdr_config *cfg,
+                                      enum m2sdr_channel_layout channel_layout)
 {
-    uint32_t actual_samplerate = cfg->sample_rate;
+    uint32_t actual_samplerate;
+    int rc;
 
     M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
 
-    if (cfg->enable_oversample)
-        actual_samplerate /= 2;
+    rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate,
+        channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R,
+        cfg->enable_oversample, &actual_samplerate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (actual_samplerate != (uint32_t)cfg->sample_rate) {
+        M2SDR_LOGF("Programming AD9361 Samplerate to %f MSPS%s%s.\n",
+            actual_samplerate / 1e6,
+            channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R ? " for 1T1R packed stream" : "",
+            cfg->enable_oversample ? " with oversample" : "");
+    }
 
     if (actual_samplerate > 61440000U) {
-        fprintf(stderr, "Requested sample rate %.3f MSPS exceeds the AD9361 clock-chain limit of 61.440 MSPS",
+        fprintf(stderr, "AD9361 programmed sample rate %.3f MSPS exceeds the clock-chain limit of 61.440 MSPS",
             actual_samplerate / 1e6);
         if (!cfg->enable_oversample)
             fprintf(stderr, "; use --oversample for 122.88 MSPS effective FPGA rate");
@@ -1060,7 +1102,12 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (!phy)
         return M2SDR_ERR_STATE;
 
-    rc = m2sdr_configure_samplerate(phy, cfg);
+    dev->rf_channel_layout = channel_layout;
+    dev->rf_channel_layout_valid = 1;
+    dev->rf_oversample_enabled = cfg->enable_oversample ? 1 : 0;
+    dev->rf_packed_stream = (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) ? 1 : 0;
+
+    rc = m2sdr_configure_samplerate(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
     rc = m2sdr_configure_bandwidth(phy, cfg);
@@ -1128,6 +1175,7 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
     struct ad9361_rf_phy *phy;
+    uint32_t actual_rate;
     int rc;
 
     if (!dev)
@@ -1138,9 +1186,14 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    rc = m2sdr_stream_to_ad9361_sample_rate(rate, dev->rf_packed_stream != 0,
+        dev->rf_oversample_enabled != 0, &actual_rate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
@@ -1204,6 +1257,13 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
 
     if (m2sdr_from_ad9361_rc(ad9361_set_no_ch_mode(phy, channel_count)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
+
+    dev->rf_channel_layout = channel_count == 1 ?
+        M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
+    dev->rf_channel_layout_valid = 1;
+    /* This runtime path configures unpacked framing: the stream rate equals
+     * the AD9361 rate even in 1T1R, so no sample-rate divisor applies. */
+    dev->rf_packed_stream = 0;
 
     return M2SDR_ERR_OK;
 }
