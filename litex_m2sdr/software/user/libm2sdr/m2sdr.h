@@ -706,6 +706,12 @@ int  m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
+/* Store the AD9361_InitParam an external integration initialized the RFIC
+ * with, so m2sdr_set_channel_mode() re-initializes with the same reference
+ * clock, SPI id and GPIO setup. init_param must point to an AD9361_InitParam
+ * and size must be sizeof(AD9361_InitParam) (guards ABI mismatches). */
+int  m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
+                               const void *init_param, size_t size);
 
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.

@@ -321,10 +321,43 @@ static int m2sdr_channel_layout_from_config(const struct m2sdr_config *cfg,
     return M2SDR_ERR_OK;
 }
 
+/* Lazily allocate the per-device AD9361 init-parameter snapshot, seeded from
+ * the built-in defaults. default_init_param is a per-translation-unit
+ * template (static in m2sdr_config.h): mutating it is invisible to other
+ * files and races between devices, so all configuration goes through this
+ * per-device copy instead. */
+static AD9361_InitParam *m2sdr_dev_init_param(struct m2sdr_dev *dev)
+{
+    if (!dev->rf_init_param) {
+        dev->rf_init_param = malloc(sizeof(AD9361_InitParam));
+        if (dev->rf_init_param)
+            memcpy(dev->rf_init_param, &default_init_param,
+                   sizeof(AD9361_InitParam));
+    }
+    return (AD9361_InitParam *)dev->rf_init_param;
+}
+
+int m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
+                              const void *init_param, size_t size)
+{
+    if (!dev || !init_param)
+        return M2SDR_ERR_INVAL;
+    if (size != sizeof(AD9361_InitParam))
+        return M2SDR_ERR_INVAL;
+    if (!dev->rf_init_param) {
+        dev->rf_init_param = malloc(size);
+        if (!dev->rf_init_param)
+            return M2SDR_ERR_NO_MEM;
+    }
+    memcpy(dev->rf_init_param, init_param, size);
+    return M2SDR_ERR_OK;
+}
+
 /* Apply the selected 1T1R/2T2R topology both to the AD9361 init parameters and
  * to the FPGA-side PHY control register. rx/tx_channel select the physical
  * channel used in 1T1R (0 = RX1/TX1, 1 = RX2/TX2). */
 static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
+                                       AD9361_InitParam *init_param,
                                        enum m2sdr_channel_layout channel_layout,
                                        unsigned rx_channel, unsigned tx_channel)
 {
@@ -332,20 +365,20 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
         /* The AD9361 init structure and the FPGA-side PHY control CSR must be
          * kept in sync or the datapath framing becomes inconsistent. */
         M2SDR_LOGF("Setting Channel Mode to 1T1R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = rx_channel == 0 ? 1 : 2;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = tx_channel == 0 ? 1 : 2;
-        default_init_param.two_t_two_r_timing_enable     = 0;
+        init_param->two_rx_two_tx_mode_enable     = 0;
+        init_param->one_rx_one_tx_mode_use_rx_num = rx_channel == 0 ? 1 : 2;
+        init_param->one_rx_one_tx_mode_use_tx_num = tx_channel == 0 ? 1 : 2;
+        init_param->two_t_two_r_timing_enable     = 0;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
     }
 
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R) {
         M2SDR_LOGF("Setting Channel Mode to 2T2R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 1;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
-        default_init_param.two_t_two_r_timing_enable     = 1;
+        init_param->two_rx_two_tx_mode_enable     = 1;
+        init_param->one_rx_one_tx_mode_use_rx_num = 1;
+        init_param->one_rx_one_tx_mode_use_tx_num = 1;
+        init_param->two_t_two_r_timing_enable     = 1;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 0) != 0)
             return M2SDR_ERR_IO;
     }
@@ -1086,20 +1119,23 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     m2sdr_ad9361_spi_init(conn, 1);
 
     M2SDR_LOGF("Initializing AD9361 RFIC...\n");
-    default_init_param.reference_clk_rate = cfg->refclk_freq;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
+    AD9361_InitParam *init_param = m2sdr_dev_init_param(dev);
+    if (!init_param)
+        return M2SDR_ERR_NO_MEM;
+    init_param->reference_clk_rate = cfg->refclk_freq;
+    init_param->gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    init_param->gpio_sync          = -1;
+    init_param->gpio_cal_sw1       = -1;
+    init_param->gpio_cal_sw2       = -1;
 
-    rc = m2sdr_apply_channel_layout(dev, channel_layout, 0, 0);
+    rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout, 0, 0);
     if (rc != M2SDR_ERR_OK)
         return rc;
 #ifdef USE_LITEETH
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         m2sdr_start_rf_init_timeout();
 #endif
-    rc = ad9361_init(&dev->ad9361_phy, &default_init_param, 1);
+    rc = ad9361_init(&dev->ad9361_phy, init_param, 1);
 #ifdef USE_LITEETH
     if (dev->transport == M2SDR_TRANSPORT_LITEETH && tls_rf_init_timed_out) {
         m2sdr_clear_rf_init_timeout();
@@ -1246,26 +1282,37 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
     if (rx_channel > 1 || tx_channel > 1)
         return M2SDR_ERR_RANGE;
 
-    /* The device must have completed RF bring-up once (the shared init
-     * parameters then carry its reference clock, SPI id and GPIO setup). */
+    /* The device must have completed RF bring-up once. */
     rc = m2sdr_require_phy(dev, &phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
+    /* Prefer the init parameters stored at bring-up (reference clock, SPI
+     * id, GPIO setup); fall back to the built-in defaults for integrations
+     * that initialized the RFIC without storing them. */
+    AD9361_InitParam *init_param = (AD9361_InitParam *)dev->rf_init_param;
+    if (!init_param) {
+        M2SDR_LOGF("No stored AD9361 init parameters; using built-in defaults for the layout switch.\n");
+        init_param = m2sdr_dev_init_param(dev);
+        if (!init_param)
+            return M2SDR_ERR_NO_MEM;
+    }
+
     channel_layout = channel_count == 1 ?
         M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
 
-    rc = m2sdr_apply_channel_layout(dev, channel_layout, rx_channel, tx_channel);
+    rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout,
+                                    rx_channel, tx_channel);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    /* Re-initialize the RFIC from the shared parameters so the runtime
+    /* Re-initialize the RFIC from the stored parameters so the runtime
      * layout switch goes through exactly the same configuration code as the
      * init-time path (m2sdr_apply_config), instead of the partial
      * ad9361_set_no_ch_mode dance. The previous phy instance is leaked
      * deliberately: the no-OS ADI driver has no remove/cleanup entry point
      * and layout switches are rare, one-shot events. */
-    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, &default_init_param, 1));
+    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, init_param, 1));
     if (rc != M2SDR_ERR_OK)
         return rc;
     if (!new_phy)

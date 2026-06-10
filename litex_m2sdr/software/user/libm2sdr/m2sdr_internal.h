@@ -73,6 +73,11 @@ struct m2sdr_dev {
     int64_t tx_user_count;
     int64_t tx_submit_count;
     struct ad9361_rf_phy *ad9361_phy;
+    /* Per-device snapshot of the AD9361_InitParam used at RF bring-up.
+     * The header-defined default_init_param template is per translation
+     * unit, so it can neither be shared across files nor across devices;
+     * layout switches re-init from this stored copy instead. */
+    void *rf_init_param;
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
     int rf_oversample_enabled;

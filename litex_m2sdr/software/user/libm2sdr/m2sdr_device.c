@@ -818,6 +818,8 @@ void m2sdr_close(struct m2sdr_dev *dev)
     }
 
     dev->ad9361_phy = NULL;
+    free(dev->rf_init_param);
+    dev->rf_init_param = NULL;
     pthread_mutex_destroy(&dev->reg_lock);
     free(dev);
 }

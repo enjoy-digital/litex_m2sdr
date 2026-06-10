@@ -773,18 +773,21 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
-    /* Initialize AD9361 RFIC. */
+    /* Initialize AD9361 RFIC. The header-defined default_init_param is only
+     * a per-translation-unit template: configure a local copy and hand it to
+     * libm2sdr so channel-layout switches re-init with the same parameters. */
     SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
-    default_init_param.reference_clk_rate = refclk_hz;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
-    default_init_param.id_no = _spi_id;
+    AD9361_InitParam init_param = default_init_param;
+    init_param.reference_clk_rate = refclk_hz;
+    init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    init_param.gpio_sync          = -1;
+    init_param.gpio_cal_sw1       = -1;
+    init_param.gpio_cal_sw2       = -1;
+    init_param.id_no = _spi_id;
 #if USE_LITEETH
     LiteEthRfOpTimeout ad9361_init_timeout("ad9361_init");
 #endif
-    int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    int ad9361_rc = ad9361_init(&ad9361_phy, &init_param, do_init);
 #if USE_LITEETH
     ad9361_init_timeout.throw_if_timed_out();
 #endif
@@ -792,6 +795,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
     }
     m2sdr_rf_bind(_dev, ad9361_phy);
+    {
+        int rc = m2sdr_rf_store_init_param(_dev, &init_param, sizeof(init_param));
+        if (rc != M2SDR_ERR_OK)
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Failed to store AD9361 init parameters: %s", m2sdr_strerror(rc));
+    }
 
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
