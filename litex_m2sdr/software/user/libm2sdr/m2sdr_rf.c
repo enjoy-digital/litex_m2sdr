@@ -575,8 +575,16 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
 }
 
 /* Apply TX attenuation and per-channel RX gains. */
-static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
+static int m2sdr_configure_gains(struct ad9361_rf_phy *phy,
+                                 const struct m2sdr_config *cfg,
+                                 enum m2sdr_channel_layout channel_layout)
 {
+    /* In 1T1R only the first channel is active: configuring the gain-control
+     * mode of the inactive channel re-enables it (ad9361_set_rx_gain_control_mode
+     * ends in ad9361_en_dis_rx), which corrupts the 1R port framing and the
+     * RX stream delivers only zeros. */
+    const bool second_channel = (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R);
+
     M2SDR_LOGF("Setting TX Attenuation to %ld dB.\n", (long)cfg->tx_att);
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(cfg->tx_att * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -591,15 +599,23 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_c
      * gains through the standalone RF configuration interface. */
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    if (second_channel) {
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    }
 
-    M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
-           (long)cfg->rx_gain1, (long)cfg->rx_gain2);
+    if (second_channel) {
+        M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
+               (long)cfg->rx_gain1, (long)cfg->rx_gain2);
+    } else {
+        M2SDR_LOGF("Setting RX Gain to %ld dB.\n", (long)cfg->rx_gain1);
+    }
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    if (second_channel) {
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    }
     return M2SDR_ERR_OK;
 }
 
@@ -1124,7 +1140,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
-    rc = m2sdr_configure_gains(phy, cfg);
+    rc = m2sdr_configure_gains(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
     rc = m2sdr_configure_modes(dev, phy, cfg);
