@@ -1160,6 +1160,9 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 			break;
 		}
 
+		/* Serialize the check-and-set so two processes cannot both win
+		 * the same DMA lock, and only release locks this file holds. */
+		spin_lock(&chan->litepcie_dev->lock);
 		m.dma_reader_status = 1;
 		if (m.dma_reader_request) {
 			if (chan->dma.reader_lock) {
@@ -1169,7 +1172,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 				chan_priv->reader = 1;
 			}
 		}
-		if (m.dma_reader_release) {
+		if (m.dma_reader_release && chan_priv->reader) {
 			chan->dma.reader_lock = 0;
 			chan_priv->reader = 0;
 		}
@@ -1183,10 +1186,11 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 				chan_priv->writer = 1;
 			}
 		}
-		if (m.dma_writer_release) {
+		if (m.dma_writer_release && chan_priv->writer) {
 			chan->dma.writer_lock = 0;
 			chan_priv->writer = 0;
 		}
+		spin_unlock(&chan->litepcie_dev->lock);
 
 		if (copy_to_user((void *)arg, &m, sizeof(m))) {
 			ret = -EFAULT;
