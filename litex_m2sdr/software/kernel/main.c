@@ -792,6 +792,9 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 			if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > DMA_BUFFER_COUNT/2) {
 				overflows++;
 			} else {
+				/* Order the buffer read after the hw_count check on
+				 * weakly-ordered architectures. */
+				dma_rmb();
 				ret = copy_to_user(data + (chan->block_size * i),
 						   chan->dma.writer_addr[chan->dma.writer_sw_count % DMA_BUFFER_COUNT],
 						   DMA_BUFFER_SIZE);
@@ -851,6 +854,9 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 							 data + (chan->block_size * i), DMA_BUFFER_SIZE);
 				if (ret)
 					return -EFAULT;
+				/* Make the buffer contents visible before the count
+				 * update exposes them to the DMA reader. */
+				dma_wmb();
 			}
 			len -= DMA_BUFFER_SIZE;
 			chan->dma.reader_sw_count += 1;
