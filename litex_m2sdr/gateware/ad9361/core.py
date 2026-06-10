@@ -94,10 +94,7 @@ class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
         with_tx_fifo = False, tx_fifo_depth = 8192,
         with_rx_fifo = False, rx_fifo_depth = 8192):
-        # Controls ---------------------------------------------------------------------------------
-        self.enable_datapath = Signal(reset=1)
-
-         # Stream Endpoints ------------------------------------------------------------------------
+        # Stream Endpoints -------------------------------------------------------------------------
         self.sink   = stream.Endpoint(dma_layout(64))
         self.source = stream.Endpoint(dma_layout(64))
 
