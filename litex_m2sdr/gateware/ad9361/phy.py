@@ -200,7 +200,10 @@ class AD9361PHY(LiteXModule):
 
         # RX Source Interface.
         # --------------------
-        # Outputs assembled RX samples when valid (rx_count == 0).
+        # Outputs assembled RX samples when valid (rx_count == 0). The source
+        # is free-running: valid pulses for a single cycle per sample set and
+        # is not held under backpressure, so samples are dropped when the
+        # downstream stalls (overflow accounting happens at the DMA level).
         self.sync.rfic += [
             rx_valid.eq(0),
             If(rx_count == 0,

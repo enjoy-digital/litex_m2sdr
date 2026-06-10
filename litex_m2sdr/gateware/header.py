@@ -49,13 +49,17 @@ class HeaderInserterExtractor(LiteXModule):
         self.comb += self.fsm.reset.eq(self.reset | ~self.enable)
 
         # Reset.
-        fsm.act("RESET",
+        reset_actions = [
             NextValue(cycles, 0),
-            If(mode == "inserter",
-                sink.ready.eq(self.reset)
-            ),
-            NextState("IDLE")
-        )
+            NextState("IDLE"),
+        ]
+        if mode == "inserter":
+            # Drain the upstream while an explicit reset is asserted so the
+            # producer does not stall against a held-in-reset inserter. (The
+            # mode selection is an elaboration-time constant, hence the
+            # Python conditional.)
+            reset_actions.append(sink.ready.eq(self.reset))
+        fsm.act("RESET", *reset_actions)
 
         # Idle.
         fsm.act("IDLE",
