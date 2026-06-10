@@ -627,21 +627,44 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _channelModeHw != _nChannels ||
         _rxChannelMaskHw != rx_channel_mask ||
         _txChannelMaskHw != tx_channel_mask;
-    if (channel_mode_changed) {
-        /* Re-runs the AD9361 bring-up, so active Soapy settings are reapplied
-         * below; the phy handle changes across the re-init. */
-        int rc = m2sdr_set_channel_mode(_dev, _nChannels, rx_channel, tx_channel);
-        if (rc != M2SDR_ERR_OK)
-            throw std::runtime_error("m2sdr_set_channel_mode failed: " + std::string(m2sdr_strerror(rc)));
-        ad9361_phy = static_cast<struct ad9361_rf_phy *>(m2sdr_rf_phy(_dev));
-        if (!ad9361_phy)
-            throw std::runtime_error("m2sdr_set_channel_mode left no AD9361 phy bound");
+    try {
+        if (channel_mode_changed) {
+            /* Re-runs the AD9361 bring-up, so active Soapy settings are
+             * reapplied below; the phy handle changes across the re-init. */
+            int rc = m2sdr_set_channel_mode(_dev, _nChannels, rx_channel, tx_channel);
+            if (rc != M2SDR_ERR_OK)
+                throw std::runtime_error("m2sdr_set_channel_mode failed: " + std::string(m2sdr_strerror(rc)));
+            ad9361_phy = static_cast<struct ad9361_rf_phy *>(m2sdr_rf_phy(_dev));
+            if (!ad9361_phy)
+                throw std::runtime_error("m2sdr_set_channel_mode left no AD9361 phy bound");
 
-        _channelModeHwApplied = true;
-        _channelModeHw = _nChannels;
-        _rxChannelMaskHw = rx_channel_mask;
-        _txChannelMaskHw = tx_channel_mask;
-        invalidateRfHardwareCache();
+            _channelModeHwApplied = true;
+            _channelModeHw = _nChannels;
+            _rxChannelMaskHw = rx_channel_mask;
+            _txChannelMaskHw = tx_channel_mask;
+            invalidateRfHardwareCache();
+        }
+    } catch (...) {
+        /* setupStream() throwing means the caller gets no stream handle and
+         * will not call closeStream(): roll back the stream opened by this
+         * call so a retry is not rejected as "already opened". */
+        Stream &fail_stream = (direction == SOAPY_SDR_RX)
+            ? static_cast<Stream &>(_rx_stream)
+            : static_cast<Stream &>(_tx_stream);
+        if (isLitePCIe()) {
+            (void)m2sdr_stream_release(_dev,
+                direction == SOAPY_SDR_RX ? M2SDR_RX : M2SDR_TX);
+        } else if (isLiteEth()) {
+            std::free(fail_stream.buf);
+        }
+        fail_stream.buf = NULL;
+        fail_stream.opened = false;
+        const Stream &other_stream = (direction == SOAPY_SDR_RX)
+            ? static_cast<const Stream &>(_tx_stream)
+            : static_cast<const Stream &>(_rx_stream);
+        if (other_stream.opened)
+            _nChannels = other_stream.channels.size();
+        throw;
     }
 
     lock.unlock();
