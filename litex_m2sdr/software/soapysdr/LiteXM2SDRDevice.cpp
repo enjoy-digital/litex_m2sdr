@@ -618,14 +618,29 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
 #endif
 
-    /* DMA RX Header */
-    #if defined(_RX_DMA_HEADER_TEST)
-        /* Enable */
-        m2sdr_set_rx_header(_dev, true, false);
-    #else
-        /* Disable */
+    /* DMA RX Header: carries the per-buffer hardware timestamp used for RX
+     * time reporting. Probe gateware support (the control CSR reads back its
+     * written value only when the header module is present in the bitstream),
+     * then leave it disabled until setupStream() configures the stream. */
+        bool rx_dma_header_requested = true;
+        if (args.count("rx_dma_header") > 0)
+            rx_dma_header_requested = args.at("rx_dma_header") != "0";
+#ifdef CSR_HEADER_RX_CONTROL_ADDR
+        if (rx_dma_header_requested) {
+            const uint32_t probe =
+                (1u << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                (1u << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET);
+            litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR, probe);
+            _rx_dma_header_supported =
+                litex_m2sdr_readl(_dev, CSR_HEADER_RX_CONTROL_ADDR) == probe;
+        }
+#endif
+        _rx_dma_header_bytes = _rx_dma_header_supported ? M2SDR_DMA_HEADER_SIZE : 0;
+        if (rx_dma_header_requested && !_rx_dma_header_supported)
+            SoapySDR::log(SOAPY_SDR_WARNING,
+                "RX DMA headers unsupported by this gateware; "
+                "RX timestamps fall back to software accounting");
         m2sdr_set_rx_header(_dev, false, false);
-    #endif
 
     /* DMA TX Header */
     #if defined(_TX_DMA_HEADER_TEST)

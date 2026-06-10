@@ -25,7 +25,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
@@ -1173,6 +1172,10 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
         m2sdr_write_dma_header(base, ts);
     }
 
+    /* Both backends emit fixed-size units (mmap DMA ring buffers framed by a
+     * fixed frame_cycles, full UDP packets): a short submit still puts the
+     * whole buffer on the air, so callers must zero-fill the tail and account
+     * for its duration themselves. */
     (void)num_samples;
 
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
@@ -1203,5 +1206,34 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
         m2sdr_pcie_dma_update_rx_release(dev);
     }
     /* DMA/UDP ring advances on read in non-zero-copy and LiteEth modes. */
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_buffer_metadata(struct m2sdr_dev *dev,
+                              enum m2sdr_direction direction,
+                              const void *buffer,
+                              struct m2sdr_metadata *meta)
+{
+    if (!dev || !buffer || !meta)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    memset(meta, 0, sizeof(*meta));
+
+    if (!dev->rx_header_enable)
+        return M2SDR_ERR_OK;
+
+    /* m2sdr_get_buffer() returns the payload pointer: with stripping enabled
+     * the header sits right before it, otherwise it leads the buffer. */
+    const uint8_t *header = (const uint8_t *)buffer;
+    if (dev->rx_strip_header)
+        header -= M2SDR_DMA_HEADER_SIZE;
+
+    uint64_t ts = 0;
+    if (m2sdr_parse_dma_header(header, &ts)) {
+        meta->timestamp = ts;
+        meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+    }
     return M2SDR_ERR_OK;
 }

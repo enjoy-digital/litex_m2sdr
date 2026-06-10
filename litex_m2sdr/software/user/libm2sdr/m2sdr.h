@@ -112,6 +112,10 @@ struct m2sdr_metadata {
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
 
+/* Size of the optional FPGA DMA header (sync word + ns timestamp); see the
+ * layout description above the zero-copy buffer API below. */
+#define M2SDR_DMA_HEADER_SIZE 16
+
 struct m2sdr_sync_params {
     /* RX or TX stream to configure. */
     enum m2sdr_direction direction;
@@ -789,6 +793,16 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
 int m2sdr_release_buffer(struct m2sdr_dev *dev,
                          enum m2sdr_direction direction,
                          void *buffer);
+
+/* Retrieve the metadata carried by the DMA header of an RX buffer obtained
+ * from m2sdr_get_buffer()/m2sdr_try_get_buffer(). meta->flags carries
+ * M2SDR_META_FLAG_HAS_TIME (with meta->timestamp in ns) only when RX headers
+ * are enabled and the buffer holds a valid sync word; otherwise meta is
+ * cleared and the call still succeeds, so it can be issued unconditionally. */
+int m2sdr_get_buffer_metadata(struct m2sdr_dev *dev,
+                              enum m2sdr_direction direction,
+                              const void *buffer,
+                              struct m2sdr_metadata *meta);
 
 /* Backend notes for zero-copy submit/release:
  *

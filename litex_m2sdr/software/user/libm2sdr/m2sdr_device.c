@@ -743,6 +743,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         return M2SDR_ERR_NO_MEM;
 
     dev->fd = -1;
+    pthread_mutex_init(&dev->reg_lock, NULL);
 
     rc = m2sdr_resolve_device_identifier(device_identifier, &addr);
     if (rc != M2SDR_ERR_OK) {
@@ -817,6 +818,7 @@ void m2sdr_close(struct m2sdr_dev *dev)
     }
 
     dev->ad9361_phy = NULL;
+    pthread_mutex_destroy(&dev->reg_lock);
     free(dev);
 }
 

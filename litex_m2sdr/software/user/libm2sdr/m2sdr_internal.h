@@ -15,6 +15,7 @@
 /*----------*/
 
 #include <stdint.h>
+#include <pthread.h>
 
 #include "m2sdr.h"
 #include "liblitepcie.h"
@@ -72,6 +73,10 @@ struct m2sdr_dev {
     int64_t tx_user_count;
     int64_t tx_submit_count;
     struct ad9361_rf_phy *ad9361_phy;
+
+    /* Serializes register transactions on the shared Etherbone connection;
+     * PCIe register access is a single atomic syscall and bypasses it. */
+    pthread_mutex_t reg_lock;
 };
 
 extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;

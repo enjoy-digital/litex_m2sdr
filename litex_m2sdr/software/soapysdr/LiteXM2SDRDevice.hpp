@@ -40,7 +40,8 @@ enum class SoapyLiteXM2SDREthernetMode {
 
 #define DEBUG
 
-//#define _RX_DMA_HEADER_TEST
+/* RX DMA headers are runtime-probed (rx_dma_header device arg); TX header
+ * insertion remains experimental. */
 //#define _TX_DMA_HEADER_TEST
 
 /* Thresholds above which we switch to 8-bit mode: */
@@ -371,6 +372,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     size_t _rx_buf_stride = 0;
     size_t _tx_buf_stride = 0;
 
+    /* RX DMA headers carry the per-buffer hardware timestamp; probed at
+     * construction since older bitstreams lack the header module. */
+    bool _rx_dma_header_supported = false;
+    size_t _rx_dma_header_bytes = 0;
+
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
     SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
@@ -416,6 +422,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long remainderTimeNs = 0;
         long long last_time_ns = 0;
         bool time_warned = false;
+        bool hw_time_warned = false;
         bool vrt_sequence_valid = false;
         uint8_t vrt_sequence_last = 0;
         uint64_t vrt_packets = 0;
@@ -442,11 +449,17 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         int32_t burst_samps = 0;
         std::map<size_t, uint8_t*> pendingWriteBufs;
         bool rate_pacing = true;
-        std::chrono::steady_clock::time_point pace_start;
+        /* Pacing follows the board clock through periodically refreshed
+         * (host, board) anchor pairs so long runs do not drift with the
+         * host oscillator. */
+        std::chrono::steady_clock::time_point pace_host_anchor;
+        long long pace_board_start_ns = 0;
+        long long pace_board_anchor_ns = 0;
+        bool pace_board_valid = false;
         uint64_t paced_buffers = 0;
 
         bool timed_tx_enabled = true;
-        size_t timed_tx_lead_buffers = 8;
+        size_t timed_tx_lead_buffers = 0;
         long long timed_tx_latency_ns = 0;
         long long timed_tx_late_margin_ns = 0;
         bool timed_tx_late_margin_configured = false;
