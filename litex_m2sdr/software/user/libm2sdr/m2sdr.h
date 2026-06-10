@@ -724,6 +724,10 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
                           enum m2sdr_direction direction,
                           struct m2sdr_stream_info *info);
 int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
+/* Re-enable a previously configured (and possibly deactivated) stream. On
+ * LitePCIe this resyncs the userspace ring counters with the kernel, whose
+ * counters restart across a stop/start cycle. */
+int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 
 /* LiteEth stream-control helpers.

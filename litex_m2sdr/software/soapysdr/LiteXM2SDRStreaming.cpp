@@ -697,6 +697,18 @@ int SoapyLiteXM2SDR::activateStream(
                 channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
             /* Crossbar Demux: Select PCIe streaming */
             litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+            /* Re-enable the DMA and resync ring counters (the kernel clears
+             * them across a deactivate/activate cycle); drop any buffer still
+             * held from before the restart. */
+            int rc = m2sdr_stream_activate(_dev, M2SDR_RX);
+            if (rc != M2SDR_ERR_OK) {
+                SoapySDR::logf(SOAPY_SDR_ERROR,
+                    "PCIe RX stream activation failed: %s", m2sdr_strerror(rc));
+                return SOAPY_SDR_STREAM_ERROR;
+            }
+            _rx_stream.remainderHandle = -1;
+            _rx_stream.remainderSamps = 0;
+            _rx_stream.remainderOffset = 0;
         } else if (isLiteEth()) {
             if (_udp_inited)
                 liteeth_udp_flush_rx(&_udp);
@@ -744,6 +756,12 @@ int SoapyLiteXM2SDR::activateStream(
                 channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
             /* Crossbar Mux: Select PCIe streaming */
             litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+            int rc = m2sdr_stream_activate(_dev, M2SDR_TX);
+            if (rc != M2SDR_ERR_OK) {
+                SoapySDR::logf(SOAPY_SDR_ERROR,
+                    "PCIe TX stream activation failed: %s", m2sdr_strerror(rc));
+                return SOAPY_SDR_STREAM_ERROR;
+            }
             _tx_stream.user_count = 0;
         } else if (isLiteEth()) {
             int rc = m2sdr_liteeth_tx_stream_activate(_dev);

@@ -666,11 +666,15 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
         return M2SDR_ERR_INVAL;
 
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        /* Also clear the local enable flags: the wait helpers pass them to
+         * the kernel on every poll and would silently re-enable the DMA. */
         if (direction == M2SDR_RX && dev->rx_configured) {
+            dev->rx_dma.writer_enable = 0;
             litepcie_dma_writer(dev->rx_dma.fds.fd, 0,
                                 &dev->rx_dma.writer_hw_count,
                                 &dev->rx_dma.writer_sw_count);
         } else if (direction == M2SDR_TX && dev->tx_configured) {
+            dev->tx_dma.reader_enable = 0;
             litepcie_dma_reader(dev->tx_dma.fds.fd, 0,
                                 &dev->tx_dma.reader_hw_count,
                                 &dev->tx_dma.reader_sw_count);
@@ -682,6 +686,55 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
         if (direction == M2SDR_RX)
             return m2sdr_liteeth_rx_stream_deactivate(dev);
         return m2sdr_liteeth_tx_stream_deactivate(dev);
+    }
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        /* The kernel clears its ring counters across a stop/start cycle, so
+         * the userspace counters must be resynced or the ring arithmetic in
+         * the wait helpers never matches again (RX then times out forever). */
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            struct litepcie_dma_ctrl *dma = &dev->rx_dma;
+            dma->writer_enable = 1;
+            if (dev->zero_copy) {
+                litepcie_dma_writer(dma->fds.fd, 1,
+                                    &dma->writer_hw_count,
+                                    &dma->writer_sw_count);
+                dev->rx_user_count = dma->writer_hw_count;
+                dev->rx_release_count = dma->writer_hw_count;
+            }
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+            dma->reader_enable = 1;
+            if (dev->zero_copy) {
+                litepcie_dma_reader(dma->fds.fd, 1,
+                                    &dma->reader_hw_count,
+                                    &dma->reader_sw_count);
+                dev->tx_user_count = dma->reader_hw_count;
+                dev->tx_submit_count = dma->reader_hw_count;
+            }
+        } else {
+            return M2SDR_ERR_STATE;
+        }
+        return M2SDR_ERR_OK;
+    }
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        if (direction == M2SDR_RX) {
+            if (!dev->liteeth_rx_config_valid)
+                return M2SDR_ERR_STATE;
+            return m2sdr_liteeth_rx_stream_activate(dev, &dev->liteeth_rx_config);
+        }
+        return m2sdr_liteeth_tx_stream_activate(dev);
     }
 
     return M2SDR_ERR_UNSUPPORTED;
