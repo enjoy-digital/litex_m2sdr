@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
 
@@ -19,7 +20,7 @@ from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
 from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
-from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
+from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker, AD9361PRBS1R1TChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 
 # Architecture -------------------------------------------------------------------------------------
@@ -294,7 +295,15 @@ class AD9361RFIC(LiteXModule):
 
         # PRBS RX.
         # --------
-        self.comb += self.prbs_rx.fields.synced.eq(1)
+        # 2R2T mode: each lane (channel) carries the full PRBS sequence; check
+        # ia/ib independently. 1R1T mode: the a/b slots carry two consecutive
+        # samples of ONE stream (each lane sees every other PRBS value), so a
+        # dedicated interleaved checker is required. Select by PHY mode.
+        mode_rfic = Signal()
+        self.specials += MultiReg(phy.control.fields.mode, mode_rfic, odomain="rfic")
+
+        synced_2r2t = Signal(reset=1)
+        self.comb += synced_2r2t.eq(1)
         for data in [phy.source.ia, phy.source.ib]:
             prbs_checker = AD9361PRBSChecker()
             prbs_checker = ClockDomainsRenamer("rfic")(prbs_checker)
@@ -303,9 +312,22 @@ class AD9361RFIC(LiteXModule):
                 prbs_checker.i.eq(data),
                 prbs_checker.ce.eq(phy.source.valid),
                 If(~prbs_checker.synced,
-                    self.prbs_rx.fields.synced.eq(0)
+                    synced_2r2t.eq(0)
                 ),
             ]
+
+        prbs_checker_1r1t = AD9361PRBS1R1TChecker()
+        prbs_checker_1r1t = ClockDomainsRenamer("rfic")(prbs_checker_1r1t)
+        self.submodules += prbs_checker_1r1t
+        self.comb += [
+            prbs_checker_1r1t.ia.eq(phy.source.ia),
+            prbs_checker_1r1t.ib.eq(phy.source.ib),
+            prbs_checker_1r1t.ce.eq(phy.source.valid),
+        ]
+
+        synced = Signal()
+        self.comb += synced.eq(Mux(mode_rfic, prbs_checker_1r1t.synced, synced_2r2t))
+        self.specials += MultiReg(synced, self.prbs_rx.fields.synced)
 
     def add_agc(self):
         rx_cdc = self.rx_cdc
