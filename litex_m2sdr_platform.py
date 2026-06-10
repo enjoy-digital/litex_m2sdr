@@ -38,7 +38,7 @@ _io = [
     ("si5351", 0,
         Subsignal("scl",        Pins("AA20"), Misc("PULLUP=TRUE"),                IOStandard("LVCMOS33")), # SI5351_SCL.
         Subsignal("sda",        Pins("AB21"), Misc("PULLUP=TRUE"),                IOStandard("LVCMOS33")), # SI5351_SDA.
-        Subsignal("ssen_clkin", Pins("W22"),  Misc("SLEW=SLOW"), Misc("DRIVE=4"), IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C).
+        Subsignal("ssen_clkin", Pins("W22"),  Misc("SLEW=FAST"), Misc("DRIVE=12"), IOStandard("LVCMOS33")), # SI5351_SSEN (A, B) / SI5351_CLKIN (C). FAST/DRIVE=12: faster edges -> lower jitter at the Si5351C CLKIN threshold (phase-noise-sensitive ref path).
         Subsignal("pwm",        Pins("W19"),                                      IOStandard("LVCMOS33")), # VCXO_TUNE_FPGA.
     ),
     ("si5351_clk0",       0, Pins("J19"), IOStandard("LVCMOS33")), # FPGA_AUXCLK_0.
