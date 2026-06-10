@@ -679,8 +679,18 @@ int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, 
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+/* Switch the 1T1R/2T2R channel layout. Re-initializes the AD9361 from the
+ * shared init parameters (the device must have completed RF bring-up once),
+ * going through the same configuration code as the init-time path. Callers
+ * caching the phy handle must refresh it via m2sdr_rf_phy() afterwards, and
+ * re-apply their RF settings (rates, frequencies, gains). */
 int  m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
                             unsigned rx_channel, unsigned tx_channel);
+/* Stream sample rate as observed by the host (inverse of the conversions
+ * applied by m2sdr_set_sample_rate()). */
+int  m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate);
+/* Currently bound AD9361 phy handle (NULL when uninitialized). */
+void *m2sdr_rf_phy(struct m2sdr_dev *dev);
 int  m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
                             enum m2sdr_rx_gain_mode mode);
 int  m2sdr_get_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,

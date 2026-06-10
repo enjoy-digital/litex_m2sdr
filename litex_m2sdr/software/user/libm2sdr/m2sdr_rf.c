@@ -322,17 +322,19 @@ static int m2sdr_channel_layout_from_config(const struct m2sdr_config *cfg,
 }
 
 /* Apply the selected 1T1R/2T2R topology both to the AD9361 init parameters and
- * to the FPGA-side PHY control register. */
+ * to the FPGA-side PHY control register. rx/tx_channel select the physical
+ * channel used in 1T1R (0 = RX1/TX1, 1 = RX2/TX2). */
 static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
-                                       enum m2sdr_channel_layout channel_layout)
+                                       enum m2sdr_channel_layout channel_layout,
+                                       unsigned rx_channel, unsigned tx_channel)
 {
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) {
         /* The AD9361 init structure and the FPGA-side PHY control CSR must be
          * kept in sync or the datapath framing becomes inconsistent. */
         M2SDR_LOGF("Setting Channel Mode to 1T1R.\n");
         default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
+        default_init_param.one_rx_one_tx_mode_use_rx_num = rx_channel == 0 ? 1 : 2;
+        default_init_param.one_rx_one_tx_mode_use_tx_num = tx_channel == 0 ? 1 : 2;
         default_init_param.two_t_two_r_timing_enable     = 0;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
@@ -351,13 +353,12 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
-/* The packed-stream divisor only applies to the init-time 1T1R configuration
- * (m2sdr_apply_channel_layout), where the FPGA packs two consecutive samples
- * of the single channel per frame and the stream runs at twice the AD9361
- * rate. The runtime path (m2sdr_set_channel_mode) keeps unpacked framing
- * where the stream rate equals the AD9361 rate. */
+/* Convert the stream rate the host observes to the rate programmed into the
+ * AD9361. The only divisor is the FPGA oversample mode (x2). Note: 1T1R does
+ * NOT change this relationship - the stream rate equals the AD9361 rate in
+ * both layouts. (An earlier dual-channel-enable bug made 1T1R appear to run
+ * at twice the programmed rate; the port then carried both RX channels.) */
 static int m2sdr_stream_to_ad9361_sample_rate(int64_t stream_rate,
-                                              bool packed_stream,
                                               bool enable_oversample,
                                               uint32_t *ad9361_rate)
 {
@@ -367,8 +368,6 @@ static int m2sdr_stream_to_ad9361_sample_rate(int64_t stream_rate,
     if (!ad9361_rate || stream_rate <= 0 || stream_rate > UINT32_MAX)
         return M2SDR_ERR_RANGE;
 
-    if (packed_stream)
-        divisor *= 2;
     if (enable_oversample)
         divisor *= 2;
 
@@ -497,17 +496,15 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
 
     M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
 
+    (void)channel_layout;
     rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate,
-        channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R,
         cfg->enable_oversample, &actual_samplerate);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
     if (actual_samplerate != (uint32_t)cfg->sample_rate) {
-        M2SDR_LOGF("Programming AD9361 Samplerate to %f MSPS%s%s.\n",
-            actual_samplerate / 1e6,
-            channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R ? " for 1T1R packed stream" : "",
-            cfg->enable_oversample ? " with oversample" : "");
+        M2SDR_LOGF("Programming AD9361 Samplerate to %f MSPS with oversample.\n",
+            actual_samplerate / 1e6);
     }
 
     if (actual_samplerate > 61440000U) {
@@ -1095,7 +1092,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     default_init_param.gpio_cal_sw1       = -1;
     default_init_param.gpio_cal_sw2       = -1;
 
-    rc = m2sdr_apply_channel_layout(dev, channel_layout);
+    rc = m2sdr_apply_channel_layout(dev, channel_layout, 0, 0);
     if (rc != M2SDR_ERR_OK)
         return rc;
 #ifdef USE_LITEETH
@@ -1121,7 +1118,6 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     dev->rf_channel_layout = channel_layout;
     dev->rf_channel_layout_valid = 1;
     dev->rf_oversample_enabled = cfg->enable_oversample ? 1 : 0;
-    dev->rf_packed_stream = (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) ? 1 : 0;
 
     rc = m2sdr_configure_samplerate(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
@@ -1202,7 +1198,7 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    rc = m2sdr_stream_to_ad9361_sample_rate(rate, dev->rf_packed_stream != 0,
+    rc = m2sdr_stream_to_ad9361_sample_rate(rate,
         dev->rf_oversample_enabled != 0, &actual_rate);
     if (rc != M2SDR_ERR_OK)
         return rc;
@@ -1239,7 +1235,8 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
                            unsigned rx_channel, unsigned tx_channel)
 {
     struct ad9361_rf_phy *phy;
-    struct ad9361_phy_platform_data *pd;
+    struct ad9361_rf_phy *new_phy = NULL;
+    enum m2sdr_channel_layout channel_layout;
     int rc;
 
     if (!dev)
@@ -1249,38 +1246,69 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
     if (rx_channel > 1 || tx_channel > 1)
         return M2SDR_ERR_RANGE;
 
+    /* The device must have completed RF bring-up once (the shared init
+     * parameters then carry its reference clock, SPI id and GPIO setup). */
     rc = m2sdr_require_phy(dev, &phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR,
-                        channel_count == 1 ? 1 : 0) != 0)
-        return M2SDR_ERR_IO;
-
-    phy->pdata->rx2tx2 = (channel_count == 2);
-    if (channel_count == 1) {
-        phy->pdata->rx1tx1_mode_use_rx_num = rx_channel == 0 ? RX_1 : RX_2;
-        phy->pdata->rx1tx1_mode_use_tx_num = tx_channel == 0 ? TX_1 : TX_2;
-    } else {
-        phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-        phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
-    }
-
-    pd = phy->pdata;
-    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-    if (channel_count == 2)
-        pd->port_ctrl.pp_conf[0] |= (1 << 2);
-
-    if (m2sdr_from_ad9361_rc(ad9361_set_no_ch_mode(phy, channel_count)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
-    dev->rf_channel_layout = channel_count == 1 ?
+    channel_layout = channel_count == 1 ?
         M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
-    dev->rf_channel_layout_valid = 1;
-    /* This runtime path configures unpacked framing: the stream rate equals
-     * the AD9361 rate even in 1T1R, so no sample-rate divisor applies. */
-    dev->rf_packed_stream = 0;
 
+    rc = m2sdr_apply_channel_layout(dev, channel_layout, rx_channel, tx_channel);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    /* Re-initialize the RFIC from the shared parameters so the runtime
+     * layout switch goes through exactly the same configuration code as the
+     * init-time path (m2sdr_apply_config), instead of the partial
+     * ad9361_set_no_ch_mode dance. The previous phy instance is leaked
+     * deliberately: the no-OS ADI driver has no remove/cleanup entry point
+     * and layout switches are rare, one-shot events. */
+    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, &default_init_param, 1));
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!new_phy)
+        return M2SDR_ERR_IO;
+
+    dev->ad9361_phy = new_phy;
+    tls_rf_dev = dev;
+
+    dev->rf_channel_layout = channel_layout;
+    dev->rf_channel_layout_valid = 1;
+
+    return M2SDR_ERR_OK;
+}
+
+/* Return the currently bound AD9361 phy handle (NULL when uninitialized).
+ * Callers caching the handle must refresh it after m2sdr_set_channel_mode(). */
+void *m2sdr_rf_phy(struct m2sdr_dev *dev)
+{
+    return dev ? dev->ad9361_phy : NULL;
+}
+
+/* Read back the stream sample rate (the rate the host observes), applying the
+ * inverse of the conversions used by m2sdr_set_sample_rate(). */
+int m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate)
+{
+    struct ad9361_rf_phy *phy;
+    uint32_t hw_rate = 0;
+    int64_t mult = 1;
+    int rc;
+
+    if (!dev || !rate)
+        return M2SDR_ERR_INVAL;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_get_rx_sampling_freq(phy, &hw_rate)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    if (dev->rf_oversample_enabled)
+        mult *= 2;
+
+    *rate = (int64_t)hw_rate * mult;
     return M2SDR_ERR_OK;
 }
 

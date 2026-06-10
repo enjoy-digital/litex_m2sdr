@@ -76,9 +76,6 @@ struct m2sdr_dev {
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
     int rf_oversample_enabled;
-    /* Set when the FPGA packs two single-channel samples per frame (init-time
-     * 1T1R via m2sdr_apply_channel_layout): stream rate = 2 x AD9361 rate. */
-    int rf_packed_stream;
 
     /* Serializes register transactions on the shared Etherbone connection;
      * PCIe register access is a single atomic syscall and bypasses it. */

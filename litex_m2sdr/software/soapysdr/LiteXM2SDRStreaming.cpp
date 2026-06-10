@@ -628,10 +628,14 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rxChannelMaskHw != rx_channel_mask ||
         _txChannelMaskHw != tx_channel_mask;
     if (channel_mode_changed) {
-        /* Re-runs AD9361 setup, so active Soapy settings are reapplied below. */
+        /* Re-runs the AD9361 bring-up, so active Soapy settings are reapplied
+         * below; the phy handle changes across the re-init. */
         int rc = m2sdr_set_channel_mode(_dev, _nChannels, rx_channel, tx_channel);
         if (rc != M2SDR_ERR_OK)
             throw std::runtime_error("m2sdr_set_channel_mode failed: " + std::string(m2sdr_strerror(rc)));
+        ad9361_phy = static_cast<struct ad9361_rf_phy *>(m2sdr_rf_phy(_dev));
+        if (!ad9361_phy)
+            throw std::runtime_error("m2sdr_set_channel_mode left no AD9361 phy bound");
 
         _channelModeHwApplied = true;
         _channelModeHw = _nChannels;

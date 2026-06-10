@@ -1733,28 +1733,25 @@ double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
 
-    uint32_t sample_rate = 0;
+    /* RX/TX rates are always programmed together; m2sdr_get_sample_rate()
+     * reports the stream rate, undoing the packed-1T1R division. */
+    (void)direction;
+    int64_t sample_rate = 0;
 
-    if (direction == SOAPY_SDR_TX) {
 #if USE_LITEETH
-        LiteEthRfOpTimeout timeout("getSampleRate(TX)");
+    LiteEthRfOpTimeout timeout("getSampleRate");
 #endif
-        ad9361_get_tx_sampling_freq(ad9361_phy, &sample_rate);
+    int rc = m2sdr_get_sample_rate(_dev, &sample_rate);
 #if USE_LITEETH
-        timeout.throw_if_timed_out();
+    timeout.throw_if_timed_out();
 #endif
-    }
-    if (direction == SOAPY_SDR_RX) {
-#if USE_LITEETH
-        LiteEthRfOpTimeout timeout("getSampleRate(RX)");
-#endif
-        ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
-#if USE_LITEETH
-        timeout.throw_if_timed_out();
-#endif
+    if (rc != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_ERROR,
+            "m2sdr_get_sample_rate failed: %s", m2sdr_strerror(rc));
+        return 0.0;
     }
 
-    return static_cast<double>(_rateMult*sample_rate);
+    return _rateMult * static_cast<double>(sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
