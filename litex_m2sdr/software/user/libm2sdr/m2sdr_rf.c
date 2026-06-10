@@ -1288,8 +1288,8 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
         return rc;
 
     /* Prefer the init parameters stored at bring-up (reference clock, SPI
-     * id, GPIO setup); fall back to the built-in defaults for integrations
-     * that initialized the RFIC without storing them. */
+     * id); fall back to the built-in defaults for integrations that
+     * initialized the RFIC without storing them. */
     AD9361_InitParam *init_param = (AD9361_InitParam *)dev->rf_init_param;
     if (!init_param) {
         M2SDR_LOGF("No stored AD9361 init parameters; using built-in defaults for the layout switch.\n");
@@ -1309,10 +1309,15 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
     /* Re-initialize the RFIC from the stored parameters so the runtime
      * layout switch goes through exactly the same configuration code as the
      * init-time path (m2sdr_apply_config), instead of the partial
-     * ad9361_set_no_ch_mode dance. The previous phy instance is leaked
-     * deliberately: the no-OS ADI driver has no remove/cleanup entry point
-     * and layout switches are rare, one-shot events. */
-    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, init_param, 1));
+     * ad9361_set_no_ch_mode dance. Use a local copy with the reset GPIO
+     * masked: a hard reset mid-session makes the subsequent setup time out,
+     * and the SPI-driven setup reconfigures everything on its own. The
+     * previous phy instance is leaked deliberately: the no-OS ADI driver has
+     * no remove/cleanup entry point and layout switches are rare, one-shot
+     * events. */
+    AD9361_InitParam reinit_param = *init_param;
+    reinit_param.gpio_resetb = -1;
+    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, &reinit_param, 1));
     if (rc != M2SDR_ERR_OK)
         return rc;
     if (!new_phy)
