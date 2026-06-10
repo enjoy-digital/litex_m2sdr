@@ -425,8 +425,14 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
             ssize_t nb = sendto(u->sock, chunk_src, chunk, 0,
                                 (struct sockaddr *)&u->remote, sizeof(u->remote));
             if (nb < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
-                    continue; /* retry */
+                if (errno == EINTR)
+                    continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    /* Wait for socket buffer space instead of spinning. */
+                    struct pollfd wfd = { .fd = u->sock, .events = POLLOUT };
+                    (void)poll(&wfd, 1, 100);
+                    continue;
+                }
                 u->tx_send_errors++;
                 perror("liteeth_udp: sendto");
                 return -1;
