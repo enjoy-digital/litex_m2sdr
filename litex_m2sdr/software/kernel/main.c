@@ -331,7 +331,7 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 
 		if (m->direction == LITEPCIE_SATA_DMA_HOST_TO_DEVICE) {
 			if (copy_from_user(s->sata_dma_cpu,
-					   user + (done * LITEPCIE_SATA_SECTOR_SIZE),
+					   user + ((size_t)done * LITEPCIE_SATA_SECTOR_SIZE),
 					   bytes)) {
 				ret = -EFAULT;
 				break;
@@ -355,7 +355,7 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 			if (ret)
 				break;
 			rmb();
-			if (copy_to_user(user + (done * LITEPCIE_SATA_SECTOR_SIZE),
+			if (copy_to_user(user + ((size_t)done * LITEPCIE_SATA_SECTOR_SIZE),
 					 s->sata_dma_cpu, bytes)) {
 				ret = -EFAULT;
 				break;
