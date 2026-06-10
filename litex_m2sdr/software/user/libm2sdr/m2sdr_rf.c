@@ -632,9 +632,6 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy,
     if (second_channel) {
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-    }
-
-    if (second_channel) {
         M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
                (long)cfg->rx_gain1, (long)cfg->rx_gain2);
     } else {
