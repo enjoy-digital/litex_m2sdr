@@ -569,6 +569,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     _spi_id = spi_register_fd(_fd);
 
+    /* A throwing constructor skips the destructor: release what has been
+     * acquired so far so a failed probe/open does not leak the device
+     * handle and SPI registration. Disarmed once construction completes. */
+    struct CtorGuard {
+        SoapyLiteXM2SDR *self;
+        bool armed = true;
+        ~CtorGuard() {
+            if (!armed)
+                return;
+            spi_unregister_fd(self->_spi_id);
+            if (self->_udp_inited) {
+                liteeth_udp_cleanup(&self->_udp);
+                self->_udp_inited = false;
+            }
+            if (self->_dev) {
+                m2sdr_rf_bind(self->_dev, nullptr);
+                m2sdr_close(self->_dev);
+                self->_dev = nullptr;
+            }
+        }
+    } ctor_guard{this};
+
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened %s via %s, serial %s",
                    path.empty() ? dev_id.c_str() : path.c_str(),
                    isLitePCIe() ? "LitePCIe" : "LiteEth",
@@ -864,6 +886,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
+    ctor_guard.armed = false;
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
 
