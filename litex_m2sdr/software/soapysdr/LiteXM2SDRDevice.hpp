@@ -598,5 +598,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     float    _rateMult          = 1.0f;
 
     // register protection
-    std::mutex _mutex;
+    /* Serializes the RF control entry points (set/get rate, frequency,
+     * gain, bandwidth, stream setup). The streaming hot path (readStream/
+     * writeStream) intentionally does not take it and reads cached fields
+     * like the stream samplerate unlocked; RF reconfiguration while
+     * streaming is expected to happen between buffers, not within one.
+     * Mutable so const getters can lock too. */
+    mutable std::mutex _mutex;
 };

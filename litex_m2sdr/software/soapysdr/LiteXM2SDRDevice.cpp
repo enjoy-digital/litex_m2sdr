@@ -1216,6 +1216,10 @@ void SoapyLiteXM2SDR::setGain(
     const std::string &name,
     const double value)
 {
+    /* Serialize with the other RF accessors; released before the fallback
+     * below, which locks on its own. */
+    std::unique_lock<std::mutex> lock(_mutex);
+
     /* TX */
     if (direction == SOAPY_SDR_TX) {
         if (name == "ATT") {
@@ -1266,7 +1270,8 @@ void SoapyLiteXM2SDR::setGain(
         return;
     }
 
-    /* Fallback */
+    /* Fallback (locks internally). */
+    lock.unlock();
     setGain(direction, channel, value);
 }
 
@@ -1742,8 +1747,10 @@ double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
 
+    std::lock_guard<std::mutex> lock(_mutex);
+
     /* RX/TX rates are always programmed together; m2sdr_get_sample_rate()
-     * reports the stream rate, undoing the packed-1T1R division. */
+     * reports the stream rate. */
     (void)direction;
     int64_t sample_rate = 0;
 
