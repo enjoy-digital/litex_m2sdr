@@ -1107,6 +1107,14 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 			break;
 		}
 
+		/* The counters index the buffer ring through a modulo: a negative
+		 * value would produce a negative index (C modulo keeps the sign)
+		 * and an out-of-bounds buffer access. */
+		if (m.sw_count < 0) {
+			ret = -EINVAL;
+			break;
+		}
+
 		chan->dma.writer_sw_count = m.sw_count;
 	}
 	break;
@@ -1116,6 +1124,11 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 
 		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
 			ret = -EFAULT;
+			break;
+		}
+
+		if (m.sw_count < 0) {
+			ret = -EINVAL;
 			break;
 		}
 
