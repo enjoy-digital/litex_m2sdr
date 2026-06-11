@@ -15,10 +15,49 @@
 /*----------*/
 
 #include <stdint.h>
-#include <pthread.h>
 
 #include "m2sdr.h"
 #include "m2sdr_platform.h"
+
+#if defined(_WIN32)
+typedef CRITICAL_SECTION m2sdr_mutex_t;
+static inline void m2sdr_mutex_init(m2sdr_mutex_t *mutex)
+{
+    InitializeCriticalSection(mutex);
+}
+static inline void m2sdr_mutex_destroy(m2sdr_mutex_t *mutex)
+{
+    DeleteCriticalSection(mutex);
+}
+static inline void m2sdr_mutex_lock(m2sdr_mutex_t *mutex)
+{
+    EnterCriticalSection(mutex);
+}
+static inline void m2sdr_mutex_unlock(m2sdr_mutex_t *mutex)
+{
+    LeaveCriticalSection(mutex);
+}
+#else
+#include <pthread.h>
+typedef pthread_mutex_t m2sdr_mutex_t;
+static inline void m2sdr_mutex_init(m2sdr_mutex_t *mutex)
+{
+    (void)pthread_mutex_init(mutex, NULL);
+}
+static inline void m2sdr_mutex_destroy(m2sdr_mutex_t *mutex)
+{
+    (void)pthread_mutex_destroy(mutex);
+}
+static inline void m2sdr_mutex_lock(m2sdr_mutex_t *mutex)
+{
+    (void)pthread_mutex_lock(mutex);
+}
+static inline void m2sdr_mutex_unlock(m2sdr_mutex_t *mutex)
+{
+    (void)pthread_mutex_unlock(mutex);
+}
+#endif
+
 #ifdef USE_LITEPCIE
 #include "liblitepcie.h"
 #define M2SDR_HAVE_LITEPCIE 1
@@ -103,7 +142,7 @@ struct m2sdr_dev {
 
     /* Serializes register transactions on the shared Etherbone connection;
      * PCIe register access is a single atomic syscall and bypasses it. */
-    pthread_mutex_t reg_lock;
+    m2sdr_mutex_t reg_lock;
 };
 
 extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;
