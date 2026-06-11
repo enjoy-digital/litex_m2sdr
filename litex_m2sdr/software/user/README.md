@@ -422,7 +422,7 @@ Example usage:
 ./m2sdr_record --sigmf --enable-header --strip-header --annotate-ts-jumps capture 2000000
 ~~~~
 
-Current SigMF support is intentionally minimal: it writes a `.sigmf-data` + `.sigmf-meta` pair and expects stripped sample payloads when DMA headers are enabled.
+Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and expects stripped sample payloads when DMA headers are enabled.
 
 ---
 
@@ -471,7 +471,7 @@ Example usage:
 ---
 
 ### m2sdr_sigmf
-Small text utility to inspect SigMF metadata without opening the GUI.
+Small text utility to inspect SigMF metadata without opening the GUI. It also reports M2SDR SATA extension fields when present.
 
 **Usage**:
 ~~~~
@@ -489,7 +489,14 @@ Example usage:
 ---
 
 ### m2sdr_sata
-Controls SATA streamers and crossbar routing to record/play I/Q directly to/from SSD, and supports replay through the TX/RX loopback.
+Workflow-first tool for SATA capture, host import/export, and RF/host replay.
+Named entries carry SigMF metadata by default. Raw sector operations are still
+available under the `diag` namespace for validation and debugging.
+
+The named capture area is called the SATA Capture Volume. It deliberately stays
+smaller than a general file system: it records contiguous sector ranges for the
+hardware streamers, keeps SigMF metadata beside each capture for interoperability,
+and avoids FAT/ext complexity so validation and recovery remain straightforward.
 
 **Usage**:
 ~~~~
@@ -497,30 +504,64 @@ m2sdr_sata [options] cmd [args...]
 ~~~~
 
 **Commands** include:
-- **status**
-  Show crossbar + SATA/loopback/streamer status.
-- **route `TXSRC RXDST [LOOPBACK]`**
-  Set routing with optional loopback (0/1).
-- **record `DST_SECTOR NSECTORS`**
-  RX stream → SSD (SATA_RX_STREAMER).
-- **play `SRC_SECTOR NSECTORS`**
-  SSD → TX stream (SATA_TX_STREAMER).
-- **replay `SRC_SECTOR NSECTORS DST`**
-  SSD → TX → loopback → RX destination (`pcie|eth|sata`).
-- **copy `SRC_SECTOR DST_SECTOR NSECTORS`**
-  SSD → SSD using loopback.
-- **header `TX|RX|BOTH ENABLE HEADER_ENABLE`**
-  Raw header control (writes HEADER CSR enable bits).
+- **info**
+  Show transport, SATA link, drive, SATA Capture Volume, and host I/O status.
+- **init `[--force]`**
+  Initialize the SATA Capture Volume. Use `--force` to reset a non-empty volume; data sectors are not erased.
+- **list**
+  List named captures with size and estimated duration when metadata is available.
+- **show `NAME`**
+  Show sector ranges, SigMF metadata storage, and RF/sample metadata for a named capture.
+- **delete `NAME`**
+  Remove a named capture from the SATA Capture Volume without erasing its sectors.
+- **check**
+  Check capture volume names and sector overlaps.
+- **capture `NAME --seconds SEC|--size BYTES [RF options]`**
+  Configure RF, record RX to SATA, and add a named SATA Capture Volume entry.
+- **capture-start `NAME --seconds SEC|--size BYTES [RF options]`**
+  Start a named RX-to-SATA capture and return immediately.
+- **import `NAME FILE|SIGMF [metadata options]`**
+  Import a raw file or SigMF dataset and register it.
+- **export `NAME PATH [--raw]`**
+  Export SigMF metadata+data by default; `--raw` writes only sample payload.
+- **play `NAME [RF overrides]`**
+  Replay SATA contents to the RF TX path, using stored SigMF metadata when present.
+- **serve `NAME [--dst pcie|eth]`**
+  Replay SATA contents through loopback to the normal host RX path for tools such as GQRX/Soapy.
+- **stop `RX|TX|BOTH`**
+  Reset selected SATA streamer(s).
+- **diag `...`**
+  Raw sector, route, pattern, header, and throughput diagnostics.
 
 Example usage:
 ~~~~
-./m2sdr_sata status
-./m2sdr_sata route pcie sata 0
-./m2sdr_sata record 0x1000 8192
-./m2sdr_sata play 0x1000 8192
-./m2sdr_sata replay 0x1000 8192 pcie
-./m2sdr_sata copy 0x2000 0x4000 4096
+./m2sdr_sata -i 192.168.1.50 info
+./m2sdr_sata -i 192.168.1.50 init
+./m2sdr_sata -i 192.168.1.50 --dry-run capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
+./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
+./m2sdr_sata -i 192.168.1.50 list
+./m2sdr_sata -i 192.168.1.50 show fm_test
+./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
+./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+./m2sdr_sata -i 192.168.1.50 import tx_sigmf /tmp/tx.sigmf-meta
+./m2sdr_sata -i 192.168.1.50 play tx_sigmf
+./m2sdr_sata -i 192.168.1.50 serve fm_test
 ~~~~
+
+Ethernet+SATA builds include enough Etherbone buffering for the default
+host-buffer burst size. From the repository root:
+~~~~
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
+cd litex_m2sdr/software/user
+./m2sdr_sata -i 192.168.1.50 diag etherbone-bench
+./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-write 0x260000 8192
+./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-check 0x260000 8192
+~~~~
+
+See [`doc/sata-workflows.md`](../../../doc/sata-workflows.md) for the complete
+workflow. Known-good PCIe/Ethernet SATA validation results are logged in
+[`doc/sata-validation.md`](../../../doc/sata-validation.md).
 
 ---
 

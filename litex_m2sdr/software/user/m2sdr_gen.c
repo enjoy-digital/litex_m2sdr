@@ -212,6 +212,7 @@ static void ofdm_next_sample(struct ofdm_state *st, float *i_out, float *q_out)
     st->sample_index++;
 }
 
+#ifdef CSR_GPIO_BASE
 static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 {
     if (m2sdr_reg_write(dev, addr, val) != 0) {
@@ -219,6 +220,7 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
         exit(1);
     }
 }
+#endif
 
 struct gen_signal_state {
     const char *signal_type;
@@ -234,6 +236,18 @@ struct gen_signal_state {
     uint32_t lfsr;
     struct ofdm_state *ofdm;
 };
+
+static int8_t gen_float_to_sc8(float sample)
+{
+    if (!isfinite(sample))
+        return 0;
+    float scaled = sample * 127.0f;
+    if (scaled > 127.0f)
+        return 127;
+    if (scaled < -128.0f)
+        return -128;
+    return (int8_t)lroundf(scaled);
+}
 
 static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_signal_state *st)
 {
@@ -276,8 +290,8 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
         }
 
         if (st->use_8bit) {
-            int8_t I_int = (int8_t)(I * 127);
-            int8_t Q_int = (int8_t)(Q * 127);
+            int8_t I_int = gen_float_to_sc8(I);
+            int8_t Q_int = gen_float_to_sc8(Q);
             ((int8_t *)payload)[4 * j + 0] = I_int;
             ((int8_t *)payload)[4 * j + 1] = Q_int;
             ((int8_t *)payload)[4 * j + 2] = I_int;
@@ -713,7 +727,7 @@ int main(int argc, char **argv) {
             {
                 enum m2sdr_format format;
 
-                if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+                if (m2sdr_cli_parse_format(optarg, &format) != 0 || format == M2SDR_FORMAT_BFP8_Q11) {
                     m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                     return 1;
                 }

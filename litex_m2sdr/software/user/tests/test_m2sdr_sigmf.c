@@ -33,6 +33,22 @@ static int write_file(const char *path, const char *content)
     return 0;
 }
 
+static int file_contains(const char *path, const char *needle)
+{
+    FILE *f = fopen(path, "rb");
+    char buf[8192];
+    size_t len;
+    int found;
+
+    if (!f)
+        return -1;
+    len = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[len] = '\0';
+    found = strstr(buf, needle) != NULL;
+    return found ? 0 : -1;
+}
+
 static int test_derive_paths(void)
 {
     char data[128];
@@ -83,6 +99,19 @@ static int test_roundtrip(const char *dir)
     meta.center_freq = 2.45e9;
     meta.has_center_freq = true;
     meta.datetime[0] = '\0';
+    snprintf(meta.m2sdr_transport, sizeof(meta.m2sdr_transport), "pcie");
+    meta.m2sdr_sata_data_sector = 0x100000;
+    meta.m2sdr_sata_data_nsectors = 4096;
+    meta.m2sdr_sata_data_bytes = 4096u * 512u;
+    meta.m2sdr_sata_meta_sector = 0x101000;
+    meta.m2sdr_sata_meta_nsectors = 64;
+    meta.m2sdr_sata_meta_bytes = 2048;
+    meta.has_m2sdr_sata_data_sector = true;
+    meta.has_m2sdr_sata_data_nsectors = true;
+    meta.has_m2sdr_sata_data_bytes = true;
+    meta.has_m2sdr_sata_meta_sector = true;
+    meta.has_m2sdr_sata_meta_nsectors = true;
+    meta.has_m2sdr_sata_meta_bytes = true;
     meta.annotation_count = 2;
     meta.annotations[0].sample_start = 0;
     meta.annotations[0].sample_count = 1024;
@@ -99,6 +128,8 @@ static int test_roundtrip(const char *dir)
 
     if (m2sdr_sigmf_write(&meta) != 0)
         return expect_true(0, "write roundtrip metadata");
+    if (file_contains(meta.meta_path, "\"core:version\": \"1.2.6\"") != 0)
+        return expect_true(0, "roundtrip writes SigMF 1.2.6");
     if (m2sdr_sigmf_read(meta.meta_path, &parsed) != 0)
         return expect_true(0, "read roundtrip metadata");
 
@@ -106,12 +137,46 @@ static int test_roundtrip(const char *dir)
         expect_true(parsed.has_sample_rate && parsed.sample_rate == meta.sample_rate, "roundtrip sample rate") != 0 ||
         expect_true(parsed.has_num_channels && parsed.num_channels == 2, "roundtrip channel count") != 0 ||
         expect_true(parsed.has_center_freq && parsed.center_freq == meta.center_freq, "roundtrip center frequency") != 0 ||
+        expect_true(strcmp(parsed.m2sdr_transport, "pcie") == 0, "roundtrip m2sdr transport") != 0 ||
+        expect_true(parsed.has_m2sdr_sata_data_sector &&
+                    parsed.m2sdr_sata_data_sector == 0x100000, "roundtrip m2sdr data sector") != 0 ||
+        expect_true(parsed.has_m2sdr_sata_meta_nsectors &&
+                    parsed.m2sdr_sata_meta_nsectors == 64, "roundtrip m2sdr meta sectors") != 0 ||
         expect_true(parsed.annotation_count == 2, "roundtrip annotation count") != 0 ||
         expect_true(strcmp(parsed.annotations[0].label, "burst-a") == 0, "roundtrip annotation label") != 0 ||
         expect_true(parsed.annotations[1].has_freq_lower_edge, "roundtrip annotation freq low") != 0 ||
         expect_true(strcmp(parsed.annotations[1].comment, "narrowband") == 0, "roundtrip annotation comment") != 0)
         return -1;
 
+    return 0;
+}
+
+static int test_text_io(void)
+{
+    struct m2sdr_sigmf_meta meta;
+    struct m2sdr_sigmf_meta parsed;
+    char text[4096];
+
+    memset(&meta, 0, sizeof(meta));
+    snprintf(meta.data_path, sizeof(meta.data_path), "sata_capture.sigmf-data");
+    snprintf(meta.meta_path, sizeof(meta.meta_path), "sata_capture.sigmf-meta");
+    snprintf(meta.datatype, sizeof(meta.datatype), "ci8");
+    meta.num_channels = 1;
+    meta.has_num_channels = true;
+    meta.m2sdr_sata_data_bytes = 1024;
+    meta.has_m2sdr_sata_data_bytes = true;
+
+    if (m2sdr_sigmf_write_text(&meta, text, sizeof(text)) != 0)
+        return expect_true(0, "write SigMF text");
+    if (strstr(text, "\"core:version\": \"1.2.6\"") == NULL ||
+        strstr(text, "\"m2sdr:sata_data_bytes\": 1024") == NULL)
+        return expect_true(0, "SigMF text contains version and SATA fields");
+    if (m2sdr_sigmf_read_text(text, strlen(text), "sata_capture.sigmf-meta", &parsed) != 0)
+        return expect_true(0, "read SigMF text");
+    if (expect_true(strcmp(parsed.datatype, "ci8") == 0, "text roundtrip datatype") != 0 ||
+        expect_true(parsed.has_m2sdr_sata_data_bytes &&
+                    parsed.m2sdr_sata_data_bytes == 1024, "text roundtrip data bytes") != 0)
+        return -1;
     return 0;
 }
 
@@ -293,6 +358,7 @@ int main(void)
 
     if (test_derive_paths() != 0 ||
         test_roundtrip(dir) != 0 ||
+        test_text_io() != 0 ||
         test_manual_metadata(dir) != 0 ||
         test_multi_capture_multi_annotation(dir) != 0 ||
         test_capture_sample_range() != 0 ||

@@ -16,17 +16,22 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Host software: `libm2sdr`, `m2sdr_util`, SoapySDR, `m2sdr_play`, and the FM helper utilities include the matching Ethernet/PTP/RFIC-reference controls and examples.
 - Source-build options: White Rabbit, SATA, VRT, 2.5G Ethernet, PCIe x4, and oversampling images remain available from source but are outside this first release artifact set.
 
-[> 2026 Q2 to date (Apr - May)
+[> 2026 Q2 to date (Apr - Jun)
 ------------------------------
-**Ethernet PTP Board Time Discipline, RFIC Reference Clocking, and Release Packaging**
+**Runtime Host Stack, SATA Workflows, Wide RFIC Modes, and Stability Hardening**
 - Added Ethernet PTP board-time discipline for baseboard Ethernet builds while keeping `time_gen` as the single exported logical hardware clock for timestamps, PPS, and host-visible time.
-- Exposed the PTP feature cleanly across gateware and host software with capability bits, runtime status/tuning controls, learned master identity reporting, and host-side time ownership rules to prevent manual PHC writes from fighting the servo.
-- Extended `libm2sdr`, `m2sdr_util`, and SoapySDR with PTP monitoring/control support, time-source reporting, and updated host-side documentation for the new workflow.
-- Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend for PTP-referenced RFIC clock operation without changing the default non-PTP operating mode.
-- Added date-named release archives with timing-gated packaging and manifests for the first supported PCIe/Ethernet image set.
-- Added a GitHub release helper that publishes the checked archive set with the same `YYYY_MM_DD` date used by archive names and release tags.
-- Added Ethernet TX validation and FM TX/RX utility support for baseboard Ethernet operation.
-- Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release artifact packaging, and Ethernet-enabled build defaults.
+- Exposed PTP feature discovery and control across gateware and host software with capability bits, runtime status/tuning controls, learned master identity reporting, and host-side time ownership rules.
+- Added an explicit SI5351C FPGA-fed `10MHz` `CLKIN` mode plus a `clk10` MMCM phase-discipline backend for PTP-referenced RFIC clock operation.
+- Consolidated host access around `libm2sdr`, including runtime PCIe/Ethernet backend selection, shared device discovery/identifier parsing, CMake/pkg-config metadata, and SoapySDR integration through the common library.
+- Added date-named release archives with timing-gated packaging, manifests, and a GitHub release helper for the first supported PCIe/Ethernet image set.
+- Reworked SATA into userspace workflows: PCIe DMA host-copy ioctls, Ethernet utility streaming, named capture/import/export commands, SigMF metadata handling, workflow documentation, and transport validation tooling.
+- Removed the obsolete in-kernel LiteSATA block path from `m2sdr.ko`; SATA host access now goes through the supported userspace `m2sdr_sata` paths.
+- Added RFIC wide-bandwidth operation: rates above `61.44 MSPS` select the AD9361 wide data-port mode with widened baseband filters, PRBS-verified interface bring-up, and support for the 1T1R/2T2R channel layouts.
+- Added rounded SC8 conversion and an experimental BFP8 RFIC transport format, with host/gateware support, format-loss evaluation tooling, documentation, plots, and regression tests.
+- Improved SoapySDR streaming with timed TX/RX support for srsRAN-style scheduling, RX hardware timestamp headers, LiteEth UDP/VRT paths, constructor/setup rollback fixes, and capability-aware PCIe high-rate bit packing.
+- Hardened gateware CDC and RFIC diagnostic paths with reusable value/strobe crossings, 64-bit CSR handshakes, PTP discipline crossings, 1T1R-aware PRBS TX/RX checks, SI5351 flush bounds, and clearer PCIe/header/backpressure behavior.
+- Hardened kernel and host transport code with DMA memory barriers, atomic DMA locking, stricter mmap update validation, DMA ring resync, stale TX flush fixes, LiteEth datagram truncation checks, and non-spinning socket backpressure handling.
+- Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release packaging, SATA host I/O, CDC helpers, RFIC sample-format loss, and Ethernet-enabled build defaults.
 
 [> 2026 Q1 (Jan - Mar)
 ----------------------
@@ -45,7 +50,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 ----------------------
 **PTM Time Sync, SATA Host Integration, and Clocking Refinements**
 - Integrated PCIe PTM/PTP support across gateware and kernel/user software, including improved hardware time generation and reporting.
-- Added/adapted LiteSATA Linux block-driver support for host operation over PCIe DMA and improved stability in polling/IRQ paths.
+- Added early SATA host integration over PCIe DMA and improved stability in polling/IRQ paths.
 - Enhanced kernel compatibility and build robustness across Linux versions (including newer and older kernel API changes).
 - Improved Ethernet and SoapySDR paths with UDP RX/TX integration, stream cleanup fixes, and safer DMA buffer teardown.
 - Expanded SI5351/RefClk handling with cleaned default configurations, additional 40MHz options, and source/frequency selection support.

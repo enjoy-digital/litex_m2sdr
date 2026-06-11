@@ -15,6 +15,7 @@
 /*----------*/
 
 #include <stdint.h>
+#include <pthread.h>
 
 #include "m2sdr.h"
 #include "liblitepcie.h"
@@ -31,6 +32,8 @@ enum m2sdr_transport {
 struct m2sdr_backend_ops {
     int (*readl)(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
     int (*writel)(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+    int (*readl_bulk)(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
+    int (*writel_bulk)(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
 };
 
 /* Internal device object shared by the transport, stream, and RF layers. */
@@ -70,6 +73,18 @@ struct m2sdr_dev {
     int64_t tx_user_count;
     int64_t tx_submit_count;
     struct ad9361_rf_phy *ad9361_phy;
+    /* Per-device snapshot of the AD9361_InitParam used at RF bring-up.
+     * The header-defined default_init_param template is per translation
+     * unit, so it can neither be shared across files nor across devices;
+     * layout switches re-init from this stored copy instead. */
+    void *rf_init_param;
+    enum m2sdr_channel_layout rf_channel_layout;
+    int rf_channel_layout_valid;
+    int rf_oversample_enabled;
+
+    /* Serializes register transactions on the shared Etherbone connection;
+     * PCIe register access is a single atomic syscall and bypasses it. */
+    pthread_mutex_t reg_lock;
 };
 
 extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;

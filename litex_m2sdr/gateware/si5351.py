@@ -157,10 +157,16 @@ class LiteI2CSequencer(LiteXModule):
         I2C_MASTER_RXTX_ADDR     = i2c_base + 0x10
         I2C_MASTER_STATUS_ADDR   = i2c_base + 0x14
 
+        # Bound the RX flush: a stuck RX-ready status bit would otherwise trap
+        # the sequencer in the CHECK-RX-READY/FLUSH-RX loop forever and hang
+        # the SI5351 configuration.
+        flush_count = Signal(max=64)
+
         # FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         self.fsm.act("IDLE",
             NextValue(mem_port.adr, 0),
+            NextValue(flush_count, 0),
             NextState("CHECK-RX-READY")
         )
         self.fsm.act("CHECK-RX-READY",
@@ -170,7 +176,7 @@ class LiteI2CSequencer(LiteXModule):
             bus.adr.eq(I2C_MASTER_STATUS_ADDR),
             bus.sel.eq(0xf),
             If(bus.ack,
-                If(bus.dat_r & 0b10,
+                If(((bus.dat_r & 0b10) != 0) & (flush_count != 63),
                     NextState("FLUSH-RX")
                 ).Else(
                     NextState("CHECK-TX-READY")
@@ -184,6 +190,7 @@ class LiteI2CSequencer(LiteXModule):
             bus.adr.eq(I2C_MASTER_RXTX_ADDR),
             bus.sel.eq(0xf),
             If(bus.ack,
+                NextValue(flush_count, flush_count + 1),
                 NextState("CHECK-RX-READY")
             )
         )

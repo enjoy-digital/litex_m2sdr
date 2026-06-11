@@ -225,6 +225,30 @@ int main(int argc, char **argv)
         printf("  Hardware          %s\n", meta.hw);
     if (meta.recorder[0])
         printf("  Recorder          %s\n", meta.recorder);
+    if (meta.m2sdr_transport[0])
+        printf("  M2SDR Transport   %s\n", meta.m2sdr_transport);
+    if (meta.has_m2sdr_sata_data_sector || meta.has_m2sdr_sata_data_nsectors ||
+        meta.has_m2sdr_sata_data_bytes) {
+        printf("  M2SDR SATA Data   ");
+        if (meta.has_m2sdr_sata_data_sector)
+            printf("sector=0x%016" PRIx64 " ", meta.m2sdr_sata_data_sector);
+        if (meta.has_m2sdr_sata_data_nsectors)
+            printf("nsectors=%" PRIu64 " ", meta.m2sdr_sata_data_nsectors);
+        if (meta.has_m2sdr_sata_data_bytes)
+            printf("bytes=%" PRIu64, meta.m2sdr_sata_data_bytes);
+        printf("\n");
+    }
+    if (meta.has_m2sdr_sata_meta_sector || meta.has_m2sdr_sata_meta_nsectors ||
+        meta.has_m2sdr_sata_meta_bytes) {
+        printf("  M2SDR SATA Meta   ");
+        if (meta.has_m2sdr_sata_meta_sector)
+            printf("sector=0x%016" PRIx64 " ", meta.m2sdr_sata_meta_sector);
+        if (meta.has_m2sdr_sata_meta_nsectors)
+            printf("nsectors=%" PRIu64 " ", meta.m2sdr_sata_meta_nsectors);
+        if (meta.has_m2sdr_sata_meta_bytes)
+            printf("bytes=%" PRIu64, meta.m2sdr_sata_meta_bytes);
+        printf("\n");
+    }
 
     printf("\nCaptures (%u)\n", meta.capture_count);
     for (i = 0; i < meta.capture_count; i++) {

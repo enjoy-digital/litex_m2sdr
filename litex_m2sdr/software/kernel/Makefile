@@ -3,17 +3,13 @@ KERNEL_VERSION := $(shell uname -r)
 KERNEL_PATH ?= /lib/modules/$(KERNEL_VERSION)/build
 
 obj-m = m2sdr.o
-m2sdr-objs = main.o liteuart.o litesata.o
-
-# Polling by default; set to 0 to allow SATA MSIs.
-LITESATA_FORCE_POLLING ?= 0
-ccflags-y += -DLITESATA_FORCE_POLLING=$(LITESATA_FORCE_POLLING)
+m2sdr-objs = main.o liteuart.o
 
 # Default target
 all: m2sdr.ko
 
 # Build the module
-m2sdr.ko: main.c liteuart.c litesata.c litepcie.h config.h csr.h soc.h litex.h
+m2sdr.ko: main.c liteuart.c litepcie.h config.h csr.h soc.h litex.h
 	make -C $(KERNEL_PATH) M=$(shell pwd) modules
 
 # Install the module to the kernel directory, enable auto-load on boot, and install udev rule to set

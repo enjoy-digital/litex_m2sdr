@@ -31,6 +31,9 @@ extern "C" {
 #define M2SDR_IDENT_MAX      256
 #define M2SDR_BUFFER_BYTES   8192u
 #define M2SDR_HEADER_BYTES   16u
+#define M2SDR_BFP8_BLOCK_BYTES 1024u
+#define M2SDR_BFP8_PAYLOAD_WORDS 127u
+#define M2SDR_BFP8_SAMPLES_PER_CHANNEL 254u
 
 /* Error codes (0 on success, negative on failure).
  *
@@ -85,6 +88,13 @@ enum m2sdr_transport_kind {
     M2SDR_TRANSPORT_KIND_LITEETH = 2,
 };
 
+enum m2sdr_sata_dma_direction {
+    M2SDR_SATA_DMA_HOST_TO_DEVICE = 0,
+    M2SDR_SATA_DMA_DEVICE_TO_HOST = 1,
+};
+
+#define M2SDR_SATA_PCIE_DMA_MAX_SECTORS 4096u
+
 /* Backward-compatible alias for older code. */
 typedef enum m2sdr_direction m2sdr_module_t;
 
@@ -94,6 +104,8 @@ enum m2sdr_format {
     M2SDR_FORMAT_SC16_Q11 = 0,
     /* 8-bit I/Q interleaved (SC8 Q7 style) */
     M2SDR_FORMAT_SC8_Q7  = 1,
+    /* Encoded BFP8 blocks: 1x64-bit header + 127x64-bit int8 mantissa payload words. */
+    M2SDR_FORMAT_BFP8_Q11 = 2,
 };
 
 struct m2sdr_metadata {
@@ -104,6 +116,10 @@ struct m2sdr_metadata {
 };
 
 #define M2SDR_META_FLAG_HAS_TIME (1u << 0)
+
+/* Size of the optional FPGA DMA header (sync word + ns timestamp); see the
+ * layout description above the zero-copy buffer API below. */
+#define M2SDR_DMA_HEADER_SIZE 16
 
 struct m2sdr_sync_params {
     /* RX or TX stream to configure. */
@@ -223,6 +239,26 @@ struct m2sdr_capabilities {
     uint32_t pcie_config;
     uint32_t eth_config;
     uint32_t sata_config;
+};
+
+#define M2SDR_SATA_SERIAL_MAX   21
+#define M2SDR_SATA_FIRMWARE_MAX 9
+#define M2SDR_SATA_MODEL_MAX    41
+
+struct m2sdr_sata_info {
+    bool     phy_enabled;         /* SATA PHY enable bit is set.                  */
+    uint32_t phy_status;          /* Raw SATA_PHY_STATUS register value.          */
+    bool     phy_ready;           /* Decoded from phy_status.                     */
+    bool     tx_ready;            /* Decoded from phy_status.                     */
+    bool     rx_ready;            /* Decoded from phy_status.                     */
+    bool     ctrl_ready;          /* Decoded from phy_status.                     */
+    bool     drive_present;       /* identify_done and a non-zero sector count.   */
+    bool     identify_done;       /* ATA IDENTIFY completed.                      */
+    char     serial[M2SDR_SATA_SERIAL_MAX];     /* NUL-terminated, trimmed.       */
+    char     firmware[M2SDR_SATA_FIRMWARE_MAX]; /* NUL-terminated, trimmed.       */
+    char     model[M2SDR_SATA_MODEL_MAX];       /* NUL-terminated, trimmed.       */
+    uint64_t sector_count;        /* Logical sector count (LBA48, else LBA28).    */
+    uint32_t logical_sector_size; /* Bytes per logical sector (512 unless > 512). */
 };
 
 struct m2sdr_clock_info {
@@ -517,7 +553,7 @@ struct m2sdr_config {
     bool    calibrate_interface_delay;
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
-    bool    enable_oversample;
+    enum m2sdr_format sample_format;
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;
@@ -570,6 +606,7 @@ int  m2sdr_get_capabilities(struct m2sdr_dev *dev, struct m2sdr_capabilities *ca
 int  m2sdr_get_identifier(struct m2sdr_dev *dev, char *buf, size_t len);
 int  m2sdr_get_fpga_git_hash(struct m2sdr_dev *dev, uint32_t *hash);
 int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
+int  m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, unsigned timeout_ms);
 
 /* Register access.
  *
@@ -578,6 +615,23 @@ int  m2sdr_get_clock_info(struct m2sdr_dev *dev, struct m2sdr_clock_info *info);
  */
 int  m2sdr_reg_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val);
 int  m2sdr_reg_write(struct m2sdr_dev *dev, uint32_t addr, uint32_t val);
+int  m2sdr_reg_read_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count);
+int  m2sdr_reg_write_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count);
+
+/* Copy SATA sectors to/from host memory using the LitePCIe userspace DMA path.
+ *
+ * 'buf' must hold at least nsectors * 512 bytes. 'timeout_ms' bounds each DMA
+ * chunk (< 0 waits forever). On return '*transferred' (if non-NULL) holds the
+ * number of sectors actually copied, even on error, so a partial transfer can
+ * be resumed. Returns M2SDR_ERR_UNSUPPORTED on non-PCIe transports.
+ */
+int  m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
+                              enum m2sdr_sata_dma_direction direction,
+                              uint64_t sector,
+                              uint32_t nsectors,
+                              void *buf,
+                              int timeout_ms,
+                              uint32_t *transferred);
 
 /* Low-level transport handle access for advanced integrations.
  *
@@ -625,6 +679,7 @@ int  m2sdr_configure_agc_counter(struct m2sdr_dev *dev,
 int  m2sdr_clear_agc_counter(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector);
 int  m2sdr_get_agc_count(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector,
                          uint32_t *count);
+int  m2sdr_set_sample_format(struct m2sdr_dev *dev, enum m2sdr_format format);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_set_txrx_loopback(struct m2sdr_dev *dev, bool enable);
@@ -658,11 +713,21 @@ int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, 
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
+/* Switch the 1T1R/2T2R channel layout. Re-initializes the AD9361 from the
+ * shared init parameters (the device must have completed RF bring-up once),
+ * going through the same configuration code as the init-time path. Callers
+ * caching the phy handle must refresh it via m2sdr_rf_phy() afterwards, and
+ * re-apply their RF settings (rates, frequencies, gains). */
 int  m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
                             unsigned rx_channel, unsigned tx_channel);
 const char *m2sdr_rx_gain_mode_name(enum m2sdr_rx_gain_mode mode);
 int  m2sdr_parse_rx_gain_mode(const char *text, enum m2sdr_rx_gain_mode *mode);
 int  m2sdr_set_rx_gain_mode_all(struct m2sdr_dev *dev, enum m2sdr_rx_gain_mode mode);
+/* Stream sample rate as observed by the host (inverse of the conversions
+ * applied by m2sdr_set_sample_rate()). */
+int  m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate);
+/* Currently bound AD9361 phy handle (NULL when uninitialized). */
+void *m2sdr_rf_phy(struct m2sdr_dev *dev);
 int  m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
                             enum m2sdr_rx_gain_mode mode);
 int  m2sdr_get_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
@@ -678,11 +743,18 @@ int  m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
+/* Store the AD9361_InitParam an external integration initialized the RFIC
+ * with, so m2sdr_set_channel_mode() re-initializes with the same reference
+ * clock, SPI id and GPIO setup. init_param must point to an AD9361_InitParam
+ * and size must be sizeof(AD9361_InitParam) (guards ABI mismatches). */
+int  m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
+                               const void *init_param, size_t size);
 
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.
  *
- * buffer_size is expressed in samples per buffer. Use
+ * buffer_size is expressed in samples per buffer. For BFP8, one sample is one
+ * encoded M2SDR_BFP8_BLOCK_BYTES block. Use
  * m2sdr_bytes_to_samples(M2SDR_FORMAT_..., M2SDR_BUFFER_BYTES)
  * for the default DMA payload size.
  */
@@ -706,6 +778,10 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
                           enum m2sdr_direction direction,
                           struct m2sdr_stream_info *info);
 int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
+/* Re-enable a previously configured (and possibly deactivated) stream. On
+ * LitePCIe this resyncs the userspace ring counters with the kernel, whose
+ * counters restart across a stop/start cycle. */
+int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 
 /* LiteEth stream-control helpers.
@@ -726,7 +802,14 @@ int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable);
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats);
 
-/* Blocking sync receive/transmit helpers. */
+/* Blocking sync receive/transmit helpers.
+ *
+ * timeout_ms = 0 uses the stream timeout configured through
+ * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ *
+ * When RX headers are enabled, meta carries the hardware timestamp of the
+ * FIRST sample of the returned block (a request spanning several DMA buffers
+ * keeps the first buffer's timestamp). */
 int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   void *samples,
                   unsigned num_samples,
@@ -775,6 +858,16 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
 int m2sdr_release_buffer(struct m2sdr_dev *dev,
                          enum m2sdr_direction direction,
                          void *buffer);
+
+/* Retrieve the metadata carried by the DMA header of an RX buffer obtained
+ * from m2sdr_get_buffer()/m2sdr_try_get_buffer(). meta->flags carries
+ * M2SDR_META_FLAG_HAS_TIME (with meta->timestamp in ns) only when RX headers
+ * are enabled and the buffer holds a valid sync word; otherwise meta is
+ * cleared and the call still succeeds, so it can be issued unconditionally. */
+int m2sdr_get_buffer_metadata(struct m2sdr_dev *dev,
+                              enum m2sdr_direction direction,
+                              const void *buffer,
+                              struct m2sdr_metadata *meta);
 
 /* Backend notes for zero-copy submit/release:
  *

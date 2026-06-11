@@ -37,6 +37,8 @@ static int m2sdr_litepcie_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t 
 }
 
 const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops = {
-    .readl  = m2sdr_litepcie_readl,
-    .writel = m2sdr_litepcie_writel,
+    .readl       = m2sdr_litepcie_readl,
+    .writel      = m2sdr_litepcie_writel,
+    .readl_bulk  = NULL,
+    .writel_bulk = NULL,
 };

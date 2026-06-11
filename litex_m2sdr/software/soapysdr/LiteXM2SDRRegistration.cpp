@@ -134,7 +134,6 @@ SoapySDR::Kwargs createDeviceKwargs(
         {"identification", info.identification},
         {"version",        "1234"},
         {"label",          ""},
-        {"oversampling",   "0"},
     };
     if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH)
         dev["eth_ip"] = addr.ip;

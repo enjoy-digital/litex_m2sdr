@@ -40,7 +40,10 @@ extern "C" {
  *                                    AD9361
  **************************************************************************************************/
 
-/* FIXME: Cleanup and try to share common approach/code with m2sdr_rf. */
+/* Channel-layout switching is shared with m2sdr_rf through
+ * m2sdr_set_channel_mode()/m2sdr_rf_store_init_param(); the remaining
+ * duplication with m2sdr_apply_config() is the bring-up sequence below
+ * (SI5351 setup, AD9361 init-parameter configuration, FIR tables). */
 
 /* AD9361 SPI */
 
@@ -168,6 +171,75 @@ std::string ptp_ipv4_to_string(uint32_t ip)
                   (ip >>  8) & 0xffu,
                   (ip >>  0) & 0xffu);
     return std::string(buf);
+}
+
+struct PCIeCapability {
+    bool known = false;
+    unsigned gen = 0;
+    unsigned lanes = 0;
+};
+
+unsigned decode_pcie_gen(uint32_t pcie_config)
+{
+#if defined(CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) && defined(CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE)
+    const uint32_t speed =
+        (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) &
+        ((1u << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1u);
+
+    switch (speed) {
+    case 0: return 1;
+    case 1: return 2;
+    default: return 0;
+    }
+#else
+    (void)pcie_config;
+    return 0;
+#endif
+}
+
+unsigned decode_pcie_lanes(uint32_t pcie_config)
+{
+#if defined(CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) && defined(CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE)
+    const uint32_t lanes =
+        (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) &
+        ((1u << CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE) - 1u);
+
+    switch (lanes) {
+    case 0: return 1;
+    case 1: return 2;
+    case 2: return 4;
+    default: return 0;
+    }
+#else
+    (void)pcie_config;
+    return 0;
+#endif
+}
+
+PCIeCapability get_pcie_capability(struct m2sdr_dev *dev)
+{
+    PCIeCapability capability;
+    struct m2sdr_capabilities caps;
+
+    if (!dev)
+        return capability;
+    if (m2sdr_get_capabilities(dev, &caps) != M2SDR_ERR_OK)
+        return capability;
+    if (M2SDR_FEATURE_PCIE && (caps.features & M2SDR_FEATURE_PCIE) == 0)
+        return capability;
+
+    capability.gen = decode_pcie_gen(caps.pcie_config);
+    capability.lanes = decode_pcie_lanes(caps.pcie_config);
+    capability.known = capability.gen != 0 && capability.lanes != 0;
+    return capability;
+}
+
+std::string pcie_capability_to_string(const PCIeCapability &capability)
+{
+    if (!capability.known)
+        return "unknown PCIe capability";
+    return "PCIe Gen" + std::to_string(capability.gen) +
+           " x" + std::to_string(capability.lanes);
 }
 
 std::string ptp_port_identity_to_string(const struct m2sdr_ptp_port_identity &port)
@@ -580,6 +652,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     _spi_id = spi_register_fd(_fd);
 
+    /* A throwing constructor skips the destructor: release what has been
+     * acquired so far so a failed probe/open does not leak the device
+     * handle and SPI registration. Disarmed once construction completes. */
+    struct CtorGuard {
+        SoapyLiteXM2SDR *self;
+        bool armed = true;
+        ~CtorGuard() {
+            if (!armed)
+                return;
+            spi_unregister_fd(self->_spi_id);
+            if (self->_udp_inited) {
+                liteeth_udp_cleanup(&self->_udp);
+                self->_udp_inited = false;
+            }
+            if (self->_dev) {
+                m2sdr_rf_bind(self->_dev, nullptr);
+                m2sdr_close(self->_dev);
+                self->_dev = nullptr;
+            }
+        }
+    } ctor_guard{this};
+
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened %s via %s, serial %s",
                    path.empty() ? dev_id.c_str() : path.c_str(),
                    isLitePCIe() ? "LitePCIe" : "LiteEth",
@@ -608,15 +702,18 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         resetDatapathUnlocked();
     }
 
-    if (args.count("bitmode") > 0) {
+    _bitModeExplicit = args.count("bitmode") > 0;
+    if (_bitModeExplicit) {
         _bitMode = std::stoi(args.at("bitmode"));
     } else {
         _bitMode = 16;
     }
+    if (_bitMode != 8 && _bitMode != 16)
+        throw std::runtime_error("Invalid bitmode: " + std::to_string(_bitMode) + " (supported: 8, 16)");
 
     /* Configure Mode based on _bitMode */
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
-    m2sdr_set_bitmode(_dev, _bitMode == 8);
+    setSampleMode();
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
@@ -629,14 +726,29 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
 #endif
 
-    /* DMA RX Header */
-    #if defined(_RX_DMA_HEADER_TEST)
-        /* Enable */
-        m2sdr_set_rx_header(_dev, true, false);
-    #else
-        /* Disable */
+    /* DMA RX Header: carries the per-buffer hardware timestamp used for RX
+     * time reporting. Probe gateware support (the control CSR reads back its
+     * written value only when the header module is present in the bitstream),
+     * then leave it disabled until setupStream() configures the stream. */
+        bool rx_dma_header_requested = true;
+        if (args.count("rx_dma_header") > 0)
+            rx_dma_header_requested = args.at("rx_dma_header") != "0";
+#ifdef CSR_HEADER_RX_CONTROL_ADDR
+        if (rx_dma_header_requested) {
+            const uint32_t probe =
+                (1u << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                (1u << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET);
+            litex_m2sdr_writel(_dev, CSR_HEADER_RX_CONTROL_ADDR, probe);
+            _rx_dma_header_supported =
+                litex_m2sdr_readl(_dev, CSR_HEADER_RX_CONTROL_ADDR) == probe;
+        }
+#endif
+        _rx_dma_header_bytes = _rx_dma_header_supported ? M2SDR_DMA_HEADER_SIZE : 0;
+        if (rx_dma_header_requested && !_rx_dma_header_supported)
+            SoapySDR::log(SOAPY_SDR_WARNING,
+                "RX DMA headers unsupported by this gateware; "
+                "RX timestamps fall back to software accounting");
         m2sdr_set_rx_header(_dev, false, false);
-    #endif
 
     /* DMA TX Header */
     #if defined(_TX_DMA_HEADER_TEST)
@@ -663,9 +775,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         rx_agc_pin = parse_bool_arg(args.at("rx_agc_pin"));
     }
 
-    if (args.count("oversampling") > 0) {
-        _oversampling = std::stoi(args.at("oversampling"));
-    }
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");
     } else if (args.count("fir_profile") > 0) {
@@ -786,18 +895,21 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         m2sdr_ad9361_spi_init((void *)(intptr_t)_fd, 1);
     }
 
-    /* Initialize AD9361 RFIC. */
+    /* Initialize AD9361 RFIC. The header-defined default_init_param is only
+     * a per-translation-unit template: configure a local copy and hand it to
+     * libm2sdr so channel-layout switches re-init with the same parameters. */
     SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
-    default_init_param.reference_clk_rate = refclk_hz;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
-    default_init_param.id_no = _spi_id;
+    AD9361_InitParam init_param = default_init_param;
+    init_param.reference_clk_rate = refclk_hz;
+    init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    init_param.gpio_sync          = -1;
+    init_param.gpio_cal_sw1       = -1;
+    init_param.gpio_cal_sw2       = -1;
+    init_param.id_no = _spi_id;
 #if USE_LITEETH
     LiteEthRfOpTimeout ad9361_init_timeout("ad9361_init");
 #endif
-    int ad9361_rc = ad9361_init(&ad9361_phy, &default_init_param, do_init);
+    int ad9361_rc = ad9361_init(&ad9361_phy, &init_param, do_init);
 #if USE_LITEETH
     ad9361_init_timeout.throw_if_timed_out();
 #endif
@@ -805,6 +917,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("ad9361_init failed (rc=" + std::to_string(ad9361_rc) + ")");
     }
     m2sdr_rf_bind(_dev, ad9361_phy);
+    {
+        int rc = m2sdr_rf_store_init_param(_dev, &init_param, sizeof(init_param));
+        if (rc != M2SDR_ERR_OK)
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Failed to store AD9361 init parameters: %s", m2sdr_strerror(rc));
+    }
     if (rx_agc_pin_requested) {
         int rc = m2sdr_set_agc_pin(_dev, rx_agc_pin);
         if (rc != M2SDR_ERR_OK) {
@@ -874,6 +992,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("Invalid TX antenna selection");
     }
 
+    ctor_guard.armed = false;
     SoapySDR::log(SOAPY_SDR_INFO, "SoapyLiteXM2SDR initialization complete");
 }
 
@@ -1232,6 +1351,10 @@ void SoapyLiteXM2SDR::setGain(
     const std::string &name,
     const double value)
 {
+    /* Serialize with the other RF accessors; released before the fallback
+     * below, which locks on its own. */
+    std::unique_lock<std::mutex> lock(_mutex);
+
     /* TX */
     if (direction == SOAPY_SDR_TX) {
         if (name == "ATT") {
@@ -1282,7 +1405,8 @@ void SoapyLiteXM2SDR::setGain(
         return;
     }
 
-    /* Fallback */
+    /* Fallback (locks internally). */
+    lock.unlock();
     setGain(direction, channel, value);
 }
 
@@ -1561,7 +1685,9 @@ void SoapyLiteXM2SDR::setSampleMode() {
     } else {
         _bytesPerSample  = 2;
         _bytesPerComplex = 4;
-        _samplesScaling  = 2047.0; /* Normalize 12-bit ADC values to [-1.0, 1.0]. */
+        /* 2047 (not 2048) so +full-scale maps exactly to +1.0; the single
+         * -2048 code lands at -1.0005, which downstream consumers accept. */
+        _samplesScaling  = 2047.0;
     }
 
     if (_bitModeHwApplied && _bitModeHw == bit_mode)
@@ -1600,41 +1726,82 @@ void SoapyLiteXM2SDR::setSampleRate(
         rate / 1e6);
 
     uint32_t sample_rate = static_cast<uint32_t>(rate);
-    _rateMult = 1.0;
 
-    if (isLitePCIe()) {
-        /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
-        if (rate > LITEPCIE_8BIT_THRESHOLD) {
-            if (_bitMode != 8) {
-                SoapySDR::logf(SOAPY_SDR_WARNING,
-                    "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
-                    rate / 1e6);
-            }
-            _bitMode      = 8;
-            _oversampling = 1;
-        } else {
-            _oversampling = 0;
-        }
-    } else if (isLiteEth()) {
+    if (isLiteEth()) {
         /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
         if (rate > LITEETH_8BIT_THRESHOLD) {
-            _bitMode      = 8;
-            _oversampling = 0;
+            _bitMode = 8;
         } else {
-            _bitMode      = 16;
-            _oversampling = 0;
+            _bitMode = 16;
         }
+    } else if (isLitePCIe() && rate > LITEPCIE_8BIT_THRESHOLD) {
+        const PCIeCapability pcie_capability = get_pcie_capability(_dev);
+        const bool pcie_x1_or_unknown =
+            !pcie_capability.known || pcie_capability.lanes == 1;
+        const bool streams_open = _rx_stream.opened || _tx_stream.opened;
+
+        if (!_bitModeExplicit && pcie_x1_or_unknown && _bitMode != 8) {
+            if (streams_open) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "PCIe sample rate %.2f MSPS on %s would use 8-bit sample packing, "
+                    "but streams are already open; pass bitmode=8 or use a CS8 stream "
+                    "before setupStream() to reduce DMA bandwidth",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            } else {
+                _bitMode = 8;
+                SoapySDR::logf(SOAPY_SDR_INFO,
+                    "PCIe sample rate %.2f MSPS on %s defaults to 8-bit sample packing",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            }
+        } else if (!_bitModeExplicit && pcie_capability.known && pcie_capability.lanes >= 2 && _bitMode != 16) {
+            if (streams_open) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "PCIe sample rate %.2f MSPS on %s would keep 16-bit sample packing, "
+                    "but streams are already open",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            } else {
+                _bitMode = 16;
+                SoapySDR::logf(SOAPY_SDR_INFO,
+                    "PCIe sample rate %.2f MSPS on %s defaults to 16-bit sample packing",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            }
+        } else if (_bitMode == 8) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "PCIe sample rate %.2f MSPS on %s is using 8-bit sample packing",
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
+        } else if (pcie_capability.known && pcie_capability.lanes >= 2) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "PCIe sample rate %.2f MSPS on %s keeps 16-bit sample packing",
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
+        } else {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "PCIe sample rate %.2f MSPS on %s keeps 16-bit sample packing; "
+                "use bitmode=8 or a CS8 stream to reduce DMA bandwidth",
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
+        }
+    } else if (isLitePCIe() && !_bitModeExplicit && rate <= LITEPCIE_8BIT_THRESHOLD) {
+        const bool streams_open = _rx_stream.opened || _tx_stream.opened;
+
+        if (_bitMode != 16 && !streams_open)
+            _bitMode = 16;
     }
 
-    /* If oversampling is enabled, double the rate multiplier. */
-    if (_oversampling) {
-        _rateMult = 2.0;
-    }
-
-    int64_t hw_sample_rate = static_cast<int64_t>(sample_rate / _rateMult);
+    int64_t hw_sample_rate = static_cast<int64_t>(sample_rate);
 
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
+        if (_tx_stream.opened) {
+            /* Sample-to-time conversion changed; rebuild TX timeline on next write. */
+            refreshTimedTxDefaults();
+            resetTimedTxTimeline();
+        }
     }
     if (direction == SOAPY_SDR_RX) {
         _rx_stream.samplerate = rate;
@@ -1643,7 +1810,6 @@ void SoapyLiteXM2SDR::setSampleRate(
     if (_sampleRateHwApplied &&
         _sampleRateHw == hw_sample_rate &&
         _sampleRateHwBitMode == _bitMode &&
-        _sampleRateHwOversampling == _oversampling &&
         _sampleRateHwFirProfile == _ad9361_fir_profile) {
         setSampleMode();
         if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
@@ -1660,9 +1826,8 @@ void SoapyLiteXM2SDR::setSampleRate(
     LiteEthRfOpTimeout timeout("setSampleRate");
 #endif
     /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
-    double actual_rate = rate / _rateMult;
-    if (actual_rate < 1250000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", actual_rate);
+    if (rate < 1250000.0) {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", rate);
         ad9361_phy->rx_fir_dec    = 4;
         ad9361_phy->tx_fir_int    = 4;
         ad9361_phy->bypass_rx_fir = 0;
@@ -1676,8 +1841,8 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
-    else if (actual_rate < 2500000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", actual_rate);
+    else if (rate < 2500000.0) {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", rate);
         ad9361_phy->rx_fir_dec    = 2;
         ad9361_phy->tx_fir_int    = 2;
         ad9361_phy->bypass_rx_fir = 0;
@@ -1720,7 +1885,6 @@ void SoapyLiteXM2SDR::setSampleRate(
             _sampleRateHwApplied = true;
             _sampleRateHw = hw_sample_rate;
             _sampleRateHwBitMode = _bitMode;
-            _sampleRateHwOversampling = _oversampling;
             _sampleRateHwFirProfile = _ad9361_fir_profile;
         }
     }
@@ -1728,13 +1892,6 @@ void SoapyLiteXM2SDR::setSampleRate(
     timeout.throw_if_timed_out();
 #endif
 
-    /* If oversampling is enabled, enable oversampling on the hardware. */
-    if (_oversampling) {
-        ad9361_enable_oversampling(ad9361_phy);
-#if USE_LITEETH
-        timeout.throw_if_timed_out();
-#endif
-    }
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
@@ -1753,28 +1910,27 @@ double SoapyLiteXM2SDR::getSampleRate(
     const int direction,
     const size_t) const {
 
-    uint32_t sample_rate = 0;
+    std::lock_guard<std::mutex> lock(_mutex);
 
-    if (direction == SOAPY_SDR_TX) {
+    /* RX/TX rates are always programmed together; m2sdr_get_sample_rate()
+     * reports the stream rate. */
+    (void)direction;
+    int64_t sample_rate = 0;
+
 #if USE_LITEETH
-        LiteEthRfOpTimeout timeout("getSampleRate(TX)");
+    LiteEthRfOpTimeout timeout("getSampleRate");
 #endif
-        ad9361_get_tx_sampling_freq(ad9361_phy, &sample_rate);
+    int rc = m2sdr_get_sample_rate(_dev, &sample_rate);
 #if USE_LITEETH
-        timeout.throw_if_timed_out();
+    timeout.throw_if_timed_out();
 #endif
-    }
-    if (direction == SOAPY_SDR_RX) {
-#if USE_LITEETH
-        LiteEthRfOpTimeout timeout("getSampleRate(RX)");
-#endif
-        ad9361_get_rx_sampling_freq(ad9361_phy, &sample_rate);
-#if USE_LITEETH
-        timeout.throw_if_timed_out();
-#endif
+    if (rc != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_ERROR,
+            "m2sdr_get_sample_rate failed: %s", m2sdr_strerror(rc));
+        return 0.0;
     }
 
-    return static_cast<double>(_rateMult*sample_rate);
+    return static_cast<double>(sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(
