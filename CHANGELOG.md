@@ -26,6 +26,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added date-named release archives with timing-gated packaging and manifests for the first supported PCIe/Ethernet image set.
 - Added a GitHub release helper that publishes the checked archive set with the same `YYYY_MM_DD` date used by archive names and release tags.
 - Added Ethernet TX validation and FM TX/RX utility support for baseboard Ethernet operation.
+- Removed the obsolete in-kernel SATA disk path from `m2sdr.ko`; SATA host access is now through the supported userspace `m2sdr_sata` PCIe DMA ioctl and Ethernet CSR paths.
 - Expanded regression coverage around PTP, `clk10` discipline, SI5351/LiteI2C interactions, release artifact packaging, and Ethernet-enabled build defaults.
 
 [> 2026 Q1 (Jan - Mar)
@@ -45,7 +46,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 ----------------------
 **PTM Time Sync, SATA Host Integration, and Clocking Refinements**
 - Integrated PCIe PTM/PTP support across gateware and kernel/user software, including improved hardware time generation and reporting.
-- Added/adapted LiteSATA Linux block-driver support for host operation over PCIe DMA and improved stability in polling/IRQ paths.
+- Added early SATA host integration over PCIe DMA and improved stability in polling/IRQ paths.
 - Enhanced kernel compatibility and build robustness across Linux versions (including newer and older kernel API changes).
 - Improved Ethernet and SoapySDR paths with UDP RX/TX integration, stream cleanup fixes, and safer DMA buffer teardown.
 - Expanded SI5351/RefClk handling with cleaned default configurations, additional 40MHz options, and source/frequency selection support.

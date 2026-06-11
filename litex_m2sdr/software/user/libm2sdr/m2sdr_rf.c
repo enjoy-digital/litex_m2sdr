@@ -321,33 +321,94 @@ static int m2sdr_channel_layout_from_config(const struct m2sdr_config *cfg,
     return M2SDR_ERR_OK;
 }
 
+/* Lazily allocate the per-device AD9361 init-parameter snapshot, seeded from
+ * the built-in defaults. default_init_param is a per-translation-unit
+ * template (static in m2sdr_config.h): mutating it is invisible to other
+ * files and races between devices, so all configuration goes through this
+ * per-device copy instead. */
+static AD9361_InitParam *m2sdr_dev_init_param(struct m2sdr_dev *dev)
+{
+    if (!dev->rf_init_param) {
+        dev->rf_init_param = malloc(sizeof(AD9361_InitParam));
+        if (dev->rf_init_param)
+            memcpy(dev->rf_init_param, &default_init_param,
+                   sizeof(AD9361_InitParam));
+    }
+    return (AD9361_InitParam *)dev->rf_init_param;
+}
+
+int m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
+                              const void *init_param, size_t size)
+{
+    if (!dev || !init_param)
+        return M2SDR_ERR_INVAL;
+    if (size != sizeof(AD9361_InitParam))
+        return M2SDR_ERR_INVAL;
+    if (!dev->rf_init_param) {
+        dev->rf_init_param = malloc(size);
+        if (!dev->rf_init_param)
+            return M2SDR_ERR_NO_MEM;
+    }
+    memcpy(dev->rf_init_param, init_param, size);
+    return M2SDR_ERR_OK;
+}
+
 /* Apply the selected 1T1R/2T2R topology both to the AD9361 init parameters and
- * to the FPGA-side PHY control register. */
+ * to the FPGA-side PHY control register. rx/tx_channel select the physical
+ * channel used in 1T1R (0 = RX1/TX1, 1 = RX2/TX2). */
 static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
-                                       enum m2sdr_channel_layout channel_layout)
+                                       AD9361_InitParam *init_param,
+                                       enum m2sdr_channel_layout channel_layout,
+                                       unsigned rx_channel, unsigned tx_channel)
 {
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R) {
         /* The AD9361 init structure and the FPGA-side PHY control CSR must be
          * kept in sync or the datapath framing becomes inconsistent. */
         M2SDR_LOGF("Setting Channel Mode to 1T1R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 0;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 0;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 0;
-        default_init_param.two_t_two_r_timing_enable     = 0;
+        init_param->two_rx_two_tx_mode_enable     = 0;
+        init_param->one_rx_one_tx_mode_use_rx_num = rx_channel == 0 ? 1 : 2;
+        init_param->one_rx_one_tx_mode_use_tx_num = tx_channel == 0 ? 1 : 2;
+        init_param->two_t_two_r_timing_enable     = 0;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
     }
 
     if (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R) {
         M2SDR_LOGF("Setting Channel Mode to 2T2R.\n");
-        default_init_param.two_rx_two_tx_mode_enable     = 1;
-        default_init_param.one_rx_one_tx_mode_use_rx_num = 1;
-        default_init_param.one_rx_one_tx_mode_use_tx_num = 1;
-        default_init_param.two_t_two_r_timing_enable     = 1;
+        init_param->two_rx_two_tx_mode_enable     = 1;
+        init_param->one_rx_one_tx_mode_use_rx_num = 1;
+        init_param->one_rx_one_tx_mode_use_tx_num = 1;
+        init_param->two_t_two_r_timing_enable     = 1;
         if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 0) != 0)
             return M2SDR_ERR_IO;
     }
 
+    return M2SDR_ERR_OK;
+}
+
+/* Convert the stream rate the host observes to the rate programmed into the
+ * AD9361. The only divisor is the FPGA oversample mode (x2). Note: 1T1R does
+ * NOT change this relationship - the stream rate equals the AD9361 rate in
+ * both layouts. (An earlier dual-channel-enable bug made 1T1R appear to run
+ * at twice the programmed rate; the port then carried both RX channels.) */
+static int m2sdr_stream_to_ad9361_sample_rate(int64_t stream_rate,
+                                              bool half_rate,
+                                              uint32_t *ad9361_rate)
+{
+    uint64_t divisor = 1;
+    uint64_t rounded;
+
+    if (!ad9361_rate || stream_rate <= 0 || stream_rate > UINT32_MAX)
+        return M2SDR_ERR_RANGE;
+
+    if (half_rate)
+        divisor *= 2;
+
+    rounded = ((uint64_t)stream_rate + divisor / 2) / divisor;
+    if (rounded == 0 || rounded > UINT32_MAX)
+        return M2SDR_ERR_RANGE;
+
+    *ad9361_rate = (uint32_t)rounded;
     return M2SDR_ERR_OK;
 }
 
@@ -459,21 +520,32 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
 
 /* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
  * interpolation/decimation mode expected by the original utilities. */
-static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
+static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
+                                      const struct m2sdr_config *cfg,
+                                      enum m2sdr_channel_layout channel_layout)
 {
-    uint32_t actual_samplerate = cfg->sample_rate;
+    uint32_t actual_samplerate;
+    int rc;
 
     M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
 
-    if (cfg->enable_oversample)
-        actual_samplerate /= 2;
+    (void)channel_layout;
+    /* Rates above the AD9361 clock-chain limit (61.44 MSPS, up to 122.88) run
+     * the chip's clock chain at half rate with the data port at 2x
+     * (wide-bandwidth mode, see ad9361_enable_oversampling()). */
+    rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate,
+        cfg->sample_rate > 61440000, &actual_samplerate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (actual_samplerate != (uint32_t)cfg->sample_rate) {
+        M2SDR_LOGF("Programming AD9361 Samplerate to %f MSPS (wide-bandwidth mode).\n",
+            actual_samplerate / 1e6);
+    }
 
     if (actual_samplerate > 61440000U) {
-        fprintf(stderr, "Requested sample rate %.3f MSPS exceeds the AD9361 clock-chain limit of 61.440 MSPS",
-            actual_samplerate / 1e6);
-        if (!cfg->enable_oversample)
-            fprintf(stderr, "; use --oversample for 122.88 MSPS effective FPGA rate");
-        fprintf(stderr, ".\n");
+        fprintf(stderr, "Requested sample rate %.3f MSPS exceeds the maximum of 122.880 MSPS.\n",
+            cfg->sample_rate / 1e6);
         return M2SDR_ERR_INVAL;
     }
 
@@ -520,6 +592,7 @@ static int m2sdr_configure_bandwidth(struct ad9361_rf_phy *phy, const struct m2s
     return M2SDR_ERR_OK;
 }
 
+
 /* Program the TX and RX local oscillator frequencies. */
 static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
@@ -533,8 +606,16 @@ static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m
 }
 
 /* Apply TX attenuation and per-channel RX gains. */
-static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
+static int m2sdr_configure_gains(struct ad9361_rf_phy *phy,
+                                 const struct m2sdr_config *cfg,
+                                 enum m2sdr_channel_layout channel_layout)
 {
+    /* In 1T1R only the first channel is active: configuring the gain-control
+     * mode of the inactive channel re-enables it (ad9361_set_rx_gain_control_mode
+     * ends in ad9361_en_dis_rx), which corrupts the 1R port framing and the
+     * RX stream delivers only zeros. */
+    const bool second_channel = (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R);
+
     M2SDR_LOGF("Setting TX Attenuation to %ld dB.\n", (long)cfg->tx_att);
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(cfg->tx_att * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -549,15 +630,20 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy, const struct m2sdr_c
      * gains through the standalone RF configuration interface. */
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
-    M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
-           (long)cfg->rx_gain1, (long)cfg->rx_gain2);
+    if (second_channel) {
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        M2SDR_LOGF("Setting RX Gain to %ld dB and %ld dB.\n",
+               (long)cfg->rx_gain1, (long)cfg->rx_gain2);
+    } else {
+        M2SDR_LOGF("Setting RX Gain to %ld dB.\n", (long)cfg->rx_gain1);
+    }
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, cfg->rx_gain1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    if (second_channel) {
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, cfg->rx_gain2)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+    }
     return M2SDR_ERR_OK;
 }
 
@@ -837,6 +923,109 @@ restore:
     return rc;
 }
 
+/* In-mode digital interface alignment verify for the wide-bandwidth mode.
+ *
+ * The doubled-DATA_CLK interface can come up misaligned (the capture lands
+ * on the wrong DDR/frame phase, yielding full-scale noise-like samples); the
+ * chip<->FPGA framing phase is re-rolled by each clock programming, so the
+ * caller retries the rate programming until this verify passes. Two probes,
+ * both read the FPGA PRBS RX checker:
+ *
+ *  1. AD9361 BIST PRBS injected at the RX path: validates RX capture framing
+ *     end-to-end. In 1R1T mode this requires the gateware's interleaved
+ *     (1R1T-aware) checker; on older gateware this probe never syncs and the
+ *     verify falls through to probe 2.
+ *  2. FPGA PRBS TX through the AD9361 data-port loopback: in 1R1T mode each
+ *     RX lane sees consecutive PRBS values, so the stock per-lane checkers
+ *     can sync; also exercises the TX direction. Acquisition is restarted a
+ *     few times (the checker must catch the seed state to lock).
+ *
+ * A synced verdict has shown no false positives; a failed verdict can be a
+ * false negative on probe-2-only gateware, costing one retry.
+ *
+ * Returns M2SDR_ERR_OK if aligned, M2SDR_ERR_IO if not (retry). */
+static int m2sdr_wide_bandwidth_verify(struct m2sdr_dev *dev)
+{
+    struct ad9361_rf_phy *phy;
+    uint32_t saved_prbs_tx = 0;
+    uint8_t obs, bist;
+    bool synced = false;
+    int attempt, i;
+    int rc;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_TX_ADDR, &saved_prbs_tx) != 0)
+        return M2SDR_ERR_IO;
+    obs  = ad9361_spi_read(phy->spi, REG_OBSERVE_CONFIG);
+    bist = ad9361_spi_read(phy->spi, REG_BIST_CONFIG);
+
+    /* Probe 1: chip BIST PRBS -> RX path -> FPGA checker. */
+    (void)m2sdr_write_prbs_tx_ctrl(dev, 0);
+    ad9361_spi_write(phy->spi, REG_BIST_CONFIG, BIST_CTRL_POINT(2) | BIST_ENABLE);
+    for (i = 0; i < 40 && !synced; i++) {
+        mdelay(5);
+        (void)m2sdr_read_prbs_synced(dev, &synced);
+    }
+    ad9361_spi_write(phy->spi, REG_BIST_CONFIG, 0x00);
+    if (synced)
+        M2SDR_LOGF("Wide-bandwidth verify: RX BIST PRBS synced.\n");
+
+    /* Probe 2: FPGA PRBS TX -> chip data-port loopback -> FPGA checker. */
+    if (!synced) {
+        ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG,
+            (uint8_t)((obs & ~DATA_PORT_SP_HD_LOOP_TEST_OE) | DATA_PORT_LOOP_TEST_ENABLE));
+        for (attempt = 0; attempt < 4 && !synced; attempt++) {
+            (void)m2sdr_write_prbs_tx_ctrl(dev, 0);
+            mdelay(2);
+            (void)m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+            for (i = 0; i < 10 && !synced; i++) {
+                mdelay(10);
+                (void)m2sdr_read_prbs_synced(dev, &synced);
+            }
+        }
+        ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG, obs);
+        if (synced)
+            M2SDR_LOGF("Wide-bandwidth verify: TX loopback PRBS synced.\n");
+    }
+
+    (void)m2sdr_write_prbs_tx_ctrl(dev, saved_prbs_tx);
+    ad9361_spi_write(phy->spi, REG_BIST_CONFIG, bist);
+
+    if (!synced)
+        M2SDR_LOGF("Wide-bandwidth verify: interface NOT aligned.\n");
+    return synced ? M2SDR_ERR_OK : M2SDR_ERR_IO;
+}
+
+/* Program the AD9361 sampling clocks for the wide-bandwidth mode and verify
+ * the doubled-rate interface, retrying in place: the interface framing phase
+ * is re-rolled by each clock programming, so a misaligned outcome is
+ * recovered by simply programming again. The verify briefly drives the chip
+ * BIST/loopback paths, so a concurrent stream glitches while this runs. */
+static int m2sdr_wide_bandwidth_bringup(struct m2sdr_dev *dev,
+                                        struct ad9361_rf_phy *phy,
+                                        uint32_t ad9361_rate)
+{
+    int rc = M2SDR_ERR_IO;
+    int try_;
+
+    for (try_ = 1; try_ <= 20; try_++) {
+        if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, ad9361_rate)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, ad9361_rate)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        ad9361_enable_oversampling(phy);
+        rc = m2sdr_wide_bandwidth_verify(dev);
+        if (rc == M2SDR_ERR_OK) {
+            M2SDR_LOGF("Wide-bandwidth interface verified aligned (try %d).\n", try_);
+            return M2SDR_ERR_OK;
+        }
+    }
+    M2SDR_LOGF("Wide-bandwidth interface failed to align.\n");
+    return rc;
+}
+
 static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
 {
     if (cfg->bist_tx_tone) {
@@ -970,7 +1159,6 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->calibrate_interface_delay = false;
     cfg->enable_8bit_mode  = false;
     cfg->sample_format      = M2SDR_FORMAT_SC16_Q11;
-    cfg->enable_oversample = false;
     cfg->channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
     cfg->clock_source      = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg->chan_mode         = NULL;
@@ -1036,20 +1224,23 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     m2sdr_ad9361_spi_init(conn, 1);
 
     M2SDR_LOGF("Initializing AD9361 RFIC...\n");
-    default_init_param.reference_clk_rate = cfg->refclk_freq;
-    default_init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    default_init_param.gpio_sync          = -1;
-    default_init_param.gpio_cal_sw1       = -1;
-    default_init_param.gpio_cal_sw2       = -1;
+    AD9361_InitParam *init_param = m2sdr_dev_init_param(dev);
+    if (!init_param)
+        return M2SDR_ERR_NO_MEM;
+    init_param->reference_clk_rate = cfg->refclk_freq;
+    init_param->gpio_resetb        = AD9361_GPIO_RESET_PIN;
+    init_param->gpio_sync          = -1;
+    init_param->gpio_cal_sw1       = -1;
+    init_param->gpio_cal_sw2       = -1;
 
-    rc = m2sdr_apply_channel_layout(dev, channel_layout);
+    rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout, 0, 0);
     if (rc != M2SDR_ERR_OK)
         return rc;
 #ifdef USE_LITEETH
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         m2sdr_start_rf_init_timeout();
 #endif
-    rc = ad9361_init(&dev->ad9361_phy, &default_init_param, 1);
+    rc = ad9361_init(&dev->ad9361_phy, init_param, 1);
 #ifdef USE_LITEETH
     if (dev->transport == M2SDR_TRANSPORT_LITEETH && tls_rf_init_timed_out) {
         m2sdr_clear_rf_init_timeout();
@@ -1065,7 +1256,12 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (!phy)
         return M2SDR_ERR_STATE;
 
-    rc = m2sdr_configure_samplerate(phy, cfg);
+    dev->rf_channel_layout = channel_layout;
+    dev->rf_channel_layout_valid = 1;
+    /* Wide-bandwidth (2x data port) is selected by the requested rate. */
+    dev->rf_oversample_enabled = (cfg->sample_rate > 61440000) ? 1 : 0;
+
+    rc = m2sdr_configure_samplerate(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
     rc = m2sdr_configure_bandwidth(phy, cfg);
@@ -1082,7 +1278,7 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
-    rc = m2sdr_configure_gains(phy, cfg);
+    rc = m2sdr_configure_gains(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
     rc = m2sdr_configure_modes(dev, phy, cfg);
@@ -1097,8 +1293,21 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (cfg->enable_oversample)
-        ad9361_enable_oversampling(phy);
+    /* Applied last: above the AD9361 clock-chain limit the chip ran at half
+     * rate so far; now switch the data port to 2x and open the analog
+     * passband to ~100 MHz (wide-bandwidth mode), verified and retried in
+     * place until the doubled-rate interface comes up aligned. */
+    if (cfg->sample_rate > 61440000) {
+        uint32_t ad9361_rate;
+
+        M2SDR_LOGF("Applying wide-bandwidth mode (AD9361 oversampling + BBF widening).\n");
+        rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate, true, &ad9361_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        rc = m2sdr_wide_bandwidth_bringup(dev, phy, ad9361_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
 
     return M2SDR_ERR_OK;
 }
@@ -1133,6 +1342,7 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
 int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 {
     struct ad9361_rf_phy *phy;
+    uint32_t actual_rate;
     int rc;
 
     if (!dev)
@@ -1143,10 +1353,29 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, (uint32_t)rate)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
+    /* Rates above the AD9361 clock-chain limit select the wide-bandwidth
+     * mode (see ad9361_enable_oversampling()). Callers pass the STREAM rate;
+     * the halving is handled here. */
+    {
+        bool wide = rate > 61440000;
+
+        rc = m2sdr_stream_to_ad9361_sample_rate(rate, wide, &actual_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+
+        if (wide) {
+            rc = m2sdr_wide_bandwidth_bringup(dev, phy, actual_rate);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+        } else {
+            if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
+                return M2SDR_ERR_IO;
+            if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, actual_rate)) != M2SDR_ERR_OK)
+                return M2SDR_ERR_IO;
+        }
+
+        dev->rf_oversample_enabled = wide ? 1 : 0;
+    }
     return M2SDR_ERR_OK;
 }
 
@@ -1175,7 +1404,8 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
                            unsigned rx_channel, unsigned tx_channel)
 {
     struct ad9361_rf_phy *phy;
-    struct ad9361_phy_platform_data *pd;
+    struct ad9361_rf_phy *new_phy = NULL;
+    enum m2sdr_channel_layout channel_layout;
     int rc;
 
     if (!dev)
@@ -1185,31 +1415,85 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
     if (rx_channel > 1 || tx_channel > 1)
         return M2SDR_ERR_RANGE;
 
+    /* The device must have completed RF bring-up once. */
     rc = m2sdr_require_phy(dev, &phy);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
-    if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR,
-                        channel_count == 1 ? 1 : 0) != 0)
-        return M2SDR_ERR_IO;
-
-    phy->pdata->rx2tx2 = (channel_count == 2);
-    if (channel_count == 1) {
-        phy->pdata->rx1tx1_mode_use_rx_num = rx_channel == 0 ? RX_1 : RX_2;
-        phy->pdata->rx1tx1_mode_use_tx_num = tx_channel == 0 ? TX_1 : TX_2;
-    } else {
-        phy->pdata->rx1tx1_mode_use_rx_num = RX_1 | RX_2;
-        phy->pdata->rx1tx1_mode_use_tx_num = TX_1 | TX_2;
+    /* Prefer the init parameters stored at bring-up (reference clock, SPI
+     * id); fall back to the built-in defaults for integrations that
+     * initialized the RFIC without storing them. */
+    AD9361_InitParam *init_param = (AD9361_InitParam *)dev->rf_init_param;
+    if (!init_param) {
+        M2SDR_LOGF("No stored AD9361 init parameters; using built-in defaults for the layout switch.\n");
+        init_param = m2sdr_dev_init_param(dev);
+        if (!init_param)
+            return M2SDR_ERR_NO_MEM;
     }
 
-    pd = phy->pdata;
-    pd->port_ctrl.pp_conf[0] &= ~(1 << 2);
-    if (channel_count == 2)
-        pd->port_ctrl.pp_conf[0] |= (1 << 2);
+    channel_layout = channel_count == 1 ?
+        M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
 
-    if (m2sdr_from_ad9361_rc(ad9361_set_no_ch_mode(phy, channel_count)) != M2SDR_ERR_OK)
+    rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout,
+                                    rx_channel, tx_channel);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    /* Re-initialize the RFIC from the stored parameters so the runtime
+     * layout switch goes through exactly the same configuration code as the
+     * init-time path (m2sdr_apply_config), instead of the partial
+     * ad9361_set_no_ch_mode dance. Use a local copy with the reset GPIO
+     * masked: a hard reset mid-session makes the subsequent setup time out,
+     * and the SPI-driven setup reconfigures everything on its own. The
+     * previous phy instance is leaked deliberately: the no-OS ADI driver has
+     * no remove/cleanup entry point and layout switches are rare, one-shot
+     * events. */
+    AD9361_InitParam reinit_param = *init_param;
+    reinit_param.gpio_resetb = -1;
+    rc = m2sdr_from_ad9361_rc(ad9361_init(&new_phy, &reinit_param, 1));
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (!new_phy)
         return M2SDR_ERR_IO;
 
+    dev->ad9361_phy = new_phy;
+    tls_rf_dev = dev;
+
+    dev->rf_channel_layout = channel_layout;
+    dev->rf_channel_layout_valid = 1;
+
+    return M2SDR_ERR_OK;
+}
+
+/* Return the currently bound AD9361 phy handle (NULL when uninitialized).
+ * Callers caching the handle must refresh it after m2sdr_set_channel_mode(). */
+void *m2sdr_rf_phy(struct m2sdr_dev *dev)
+{
+    return dev ? dev->ad9361_phy : NULL;
+}
+
+/* Read back the stream sample rate (the rate the host observes), applying the
+ * inverse of the conversions used by m2sdr_set_sample_rate(). */
+int m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate)
+{
+    struct ad9361_rf_phy *phy;
+    uint32_t hw_rate = 0;
+    int64_t mult = 1;
+    int rc;
+
+    if (!dev || !rate)
+        return M2SDR_ERR_INVAL;
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (m2sdr_from_ad9361_rc(ad9361_get_rx_sampling_freq(phy, &hw_rate)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    if (dev->rf_oversample_enabled)
+        mult *= 2;
+
+    *rate = (int64_t)hw_rate * mult;
     return M2SDR_ERR_OK;
 }
 

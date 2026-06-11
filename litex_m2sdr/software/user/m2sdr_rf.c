@@ -37,12 +37,13 @@ static void help(void)
            "  -p, --port PORT        Port number (default: 1234).\n"
            "      --format FMT       Sample format: sc16, sc8 or bfp8 (default: sc16).\n"
            "      --8bit             Legacy alias for --format sc8.\n"
-           "      --oversample       Enable oversample mode.\n"
            "      --channel-layout M Channel mode: 1t1r or 2t2r (default: 2t2r).\n"
            "      --sync MODE        Clock source: internal, external, or fpga.\n"
            "\n"
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
-           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6 or 20M).\n"
+           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6\n"
+           "                         or 20M). Rates above 61.44 MSPS select the\n"
+           "                         wide-bandwidth mode (~100 MHz analog passband).\n"
            "      --bandwidth HZ     Set the RF bandwidth in Hz (default: %d).\n"
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
@@ -95,7 +96,6 @@ int main(int argc, char **argv)
         { "port", required_argument, NULL, 'p' },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
-        { "oversample", no_argument, NULL, 3 },
         { "channel-layout", required_argument, NULL, 4 },
         { "chan", required_argument, NULL, 4 },
         { "sync", required_argument, NULL, 5 },
@@ -165,9 +165,6 @@ int main(int argc, char **argv)
         case 2:
             cfg.enable_8bit_mode = true;
             cfg.sample_format = M2SDR_FORMAT_SC8_Q7;
-            break;
-        case 3:
-            cfg.enable_oversample = true;
             break;
         case 4:
             cfg.chan_mode = optarg;

@@ -12,6 +12,8 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
+from litex_m2sdr.gateware.cdc import ValueStrobeCDC
+
 # Time Generator -----------------------------------------------------------------------------------
 
 class TimeGenerator(LiteXModule):
@@ -131,30 +133,57 @@ class TimeGenerator(LiteXModule):
         # Sync.
         self.specials += MultiReg(self._control.fields.sync_enable, self.sync_enable)
 
-        # Time Read (FPGA -> SW).
-        time_read = Signal(64)
+        # Time Read (FPGA -> SW). The full 64-bit snapshot crosses through one
+        # handshaked crossing: per-bit synchronizers would let software observe
+        # torn values while the snapshot settles (the C library used to need a
+        # multi-attempt stable-read workaround for exactly this).
         time_read_ps = PulseSynchronizer("sys", "time")
         self.submodules += time_read_ps
         self.comb += time_read_ps.i.eq(self._control.fields.read)
-        self.sync.time += If(time_read_ps.o, time_read.eq(self.time))
-        self.specials += MultiReg(time_read, self._read_time.status)
+        self.time_read_cdc = time_read_cdc = ValueStrobeCDC(64, cd_from="time", cd_to="sys")
+        self.comb += [
+            time_read_cdc.strobe.eq(time_read_ps.o),
+            time_read_cdc.value.eq(self.time),
+        ]
+        self.sync += If(time_read_cdc.strobe_o,
+            self._read_time.status.eq(time_read_cdc.value_o)
+        )
 
-        # Time Write (SW -> FPGA).
-        self.specials += MultiReg(self._write_time.storage, self.write_time, "time")
-        time_write_ps = PulseSynchronizer("sys", "time")
-        self.submodules += time_write_ps
-        self.comb += time_write_ps.i.eq(self._control.fields.write)
-        self.comb += self.write.eq(time_write_ps.o)
+        # Time Write (SW -> FPGA). The value travels with the strobe so the
+        # time domain never applies a half-settled 64-bit word.
+        self.time_write_cdc = time_write_cdc = ValueStrobeCDC(64, cd_from="sys", cd_to="time")
+        self.comb += [
+            time_write_cdc.strobe.eq(self._control.fields.write),
+            time_write_cdc.value.eq(self._write_time.storage),
+            self.write.eq(time_write_cdc.strobe_o),
+            self.write_time.eq(time_write_cdc.value_o),
+        ]
 
-        # Time Adjust (SW -> FPGA).
-        self.specials += MultiReg(self._time_adjustment.storage, self.time_adjustment, "time")
-        time_adjust_ps = PulseSynchronizer("sys", "time")
-        self.submodules += time_adjust_ps
-        self.comb += time_adjust_ps.i.eq(self._time_adjustment.re)
-        self.comb += self._time_adjust_change.eq(time_adjust_ps.o)
+        # Time Adjust (SW -> FPGA). Registered atomically in the time domain:
+        # the adjustment is summed into the live time output on every cycle,
+        # so a torn update would glitch the timestamps fed to the DMA headers
+        # and VRT packets.
+        self.time_adjust_cdc = time_adjust_cdc = ValueStrobeCDC(64, cd_from="sys", cd_to="time")
+        self.comb += [
+            time_adjust_cdc.strobe.eq(self._time_adjustment.re),
+            time_adjust_cdc.value.eq(self._time_adjustment.storage),
+            self._time_adjust_change.eq(time_adjust_cdc.strobe_o),
+        ]
+        self.sync.time += If(time_adjust_cdc.strobe_o,
+            self.time_adjustment.eq(time_adjust_cdc.value_o)
+        )
 
-        # Time Increment.
-        self.specials += MultiReg(self._time_inc.storage, self.time_inc, "time")
+        # Time Increment (SW -> FPGA). Registered atomically: the increment is
+        # accumulated every cycle, so torn bits would permanently offset the
+        # time.
+        self.time_inc_cdc = time_inc_cdc = ValueStrobeCDC(32, cd_from="sys", cd_to="time")
+        self.comb += [
+            time_inc_cdc.strobe.eq(self._time_inc.re),
+            time_inc_cdc.value.eq(self._time_inc.storage),
+        ]
+        self.sync.time += If(time_inc_cdc.strobe_o,
+            self.time_inc.eq(time_inc_cdc.value_o)
+        )
 
     def add_cdc(self):
         time        = Signal(64)

@@ -40,10 +40,11 @@ enum class SoapyLiteXM2SDREthernetMode {
 
 #define DEBUG
 
-//#define _RX_DMA_HEADER_TEST
+/* RX DMA headers are runtime-probed (rx_dma_header device arg); TX header
+ * insertion remains experimental. */
 //#define _TX_DMA_HEADER_TEST
 
-/* Thresholds above which we switch to 8-bit mode: */
+/* Thresholds relevant to 8-bit sample-packing policy. */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
 #define LITEETH_8BIT_THRESHOLD   20.0e6
 
@@ -371,6 +372,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     size_t _rx_buf_stride = 0;
     size_t _tx_buf_stride = 0;
 
+    /* RX DMA headers carry the per-buffer hardware timestamp; probed at
+     * construction since older bitstreams lack the header module. */
+    bool _rx_dma_header_supported = false;
+    size_t _rx_dma_header_bytes = 0;
+
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
     SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
@@ -416,6 +422,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long remainderTimeNs = 0;
         long long last_time_ns = 0;
         bool time_warned = false;
+        bool hw_time_warned = false;
         bool vrt_sequence_valid = false;
         uint8_t vrt_sequence_last = 0;
         uint64_t vrt_packets = 0;
@@ -435,13 +442,31 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         std::string antenna[2];
 
         bool underflow = false;
+        bool time_error = false;
+        long long status_time_ns = 0;
 
         bool   burst_end   = false;
         int32_t burst_samps = 0;
         std::map<size_t, uint8_t*> pendingWriteBufs;
         bool rate_pacing = true;
-        std::chrono::steady_clock::time_point pace_start;
+        /* Pacing follows the board clock through periodically refreshed
+         * (host, board) anchor pairs so long runs do not drift with the
+         * host oscillator. */
+        std::chrono::steady_clock::time_point pace_host_anchor;
+        long long pace_board_start_ns = 0;
+        long long pace_board_anchor_ns = 0;
+        bool pace_board_valid = false;
         uint64_t paced_buffers = 0;
+
+        bool timed_tx_enabled = true;
+        size_t timed_tx_lead_buffers = 0;
+        long long timed_tx_latency_ns = 0;
+        long long timed_tx_late_margin_ns = 0;
+        bool timed_tx_late_margin_configured = false;
+        bool tx_timeline_valid = false;
+        long long tx_next_time_ns = 0;
+        int remainderFlags = 0;
+        long long remainderTimeNs = 0;
     };
 
     RXStream _rx_stream;
@@ -453,7 +478,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     bool _sampleRateHwApplied = false;
     int64_t _sampleRateHw = 0;
     uint32_t _sampleRateHwBitMode = 0;
-    uint32_t _sampleRateHwOversampling = 0;
     std::string _sampleRateHwFirProfile;
     bool _bandwidthHwApplied = false;
     uint32_t _bandwidthHw = 0;
@@ -475,6 +499,27 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     void stopRxStreamUnlocked();
     void stopTxStreamUnlocked();
     void cleanupLiteEthUdpIfIdleUnlocked();
+    void resetTimedTxTimeline();
+    void refreshTimedTxDefaults();
+    void initTimedTxTimeline();
+    int ensureTxRemainderBuffer(
+        SoapySDR::Stream *stream,
+        const long timeoutUs);
+    int submitTxRemainder(
+        SoapySDR::Stream *stream,
+        const bool force);
+    int appendTxZeros(
+        SoapySDR::Stream *stream,
+        size_t numElems,
+        const long timeoutUs);
+    int appendTxSamples(
+        SoapySDR::Stream *stream,
+        const void *const *buffs,
+        size_t numElems,
+        size_t userOffset,
+        bool holdLast,
+        const long timeoutUs);
+    void markTxRemainderTime(const long long payloadTimeNs);
     bool isLitePCIe() const {
         return _transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
     }
@@ -543,14 +588,19 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint8_t _spi_id = 0;
 
     uint32_t _bitMode           = 16;
-    uint32_t _oversampling      = 0;
+    bool     _bitModeExplicit   = false;
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
     float    _samplesScaling    = 2047.0f;
-    float    _rateMult          = 1.0f;
 
     // register protection
-    std::mutex _mutex;
+    /* Serializes the RF control entry points (set/get rate, frequency,
+     * gain, bandwidth, stream setup). The streaming hot path (readStream/
+     * writeStream) intentionally does not take it and reads cached fields
+     * like the stream samplerate unlocked; RF reconfiguration while
+     * streaming is expected to happen between buffers, not within one.
+     * Mutable so const getters can lock too. */
+    mutable std::mutex _mutex;
 };

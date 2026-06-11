@@ -7468,57 +7468,154 @@ int32_t ad9361_rssi_gain_step_calib(struct ad9361_rf_phy *phy)
  *  More information:
  *  - https://www.nuand.com/2023-02-release-122-88mhz-bandwidth
  *  - https://destevez.net/2023/02/running-the-ad9361-at-122-88-msps
- *
- * One key difference from BladeRF is that M2SDR, in X4 mode, has sufficient bandwidth on the
- * PCIe link to avoid truncating data from 12-bit to 8-bit.
- *
- * When operating in 2T2R mode, the FPGA to RFIC interface is overclocked from 245.76MHz to
- * 491.52MHz. Surprisingly, this seems to work well with updated timing constraints. However,
- * switching to 1T1R mode avoids overclocking this interface and limits overclocking to the
- * AD9631 part.
- *
  */
+
+/* AD9361 oversampling + baseband-filter widening (wide-bandwidth mode).
+ *
+ * The AD9361's analog baseband filters calibrate to ~56 MHz at most. This
+ * function bypasses converter half-band stages so the data port runs at 2x
+ * the configured rate, and force-widens the TX/RX baseband filters by
+ * driving the BBF resistor/capacitor words to their extreme values
+ * (caps -> 0 = minimum capacitance = maximum bandwidth), opening the analog
+ * passband to ~100 MHz at 122.88 MSPS.
+ *
+ * Apply AFTER the normal RF configuration. The LVDS framing follows the
+ * number of enabled channels (UG-570 Table 50), so at 122.88 MSPS DATA_CLK
+ * is 245.76 MHz with one channel enabled and 491.52 MHz with two; callers
+ * must ensure the channel enables in 0x002/0x003 (preserved by this
+ * function) match what the connected interface supports.
+ *
+ * Measured characteristics vs the stock ~56 MHz path (loopback +
+ * external-receiver verified, 3.6 GHz): RX noise floor ~2.5-3 dB higher
+ * (widened-BBF self-noise); TX image rejection ~30 dB at tx-att 0 vs ~42 dB
+ * stock, matching stock (~44-58 dB) at tx-att >= 10 (the gain dependence is
+ * the AD9361's attenuation-dependent TX quad cal, present in both modes).
+ *
+ * References: AD9361 Register Map (doc/ad9361/ad9361_register_map.pdf) for
+ * the per-register field layouts; UG-570 (doc/ad9361/ad9361_user_guide.pdf)
+ * for the LVDS framing (Table 50), BBF architecture and delay registers.
+ * "Measured" notes below come from A/B experiments on a 100 MHz NR-FR1-TM3.1
+ * loopback (per-band coherence effective SNR + MATLAB 5G Toolbox EVM),
+ * cross-checked against an external receiver. */
 void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
 {
-    /* OC Register: General oversampling control. */
-    ad9361_spi_write(phy->spi, 0x003, 0x54);
+    /* Filter-control registers: halve the decimation/interpolation so the data
+     * port runs at 2x the configured rate (the converters themselves keep their
+     * BBPLL-derived clocks; "overclock" only removes digital filter stages).
+     * IMPORTANT: bits [7:6] of 0x002/0x003 are the TX/RX channel enables and
+     * determine the LVDS framing (UG-570 Table 50): 2 channels enabled forces
+     * 2R2T timing, doubling DATA_CLK again (491.52 MHz at 122.88 MSPS - beyond
+     * both the AD9361 LVDS spec and the stock 245.76 MHz gateware). So preserve
+     * the channel enables via read-modify-write rather than writing fixed
+     * 2-channel values. */
+    {
+        /* Bits [7:6] of 0x002/0x003 are the TX/RX channel enables and select
+         * the LVDS framing (UG-570 Table 50); they are preserved here - the
+         * caller decides how many channels the interface can carry. */
+        uint8_t rx_ctrl = ad9361_spi_read(phy->spi, 0x003);
+        uint8_t tx_ctrl = ad9361_spi_read(phy->spi, 0x002);
+        /* 0x003 (Rx Enable & Filter Ctrl) low bits 0x14: RHB3 dec2 ([5:4]=01),
+         * RHB2 bypassed ([3]=0), RHB1 dec2 ([2]=1), RX FIR off ([1:0]=00):
+         * total decimation 4 from a 4x-rate ADC clock = 2x port rate. */
+        ad9361_spi_write(phy->spi, 0x003, (rx_ctrl & 0xC0) | 0x14);
+        /* 0x002 (Tx Enable & Filter Ctrl) low bits 0x00: all THB stages and
+         * the TX FIR bypassed - the DAC runs directly at the port rate. */
+        ad9361_spi_write(phy->spi, 0x002, (tx_ctrl & 0xC0) | 0x00);
+    }
 
-#if 0 /* Note: Creates a symmetry in the spectrum for some gains values...*/
-    /* TX Register Assignments: Configuring TX path for oversampling. */
-    ad9361_spi_write(phy->spi, 0x02, 0xc0);  /* TX Enable and Filter Control. */
-    ad9361_spi_write(phy->spi, 0xc2, 0x9f);  /* TX BBF (Baseband Filter) R1.  */
-    ad9361_spi_write(phy->spi, 0xc3, 0x9f);  /* TX BBF R2.                    */
-    ad9361_spi_write(phy->spi, 0xc4, 0x9f);  /* TX BBF R3.                    */
-    ad9361_spi_write(phy->spi, 0xc5, 0x9f);  /* TX BBF R4.                    */
-    ad9361_spi_write(phy->spi, 0xc6, 0x9f);  /* TX BBF Real Pole Word.        */
-    ad9361_spi_write(phy->spi, 0xc7, 0x00);  /* TX BBF Capacitor C1.          */
-    ad9361_spi_write(phy->spi, 0xc8, 0x00);  /* TX BBF Capacitor C2.          */
-    ad9361_spi_write(phy->spi, 0xc9, 0x00);  /* TX BBF Real Pole Word.        */
-#endif
+    /* TX baseband filter (3rd-order Butterworth, corner ~ 1/(2.pi.R.C)):
+     * resistor words to 0x9f = override-enable bit (0x80) + maximum code
+     * (0x1f), capacitor words to 0x00 = minimum C; both push the corner as
+     * high as it goes. 0x0c2..0x0cb are pure override registers - the normal
+     * calibration never rewrites them. Measured: with the RX side already
+     * widened, adding the TX widening took 100 MHz NR EVM from 20.6% to 14%
+     * (pre-emphasis included); without it the outer ~20 MHz of TX rolls off
+     * behind the calibrated ~56 MHz corner. */
+    ad9361_spi_write(phy->spi, 0x0c2, 0x9f); /* TX BBF R1.            */
+    ad9361_spi_write(phy->spi, 0x0c3, 0x9f); /* TX BBF R2.            */
+    ad9361_spi_write(phy->spi, 0x0c4, 0x9f); /* TX BBF R3.            */
+    ad9361_spi_write(phy->spi, 0x0c5, 0x9f); /* TX BBF R4.            */
+    ad9361_spi_write(phy->spi, 0x0c6, 0x9f); /* TX BBF real pole word.*/
+    ad9361_spi_write(phy->spi, 0x0c7, 0x00); /* TX BBF C1 -> 0.       */
+    ad9361_spi_write(phy->spi, 0x0c8, 0x00); /* TX BBF C2 -> 0.       */
+    ad9361_spi_write(phy->spi, 0x0c9, 0x00); /* TX BBF real pole word.*/
+    /* R2B is part of the same override set (0x0c2..0x0cb); maxing it
+     * measures ~+1 dB effective SNR at the band edges. */
+    ad9361_spi_write(phy->spi, 0x0cb, 0x1f); /* TX BBF R2B (max).     */
 
-#if 0 /* Note: Creates a symmetry in the spectrum for some gains values... */
-    /* RX Register Assignments: Configuring RX path for oversampling. */
-    ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
-    ad9361_spi_write(phy->spi, 0x1e4, 0xFF);
-    ad9361_spi_write(phy->spi, 0x1f2, 0xFF);
-#endif
+    /* TX secondary (post-BBF single-pole) filter capacitor word: the driver's
+     * ad9361_tx_bb_second_filter_calib() places this pole at 2.5 x BBBW and
+     * BBBW is clamped to 20 MHz, so it calibrates to ~50 MHz - right on a
+     * 100 MHz carrier's band edge. Cap word 0 = minimum C = highest corner.
+     * Measured: ~+0.5 dB effective SNR at the band edges. */
+    ad9361_spi_write(phy->spi, 0x0d2, 0x00); /* TX secondary LPF cap -> 0. */
 
-#if 0 /* Note: Improves RF Bandwidth but creates a symmetry in the spectrum for some gains values... */
-    /* Miller and BBF capacitors settings. */
-    ad9361_spi_write(phy->spi, 0x1e7, 0x00);
-    ad9361_spi_write(phy->spi, 0x1e8, 0x00);
-    ad9361_spi_write(phy->spi, 0x1e9, 0x00);
-    ad9361_spi_write(phy->spi, 0x1ea, 0x00);
-    ad9361_spi_write(phy->spi, 0x1eb, 0x00);
-    ad9361_spi_write(phy->spi, 0x1ec, 0x00);
-    ad9361_spi_write(phy->spi, 0x1ed, 0x00);
-    ad9361_spi_write(phy->spi, 0x1ee, 0x00);
-    ad9361_spi_write(phy->spi, 0x1ef, 0x00);
-    ad9361_spi_write(phy->spi, 0x1e0, 0xBF);
-#endif
+    /* RX baseband filter (bi-quad + pole, UG-570 RX BBF chapter). NOTE the
+     * polarity is OPPOSITE to TX: the RX gain-setting resistors (R1A, R5)
+     * must be driven to their MAXIMUM while only the capacitors go to zero.
+     * R1A is the DENOMINATOR of the bi-quad gain (R4/R1A) and R5 of the pole
+     * gain (R6/R5); zeroing them (as a naive copy of the TX recipe does)
+     * collapses the RX path - measured as "no signal, ~0 dB IQ image". */
+    {
+        ad9361_spi_write(phy->spi, 0x1e0, 0xbf); /* RX BBF R1A: force + 0x3f (max). */
+        ad9361_spi_write(phy->spi, 0x1e4, 0xff); /* RX BBF R5 (max).      */
+        /* R5 tune (0x1f2) must be ZERO while R5 (0x1e4/0x1e5) is nonzero
+         * (UG-570: the two gain paths are mutually exclusive). The inverse
+         * configuration (R5=0, R5-tune=0xff) was measured to collapse the
+         * passband entirely. */
+        ad9361_spi_write(phy->spi, 0x1f2, 0x00);
+        /* R2346 (R2/R3/R4/R6) forced to maximum: R4 and R6 are the NUMERATORS
+         * of the bi-quad (R4/R1A) and pole (R6/R5) gains, so maxing them buys
+         * back the gain lost to the forced-max R1A/R5 denominators. Measured:
+         * ~+10 dB effective SNR at the +/-44-49 MHz band edges (and a flatter
+         * passband) on a 100 MHz NR carrier vs leaving it calibrated. */
+        ad9361_spi_write(phy->spi, 0x1e6, 0x87);
+        ad9361_spi_write(phy->spi, 0x1e7, 0x00); /* RX BBF C1 MSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1e8, 0x00); /* RX BBF C1 LSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1e9, 0x00); /* RX BBF C2 MSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1ea, 0x00); /* RX BBF C2 LSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1eb, 0x00); /* RX BBF C3 MSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1ec, 0x00); /* RX BBF C3 LSB -> 0.   */
+        ad9361_spi_write(phy->spi, 0x1ed, 0x00); /* RX BBF CC1 ctr -> 0.  */
+        ad9361_spi_write(phy->spi, 0x1ee, 0x60); /* Register map: "must be 0x60"; the
+                                                  * chip also calibrates it to 0x60.
+                                                  * Zeroing it was part of the old
+                                                  * disabled recipe's artifact. */
+        ad9361_spi_write(phy->spi, 0x1ef, 0x00); /* RX BBF CC2 ctr -> 0.  */
+        ad9361_spi_write(phy->spi, 0x1e0, 0xbf); /* RX BBF R1A (re-asserted per doc). */
+    }
 
-#if 0 /* Note: Hidden feature? Does not seems to impact spectrum. */
-    /* BIST and Data Port Test Config: Must be set to 0x03. */
+    /* 0x3F6 (BIST and Data Port Test Config): register map requires the low
+     * bits set this way for normal data-port operation at this rate. */
     ad9361_spi_write(phy->spi, 0x3f6, 0x03);
-#endif
+
+    /* Interface clock/data delays (UG-570 digital-interface delay registers
+     * 0x006/0x007, ~0.3 ns per tap). The init-table delays were chosen for
+     * DATA_CLK <= 122.88 MHz; at the doubled 245.76 MHz the DDR unit interval
+     * is ~2 ns and the measured RX eye is only 4 of 16 taps wide, with the
+     * defaults at its edge - the cause of intermittently misaligned
+     * (full-scale noise) captures. Values below are the eye midpoints from
+     * the PRBS delay scan (`m2sdr_rf --sample-rate 61.44e6 --calibrate-delay`,
+     * 61.44 MSPS 2T2R = electrically the same DATA_CLK 245.76 MHz): RX eye
+     * 4 taps -> clk 1/data 2; TX eye 14 taps -> clk 6/data 7. */
+    ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, 0x12); /* clk 1 / data 2 */
+    ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, 0x67); /* clk 6 / data 7 */
+
+    /* Per-board override of the interface delays from the environment
+     * (M2SDR_OC_RX_DELAY / M2SDR_OC_TX_DELAY, raw register byte: clk delay in
+     * [7:4], data delay in [3:0]) for boards whose eye differs. */
+    {
+        const char *s;
+        if ((s = getenv("M2SDR_OC_RX_DELAY")) != NULL) {
+            uint8_t v = (uint8_t)strtoul(s, NULL, 0);
+            ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, v);
+            printf("RFIC overclock: RX clock/data delay override 0x%02x.\n", v);
+        }
+        if ((s = getenv("M2SDR_OC_TX_DELAY")) != NULL) {
+            uint8_t v = (uint8_t)strtoul(s, NULL, 0);
+            ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, v);
+            printf("RFIC overclock: TX clock/data delay override 0x%02x.\n", v);
+        }
+    }
+
 }
