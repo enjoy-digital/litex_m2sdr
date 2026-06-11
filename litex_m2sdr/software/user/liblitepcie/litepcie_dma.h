@@ -25,6 +25,9 @@ struct litepcie_dma_ctrl {
     int64_t writer_hw_count, writer_sw_count;
     unsigned buffers_available_read, buffers_available_write;
     unsigned usr_read_buf_offset, usr_write_buf_offset;
+    /* TX staging cursors: buffers filled by the user vs flushed to the
+     * kernel. Monotonic; slot = count % DMA_BUFFER_COUNT. */
+    uint64_t usr_write_fill_count, usr_write_flush_count;
     struct litepcie_ioctl_mmap_dma_info mmap_dma_info;
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
 };

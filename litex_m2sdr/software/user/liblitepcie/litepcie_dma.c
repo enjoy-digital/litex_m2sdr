@@ -9,6 +9,7 @@
  */
 
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -164,6 +165,8 @@ void litepcie_dma_cleanup(struct litepcie_dma_ctrl *dma)
         close(dma->fds.fd);
 }
 
+static void litepcie_dma_flush_writes(struct litepcie_dma_ctrl *dma);
+
 void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
 {
     ssize_t len;
@@ -220,13 +223,31 @@ void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
             checked_ioctl(dma->fds.fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &dma->mmap_dma_update);
 
         } else {
-            len = write(dma->fds.fd, dma->buf_wr, DMA_BUFFER_TOTAL_SIZE);
-            if (len < 0) {
-                perror("write");
-                abort();
+            /* Flush exactly the buffers the user filled since the last
+             * flush. The previous implementation wrote the WHOLE staging
+             * area from offset 0 every time and reset the fill offset: the
+             * kernel then transmitted stale staging content whenever it
+             * accepted more buffers than the user had freshly filled
+             * (audible as periodic repeats of old 32 KB chunks), and
+             * partially-accepted writes were silently dropped (skips). */
+            litepcie_dma_flush_writes(dma);
+            /* Grant the full remaining staging room. The kernel gate
+             * (sw - hw >= DMA_BUFFER_COUNT/2) is what bounds the in-kernel
+             * queue; a smaller grant here does NOT reduce latency, it only
+             * caps the fill rate. Since the DMA reader hardware free-runs
+             * through the ring (LOOP mode, no backpressure), a writer that
+             * falls behind the hardware position has all its writes
+             * silently skipped as "late" while the ring replays stale
+             * content - so the writer must be allowed to fill as fast as
+             * it can to get and stay ahead. Applications that want low
+             * TX latency must pace their submissions themselves. */
+            {
+                uint64_t in_flight = dma->usr_write_fill_count -
+                                     dma->usr_write_flush_count;
+                dma->buffers_available_write =
+                    DMA_BUFFER_COUNT - (unsigned)in_flight;
             }
-            dma->buffers_available_write = len / DMA_BUFFER_SIZE;
-            dma->usr_write_buf_offset = 0;
+            dma->usr_write_buf_offset = dma->usr_write_fill_count % DMA_BUFFER_COUNT;
         }
     } else {
         dma->buffers_available_write = 0;
@@ -243,12 +264,59 @@ char *litepcie_dma_next_read_buffer(struct litepcie_dma_ctrl *dma)
     return ret;
 }
 
+/* Push user-filled TX staging buffers to the kernel (non zero-copy mode).
+ * Writes exactly the [flush, fill) cursor range, honoring partial accepts.
+ * The blocking write() at the kernel queue high-water mark provides natural
+ * backpressure. */
+static void litepcie_dma_flush_writes(struct litepcie_dma_ctrl *dma)
+{
+    ssize_t len;
+
+    while (dma->usr_write_fill_count != dma->usr_write_flush_count) {
+        int64_t pending = (int64_t)(dma->usr_write_fill_count -
+                                    dma->usr_write_flush_count);
+        unsigned off  = dma->usr_write_flush_count % DMA_BUFFER_COUNT;
+        unsigned span = DMA_BUFFER_COUNT - off;
+        if ((int64_t)span > pending)
+            span = (unsigned)pending;
+        len = write(dma->fds.fd,
+                    dma->buf_wr + (size_t)off * DMA_BUFFER_SIZE,
+                    (size_t)span * DMA_BUFFER_SIZE);
+        if (len < 0) {
+            if (errno == EAGAIN || errno == EINTR)
+                break;
+            perror("write");
+            abort();
+        }
+        dma->usr_write_flush_count += (uint64_t)(len / DMA_BUFFER_SIZE);
+        if (len < (ssize_t)((size_t)span * DMA_BUFFER_SIZE))
+            break; /* kernel ring full; retry on the next flush */
+    }
+}
+
 char *litepcie_dma_next_write_buffer(struct litepcie_dma_ctrl *dma)
 {
     if (!dma->buffers_available_write)
         return NULL;
+    /* The previously handed-out buffer is fully filled by now: push pending
+     * buffers to the kernel before handing out the next one. The DMA reader
+     * hardware free-runs through the kernel ring (LOOP mode, no backpressure),
+     * so staged data must reach the kernel promptly or the hardware position
+     * overtakes it (the kernel then discards the writes as late while the
+     * ring replays stale content). Flushing on acquisition keeps the lag
+     * bounded to one buffer without callers having to manage flushes. */
+    if (dma->zero_copy) {
+        /* Zero-copy: buffers are the kernel ring itself; the slot follows the
+         * ring position established by litepcie_dma_process(). */
+        dma->buffers_available_write --;
+        char *ret = dma->buf_wr + (size_t)dma->usr_write_buf_offset * DMA_BUFFER_SIZE;
+        dma->usr_write_buf_offset = (dma->usr_write_buf_offset + 1) % DMA_BUFFER_COUNT;
+        return ret;
+    }
+    litepcie_dma_flush_writes(dma);
     dma->buffers_available_write --;
-    char *ret = dma->buf_wr + dma->usr_write_buf_offset * DMA_BUFFER_SIZE;
-    dma->usr_write_buf_offset = (dma->usr_write_buf_offset + 1) % DMA_BUFFER_COUNT;
+    char *ret = dma->buf_wr +
+        (size_t)(dma->usr_write_fill_count % DMA_BUFFER_COUNT) * DMA_BUFFER_SIZE;
+    dma->usr_write_fill_count++;
     return ret;
 }
