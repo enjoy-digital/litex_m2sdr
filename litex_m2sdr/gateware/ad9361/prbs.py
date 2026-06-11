@@ -35,6 +35,32 @@ class AD9361PRBSGenerator(LiteXModule):
         self.sync += If(self.ce, data.eq(_prbs16_next(data)))
         self.comb += self.o.eq(data)
 
+# AD9361 PRBS 1R1T Generator -----------------------------------------------------------------------
+
+class AD9361PRBS1R1TGenerator(LiteXModule):
+    """PRBS generator for 1R1T mode.
+
+    In 1R1T mode the a/b slots represent two consecutive samples of the same
+    stream. Export both samples for the current word and advance the reference
+    by two words on each accepted PHY word.
+    """
+    def __init__(self, seed=0x0a54):
+        self.ce     = Signal(reset=1)
+        self.o      = Signal(16)
+        self.o_next = Signal(16)
+
+        # # #
+
+        data   = Signal(16, reset=seed)
+        data_n = Signal(16)
+
+        self.comb += data_n.eq(_prbs16_next(data))
+        self.sync += If(self.ce, data.eq(_prbs16_next(data_n)))
+        self.comb += [
+            self.o.eq(data),
+            self.o_next.eq(data_n),
+        ]
+
 # AD9361 PRBS Checker ----------------------------------------------------------------------------
 
 class AD9361PRBSChecker(LiteXModule):

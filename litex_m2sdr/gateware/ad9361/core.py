@@ -20,7 +20,8 @@ from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
 from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
-from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker, AD9361PRBS1R1TChecker
+from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
+from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBS1R1TGenerator, AD9361PRBS1R1TChecker
 from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
 
 # Architecture -------------------------------------------------------------------------------------
@@ -274,22 +275,41 @@ class AD9361RFIC(LiteXModule):
         # # #
 
         phy = self.phy
+        mode_rfic = Signal()
+        prbs_tx_enable = Signal()
+        self.specials += [
+            MultiReg(phy.control.fields.mode, mode_rfic, odomain="rfic"),
+            MultiReg(self.prbs_tx.fields.enable, prbs_tx_enable, odomain="rfic"),
+        ]
 
         # PRBS TX.
         # --------
-        prbs_generator = AD9361PRBSGenerator()
-        prbs_generator = ResetInserter()(prbs_generator)
-        prbs_generator = ClockDomainsRenamer("rfic")(prbs_generator)
-        self.submodules += prbs_generator
+        prbs_generator_2r2t = AD9361PRBSGenerator()
+        prbs_generator_2r2t = ResetInserter()(prbs_generator_2r2t)
+        prbs_generator_2r2t = ClockDomainsRenamer("rfic")(prbs_generator_2r2t)
+        prbs_generator_1r1t = AD9361PRBS1R1TGenerator()
+        prbs_generator_1r1t = ResetInserter()(prbs_generator_1r1t)
+        prbs_generator_1r1t = ClockDomainsRenamer("rfic")(prbs_generator_1r1t)
+        self.submodules += prbs_generator_2r2t
+        self.submodules += prbs_generator_1r1t
         self.comb += [
-            prbs_generator.reset.eq(~self.prbs_tx.fields.enable),
-            prbs_generator.ce.eq(phy.sink.ready),
-            If(self.prbs_tx.fields.enable,
+            prbs_generator_2r2t.reset.eq(~prbs_tx_enable | mode_rfic),
+            prbs_generator_1r1t.reset.eq(~prbs_tx_enable | ~mode_rfic),
+            prbs_generator_2r2t.ce.eq(phy.sink.ready),
+            prbs_generator_1r1t.ce.eq(phy.sink.ready),
+            If(prbs_tx_enable,
                 phy.sink.valid.eq(1),
-                phy.sink.ia.eq(prbs_generator.o),
-                phy.sink.qa.eq(prbs_generator.o),
-                phy.sink.ib.eq(prbs_generator.o),
-                phy.sink.qb.eq(prbs_generator.o),
+                If(mode_rfic,
+                    phy.sink.ia.eq(prbs_generator_1r1t.o),
+                    phy.sink.qa.eq(prbs_generator_1r1t.o),
+                    phy.sink.ib.eq(prbs_generator_1r1t.o_next),
+                    phy.sink.qb.eq(prbs_generator_1r1t.o_next),
+                ).Else(
+                    phy.sink.ia.eq(prbs_generator_2r2t.o),
+                    phy.sink.qa.eq(prbs_generator_2r2t.o),
+                    phy.sink.ib.eq(prbs_generator_2r2t.o),
+                    phy.sink.qb.eq(prbs_generator_2r2t.o),
+                )
             )
         ]
 
@@ -299,8 +319,6 @@ class AD9361RFIC(LiteXModule):
         # ia/ib independently. 1R1T mode: the a/b slots carry two consecutive
         # samples of ONE stream (each lane sees every other PRBS value), so a
         # dedicated interleaved checker is required. Select by PHY mode.
-        mode_rfic = Signal()
-        self.specials += MultiReg(phy.control.fields.mode, mode_rfic, odomain="rfic")
 
         synced_2r2t = Signal(reset=1)
         self.comb += synced_2r2t.eq(1)
