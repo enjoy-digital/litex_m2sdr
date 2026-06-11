@@ -117,6 +117,10 @@ m2sdr_util [options] cmd [args...]
   Get board information (FPGA version, gateware build, etc.).
 - **reg-read** / **reg-write**
   Read/write FPGA registers.
+- **agc-status**
+  Show the FPGA-connected `RF_EN_AGC` pin state and the RX1/RX2 low/high AGC saturation counters.
+- **agc-counter** / **agc-clear**
+  Configure or clear the FPGA AGC saturation counters.
 - **dma-test**
   Test DMA transfers between host and FPGA.
 - **scratch-test**
@@ -258,7 +262,10 @@ m2sdr_rf [options] cmd [args...]
 - `--tx-freq freq` (default=`2400000000`)
 - `--rx-freq freq` (default=`2400000000`)
 - `--tx-att att` (default=`20` dB, preferred positive TX attenuation)
+- `--rx-gain-mode mode` set both RX gain-control modes (`manual`, `slow`, `fast`, or `hybrid`)
+- `--rx-gain-mode1 mode`, `--rx-gain-mode2 mode` set per-channel RX gain-control modes
 - `--rx-gain gain` force manual RX gain mode and apply the requested gain
+- `--rx-agc-pin bool` drive the FPGA-connected AD9361 `RF_EN_AGC` pin
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)
 - `--calibrate-delay` scan and program the FPGA<->AD9361 RX clock-data delay using PRBS, then attempt the TX delay scan

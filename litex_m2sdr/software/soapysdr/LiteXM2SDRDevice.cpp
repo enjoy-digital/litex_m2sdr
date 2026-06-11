@@ -120,6 +120,17 @@ enum m2sdr_rx_gain_mode parse_agc_mode(const std::string &mode)
     throw std::runtime_error("Invalid rx_agc_mode: " + mode);
 }
 
+bool parse_bool_arg(const std::string &value)
+{
+    if (value == "1" || value == "true" || value == "yes" ||
+        value == "on" || value == "enable" || value == "enabled")
+        return true;
+    if (value == "0" || value == "false" || value == "no" ||
+        value == "off" || value == "disable" || value == "disabled")
+        return false;
+    throw std::runtime_error("Invalid boolean argument: " + value);
+}
+
 bool antenna_allowed(const std::vector<std::string> &ants, const std::string &name)
 {
     if (ants.empty())
@@ -757,6 +768,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         std::cout << args.at("bypass_init")[0] << std::endl;
         do_init = args.at("bypass_init")[0] == '0';
     }
+    bool rx_agc_pin_requested = false;
+    bool rx_agc_pin = false;
+    if (args.count("rx_agc_pin") > 0) {
+        rx_agc_pin_requested = true;
+        rx_agc_pin = parse_bool_arg(args.at("rx_agc_pin"));
+    }
 
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");
@@ -785,9 +802,20 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
             "Custom antenna lists are not supported; use RX=A_BALANCED and TX=A");
     }
 
-    _rx_agc_mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
-    if (args.count("rx_agc_mode") > 0)
-        _rx_agc_mode = parse_agc_mode(args.at("rx_agc_mode"));
+    _rx_agc_mode[0] = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    _rx_agc_mode[1] = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    if (args.count("rx_agc_mode") > 0) {
+        _rx_agc_mode[0] = parse_agc_mode(args.at("rx_agc_mode"));
+        _rx_agc_mode[1] = _rx_agc_mode[0];
+    }
+    if (args.count("rx_agc_mode0") > 0)
+        _rx_agc_mode[0] = parse_agc_mode(args.at("rx_agc_mode0"));
+    if (args.count("rx_agc_mode1") > 0)
+        _rx_agc_mode[1] = parse_agc_mode(args.at("rx_agc_mode1"));
+    if (args.count("rx0_agc_mode") > 0)
+        _rx_agc_mode[0] = parse_agc_mode(args.at("rx0_agc_mode"));
+    if (args.count("rx1_agc_mode") > 0)
+        _rx_agc_mode[1] = parse_agc_mode(args.at("rx1_agc_mode"));
 
     /* RefClk Selection */
     int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
@@ -894,6 +922,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         if (rc != M2SDR_ERR_OK)
             SoapySDR::logf(SOAPY_SDR_WARNING,
                 "Failed to store AD9361 init parameters: %s", m2sdr_strerror(rc));
+    }
+    if (rx_agc_pin_requested) {
+        int rc = m2sdr_set_agc_pin(_dev, rx_agc_pin);
+        if (rc != M2SDR_ERR_OK) {
+            throw std::runtime_error("m2sdr_set_agc_pin failed: " + std::string(m2sdr_strerror(rc)));
+        }
     }
 
     if (do_init) {
@@ -1208,13 +1242,17 @@ void SoapyLiteXM2SDR::setGainMode(const int direction, const size_t channel,
     /* N/A. */
     if (direction == SOAPY_SDR_TX)
         return;
+    if (channel >= 2) {
+        SoapySDR::logf(SOAPY_SDR_ERROR, "Invalid RX channel index for setGainMode: %zu", channel);
+        return;
+    }
 
     _rx_stream.gainMode[channel] = automatic;
 #if USE_LITEETH
     LiteEthRfOpTimeout timeout("setGainMode");
 #endif
     int rc = m2sdr_set_rx_gain_mode(_dev, channel,
-        automatic ? _rx_agc_mode : M2SDR_RX_GAIN_MODE_MANUAL);
+        automatic ? _rx_agc_mode[channel] : M2SDR_RX_GAIN_MODE_MANUAL);
     if (rc != M2SDR_ERR_OK)
         SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_rx_gain_mode failed: %s", m2sdr_strerror(rc));
 #if USE_LITEETH
@@ -1231,6 +1269,8 @@ bool SoapyLiteXM2SDR::getGainMode(const int direction, const size_t channel) con
 
     /* RX */
     if (direction == SOAPY_SDR_RX) {
+        if (channel >= 2)
+            return false;
         enum m2sdr_rx_gain_mode gc_mode = M2SDR_RX_GAIN_MODE_MANUAL;
 #if USE_LITEETH
         LiteEthRfOpTimeout timeout("getGainMode");

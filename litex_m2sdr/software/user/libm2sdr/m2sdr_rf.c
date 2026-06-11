@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <limits.h>
 #include <errno.h>
@@ -189,6 +190,49 @@ static int m2sdr_from_ad9361_gain_mode(uint8_t ad9361_mode, enum m2sdr_rx_gain_m
     }
 }
 
+const char *m2sdr_rx_gain_mode_name(enum m2sdr_rx_gain_mode mode)
+{
+    switch (mode) {
+    case M2SDR_RX_GAIN_MODE_MANUAL:
+        return "manual";
+    case M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC:
+        return "slow";
+    case M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC:
+        return "fast";
+    case M2SDR_RX_GAIN_MODE_HYBRID_AGC:
+        return "hybrid";
+    default:
+        return "unknown";
+    }
+}
+
+int m2sdr_parse_rx_gain_mode(const char *text, enum m2sdr_rx_gain_mode *mode)
+{
+    if (!text || !mode)
+        return M2SDR_ERR_INVAL;
+
+    if (strcasecmp(text, "manual") == 0 || strcasecmp(text, "mgc") == 0) {
+        *mode = M2SDR_RX_GAIN_MODE_MANUAL;
+        return M2SDR_ERR_OK;
+    }
+    if (strcasecmp(text, "slow") == 0 || strcasecmp(text, "slowattack") == 0 ||
+        strcasecmp(text, "slow-attack") == 0 || strcasecmp(text, "slow-agc") == 0) {
+        *mode = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+        return M2SDR_ERR_OK;
+    }
+    if (strcasecmp(text, "fast") == 0 || strcasecmp(text, "fastattack") == 0 ||
+        strcasecmp(text, "fast-attack") == 0 || strcasecmp(text, "fast-agc") == 0) {
+        *mode = M2SDR_RX_GAIN_MODE_FAST_ATTACK_AGC;
+        return M2SDR_ERR_OK;
+    }
+    if (strcasecmp(text, "hybrid") == 0 || strcasecmp(text, "hybrid-agc") == 0) {
+        *mode = M2SDR_RX_GAIN_MODE_HYBRID_AGC;
+        return M2SDR_ERR_OK;
+    }
+
+    return M2SDR_ERR_PARSE;
+}
+
 static int m2sdr_transport_error(struct m2sdr_dev *dev)
 {
 #ifdef USE_LITEETH
@@ -235,6 +279,8 @@ static int m2sdr_require_phy(struct m2sdr_dev *dev, struct ad9361_rf_phy **phy_o
 
 static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
 {
+    uint8_t ad9361_mode;
+
     if (!cfg)
         return M2SDR_ERR_INVAL;
 
@@ -252,6 +298,10 @@ static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
         return M2SDR_ERR_RANGE;
     if (cfg->rx_gain2 < M2SDR_RX_GAIN_MIN_DB || cfg->rx_gain2 > M2SDR_RX_GAIN_MAX_DB)
         return M2SDR_ERR_RANGE;
+    if (cfg->program_rx_gain_modes &&
+        (m2sdr_to_ad9361_gain_mode(cfg->rx_gain_mode1, &ad9361_mode) != M2SDR_ERR_OK ||
+         m2sdr_to_ad9361_gain_mode(cfg->rx_gain_mode2, &ad9361_mode) != M2SDR_ERR_OK))
+        return M2SDR_ERR_INVAL;
 
     return M2SDR_ERR_OK;
 }
@@ -620,8 +670,26 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy,
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_atten(phy, (uint32_t)(cfg->tx_att * 1000), 1, 1, 1)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
-    if (!cfg->program_rx_gains) {
+    if (!cfg->program_rx_gains && !cfg->program_rx_gain_modes) {
         M2SDR_LOGF("Leaving RX gain mode and gains at AD9361 defaults.\n");
+        return M2SDR_ERR_OK;
+    }
+
+    if (!cfg->program_rx_gains) {
+        uint8_t mode1;
+        uint8_t mode2;
+
+        if (m2sdr_to_ad9361_gain_mode(cfg->rx_gain_mode1, &mode1) != M2SDR_ERR_OK ||
+            m2sdr_to_ad9361_gain_mode(cfg->rx_gain_mode2, &mode2) != M2SDR_ERR_OK)
+            return M2SDR_ERR_INVAL;
+
+        M2SDR_LOGF("Setting RX gain control mode to %s and %s.\n",
+            m2sdr_rx_gain_mode_name(cfg->rx_gain_mode1),
+            m2sdr_rx_gain_mode_name(cfg->rx_gain_mode2));
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, mode1)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, mode2)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
         return M2SDR_ERR_OK;
     }
 
@@ -668,7 +736,14 @@ static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *ph
     else
         M2SDR_LOGF("Enabling 16-bit mode.\n");
 
-    return m2sdr_set_sample_format(dev, format);
+    int rc = m2sdr_set_sample_format(dev, format);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (cfg->program_agc_pin)
+        return m2sdr_set_agc_pin(dev, cfg->agc_pin_enable);
+
+    return M2SDR_ERR_OK;
 }
 
 /* Run the optional AD9361 built-in test modes requested by the config. */
@@ -1151,6 +1226,11 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->rx_gain1          = DEFAULT_RX_GAIN;
     cfg->rx_gain2          = DEFAULT_RX_GAIN;
     cfg->program_rx_gains  = false;
+    cfg->program_rx_gain_modes = false;
+    cfg->rx_gain_mode1     = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    cfg->rx_gain_mode2     = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    cfg->program_agc_pin   = false;
+    cfg->agc_pin_enable    = false;
     cfg->loopback          = DEFAULT_LOOPBACK;
     cfg->bist_tone_freq    = DEFAULT_BIST_TONE_FREQ;
     cfg->bist_tx_tone      = false;
@@ -1519,6 +1599,10 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
     } else {
         if (gain < M2SDR_RX_GAIN_MIN_DB || gain > M2SDR_RX_GAIN_MAX_DB)
             return M2SDR_ERR_RANGE;
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 0, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
+        if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, 1, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+            return M2SDR_ERR_IO;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 0, gain)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, 1, gain)) != M2SDR_ERR_OK)
@@ -1526,6 +1610,16 @@ int m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_
     }
 
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_set_rx_gain_mode_all(struct m2sdr_dev *dev, enum m2sdr_rx_gain_mode mode)
+{
+    int rc;
+
+    rc = m2sdr_set_rx_gain_mode(dev, 0, mode);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    return m2sdr_set_rx_gain_mode(dev, 1, mode);
 }
 
 int m2sdr_set_rx_gain_mode(struct m2sdr_dev *dev, unsigned channel,
@@ -1610,6 +1704,8 @@ int m2sdr_set_rx_gain_chan(struct m2sdr_dev *dev, unsigned channel, int64_t gain
     if (rc != M2SDR_ERR_OK)
         return rc;
 
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_gain_control_mode(phy, channel, RF_GAIN_MGC)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_rx_rf_gain(phy, channel, gain)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 

@@ -22,7 +22,11 @@ from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBSGenerator, AD9361PRBSChecker
 from litex_m2sdr.gateware.ad9361.prbs    import AD9361PRBS1R1TGenerator, AD9361PRBS1R1TChecker
-from litex_m2sdr.gateware.ad9361.agc     import AGCSaturationCount
+from litex_m2sdr.gateware.ad9361.agc     import (
+    AGC_DEFAULT_HIGH_THRESHOLD,
+    AGC_DEFAULT_LOW_THRESHOLD,
+    AGCSaturationCount,
+)
 
 # Architecture -------------------------------------------------------------------------------------
 #
@@ -349,17 +353,21 @@ class AD9361RFIC(LiteXModule):
         rx_cdc = self.rx_cdc
         self.agc_count_rx1_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]]
+            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx1_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]]
+            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
         self.agc_count_rx2_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]]
+            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx2_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]]
+            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )

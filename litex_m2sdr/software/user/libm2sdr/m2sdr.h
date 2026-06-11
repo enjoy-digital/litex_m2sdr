@@ -505,6 +505,19 @@ enum m2sdr_rx_gain_mode {
     M2SDR_RX_GAIN_MODE_HYBRID_AGC = 3,
 };
 
+enum m2sdr_agc_detector {
+    M2SDR_AGC_DETECTOR_RX1_LOW = 0,
+    M2SDR_AGC_DETECTOR_RX1_HIGH = 1,
+    M2SDR_AGC_DETECTOR_RX2_LOW = 2,
+    M2SDR_AGC_DETECTOR_RX2_HIGH = 3,
+};
+
+struct m2sdr_agc_counter_config {
+    bool enable;
+    bool clear;
+    uint16_t threshold;
+};
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     /* Common TX/RX sample rate in SPS. */
@@ -525,6 +538,13 @@ struct m2sdr_config {
     int64_t rx_gain2;
     /* Apply explicit RX gain programming and force manual gain mode. */
     bool    program_rx_gains;
+    /* Apply explicit AD9361 RX gain-control modes when not programming manual gains. */
+    bool    program_rx_gain_modes;
+    enum m2sdr_rx_gain_mode rx_gain_mode1;
+    enum m2sdr_rx_gain_mode rx_gain_mode2;
+    /* Drive the FPGA-connected AD9361 EN_AGC pin for pin-controlled AGC flows. */
+    bool    program_agc_pin;
+    bool    agc_pin_enable;
     uint8_t loopback;
     bool    bist_tx_tone;
     bool    bist_rx_tone;
@@ -651,6 +671,14 @@ int  m2sdr_set_ptp_clock10_config(struct m2sdr_dev *dev, const struct m2sdr_ptp_
 int  m2sdr_clear_ptp_clock10_counters(struct m2sdr_dev *dev);
 /* Queue a clk10 marker realignment; hardware applies it on the next PTP reference edge. */
 int  m2sdr_align_ptp_clock10(struct m2sdr_dev *dev);
+int  m2sdr_set_agc_pin(struct m2sdr_dev *dev, bool enable);
+int  m2sdr_get_agc_pin(struct m2sdr_dev *dev, bool *enabled);
+int  m2sdr_configure_agc_counter(struct m2sdr_dev *dev,
+                                 enum m2sdr_agc_detector detector,
+                                 const struct m2sdr_agc_counter_config *config);
+int  m2sdr_clear_agc_counter(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector);
+int  m2sdr_get_agc_count(struct m2sdr_dev *dev, enum m2sdr_agc_detector detector,
+                         uint32_t *count);
 int  m2sdr_set_sample_format(struct m2sdr_dev *dev, enum m2sdr_format format);
 int  m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit);
 int  m2sdr_set_dma_loopback(struct m2sdr_dev *dev, bool enable);
@@ -692,6 +720,9 @@ int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64
  * re-apply their RF settings (rates, frequencies, gains). */
 int  m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
                             unsigned rx_channel, unsigned tx_channel);
+const char *m2sdr_rx_gain_mode_name(enum m2sdr_rx_gain_mode mode);
+int  m2sdr_parse_rx_gain_mode(const char *text, enum m2sdr_rx_gain_mode *mode);
+int  m2sdr_set_rx_gain_mode_all(struct m2sdr_dev *dev, enum m2sdr_rx_gain_mode mode);
 /* Stream sample rate as observed by the host (inverse of the conversions
  * applied by m2sdr_set_sample_rate()). */
 int  m2sdr_get_sample_rate(struct m2sdr_dev *dev, int64_t *rate);
