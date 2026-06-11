@@ -14,6 +14,7 @@
 #include <stdlib.h>
 
 #include "m2sdr.h"
+#include "m2sdr_platform.h"
 
 /* Utility helpers */
 /*-----------------*/
@@ -55,15 +56,12 @@ void *m2sdr_alloc_buffer(enum m2sdr_format format, unsigned num_samples)
     size_t bytes = m2sdr_samples_to_bytes(format, num_samples);
     if (!bytes)
         return NULL;
-    void *buf = NULL;
     /* 64-byte alignment keeps DMA/SIMD-friendly callers out of trouble without
      * exposing transport-specific alignment rules in the public API. */
-    if (posix_memalign(&buf, 64, bytes) != 0)
-        return NULL;
-    return buf;
+    return m2sdr_aligned_malloc(64, bytes);
 }
 
 void m2sdr_free_buffer(void *buf)
 {
-    free(buf);
+    m2sdr_aligned_free(buf);
 }

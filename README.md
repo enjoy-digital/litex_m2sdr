@@ -390,6 +390,7 @@ The helper requires the GitHub CLI `gh` to be installed and authenticated with r
 
 For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
 
+- [Install Ethernet-only host tools on Windows/macOS](doc/hosts/windows-macos.md)
 - [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
 - [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
 

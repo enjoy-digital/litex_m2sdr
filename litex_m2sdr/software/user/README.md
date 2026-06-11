@@ -1,10 +1,11 @@
-# LiteX M2SDR Linux User-Space Utilities
+# LiteX M2SDR User-Space Utilities
 
 > [!Note]
 > This README describes the user-space tools provided by the **LiteX-M2SDR** project and shows examples of how to use them in typical TX/RX scenarios. The utilities rely on several libraries:
 
 - **ad9361/**: Code adapted from the Analog Devices AD9361 driver, handling low-level RFIC configuration/registers.
-- **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication.
+- **liblitepcie/**: Part of [LitePCIe](https://github.com/enjoy-digital/litepcie), managing DMA operations and PCIe driver communication on Linux.
+- **libliteeth/**: Etherbone control and UDP streaming helpers used by the Ethernet transport on Linux, macOS, and Windows.
 - **libm2sdr/**: Board-specific support for the M2SDR, integrating device configuration (SI5351, AD9361, etc.) and exposing higher-level APIs to these utilities.
 
 The public `libm2sdr` C API is documented in `../../doc/libm2sdr/README.md` and is now the common device/streaming layer used by the user tools and the SoapySDR module. It is built as one runtime PCIe/Ethernet library, so external applications should only need to link `libm2sdr`.
@@ -55,6 +56,27 @@ The user utilities now follow a mostly shared CLI vocabulary:
 - The public `libm2sdr` API exposes `m2sdr_get_ptp_status()`, `m2sdr_get_ptp_discipline_config()`, `m2sdr_set_ptp_discipline_config()`, `m2sdr_clear_ptp_counters()`, plus the matching `m2sdr_get_ptp_clock10_*()` helpers when the PTP clk10 block is present.
 - When Ethernet PTP actively owns the board clock, host-side absolute time writes are rejected to avoid conflicting masters.
 
+## Platform Support
+
+PCIe support remains Linux-only because it depends on the LitePCIe kernel driver, `/dev/m2sdrN`, `ioctl`, and DMA `mmap` interfaces. Ethernet support is available through portable sockets and can be built on Linux, macOS, and Windows.
+
+Use the Makefile for the existing Linux workflow:
+
+~~~~
+make
+make INTERFACE=USE_LITEETH
+~~~~
+
+Use CMake for native macOS/Windows builds and for transport-explicit Linux builds:
+
+~~~~
+cmake -S . -B build-liteeth -DM2SDR_ENABLE_LITEPCIE=OFF -DM2SDR_ENABLE_LITEETH=ON
+cmake --build build-liteeth
+ctest --test-dir build-liteeth --output-on-failure
+~~~~
+
+On Windows, use a normal CMake generator such as Visual Studio or Ninja. The supported Windows/macOS target is Ethernet-only: `--device eth:192.168.1.50:1234`, `--ip 192.168.1.50`, and Soapy `eth_ip=...` work; `pcie:/dev/m2sdr0`, `-c`, and `dma-test` require Linux PCIe support. See the [Windows/macOS install tutorial](../../../doc/hosts/windows-macos.md) for the host setup flow.
+
 ## Build dependencies
 
 Core user tools build with the standard C/C++ toolchain and do not require the optional audio or GUI packages.
@@ -83,8 +105,8 @@ git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 
 Use `../build.py --clean` when you want a full kernel/user/Soapy rebuild.
 
-The default user build is `INTERFACE=USE_RUNTIME` and compiles one set of
-tools plus one `libm2sdr` with both LitePCIe and LiteEth support:
+The default Makefile user build is `INTERFACE=USE_RUNTIME` and compiles one set
+of Linux tools plus one `libm2sdr` with both LitePCIe and LiteEth support:
 
 ~~~~
 make
@@ -99,8 +121,9 @@ Use explicit device arguments to choose the transport at runtime:
 ~~~~
 
 `INTERFACE=USE_LITEPCIE` and `INTERFACE=USE_LITEETH` remain available when
-you need to test legacy/default transport behavior, but they are no longer
-required just to build PCIe or Ethernet-capable binaries.
+you need to test legacy/default transport behavior. `INTERFACE=USE_LITEETH`
+now builds without LitePCIe objects, matching the portable CMake Ethernet-only
+configuration.
 
 These dependencies are only needed for optional tools. When libsndfile/libsamplerate are not available, `m2sdr_fm_tx` and `m2sdr_fm_rx` are skipped by the `Makefile`. When SDL2 is not available, or when `software/user/cimgui/` is missing, `m2sdr_scan` and `m2sdr_check` are skipped. When libpng is not available, `m2sdr_scan` is skipped. The core CLI tools, `libm2sdr`, and the SoapySDR module still build.
 

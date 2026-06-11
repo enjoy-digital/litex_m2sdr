@@ -26,16 +26,21 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 #include <math.h>
 #include <signal.h>
 #include <time.h>
-#include <getopt.h>
 
+#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
+#endif
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_tool.h"
 #include "kissfft/kiss_fft.h"
 #include "config.h"
@@ -326,21 +331,29 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
 /*-----------------------------*/
 
 static void m2sdr_gen(const char *device_id, double sample_rate, double frequency, double amplitude, uint8_t zero_copy, double pps_freq, uint8_t gpio_pin, const char *signal_type, uint8_t enable_header, uint8_t use_8bit, int ofdm_fft_size, int ofdm_cp_len, int ofdm_occupied_carriers, const char *ofdm_modulation, uint32_t ofdm_seed) {
+#ifdef USE_LITEPCIE
     static struct litepcie_dma_ctrl dma = {.use_reader = 1};
+#endif
 
     int i = 0;
     int64_t last_time;
     uint64_t total_buffers = 0;
     uint64_t last_buffers = 0;
     uint64_t sw_underflows = 0;
+#ifdef USE_LITEPCIE
     int64_t hw_count_stop = 0;
+#endif
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
+#ifdef USE_LITEPCIE
     int fd = -1;
+#endif
     struct ofdm_state ofdm;
     int ofdm_enabled = strcmp(signal_type, "ofdm") == 0;
     int ofdm_inited = 0;
+#ifdef USE_LITEPCIE
     int use_pcie_dma = 0;
+#endif
     int stream_configured = 0;
     int exit_status = 1;
     enum m2sdr_format format = use_8bit ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
@@ -412,6 +425,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     printf("  Amplitude: %.2f\n", amplitude);
     printf("  Zero-Copy Mode: %d\n", zero_copy);
 
+#ifdef USE_LITEPCIE
     if (transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
         fd = m2sdr_get_fd(dev);
         if (fd < 0) {
@@ -428,7 +442,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 
         dma.reader_enable = 1;
         use_pcie_dma = 1;
-    } else {
+    } else
+#endif
+    {
         struct m2sdr_sync_params params;
         int rc;
 
@@ -471,6 +487,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     /* Test Loop */
     last_time = get_time_ms();
     for (;;) {
+#ifdef USE_LITEPCIE
         if (use_pcie_dma) {
             litepcie_dma_process(&dma);
 
@@ -498,7 +515,9 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                                  &gen);
             }
             total_buffers = (uint64_t)dma.reader_sw_count;
-        } else {
+        } else
+#endif
+        {
             void *buf_wr = NULL;
             unsigned num_samples = 0;
             struct m2sdr_metadata meta = {0};
@@ -557,17 +576,21 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     }
 
     /* Wait end of DMA transfer */
+#ifdef USE_LITEPCIE
     while (use_pcie_dma && dma.reader_hw_count < hw_count_stop) {
         dma.reader_enable = 1;
         litepcie_dma_process(&dma);
     }
+#endif
 
     exit_status = 0;
 
 cleanup:
     /* Cleanup DMA and close device */
+#ifdef USE_LITEPCIE
     if (use_pcie_dma)
         litepcie_dma_cleanup(&dma);
+#endif
     if (stream_configured)
         (void)m2sdr_stream_release(dev, M2SDR_TX);
     if (ofdm_inited)

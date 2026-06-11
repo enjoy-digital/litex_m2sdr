@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
+#endif
 #include <stdarg.h>
 #include <ctype.h>
 #include <errno.h>
@@ -11,6 +13,7 @@
 #include <stdint.h>
 
 #include "m2sdr_cli.h"
+#include "m2sdr_platform.h"
 
 void m2sdr_cli_device_init(struct m2sdr_cli_device *dev)
 {

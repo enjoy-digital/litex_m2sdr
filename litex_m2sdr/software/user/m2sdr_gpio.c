@@ -12,13 +12,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <fcntl.h>
-#include <getopt.h>
+#endif
 
 #include "libm2sdr.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
 
 /* Variables */
 /*-----------*/
