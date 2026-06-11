@@ -378,6 +378,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (isLitePCIe()) {
             if (format == SOAPY_SDR_CS8) {
                 _bitMode = 8;
+                _bitModeExplicit = true;
                 setSampleMode();
             }
 
@@ -446,6 +447,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _rx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
             _bitMode = 8;
+            _bitModeExplicit = true;
             setSampleMode();
         }
         _rx_stream.remainderHandle = -1;
@@ -501,6 +503,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         if (isLitePCIe()) {
             if (format == SOAPY_SDR_CS8) {
                 _bitMode = 8;
+                _bitModeExplicit = true;
                 setSampleMode();
             }
 
@@ -569,6 +572,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
             _bitMode = 8;
+            _bitModeExplicit = true;
             setSampleMode();
         }
         _tx_stream.remainderHandle = -1;

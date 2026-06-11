@@ -72,8 +72,8 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Bit mode**: `bitmode=8|16`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Rates above `61.44 MSPS` automatically use the wide-bandwidth data-port mode; these profiles affect the AD9361 `1x` FIR path used by that mode.
-- **PCIe high-rate packing**: `bitmode=8`
-  - Useful above `61.44 MSPS` when DMA bandwidth matters. The driver no longer silently overrides PCIe to 8-bit mode, so request `bitmode=8` or a `CS8` stream explicitly.
+- **PCIe high-rate packing**: `bitmode=8|16`
+  - Above `61.44 MSPS`, PCIe x1 capability defaults to 8-bit packing to reduce DMA bandwidth, while PCIe x2/x4 capability keeps 16-bit packing by default. Request `bitmode=8`, `bitmode=16`, or a `CS8` stream explicitly to override the default.
 - **Clock source**: `clock_source=internal|external|fpga`
   - `internal` keeps the local XO path.
   - `external` selects the SI5351C `10MHz` CLKIN from the uFL connector.

@@ -588,6 +588,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint8_t _spi_id = 0;
 
     uint32_t _bitMode           = 16;
+    bool     _bitModeExplicit   = false;
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
     uint32_t _bytesPerSample    = 2;

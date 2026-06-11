@@ -162,6 +162,75 @@ std::string ptp_ipv4_to_string(uint32_t ip)
     return std::string(buf);
 }
 
+struct PCIeCapability {
+    bool known = false;
+    unsigned gen = 0;
+    unsigned lanes = 0;
+};
+
+unsigned decode_pcie_gen(uint32_t pcie_config)
+{
+#if defined(CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) && defined(CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE)
+    const uint32_t speed =
+        (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) &
+        ((1u << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1u);
+
+    switch (speed) {
+    case 0: return 1;
+    case 1: return 2;
+    default: return 0;
+    }
+#else
+    (void)pcie_config;
+    return 0;
+#endif
+}
+
+unsigned decode_pcie_lanes(uint32_t pcie_config)
+{
+#if defined(CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) && defined(CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE)
+    const uint32_t lanes =
+        (pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_LANES_OFFSET) &
+        ((1u << CSR_CAPABILITY_PCIE_CONFIG_LANES_SIZE) - 1u);
+
+    switch (lanes) {
+    case 0: return 1;
+    case 1: return 2;
+    case 2: return 4;
+    default: return 0;
+    }
+#else
+    (void)pcie_config;
+    return 0;
+#endif
+}
+
+PCIeCapability get_pcie_capability(struct m2sdr_dev *dev)
+{
+    PCIeCapability capability;
+    struct m2sdr_capabilities caps;
+
+    if (!dev)
+        return capability;
+    if (m2sdr_get_capabilities(dev, &caps) != M2SDR_ERR_OK)
+        return capability;
+    if (M2SDR_FEATURE_PCIE && (caps.features & M2SDR_FEATURE_PCIE) == 0)
+        return capability;
+
+    capability.gen = decode_pcie_gen(caps.pcie_config);
+    capability.lanes = decode_pcie_lanes(caps.pcie_config);
+    capability.known = capability.gen != 0 && capability.lanes != 0;
+    return capability;
+}
+
+std::string pcie_capability_to_string(const PCIeCapability &capability)
+{
+    if (!capability.known)
+        return "unknown PCIe capability";
+    return "PCIe Gen" + std::to_string(capability.gen) +
+           " x" + std::to_string(capability.lanes);
+}
+
 std::string ptp_port_identity_to_string(const struct m2sdr_ptp_port_identity &port)
 {
     char buf[64];
@@ -622,7 +691,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         resetDatapathUnlocked();
     }
 
-    if (args.count("bitmode") > 0) {
+    _bitModeExplicit = args.count("bitmode") > 0;
+    if (_bitModeExplicit) {
         _bitMode = std::stoi(args.at("bitmode"));
     } else {
         _bitMode = 16;
@@ -1625,16 +1695,62 @@ void SoapyLiteXM2SDR::setSampleRate(
             _bitMode = 16;
         }
     } else if (isLitePCIe() && rate > LITEPCIE_8BIT_THRESHOLD) {
-        if (_bitMode == 8) {
+        const PCIeCapability pcie_capability = get_pcie_capability(_dev);
+        const bool pcie_x1_or_unknown =
+            !pcie_capability.known || pcie_capability.lanes == 1;
+        const bool streams_open = _rx_stream.opened || _tx_stream.opened;
+
+        if (!_bitModeExplicit && pcie_x1_or_unknown && _bitMode != 8) {
+            if (streams_open) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "PCIe sample rate %.2f MSPS on %s would use 8-bit sample packing, "
+                    "but streams are already open; pass bitmode=8 or use a CS8 stream "
+                    "before setupStream() to reduce DMA bandwidth",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            } else {
+                _bitMode = 8;
+                SoapySDR::logf(SOAPY_SDR_INFO,
+                    "PCIe sample rate %.2f MSPS on %s defaults to 8-bit sample packing",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            }
+        } else if (!_bitModeExplicit && pcie_capability.known && pcie_capability.lanes >= 2 && _bitMode != 16) {
+            if (streams_open) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "PCIe sample rate %.2f MSPS on %s would keep 16-bit sample packing, "
+                    "but streams are already open",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            } else {
+                _bitMode = 16;
+                SoapySDR::logf(SOAPY_SDR_INFO,
+                    "PCIe sample rate %.2f MSPS on %s defaults to 16-bit sample packing",
+                    rate / 1e6,
+                    pcie_capability_to_string(pcie_capability).c_str());
+            }
+        } else if (_bitMode == 8) {
             SoapySDR::logf(SOAPY_SDR_INFO,
-                "PCIe sample rate %.2f MSPS is using 8-bit sample packing",
-                rate / 1e6);
+                "PCIe sample rate %.2f MSPS on %s is using 8-bit sample packing",
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
+        } else if (pcie_capability.known && pcie_capability.lanes >= 2) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "PCIe sample rate %.2f MSPS on %s keeps 16-bit sample packing",
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
         } else {
             SoapySDR::logf(SOAPY_SDR_WARNING,
-                "PCIe sample rate %.2f MSPS keeps 16-bit sample packing; "
+                "PCIe sample rate %.2f MSPS on %s keeps 16-bit sample packing; "
                 "use bitmode=8 or a CS8 stream to reduce DMA bandwidth",
-                rate / 1e6);
+                rate / 1e6,
+                pcie_capability_to_string(pcie_capability).c_str());
         }
+    } else if (isLitePCIe() && !_bitModeExplicit && rate <= LITEPCIE_8BIT_THRESHOLD) {
+        const bool streams_open = _rx_stream.opened || _tx_stream.opened;
+
+        if (_bitMode != 16 && !streams_open)
+            _bitMode = 16;
     }
 
     int64_t hw_sample_rate = static_cast<int64_t>(sample_rate);
