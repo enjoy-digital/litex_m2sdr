@@ -47,7 +47,7 @@ CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
-.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli clean install install_dev check analyze-libm2sdr
+.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli clean install install_dev check analyze-libm2sdr
 
 ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
                 m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan
@@ -96,7 +96,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
 CLI_OBJS = m2sdr_cli.o m2sdr_getopt.o
 TOOL_OBJS = m2sdr_tool.o
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_platform.o \
@@ -106,6 +106,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_device.o \
 	libm2sdr/m2sdr_stream.o \
 	libm2sdr/m2sdr_rf.o \
+	libm2sdr/m2sdr_sata.o \
 	libm2sdr/m2sdr_utils.o \
 	libm2sdr/m2sdr_json.o \
 	libm2sdr/m2sdr_sigmf.o \
@@ -138,7 +139,7 @@ M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
-core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli
+core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio
 
 examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
@@ -153,6 +154,12 @@ test-sigmf-smoke: tests/test_sigmf_capture_smoke
 test-sigmf-cli: tests/test_sigmf_cli m2sdr_sigmf
 	./tests/test_sigmf_cli
 
+test-sata-cli: tests/test_m2sdr_sata_cli m2sdr_sata
+	./tests/test_m2sdr_sata_cli
+
+test-sata-hostio: tests/test_m2sdr_sata_hostio
+	./tests/test_m2sdr_sata_hostio
+
 tests/test_libm2sdr: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm
 
@@ -164,6 +171,12 @@ tests/test_sigmf_capture_smoke: $(LIBM2SDR_STATIC) tests/test_sigmf_capture_smok
 
 tests/test_sigmf_cli: tests/test_sigmf_cli.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_cli.o -lm
+
+tests/test_m2sdr_sata_cli: tests/test_m2sdr_sata_cli.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_cli.o -lm
+
+tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o -lm
 
 analyze-libm2sdr:
 	cppcheck --enable=warning,style,performance,portability --error-exitcode=1 \
@@ -235,8 +248,8 @@ m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_getopt.o m2sdr_sigmf.o
 m2sdr_gpio: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_gpio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_gpio.o $(M2SDR_LINK_LIBS)
 
-m2sdr_sata: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sata.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sata.o $(M2SDR_LINK_LIBS)
+m2sdr_sata: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_capture_volume.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o m2sdr_sata_hostio.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sata.o m2sdr_sata_capture_volume.o m2sdr_sata_sigmf.o m2sdr_sata_lowlevel.o m2sdr_sata_hostio.o $(M2SDR_LINK_LIBS)
 
 ifeq ($(HAVE_SDL2),1)
 m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sdr_check.o $(M2SDR_IMGUI_OBJS)

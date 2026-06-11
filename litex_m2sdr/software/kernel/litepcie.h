@@ -61,6 +61,24 @@ struct litepcie_ioctl_mmap_dma_update {
 	int64_t sw_count;
 };
 
+enum litepcie_ioctl_sata_dma_direction {
+	LITEPCIE_SATA_DMA_HOST_TO_DEVICE = 0,
+	LITEPCIE_SATA_DMA_DEVICE_TO_HOST = 1,
+};
+
+#define LITEPCIE_SATA_DMA_MAX_SECTORS 4096U
+
+struct litepcie_ioctl_sata_dma {
+	uint64_t user_addr;   /* In:  user buffer (>= nsectors * 512 bytes).         */
+	uint64_t sector;      /* In:  first SATA sector (64-bit LBA).                */
+	uint32_t nsectors;    /* In:  number of 512-byte sectors to transfer.        */
+	int32_t  timeout_ms;  /* In:  per-chunk timeout, < 0 to wait forever.        */
+	uint32_t direction;   /* In:  enum litepcie_ioctl_sata_dma_direction.        */
+	uint32_t transferred; /* Out: sectors actually transferred.                 */
+	int32_t  status;      /* Out: 0 on success, else negative errno.             */
+	uint32_t reserved;    /* Reserved for future use, must be 0.                 */
+};
+
 #define LITEPCIE_IOCTL 'S'
 
 #define LITEPCIE_IOCTL_REG               _IOWR(LITEPCIE_IOCTL,  0, struct litepcie_ioctl_reg)
@@ -72,5 +90,6 @@ struct litepcie_ioctl_mmap_dma_update {
 #define LITEPCIE_IOCTL_LOCK                      _IOWR(LITEPCIE_IOCTL, 25, struct litepcie_ioctl_lock)
 #define LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE    _IOW(LITEPCIE_IOCTL,  26, struct litepcie_ioctl_mmap_dma_update)
 #define LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE    _IOW(LITEPCIE_IOCTL,  27, struct litepcie_ioctl_mmap_dma_update)
+#define LITEPCIE_IOCTL_SATA_DMA                  _IOWR(LITEPCIE_IOCTL, 28, struct litepcie_ioctl_sata_dma)
 
 #endif /* _LINUX_LITEPCIE_H */

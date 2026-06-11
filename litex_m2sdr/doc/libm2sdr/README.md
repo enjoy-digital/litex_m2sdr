@@ -172,8 +172,9 @@ that may run with either transport.
 - Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_tx_att`
+- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_rx_gain_mode`, `m2sdr_set_rx_gain_mode_all`, `m2sdr_set_agc_pin`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
+- AGC monitor: `m2sdr_configure_agc_counter`, `m2sdr_clear_agc_counter`, `m2sdr_get_agc_count`
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`, `m2sdr_get_ptp_discipline_config`, `m2sdr_set_ptp_discipline_config`, `m2sdr_clear_ptp_counters`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`

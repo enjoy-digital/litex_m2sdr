@@ -155,30 +155,43 @@ static void json_write_escaped(FILE *f, const char *s)
     fputc('"', f);
 }
 
-int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
+static int sigmf_has_m2sdr_fields(const struct m2sdr_sigmf_meta *meta)
 {
-    FILE *f;
+    return meta->m2sdr_transport[0] ||
+           meta->has_m2sdr_sata_data_sector ||
+           meta->has_m2sdr_sata_data_nsectors ||
+           meta->has_m2sdr_sata_data_bytes ||
+           meta->has_m2sdr_sata_meta_sector ||
+           meta->has_m2sdr_sata_meta_nsectors ||
+           meta->has_m2sdr_sata_meta_bytes;
+}
+
+static int sigmf_write_file(FILE *f, const struct m2sdr_sigmf_meta *meta)
+{
     const char *dataset_name;
     const char *slash;
+    int has_m2sdr;
 
-    if (!meta || !meta->meta_path[0] || !meta->data_path[0] || !meta->datatype[0])
-        return -1;
-
-    f = fopen(meta->meta_path, "wb");
-    if (!f)
+    if (!f || !meta || !meta->data_path[0] || !meta->datatype[0])
         return -1;
 
     slash = strrchr(meta->data_path, '/');
     dataset_name = slash ? slash + 1 : meta->data_path;
+    has_m2sdr = sigmf_has_m2sdr_fields(meta);
 
     fprintf(f, "{\n");
     fprintf(f, "  \"global\": {\n");
-    fprintf(f, "    \"core:version\": \"1.2.5\",\n");
+    fprintf(f, "    \"core:version\": \"" M2SDR_SIGMF_CORE_VERSION "\",\n");
     fprintf(f, "    \"core:datatype\": ");
     json_write_escaped(f, meta->datatype);
     fprintf(f, ",\n");
     fprintf(f, "    \"core:dataset\": ");
     json_write_escaped(f, dataset_name);
+    if (has_m2sdr) {
+        fprintf(f, ",\n    \"core:extensions\": [\n");
+        fprintf(f, "      {\"name\": \"m2sdr\", \"version\": \"" M2SDR_SIGMF_M2SDR_EXTENSION_VERSION "\", \"optional\": true}\n");
+        fprintf(f, "    ]");
+    }
     if (meta->has_sample_rate) {
         fprintf(f, ",\n    \"core:sample_rate\": %.17g", meta->sample_rate);
     }
@@ -201,6 +214,22 @@ int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
         fprintf(f, ",\n    \"core:recorder\": ");
         json_write_escaped(f, meta->recorder);
     }
+    if (meta->m2sdr_transport[0]) {
+        fprintf(f, ",\n    \"m2sdr:transport\": ");
+        json_write_escaped(f, meta->m2sdr_transport);
+    }
+    if (meta->has_m2sdr_sata_data_sector)
+        fprintf(f, ",\n    \"m2sdr:sata_data_sector\": %" PRIu64, meta->m2sdr_sata_data_sector);
+    if (meta->has_m2sdr_sata_data_nsectors)
+        fprintf(f, ",\n    \"m2sdr:sata_data_nsectors\": %" PRIu64, meta->m2sdr_sata_data_nsectors);
+    if (meta->has_m2sdr_sata_data_bytes)
+        fprintf(f, ",\n    \"m2sdr:sata_data_bytes\": %" PRIu64, meta->m2sdr_sata_data_bytes);
+    if (meta->has_m2sdr_sata_meta_sector)
+        fprintf(f, ",\n    \"m2sdr:sata_meta_sector\": %" PRIu64, meta->m2sdr_sata_meta_sector);
+    if (meta->has_m2sdr_sata_meta_nsectors)
+        fprintf(f, ",\n    \"m2sdr:sata_meta_nsectors\": %" PRIu64, meta->m2sdr_sata_meta_nsectors);
+    if (meta->has_m2sdr_sata_meta_bytes)
+        fprintf(f, ",\n    \"m2sdr:sata_meta_bytes\": %" PRIu64, meta->m2sdr_sata_meta_bytes);
     fprintf(f, "\n  },\n");
     fprintf(f, "  \"captures\": [\n");
     fprintf(f, "    {\n");
@@ -238,9 +267,42 @@ int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
     }
     fprintf(f, "  ]\n");
     fprintf(f, "}\n");
+    return ferror(f) ? -1 : 0;
+}
 
-    fclose(f);
+int m2sdr_sigmf_write_text(const struct m2sdr_sigmf_meta *meta, char *buf, size_t buf_len)
+{
+    FILE *f;
+    int rc;
+
+    if (!meta || !buf || buf_len == 0)
+        return -1;
+
+    f = fmemopen(buf, buf_len, "w");
+    if (!f)
+        return -1;
+    rc = sigmf_write_file(f, meta);
+    if (fclose(f) != 0)
+        rc = -1;
+    if (rc != 0 || buf[buf_len - 1] != '\0')
+        return -1;
     return 0;
+}
+
+int m2sdr_sigmf_write(const struct m2sdr_sigmf_meta *meta)
+{
+    FILE *f;
+    int rc;
+
+    if (!meta || !meta->meta_path[0])
+        return -1;
+
+    f = fopen(meta->meta_path, "wb");
+    if (!f)
+        return -1;
+    rc = sigmf_write_file(f, meta);
+    fclose(f);
+    return rc;
 }
 
 int m2sdr_sigmf_capture_sample_range(const struct m2sdr_sigmf_meta *meta,
@@ -408,13 +470,13 @@ static void sigmf_read_annotation_array(const char *buf,
     }
 }
 
-int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
+int m2sdr_sigmf_read_text(const char *text, size_t text_len,
+                          const char *input_path_hint,
+                          struct m2sdr_sigmf_meta *meta)
 {
-    FILE *f;
-    long len;
-    char *buf = NULL;
     struct m2sdr_json_parser parser;
     struct m2sdr_json_token *tokens = NULL;
+    const char *input_path = input_path_hint ? input_path_hint : "m2sdr.sigmf-meta";
     int token_count;
     char dataset_path[1024] = {0};
     char meta_dir[1024] = {0};
@@ -424,103 +486,92 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
     int annotations_index;
     int idx;
 
-    if (!input_path || !meta)
+    if (!text || !meta)
         return -1;
     memset(meta, 0, sizeof(*meta));
     if (m2sdr_sigmf_derive_paths(input_path, meta->data_path, sizeof(meta->data_path),
                                  meta->meta_path, sizeof(meta->meta_path)) != 0)
         return -1;
 
-    f = fopen(meta->meta_path, "rb");
-    if (!f)
-        return -1;
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return -1;
-    }
-    len = ftell(f);
-    if (len < 0) {
-        fclose(f);
-        return -1;
-    }
-    rewind(f);
-    buf = calloc((size_t)len + 1u, 1u);
-    if (!buf) {
-        fclose(f);
-        return -1;
-    }
-    if (fread(buf, 1, (size_t)len, f) != (size_t)len) {
-        free(buf);
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-
     tokens = calloc(512u, sizeof(*tokens));
-    if (!tokens) {
-        free(buf);
+    if (!tokens)
         return -1;
-    }
     m2sdr_json_parser_init(&parser);
-    token_count = m2sdr_json_parse(&parser, buf, (size_t)len, tokens, 512u);
+    token_count = m2sdr_json_parse(&parser, text, text_len, tokens, 512u);
     if (token_count <= 0 || tokens[root_index].type != M2SDR_JSON_OBJECT) {
         free(tokens);
-        free(buf);
         return -1;
     }
 
-    global_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "global");
-    captures_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "captures");
-    annotations_index = m2sdr_json_object_get(buf, tokens, token_count, root_index, "annotations");
+    global_index = m2sdr_json_object_get(text, tokens, token_count, root_index, "global");
+    captures_index = m2sdr_json_object_get(text, tokens, token_count, root_index, "captures");
+    annotations_index = m2sdr_json_object_get(text, tokens, token_count, root_index, "annotations");
     if (global_index < 0 || tokens[global_index].type != M2SDR_JSON_OBJECT) {
         free(tokens);
-        free(buf);
         return -1;
     }
 
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:datatype");
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:datatype");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], meta->datatype, sizeof(meta->datatype));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:dataset");
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->datatype, sizeof(meta->datatype));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:dataset");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], dataset_path, sizeof(dataset_path));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:description");
+        m2sdr_json_token_tostr(text, &tokens[idx], dataset_path, sizeof(dataset_path));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:description");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], meta->description, sizeof(meta->description));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:author");
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->description, sizeof(meta->description));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:author");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], meta->author, sizeof(meta->author));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:hw");
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->author, sizeof(meta->author));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:hw");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], meta->hw, sizeof(meta->hw));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:recorder");
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->hw, sizeof(meta->hw));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:recorder");
     if (idx >= 0)
-        m2sdr_json_token_tostr(buf, &tokens[idx], meta->recorder, sizeof(meta->recorder));
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:sample_rate");
-    if (idx >= 0 && m2sdr_json_token_todouble(buf, &tokens[idx], &meta->sample_rate) == 0)
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->recorder, sizeof(meta->recorder));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:sample_rate");
+    if (idx >= 0 && m2sdr_json_token_todouble(text, &tokens[idx], &meta->sample_rate) == 0)
         meta->has_sample_rate = true;
-    idx = m2sdr_json_object_get(buf, tokens, token_count, global_index, "core:num_channels");
-    if (idx >= 0 && m2sdr_json_token_touint(buf, &tokens[idx], &meta->num_channels) == 0)
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "core:num_channels");
+    if (idx >= 0 && m2sdr_json_token_touint(text, &tokens[idx], &meta->num_channels) == 0)
         meta->has_num_channels = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:transport");
+    if (idx >= 0)
+        m2sdr_json_token_tostr(text, &tokens[idx], meta->m2sdr_transport, sizeof(meta->m2sdr_transport));
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_data_sector");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_data_sector) == 0)
+        meta->has_m2sdr_sata_data_sector = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_data_nsectors");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_data_nsectors) == 0)
+        meta->has_m2sdr_sata_data_nsectors = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_data_bytes");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_data_bytes) == 0)
+        meta->has_m2sdr_sata_data_bytes = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_meta_sector");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_meta_sector) == 0)
+        meta->has_m2sdr_sata_meta_sector = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_meta_nsectors");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_meta_nsectors) == 0)
+        meta->has_m2sdr_sata_meta_nsectors = true;
+    idx = m2sdr_json_object_get(text, tokens, token_count, global_index, "m2sdr:sata_meta_bytes");
+    if (idx >= 0 && m2sdr_json_token_tou64(text, &tokens[idx], &meta->m2sdr_sata_meta_bytes) == 0)
+        meta->has_m2sdr_sata_meta_bytes = true;
 
     if (captures_index >= 0 && tokens[captures_index].type == M2SDR_JSON_ARRAY)
-        sigmf_read_capture_array(buf, tokens, token_count, captures_index, meta);
+        sigmf_read_capture_array(text, tokens, token_count, captures_index, meta);
     if (annotations_index >= 0 && tokens[annotations_index].type == M2SDR_JSON_ARRAY)
-        sigmf_read_annotation_array(buf, tokens, token_count, annotations_index, meta);
+        sigmf_read_annotation_array(text, tokens, token_count, annotations_index, meta);
 
     if (meta->datatype[0] == '\0') {
         free(tokens);
-        free(buf);
         return -1;
     }
     if (meta->has_num_channels && meta->num_channels == 0) {
         free(tokens);
-        free(buf);
         return -1;
     }
     if (meta->has_sample_rate && meta->sample_rate <= 0.0) {
         free(tokens);
-        free(buf);
         return -1;
     }
     if (meta->capture_count > 0) {
@@ -550,6 +601,50 @@ int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
         }
     }
     free(tokens);
-    free(buf);
     return 0;
+}
+
+int m2sdr_sigmf_read(const char *input_path, struct m2sdr_sigmf_meta *meta)
+{
+    FILE *f;
+    long len;
+    char *buf = NULL;
+    char meta_path[1024];
+    char data_path[1024];
+    int rc;
+
+    if (!input_path || !meta)
+        return -1;
+
+    if (m2sdr_sigmf_derive_paths(input_path, data_path, sizeof(data_path),
+                                 meta_path, sizeof(meta_path)) != 0)
+        return -1;
+    f = fopen(meta_path, "rb");
+    if (!f)
+        return -1;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    len = ftell(f);
+    if (len < 0) {
+        fclose(f);
+        return -1;
+    }
+    rewind(f);
+    buf = calloc((size_t)len + 1u, 1u);
+    if (!buf) {
+        fclose(f);
+        return -1;
+    }
+    if (fread(buf, 1, (size_t)len, f) != (size_t)len) {
+        free(buf);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    rc = m2sdr_sigmf_read_text(buf, (size_t)len, input_path, meta);
+    free(buf);
+    return rc;
 }

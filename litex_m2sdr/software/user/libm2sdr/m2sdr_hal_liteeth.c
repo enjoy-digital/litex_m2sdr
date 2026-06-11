@@ -36,8 +36,13 @@ static int m2sdr_liteeth_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *v
     if (!dev || !val || !dev->eb)
         return M2SDR_ERR_INVAL;
     /* Etherbone already presents CSR access as 32-bit register transactions,
-     * so the HAL is just a validity check plus the backend call. */
+     * so the HAL is just a validity check plus the backend call. The lock
+     * keeps request/reply pairs from interleaving on the shared connection
+     * when several threads (RF control, streaming recovery, time reads)
+     * access registers concurrently. */
+    pthread_mutex_lock(&dev->reg_lock);
     err = eb_read32_checked(dev->eb, addr, val);
+    pthread_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 
@@ -47,11 +52,39 @@ static int m2sdr_liteeth_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t v
 
     if (!dev || !dev->eb)
         return M2SDR_ERR_INVAL;
+    pthread_mutex_lock(&dev->reg_lock);
     err = eb_write32_checked(dev->eb, val, addr);
+    pthread_mutex_unlock(&dev->reg_lock);
+    return m2sdr_from_eb_error(err);
+}
+
+static int m2sdr_liteeth_readl_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32_t *vals, size_t count)
+{
+    int err;
+
+    if (!dev || !vals || !dev->eb)
+        return M2SDR_ERR_INVAL;
+    pthread_mutex_lock(&dev->reg_lock);
+    err = eb_read32_bulk_checked(dev->eb, addr, vals, count);
+    pthread_mutex_unlock(&dev->reg_lock);
+    return m2sdr_from_eb_error(err);
+}
+
+static int m2sdr_liteeth_writel_bulk(struct m2sdr_dev *dev, uint32_t addr, const uint32_t *vals, size_t count)
+{
+    int err;
+
+    if (!dev || !vals || !dev->eb)
+        return M2SDR_ERR_INVAL;
+    pthread_mutex_lock(&dev->reg_lock);
+    err = eb_write32_bulk_checked(dev->eb, addr, vals, count);
+    pthread_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 
 const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops = {
-    .readl  = m2sdr_liteeth_readl,
-    .writel = m2sdr_liteeth_writel,
+    .readl       = m2sdr_liteeth_readl,
+    .writel      = m2sdr_liteeth_writel,
+    .readl_bulk  = m2sdr_liteeth_readl_bulk,
+    .writel_bulk = m2sdr_liteeth_writel_bulk,
 };

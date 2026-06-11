@@ -48,6 +48,7 @@ set(M2SDR_LIB_SOURCES
     libm2sdr/m2sdr_device.c
     libm2sdr/m2sdr_stream.c
     libm2sdr/m2sdr_rf.c
+    libm2sdr/m2sdr_sata.c
     libm2sdr/m2sdr_utils.c
     libm2sdr/m2sdr_json.c
     libm2sdr/m2sdr_sigmf.c
@@ -140,14 +141,29 @@ function(m2sdr_add_tool name)
     endif()
 endfunction()
 
+function(m2sdr_keep_asserts name)
+    if(MSVC)
+        target_compile_options(${name} PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(${name} PRIVATE -UNDEBUG)
+    endif()
+endfunction()
+
 if(M2SDR_BUILD_TOOLS)
     set(M2SDR_CLI_SOURCES m2sdr_cli.c m2sdr_getopt.c)
     set(M2SDR_TOOL_SOURCES m2sdr_tool.c)
+    set(M2SDR_SATA_TOOL_SOURCES
+        m2sdr_sata.c
+        m2sdr_sata_capture_volume.c
+        m2sdr_sata_lowlevel.c
+        m2sdr_sata_hostio.c
+        m2sdr_sata_sigmf.c
+    )
 
     m2sdr_add_tool(m2sdr_util ${M2SDR_CLI_SOURCES} m2sdr_util.c)
     m2sdr_add_tool(m2sdr_rf ${M2SDR_CLI_SOURCES} m2sdr_rf.c)
     m2sdr_add_tool(m2sdr_gpio ${M2SDR_CLI_SOURCES} m2sdr_gpio.c)
-    m2sdr_add_tool(m2sdr_sata ${M2SDR_CLI_SOURCES} m2sdr_sata.c)
+    m2sdr_add_tool(m2sdr_sata ${M2SDR_CLI_SOURCES} ${M2SDR_SATA_TOOL_SOURCES})
     m2sdr_add_tool(m2sdr_play ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_play.c)
     m2sdr_add_tool(m2sdr_record ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_record.c)
     m2sdr_add_tool(m2sdr_gen ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_gen.c kissfft/kiss_fft.c)
@@ -169,15 +185,33 @@ if(M2SDR_BUILD_TESTS)
         m2sdr_add_tool(test_libm2sdr ${M2SDR_CLI_SOURCES} m2sdr_tool.c tests/test_libm2sdr.c)
         m2sdr_add_tool(test_m2sdr_sigmf tests/test_m2sdr_sigmf.c)
         m2sdr_add_tool(test_sigmf_capture_smoke tests/test_sigmf_capture_smoke.c)
+        m2sdr_add_tool(test_m2sdr_sata_cli tests/test_m2sdr_sata_cli.c)
+        m2sdr_add_tool(test_m2sdr_sata_hostio tests/test_m2sdr_sata_hostio.c m2sdr_sata_hostio.c)
         add_executable(test_sigmf_cli tests/test_sigmf_cli.c)
+
+        foreach(test_target
+            test_libm2sdr
+            test_m2sdr_sigmf
+            test_sigmf_capture_smoke
+            test_m2sdr_sata_cli
+            test_m2sdr_sata_hostio
+            test_sigmf_cli
+        )
+            m2sdr_keep_asserts(${test_target})
+        endforeach()
 
         add_test(NAME test_libm2sdr COMMAND test_libm2sdr)
         add_test(NAME test_m2sdr_sigmf COMMAND test_m2sdr_sigmf)
         add_test(NAME test_sigmf_capture_smoke COMMAND test_sigmf_capture_smoke)
+        add_test(NAME test_m2sdr_sata_hostio COMMAND test_m2sdr_sata_hostio)
         if(M2SDR_BUILD_TOOLS)
             add_test(NAME test_sigmf_cli COMMAND test_sigmf_cli)
             set_tests_properties(test_sigmf_cli PROPERTIES
                 ENVIRONMENT "M2SDR_SIGMF_TOOL=$<TARGET_FILE:m2sdr_sigmf>"
+            )
+            add_test(NAME test_m2sdr_sata_cli COMMAND test_m2sdr_sata_cli)
+            set_tests_properties(test_m2sdr_sata_cli PROPERTIES
+                WORKING_DIRECTORY $<TARGET_FILE_DIR:m2sdr_sata>
             )
         endif()
     endif()

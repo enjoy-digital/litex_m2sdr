@@ -53,11 +53,18 @@ static void generate_sine_table(int16_t *sine_table, int bits) {
     }
 }
 
+static int32_t arithmetic_shift_right_i32(int32_t value, unsigned shift) {
+    if (value >= 0)
+        return value >> shift;
+    return -(((-value) + ((1 << shift) - 1)) >> shift);
+}
+
 static int8_t sc8_from_bits(int16_t sample, int bits) {
     int shift = bits - 8;
     int32_t v = sample;
     if (shift > 0) {
-        v >>= shift;
+        int32_t offset = v < 0 ? ((1 << (shift - 1)) - 1) : (1 << (shift - 1));
+        v = arithmetic_shift_right_i32(v + offset, shift);
     } else if (shift < 0) {
         v <<= -shift;
     }
@@ -437,7 +444,7 @@ int main(int argc, char **argv) {
             bits_set = true;
             break;
         case 1:
-            if (m2sdr_cli_parse_format(optarg, &format) != 0) {
+            if (m2sdr_cli_parse_format(optarg, &format) != 0 || format == M2SDR_FORMAT_BFP8_Q11) {
                 m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }

@@ -86,15 +86,18 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
+  Use `rx_agc_mode0`/`rx_agc_mode1` or `rx0_agc_mode`/`rx1_agc_mode` for per-channel defaults.
+- **RX AGC pin**: `rx_agc_pin=on|off` drives the FPGA-connected AD9361 `RF_EN_AGC` pin for pin-controlled gain flows.
 - **Device selection**: `path=/dev/m2sdr0` for PCIe, `eth_ip=192.168.1.50` for Ethernet, or `dev_id=pcie:/dev/m2sdr0` / `dev_id=eth:192.168.1.50:1234` for an explicit libm2sdr identifier.
 - **Ethernet discovery**: default discovery probes `192.168.1.50:1234` after PCIe. Use `eth_ips=ip[;ip[:port]...]` or `LITEXM2SDR_ETH_IPS` to override the discovery list, and `eth_discovery=0` to disable Ethernet discovery.
 - **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`
   The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
 - **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
 - **Bit mode**: `bitmode=8|16`
-- **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
-  - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+  - Rates above `61.44 MSPS` automatically use the wide-bandwidth data-port mode; these profiles affect the AD9361 `1x` FIR path used by that mode.
+- **PCIe high-rate packing**: `bitmode=8|16`
+  - Above `61.44 MSPS`, PCIe x1 capability defaults to 8-bit packing to reduce DMA bandwidth, while PCIe x2/x4 capability keeps 16-bit packing by default. Request `bitmode=8`, `bitmode=16`, or a `CS8` stream explicitly to override the default.
 - **Clock source**: `clock_source=internal|external|fpga`
   - `internal` keeps the local XO path.
   - `external` selects the SI5351C `10MHz` CLKIN from the uFL connector.
@@ -107,17 +110,24 @@ You can pass device arguments to configure the driver. These are most useful whe
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
 - **VRT UDP port override** (Etherbone + `eth_mode=vrt`): `vrt_port=4991`
 - **LiteEth TX pacing**: `tx_pacing=rate|none`
-  - `rate` is the default and submits TX UDP buffers according to the configured TX sample rate.
+  - `rate` is the default and submits TX UDP buffers according to the configured TX sample rate. Pacing follows the board clock (periodically re-anchored through hardware time reads) so long runs do not drift with the host oscillator.
   - `none` keeps TX submissions unpaced for link stress tests.
+- **Timed TX** (software placement on the board-time axis): `timed_tx=software|off`
+  - `software` (default) honors `SOAPY_SDR_HAS_TIME` on `writeStream()`: gaps up to the requested timestamp are zero-filled and writes later than `tx_late_margin_ns` return `SOAPY_SDR_TIME_ERROR`.
+  - `tx_lead_buffers=N` (default `0`): schedules the timeline `N` MTUs ahead of board time at activation. The hardware emits samples as soon as DMA delivers them, so any lead shifts actual emission that far **before** the requested timestamps — keep `0` for applications that need absolute TX timing (srsRAN) and already write ahead of time.
+  - `tx_latency_ns=K` (default `0`, negative allowed): constant trim for the DMA/RFIC pipeline latency, calibratable with an RF/FPGA loopback.
+  - `tx_late_margin_ns=M`: lateness tolerance before a timed write is rejected (default: one MTU duration).
+- **RX DMA headers** (PCIe): `rx_dma_header=1|0`
+  - `1` (default) uses the FPGA per-buffer hardware timestamps for RX time reporting when the gateware supports them (probed at open; falls back to software accounting otherwise).
 
 Example:
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8,oversampling=1"
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8"
 ```
 
 Example (122.88 MSPS edge-flatness A/B test):
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
+SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,ad9361_fir_profile=wide"
 ```
 
 Example (Etherbone control + Soapy RX over FPGA VRT):
@@ -146,6 +156,46 @@ For PCIe/PTM host-time synchronization, build the gateware with
 `scripts/m2sdr_pcie_time_sync.py` on the host. The helper drives the M2SDR PHC
 from `CLOCK_REALTIME` through `phc2sys`; Soapy then observes the same board
 hardware time as the rest of the host stack.
+
+---
+
+## srsRAN 4G
+
+The driver works with srsRAN 4G (srsENB/srsUE) through srsRAN's SoapySDR RF
+adapter. srsRAN streams CF32, schedules every TX subframe ~4 ms ahead with
+`SOAPY_SDR_HAS_TIME` on the first write of each send, and derives its TX time
+from the RX timestamps — both paths are served by the hardware RX timestamps
+(PCIe DMA headers / Ethernet VRT) and the software timed-TX placement.
+
+Example `enb.conf` / `ue.conf` RF section (PCIe):
+
+```ini
+[rf]
+device_name = soapy
+device_args = driver=LiteXM2SDR
+tx_gain = 60
+rx_gain = 40
+# time_adv_nsamples = auto    # increase if "L" (late) indicators appear
+```
+
+For an Ethernet board use `device_args = driver=LiteXM2SDR,eth_ip=192.168.1.50`.
+PCIe is recommended for LTE: raw-UDP RX carries no hardware timestamps
+(`eth_mode=vrt` does, but VRT is RX-only).
+
+Notes:
+- All LTE sample rates (1.92 / 3.84 / 5.76 / 11.52 / 15.36 / 23.04 MSPS) are
+  within the supported range; the AD9361 FIR decimation is selected
+  automatically.
+- Do **not** pass LimeSDR-style `rxant=`/`txant=` antenna arguments: the board
+  exposes `A_BALANCED` (RX) and `A` (TX) only, and unknown names make the
+  driver throw at open.
+- RX gain defaults to manual mode, so srsRAN's gain settings apply directly.
+- Console indicators: `L`/`T` = TX timed write arrived late (raise
+  `time_adv_nsamples` or check CPU load), `U` = TX underflow, `O` = RX
+  overflow. They should be absent or rare in steady state.
+- Keep `tx_lead_buffers=0` (the default): srsRAN's own scheduling advance
+  provides the queue slack, and a non-zero lead shifts the actual emission
+  ahead of the requested timestamps, breaking the DL/UL subframe alignment.
 
 ---
 

@@ -37,21 +37,26 @@ static void help(void)
            "  -c, --device-num N     Select PCIe device number (default: 0).\n"
            "  -i, --ip ADDR          Target IP address for Etherbone.\n"
            "  -p, --port PORT        Port number (default: 1234).\n"
-           "      --format FMT       Sample format: sc16 or sc8 (default: sc16).\n"
+           "      --format FMT       Sample format: sc16, sc8 or bfp8 (default: sc16).\n"
            "      --8bit             Legacy alias for --format sc8.\n"
-           "      --oversample       Enable oversample mode.\n"
            "      --channel-layout M Channel mode: 1t1r or 2t2r (default: 2t2r).\n"
            "      --sync MODE        Clock source: internal, external, or fpga.\n"
            "\n"
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
-           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6 or 20M).\n"
+           "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6\n"
+           "                         or 20M). Rates above 61.44 MSPS select the\n"
+           "                         wide-bandwidth mode (~100 MHz analog passband).\n"
            "      --bandwidth HZ     Set the RF bandwidth in Hz (default: %d).\n"
            "      --tx-freq HZ       Set the TX frequency in Hz (default: %" PRId64 ").\n"
            "      --rx-freq HZ       Set the RX frequency in Hz (default: %" PRId64 ").\n"
            "      --tx-att DB        Set TX attenuation in dB (default: %d).\n"
+           "      --rx-gain-mode M   Set both RX gain modes: manual, slow, fast, or hybrid.\n"
+           "      --rx-gain-mode1 M  Set RX1 gain mode.\n"
+           "      --rx-gain-mode2 M  Set RX2 gain mode.\n"
            "      --rx-gain DB       Set both RX gains in dB and force manual gain mode.\n"
            "      --rx-gain1 DB      Set RX gain 1 in dB and force manual gain mode.\n"
            "      --rx-gain2 DB      Set RX gain 2 in dB and force manual gain mode.\n"
+           "      --rx-agc-pin BOOL  Drive the FPGA-connected AD9361 EN_AGC pin.\n"
            "      --loopback N       Set internal loopback (default: %d).\n"
            "      --bist-tx-tone     Run TX tone test.\n"
            "      --bist-rx-tone     Run RX tone test.\n"
@@ -97,7 +102,6 @@ int main(int argc, char **argv)
         { "port", required_argument, NULL, 'p' },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
-        { "oversample", no_argument, NULL, 3 },
         { "channel-layout", required_argument, NULL, 4 },
         { "chan", required_argument, NULL, 4 },
         { "sync", required_argument, NULL, 5 },
@@ -118,6 +122,14 @@ int main(int argc, char **argv)
         { "rx_gain1", required_argument, NULL, 13 },
         { "rx-gain2", required_argument, NULL, 14 },
         { "rx_gain2", required_argument, NULL, 14 },
+        { "rx-gain-mode", required_argument, NULL, 21 },
+        { "rx_gain_mode", required_argument, NULL, 21 },
+        { "rx-gain-mode1", required_argument, NULL, 22 },
+        { "rx_gain_mode1", required_argument, NULL, 22 },
+        { "rx-gain-mode2", required_argument, NULL, 23 },
+        { "rx_gain_mode2", required_argument, NULL, 23 },
+        { "rx-agc-pin", required_argument, NULL, 24 },
+        { "rx_agc_pin", required_argument, NULL, 24 },
         { "loopback", required_argument, NULL, 15 },
         { "bist-tx-tone", no_argument, NULL, 16 },
         { "bist_tx_tone", no_argument, NULL, 16 },
@@ -157,17 +169,16 @@ int main(int argc, char **argv)
                 enum m2sdr_format format;
 
                 if (m2sdr_cli_parse_format(optarg, &format) != 0) {
-                    m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                    m2sdr_cli_invalid_choice("format", optarg, "sc16, sc8 or bfp8");
                     return 1;
                 }
+                cfg.sample_format = format;
                 cfg.enable_8bit_mode = (format == M2SDR_FORMAT_SC8_Q7);
             }
             break;
         case 2:
             cfg.enable_8bit_mode = true;
-            break;
-        case 3:
-            cfg.enable_oversample = true;
+            cfg.sample_format = M2SDR_FORMAT_SC8_Q7;
             break;
         case 4:
             cfg.chan_mode = optarg;
@@ -235,6 +246,35 @@ int main(int argc, char **argv)
             if (parse_i64_option("RX gain 2", optarg, &cfg.rx_gain2) != 0)
                 return 1;
             cfg.program_rx_gains = true;
+            break;
+        case 21:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode1) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.rx_gain_mode2 = cfg.rx_gain_mode1;
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 22:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode1) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode 1", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 23:
+            if (m2sdr_parse_rx_gain_mode(optarg, &cfg.rx_gain_mode2) != M2SDR_ERR_OK) {
+                m2sdr_cli_invalid_choice("RX gain mode 2", optarg, "manual, slow, fast, or hybrid");
+                return 1;
+            }
+            cfg.program_rx_gain_modes = true;
+            break;
+        case 24:
+            if (m2sdr_cli_parse_bool(optarg, &cfg.agc_pin_enable) != 0) {
+                m2sdr_cli_invalid_choice("RX AGC pin", optarg, "0/1, true/false, on/off, or yes/no");
+                return 1;
+            }
+            cfg.program_agc_pin = true;
             break;
         case 15:
             {

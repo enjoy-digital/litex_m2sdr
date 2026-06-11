@@ -29,7 +29,7 @@ static int bind_any(m2sdr_socket_t sock, const char *ip, uint16_t port)
     memset(&sa, 0, sizeof(sa));
     sa.sin_family      = AF_INET;
     sa.sin_port        = htons(port);
-    sa.sin_addr.s_addr = (ip && *ip) ? 0 : htonl(INADDR_ANY);
+    sa.sin_addr.s_addr = htonl(INADDR_ANY);
     if (ip && *ip) {
         if (inet_pton(AF_INET, ip, &sa.sin_addr) != 1)
             return -1;
@@ -96,6 +96,18 @@ static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t l
 
         nb = recvmsg(u->sock, &msg, MSG_DONTWAIT);
         src_len = msg.msg_namelen;
+        if (nb >= 0 && (msg.msg_flags & MSG_TRUNC)) {
+            /* The datagram was larger than the remaining slot space; the
+             * excess is gone. Slot size must be a multiple of the FPGA
+             * packet size for the assembly to stay aligned. */
+            u->rx_truncated++;
+            if (!u->rx_trunc_warned) {
+                u->rx_trunc_warned = 1;
+                fprintf(stderr,
+                    "liteeth_udp: RX datagram truncated; buffer_size must be "
+                    "a multiple of the FPGA packet size\n");
+            }
+        }
         if (nb >= 0) {
             struct cmsghdr *cmsg;
             for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
@@ -116,8 +128,24 @@ static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t l
         ssize_t nb;
 
         memset(&src_addr, 0, sizeof(src_addr));
+#if defined(_WIN32)
         nb = recvfrom(u->sock, (char *)dst, (int)len, 0,
+#else
+        nb = recvfrom(u->sock, dst, len, MSG_DONTWAIT | MSG_TRUNC,
+#endif
                       (struct sockaddr *)&src_addr, &src_len);
+        if (nb >= 0 && (size_t)nb > len) {
+            /* Real datagram length reported through MSG_TRUNC: the tail
+             * beyond the slot space was dropped by the kernel. */
+            u->rx_truncated++;
+            if (!u->rx_trunc_warned) {
+                u->rx_trunc_warned = 1;
+                fprintf(stderr,
+                    "liteeth_udp: RX datagram truncated; buffer_size must be "
+                    "a multiple of the FPGA packet size\n");
+            }
+            nb = (ssize_t)len;
+        }
 #endif
         if (nb >= 0 && !rx_source_allowed(u, &src_addr, src_len)) {
             u->rx_source_drops++;
@@ -412,8 +440,20 @@ int liteeth_udp_write_submit(struct liteeth_udp_ctrl *u)
             ssize_t nb = sendto(u->sock, (const char *)chunk_src, (int)chunk, 0,
                                 (struct sockaddr *)&u->remote, sizeof(u->remote));
             if (nb < 0) {
-                if (m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()))
-                    continue; /* retry */
+                int err = m2sdr_socket_last_error();
+
+                if (m2sdr_socket_error_is_interrupted(err))
+                    continue;
+                if (m2sdr_socket_error_is_would_block(err)) {
+                    /* Wait for socket buffer space instead of spinning. */
+                    m2sdr_pollfd wfd;
+
+                    memset(&wfd, 0, sizeof(wfd));
+                    wfd.fd = u->sock;
+                    wfd.events = POLLOUT;
+                    (void)m2sdr_poll(&wfd, 1, 100);
+                    continue;
+                }
                 u->tx_send_errors++;
                 perror("liteeth_udp: sendto");
                 return -1;

@@ -48,7 +48,7 @@ Imagine a minimalist AD9361-based SDR with:
 - PCIe Gen 2 X4 (~14Gbps of TX/RX bandwidth) with [LitePCIe](https://github.com/enjoy-digital/litepcie), providing MMAP and several possible DMAs (for direct I/Q samples transfer or processed I/Q samples). ⚡
 - A large XC7A200T FPGA where the base infrastructure only uses a fraction of the available resources, allowing you to integrate large RF processing blocks. 💪
 - The option to reuse some of the PCIe lanes of the M2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
-- Or ... for SATA through [LiteSATA](https://github.com/enjoy-digital/litesata). 💾
+- Or ... for SATA through the [LiteSATA](https://github.com/enjoy-digital/litesata) gateware core. 💾
 - Or ... for inter-board SerDes-based communication through [LiteICLink](https://github.com/enjoy-digital/liteiclink). 🔗
 - Powerful debug capabilities through LiteX [Host <-> FPGA bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC) and [LiteScope](https://github.com/enjoy-digital/litescope) logic analyzer. 🛠️
 - Multiboot support to allow secure remote update over PCIe (or Ethernet).
@@ -219,6 +219,30 @@ Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, 
 
 When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
 
+[> Wide Analog Bandwidth (RFIC Overclock)
+------------------------------------------
+
+The AD9361's analog baseband filters are normally limited to ~56 MHz. Requesting a sample rate above 61.44 MSPS (up to 122.88) selects the wide-bandwidth mode automatically:
+
+```bash
+m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
+```
+
+Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are force-widened with tuned register words, opening a true ~100 MHz analog passband at 122.88 MSPS. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
+
+Measured (loopback TX1->RX1 with 40 dB pad + external-receiver cross-check, 3.6 GHz, 100 MHz NR-FR1-TM3.1 64QAM test model):
+
+| Metric                          | Wide (overclock)        | Stock ~56 MHz       |
+|---------------------------------|-------------------------|---------------------|
+| Usable analog bandwidth         | ~100 MHz                | ~56 MHz             |
+| EVM, 100 MHz NR TM3.1 (PDSCH)   | ~10% RMS (*)            | n/a (BW > filter)   |
+| EVM, 10 MHz NR TM3.1            | ~3% RMS                 | ~3% RMS             |
+| No-signal RX floor (rx-gain 55) | -31.6 dBFS              | -34 dBFS            |
+| TX image rejection, tx-att 0    | ~30 dB                  | ~42 dB              |
+| TX image rejection, tx-att >=10 | ~44-58 dB               | ~44-58 dB           |
+
+(*) With TX magnitude pre-emphasis flattening the widened-filter rolloff the per-band effective SNR is uniform (+/-50 MHz); the ~10% ceiling decomposes into ~7% TX (reference/LO phase noise) and ~8.5% RX (widened-BBF noise floor). Best EVM is obtained on the internal clock reference; an external 10 MHz reference costs ~6% EVM through the Si5351's higher multiplication ratio (N=84 vs N=34).
+
 [> Getting Started
 ------------------
 <a id="quick-start"></a>
@@ -300,7 +324,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **Runtime transport selection**: The installed user tools and SoapySDR module support both transports in one build. Use `--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234` with the CLI tools, and `driver=LiteXM2SDR,path=/dev/m2sdr0` or `driver=LiteXM2SDR,eth_ip=192.168.1.50` with SoapySDR.
 - **PCIe PTM host-time sync**: Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
-- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`.
+- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`. `m2sdr_sata` supports low-level sector tests and named capture workflows for RF-to-SATA recording, host import/export, SATA-to-RF replay, and SATA replay into the normal PCIe/Ethernet RX path used by SoapySDR/GQRX.
 - **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
 - **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
 - **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
@@ -468,7 +492,50 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
    cd litex_m2sdr/software/user
    make m2sdr_sata
-   ./m2sdr_sata -i 192.168.1.50 status
+   ./m2sdr_sata -i 192.168.1.50 info
+   ./m2sdr_sata -i 192.168.1.50 diag etherbone-bench
+   ./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-write 0x8000 4096
+   ./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-check 0x8000 4096
+   ./m2sdr_sata -i 192.168.1.50 init
+   ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
+   ./m2sdr_sata -i 192.168.1.50 list
+   ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
+   ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
+   ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
+   ./m2sdr_sata -i 192.168.1.50 import tx_sigmf /tmp/tx.sigmf-meta
+   ./m2sdr_sata -i 192.168.1.50 play tx_test
+   ./m2sdr_sata -i 192.168.1.50 play tx_sigmf
+   ```
+   To replay a stored capture into an existing SoapySDR/GQRX receive flow, start
+   the RX application normally, then feed the Ethernet RX path from SATA:
+   ```
+   ./m2sdr_sata -i 192.168.1.50 serve fm_test
+   ```
+   The SATA Capture Volume is stored on the SATA disk at sector `0x800`;
+   automatic capture allocation starts at sector `0x100000`, and named
+   captures keep a SigMF metadata region next to the sample data. It is a small
+   capture index, not a general file system: captures stay in contiguous sector
+   ranges for the SATA streamers, SigMF provides interchange metadata, and
+   avoiding FAT/ext keeps validation and recovery simple. `init` refuses to
+   reset a non-empty volume unless `--force` is provided; it does not erase
+   sample data sectors. See
+   [SATA Workflows](doc/sata-workflows.md) for the full `m2sdr_sata` workflow
+   and [SATA Hardware Validation](doc/sata-validation.md) for measured
+   PCIe/Ethernet validity and throughput results.
+   - For PCIe + SATA source-build tests:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --build --load
+   cd litex_m2sdr/software/user
+   make m2sdr_util m2sdr_sata
+   ./m2sdr_util -c 0 info
+   ./m2sdr_sata -c 0 info
+   ./m2sdr_sata -c 0 --pattern counter diag pattern-write 0x8000 4096
+   ./m2sdr_sata -c 0 --pattern counter diag pattern-check 0x8000 4096
+   ./m2sdr_sata -c 0 init
+   ./m2sdr_sata -c 0 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
+   ./m2sdr_sata -c 0 export fm_test /tmp/fm_test.sc16 --raw
+   ./m2sdr_sata -c 0 export fm_test /tmp/fm_test.sigmf-meta
+   ./m2sdr_sata -c 0 serve fm_test
    ```
    - For Ethernet PTP time-discipline tests on the baseboard:
    ```

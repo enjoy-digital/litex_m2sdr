@@ -69,6 +69,8 @@ struct liteeth_udp_ctrl {
     uint64_t      rx_source_drops;
     uint64_t      rx_timeout_recoveries;
     uint64_t      rx_recv_errors;
+    uint64_t      rx_truncated;
+    int           rx_trunc_warned;
     uint32_t      rxq_ovfl_last;
     int           rxq_ovfl_valid;
 

@@ -22,6 +22,15 @@
 #define EB_READ_ATTEMPTS 3
 #define EB_MAX_DISCARDS 32
 #define EB_MAX_INVALID_READ_REPLIES 8
+#define EB_MAX_BURST_WORDS 255
+#define EB_PACKET_HEADER_BYTES 8
+#define EB_RECORD_HEADER_BYTES 4
+#define EB_ADDR_BYTES 4
+#define EB_MIN_PACKET_BYTES (EB_PACKET_HEADER_BYTES + EB_RECORD_HEADER_BYTES + EB_ADDR_BYTES)
+
+/* Byte offsets into an Etherbone packet: header | record header | address | data. */
+#define EB_ADDR_OFFSET (EB_PACKET_HEADER_BYTES + EB_RECORD_HEADER_BYTES) /* 12 */
+#define EB_DATA_OFFSET (EB_ADDR_OFFSET + EB_ADDR_BYTES)                  /* 16 */
 
 struct eb_connection {
     m2sdr_socket_t fd;
@@ -29,6 +38,7 @@ struct eb_connection {
     int is_direct;
     int timeout_ms;
     int last_error;
+    uint32_t read_counter;
     struct addrinfo* addr;
 };
 
@@ -79,6 +89,107 @@ static bool eb_validate_read_reply(const uint8_t *pkt, size_t len)
     if (pkt[9] != 0x0f)
         return false;
 
+    return true;
+}
+
+static void eb_put_be32(uint8_t *dst, uint32_t value)
+{
+    value = htobe32(value);
+    memcpy(dst, &value, sizeof(value));
+}
+
+static uint32_t eb_get_be32(const uint8_t *src)
+{
+    uint32_t value;
+
+    memcpy(&value, src, sizeof(value));
+    return be32toh(value);
+}
+
+static size_t eb_bulk_packet_len(size_t count)
+{
+    return EB_MIN_PACKET_BYTES + count * sizeof(uint32_t);
+}
+
+static int eb_validate_bulk_count(struct eb_connection *conn, const void *vals, size_t count)
+{
+    if (!conn || !vals || count == 0 || count > EB_MAX_BURST_WORDS)
+        return eb_fail(conn, EB_ERR_IO);
+    return EB_ERR_OK;
+}
+
+static void eb_fill_header(uint8_t *pkt)
+{
+    memset(pkt, 0, EB_MIN_PACKET_BYTES);
+    pkt[0] = 0x4e; /* Magic byte 0. */
+    pkt[1] = 0x6f; /* Magic byte 1. */
+    pkt[2] = 0x10; /* Version 1. */
+    pkt[3] = 0x44; /* 32-bit port, 32-bit address. */
+}
+
+static void eb_fill_record_header(uint8_t *pkt, uint8_t wcount, uint8_t rcount)
+{
+    pkt[8]  = 0x00; /* Unsupported Etherbone flags stay clear. */
+    pkt[9]  = 0x0f; /* 32-bit byte enable. */
+    pkt[10] = wcount;
+    pkt[11] = rcount;
+}
+
+static bool eb_validate_bulk_read_reply(const uint8_t *pkt,
+                                        size_t len,
+                                        uint32_t expected_base_addr,
+                                        size_t expected_count)
+{
+    if (!pkt || expected_count == 0 || expected_count > EB_MAX_BURST_WORDS)
+        return false;
+    if (len != eb_bulk_packet_len(expected_count))
+        return false;
+    if (pkt[0] != 0x4e || pkt[1] != 0x6f)
+        return false;
+    if (pkt[2] != 0x10 || pkt[3] != 0x44)
+        return false;
+    if (pkt[4] != 0 || pkt[5] != 0 || pkt[6] != 0 || pkt[7] != 0)
+        return false;
+    if (pkt[8] != 0x00 || pkt[9] != 0x0f)
+        return false;
+    if (pkt[10] != expected_count || pkt[11] != 0)
+        return false;
+    if (eb_get_be32(&pkt[EB_ADDR_OFFSET]) != expected_base_addr)
+        return false;
+    return true;
+}
+
+static bool eb_validate_bulk_read_reply_header(const uint8_t *pkt,
+                                               size_t len,
+                                               uint32_t *base_ret_addr,
+                                               size_t *count)
+{
+    uint32_t c;
+
+    if (!pkt || len < EB_MIN_PACKET_BYTES + sizeof(uint32_t))
+        return false;
+    if ((len - EB_MIN_PACKET_BYTES) % sizeof(uint32_t) != 0)
+        return false;
+    if (pkt[0] != 0x4e || pkt[1] != 0x6f)
+        return false;
+    if (pkt[2] != 0x10 || pkt[3] != 0x44)
+        return false;
+    if (pkt[4] != 0 || pkt[5] != 0 || pkt[6] != 0 || pkt[7] != 0)
+        return false;
+    if (pkt[8] != 0x00 || pkt[9] != 0x0f)
+        return false;
+    if (pkt[11] != 0)
+        return false;
+    c = pkt[10];
+    if (c == 0 || c > EB_MAX_BURST_WORDS)
+        return false;
+    if (len != eb_bulk_packet_len(c))
+        return false;
+
+    if (base_ret_addr)
+        *base_ret_addr = eb_get_be32(&pkt[EB_ADDR_OFFSET]);
+    if (count)
+        *count = c;
     return true;
 }
 
@@ -326,6 +437,30 @@ void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr) {
     (void)eb_write32_checked(conn, val, addr);
 }
 
+int eb_write32_bulk_checked(struct eb_connection *conn, uint32_t addr, const uint32_t *vals, size_t count)
+{
+    uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
+    size_t len;
+
+    if (eb_validate_bulk_count(conn, vals, count) != EB_ERR_OK)
+        return EB_ERR_IO;
+
+    len = eb_bulk_packet_len(count);
+    eb_fill_header(raw_pkt);
+    /* Write record only (rcount = 0): Etherbone sends no reply, so this is
+     * fire-and-forget and we cannot confirm the writes landed. */
+    eb_fill_record_header(raw_pkt, (uint8_t)count, 0);
+    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], addr);
+    for (size_t i = 0; i < count; i++)
+        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], vals[i]);
+
+    if (eb_send(conn, raw_pkt, len) < 0) {
+        fprintf(stderr, "eb_write32_bulk: send failed\n");
+        return eb_get_last_error(conn);
+    }
+    return EB_ERR_OK;
+}
+
 static int eb_recv_read_reply(struct eb_connection *conn, uint8_t raw_pkt[20])
 {
     if (conn->is_direct) {
@@ -410,6 +545,282 @@ int eb_read32_checked(struct eb_connection *conn, uint32_t addr, uint32_t *val) 
             return err;
         if (conn && conn->is_direct)
             eb_drain_direct_rx(conn);
+    }
+
+    return eb_fail(conn, err);
+}
+
+static int eb_recv_bulk_read_reply(struct eb_connection *conn,
+                                   uint8_t *raw_pkt,
+                                   size_t len,
+                                   uint32_t base_ret_addr,
+                                   size_t count)
+{
+    if (conn->is_direct) {
+        int invalid = 0;
+
+        for (;;) {
+            int received = eb_recv(conn, raw_pkt, len);
+
+            if (received < 0)
+                return eb_get_last_error(conn);
+            if (eb_validate_bulk_read_reply(raw_pkt, (size_t)received, base_ret_addr, count))
+                return EB_ERR_OK;
+            if (++invalid >= EB_MAX_INVALID_READ_REPLIES)
+                return eb_fail(conn, EB_ERR_IO);
+        }
+    } else {
+        uint8_t *p   = raw_pkt;
+        uint8_t *end = raw_pkt + len;
+
+        while (p < end) {
+            int received = eb_recv(conn, p, (size_t)(end - p));
+
+            if (received < 0) {
+                int err = eb_get_last_error(conn);
+
+                if (err == EB_ERR_TIMEOUT || err == EB_ERR_INTERRUPTED)
+                    return err;
+                fprintf(stderr, "socket read error: %s\n", strerror(errno));
+                return eb_fail(conn, EB_ERR_IO);
+            }
+            if (received == 0)
+                return eb_fail(conn, EB_ERR_IO);
+            p += received;
+        }
+        if (!eb_validate_bulk_read_reply(raw_pkt, len, base_ret_addr, count))
+            return eb_fail(conn, EB_ERR_IO);
+    }
+
+    return EB_ERR_OK;
+}
+
+/* Allocate the next reply-matching tag. 0 is reserved as a "no reply parsed
+ * yet" sentinel in the pipelined reader, so it is skipped on wrap-around. */
+static uint32_t eb_next_read_counter(struct eb_connection *conn)
+{
+    uint32_t base_ret_addr = ++conn->read_counter;
+
+    if (base_ret_addr == 0)
+        base_ret_addr = ++conn->read_counter;
+    return base_ret_addr;
+}
+
+/* Build and send one bulk-read request (rcount records, each returning to the
+ * matching base_ret_addr tag). Used by both the single-shot and pipelined readers. */
+static int eb_send_bulk_read_request(struct eb_connection *conn,
+                                     uint32_t addr,
+                                     size_t count,
+                                     uint32_t base_ret_addr)
+{
+    uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
+    size_t len;
+
+    if (!conn || count == 0 || count > EB_MAX_BURST_WORDS)
+        return eb_fail(conn, EB_ERR_IO);
+
+    len = eb_bulk_packet_len(count);
+    eb_fill_header(raw_pkt);
+    eb_fill_record_header(raw_pkt, 0, (uint8_t)count);
+    eb_put_be32(&raw_pkt[EB_ADDR_OFFSET], base_ret_addr);
+    for (size_t i = 0; i < count; i++)
+        eb_put_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i], addr + (uint32_t)(4 * i));
+
+    if (eb_send(conn, raw_pkt, len) < 0) {
+        fprintf(stderr, "eb_bulk_read: send failed\n");
+        return eb_get_last_error(conn);
+    }
+    return EB_ERR_OK;
+}
+
+static int eb_read32_bulk_once(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
+{
+    uint8_t raw_pkt[EB_MIN_PACKET_BYTES + EB_MAX_BURST_WORDS * sizeof(uint32_t)];
+    uint32_t base_ret_addr;
+    size_t len;
+    int err;
+
+    if (eb_validate_bulk_count(conn, vals, count) != EB_ERR_OK)
+        return EB_ERR_IO;
+
+    len           = eb_bulk_packet_len(count);
+    base_ret_addr = eb_next_read_counter(conn);
+
+    if (conn->is_direct)
+        eb_drain_direct_rx(conn);
+
+    err = eb_send_bulk_read_request(conn, addr, count, base_ret_addr);
+    if (err != EB_ERR_OK)
+        return err;
+
+    err = eb_recv_bulk_read_reply(conn, raw_pkt, len, base_ret_addr, count);
+    if (err != EB_ERR_OK)
+        return err;
+
+    for (size_t i = 0; i < count; i++)
+        vals[i] = eb_get_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i]);
+    conn->last_error = EB_ERR_OK;
+    return EB_ERR_OK;
+}
+
+int eb_read32_bulk_checked(struct eb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
+{
+    int err = EB_ERR_IO;
+    int attempts = (conn && conn->is_direct) ? EB_READ_ATTEMPTS : 1;
+
+    for (int attempt = 0; attempt < attempts; attempt++) {
+        err = eb_read32_bulk_once(conn, addr, vals, count);
+        if (err == EB_ERR_OK || err == EB_ERR_INTERRUPTED)
+            return err;
+        if (conn && conn->is_direct)
+            eb_drain_direct_rx(conn);
+    }
+
+    return eb_fail(conn, err);
+}
+
+struct eb_pipeline_read {
+    uint32_t base_ret_addr;
+    size_t offset;
+    size_t count;
+};
+
+static int eb_read32_bulk_pipeline_once(struct eb_connection *conn,
+                                        uint32_t addr,
+                                        uint32_t *vals,
+                                        size_t count,
+                                        size_t burst_words,
+                                        size_t window)
+{
+    struct eb_pipeline_read *pending;
+    uint8_t *raw_pkt;
+    size_t max_len;
+    size_t sent = 0;
+    size_t completed = 0;
+    size_t pending_count = 0;
+    int invalid = 0;
+    int rc = EB_ERR_IO;
+
+    if (!conn || !vals || count == 0 || burst_words == 0 ||
+        burst_words > EB_MAX_BURST_WORDS || window == 0)
+        return eb_fail(conn, EB_ERR_IO);
+
+    pending = calloc(window, sizeof(*pending));
+    if (!pending)
+        return eb_fail(conn, EB_ERR_IO);
+    max_len = eb_bulk_packet_len(burst_words);
+    raw_pkt = malloc(max_len);
+    if (!raw_pkt) {
+        free(pending);
+        return eb_fail(conn, EB_ERR_IO);
+    }
+
+    eb_drain_direct_rx(conn);
+
+    while (completed < count) {
+        while (pending_count < window && sent < count) {
+            size_t chunk = count - sent;
+            uint32_t base_ret_addr;
+
+            if (chunk > burst_words)
+                chunk = burst_words;
+            base_ret_addr = eb_next_read_counter(conn);
+            rc = eb_send_bulk_read_request(conn,
+                addr + (uint32_t)(4 * sent), chunk, base_ret_addr);
+            if (rc != EB_ERR_OK)
+                goto out;
+
+            pending[pending_count].base_ret_addr = base_ret_addr;
+            pending[pending_count].offset = sent;
+            pending[pending_count].count = chunk;
+            pending_count++;
+            sent += chunk;
+        }
+
+        for (;;) {
+            uint32_t base_ret_addr = 0;
+            size_t reply_count = 0;
+            size_t pending_index = pending_count;
+            int received = eb_recv(conn, raw_pkt, max_len);
+
+            if (received < 0) {
+                rc = eb_get_last_error(conn);
+                goto out;
+            }
+            if (!eb_validate_bulk_read_reply_header(raw_pkt, (size_t)received,
+                                                    &base_ret_addr, &reply_count)) {
+                if (++invalid >= EB_MAX_INVALID_READ_REPLIES) {
+                    rc = eb_fail(conn, EB_ERR_IO);
+                    goto out;
+                }
+                continue;
+            }
+
+            for (size_t i = 0; i < pending_count; i++) {
+                if (pending[i].base_ret_addr == base_ret_addr &&
+                    pending[i].count == reply_count) {
+                    pending_index = i;
+                    break;
+                }
+            }
+            if (pending_index == pending_count) {
+                if (++invalid >= EB_MAX_INVALID_READ_REPLIES) {
+                    rc = eb_fail(conn, EB_ERR_IO);
+                    goto out;
+                }
+                continue;
+            }
+
+            for (size_t i = 0; i < reply_count; i++)
+                vals[pending[pending_index].offset + i] = eb_get_be32(&raw_pkt[EB_DATA_OFFSET + 4 * i]);
+
+            completed += reply_count;
+            pending[pending_index] = pending[pending_count - 1];
+            pending_count--;
+            invalid = 0;
+            break;
+        }
+    }
+
+    conn->last_error = EB_ERR_OK;
+    rc = EB_ERR_OK;
+
+out:
+    free(raw_pkt);
+    free(pending);
+    return rc;
+}
+
+int eb_read32_bulk_pipeline_checked(struct eb_connection *conn, uint32_t addr, uint32_t *vals,
+                                    size_t count, size_t burst_words, size_t window)
+{
+    int err = EB_ERR_IO;
+
+    if (!conn || !vals || burst_words == 0 || burst_words > EB_MAX_BURST_WORDS || window == 0)
+        return eb_fail(conn, EB_ERR_IO);
+    if (count == 0)
+        return EB_ERR_OK;
+
+    if (!conn->is_direct || window <= 1 || count <= burst_words) {
+        for (size_t done = 0; done < count;) {
+            size_t chunk = count - done;
+
+            if (chunk > burst_words)
+                chunk = burst_words;
+            err = eb_read32_bulk_checked(conn, addr + (uint32_t)(4 * done),
+                                         vals + done, chunk);
+            if (err != EB_ERR_OK)
+                return err;
+            done += chunk;
+        }
+        return EB_ERR_OK;
+    }
+
+    for (int attempt = 0; attempt < EB_READ_ATTEMPTS; attempt++) {
+        err = eb_read32_bulk_pipeline_once(conn, addr, vals, count, burst_words, window);
+        if (err == EB_ERR_OK || err == EB_ERR_INTERRUPTED)
+            return err;
+        eb_drain_direct_rx(conn);
     }
 
     return eb_fail(conn, err);

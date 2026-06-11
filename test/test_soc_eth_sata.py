@@ -37,6 +37,11 @@ def test_eth_sata_soc_build_exposes_both_transport_csrs(tmp_path):
     assert hasattr(soc, "sata_phy")
     assert hasattr(soc, "sata_rx_streamer")
     assert hasattr(soc, "sata_tx_streamer")
+    assert not hasattr(soc, "dma_bus")
+
+    host_buffer = soc.bus.regions["sata_host_buffer"]
+    assert host_buffer.origin == soc_mod.SATA_HOST_BUFFER_BASE
+    assert host_buffer.size == soc_mod.SATA_HOST_BUFFER_SIZE
 
     builder = Builder(
         soc,
@@ -55,3 +60,32 @@ def test_eth_sata_soc_build_exposes_both_transport_csrs(tmp_path):
     assert "csr_register,sata_phy_enable" in csr_csv
     assert "csr_register,sata_rx_streamer_start" in csr_csv
     assert "csr_register,sata_tx_streamer_start" in csr_csv
+
+
+def test_pcie_sata_soc_routes_dma_to_host_buffer_and_pcie():
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(
+        variant="baseboard",
+        with_pcie=True,
+        with_eth=False,
+        with_sata=True,
+        with_jtagbone=False,
+    )
+
+    assert soc.qpll.channel_map == {"pcie": 0, "sata": 1}
+    assert hasattr(soc, "dma_bus")
+    assert hasattr(soc, "sata_dma_mem")
+
+    assert sorted(soc.dma_bus.masters) == [
+        "sata_mem2sector",
+        "sata_sector2mem",
+        "sata_sector2mem_fence",
+    ]
+
+    host_buffer = soc.bus.regions["sata_host_buffer"]
+    assert host_buffer.origin == soc_mod.SATA_HOST_BUFFER_BASE
+    assert host_buffer.size == soc_mod.SATA_HOST_BUFFER_SIZE
+
+    dma_window = soc.dma_bus.regions["sata_dma_mem"]
+    assert dma_window.origin == 0
+    assert dma_window.size == 2**32

@@ -264,6 +264,23 @@ static double monotonic_seconds(void)
     return (double)ts.tv_sec + ((double)ts.tv_nsec / 1e9);
 }
 
+static void format_capacity(char *buf, size_t len, uint64_t sectors, uint32_t sector_size)
+{
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB"};
+    double bytes = (double)sectors * (double)sector_size;
+    unsigned unit = 0;
+
+    if (!buf || len == 0)
+        return;
+
+    while (bytes >= 1024.0 && unit + 1 < sizeof(units) / sizeof(units[0])) {
+        bytes /= 1024.0;
+        unit++;
+    }
+
+    snprintf(buf, len, "%.2f %s", bytes, units[unit]);
+}
+
 static void sleep_seconds(double seconds)
 {
     struct timespec req;
@@ -1218,7 +1235,6 @@ static uint32_t icap_read(void *conn, uint32_t reg)
 
 static void info(void)
 {
-    int i;
     unsigned char soc_identifier[256];
 
     struct m2sdr_dev *conn = m2sdr_open_dev();
@@ -1227,8 +1243,13 @@ static void info(void)
     printf("\e[1m[> SoC Info:\e[0m\n");
     printf("------------\n");
 
-    for (i = 0; i < 256; i ++)
-        soc_identifier[i] = m2sdr_read32(conn, CSR_IDENTIFIER_MEM_BASE + 4 * i);
+    if (m2sdr_get_identifier(conn, (char *)soc_identifier, sizeof(soc_identifier)) != M2SDR_ERR_OK) {
+        fprintf(stderr,
+            "Failed to read SoC identifier. If this is PCIe after loading a "
+            "new bitstream, rescan the PCIe bus/driver before using the board.\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
     printf("SoC Identifier   : %s.\n", soc_identifier);
 
 #ifdef CSR_CAPABILITY_BASE
@@ -1315,6 +1336,34 @@ static void info(void)
         const char *sata_mode_str[] = {"Read-only", "Write-only", "Read+Write", "Reserved"};
         const char *sata_mode_name = (sata_mode < 4) ? sata_mode_str[sata_mode] : "Unknown";
         printf("  SATA Mode      : %s\n", sata_mode_name);
+        {
+            struct m2sdr_sata_info sata_info;
+            int sata_rc = m2sdr_get_sata_info(conn, &sata_info, 1000);
+            if (sata_rc == M2SDR_ERR_OK) {
+                printf("  SATA PHY       : %s (status=0x%08" PRIx32 ")\n",
+                    sata_info.phy_ready ? "Ready" : "Not ready",
+                    sata_info.phy_status);
+                printf("  SATA Disk      : %s\n",
+                    sata_info.drive_present ? "Present" : "Not present");
+                if (sata_info.drive_present) {
+                    char capacity[32];
+                    format_capacity(capacity, sizeof(capacity),
+                        sata_info.sector_count,
+                        sata_info.logical_sector_size ? sata_info.logical_sector_size : 512);
+                    printf("  SATA Model     : %s\n", sata_info.model[0] ? sata_info.model : "Unknown");
+                    printf("  SATA Serial    : %s\n", sata_info.serial[0] ? sata_info.serial : "Unknown");
+                    printf("  SATA Firmware  : %s\n", sata_info.firmware[0] ? sata_info.firmware : "Unknown");
+                    printf("  SATA Sectors   : %" PRIu64 "\n", sata_info.sector_count);
+                    printf("  SATA Sector Sz : %" PRIu32 " bytes\n",
+                        sata_info.logical_sector_size ? sata_info.logical_sector_size : 512);
+                    printf("  SATA Capacity  : %s\n", capacity);
+                }
+            } else if (sata_rc == M2SDR_ERR_UNSUPPORTED) {
+                printf("  SATA Disk      : Identify CSR not present\n");
+            } else {
+                printf("  SATA Disk      : Identify failed (%s)\n", m2sdr_strerror(sata_rc));
+            }
+        }
     }
 
     if (wr_enabled) {
@@ -3579,24 +3628,50 @@ static void rfic_prbs_build_sequence(uint16_t *seq)
     }
 }
 
-static uint16_t rfic_prbs_expected(const uint16_t *seq, const struct rfic_prbs_phase *phase, unsigned lane)
+static unsigned rfic_prbs_word_step(enum m2sdr_channel_layout channel_layout)
 {
-    unsigned word_advance = (phase->lane_mod + lane) / RFIC_LOOPBACK_LANES_PER_WORD;
-    return seq[(phase->phase + word_advance) % RFIC_PRBS_LEN];
+    return channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R ? 2u : 1u;
 }
 
-static void rfic_prbs_advance(struct rfic_prbs_phase *phase, unsigned lanes)
+static unsigned rfic_prbs_lane_step(enum m2sdr_channel_layout channel_layout,
+                                    unsigned lane_in_word)
+{
+    if (channel_layout == M2SDR_CHANNEL_LAYOUT_1T1R && lane_in_word >= 2)
+        return 1u;
+    return 0u;
+}
+
+static uint16_t rfic_prbs_expected(const uint16_t *seq,
+                                   const struct rfic_prbs_phase *phase,
+                                   enum m2sdr_channel_layout channel_layout,
+                                   unsigned lane)
+{
+    unsigned lane_index = phase->lane_mod + lane;
+    unsigned word_advance = lane_index / RFIC_LOOPBACK_LANES_PER_WORD;
+    unsigned lane_in_word = lane_index % RFIC_LOOPBACK_LANES_PER_WORD;
+    unsigned phase_advance = word_advance * rfic_prbs_word_step(channel_layout);
+
+    phase_advance += rfic_prbs_lane_step(channel_layout, lane_in_word);
+    return seq[(phase->phase + phase_advance) % RFIC_PRBS_LEN];
+}
+
+static void rfic_prbs_advance(struct rfic_prbs_phase *phase,
+                              enum m2sdr_channel_layout channel_layout,
+                              unsigned lanes)
 {
     unsigned total = phase->lane_mod + lanes;
+    unsigned word_advance = total / RFIC_LOOPBACK_LANES_PER_WORD;
 
-    phase->phase = (phase->phase + total / RFIC_LOOPBACK_LANES_PER_WORD) % RFIC_PRBS_LEN;
+    phase->phase = (phase->phase +
+        word_advance * rfic_prbs_word_step(channel_layout)) % RFIC_PRBS_LEN;
     phase->lane_mod = total % RFIC_LOOPBACK_LANES_PER_WORD;
 }
 
 static bool rfic_prbs_match_at(const int16_t *buf,
                                unsigned lanes,
                                const uint16_t *seq,
-                               const struct rfic_prbs_phase *phase)
+                               const struct rfic_prbs_phase *phase,
+                               enum m2sdr_channel_layout channel_layout)
 {
     unsigned sync_lanes = lanes < RFIC_PRBS_SYNC_LANES ? lanes : RFIC_PRBS_SYNC_LANES;
 
@@ -3605,7 +3680,7 @@ static bool rfic_prbs_match_at(const int16_t *buf,
 
     for (unsigned i = 0; i < sync_lanes; i++) {
         uint16_t got = (uint16_t)buf[i] & 0x0fffu;
-        uint16_t expected = rfic_prbs_expected(seq, phase, i);
+        uint16_t expected = rfic_prbs_expected(seq, phase, channel_layout, i);
 
         if (got != expected)
             return false;
@@ -3617,7 +3692,8 @@ static bool rfic_prbs_match_at(const int16_t *buf,
 static bool rfic_prbs_find_sync(const int16_t *buf,
                                 unsigned lanes,
                                 const uint16_t *seq,
-                                struct rfic_prbs_phase *phase)
+                                struct rfic_prbs_phase *phase,
+                                enum m2sdr_channel_layout channel_layout)
 {
     struct rfic_prbs_phase candidate;
 
@@ -3625,8 +3701,10 @@ static bool rfic_prbs_find_sync(const int16_t *buf,
         return false;
 
     for (candidate.phase = 0; candidate.phase < RFIC_PRBS_LEN; candidate.phase++) {
-        for (candidate.lane_mod = 0; candidate.lane_mod < RFIC_LOOPBACK_LANES_PER_WORD; candidate.lane_mod++) {
-            if (rfic_prbs_match_at(buf, lanes, seq, &candidate)) {
+        for (candidate.lane_mod = 0;
+             candidate.lane_mod < RFIC_LOOPBACK_LANES_PER_WORD;
+             candidate.lane_mod++) {
+            if (rfic_prbs_match_at(buf, lanes, seq, &candidate, channel_layout)) {
                 *phase = candidate;
                 return true;
             }
@@ -3640,13 +3718,14 @@ static uint64_t rfic_prbs_check(const int16_t *buf,
                                 unsigned lanes,
                                 const uint16_t *seq,
                                 struct rfic_prbs_phase *phase,
+                                enum m2sdr_channel_layout channel_layout,
                                 bool verbose)
 {
     uint64_t errors = 0;
 
     for (unsigned i = 0; i < lanes; i++) {
         uint16_t got = (uint16_t)buf[i] & 0x0fffu;
-        uint16_t expected = rfic_prbs_expected(seq, phase, i);
+        uint16_t expected = rfic_prbs_expected(seq, phase, channel_layout, i);
 
         if (unlikely(got != expected)) {
             if (verbose && errors < 8) {
@@ -3657,7 +3736,7 @@ static uint64_t rfic_prbs_check(const int16_t *buf,
         }
     }
 
-    rfic_prbs_advance(phase, lanes);
+    rfic_prbs_advance(phase, channel_layout, lanes);
     return errors;
 }
 
@@ -3676,6 +3755,7 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     struct m2sdr_dev *dev = NULL;
     struct m2sdr_config cfg;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    enum m2sdr_channel_layout channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
     const unsigned samples_per_buf = m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
     const unsigned lanes_per_buf = M2SDR_BUFFER_BYTES / sizeof(int16_t);
     struct rfic_prbs_phase phase = {0, 0};
@@ -3734,6 +3814,7 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
     cfg.bandwidth = sample_rate;
     cfg.loopback = 1;
     cfg.enable_8bit_mode = false;
+    channel_layout = cfg.channel_layout;
     rc = loopback_reset_datapath(dev, NULL);
     if (rc != M2SDR_ERR_OK)
         goto cleanup;
@@ -3769,7 +3850,7 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
         (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
 
         if (!host_synced) {
-            if (!rfic_prbs_find_sync(rx_buf, lanes_per_buf, seq, &phase)) {
+            if (!rfic_prbs_find_sync(rx_buf, lanes_per_buf, seq, &phase, channel_layout)) {
                 stale_buffers++;
                 if (stale_buffers == 1)
                     rfic_prbs_print_rx_preview(rx_buf, lanes_per_buf);
@@ -3785,7 +3866,8 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
             host_synced = true;
         }
 
-        uint64_t errors = rfic_prbs_check(rx_buf, lanes_per_buf, seq, &phase, checked_buffers == 0);
+        uint64_t errors = rfic_prbs_check(rx_buf, lanes_per_buf, seq, &phase,
+            channel_layout, checked_buffers == 0);
         total_errors += errors;
         checked_buffers++;
         if (errors)
@@ -3839,6 +3921,117 @@ cleanup:
 #endif
 #endif
 
+/* AGC helpers */
+/*-------------*/
+
+static const char *agc_detector_name(enum m2sdr_agc_detector detector)
+{
+    switch (detector) {
+    case M2SDR_AGC_DETECTOR_RX1_LOW:  return "rx1_low";
+    case M2SDR_AGC_DETECTOR_RX1_HIGH: return "rx1_high";
+    case M2SDR_AGC_DETECTOR_RX2_LOW:  return "rx2_low";
+    case M2SDR_AGC_DETECTOR_RX2_HIGH: return "rx2_high";
+    default:                          return "unknown";
+    }
+}
+
+static bool parse_agc_detector(const char *text, enum m2sdr_agc_detector *detector)
+{
+    if (!text || !detector)
+        return false;
+
+    if (!strcmp(text, "rx1_low") || !strcmp(text, "rx1-low")) {
+        *detector = M2SDR_AGC_DETECTOR_RX1_LOW;
+        return true;
+    }
+    if (!strcmp(text, "rx1_high") || !strcmp(text, "rx1-high")) {
+        *detector = M2SDR_AGC_DETECTOR_RX1_HIGH;
+        return true;
+    }
+    if (!strcmp(text, "rx2_low") || !strcmp(text, "rx2-low")) {
+        *detector = M2SDR_AGC_DETECTOR_RX2_LOW;
+        return true;
+    }
+    if (!strcmp(text, "rx2_high") || !strcmp(text, "rx2-high")) {
+        *detector = M2SDR_AGC_DETECTOR_RX2_HIGH;
+        return true;
+    }
+
+    return false;
+}
+
+static void agc_status(void)
+{
+    static const enum m2sdr_agc_detector detectors[] = {
+        M2SDR_AGC_DETECTOR_RX1_LOW,
+        M2SDR_AGC_DETECTOR_RX1_HIGH,
+        M2SDR_AGC_DETECTOR_RX2_LOW,
+        M2SDR_AGC_DETECTOR_RX2_HIGH,
+    };
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    bool agc_pin = false;
+    int rc;
+
+    printf("\e[1m[> AGC Status:\e[0m\n");
+    printf("-------------\n");
+
+    rc = m2sdr_get_agc_pin(conn, &agc_pin);
+    if (rc == M2SDR_ERR_OK)
+        printf("EN_AGC pin       : %s\n", agc_pin ? "enabled" : "disabled");
+    else
+        printf("EN_AGC pin       : unavailable (%s)\n", m2sdr_strerror(rc));
+
+    for (unsigned i = 0; i < sizeof(detectors) / sizeof(detectors[0]); i++) {
+        uint32_t count = 0;
+        rc = m2sdr_get_agc_count(conn, detectors[i], &count);
+        if (rc == M2SDR_ERR_OK)
+            printf("%-16s: %" PRIu32 "\n", agc_detector_name(detectors[i]), count);
+        else
+            printf("%-16s: unavailable (%s)\n", agc_detector_name(detectors[i]), m2sdr_strerror(rc));
+    }
+
+    m2sdr_close_dev(conn);
+}
+
+static int agc_counter_configure(enum m2sdr_agc_detector detector, uint16_t threshold, bool enable)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    struct m2sdr_agc_counter_config config = {
+        .enable = enable,
+        .clear = true,
+        .threshold = threshold,
+    };
+    int rc = m2sdr_configure_agc_counter(conn, detector, &config);
+
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_configure_agc_counter(%s) failed: %s\n",
+            agc_detector_name(detector), m2sdr_strerror(rc));
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+
+    printf("%s threshold=%u enable=%s\n",
+        agc_detector_name(detector), threshold, enable ? "yes" : "no");
+    m2sdr_close_dev(conn);
+    return 0;
+}
+
+static int agc_counter_clear(enum m2sdr_agc_detector detector)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    int rc = m2sdr_clear_agc_counter(conn, detector);
+
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_clear_agc_counter(%s) failed: %s\n",
+            agc_detector_name(detector), m2sdr_strerror(rc));
+        m2sdr_close_dev(conn);
+        return 1;
+    }
+
+    m2sdr_close_dev(conn);
+    return 0;
+}
+
 /* Help */
 /*------*/
 
@@ -3882,6 +4075,12 @@ static void help(void)
            "      Read an FPGA register.\n"
            "  reg-write OFFSET VALUE\n"
            "      Write an FPGA register.\n"
+           "  agc-status\n"
+           "      Show RF_EN_AGC pin state and FPGA AGC saturation counters.\n"
+           "  agc-counter DETECTOR THRESHOLD [enable|disable]\n"
+           "      Configure an AGC counter threshold and clear it. DETECTOR: rx1_low, rx1_high, rx2_low, rx2_high.\n"
+           "  agc-clear [DETECTOR|all]\n"
+           "      Clear one or all FPGA AGC saturation counters.\n"
            "\n"
            "ptp commands:\n"
            "  ptp-status\n"
@@ -4219,6 +4418,59 @@ int main(int argc, char **argv)
         if (!parse_next_u32_arg("offset", argv, &optind, &offset))
             exit(1);
         test_reg_read(offset);
+    }
+    else if (cmd_is(cmd, "agc_status", "agc-status")) {
+        if (optind < argc)
+            goto show_help;
+        agc_status();
+    }
+    else if (cmd_is(cmd, "agc_counter", "agc-counter")) {
+        enum m2sdr_agc_detector detector;
+        uint16_t threshold;
+        bool enable = true;
+
+        if (!have_args(optind, argc, 2))
+            goto show_help;
+        if (!parse_agc_detector(argv[optind++], &detector)) {
+            fprintf(stderr, "Invalid AGC detector (expected rx1_low, rx1_high, rx2_low, or rx2_high)\n");
+            exit(1);
+        }
+        if (m2sdr_cli_parse_u16(argv[optind++], &threshold) != 0) {
+            fprintf(stderr, "Invalid AGC threshold\n");
+            exit(1);
+        }
+        if (optind < argc && m2sdr_cli_parse_bool(argv[optind++], &enable) != 0) {
+            fprintf(stderr, "Invalid AGC counter enable value\n");
+            exit(1);
+        }
+        if (optind < argc)
+            goto show_help;
+        return agc_counter_configure(detector, threshold, enable);
+    }
+    else if (cmd_is(cmd, "agc_clear", "agc-clear")) {
+        static const enum m2sdr_agc_detector detectors[] = {
+            M2SDR_AGC_DETECTOR_RX1_LOW,
+            M2SDR_AGC_DETECTOR_RX1_HIGH,
+            M2SDR_AGC_DETECTOR_RX2_LOW,
+            M2SDR_AGC_DETECTOR_RX2_HIGH,
+        };
+        const char *selection = optind < argc ? argv[optind++] : "all";
+
+        if (optind < argc)
+            goto show_help;
+        if (!strcmp(selection, "all")) {
+            for (unsigned i = 0; i < sizeof(detectors) / sizeof(detectors[0]); i++) {
+                if (agc_counter_clear(detectors[i]) != 0)
+                    return 1;
+            }
+        } else {
+            enum m2sdr_agc_detector detector;
+            if (!parse_agc_detector(selection, &detector)) {
+                fprintf(stderr, "Invalid AGC detector (expected rx1_low, rx1_high, rx2_low, rx2_high, or all)\n");
+                return 1;
+            }
+            return agc_counter_clear(detector);
+        }
     }
 
     /* Scratch cmds. */

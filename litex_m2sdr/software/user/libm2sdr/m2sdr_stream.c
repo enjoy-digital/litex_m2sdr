@@ -21,7 +21,6 @@
 #include "litepcie_helpers.h"
 #endif
 
-#define M2SDR_DMA_HEADER_SIZE 16
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
@@ -38,6 +37,8 @@ static unsigned m2sdr_sample_size(enum m2sdr_format format)
         return 4;
     case M2SDR_FORMAT_SC8_Q7:
         return 2;
+    case M2SDR_FORMAT_BFP8_Q11:
+        return M2SDR_BFP8_BLOCK_BYTES;
     default:
         return 0;
     }
@@ -681,11 +682,15 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
 
 #if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        /* Also clear the local enable flags: the wait helpers pass them to
+         * the kernel on every poll and would silently re-enable the DMA. */
         if (direction == M2SDR_RX && dev->rx_configured) {
+            dev->rx_dma.writer_enable = 0;
             litepcie_dma_writer(dev->rx_dma.fds.fd, 0,
                                 &dev->rx_dma.writer_hw_count,
                                 &dev->rx_dma.writer_sw_count);
         } else if (direction == M2SDR_TX && dev->tx_configured) {
+            dev->tx_dma.reader_enable = 0;
             litepcie_dma_reader(dev->tx_dma.fds.fd, 0,
                                 &dev->tx_dma.reader_hw_count,
                                 &dev->tx_dma.reader_sw_count);
@@ -698,6 +703,57 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
         if (direction == M2SDR_RX)
             return m2sdr_liteeth_rx_stream_deactivate(dev);
         return m2sdr_liteeth_tx_stream_deactivate(dev);
+    }
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+#if M2SDR_HAVE_LITEPCIE
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        /* The kernel clears its ring counters across a stop/start cycle, so
+         * the userspace counters must be resynced or the ring arithmetic in
+         * the wait helpers never matches again (RX then times out forever). */
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            struct litepcie_dma_ctrl *dma = &dev->rx_dma;
+            dma->writer_enable = 1;
+            if (dev->zero_copy) {
+                litepcie_dma_writer(dma->fds.fd, 1,
+                                    &dma->writer_hw_count,
+                                    &dma->writer_sw_count);
+                dev->rx_user_count = dma->writer_hw_count;
+                dev->rx_release_count = dma->writer_hw_count;
+            }
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+            dma->reader_enable = 1;
+            if (dev->zero_copy) {
+                litepcie_dma_reader(dma->fds.fd, 1,
+                                    &dma->reader_hw_count,
+                                    &dma->reader_sw_count);
+                dev->tx_user_count = dma->reader_hw_count;
+                dev->tx_submit_count = dma->reader_hw_count;
+            }
+        } else {
+            return M2SDR_ERR_STATE;
+        }
+        return M2SDR_ERR_OK;
+    }
+#endif
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        if (direction == M2SDR_RX) {
+            if (!dev->liteeth_rx_config_valid)
+                return M2SDR_ERR_STATE;
+            return m2sdr_liteeth_rx_stream_activate(dev, &dev->liteeth_rx_config);
+        }
+        return m2sdr_liteeth_tx_stream_activate(dev);
     }
 
     return M2SDR_ERR_UNSUPPORTED;
@@ -967,7 +1023,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                 to_copy = total_bytes - copied;
             if (dev->rx_header_enable) {
                 uint64_t ts = 0;
-                if (m2sdr_parse_dma_header((const uint8_t *)buf, &ts) && meta) {
+                /* Keep the first buffer's timestamp: it corresponds to the
+                 * first sample of the block returned to the caller. */
+                if (meta && !(meta->flags & M2SDR_META_FLAG_HAS_TIME) &&
+                    m2sdr_parse_dma_header((const uint8_t *)buf, &ts)) {
                     meta->timestamp = ts;
                     meta->flags |= M2SDR_META_FLAG_HAS_TIME;
                 }
@@ -997,7 +1056,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                 to_copy = total_bytes - copied;
             if (dev->rx_header_enable) {
                 uint64_t ts = 0;
-                if (m2sdr_parse_dma_header(buf, &ts) && meta) {
+                /* Keep the first buffer's timestamp: it corresponds to the
+                 * first sample of the block returned to the caller. */
+                if (meta && !(meta->flags & M2SDR_META_FLAG_HAS_TIME) &&
+                    m2sdr_parse_dma_header(buf, &ts)) {
                     meta->timestamp = ts;
                     meta->flags |= M2SDR_META_FLAG_HAS_TIME;
                 }
@@ -1204,6 +1266,10 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
         m2sdr_write_dma_header(base, ts);
     }
 
+    /* Both backends emit fixed-size units (mmap DMA ring buffers framed by a
+     * fixed frame_cycles, full UDP packets): a short submit still puts the
+     * whole buffer on the air, so callers must zero-fill the tail and account
+     * for its duration themselves. */
     (void)num_samples;
 
 #if M2SDR_HAVE_LITEPCIE
@@ -1238,5 +1304,34 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
     }
 #endif
     /* DMA/UDP ring advances on read in non-zero-copy and LiteEth modes. */
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_buffer_metadata(struct m2sdr_dev *dev,
+                              enum m2sdr_direction direction,
+                              const void *buffer,
+                              struct m2sdr_metadata *meta)
+{
+    if (!dev || !buffer || !meta)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX)
+        return M2SDR_ERR_INVAL;
+
+    memset(meta, 0, sizeof(*meta));
+
+    if (!dev->rx_header_enable)
+        return M2SDR_ERR_OK;
+
+    /* m2sdr_get_buffer() returns the payload pointer: with stripping enabled
+     * the header sits right before it, otherwise it leads the buffer. */
+    const uint8_t *header = (const uint8_t *)buffer;
+    if (dev->rx_strip_header)
+        header -= M2SDR_DMA_HEADER_SIZE;
+
+    uint64_t ts = 0;
+    if (m2sdr_parse_dma_header(header, &ts)) {
+        meta->timestamp = ts;
+        meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+    }
     return M2SDR_ERR_OK;
 }

@@ -156,7 +156,7 @@ static void help(void)
     puts("  -h, --help            Show this help message.");
     puts("  -q, --quiet           Quiet mode.");
     puts("  -t, --timed-start     Timed start (align to the next second).");
-    puts("      --format FMT      Sample format: sc16 or sc8 (default: sc16).");
+    puts("      --format FMT      Sample format: sc16, sc8 or encoded bfp8 (default: sc16).");
     puts("");
     puts("SigMF input:");
     puts("      --capture-index N Select capture index from SigMF metadata (default: 0).");
@@ -208,6 +208,10 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
 
     if (m2sdr_set_tx_header(dev, header_bytes > 0) != 0) {
         fprintf(stderr, "m2sdr_set_tx_header failed\n");
+        goto cleanup;
+    }
+    if (m2sdr_set_sample_format(dev, format) != 0) {
+        fprintf(stderr, "m2sdr_set_sample_format failed\n");
         goto cleanup;
     }
 
@@ -436,7 +440,7 @@ int main(int argc, char **argv)
             break;
         case 1:
             if (m2sdr_cli_parse_format(optarg, &format) != 0) {
-                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                m2sdr_cli_invalid_choice("format", optarg, "sc16, sc8 or bfp8");
                 return 1;
             }
             break;
@@ -541,6 +545,11 @@ int main(int argc, char **argv)
 
     if (!m2sdr_cli_finalize_device(&cli_dev))
         return 1;
+
+    if (format == M2SDR_FORMAT_BFP8_Q11 && sigmf_header_bytes != 0) {
+        fprintf(stderr, "BFP8 uses fixed 1024-byte blocks and cannot be combined with framed SigMF headers\n");
+        return 1;
+    }
 
     m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format,
                sigmf_header_bytes, start_offset_bytes, end_offset_bytes);
