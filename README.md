@@ -219,6 +219,30 @@ Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, 
 
 When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
 
+[> Wide Analog Bandwidth (RFIC Overclock)
+------------------------------------------
+
+The AD9361's analog baseband filters are normally limited to ~56 MHz. Requesting a sample rate above 61.44 MSPS (up to 122.88) selects the wide-bandwidth mode automatically:
+
+```bash
+m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
+```
+
+Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are force-widened with tuned register words, opening a true ~100 MHz analog passband at 122.88 MSPS. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
+
+Measured (loopback TX1->RX1 with 40 dB pad + external-receiver cross-check, 3.6 GHz, 100 MHz NR-FR1-TM3.1 64QAM test model):
+
+| Metric                          | Wide (overclock)        | Stock ~56 MHz       |
+|---------------------------------|-------------------------|---------------------|
+| Usable analog bandwidth         | ~100 MHz                | ~56 MHz             |
+| EVM, 100 MHz NR TM3.1 (PDSCH)   | ~10% RMS (*)            | n/a (BW > filter)   |
+| EVM, 10 MHz NR TM3.1            | ~3% RMS                 | ~3% RMS             |
+| No-signal RX floor (rx-gain 55) | -31.6 dBFS              | -34 dBFS            |
+| TX image rejection, tx-att 0    | ~30 dB                  | ~42 dB              |
+| TX image rejection, tx-att >=10 | ~44-58 dB               | ~44-58 dB           |
+
+(*) With TX magnitude pre-emphasis flattening the widened-filter rolloff the per-band effective SNR is uniform (+/-50 MHz); the ~10% ceiling decomposes into ~7% TX (reference/LO phase noise) and ~8.5% RX (widened-BBF noise floor). Best EVM is obtained on the internal clock reference; an external 10 MHz reference costs ~6% EVM through the Si5351's higher multiplication ratio (N=84 vs N=34).
+
 [> Getting Started
 ------------------
 <a id="quick-start"></a>

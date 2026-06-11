@@ -70,9 +70,10 @@ You can pass device arguments to configure the driver. These are most useful whe
   The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
 - **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
 - **Bit mode**: `bitmode=8|16`
-- **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
-  - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+  - Rates above `61.44 MSPS` automatically use the wide-bandwidth data-port mode; these profiles affect the AD9361 `1x` FIR path used by that mode.
+- **PCIe high-rate packing**: `bitmode=8`
+  - Useful above `61.44 MSPS` when DMA bandwidth matters. The driver no longer silently overrides PCIe to 8-bit mode, so request `bitmode=8` or a `CS8` stream explicitly.
 - **Clock source**: `clock_source=internal|external|fpga`
   - `internal` keeps the local XO path.
   - `external` selects the SI5351C `10MHz` CLKIN from the uFL connector.
@@ -97,12 +98,12 @@ You can pass device arguments to configure the driver. These are most useful whe
 
 Example:
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8,oversampling=1"
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8"
 ```
 
 Example (122.88 MSPS edge-flatness A/B test):
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
+SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,ad9361_fir_profile=wide"
 ```
 
 Example (Etherbone control + Soapy RX over FPGA VRT):

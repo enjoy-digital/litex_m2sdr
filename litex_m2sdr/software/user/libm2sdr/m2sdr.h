@@ -528,7 +528,6 @@ struct m2sdr_config {
     bool    calibrate_interface_delay;
     int32_t bist_tone_freq;
     bool    enable_8bit_mode;
-    bool    enable_oversample;
     /* Preferred typed RF topology controls. */
     enum m2sdr_channel_layout channel_layout;
     enum m2sdr_clock_source clock_source;

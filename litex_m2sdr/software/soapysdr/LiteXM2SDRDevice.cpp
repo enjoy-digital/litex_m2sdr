@@ -627,10 +627,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     } else {
         _bitMode = 16;
     }
+    if (_bitMode != 8 && _bitMode != 16)
+        throw std::runtime_error("Invalid bitmode: " + std::to_string(_bitMode) + " (supported: 8, 16)");
 
     /* Configure Mode based on _bitMode */
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
-    m2sdr_set_bitmode(_dev, _bitMode == 8);
+    setSampleMode();
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
@@ -686,9 +688,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         do_init = args.at("bypass_init")[0] == '0';
     }
 
-    if (args.count("oversampling") > 0) {
-        _oversampling = std::stoi(args.at("oversampling"));
-    }
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");
     } else if (args.count("fir_profile") > 0) {
@@ -1617,38 +1616,28 @@ void SoapyLiteXM2SDR::setSampleRate(
         rate / 1e6);
 
     uint32_t sample_rate = static_cast<uint32_t>(rate);
-    _rateMult = 1.0;
 
-    if (isLitePCIe()) {
-        /* For PCIe, if the sample rate is above 61.44 MSPS, force 8-bit mode + oversampling. */
-        if (rate > LITEPCIE_8BIT_THRESHOLD) {
-            if (_bitMode != 8) {
-                SoapySDR::logf(SOAPY_SDR_WARNING,
-                    "Sample rate %.2f MSPS requires 8-bit + oversampling on PCIe, overriding bitmode",
-                    rate / 1e6);
-            }
-            _bitMode      = 8;
-            _oversampling = 1;
-        } else {
-            _oversampling = 0;
-        }
-    } else if (isLiteEth()) {
+    if (isLiteEth()) {
         /* For Ethernet, if the sample rate is above 20 MSPS, switch to 8-bit mode. */
         if (rate > LITEETH_8BIT_THRESHOLD) {
-            _bitMode      = 8;
-            _oversampling = 0;
+            _bitMode = 8;
         } else {
-            _bitMode      = 16;
-            _oversampling = 0;
+            _bitMode = 16;
+        }
+    } else if (isLitePCIe() && rate > LITEPCIE_8BIT_THRESHOLD) {
+        if (_bitMode == 8) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "PCIe sample rate %.2f MSPS is using 8-bit sample packing",
+                rate / 1e6);
+        } else {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "PCIe sample rate %.2f MSPS keeps 16-bit sample packing; "
+                "use bitmode=8 or a CS8 stream to reduce DMA bandwidth",
+                rate / 1e6);
         }
     }
 
-    /* If oversampling is enabled, double the rate multiplier. */
-    if (_oversampling) {
-        _rateMult = 2.0;
-    }
-
-    int64_t hw_sample_rate = static_cast<int64_t>(sample_rate / _rateMult);
+    int64_t hw_sample_rate = static_cast<int64_t>(sample_rate);
 
     if (direction == SOAPY_SDR_TX) {
         _tx_stream.samplerate = rate;
@@ -1665,7 +1654,6 @@ void SoapyLiteXM2SDR::setSampleRate(
     if (_sampleRateHwApplied &&
         _sampleRateHw == hw_sample_rate &&
         _sampleRateHwBitMode == _bitMode &&
-        _sampleRateHwOversampling == _oversampling &&
         _sampleRateHwFirProfile == _ad9361_fir_profile) {
         setSampleMode();
         if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
@@ -1682,9 +1670,8 @@ void SoapyLiteXM2SDR::setSampleRate(
     LiteEthRfOpTimeout timeout("setSampleRate");
 #endif
     /* Check and set FIR decimation/interpolation if actual rate is below 2.5 Msps */
-    double actual_rate = rate / _rateMult;
-    if (actual_rate < 1250000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", actual_rate);
+    if (rate < 1250000.0) {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 4 for rate %f < 1.25 Msps", rate);
         ad9361_phy->rx_fir_dec    = 4;
         ad9361_phy->tx_fir_int    = 4;
         ad9361_phy->bypass_rx_fir = 0;
@@ -1698,8 +1685,8 @@ void SoapyLiteXM2SDR::setSampleRate(
         ad9361_set_rx_fir_en_dis(ad9361_phy, 1);
         ad9361_set_tx_fir_en_dis(ad9361_phy, 1);
     }
-    else if (actual_rate < 2500000.0) {
-        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", actual_rate);
+    else if (rate < 2500000.0) {
+        SoapySDR::logf(SOAPY_SDR_DEBUG, "Setting FIR decimation/interpolation to 2 for rate %f < 2.5 Msps", rate);
         ad9361_phy->rx_fir_dec    = 2;
         ad9361_phy->tx_fir_int    = 2;
         ad9361_phy->bypass_rx_fir = 0;
@@ -1742,7 +1729,6 @@ void SoapyLiteXM2SDR::setSampleRate(
             _sampleRateHwApplied = true;
             _sampleRateHw = hw_sample_rate;
             _sampleRateHwBitMode = _bitMode;
-            _sampleRateHwOversampling = _oversampling;
             _sampleRateHwFirProfile = _ad9361_fir_profile;
         }
     }
@@ -1750,13 +1736,6 @@ void SoapyLiteXM2SDR::setSampleRate(
     timeout.throw_if_timed_out();
 #endif
 
-    /* If oversampling is enabled, enable oversampling on the hardware. */
-    if (_oversampling) {
-        ad9361_enable_oversampling(ad9361_phy);
-#if USE_LITEETH
-        timeout.throw_if_timed_out();
-#endif
-    }
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
@@ -1795,7 +1774,7 @@ double SoapyLiteXM2SDR::getSampleRate(
         return 0.0;
     }
 
-    return _rateMult * static_cast<double>(sample_rate);
+    return static_cast<double>(sample_rate);
 }
 
 std::vector<double> SoapyLiteXM2SDR::listSampleRates(

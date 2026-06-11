@@ -44,7 +44,7 @@ enum class SoapyLiteXM2SDREthernetMode {
  * insertion remains experimental. */
 //#define _TX_DMA_HEADER_TEST
 
-/* Thresholds above which we switch to 8-bit mode: */
+/* Thresholds relevant to 8-bit sample-packing policy. */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
 #define LITEETH_8BIT_THRESHOLD   20.0e6
 
@@ -478,7 +478,6 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     bool _sampleRateHwApplied = false;
     int64_t _sampleRateHw = 0;
     uint32_t _sampleRateHwBitMode = 0;
-    uint32_t _sampleRateHwOversampling = 0;
     std::string _sampleRateHwFirProfile;
     bool _bandwidthHwApplied = false;
     uint32_t _bandwidthHw = 0;
@@ -589,13 +588,11 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint8_t _spi_id = 0;
 
     uint32_t _bitMode           = 16;
-    uint32_t _oversampling      = 0;
     uint32_t _nChannels         = 2;
     uint32_t _samplesPerComplex = 2;
     uint32_t _bytesPerSample    = 2;
     uint32_t _bytesPerComplex   = 4;
     float    _samplesScaling    = 2047.0f;
-    float    _rateMult          = 1.0f;
 
     // register protection
     /* Serializes the RF control entry points (set/get rate, frequency,
