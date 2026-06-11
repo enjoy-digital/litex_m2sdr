@@ -12,6 +12,8 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
+from litex_m2sdr.gateware.cdc import ValueStrobeCDC
+
 # Time Discipline CDC ------------------------------------------------------------------------------
 
 class TimeDisciplineCDC(LiteXModule):
@@ -36,43 +38,33 @@ class TimeDisciplineCDC(LiteXModule):
         # clocks, so the time domain could apply a half-settled 64-bit word
         # (torn coarse write during PTP acquisition). Carry each value with
         # its strobe through a handshaked crossing instead.
-        self.write_cdc = write_cdc = stream.ClockDomainCrossing(
-            [("ts", 64)], cd_from=cd_from, cd_to="time")
+        self.write_cdc = write_cdc = ValueStrobeCDC(64, cd_from=cd_from, cd_to="time")
         self.comb += [
-            write_cdc.sink.valid.eq(self.write),
-            write_cdc.sink.ts.eq(self.write_time),
-            write_cdc.source.ready.eq(1),
-            time_gen.discipline_write.eq(write_cdc.source.valid),
-            time_gen.discipline_write_time.eq(write_cdc.source.ts),
+            write_cdc.strobe.eq(self.write),
+            write_cdc.value.eq(self.write_time),
+            time_gen.discipline_write.eq(write_cdc.strobe_o),
+            time_gen.discipline_write_time.eq(write_cdc.value_o),
         ]
 
-        self.adjust_cdc = adjust_cdc = stream.ClockDomainCrossing(
+        self.adjust_cdc = adjust_cdc = ValueStrobeCDC(
             [("sign", 1), ("value", 64)], cd_from=cd_from, cd_to="time")
         self.comb += [
-            adjust_cdc.sink.valid.eq(self.adjust),
-            adjust_cdc.sink.sign.eq(self.adjust_sign),
-            adjust_cdc.sink.value.eq(self.adjustment),
-            adjust_cdc.source.ready.eq(1),
-            time_gen.discipline_adjust.eq(adjust_cdc.source.valid),
-            time_gen.discipline_adjust_sign.eq(adjust_cdc.source.sign),
-            time_gen.discipline_adjustment.eq(adjust_cdc.source.value),
+            adjust_cdc.strobe.eq(self.adjust),
+            adjust_cdc.sign.eq(self.adjust_sign),
+            adjust_cdc.value.eq(self.adjustment),
+            time_gen.discipline_adjust.eq(adjust_cdc.strobe_o),
+            time_gen.discipline_adjust_sign.eq(adjust_cdc.sign_o),
+            time_gen.discipline_adjustment.eq(adjust_cdc.value_o),
         ]
 
         # The increment is consumed on every time-domain cycle and
         # accumulates, so register it atomically on change rather than
         # bit-synchronizing a live value.
-        time_inc_prev = Signal(32)
-        sync_from = getattr(self.sync, cd_from)
-        sync_from += time_inc_prev.eq(self.time_inc)
-        self.inc_cdc = inc_cdc = stream.ClockDomainCrossing(
-            [("inc", 32)], cd_from=cd_from, cd_to="time")
-        self.comb += [
-            inc_cdc.sink.valid.eq(self.time_inc != time_inc_prev),
-            inc_cdc.sink.inc.eq(self.time_inc),
-            inc_cdc.source.ready.eq(1),
-        ]
-        self.sync.time += If(inc_cdc.source.valid,
-            time_gen.discipline_time_inc.eq(inc_cdc.source.inc)
+        self.inc_cdc = inc_cdc = ValueStrobeCDC(32, cd_from=cd_from, cd_to="time",
+            on_change=True)
+        self.comb += inc_cdc.value.eq(self.time_inc)
+        self.sync.time += If(inc_cdc.strobe_o,
+            time_gen.discipline_time_inc.eq(inc_cdc.value_o)
         )
 
 # PTP Time Discipline ------------------------------------------------------------------------------

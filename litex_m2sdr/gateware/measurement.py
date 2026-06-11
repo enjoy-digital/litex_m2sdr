@@ -10,7 +10,8 @@ from migen.genlib.cdc import PulseSynchronizer
 from litex.gen import *
 
 from litex.soc.interconnect.csr import *
-from litex.soc.interconnect import stream
+
+from litex_m2sdr.gateware.cdc import ValueStrobeCDC
 
 # Clk Measurement ----------------------------------------------------------------------------------
 
@@ -35,15 +36,13 @@ class ClkMeasurement(LiteXModule):
         latch_sync = PulseSynchronizer("sys", "counter")
         self.submodules += latch_sync
         self.comb += latch_sync.i.eq(self.latch)
-        self.value_cdc = value_cdc = stream.ClockDomainCrossing(
-            [("value", 64)], cd_from="counter", cd_to="sys")
+        self.value_cdc = value_cdc = ValueStrobeCDC(64, cd_from="counter", cd_to="sys")
         self.comb += [
-            value_cdc.sink.valid.eq(latch_sync.o),
-            value_cdc.sink.value.eq(counter),
-            value_cdc.source.ready.eq(1),
+            value_cdc.strobe.eq(latch_sync.o),
+            value_cdc.value.eq(counter),
         ]
-        self.sync += If(value_cdc.source.valid,
-            self.value.eq(value_cdc.source.value)
+        self.sync += If(value_cdc.strobe_o,
+            self.value.eq(value_cdc.value_o)
         )
 
         # CSR (Optional).

@@ -12,6 +12,8 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect import stream
 
+from litex_m2sdr.gateware.cdc import ValueStrobeCDC
+
 # Time Generator -----------------------------------------------------------------------------------
 
 class TimeGenerator(LiteXModule):
@@ -138,58 +140,49 @@ class TimeGenerator(LiteXModule):
         time_read_ps = PulseSynchronizer("sys", "time")
         self.submodules += time_read_ps
         self.comb += time_read_ps.i.eq(self._control.fields.read)
-        self.time_read_cdc = time_read_cdc = stream.ClockDomainCrossing(
-            [("ts", 64)], cd_from="time", cd_to="sys")
+        self.time_read_cdc = time_read_cdc = ValueStrobeCDC(64, cd_from="time", cd_to="sys")
         self.comb += [
-            time_read_cdc.sink.valid.eq(time_read_ps.o),
-            time_read_cdc.sink.ts.eq(self.time),
-            time_read_cdc.source.ready.eq(1),
+            time_read_cdc.strobe.eq(time_read_ps.o),
+            time_read_cdc.value.eq(self.time),
         ]
-        self.sync += If(time_read_cdc.source.valid,
-            self._read_time.status.eq(time_read_cdc.source.ts)
+        self.sync += If(time_read_cdc.strobe_o,
+            self._read_time.status.eq(time_read_cdc.value_o)
         )
 
-        # Time Write (SW -> FPGA). The value travels with the strobe through
-        # one handshaked crossing so the time domain never applies a
-        # half-settled 64-bit word.
-        self.time_write_cdc = time_write_cdc = stream.ClockDomainCrossing(
-            [("ts", 64)], cd_from="sys", cd_to="time")
+        # Time Write (SW -> FPGA). The value travels with the strobe so the
+        # time domain never applies a half-settled 64-bit word.
+        self.time_write_cdc = time_write_cdc = ValueStrobeCDC(64, cd_from="sys", cd_to="time")
         self.comb += [
-            time_write_cdc.sink.valid.eq(self._control.fields.write),
-            time_write_cdc.sink.ts.eq(self._write_time.storage),
-            time_write_cdc.source.ready.eq(1),
-            self.write.eq(time_write_cdc.source.valid),
-            self.write_time.eq(time_write_cdc.source.ts),
+            time_write_cdc.strobe.eq(self._control.fields.write),
+            time_write_cdc.value.eq(self._write_time.storage),
+            self.write.eq(time_write_cdc.strobe_o),
+            self.write_time.eq(time_write_cdc.value_o),
         ]
 
         # Time Adjust (SW -> FPGA). Registered atomically in the time domain:
         # the adjustment is summed into the live time output on every cycle,
         # so a torn update would glitch the timestamps fed to the DMA headers
         # and VRT packets.
-        self.time_adjust_cdc = time_adjust_cdc = stream.ClockDomainCrossing(
-            [("value", 64)], cd_from="sys", cd_to="time")
+        self.time_adjust_cdc = time_adjust_cdc = ValueStrobeCDC(64, cd_from="sys", cd_to="time")
         self.comb += [
-            time_adjust_cdc.sink.valid.eq(self._time_adjustment.re),
-            time_adjust_cdc.sink.value.eq(self._time_adjustment.storage),
-            time_adjust_cdc.source.ready.eq(1),
-            self._time_adjust_change.eq(time_adjust_cdc.source.valid),
+            time_adjust_cdc.strobe.eq(self._time_adjustment.re),
+            time_adjust_cdc.value.eq(self._time_adjustment.storage),
+            self._time_adjust_change.eq(time_adjust_cdc.strobe_o),
         ]
-        self.sync.time += If(time_adjust_cdc.source.valid,
-            self.time_adjustment.eq(time_adjust_cdc.source.value)
+        self.sync.time += If(time_adjust_cdc.strobe_o,
+            self.time_adjustment.eq(time_adjust_cdc.value_o)
         )
 
         # Time Increment (SW -> FPGA). Registered atomically: the increment is
         # accumulated every cycle, so torn bits would permanently offset the
         # time.
-        self.time_inc_cdc = time_inc_cdc = stream.ClockDomainCrossing(
-            [("inc", 32)], cd_from="sys", cd_to="time")
+        self.time_inc_cdc = time_inc_cdc = ValueStrobeCDC(32, cd_from="sys", cd_to="time")
         self.comb += [
-            time_inc_cdc.sink.valid.eq(self._time_inc.re),
-            time_inc_cdc.sink.inc.eq(self._time_inc.storage),
-            time_inc_cdc.source.ready.eq(1),
+            time_inc_cdc.strobe.eq(self._time_inc.re),
+            time_inc_cdc.value.eq(self._time_inc.storage),
         ]
-        self.sync.time += If(time_inc_cdc.source.valid,
-            self.time_inc.eq(time_inc_cdc.source.inc)
+        self.sync.time += If(time_inc_cdc.strobe_o,
+            self.time_inc.eq(time_inc_cdc.value_o)
         )
 
     def add_cdc(self):
