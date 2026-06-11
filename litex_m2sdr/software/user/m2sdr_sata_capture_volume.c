@@ -83,6 +83,23 @@ static char *capture_volume_next_field(char **save)
     return field;
 }
 
+static char *capture_volume_next_line(char **save)
+{
+    char *line = *save;
+    char *sep;
+
+    if (!line)
+        return NULL;
+    sep = strchr(line, '\n');
+    if (sep) {
+        *sep = '\0';
+        *save = sep + 1;
+    } else {
+        *save = NULL;
+    }
+    return line;
+}
+
 static int capture_volume_parse_entry(struct sata_capture_volume *volume, char *line)
 {
     char *save = line;
@@ -173,12 +190,13 @@ int capture_volume_parse_text(struct sata_capture_volume *volume, char *text)
     char *save;
 
     memset(volume, 0, sizeof(*volume));
-    line = strtok_r(text, "\n", &save);
+    save = text;
+    line = capture_volume_next_line(&save);
     if (!line || strcmp(line, SATA_CAPTURE_VOLUME_MAGIC_V1) != 0)
         return 0;
 
     volume->initialized = true;
-    while ((line = strtok_r(NULL, "\n", &save)) != NULL) {
+    while ((line = capture_volume_next_line(&save)) != NULL) {
         if (strncmp(line, "entry|", 6) == 0 && capture_volume_parse_entry(volume, line) != 0)
             return -1;
     }
