@@ -132,9 +132,10 @@ class AD9361RFIC(LiteXModule):
             ], description="AD9361's status pins.")
         ])
         self._bitmode = CSRStorage(fields=[
-            CSRField("mode", size=1, offset=0, values=[
-                ("``0b0``", "12-bit mode."),
-                ("``0b1``", " 8-bit mode."),
+            CSRField("mode", size=2, offset=0, values=[
+                ("``0b00``", "12-bit mode in SC16/Q11 transport containers."),
+                ("``0b01``", " 8-bit mode in SC8/Q7 transport containers."),
+                ("``0b10``", "BFP8 block-floating transport mode."),
             ], description="Sample format.")
         ])
 

@@ -1889,19 +1889,41 @@ static void m2sdr_reset_keep_error(int rc, int *status)
         *status = rc;
 }
 
-/* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
-int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
+/* Select FPGA-side AD9361 sample transport packing. */
+int m2sdr_set_sample_format(struct m2sdr_dev *dev, enum m2sdr_format format)
 {
+    uint32_t mode;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
 
+    switch (format) {
+    case M2SDR_FORMAT_SC16_Q11:
+        mode = 0;
+        break;
+    case M2SDR_FORMAT_SC8_Q7:
+        mode = 1;
+        break;
+    case M2SDR_FORMAT_BFP8_Q11:
+        mode = 2;
+        break;
+    default:
+        return M2SDR_ERR_UNSUPPORTED;
+    }
+
 #ifdef CSR_AD9361_BITMODE_ADDR
-    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, enable_8bit ? 1 : 0) != 0)
+    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, mode) != 0)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 #else
     return M2SDR_ERR_UNSUPPORTED;
 #endif
+}
+
+/* Select 8-bit or 16-bit AD9361 sample packing in the FPGA datapath. */
+int m2sdr_set_bitmode(struct m2sdr_dev *dev, bool enable_8bit)
+{
+    return m2sdr_set_sample_format(dev, enable_8bit ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11);
 }
 
 /* Enable or disable the FPGA DMA loopback path when the backend supports it. */

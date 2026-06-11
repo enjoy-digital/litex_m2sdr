@@ -11,7 +11,11 @@ import random
 
 from litex.gen.sim import run_simulation
 
-from litex_m2sdr.gateware.ad9361.bitmode import AD9361RXBitMode, AD9361TXBitMode
+from litex_m2sdr.gateware.ad9361.bitmode import (
+    AD9361RXBitMode,
+    AD9361TXBitMode,
+    BFP8_HEADER_MAGIC,
+)
 from litex_m2sdr.gateware.ad9361.prbs import AD9361PRBSChecker, AD9361PRBSGenerator
 
 # AD9361 BitMode Tests ----------------------------------------------------------------------------
@@ -133,6 +137,177 @@ def test_ad9361_rx_bitmode_8bit_packing():
 
     run_simulation(dut, [gen(), mon()])
     assert out == [0x0B0A09080F0E0D0C]
+
+
+def test_ad9361_rx_bitmode_8bit_rounding_and_saturation():
+    """Verify RX 8-bit mode rounds 12-bit samples and clamps positive overflow."""
+    dut = AD9361RXBitMode()
+    out = []
+
+    def pack_sample12(value):
+        value &= 0xfff
+        return value | (0xf000 if value & 0x800 else 0)
+
+    def pack_word(samples):
+        word = 0
+        for i, sample in enumerate(samples):
+            word |= pack_sample12(sample) << (16 * i)
+        return word
+
+    def gen():
+        yield dut.mode.eq(1)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(0)
+        yield dut.sink.data.eq(pack_word([0x007, 0x008, 0xff9, 0xff8]))
+        yield
+        yield dut.sink.first.eq(0)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(pack_word([0x7f7, 0x7f8, 0xff7, 0x800]))
+        yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(4):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert out == [0x80FF7F7FFF000100]
+
+
+def test_ad9361_rx_bitmode_bfp8_block_header_and_payload():
+    """Verify RX BFP8 emits a block header and rounded mantissa payload."""
+    dut = AD9361RXBitMode(bfp8_payload_words=1)
+    out = []
+
+    def pack_sample12(value):
+        value &= 0xfff
+        return value | (0xf000 if value & 0x800 else 0)
+
+    def pack_word(samples):
+        word = 0
+        for i, sample in enumerate(samples):
+            word |= pack_sample12(sample) << (16 * i)
+        return word
+
+    def gen():
+        yield dut.mode.eq(2)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(0)
+        yield dut.sink.data.eq(pack_word([0x007, 0x008, 0xff9, 0xff8]))
+        yield
+        yield dut.sink.first.eq(0)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(pack_word([0x7f7, 0x7f8, 0xff7, 0x800]))
+        yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(12):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.first), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    expected_header = BFP8_HEADER_MAGIC | (4 << 32) | (1 << 40) | (1 << 56)
+    assert out == [
+        (expected_header, 1, 0),
+        (0x80FF7F7FFF000100, 0, 1),
+    ]
+
+
+def test_ad9361_rx_bitmode_bfp8_uses_low_exponent_for_small_blocks():
+    """Verify RX BFP8 preserves small samples by lowering the block exponent."""
+    dut = AD9361RXBitMode(bfp8_payload_words=1)
+    out = []
+
+    def pack_sample12(value):
+        value &= 0xfff
+        return value | (0xf000 if value & 0x800 else 0)
+
+    def pack_word(samples):
+        word = 0
+        for i, sample in enumerate(samples):
+            word |= pack_sample12(sample) << (16 * i)
+        return word
+
+    def gen():
+        yield dut.mode.eq(2)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.data.eq(pack_word([1, -1, 64, -64]))
+        yield
+        yield dut.sink.data.eq(pack_word([127, -127, 0, 7]))
+        yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(12):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    expected_header = BFP8_HEADER_MAGIC | (0 << 32) | (1 << 40) | (1 << 56)
+    assert out == [
+        expected_header,
+        0x0700817FC040FF01,
+    ]
+
+
+def test_ad9361_tx_bitmode_bfp8_header_and_payload_expansion():
+    """Verify TX BFP8 consumes a header and expands one payload word to two RFIC beats."""
+    dut = AD9361TXBitMode(bfp8_payload_words=1)
+    out = []
+
+    header = BFP8_HEADER_MAGIC | (4 << 32) | (1 << 40) | (1 << 56)
+    payload = 0x80FF7F7FFF000100
+
+    def gen():
+        yield dut.mode.eq(2)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(0)
+        yield dut.sink.data.eq(header)
+        yield
+        yield dut.sink.first.eq(0)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(payload)
+        yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert out == [
+        (0x0FF0000000100000, 0),
+        (0x08000FF007F007F0, 1),
+    ]
 
 # AD9361 PRBS Tests -------------------------------------------------------------------------------
 

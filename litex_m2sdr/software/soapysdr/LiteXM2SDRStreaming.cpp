@@ -67,6 +67,40 @@ static std::vector<size_t> parse_channel_list(const std::string &channels_str)
     return chans;
 }
 
+static inline int32_t arithmetic_shift_right(int32_t value, unsigned shift)
+{
+    if (value >= 0)
+        return value >> shift;
+    return -(((-value) + ((1 << shift) - 1)) >> shift);
+}
+
+static inline int8_t clamp_to_sc8(int32_t value)
+{
+    if (value > 127)
+        return 127;
+    if (value < -128)
+        return -128;
+    return static_cast<int8_t>(value);
+}
+
+static inline int8_t cf32_to_sc8(float sample, double scale)
+{
+    if (!std::isfinite(sample))
+        return 0;
+    const double scaled = sample * scale;
+    if (scaled > 127.0)
+        return 127;
+    if (scaled < -128.0)
+        return -128;
+    return static_cast<int8_t>(std::lround(scaled));
+}
+
+static inline int8_t sc16_q11_to_sc8(int16_t sample)
+{
+    const int32_t offset = sample < 0 ? 7 : 8;
+    return clamp_to_sc8(arithmetic_shift_right(static_cast<int32_t>(sample) + offset, 4));
+}
+
 static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format, uint32_t bit_mode);
 
 static std::string get_kwargs_string(
@@ -1588,8 +1622,8 @@ void SoapyLiteXM2SDR::interleaveCF32(
     } else if (_bytesPerSample == 1) {
         int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst) + (offset * 2 * _samplesPerComplex);
         for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = static_cast<int8_t>(samples_cf32[0] * (_samplesScaling)); /* I. */
-            dst_int8[1] = static_cast<int8_t>(samples_cf32[1] * (_samplesScaling)); /* Q. */
+            dst_int8[0] = cf32_to_sc8(samples_cf32[0], _samplesScaling); /* I. */
+            dst_int8[1] = cf32_to_sc8(samples_cf32[1], _samplesScaling); /* Q. */
             samples_cf32 += 2;
             dst_int8 += _nChannels * _samplesPerComplex;
         }
@@ -1655,8 +1689,8 @@ void SoapyLiteXM2SDR::interleaveCS16(
         int8_t *dst_int8 = reinterpret_cast<int8_t*>(dst) + (offset * 2 * _samplesPerComplex);
 
         for (uint32_t i = 0; i < len; i++) {
-            dst_int8[0] = samples_cs16[0]; /* I. */
-            dst_int8[1] = samples_cs16[1]; /* Q. */
+            dst_int8[0] = sc16_q11_to_sc8(samples_cs16[0]); /* I. */
+            dst_int8[1] = sc16_q11_to_sc8(samples_cs16[1]); /* Q. */
             samples_cs16 += 2;
             dst_int8 += _nChannels * _samplesPerComplex;
         }
@@ -1745,8 +1779,8 @@ void SoapyLiteXM2SDR::deinterleaveCS8(
     } else if (_bytesPerSample == 2) {
         const int16_t *src_int16 = reinterpret_cast<const int16_t*>(src);
         for (uint32_t i = 0; i < len; i++) {
-            samples_cs8[0] = static_cast<int8_t>(src_int16[0] >> 4); /* I. */
-            samples_cs8[1] = static_cast<int8_t>(src_int16[1] >> 4); /* Q. */
+            samples_cs8[0] = sc16_q11_to_sc8(src_int16[0]); /* I. */
+            samples_cs8[1] = sc16_q11_to_sc8(src_int16[1]); /* Q. */
             samples_cs8 += 2;
             src_int16 += _nChannels * _samplesPerComplex;
         }

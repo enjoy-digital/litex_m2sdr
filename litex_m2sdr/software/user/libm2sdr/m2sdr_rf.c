@@ -650,21 +650,25 @@ static int m2sdr_configure_gains(struct ad9361_rf_phy *phy,
 /* Configure the FPGA-side bit mode and AD9361 internal loopback controls. */
 static int m2sdr_configure_modes(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
 {
+    enum m2sdr_format format = cfg->sample_format;
+
+    if (cfg->enable_8bit_mode && format == M2SDR_FORMAT_SC16_Q11)
+        format = M2SDR_FORMAT_SC8_Q7;
+
     M2SDR_LOGF("Setting Loopback to %d\n", cfg->loopback);
     if (m2sdr_from_ad9361_rc(ad9361_bist_loopback(phy, cfg->loopback)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     /* Bit mode is implemented in the FPGA-side AD9361 wrapper rather than in
      * the AD9361 itself, so it is applied through a CSR write here. */
-    if (cfg->enable_8bit_mode)
+    if (format == M2SDR_FORMAT_BFP8_Q11)
+        M2SDR_LOGF("Enabling BFP8 mode.\n");
+    else if (format == M2SDR_FORMAT_SC8_Q7)
         M2SDR_LOGF("Enabling 8-bit mode.\n");
     else
         M2SDR_LOGF("Enabling 16-bit mode.\n");
 
-    if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, cfg->enable_8bit_mode ? 1 : 0) != 0)
-        return M2SDR_ERR_IO;
-
-    return M2SDR_ERR_OK;
+    return m2sdr_set_sample_format(dev, format);
 }
 
 /* Run the optional AD9361 built-in test modes requested by the config. */
@@ -1154,6 +1158,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->bist_prbs         = false;
     cfg->calibrate_interface_delay = false;
     cfg->enable_8bit_mode  = false;
+    cfg->sample_format      = M2SDR_FORMAT_SC16_Q11;
     cfg->channel_layout    = M2SDR_CHANNEL_LAYOUT_2T2R;
     cfg->clock_source      = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg->chan_mode         = NULL;
