@@ -44,7 +44,8 @@ enum class SoapyLiteXM2SDREthernetMode {
  * insertion remains experimental. */
 //#define _TX_DMA_HEADER_TEST
 
-/* Thresholds above which we switch to 8-bit mode: */
+/* Thresholds relevant to 8-bit sample-packing policy. */
+#define LITEPCIE_8BIT_THRESHOLD  61.44e6
 #define LITEETH_8BIT_THRESHOLD   20.0e6
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))

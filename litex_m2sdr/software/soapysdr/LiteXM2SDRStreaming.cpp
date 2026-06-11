@@ -67,7 +67,7 @@ static std::vector<size_t> parse_channel_list(const std::string &channels_str)
     return chans;
 }
 
-static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format);
+static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format, uint32_t bit_mode);
 
 static std::string get_kwargs_string(
     const SoapySDR::Kwargs &stream_args,
@@ -381,7 +381,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 setSampleMode();
             }
 
-            enum m2sdr_format m2fmt = soapy_stream_format_to_m2sdr(format);
+            enum m2sdr_format m2fmt = soapy_stream_format_to_m2sdr(format, _bitMode);
             m2sdr_stream_config_t config;
             struct m2sdr_stream_info info;
 
@@ -504,7 +504,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 setSampleMode();
             }
 
-            enum m2sdr_format m2fmt = soapy_stream_format_to_m2sdr(format);
+            enum m2sdr_format m2fmt = soapy_stream_format_to_m2sdr(format, _bitMode);
             m2sdr_stream_config_t config;
             struct m2sdr_stream_info info;
 
@@ -982,9 +982,10 @@ static inline int timeout_us_to_ms(long timeout_us)
     return static_cast<int>((timeout_us + 999) / 1000);
 }
 
-static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format)
+static enum m2sdr_format soapy_stream_format_to_m2sdr(const std::string &format, uint32_t bit_mode)
 {
-    return format == SOAPY_SDR_CS8 ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
+    return (format == SOAPY_SDR_CS8 || bit_mode == 8) ?
+        M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
 }
 
 void SoapyLiteXM2SDR::refreshTimedTxDefaults()

@@ -627,10 +627,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     } else {
         _bitMode = 16;
     }
+    if (_bitMode != 8 && _bitMode != 16)
+        throw std::runtime_error("Invalid bitmode: " + std::to_string(_bitMode) + " (supported: 8, 16)");
 
     /* Configure Mode based on _bitMode */
     SoapySDR::log(SOAPY_SDR_INFO, "Configuring bitmode");
-    m2sdr_set_bitmode(_dev, _bitMode == 8);
+    setSampleMode();
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
@@ -1621,6 +1623,17 @@ void SoapyLiteXM2SDR::setSampleRate(
             _bitMode = 8;
         } else {
             _bitMode = 16;
+        }
+    } else if (isLitePCIe() && rate > LITEPCIE_8BIT_THRESHOLD) {
+        if (_bitMode == 8) {
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "PCIe sample rate %.2f MSPS is using 8-bit sample packing",
+                rate / 1e6);
+        } else {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "PCIe sample rate %.2f MSPS keeps 16-bit sample packing; "
+                "use bitmode=8 or a CS8 stream to reduce DMA bandwidth",
+                rate / 1e6);
         }
     }
 
