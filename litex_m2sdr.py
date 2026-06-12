@@ -810,7 +810,10 @@ class BaseSoC(SoCMini):
             self.comb += [
                 self.pcie_dma0.source.connect(self.crossbar.mux.sink0),
                 If(self.crossbar.mux.sel == 0,
-                    self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+                    # The synchronizer is shared between directions and stays synced while the
+                    # other direction runs; gating the FSM reset on the Reader enable re-aligns it
+                    # with the stream on every Reader start, including in Full-Duplex.
+                    self.header.tx.reset.eq(~self.pcie_dma0.synchronizer.synced | ~self.pcie_dma0.reader.enable)
                 )
             ]
         if with_eth:
@@ -833,7 +836,11 @@ class BaseSoC(SoCMini):
             self.comb += [
                 self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
                 If(self.crossbar.demux.sel == 0,
-                    self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced)
+                    # Same as the TX Header FSM above: gating on the Writer enable aligns the
+                    # inserted headers with the first DMA buffer on every Writer start (frames are
+                    # exactly one buffer long, so a phase slip at start would persist for the
+                    # whole run).
+                    self.header.rx.reset.eq(~self.pcie_dma0.synchronizer.synced | ~self.pcie_dma0.writer.enable)
                 )
             ]
         if with_eth:

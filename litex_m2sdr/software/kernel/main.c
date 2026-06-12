@@ -391,10 +391,19 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 /*                               LitePCIe Interrupts                                              */
 /* -----------------------------------------------------------------------------------------------*/
 
-/* Function to enable a specific interrupt on a LitePCIe device */
+/* Function to enable a specific interrupt on a LitePCIe device.
+ *
+ * The MSI enable register is shared by all interrupt sources and the ioctl
+ * paths run concurrently (e.g. one thread starting the DMA writer while
+ * another starts the reader), so the read-modify-write must be locked: a
+ * lost update here leaves that source's hw_count frozen and its consumer
+ * starving while the hardware streams normally. */
 static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -404,12 +413,17 @@ static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* Function to disable a specific interrupt on a LitePCIe device */
 static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -419,6 +433,8 @@ static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* -----------------------------------------------------------------------------------------------*/
@@ -498,9 +514,15 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA Writer */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (RX only) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	/* Arm DMA Synchronizer (RX only) only if the Reader is not active:
+	 * re-arming drops `synced` and cuts the running Reader stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->reader_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Reader is active; skipping synchronizer re-arm in writer_start\n");
+	}
 }
 
 /* Stop DMA writer for a specific channel */
@@ -566,9 +588,15 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA reader */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (TX & RX) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	/* Arm DMA Synchronizer (TX & RX) only if the Writer is not active:
+	 * re-arming drops `synced` and cuts the running Writer stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->writer_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Writer is active; skipping synchronizer re-arm in reader_start\n");
+	}
 }
 
 /* Stop DMA reader for a specific channel */
