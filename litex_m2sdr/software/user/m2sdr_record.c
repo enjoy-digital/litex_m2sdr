@@ -48,7 +48,7 @@ static void help(void)
     puts("Capture options:");
     puts("  -h, --help            Show this help message.");
     puts("  -q, --quiet           Quiet mode.");
-    puts("      --format FMT      Sample format: sc16 or sc8 (default: sc16).");
+    puts("      --format FMT      Sample format: sc16, sc8 or encoded bfp8 (default: sc16).");
     puts("      --enable-header   Enable DMA header.");
     puts("      --strip-header    Strip DMA header from output.");
     puts("");
@@ -318,6 +318,10 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     }
     if (m2sdr_set_rx_header(dev, header ? true : false, (header && strip_header) ? true : false) != 0) {
         fprintf(stderr, "m2sdr_set_rx_header failed\n");
+        goto cleanup;
+    }
+    if (m2sdr_set_sample_format(dev, format) != 0) {
+        fprintf(stderr, "m2sdr_set_sample_format failed\n");
         goto cleanup;
     }
 
@@ -601,7 +605,7 @@ int main(int argc, char **argv)
             break;
         case 1:
             if (m2sdr_cli_parse_format(optarg, &format) != 0) {
-                m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
+                m2sdr_cli_invalid_choice("format", optarg, "sc16, sc8 or bfp8");
                 return 1;
             }
             break;
@@ -716,6 +720,11 @@ int main(int argc, char **argv)
 
     if (optind < argc) {
         m2sdr_cli_error("unexpected extra argument: %s", argv[optind]);
+        return 1;
+    }
+
+    if (format == M2SDR_FORMAT_BFP8_Q11 && header) {
+        fprintf(stderr, "BFP8 uses fixed 1024-byte blocks and cannot be combined with the DMA header option\n");
         return 1;
     }
 

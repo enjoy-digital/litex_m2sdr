@@ -64,15 +64,18 @@ Once installed, the driver will be automatically loaded by SoapySDR. You can the
 You can pass device arguments to configure the driver. These are most useful when probing or selecting the device:
 
 - **RX AGC mode**: `rx_agc_mode=slow|fast|hybrid|mgc`
+  Use `rx_agc_mode0`/`rx_agc_mode1` or `rx0_agc_mode`/`rx1_agc_mode` for per-channel defaults.
+- **RX AGC pin**: `rx_agc_pin=on|off` drives the FPGA-connected AD9361 `RF_EN_AGC` pin for pin-controlled gain flows.
 - **Device selection**: `path=/dev/m2sdr0` for PCIe, `eth_ip=192.168.1.50` for Ethernet, or `dev_id=pcie:/dev/m2sdr0` / `dev_id=eth:192.168.1.50:1234` for an explicit libm2sdr identifier.
 - **Ethernet discovery**: default discovery probes `192.168.1.50:1234` after PCIe. Use `eth_ips=ip[;ip[:port]...]` or `LITEXM2SDR_ETH_IPS` to override the discovery list, and `eth_discovery=0` to disable Ethernet discovery.
 - **Antenna selection**: RX uses `A_BALANCED`, TX uses `A`
   The driver intentionally exposes only the board-connected RF ports, not the full AD9361 antenna enum.
 - **Per-channel antenna**: `rx_antenna0=A_BALANCED`, `rx_antenna1=A_BALANCED`, `tx_antenna0=A`, `tx_antenna1=A`
 - **Bit mode**: `bitmode=8|16`
-- **Oversampling**: `oversampling=0|1`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
-  - Useful for `122.88 MSPS` oversampling experiments (these profiles affect the AD9361 `1x` FIR path used above `61.44 MSPS`).
+  - Rates above `61.44 MSPS` automatically use the wide-bandwidth data-port mode; these profiles affect the AD9361 `1x` FIR path used by that mode.
+- **PCIe high-rate packing**: `bitmode=8|16`
+  - Above `61.44 MSPS`, PCIe x1 capability defaults to 8-bit packing to reduce DMA bandwidth, while PCIe x2/x4 capability keeps 16-bit packing by default. Request `bitmode=8`, `bitmode=16`, or a `CS8` stream explicitly to override the default.
 - **Clock source**: `clock_source=internal|external|fpga`
   - `internal` keeps the local XO path.
   - `external` selects the SI5351C `10MHz` CLKIN from the uFL connector.
@@ -97,12 +100,12 @@ You can pass device arguments to configure the driver. These are most useful whe
 
 Example:
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8,oversampling=1"
+SoapySDRUtil --probe="driver=LiteXM2SDR,rx_agc_mode=fast,bitmode=8"
 ```
 
 Example (122.88 MSPS edge-flatness A/B test):
 ```bash
-SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,oversampling=1,ad9361_fir_profile=wide"
+SoapySDRUtil --probe="driver=LiteXM2SDR,bitmode=8,ad9361_fir_profile=wide"
 ```
 
 Example (Etherbone control + Soapy RX over FPGA VRT):

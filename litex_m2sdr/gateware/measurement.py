@@ -5,11 +5,13 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
-from migen.genlib.cdc import MultiReg, PulseSynchronizer
+from migen.genlib.cdc import PulseSynchronizer
 
 from litex.gen import *
 
 from litex.soc.interconnect.csr import *
+
+from litex_m2sdr.gateware.cdc import ValueStrobeCDC
 
 # Clk Measurement ----------------------------------------------------------------------------------
 
@@ -28,13 +30,20 @@ class ClkMeasurement(LiteXModule):
         counter = Signal(64)
         self.sync.counter += counter.eq(counter + increment)
 
-        # Latch Clock Counter.
-        latch_value = Signal(64)
-        latch_sync  = PulseSynchronizer("sys", "counter")
+        # Latch Clock Counter. The 64-bit snapshot crosses back through one
+        # handshaked crossing so software never reads a torn value while the
+        # latch settles.
+        latch_sync = PulseSynchronizer("sys", "counter")
         self.submodules += latch_sync
         self.comb += latch_sync.i.eq(self.latch)
-        self.sync.counter += If(latch_sync.o, latch_value.eq(counter))
-        self.specials += MultiReg(latch_value, self.value)
+        self.value_cdc = value_cdc = ValueStrobeCDC(64, cd_from="counter", cd_to="sys")
+        self.comb += [
+            value_cdc.strobe.eq(latch_sync.o),
+            value_cdc.value.eq(counter),
+        ]
+        self.sync += If(value_cdc.strobe_o,
+            self.value.eq(value_cdc.value_o)
+        )
 
         # CSR (Optional).
         if with_csr:

@@ -529,6 +529,9 @@ class BaseSoC(SoCMini):
                 with_ptm              = with_pcie_ptm,
             )
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
+            # The DMA synchronizer (when not bypassed by software) waits for
+            # this PPS pulse before declaring synced; PCIe streaming liveness
+            # therefore depends on the time generator staying enabled.
             self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # Host <-> SoC DMA Bus.
@@ -800,6 +803,10 @@ class BaseSoC(SoCMini):
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
         if with_pcie:
+            # The DMA synchronizer syncs on the PPS pulse derived from the
+            # time generator (enabled by default): disabling the time
+            # generator therefore holds the headers in reset and silently
+            # freezes PCIe streaming.
             self.comb += [
                 self.pcie_dma0.source.connect(self.crossbar.mux.sink0),
                 If(self.crossbar.mux.sel == 0,

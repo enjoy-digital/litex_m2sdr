@@ -18,7 +18,7 @@ from test_clks   import ClkDriver, CLOCKS
 from test_xadc   import XADCDriver
 from test_header import HeaderDriver
 from test_time   import TimeDriver, unix_to_datetime
-from test_agc    import AGCDriver
+from test_agc    import AGCDriver, default_agc_threshold
 
 # Constants ----------------------------------------------------------------------------------------
 
@@ -429,7 +429,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
 
                 dpg.add_slider_int(
                     label         = "Threshold",
-                    default_value = 1000,
+                    default_value = default_agc_threshold(f"ad9361_agc_count_{inst}"),
                     min_value     = 0,
                     max_value     = 65535,
                     tag           = f"agc_{inst}_threshold",
