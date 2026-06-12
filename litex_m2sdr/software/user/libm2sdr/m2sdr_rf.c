@@ -1094,6 +1094,47 @@ static int m2sdr_wide_bandwidth_bringup(struct m2sdr_dev *dev,
         rc = m2sdr_wide_bandwidth_verify(dev);
         if (rc == M2SDR_ERR_OK) {
             M2SDR_LOGF("Wide-bandwidth interface verified aligned (try %d).\n", try_);
+            /* RX quadrature tracking loop gain: at the driver default
+             * (K exp 0x15) the loop is effectively inert in this mode and
+             * the image rejection settles at ~23-28dBc - a direct 3.5-7%
+             * EVM floor. K exp 0x0a converges to ~40-43dBc (measured;
+             * stable from 0x02 to 0x0a). M2SDR_QEC_KEXP overrides. */
+            {
+                const char *s = getenv("M2SDR_QEC_KEXP");
+                uint8_t kexp = s ? (uint8_t)strtoul(s, NULL, 0) & 0x1F : 0x0a;
+
+                ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_2,
+                    CALIBRATION_CONFIG2_DFLT | K_EXP_PHASE(kexp));
+                ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_3,
+                    PREVENT_POS_LOOP_GAIN | K_EXP_AMPLITUDE(kexp));
+            }
+            /* RFPLL loop peaking: the LUT charge-pump current leaves a
+             * ~5dB skirt bump at 1-3MHz offsets (measured); reducing it to
+             * ~30% removes the peaking on both synthesizers and the EVM
+             * plateaus there (RX 6.8 -> 6.2%, TX 7.3 -> 5.1% on a 50MHz TM;
+             * lower values measure no further gain and erode loop margin).
+             * M2SDR_RFPLL_CP_PERCENT overrides (100 = LUT value). */
+            {
+                const char *s = getenv("M2SDR_RFPLL_CP_PERCENT");
+                unsigned pct = s ? (unsigned)strtoul(s, NULL, 0) : 30;
+                static const uint16_t cp_regs[2] = {
+                    REG_RX_CP_CURRENT, REG_TX_CP_CURRENT
+                };
+                unsigned i;
+
+                for (i = 0; i < 2; i++) {
+                    uint8_t cp = ad9361_spi_read(phy->spi, cp_regs[i]);
+                    uint8_t icp = cp & CHARGE_PUMP_CURRENT(~0);
+                    uint8_t nicp = (uint8_t)((icp * pct + 50) / 100);
+
+                    if (nicp < 1)
+                        nicp = 1;
+                    if (nicp > CHARGE_PUMP_CURRENT(~0))
+                        nicp = CHARGE_PUMP_CURRENT(~0);
+                    ad9361_spi_write(phy->spi, cp_regs[i],
+                        (cp & ~CHARGE_PUMP_CURRENT(~0)) | nicp);
+                }
+            }
             return M2SDR_ERR_OK;
         }
     }
@@ -1313,7 +1354,14 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     init_param->gpio_cal_sw1       = -1;
     init_param->gpio_cal_sw2       = -1;
 
-    rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout, 0, 0);
+    {
+        /* M2SDR_RF_CHANNEL=2 selects the second physical RF port pair
+         * (RX2/TX2) in 1T1R; the default is RX1/TX1. */
+        const char *s = getenv("M2SDR_RF_CHANNEL");
+        unsigned ch = (s != NULL && strtoul(s, NULL, 0) == 2) ? 1 : 0;
+
+        rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout, ch, ch);
+    }
     if (rc != M2SDR_ERR_OK)
         return rc;
 #ifdef USE_LITEETH
