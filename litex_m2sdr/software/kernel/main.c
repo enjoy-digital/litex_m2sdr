@@ -391,10 +391,19 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 /*                               LitePCIe Interrupts                                              */
 /* -----------------------------------------------------------------------------------------------*/
 
-/* Function to enable a specific interrupt on a LitePCIe device */
+/* Function to enable a specific interrupt on a LitePCIe device.
+ *
+ * The MSI enable register is shared by all interrupt sources and the ioctl
+ * paths run concurrently (e.g. one thread starting the DMA writer while
+ * another starts the reader), so the read-modify-write must be locked: a
+ * lost update here leaves that source's hw_count frozen and its consumer
+ * starving while the hardware streams normally. */
 static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -404,12 +413,17 @@ static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* Function to disable a specific interrupt on a LitePCIe device */
 static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -419,6 +433,8 @@ static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* -----------------------------------------------------------------------------------------------*/
