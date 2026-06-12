@@ -758,13 +758,23 @@ class BaseSoC(SoCMini):
 
         with_rfic_stream_fifos = with_eth and not with_pcie
         self.ad9361 = AD9361RFIC(
-            rfic_pads      = platform.request("ad9361_rfic"),
-            spi_pads       = platform.request("ad9361_spi"),
-            sys_clk_freq   = sys_clk_freq,
-            with_tx_fifo   = with_rfic_stream_fifos,
-            tx_fifo_depth  = 8192,
-            with_rx_fifo   = with_rfic_stream_fifos,
-            rx_fifo_depth  = 8192,
+            rfic_pads         = platform.request("ad9361_rfic"),
+            spi_pads          = platform.request("ad9361_spi"),
+            sys_clk_freq      = sys_clk_freq,
+            with_tx_fifo      = with_rfic_stream_fifos,
+            tx_fifo_depth     = 8192,
+            with_rx_fifo      = with_rfic_stream_fifos,
+            rx_fifo_depth     = 8192,
+            # The internal PHY TX->RX loopback (diagnostics-only) does not close timing at
+            # 491.52MHz rfic_clk; Oversampling builds omit it (the CSR field then has no effect).
+            with_phy_loopback = not with_rfic_oversampling,
+            # Per-lane RX IDELAYE2 deskew: at 983Mbps per lane (2T2R @ 122.88MSPS) the board's
+            # lane-to-lane skew exceeds the eye, and the AD9361's delay registers are global-only.
+            with_rx_deskew    = with_rfic_oversampling,
+            # Per-lane TX clock phase trim (MMCM + DRP): the TX-direction counterpart of the RX
+            # deskew; Artix-7 HR banks have no ODELAY, so the lane alignment is done by phasing
+            # each TX ODDR's clock instead.
+            with_tx_phase     = with_rfic_oversampling,
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
@@ -1136,13 +1146,82 @@ class BaseSoC(SoCMini):
         # RFIC clock domain.
         platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
 
+        if with_rfic_oversampling and not with_eth:
+            # TX CDC FIFO output register (the only rfic_clk-clocked *_dat1_reg in non-Eth builds):
+            # its read-address cone is re-read unconditionally every cycle and the PHY consumes one
+            # word every 4 rfic_clk cycles (tx_count wrap), so a transient mis-capture after a
+            # launcher toggles is overwritten with the settled value long before use. Relax its
+            # setup check to 2 cycles (hold stays at 0) to close timing at 491.52MHz. Scoped -from
+            # rfic_clk so the sys-side RX CDC output register (read back-to-back) is NOT relaxed.
+            platform.toolchain.pre_placement_commands += [
+                "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg*}}]",
+                "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg*}}]",
+                # The TX phase-trim BUFGCTRL selects are quasi-static control (changed only
+                # with TX idle; IGNORE0/1 make the mux asynchronous by design).
+                "set_false_path -to [get_pins -hierarchical -filter {{NAME =~ *BUFGCTRL*/S?}}]",
+                # TX ODDR paths captured by the BUFGCTRL bypass leg (pad clock): the bypass
+                # only carries data at DATA_CLK <= 245.76MHz (period >= 4.07ns) - at 491.52MHz
+                # the MMCM-phased leg is selected before TX is used - so the single-cycle
+                # 491.52MHz check is over-constrained by 2x.
+                "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+                "-to [get_clocks ad9361_rfic_rx_clk_p]",
+                "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+                "-to [get_clocks ad9361_rfic_rx_clk_p]",
+                # The TX BUFGCTRL muxes carry either the bypass (pad) clock or the MMCM-phased
+                # clocks, never both: cross-leg paths are physically impossible.
+                "set_clock_groups -logically_exclusive "
+                "-group [get_clocks ad9361_rfic_rx_clk_p] "
+                "-group [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
+                # The 2R2T PRBS checkers' compare/re-seed recurrence captures on a ce that the
+                # PHY asserts at most once per 4 rfic_clk cycles (one word per 4 DDR phases),
+                # and the capture is retimed so both compare operands are stable two cycles
+                # before every capture by construction: the recurrence paths into the state
+                # registers are exact 2-cycle paths.
+                # error_r captures the ce_rr-gated compare: on every cycle other than the
+                # (2-cycle-stable) sample cycle the gating flop forces the cone low, so the
+                # compare-dependent capture is also an exact 2-cycle path.
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                # Same retimed-capture property for the 1R1T checker's reference pair (which
+                # additionally never carries meaningful data at 491.52MHz: 1R1T caps DATA_CLK
+                # at 245.76MHz, and at 491.52MHz the design is necessarily in 2R2T mode).
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+                # The rfic -> phased-lane-domain crossing's validity is enforced by the TX phase
+                # calibration, not by static analysis: the lane trim moves the capture clock in
+                # VCO/8 steps and a miscapture shows in the per-lane PRBS error counters the
+                # calibration sweeps over (a fixed-phase same-frequency crossing, residual
+                # -0.1..-0.35ns inter-clock-tree pessimism at 491.52MHz).
+                "set_false_path -from [get_clocks rfic_clk] "
+                "-to [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
+            ]
+
         # Clk Measurements -------------------------------------------------------------------------
+
+        # At 491.52MHz rfic_clk a 64-bit free-running counter does not close timing; count a /4
+        # divided clock with increment=4 (same reported value, +/-4 cycles granularity).
+        if with_rfic_oversampling:
+            rfic_meas_div = Signal(2)
+            self.sync.rfic += rfic_meas_div.eq(rfic_meas_div + 1)
+            rfic_meas_clk = (rfic_meas_div[1], 4)
+        else:
+            rfic_meas_clk = ClockSignal("rfic")
 
         self.clk_measurement = MultiClkMeasurement(clks={
             "clk0" : ClockSignal("sys"),
             "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
-            "clk3" : ClockSignal("rfic"),
+            "clk3" : rfic_meas_clk,
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
@@ -1599,7 +1678,19 @@ def main():
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
-    builder.build(build_name=get_build_name(), run=args.build)
+    build_kwargs = {}
+    # Only pass the Vivado directives for actual builds: they are toolchain
+    # kwargs newer than some LiteX releases, and elaboration-only runs
+    # (run=False, e.g. CI) never reach Vivado.
+    if args.with_rfic_oversampling and args.build:
+        # 491.52MHz rfic_clk needs more placer/router effort than the Vivado defaults.
+        build_kwargs.update(
+            vivado_place_directive               = "ExtraTimingOpt",
+            vivado_post_place_phys_opt_directive = "AggressiveExplore",
+            vivado_route_directive               = "AggressiveExplore",
+            vivado_post_route_phys_opt_directive = "AggressiveExplore",
+        )
+    builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)

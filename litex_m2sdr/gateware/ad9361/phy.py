@@ -13,6 +13,8 @@ from litex.gen import *
 from litex.soc.interconnect.csr import *
 from litex.soc.interconnect     import stream
 
+from litex.soc.cores.clock import S7MMCM
+
 """
 AD9361 RFIC PHY (Dual Port Full Duplex LVDS Mode).
 
@@ -60,8 +62,24 @@ class AD9361PHY(LiteXModule):
 
     Parameters:
         pads: External FPGA pins connected to the AD9361.
+        with_loopback: Include the internal TX->RX loopback path (FIFO + muxes). Disable to relax
+            rfic_clk timing at high DATA_CLK rates (491.52MHz with Oversampling); the `loopback`
+            CSR field then has no effect.
+        with_rx_idelay: Insert an IDELAYE2 on each RX data lane. The AD9361's RX clock/data delay
+            registers shift all lanes together; at 983Mbps per lane (2T2R with Oversampling) the
+            board's ~300ps lane-to-lane skew leaves no common eye, so per-lane deskew is required.
+            Drive rx_idelay_value/rx_idelay_ld from the sys domain to load per-lane tap values
+            (requires an IDELAYCTRL with a 200MHz reference in the design).
+        with_tx_phase: Clock each TX data lane's ODDR (and the FB_CLK ODDR) from an MMCM-phased
+            copy of rfic_clk instead of rfic_clk directly, selectable at runtime. The TX
+            direction has no per-lane delay primitive in Artix-7 HR banks; the MMCM's per-output
+            static phase (re-programmable through its DRP, VCO/8 steps) provides the per-lane
+            trim that aligns the 983Mbps TX eyes at 491.52MHz DATA_CLK. FB_CLK's ODDR drives a
+            constant pattern, so its output can be phased across the full bit period (the global
+            search axis); the data lanes accept small forward trims. The MMCM only locks at the
+            491.52MHz DATA_CLK; at other rates leave the bypass selected (ODDRs on rfic_clk).
     """
-    def __init__(self, pads):
+    def __init__(self, pads, with_loopback=True, with_rx_idelay=False, with_tx_phase=False):
         self.sink    = sink   = stream.Endpoint(phy_layout()) # TX input  stream.
         self.source  = source = stream.Endpoint(phy_layout()) # RX output stream.
         self.control = CSRStorage(fields=[
@@ -75,16 +93,19 @@ class AD9361PHY(LiteXModule):
             ], description="Enables/disables internal loopback mode"),
         ])
 
+        if with_rx_idelay:
+            self.rx_idelay_value = Signal(5) # Tap value to load (sys domain).
+            self.rx_idelay_ld    = Signal(6) # Per-lane load strobe (sys domain).
+
         # # #
 
         # Control Signals
         # ---------------
-        mode     = Signal()  # Mode selection (1R1T or 2R2T).
-        loopback = Signal()  # Loopback enable/disable.
-        self.specials += [
-            MultiReg(self.control.fields.mode,     mode,     odomain="rfic"),
-            MultiReg(self.control.fields.loopback, loopback, odomain="rfic"),
-        ]
+        mode = Signal()  # Mode selection (1R1T or 2R2T).
+        self.specials += MultiReg(self.control.fields.mode, mode, odomain="rfic")
+        if with_loopback:
+            loopback = Signal()  # Loopback enable/disable.
+            self.specials += MultiReg(self.control.fields.loopback, loopback, odomain="rfic")
 
         # RX PHY -----------------------------------------------------------------------------------
 
@@ -152,6 +173,7 @@ class AD9361PHY(LiteXModule):
         # Assembles 12-bit I/Q samples with MSBs first, then LSBs, interleaved. Uses AD9361's
         # alignment to ensure correct data capture.
         rx_data_ibufds = Signal(6)
+        rx_data_in     = Signal(6)
         rx_data_half_i = Signal(6)
         rx_data_half_q = Signal(6)
         for i in range(6):
@@ -167,11 +189,36 @@ class AD9361PHY(LiteXModule):
                     i_CE = 1,
                     i_S  = 0,
                     i_R  = 0,
-                    i_D  = rx_data_ibufds[i],
+                    i_D  = rx_data_in[i],
                     o_Q1 = rx_data_half_i[i],
                     o_Q2 = rx_data_half_q[i],
                 )
             ]
+            if with_rx_idelay:
+                self.specials += Instance("IDELAYE2",
+                    p_IDELAY_TYPE           = "VAR_LOAD",
+                    p_DELAY_SRC             = "IDATAIN",
+                    p_REFCLK_FREQUENCY      = 200.0,
+                    p_SIGNAL_PATTERN        = "DATA",
+                    p_HIGH_PERFORMANCE_MODE = "TRUE",
+                    p_PIPE_SEL              = "FALSE",
+                    p_CINVCTRL_SEL          = "FALSE",
+                    p_IDELAY_VALUE          = 0,
+                    i_C           = ClockSignal("sys"),
+                    i_LD          = self.rx_idelay_ld[i],
+                    i_CNTVALUEIN  = self.rx_idelay_value,
+                    i_IDATAIN     = rx_data_ibufds[i],
+                    o_DATAOUT     = rx_data_in[i],
+                    i_CE          = 0,
+                    i_INC         = 0,
+                    i_LDPIPEEN    = 0,
+                    i_REGRST      = 0,
+                    i_CINVCTRL    = 0,
+                    i_DATAIN      = 0,
+                    o_CNTVALUEOUT = Open(),
+                )
+            else:
+                self.comb += rx_data_in[i].eq(rx_data_ibufds[i])
         rx_data_ia  = Signal(12)
         rx_data_qa  = Signal(12)
         rx_data_ib  = Signal(12)
@@ -220,21 +267,27 @@ class AD9361PHY(LiteXModule):
         # Routes TX data to RX when loopback is enabled. Keep an RFIC-domain FIFO
         # here instead of a single registered word so TX serializer pacing is
         # decoupled from RX-side Ethernet/backpressure pauses during diagnostics.
-        self.loopback_fifo = loopback_fifo = ClockDomainsRenamer("rfic")(
-            stream.SyncFIFO(phy_layout(), depth=16, buffered=True)
-        )
-        self.comb += [
-            If(loopback,
-                loopback_fifo.source.connect(source),
-            ).Else(
-                loopback_fifo.source.ready.eq(1),
-                source.valid.eq(rx_valid),
-                source.ia.eq(rx_source_ia),
-                source.qa.eq(rx_source_qa),
-                source.ib.eq(rx_source_ib),
-                source.qb.eq(rx_source_qb),
-            )
+        rx_source_connect = [
+            source.valid.eq(rx_valid),
+            source.ia.eq(rx_source_ia),
+            source.qa.eq(rx_source_qa),
+            source.ib.eq(rx_source_ib),
+            source.qb.eq(rx_source_qb),
         ]
+        if with_loopback:
+            self.loopback_fifo = loopback_fifo = ClockDomainsRenamer("rfic")(
+                stream.SyncFIFO(phy_layout(), depth=16, buffered=True)
+            )
+            self.comb += [
+                If(loopback,
+                    loopback_fifo.source.connect(source),
+                ).Else(
+                    loopback_fifo.source.ready.eq(1),
+                    *rx_source_connect,
+                )
+            ]
+        else:
+            self.comb += rx_source_connect
 
         # TX PHY -----------------------------------------------------------------------------------
 
@@ -244,14 +297,17 @@ class AD9361PHY(LiteXModule):
         # so the next word starts with the freshly latched IA/QA MSBs.
         tx_count = Signal(2)
         self.sync.rfic += tx_count.eq(tx_count + 1)
-        self.comb += [
-            sink.ready.eq((tx_count == 3) & (~loopback | loopback_fifo.sink.ready)),
-            loopback_fifo.sink.valid.eq(loopback & sink.valid & (tx_count == 3)),
-            loopback_fifo.sink.ia.eq(sink.ia),
-            loopback_fifo.sink.qa.eq(sink.qa),
-            loopback_fifo.sink.ib.eq(sink.ib),
-            loopback_fifo.sink.qb.eq(sink.qb),
-        ]
+        if with_loopback:
+            self.comb += [
+                sink.ready.eq((tx_count == 3) & (~loopback | loopback_fifo.sink.ready)),
+                loopback_fifo.sink.valid.eq(loopback & sink.valid & (tx_count == 3)),
+                loopback_fifo.sink.ia.eq(sink.ia),
+                loopback_fifo.sink.qa.eq(sink.qa),
+                loopback_fifo.sink.ib.eq(sink.ib),
+                loopback_fifo.sink.qb.eq(sink.qb),
+            ]
+        else:
+            self.comb += sink.ready.eq(tx_count == 3)
 
         # TX Data Latching.
         # -----------------
@@ -277,6 +333,51 @@ class AD9361PHY(LiteXModule):
             )
         ]
 
+        # TX Phase Trim (Oversampling).
+        # -----------------------------
+        # MMCM-phased copies of rfic_clk for the TX ODDRs, with a per-output glitching async
+        # bypass mux back to rfic_clk (used whenever DATA_CLK is not 491.52MHz and the MMCM is
+        # unlocked). Phases are static (0 at build, analyzed as such) and re-programmed at
+        # runtime through the DRP; data-lane trims stay small and forward so the rfic-domain
+        # launch registers keep setup margin into the phased ODDRs.
+        if with_tx_phase:
+            self.tx_phase = CSRStorage(fields=[
+                CSRField("en", size=1, offset=0,
+                    description="Clock the TX ODDRs from the MMCM-phased clocks."),
+                CSRField("mmcm_reset", size=1, offset=1,
+                    description="Hold the TX MMCM in reset (assert around DRP phase writes)."),
+            ])
+            self.tx_mmcm = S7MMCM(speedgrade=-3)
+            # Feed the MMCM and the bypass inputs from the IBUFDS output (dedicated routes);
+            # cascading out of the rfic BUFG is not placeable.
+            self.tx_mmcm.register_clkin(rx_clk_ibufds, 491.52e6)
+            self.comb += self.tx_mmcm.reset.eq(self.tx_phase.fields.mmcm_reset)
+            tx_ph_cds = []
+            for i in range(7):
+                cd_raw = ClockDomain(f"rfic_txphraw{i}", reset_less=True)
+                self.clock_domains += cd_raw
+                self.tx_mmcm.create_clkout(cd_raw, 491.52e6, phase=0, buf=None, with_reset=False)
+                cd_mux = ClockDomain(f"rfic_txph{i}", reset_less=True)
+                self.clock_domains += cd_mux
+                self.specials += Instance("BUFGCTRL",
+                    i_I0      = rx_clk_ibufds,
+                    i_I1      = cd_raw.clk,
+                    i_S0      = ~self.tx_phase.fields.en,
+                    i_S1      = self.tx_phase.fields.en,
+                    i_CE0     = 1,
+                    i_CE1     = 1,
+                    i_IGNORE0 = 1,
+                    i_IGNORE1 = 1,
+                    o_O       = cd_mux.clk,
+                )
+                tx_ph_cds.append(cd_mux)
+            self.tx_mmcm.expose_drp()
+            tx_lane_clk = [cd.clk for cd in tx_ph_cds[:6]]
+            tx_fb_clk   = tx_ph_cds[6].clk
+        else:
+            tx_lane_clk = [ClockSignal("rfic") for _ in range(6)]
+            tx_fb_clk   = ClockSignal("rfic")
+
         # TX Clocking.
         # ------------
         # Output: FB_CLK to AD9361, derived from RFIC clock (same frequency as DATA_CLK).
@@ -284,7 +385,7 @@ class AD9361PHY(LiteXModule):
         self.specials += [
             Instance("ODDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE",
-                i_C  = ClockSignal("rfic"),
+                i_C  = tx_fb_clk,
                 i_CE = 1,
                 i_S  = 0,
                 i_R  = 0,
@@ -304,7 +405,11 @@ class AD9361PHY(LiteXModule):
         # ----------
         # Generates TX_FRAME: high for MSBs (or channel 1 in 2R2T), low for LSBs(or channel 2 in
         # 2R2T). Uses SDR with 50% duty cycle.
-        tx_frame = Signal()
+        # TX_FRAME and TX_D are registered once in the rfic domain before their ODDRs to keep the
+        # serializer muxes off the IOB paths at high DATA_CLK rates (491.52MHz with Oversampling).
+        # Frame and data are delayed by the same cycle, so their alignment is preserved.
+        tx_frame   = Signal()
+        tx_frame_r = Signal()
         tx_frame_obufds = Signal()
         self.comb += [
             If(mode == AD9361PHY1R1T_MODE,
@@ -323,6 +428,12 @@ class AD9361PHY(LiteXModule):
                 })
             )
         ]
+        # The data lanes are re-registered once more in their (phased) clock domains so the
+        # rfic -> phased-domain crossing terminates on fabric flops instead of the IOB-locked
+        # ODDR D pins; the frame gets a matching extra cycle here.
+        tx_frame_r2 = Signal()
+        self.sync.rfic += tx_frame_r.eq(tx_frame)
+        self.sync.rfic += tx_frame_r2.eq(tx_frame_r)
         self.specials += [
             Instance("ODDR",
                 p_DDR_CLK_EDGE = "SAME_EDGE",
@@ -330,8 +441,8 @@ class AD9361PHY(LiteXModule):
                 i_CE = 1,
                 i_S  = 0,
                 i_R  = 0,
-                i_D1 = tx_frame,
-                i_D2 = tx_frame,
+                i_D1 = tx_frame_r2,
+                i_D2 = tx_frame_r2,
                 o_Q  = tx_frame_obufds,
             ),
             Instance("OBUFDS",
@@ -346,9 +457,11 @@ class AD9361PHY(LiteXModule):
         # Outputs TX_D[5:0] in DDR mode: I samples on rising edge, Q samples on falling edge.
         # Sequences MSBs first, then LSBs; I and Q interleaved. Relies on AD9361's alignment for
         # correct data transmission.
-        tx_data_half_i = Signal(6)
-        tx_data_half_q = Signal(6)
-        tx_data_obufds = Signal(6)
+        tx_data_half_i   = Signal(6)
+        tx_data_half_q   = Signal(6)
+        tx_data_half_i_r = Signal(6)
+        tx_data_half_q_r = Signal(6)
+        tx_data_obufds   = Signal(6)
         self.comb += [
             Case(tx_count, {
                 0b00: [  # IA/QA MSBs.
@@ -369,16 +482,30 @@ class AD9361PHY(LiteXModule):
                 ]
             })
         ]
+        self.sync.rfic += [
+            tx_data_half_i_r.eq(tx_data_half_i),
+            tx_data_half_q_r.eq(tx_data_half_q),
+        ]
+        tx_data_half_i_r2 = Signal(6)
+        tx_data_half_q_r2 = Signal(6)
         for i in range(6):
+            if with_tx_phase:
+                lane_sync = getattr(self.sync, f"rfic_txph{i}")
+            else:
+                lane_sync = self.sync.rfic
+            lane_sync += [
+                tx_data_half_i_r2[i].eq(tx_data_half_i_r[i]),
+                tx_data_half_q_r2[i].eq(tx_data_half_q_r[i]),
+            ]
             self.specials += [
                 Instance("ODDR",
                     p_DDR_CLK_EDGE = "SAME_EDGE",
-                    i_C  = ClockSignal("rfic"),
+                    i_C  = tx_lane_clk[i],
                     i_CE = 1,
                     i_S  = 0,
                     i_R  = 0,
-                    i_D1 = tx_data_half_i[i],
-                    i_D2 = tx_data_half_q[i],
+                    i_D1 = tx_data_half_i_r2[i],
+                    i_D2 = tx_data_half_q_r2[i],
                     o_Q  = tx_data_obufds[i],
                 ),
                 Instance("OBUFDS",

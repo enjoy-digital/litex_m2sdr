@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
-from migen.genlib.cdc import MultiReg
+from migen.genlib.cdc import MultiReg, PulseSynchronizer
 
 from litex.gen import *
 
@@ -17,6 +17,7 @@ from litepcie.common import *
 from litex_m2sdr.gateware.gpio import GPIORXPacker, GPIOTXUnpacker
 
 from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
+from litex_m2sdr.gateware.ad9361.cdc     import ClockDomainCrossingRegistered
 from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
@@ -98,8 +99,11 @@ class AD9361RFICStreamBypass(LiteXModule):
 
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
-        with_tx_fifo = False, tx_fifo_depth = 8192,
-        with_rx_fifo = False, rx_fifo_depth = 8192):
+        with_tx_fifo      = False, tx_fifo_depth = 8192,
+        with_rx_fifo      = False, rx_fifo_depth = 8192,
+        with_phy_loopback = True,
+        with_rx_deskew    = False,
+        with_tx_phase     = False):
         # Stream Endpoints -------------------------------------------------------------------------
         self.sink   = stream.Endpoint(dma_layout(64))
         self.source = stream.Endpoint(dma_layout(64))
@@ -165,7 +169,10 @@ class AD9361RFIC(LiteXModule):
         ]
 
         # PHY --------------------------------------------------------------------------------------
-        self.phy = AD9361PHY(rfic_pads)
+        self.phy = AD9361PHY(rfic_pads, with_loopback=with_phy_loopback, with_rx_idelay=with_rx_deskew,
+            with_tx_phase=with_tx_phase)
+        if with_rx_deskew:
+            self.add_rx_deskew()
 
         # TX/RX UnPacker/Packer (GPIOs) ------------------------------------------------------------
 
@@ -173,17 +180,19 @@ class AD9361RFIC(LiteXModule):
         self.gpio_rx_packer   = gpio_rx_packer   = GPIORXPacker()
 
         # Cross domain crossing --------------------------------------------------------------------
-        self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
+        # Registered-flags CDC FIFOs: keep the pointer synchronizers out of the memory port
+        # address/enable cones so the rfic side closes timing at 491.52MHz (see cdc.py).
+        self.tx_cdc = tx_cdc = ClockDomainCrossingRegistered(
             layout  = dma_layout(64),
             cd_from = "sys",
             cd_to   = "rfic",
-            with_common_rst = True
         )
-        self.rx_cdc = rx_cdc = stream.ClockDomainCrossing(
+        self.rx_cdc = rx_cdc = ClockDomainCrossingRegistered(
             layout  = dma_layout(64),
             cd_from = "rfic",
             cd_to   = "sys",
-            with_common_rst = True
+            # rfic_clk-clocked LUTRAM writes violate the RAMD32 min low-pulse-width at 491.52MHz.
+            register_storage = True,
         )
 
         # Buffers (For Timings) --------------------------------------------------------------------
@@ -261,6 +270,81 @@ class AD9361RFIC(LiteXModule):
             rx_buffer,
             self.source,
         )
+
+    def add_rx_deskew(self):
+        """Per-lane RX deskew: IDELAYE2 tap loading + per-lane error counters.
+
+        The error counters compare the channel 1 and channel 2 sample slots: with the AD9361 BIST
+        PRBS enabled in 2R2T mode the chip sends the same word in both slots, so any ch1/ch2
+        difference on a lane's two word bits is a capture error on that lane. Software sweeps the
+        IDELAYE2 taps and reads the counters to center each lane in its eye.
+        """
+        self.rx_deskew_idelay = CSRStorage(fields=[
+            CSRField("value", size=5, offset=0, description="IDELAYE2 tap value to load."),
+            CSRField("lane",  size=3, offset=8, description="RX data lane to load (0-5)."),
+        ], description="Load an IDELAYE2 tap value on an RX data lane (applies on write).")
+        self.rx_deskew_ctrl = CSRStorage(fields=[
+            CSRField("latch", size=1, offset=0, pulse=True,
+                description="Latch the per-lane error counters and clear them."),
+        ])
+        self.rx_deskew_err = []
+        for i in range(6):
+            csr = CSRStatus(24, name=f"rx_deskew_err{i}",
+                description=f"Latched lane {i} error count.")
+            setattr(self, f"rx_deskew_err{i}", csr)
+            self.rx_deskew_err.append(csr)
+
+        # # #
+
+        phy = self.phy
+
+        # IDELAYE2 loading: the storage fields update at the end of the write cycle, so strobe LD
+        # one cycle later when value/lane already hold the written values.
+        idelay_re_d = Signal()
+        self.sync += idelay_re_d.eq(self.rx_deskew_idelay.re)
+        self.comb += phy.rx_idelay_value.eq(self.rx_deskew_idelay.fields.value)
+        for i in range(6):
+            self.comb += phy.rx_idelay_ld[i].eq(idelay_re_d & (self.rx_deskew_idelay.fields.lane == i))
+
+        # Per-lane ch1-vs-ch2 error counters (rfic domain, pipelined for 491.52MHz DATA_CLK).
+        valid_r = Signal()
+        ia_r    = Signal(12)
+        qa_r    = Signal(12)
+        ib_r    = Signal(12)
+        qb_r    = Signal(12)
+        self.sync.rfic += [
+            valid_r.eq(phy.source.valid),
+            If(phy.source.valid,
+                ia_r.eq(phy.source.ia),
+                qa_r.eq(phy.source.qa),
+                ib_r.eq(phy.source.ib),
+                qb_r.eq(phy.source.qb),
+            )
+        ]
+        lane_err = Signal(6)
+        for i in range(6):
+            self.sync.rfic += lane_err[i].eq(valid_r & (
+                (ia_r[i] ^ ib_r[i]) | (ia_r[i+6] ^ ib_r[i+6]) |
+                (qa_r[i] ^ qb_r[i]) | (qa_r[i+6] ^ qb_r[i+6])
+            ))
+
+        latch_rfic = PulseSynchronizer("sys", "rfic")
+        self.submodules += latch_rfic
+        self.comb += latch_rfic.i.eq(self.rx_deskew_ctrl.fields.latch)
+        for i in range(6):
+            count = Signal(24)
+            hold  = Signal(24)
+            self.sync.rfic += [
+                If(lane_err[i],
+                    count.eq(count + 1)
+                ),
+                If(latch_rfic.o,
+                    hold.eq(count),
+                    count.eq(0),
+                )
+            ]
+            # hold is stable between latches; sample it through a MultiReg.
+            self.specials += MultiReg(hold, self.rx_deskew_err[i].status)
 
     def add_prbs(self):
         self.prbs_tx = CSRStorage(fields=[
