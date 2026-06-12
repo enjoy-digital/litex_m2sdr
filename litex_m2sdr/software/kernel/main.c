@@ -498,9 +498,15 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA Writer */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (RX only) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	/* Arm DMA Synchronizer (RX only) only if the Reader is not active:
+	 * re-arming drops `synced` and cuts the running Reader stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->reader_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Reader is active; skipping synchronizer re-arm in writer_start\n");
+	}
 }
 
 /* Stop DMA writer for a specific channel */
@@ -566,9 +572,15 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA reader */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (TX & RX) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	/* Arm DMA Synchronizer (TX & RX) only if the Writer is not active:
+	 * re-arming drops `synced` and cuts the running Writer stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->writer_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Writer is active; skipping synchronizer re-arm in reader_start\n");
+	}
 }
 
 /* Stop DMA reader for a specific channel */
