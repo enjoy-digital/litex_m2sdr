@@ -26,8 +26,8 @@ from litex.soc.integration.soc      import SoCRegion
 
 from litex.soc.cores.clock     import *
 from litex.soc.cores.icap      import ICAP
-from litex.soc.cores.xadc      import XADC
-from litex.soc.cores.dna       import DNA
+from litex.soc.cores.xadc      import S7SystemMonitor
+from litex.soc.cores.dna       import S7DNA
 from litex.soc.cores.gpio      import GPIOOut
 from litex.soc.cores.spi_flash import S7SPIFlash
 
@@ -458,11 +458,11 @@ class BaseSoC(SoCMini):
 
         # XADC -------------------------------------------------------------------------------------
 
-        self.xadc = XADC()
+        self.xadc = S7SystemMonitor()
 
         # DNA --------------------------------------------------------------------------------------
 
-        self.dna = DNA()
+        self.dna = S7DNA()
 
         # SPI Flash --------------------------------------------------------------------------------
 
