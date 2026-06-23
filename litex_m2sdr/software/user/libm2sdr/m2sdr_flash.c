@@ -13,12 +13,15 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <string.h>
 
 #include "csr.h"
 #include "soc.h"
 #include "libm2sdr.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_flash.h"
 
 #ifdef CSR_FLASH_BASE
@@ -47,6 +50,7 @@ static void flash_spi_cs(void *conn, uint8_t cs_n)
     m2sdr_writel(conn, CSR_FLASH_CS_N_OUT_ADDR, cs_n);
 }
 
+#ifdef USE_LITEPCIE
 static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
 {
     uint32_t status = 0;
@@ -55,7 +59,7 @@ static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
         status = m2sdr_readl(conn, CSR_FLASH_SPI_STATUS_ADDR);
         if (status & SPI_STATUS_DONE)
             return;
-        usleep(1);
+        m2sdr_sleep_us(1);
     }
 
     fprintf(stderr,
@@ -63,6 +67,7 @@ static void flash_wait_done(void *conn, const char *op, uint8_t cmd, int tx_len)
         op, cmd, tx_len, status);
     abort();
 }
+#endif
 
 /* flash_spi */
 /*-----------*/
@@ -86,18 +91,22 @@ static uint64_t flash_spi(void *conn, int tx_len, uint8_t cmd, uint32_t tx_data)
     m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
                  SPI_CTRL_START | (tx_len * SPI_CTRL_LENGTH));
 
+#ifdef USE_LITEPCIE
     if (m2sdr_legacy_handle_is_fd(conn)) {
         /* Poll SPI_STATUS_DONE for PCIe. */
         flash_wait_done(conn, "flash_spi", cmd, tx_len);
         rx = ((uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR) << 32) |
               m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
     } else {
+#endif
         /* Etherbone already pays a network latency cost, so a short fixed
          * delay is sufficient here instead of polling a local completion bit. */
-        usleep(SPI_TRANSACTION_TIME_US);
+        m2sdr_sleep_us(SPI_TRANSACTION_TIME_US);
         if (tx_len > 8)
             rx = m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
+#ifdef USE_LITEPCIE
     }
+#endif
 
     flash_spi_cs(conn, 1);
 
@@ -170,7 +179,7 @@ static int flash_wait_while_busy(void *conn, uint32_t addr, const char *op,
                 op, addr, status, (long long)elapsed_ms);
             return 1;
         }
-        usleep(1000);
+        m2sdr_sleep_us(1000);
     }
 
     return 0;
@@ -197,10 +206,12 @@ static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t
         m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
                      SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
+#ifdef USE_LITEPCIE
         if (m2sdr_legacy_handle_is_fd(conn))
             flash_wait_done(conn, "flash_write_buffer_cmd", FLASH_PP, 32);
         else
-            usleep(SPI_TRANSACTION_TIME_US);
+#endif
+            m2sdr_sleep_us(SPI_TRANSACTION_TIME_US);
 
         /* send data words */
         for (i = 0; i < size; i += 4) {
@@ -213,10 +224,12 @@ static void flash_write_buffer(void *conn, uint32_t addr, uint8_t *buf, uint16_t
             m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
                          SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
+#ifdef USE_LITEPCIE
             if (m2sdr_legacy_handle_is_fd(conn))
                 flash_wait_done(conn, "flash_write_buffer_data", FLASH_PP, 32);
             else
-                usleep(SPI_TRANSACTION_TIME_US);
+#endif
+                m2sdr_sleep_us(SPI_TRANSACTION_TIME_US);
         }
 
         flash_spi_cs(conn, 1);
@@ -254,10 +267,12 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
     m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
                  SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
+#ifdef USE_LITEPCIE
     if (m2sdr_legacy_handle_is_fd(conn))
         flash_wait_done(conn, "flash_read_buffer_cmd", FLASH_READ, 32);
     else
-        usleep(SPI_TRANSACTION_TIME_US);
+#endif
+        m2sdr_sleep_us(SPI_TRANSACTION_TIME_US);
 
     for (i = 0; i < size; i += 4) {
         m2sdr_writel(conn, CSR_FLASH_SPI_MOSI_ADDR + 0, 0);
@@ -265,10 +280,12 @@ static void m2sdr_flash_read_buffer(void *conn, uint32_t addr, uint8_t *buf, uin
         m2sdr_writel(conn, CSR_FLASH_SPI_CONTROL_ADDR,
                      SPI_CTRL_START | (32 * SPI_CTRL_LENGTH));
 
+#ifdef USE_LITEPCIE
         if (m2sdr_legacy_handle_is_fd(conn))
             flash_wait_done(conn, "flash_read_buffer_data", FLASH_READ, 32);
         else
-            usleep(SPI_TRANSACTION_TIME_US);
+#endif
+            m2sdr_sleep_us(SPI_TRANSACTION_TIME_US);
 
         rx = (uint64_t)m2sdr_readl(conn, CSR_FLASH_SPI_MISO_ADDR + 4);
         buf[i + 0] = (rx >> 24) & 0xff;

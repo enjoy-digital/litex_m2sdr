@@ -13,24 +13,29 @@
 #include <string.h>
 #include <stdarg.h>
 #include <inttypes.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 #include <signal.h>
 #include <time.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
-#include <getopt.h>
 #include <limits.h>
 
 #include "ad9361/util.h"
 #include "ad9361/ad9361.h"
 
+#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
+#endif
 #include "libm2sdr.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 
 #include "m2sdr_config.h"
 

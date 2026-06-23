@@ -40,9 +40,9 @@ static int m2sdr_liteeth_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *v
      * keeps request/reply pairs from interleaving on the shared connection
      * when several threads (RF control, streaming recovery, time reads)
      * access registers concurrently. */
-    pthread_mutex_lock(&dev->reg_lock);
+    m2sdr_mutex_lock(&dev->reg_lock);
     err = eb_read32_checked(dev->eb, addr, val);
-    pthread_mutex_unlock(&dev->reg_lock);
+    m2sdr_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 
@@ -52,9 +52,9 @@ static int m2sdr_liteeth_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t v
 
     if (!dev || !dev->eb)
         return M2SDR_ERR_INVAL;
-    pthread_mutex_lock(&dev->reg_lock);
+    m2sdr_mutex_lock(&dev->reg_lock);
     err = eb_write32_checked(dev->eb, val, addr);
-    pthread_mutex_unlock(&dev->reg_lock);
+    m2sdr_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 
@@ -64,9 +64,9 @@ static int m2sdr_liteeth_readl_bulk(struct m2sdr_dev *dev, uint32_t addr, uint32
 
     if (!dev || !vals || !dev->eb)
         return M2SDR_ERR_INVAL;
-    pthread_mutex_lock(&dev->reg_lock);
+    m2sdr_mutex_lock(&dev->reg_lock);
     err = eb_read32_bulk_checked(dev->eb, addr, vals, count);
-    pthread_mutex_unlock(&dev->reg_lock);
+    m2sdr_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 
@@ -76,9 +76,9 @@ static int m2sdr_liteeth_writel_bulk(struct m2sdr_dev *dev, uint32_t addr, const
 
     if (!dev || !vals || !dev->eb)
         return M2SDR_ERR_INVAL;
-    pthread_mutex_lock(&dev->reg_lock);
+    m2sdr_mutex_lock(&dev->reg_lock);
     err = eb_write32_bulk_checked(dev->eb, addr, vals, count);
-    pthread_mutex_unlock(&dev->reg_lock);
+    m2sdr_mutex_unlock(&dev->reg_lock);
     return m2sdr_from_eb_error(err);
 }
 

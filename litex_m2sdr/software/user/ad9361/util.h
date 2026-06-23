@@ -46,6 +46,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "ad9361.h"
 #include "common.h"
 #include "config.h"
@@ -59,9 +60,13 @@
 #if (__cplusplus >= 201703L)
 /* pass */
 #else
+#ifndef min
 #define min(x, y)								(((x) < (y)) ? (x) : (y))
+#endif
 #define min_t(type, x, y)						(type)min((type)(x), (type)(y))
+#ifndef max
 #define max(x, y)								(((x) > (y)) ? (x) : (y))
+#endif
 #define max_t(type, x, y)						(type)max((type)(x), (type)(y))
 #define clamp(val, min_val, max_val)			(max(min((val), (max_val)), (min_val)))
 #define clamp_t(type, val, min_val, max_val)	(type)clamp((type)(val), (type)(min_val), (type)(max_val))
@@ -72,6 +77,23 @@
 #define CLK_IGNORE_UNUSED						BIT(3)
 #define CLK_GET_RATE_NOCACHE					BIT(6)
 
+#if defined(_MSC_VER)
+#if defined(HAVE_VERBOSE_MESSAGES)
+#define dev_err(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#define dev_warn(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#if defined(HAVE_DEBUG_MESSAGES)
+#define dev_dbg(dev, ...)		do { printf(__VA_ARGS__); printf("\n"); } while (0)
+#else
+#define dev_dbg(...)			((void)0)
+#endif
+#define printk(...)				printf(__VA_ARGS__)
+#else
+#define dev_err(...)			((void)0)
+#define dev_warn(...)			((void)0)
+#define dev_dbg(...)			((void)0)
+#define printk(...)				((void)0)
+#endif
+#else
 #if defined(HAVE_VERBOSE_MESSAGES)
 #define dev_err(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
 #define dev_warn(dev, format, ...)		({printf(format, ## __VA_ARGS__);printf("\n"); })
@@ -87,8 +109,12 @@
 #define dev_dbg(dev, format, ...)	({ if (0) printf(format, ## __VA_ARGS__); })
 #define printk(format, ...)			({ if (0) printf(format, ## __VA_ARGS__); })
 #endif
+#endif
 
 struct device {
+#if defined(_MSC_VER)
+	int unused;
+#endif
 };
 
 struct spi_device {
@@ -111,12 +137,33 @@ struct axiadc_converter {
 	uint32_t				scratch_reg[16];
 };
 
-#ifdef WIN32
-#include "basetsd.h"
+#ifdef _WIN32
+#include <BaseTsd.h>
+#ifndef _SSIZE_T_DEFINED
 typedef SSIZE_T ssize_t;
-#define strsep(s, ct)				0
-#define snprintf(s, n, format, ...)	0
+#define _SSIZE_T_DEFINED
+#endif
+static inline char *ad9361_strsep(char **stringp, const char *delim)
+{
+	char *start;
+	char *p;
+
+	if (!stringp || !*stringp)
+		return NULL;
+	start = *stringp;
+	p = start + strcspn(start, delim);
+	if (*p) {
+		*p++ = '\0';
+		*stringp = p;
+	} else {
+		*stringp = NULL;
+	}
+	return start;
+}
+#define strsep(s, ct)				ad9361_strsep((s), (ct))
+#if !defined(__func__)
 #define __func__ __FUNCTION__
+#endif
 #endif
 
 /******************************************************************************/

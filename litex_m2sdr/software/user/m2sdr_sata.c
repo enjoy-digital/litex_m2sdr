@@ -19,22 +19,26 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 #include <stdint.h>
 #include <time.h>
 #include <signal.h>
-#include <getopt.h>
 #include <errno.h>
+#ifndef _WIN32
 #include <sys/file.h>
 #include <sys/stat.h>
+#endif
 #include <math.h>
 #include <ctype.h>
 #include <limits.h>
 
-#include "liblitepcie.h"
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_sata_capture_volume.h"
 #include "m2sdr_sata_lowlevel.h"
 #include "m2sdr_sata_hostio.h"
@@ -63,7 +67,11 @@
 
 static struct m2sdr_cli_device g_cli_dev;
 static sig_atomic_t keep_running = 1;
+#ifdef _WIN32
+static HANDLE g_sata_lock_handle;
+#else
 static int g_sata_lock_fd = -1;
+#endif
 
 static void int_handler(int dummy)
 {
@@ -399,15 +407,45 @@ static int parse_force_args(int argc, char **argv, int *argi, bool *force)
 
 static void m2sdr_sata_unlock(void)
 {
+#ifdef _WIN32
+    if (g_sata_lock_handle) {
+        ReleaseMutex(g_sata_lock_handle);
+        CloseHandle(g_sata_lock_handle);
+        g_sata_lock_handle = NULL;
+    }
+#else
     if (g_sata_lock_fd >= 0) {
         flock(g_sata_lock_fd, LOCK_UN);
         close(g_sata_lock_fd);
         g_sata_lock_fd = -1;
     }
+#endif
 }
 
 static int m2sdr_sata_lock(void)
 {
+#ifdef _WIN32
+    DWORD wait_rc;
+
+    if (g_sata_lock_handle)
+        return 0;
+
+    g_sata_lock_handle = CreateMutexA(NULL, FALSE, "Local\\m2sdr_sata.lock");
+    if (!g_sata_lock_handle) {
+        fprintf(stderr, "CreateMutex(m2sdr_sata.lock) failed: %lu\n",
+            (unsigned long)GetLastError());
+        return -1;
+    }
+
+    wait_rc = WaitForSingleObject(g_sata_lock_handle, INFINITE);
+    if (wait_rc != WAIT_OBJECT_0 && wait_rc != WAIT_ABANDONED) {
+        fprintf(stderr, "WaitForSingleObject(m2sdr_sata.lock) failed: %lu\n",
+            (unsigned long)GetLastError());
+        m2sdr_sata_unlock();
+        return -1;
+    }
+    return 0;
+#else
     if (g_sata_lock_fd >= 0)
         return 0;
 
@@ -423,6 +461,7 @@ static int m2sdr_sata_lock(void)
         return -1;
     }
     return 0;
+#endif
 }
 
 static struct m2sdr_dev *m2sdr_open_dev(void)
@@ -1727,6 +1766,27 @@ static int do_export_sigmf_capture(const char *name, const char *path, int timeo
 
 static uint64_t file_size_bytes(const char *path)
 {
+#ifdef _WIN32
+    FILE *f;
+    off_t size;
+
+    if (!path || !strcmp(path, "-")) {
+        fprintf(stderr, "Named import requires a regular file path, not '-'.\n");
+        exit(1);
+    }
+    f = fopen(path, "rb");
+    if (!f) {
+        perror(path);
+        exit(1);
+    }
+    if (fseeko(f, 0, SEEK_END) != 0 || (size = ftello(f)) < 0) {
+        perror(path);
+        fclose(f);
+        exit(1);
+    }
+    fclose(f);
+    return (uint64_t)size;
+#else
     struct stat st;
 
     if (!path || !strcmp(path, "-")) {
@@ -1742,6 +1802,7 @@ static uint64_t file_size_bytes(const char *path)
         exit(1);
     }
     return (uint64_t)st.st_size;
+#endif
 }
 
 struct named_transfer_options {

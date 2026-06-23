@@ -11,13 +11,15 @@
 /* Includes */
 /*----------*/
 
-#include <fcntl.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(USE_LITEPCIE)
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#endif
 
 #include "csr.h"
 #include "m2sdr_internal.h"
@@ -32,6 +34,12 @@
 #define M2SDR_DISCOVERY_DEFAULT_PCIE_COUNT 8
 #define M2SDR_DISCOVERY_DEFAULT_ETH_TARGETS "192.168.1.50"
 #define M2SDR_DISCOVERY_DEFAULT_ETH_PORT 1234
+
+#if defined(__GNUC__) || defined(__clang__)
+#define M2SDR_UNUSED __attribute__((unused))
+#else
+#define M2SDR_UNUSED
+#endif
 
 /* Helpers */
 /*---------*/
@@ -227,7 +235,7 @@ static int m2sdr_liteeth_probe_control(struct m2sdr_dev *dev)
         if (rc == M2SDR_ERR_OK && (value & 0xffu) == 'L')
             return M2SDR_ERR_OK;
         if (rc == M2SDR_ERR_TIMEOUT)
-            usleep(M2SDR_LITEETH_OPEN_PROBE_DELAY_US);
+            m2sdr_sleep_us(M2SDR_LITEETH_OPEN_PROBE_DELAY_US);
     }
 
     return rc == M2SDR_ERR_OK ? M2SDR_ERR_IO : rc;
@@ -342,7 +350,7 @@ static int m2sdr_has_eth_ptp(struct m2sdr_dev *dev, bool *present)
     return M2SDR_ERR_OK;
 }
 
-static __attribute__((unused)) int m2sdr_has_ptp_clock10(struct m2sdr_dev *dev, bool *present)
+static M2SDR_UNUSED int m2sdr_has_ptp_clock10(struct m2sdr_dev *dev, bool *present)
 {
     if (!dev || !present)
         return M2SDR_ERR_INVAL;
@@ -401,7 +409,7 @@ static int m2sdr_time_owned_by_ptp(struct m2sdr_dev *dev, bool *owned)
 #endif
 }
 
-static __attribute__((unused)) int m2sdr_get_ptp_discipline_control(struct m2sdr_dev *dev, uint32_t *control)
+static M2SDR_UNUSED int m2sdr_get_ptp_discipline_control(struct m2sdr_dev *dev, uint32_t *control)
 {
 #if defined(CSR_PTP_DISCIPLINE_CONTROL_ADDR)
     if (!dev || !control)
@@ -418,7 +426,7 @@ static __attribute__((unused)) int m2sdr_get_ptp_discipline_control(struct m2sdr
 #endif
 }
 
-static __attribute__((unused)) int m2sdr_write_ptp_discipline_control(struct m2sdr_dev *dev, bool enable, bool holdover)
+static M2SDR_UNUSED int m2sdr_write_ptp_discipline_control(struct m2sdr_dev *dev, bool enable, bool holdover)
 {
 #if defined(CSR_PTP_DISCIPLINE_CONTROL_ADDR) && \
     defined(CSR_PTP_DISCIPLINE_CONTROL_ENABLE_OFFSET) && \
@@ -447,7 +455,7 @@ static __attribute__((unused)) int m2sdr_write_ptp_discipline_control(struct m2s
 #endif
 }
 
-static __attribute__((unused)) int m2sdr_get_ptp_clock10_control(struct m2sdr_dev *dev, uint32_t *control)
+static M2SDR_UNUSED int m2sdr_get_ptp_clock10_control(struct m2sdr_dev *dev, uint32_t *control)
 {
 #if defined(CSR_PTP_CLK10_DISCIPLINE_CONTROL_ADDR)
     if (!dev || !control)
@@ -464,7 +472,7 @@ static __attribute__((unused)) int m2sdr_get_ptp_clock10_control(struct m2sdr_de
 #endif
 }
 
-static __attribute__((unused)) int m2sdr_write_ptp_clock10_control(
+static M2SDR_UNUSED int m2sdr_write_ptp_clock10_control(
     struct m2sdr_dev *dev,
     bool enable,
     bool holdover,
@@ -743,7 +751,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         return M2SDR_ERR_NO_MEM;
 
     dev->fd = -1;
-    pthread_mutex_init(&dev->reg_lock, NULL);
+    m2sdr_mutex_init(&dev->reg_lock);
 
     rc = m2sdr_resolve_device_identifier(device_identifier, &addr);
     if (rc != M2SDR_ERR_OK) {
@@ -752,6 +760,7 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
     }
 
     if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+#if M2SDR_HAVE_LITEPCIE
         dev->transport = M2SDR_TRANSPORT_LITEPCIE;
         dev->ops = &m2sdr_litepcie_backend_ops;
 
@@ -762,7 +771,12 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         }
 
         snprintf(dev->device_path, sizeof(dev->device_path), "%s", addr.path);
+#else
+        free(dev);
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
     } else {
+#if M2SDR_HAVE_LITEETH
         char port_str[16];
 
         dev->transport = M2SDR_TRANSPORT_LITEETH;
@@ -790,6 +804,10 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
 
         snprintf(dev->eth_ip, sizeof(dev->eth_ip), "%s", addr.ip);
         dev->eth_port = addr.port;
+#else
+        free(dev);
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
     }
 
     *dev_out = dev;
@@ -804,10 +822,13 @@ void m2sdr_close(struct m2sdr_dev *dev)
 
     m2sdr_stream_cleanup(dev);
     if (dev->fd >= 0) {
+#if M2SDR_HAVE_LITEPCIE
         close(dev->fd);
+#endif
         dev->fd = -1;
     }
 
+#if M2SDR_HAVE_LITEETH
     if (dev->udp_inited) {
         liteeth_udp_cleanup(&dev->udp);
         dev->udp_inited = 0;
@@ -816,11 +837,12 @@ void m2sdr_close(struct m2sdr_dev *dev)
         eb_disconnect(&dev->eb);
         dev->eb = NULL;
     }
+#endif
 
     dev->ad9361_phy = NULL;
     free(dev->rf_init_param);
     dev->rf_init_param = NULL;
-    pthread_mutex_destroy(&dev->reg_lock);
+    m2sdr_mutex_destroy(&dev->reg_lock);
     free(dev);
 }
 
@@ -885,6 +907,7 @@ int m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
                              int timeout_ms,
                              uint32_t *transferred)
 {
+#if defined(USE_LITEPCIE)
     struct litepcie_ioctl_sata_dma m;
 
     if (transferred)
@@ -927,6 +950,17 @@ int m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
     if (m.status)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)direction;
+    (void)sector;
+    (void)nsectors;
+    (void)buf;
+    (void)timeout_ms;
+    if (transferred)
+        *transferred = 0;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
 }
 
 /* Legacy escape hatches kept for Soapy and advanced utilities. */
@@ -1015,8 +1049,8 @@ void m2sdr_discovery_config_init(struct m2sdr_discovery_config *config)
         return;
 
     memset(config, 0, sizeof(*config));
-    config->enable_pcie = true;
-    config->enable_liteeth = true;
+    config->enable_pcie = M2SDR_HAVE_LITEPCIE ? true : false;
+    config->enable_liteeth = M2SDR_HAVE_LITEETH ? true : false;
     config->pcie_first = M2SDR_DISCOVERY_DEFAULT_PCIE_FIRST;
     config->pcie_count = M2SDR_DISCOVERY_DEFAULT_PCIE_COUNT;
     config->liteeth_targets = M2SDR_DISCOVERY_DEFAULT_ETH_TARGETS;

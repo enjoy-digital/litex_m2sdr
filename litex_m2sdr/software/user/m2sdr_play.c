@@ -12,19 +12,24 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <signal.h>
 #include <time.h>
-#include <getopt.h>
 #include <stdbool.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_getopt.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_sigmf.h"
 #include "m2sdr_tool.h"
 #include "config.h"
 
+#ifdef USE_LITEPCIE
 #include "liblitepcie.h"
+#endif
 
 sig_atomic_t keep_running = 1;
 

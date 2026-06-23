@@ -2,13 +2,16 @@ name: ci
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   software-build:
     runs-on: ubuntu-22.04
     steps:
       # Checkout Repository
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -27,6 +30,7 @@ jobs:
             libgl1-mesa-dev \
             libpng-dev \
             libsoapysdr-dev \
+            soapysdr-tools \
             libsndfile1-dev \
             libsamplerate0-dev
 
@@ -76,12 +80,19 @@ jobs:
           ldd build/libSoapyLiteXM2SDR.so | tee /tmp/ldd_soapylitexm2sdr.txt
           ! grep -q "not found" /tmp/ldd_soapylitexm2sdr.txt
 
+      - name: Probe fake LiteEth target with SoapySDR
+        run: |
+          python3 litex_m2sdr/software/user/tests/test_fake_liteeth.py \
+            --m2sdr-util litex_m2sdr/software/user/m2sdr_util \
+            --soapy-util SoapySDRUtil \
+            --soapy-plugin-dir litex_m2sdr/software/soapysdr/build
+
   build:
     runs-on: ubuntu-22.04
     steps:
       # Checkout Repository
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -92,7 +103,7 @@ jobs:
           sudo apt-get install make wget
 
       - name: Set up Python 3.9
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.9"
           cache: "pip"
