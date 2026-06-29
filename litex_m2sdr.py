@@ -56,7 +56,11 @@ from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
 from litex_m2sdr.gateware.pps         import PPSGenerator
-from litex_m2sdr.gateware.pcie        import PCIeLinkResetWorkaround, LitePCIeWishboneBurstReadSlave
+from litex_m2sdr.gateware.pcie        import (
+    PCIeLinkResetWorkaround,
+    LitePCIeWishboneBurstReadSlave,
+    add_s7_pcie_timing_constraints,
+)
 from litex_m2sdr.gateware.header      import TXRXHeader
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
@@ -479,10 +483,11 @@ class BaseSoC(SoCMini):
                 assert pcie_lanes == 1
             pcie_dmas = 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
-                data_width = {1: 64, 2: 64, 4: 128}[pcie_lanes],
-                bar0_size  = 0x10_0000,
-                with_ptm   = with_pcie_ptm,
-                cd         = "sys",
+                data_width                = {1: 64, 2: 64, 4: 128}[pcie_lanes],
+                bar0_size                 = 0x10_0000,
+                with_ptm                  = with_pcie_ptm,
+                cd                        = "sys",
+                pclk_mux_direct_from_mmcm = (pcie_lanes == 1),
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
@@ -1107,25 +1112,8 @@ class BaseSoC(SoCMini):
                 add_guarded_false_path("*crg*clkout0*", cdc_clk)
                 add_guarded_false_path(cdc_clk, "*crg*clkout0*")
 
-        # PCIe: all PHY-generated user clocks are asynchronous to sys. LitePCIe
-        # crosses status/control signals with CDC primitives; keeping these paths
-        # timed makes Vivado optimize impossible phase relationships between the
-        # PCIe hard-IP PIPECLK outputs and the board system clock.
         if with_pcie:
-            for pcie_clk in [
-                "*s7pciephy_clkout0*",
-                "*s7pciephy_clkout1*",
-                "*s7pciephy_clkout2*",
-                "*s7pciephy_clkout3*",
-            ]:
-                add_guarded_false_path("*crg*clkout0*", pcie_clk)
-                add_guarded_false_path(pcie_clk, "*crg*clkout0*")
-
-            # The S7 PCIe PHY contains both 125MHz and 250MHz user-clock
-            # alternatives. They are muxed by the IP and are not synchronous
-            # launch/capture domains for user logic.
-            add_guarded_false_path("*s7pciephy_clkout0*", "*s7pciephy_clkout1*")
-            add_guarded_false_path("*s7pciephy_clkout1*", "*s7pciephy_clkout0*")
+            add_s7_pcie_timing_constraints(platform, pcie_lanes=pcie_lanes)
 
         # Ethernet transceiver clocks.
         if with_eth:

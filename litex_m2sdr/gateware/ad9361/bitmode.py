@@ -258,17 +258,27 @@ class AD9361RXBitMode(LiteXModule):
                 sink.ready.eq(bfp8_fifo.sink.ready),
                 bfp8_fifo.sink.valid.eq(sink.valid),
                 bfp8_fifo.sink.data.eq(sink.data),
+                NextValue(bfp8_max_abs,
+                    Mux(sink.valid & sink.ready, next_max_abs, bfp8_max_abs)),
                 If(sink.valid & sink.ready,
-                    NextValue(bfp8_max_abs, next_max_abs),
                     If(bfp8_collect_count == (bfp8_input_words - 1),
-                        NextValue(bfp8_exponent, _bfp8_exponent(next_max_abs)),
                         NextValue(bfp8_collect_count, 0),
-                        NextValue(bfp8_max_abs, 0),
-                        NextState("BFP8_HEADER"),
+                        NextState("BFP8_EXPONENT"),
                     ).Else(
                         NextValue(bfp8_collect_count, bfp8_collect_count + 1),
                     )
                 )
+            )
+        )
+        bfp8_fsm.act("BFP8_EXPONENT",
+            If(mode != _BFP8_MODE,
+                NextValue(bfp8_max_abs, 0),
+                NextState("BFP8_COLLECT"),
+            ).Else(
+                # Keep the block max and exponent decode out of the same cycle.
+                NextValue(bfp8_exponent, _bfp8_exponent(bfp8_max_abs)),
+                NextValue(bfp8_max_abs, 0),
+                NextState("BFP8_HEADER"),
             )
         )
         bfp8_fsm.act("BFP8_HEADER",
