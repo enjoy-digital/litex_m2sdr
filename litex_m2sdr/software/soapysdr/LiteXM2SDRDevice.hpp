@@ -19,6 +19,7 @@
 #include <string>
 #include <cstdint>
 #include <chrono>
+#include <atomic>
 
 #include "m2sdr.h"
 
@@ -391,7 +392,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
             user_count(0),
             remainderHandle(-1), remainderSamps(0),
             remainderOffset(0), remainderBuff(nullptr),
-            format() {}
+            format(),
+            stop_requested(false) {}
 
         bool opened;
         void *buf;
@@ -403,6 +405,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         int8_t* remainderBuff;
         std::string format;
         std::vector<size_t> channels;
+        std::atomic<bool> stop_requested;
     };
 
     struct RXStream: Stream {
@@ -471,6 +474,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     RXStream _rx_stream;
     TXStream _tx_stream;
+    mutable std::recursive_mutex _rx_stream_mutex;
+    mutable std::recursive_mutex _tx_stream_mutex;
     std::vector<std::string> _rx_antennas;
     std::vector<std::string> _tx_antennas;
     enum m2sdr_rx_gain_mode _rx_agc_mode[2] = {
@@ -498,6 +503,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _txChannelMaskHw = 0;
 
     void invalidateRfHardwareCache();
+    std::recursive_mutex &streamAccessMutex(SoapySDR::Stream *stream) const;
     void resetDatapathUnlocked();
     void stopRxStreamUnlocked();
     void stopTxStreamUnlocked();
