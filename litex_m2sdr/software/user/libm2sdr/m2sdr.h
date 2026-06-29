@@ -790,10 +790,13 @@ int  m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.
  *
- * buffer_size is expressed in samples per buffer. For BFP8, one sample is one
- * encoded M2SDR_BFP8_BLOCK_BYTES block. Use
+ * buffer_size is the fixed backend descriptor payload size expressed in
+ * samples per buffer, not the size of each m2sdr_sync_rx()/m2sdr_sync_tx()
+ * request. For BFP8, one sample is one encoded M2SDR_BFP8_BLOCK_BYTES block.
+ * Use
  * m2sdr_bytes_to_samples(M2SDR_FORMAT_..., M2SDR_BUFFER_BYTES)
- * for the default DMA payload size.
+ * for the default DMA payload size. Larger per-call requests are passed to
+ * m2sdr_sync_rx()/m2sdr_sync_tx(), which drain/fill multiple descriptors.
  */
 int m2sdr_sync_config(struct m2sdr_dev *dev,
                       enum m2sdr_direction direction,
@@ -848,6 +851,9 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
  *
  * timeout_ms = 0 uses the stream timeout configured through
  * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ *
+ * num_samples is the requested transfer size and may be larger than the
+ * descriptor size configured with m2sdr_sync_config().
  *
  * When RX headers are enabled, meta carries the hardware timestamp of the
  * FIRST sample of the returned block (a request spanning several DMA buffers
