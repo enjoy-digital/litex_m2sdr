@@ -77,6 +77,11 @@ Please append the line with `pci=noaer pcie_aspm=off`:
 - `pci=noaer`: disables PCIe advanced error reporting (`AER: Corrected error received`).
 - `pcie_aspm=off`: ignores PCIe Active State Power Management. Leaves any configuration done by firmware unchanged.
 
+If the board enumerates but DMA streaming does not produce samples, add
+`iommu.passthrough=1` as a first debug step and reboot. Avoid
+`arm-smmu.disable=1` as a default setting; it disables the SMMU globally and
+should only be used for controlled bring-up if passthrough mode is not enough.
+
 ### Wiring Up and Running Your Raspberry Pi Board
 
 Please plug in your Ethernet cable, HDMI monitor, USB keyboard, and the MicroSD card generated earlier.
@@ -98,6 +103,8 @@ sudo reboot
 
 Insert the LiteX-M2SDR module before powering your Raspberry Pi.
 You’ll need an M2x3mm screw to lock the SDR module in place.
+
+![LiteX-M2SDR on Raspberry Pi 5 M.2 HAT](https://github.com/user-attachments/assets/a149be27-aaa7-42cd-9eca-9a02b3f91de8)
 
 ```bash
 # Log in over SSH using your IP and password
@@ -136,6 +143,18 @@ sudo apt install -y python3-numpy
 user/m2sdr_util info
 user/m2sdr_rf
 ```
+
+For a short RX smoke test, tune to a local signal and record a bounded capture:
+
+```bash
+user/m2sdr_rf --sample-rate=5e6 --rx-freq=102.4e6 --rx-gain=30
+user/m2sdr_record /tmp/m2sdr-rx.iq 67108864
+```
+
+The shared GNU Radio examples are under `litex_m2sdr/software/gnuradio/`.
+After the SoapySDR module is installed, `test_fm_rx.grc` provides an FM
+receiver flowgraph that can be used as a Raspberry Pi 5 end-to-end receive
+test.
 
 On subsequent boots, the LiteX-M2SDR driver is automatically loaded:
 ```bash
