@@ -21,6 +21,9 @@ The default `make` build uses `INTERFACE=USE_RUNTIME`, which compiles one
 `libm2sdr` with both LitePCIe and LiteEth support. `INTERFACE=USE_LITEPCIE`
 and `INTERFACE=USE_LITEETH` remain useful for legacy/default-target testing,
 but they do not create separate public APIs for PCIe and Ethernet applications.
+The shared and static libraries include the transport helper objects needed by
+both backends, and the installed `pkg-config`/CMake metadata exports both the
+public libm2sdr headers and generated kernel CSR headers.
 
 This installs:
 
@@ -102,6 +105,9 @@ int main(void)
     cfg.clock_source   = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg.tx_freq        = 2400000000LL;
     cfg.rx_freq        = 2400000000LL;
+    cfg.program_rx_gains = true;
+    cfg.rx_gain1       = 20;
+    cfg.rx_gain2       = 20;
     if (m2sdr_apply_config(dev, &cfg) != 0)
         return 1;
 
@@ -166,6 +172,56 @@ If no identifier is provided, the runtime/default PCIe build opens
 `192.168.1.50:1234`, but explicit identifiers are preferred in applications
 that may run with either transport.
 
+## RF configuration lifecycle
+
+`m2sdr_apply_config()` is the full RF bring-up path. It initializes or
+re-initializes the AD9361 state, programs the common RF clocking parameters, and
+applies the requested channel layout. Treat it as a setup-time operation and
+call it before streaming starts.
+
+For runtime retunes or small adjustments, prefer the per-field setters such as
+`m2sdr_set_rx_frequency()`, `m2sdr_set_tx_frequency()`,
+`m2sdr_set_sample_rate()`, `m2sdr_set_bandwidth()`, `m2sdr_set_rx_gain()`, and
+`m2sdr_set_tx_att()`. These setters require an RFIC that was already brought up
+with `m2sdr_apply_config()` or an advanced integration path such as SoapySDR.
+
+## Manual RX gain
+
+The default config keeps RX gain under slow-attack AGC. If an application sets
+`rx_gain1` or `rx_gain2` and expects those values to be programmed, it must also
+set:
+
+```c
+cfg.program_rx_gains = true;
+```
+
+To switch gain control mode explicitly, use `cfg.program_rx_gain_modes = true`
+with `cfg.rx_gain_mode1`/`cfg.rx_gain_mode2`, or call
+`m2sdr_set_rx_gain_mode()` after RF bring-up.
+
+## Stream buffer sizing
+
+`m2sdr_sync_config()` configures the fixed backend DMA/UDP descriptor size. The
+`buffer_size` argument is expressed in samples and must match the current
+descriptor payload:
+
+```c
+unsigned samples_per_buf =
+    m2sdr_bytes_to_samples(format, M2SDR_BUFFER_BYTES);
+```
+
+Use larger `m2sdr_sync_rx()` / `m2sdr_sync_tx()` requests when the application
+wants batching. For example, at 30.72 MS/s, a 2 ms SC16 RX request is about
+61440 samples even though each backend descriptor remains 8192 bytes.
+
+## Channel layout and stream packing
+
+`M2SDR_CHANNEL_LAYOUT_1T1R` selects the RF/PHY channel layout, but the current
+host streaming path still uses the fixed transport descriptor layout. Do not
+assume PCIe DMA bandwidth halves automatically in 1T1R mode. For applications
+that need a stable host ABI today, use `M2SDR_CHANNEL_LAYOUT_2T2R` and demux the
+active channel in software until a true packed 1T1R stream mode is added.
+
 ## API overview
 
 - Device: `m2sdr_open`, `m2sdr_close`, `m2sdr_get_device_info`
@@ -176,6 +232,7 @@ that may run with either transport.
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - AGC monitor: `m2sdr_configure_agc_counter`, `m2sdr_clear_agc_counter`, `m2sdr_get_agc_count`
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
+- Stream diagnostics: `m2sdr_get_stream_stats`, `m2sdr_clear_stream_stats`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`, `m2sdr_get_ptp_discipline_config`, `m2sdr_set_ptp_discipline_config`, `m2sdr_clear_ptp_counters`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
 
@@ -194,7 +251,7 @@ Use `m2sdr_strerror()` for concise error text in logs.
 
 ## Library versioning
 
-- `libm2sdr` public API version: `1.0.0`
+- `libm2sdr` public API version: `1.1.0`
 - `libm2sdr` public ABI version: `1`
 - installed shared-library SONAME: `libm2sdr.so.1`
 
@@ -213,7 +270,10 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 
 ## Notes
 
-- Streaming supports SC16/Q11 and SC8/Q7.
+- Streaming supports SC16/Q11, SC8/Q7, and encoded BFP8/Q11.
+- `m2sdr_get_stream_stats()` reports backend stream counters. On PCIe it exposes
+  DMA ring level/high-water and overflow/underflow counters; on LiteEth it
+  mirrors UDP RX/TX counters and drop/recovery diagnostics.
 - `m2sdr_get_ptp_status()` reports the LiteEth PTP lock state, current discipline mode, local/master port identity, tolerated lock-window misses, lock-loss counters, and protocol/debug counters when the FPGA bitstream was built with `--with-eth --with-eth-ptp`.
 - `m2sdr_get_ptp_discipline_config()` / `m2sdr_set_ptp_discipline_config()` expose the runtime servo controls used by `m2sdr_util ptp-config`, including the consecutive `unlock_misses` threshold used to deglitch time-lock loss reporting and `coarse_confirm` used to allow confirmed runtime coarse realignments. The default `unlock_misses=64` avoids reporting short software-timestamp jitter bursts as lock drops. The default `coarse_confirm=0` disables runtime coarse rewrites after initial acquisition; near-one-second runtime coarse errors are always treated as TSU excursions and are not copied into the board clock.
 - `m2sdr_clear_ptp_counters()` clears the board-side discipline and identity counters. LiteEth protocol counters remain read-only in this first implementation.

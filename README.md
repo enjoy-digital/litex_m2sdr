@@ -19,9 +19,9 @@
 - Docs: `litex_m2sdr/doc/libm2sdr/README.md`
 - Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
 - Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
-- Current public library version: `1.0.0` (ABI `1`)
+- Current public library version: `1.1.0` (ABI `1`)
 - The library is built as a runtime PCIe/Ethernet library; external applications only need to link `libm2sdr`.
-- Recent API additions: backend accessors `m2sdr_get_transport()` / `m2sdr_get_eb_handle()` and finer-grained `parse`/`range`/`state` error classes.
+- Recent API additions: backend accessors, stream diagnostics, and finer-grained `parse`/`range`/`state` error classes.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">
@@ -386,9 +386,12 @@ The helper requires the GitHub CLI `gh` to be installed and authenticated with r
 > **ARM (ex NVIDIA Jetson/Orin)**:
 > ```bash
 > # Add to extlinux.conf (/boot/extlinux/extlinux.conf):
-> APPEND ... iommu.passthrough=1 arm-smmu.disable=1
+> APPEND ... iommu.passthrough=1
 > sudo reboot
 > ```
+> Keep the Tegra SMMU driver enabled. `iommu.passthrough=1` is the safer first
+> test knob for current L4T kernels; disabling `arm-smmu` globally can break
+> other Jetson devices. See [Jetson Orin host notes](doc/hosts/jetson-orin.md).
 
 > [!WARNING]
 > For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
@@ -405,6 +408,7 @@ For some platforms we created detailed tutorials. For everything else, please fo
 
 - [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
 - [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
+- [Use LiteX-M2SDR on Jetson Orin / NVIDIA L4T](doc/hosts/jetson-orin.md)
 
 ### For Software Developers
 
