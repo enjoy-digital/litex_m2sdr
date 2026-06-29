@@ -374,6 +374,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const std::string &format,
     const std::vector<size_t> &channels,
     const SoapySDR::Kwargs &args) {
+    if (direction != SOAPY_SDR_RX && direction != SOAPY_SDR_TX)
+        throw std::runtime_error("Invalid direction.");
+
+    std::lock_guard<std::recursive_mutex> stream_lock(
+        direction == SOAPY_SDR_RX ? _rx_stream_mutex : _tx_stream_mutex);
     std::unique_lock<std::mutex> lock(_mutex);
 
     SoapySDR::Kwargs searchArgs = args;
