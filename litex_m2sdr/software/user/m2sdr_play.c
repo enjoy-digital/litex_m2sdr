@@ -17,9 +17,11 @@
 #include <time.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_host_queue.h"
 #include "m2sdr_sigmf.h"
 #include "m2sdr_tool.h"
 #include "config.h"
@@ -27,6 +29,21 @@
 #include "liblitepcie.h"
 
 sig_atomic_t keep_running = 1;
+
+struct m2sdr_play_source {
+    struct m2sdr_host_queue queue;
+    FILE *fi;
+    pthread_t thread;
+    uint32_t current_loop;
+    uint32_t loops;
+    uint64_t start_offset_bytes;
+    uint64_t end_offset_bytes;
+    size_t frame_bytes;
+    int close_fi;
+    int enabled;
+    int started;
+    int error;
+};
 
 void intHandler(int dummy) {
     (void)dummy;
@@ -98,6 +115,108 @@ static int read_next_play_frame(FILE *fi, int close_fi, uint32_t *current_loop, 
     return 0;
 }
 
+static void *m2sdr_play_source_worker(void *arg)
+{
+    struct m2sdr_play_source *source = arg;
+    uint8_t raw_buf[DMA_BUFFER_SIZE];
+
+    while (1) {
+        int rc = read_next_play_frame(source->fi, source->close_fi, &source->current_loop,
+                                      source->loops, source->start_offset_bytes,
+                                      source->end_offset_bytes, raw_buf, source->frame_bytes);
+
+        if (rc > 0)
+            break;
+        if (rc < 0) {
+            source->error = 1;
+            m2sdr_host_queue_stop(&source->queue);
+            break;
+        }
+
+        rc = m2sdr_host_queue_push(&source->queue, raw_buf, source->frame_bytes,
+                                   source->current_loop);
+        if (rc != M2SDR_HOST_QUEUE_OK) {
+            if (rc != M2SDR_HOST_QUEUE_STOPPED)
+                source->error = 1;
+            break;
+        }
+    }
+
+    m2sdr_host_queue_close_writer(&source->queue);
+    return NULL;
+}
+
+static int m2sdr_play_source_start(struct m2sdr_play_source *source, FILE *fi, int close_fi,
+                                   uint32_t loops, uint64_t start_offset_bytes,
+                                   uint64_t end_offset_bytes, size_t frame_bytes,
+                                   unsigned host_buffers)
+{
+    memset(source, 0, sizeof(*source));
+    if (host_buffers == 0)
+        return 0;
+
+    if (m2sdr_host_queue_init(&source->queue, host_buffers, DMA_BUFFER_SIZE) != M2SDR_HOST_QUEUE_OK)
+        return -1;
+    source->fi = fi;
+    source->close_fi = close_fi;
+    source->loops = loops;
+    source->start_offset_bytes = start_offset_bytes;
+    source->end_offset_bytes = end_offset_bytes;
+    source->frame_bytes = frame_bytes;
+    source->enabled = 1;
+    if (pthread_create(&source->thread, NULL, m2sdr_play_source_worker, source) != 0) {
+        m2sdr_host_queue_destroy(&source->queue);
+        memset(source, 0, sizeof(*source));
+        return -1;
+    }
+    source->started = 1;
+    return 0;
+}
+
+static int m2sdr_play_source_finish(struct m2sdr_play_source *source)
+{
+    int error;
+
+    if (!source->enabled)
+        return 0;
+
+    if (source->started) {
+        m2sdr_host_queue_stop(&source->queue);
+        if (pthread_join(source->thread, NULL) != 0)
+            source->error = 1;
+        source->started = 0;
+    }
+
+    error = source->error;
+    m2sdr_host_queue_destroy(&source->queue);
+    source->enabled = 0;
+    return error ? -1 : 0;
+}
+
+static int m2sdr_play_next_frame(FILE *fi, struct m2sdr_play_source *source, int close_fi,
+                                 uint32_t *current_loop, uint32_t loops,
+                                 uint64_t start_offset_bytes, uint64_t end_offset_bytes,
+                                 uint8_t *raw_buf, size_t frame_bytes)
+{
+    if (source->enabled) {
+        size_t len = 0;
+        uint64_t tag = 0;
+        int rc = m2sdr_host_queue_pop(&source->queue, raw_buf, DMA_BUFFER_SIZE, &len, &tag);
+
+        if (rc == M2SDR_HOST_QUEUE_CLOSED)
+            return 1;
+        if (rc != M2SDR_HOST_QUEUE_OK)
+            return -1;
+        if (len < frame_bytes)
+            memset(raw_buf + len, 0, frame_bytes - len);
+        *current_loop = (uint32_t)tag;
+        return 0;
+    }
+
+    return read_next_play_frame(fi, close_fi, current_loop, loops, start_offset_bytes,
+                                end_offset_bytes, raw_buf, frame_bytes);
+}
+
 static void prepare_play_metadata(const uint8_t *raw_buf, unsigned header_bytes,
                                   struct m2sdr_metadata *meta)
 {
@@ -152,6 +271,8 @@ static void help(void)
     puts("  -q, --quiet           Quiet mode.");
     puts("  -t, --timed-start     Timed start (align to the next second).");
     puts("      --format FMT      Sample format: sc16, sc8 or encoded bfp8 (default: sc16).");
+    puts("      --host-buffers N  Queue N DMA buffers read from input.");
+    puts("      --prefill N       Wait for N queued buffers before starting playback.");
     puts("");
     puts("SigMF input:");
     puts("      --capture-index N Select capture index from SigMF metadata (default: 0).");
@@ -164,7 +285,8 @@ static void help(void)
 
 static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet,
                        uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes,
-                       uint64_t start_offset_bytes, uint64_t end_offset_bytes)
+                       uint64_t start_offset_bytes, uint64_t end_offset_bytes,
+                       unsigned host_buffers, unsigned prefill_buffers)
 {
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
@@ -187,6 +309,7 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     int exit_status = 1;
     uint8_t raw_buf[DMA_BUFFER_SIZE];
     uint8_t payload_buf[DMA_BUFFER_SIZE];
+    struct m2sdr_play_source source = {0};
 
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
@@ -275,6 +398,20 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         close_fi = 1;
     }
 
+    if (m2sdr_play_source_start(&source, fi, close_fi, loops, start_offset_bytes,
+                                end_offset_bytes, frame_bytes, host_buffers) != 0) {
+        fprintf(stderr, "Could not start host input queue\n");
+        goto cleanup;
+    }
+    if (source.enabled && prefill_buffers > 0) {
+        int rc = m2sdr_host_queue_wait_count(&source.queue, prefill_buffers);
+
+        if (rc == M2SDR_HOST_QUEUE_ERROR || rc == M2SDR_HOST_QUEUE_STOPPED) {
+            fprintf(stderr, "Host input queue prefill failed\n");
+            goto cleanup;
+        }
+    }
+
     last_time = get_time_ms();
     while (1) {
 #ifdef USE_LITEPCIE
@@ -296,9 +433,9 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
                 if (dma.reader_sw_count - dma.reader_hw_count < 0)
                     sw_underflows += (uint64_t)(dma.reader_hw_count - dma.reader_sw_count);
 
-                rc = read_next_play_frame(fi, close_fi, &current_loop, loops,
-                                          start_offset_bytes, end_offset_bytes,
-                                          raw_buf, frame_bytes);
+                rc = m2sdr_play_next_frame(fi, &source, close_fi, &current_loop, loops,
+                                           start_offset_bytes, end_offset_bytes,
+                                           raw_buf, frame_bytes);
                 if (rc < 0)
                     goto cleanup;
                 if (rc > 0) {
@@ -320,9 +457,9 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             if (!keep_running)
                 break;
 
-            rc = read_next_play_frame(fi, close_fi, &current_loop, loops,
-                                      start_offset_bytes, end_offset_bytes,
-                                      raw_buf, frame_bytes);
+            rc = m2sdr_play_next_frame(fi, &source, close_fi, &current_loop, loops,
+                                       start_offset_bytes, end_offset_bytes,
+                                       raw_buf, frame_bytes);
             if (rc < 0)
                 goto cleanup;
             if (rc > 0)
@@ -371,6 +508,8 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
     exit_status = 0;
 
 cleanup:
+    if (source.enabled && m2sdr_play_source_finish(&source) != 0)
+        exit_status = 1;
 #ifdef USE_LITEPCIE
     if (use_pcie_dma)
         litepcie_dma_cleanup(&dma);
@@ -390,6 +529,8 @@ int main(int argc, char **argv)
     static uint8_t quiet = 0;
     static uint8_t timed_start = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    static unsigned host_buffers = 0;
+    static unsigned prefill_buffers = 0;
     unsigned capture_index = 0;
     unsigned sigmf_header_bytes = 0;
     uint64_t start_offset_bytes = 0;
@@ -407,6 +548,8 @@ int main(int argc, char **argv)
         { "timed-start", no_argument, NULL, 't' },
         { "zero-copy", no_argument, NULL, 'z' },
         { "capture-index", required_argument, NULL, 3 },
+        { "host-buffers", required_argument, NULL, 4 },
+        { "prefill", required_argument, NULL, 5 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -448,6 +591,18 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
+        case 4:
+            if (m2sdr_cli_parse_uint_range(optarg, 1, UINT32_MAX, &host_buffers) != 0) {
+                m2sdr_cli_error("invalid host buffer count '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 5:
+            if (m2sdr_cli_parse_uint_range(optarg, 1, UINT32_MAX, &prefill_buffers) != 0) {
+                m2sdr_cli_error("invalid prefill count '%s'", optarg);
+                return 1;
+            }
+            break;
         case 'q':
             quiet = 1;
             break;
@@ -484,6 +639,15 @@ int main(int argc, char **argv)
 
     if (optind < argc) {
         m2sdr_cli_error("unexpected extra argument: %s", argv[optind]);
+        return 1;
+    }
+
+    if (prefill_buffers > 0 && host_buffers == 0) {
+        fprintf(stderr, "--prefill requires --host-buffers\n");
+        return 1;
+    }
+    if (prefill_buffers > host_buffers) {
+        fprintf(stderr, "--prefill cannot exceed --host-buffers\n");
         return 1;
     }
 
@@ -547,6 +711,7 @@ int main(int argc, char **argv)
     }
 
     m2sdr_play(m2sdr_cli_device_id(&cli_dev), filename, loops, quiet, timed_start, format,
-               sigmf_header_bytes, start_offset_bytes, end_offset_bytes);
+               sigmf_header_bytes, start_offset_bytes, end_offset_bytes,
+               host_buffers, prefill_buffers);
     return 0;
 }
