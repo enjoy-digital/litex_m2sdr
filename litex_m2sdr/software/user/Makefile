@@ -242,8 +242,8 @@ m2sdr_rf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_rf.o
 m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) m2sdr_play.o $(M2SDR_LINK_LIBS)
 
-m2sdr_record: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) m2sdr_record.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) m2sdr_record.o $(M2SDR_LINK_LIBS)
+m2sdr_record: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
 m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_sigmf.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
