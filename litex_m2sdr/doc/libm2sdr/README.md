@@ -173,10 +173,15 @@ that may run with either transport.
 
 ## RF configuration lifecycle
 
-`m2sdr_apply_config()` is the full RF bring-up path. It initializes or
-re-initializes the AD9361 state, programs the common RF clocking parameters, and
-applies the requested channel layout. Treat it as a setup-time operation and
-call it before streaming starts.
+`m2sdr_apply_config()` is the full RF bring-up path. It initializes the AD9361
+state, programs the common RF clocking parameters, and applies the requested
+channel layout. Treat it as a setup-time operation and call it before streaming
+starts.
+
+Use `m2sdr_apply_config_if_needed()` when startup code may be called more than
+once with the same config. It returns success for an already-applied matching
+config, but still rejects attempts to apply different settings to an active
+RFIC.
 
 For runtime retunes or small adjustments, prefer the per-field setters such as
 `m2sdr_set_rx_frequency()`, `m2sdr_set_tx_frequency()`,
@@ -228,7 +233,7 @@ active channel in software until a true packed 1T1R stream mode is added.
 - Backend selection/interop: `m2sdr_get_transport`, `m2sdr_get_fd`, `m2sdr_get_eb_handle`
 - Capabilities: `m2sdr_get_capabilities`
 - Control: `m2sdr_set_bitmode`, `m2sdr_set_dma_loopback`
-- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_rx_gain_mode`, `m2sdr_set_rx_gain_mode_all`, `m2sdr_set_agc_pin`, `m2sdr_set_tx_att`
+- RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_apply_config_if_needed`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_rx_gain_mode`, `m2sdr_set_rx_gain_mode_all`, `m2sdr_set_agc_pin`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - AGC monitor: `m2sdr_configure_agc_counter`, `m2sdr_clear_agc_counter`, `m2sdr_get_agc_count`
 - Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`

@@ -82,6 +82,8 @@ struct m2sdr_dev {
      * unit, so it can neither be shared across files nor across devices;
      * layout switches re-init from this stored copy instead. */
     void *rf_init_param;
+    struct m2sdr_config rf_last_config;
+    int rf_last_config_valid;
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
     int rf_oversample_enabled;

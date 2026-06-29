@@ -557,6 +557,43 @@ static int test_rf_range_validation(void)
     return 0;
 }
 
+static int test_apply_config_if_needed_validation(void)
+{
+    struct m2sdr_dev dev;
+    struct m2sdr_config cfg;
+    struct m2sdr_config other;
+
+    memset(&dev, 0, sizeof(dev));
+    m2sdr_config_init(&cfg);
+
+    if (m2sdr_apply_config_if_needed(NULL, &cfg) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_apply_config_if_needed(&dev, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+
+    other = cfg;
+    other.sample_rate = -1;
+    if (m2sdr_apply_config_if_needed(&dev, &other) != M2SDR_ERR_RANGE)
+        return -1;
+
+    dev.ad9361_phy = (struct ad9361_rf_phy *)(uintptr_t)1;
+    dev.rf_last_config = cfg;
+    dev.rf_last_config_valid = 1;
+    if (m2sdr_apply_config_if_needed(&dev, &cfg) != M2SDR_ERR_OK)
+        return -1;
+
+    other = cfg;
+    other.rx_freq++;
+    if (m2sdr_apply_config_if_needed(&dev, &other) != M2SDR_ERR_STATE)
+        return -1;
+
+    dev.rf_last_config_valid = 0;
+    if (m2sdr_apply_config_if_needed(&dev, &cfg) != M2SDR_ERR_STATE)
+        return -1;
+
+    return 0;
+}
+
 static int test_transport_helpers(void)
 {
     struct m2sdr_dev dev;
@@ -649,6 +686,10 @@ int main(void)
     }
     if (test_rf_range_validation() != 0) {
         fprintf(stderr, "test_rf_range_validation failed\n");
+        return 1;
+    }
+    if (test_apply_config_if_needed_validation() != 0) {
+        fprintf(stderr, "test_apply_config_if_needed_validation failed\n");
         return 1;
     }
     if (test_transport_helpers() != 0) {

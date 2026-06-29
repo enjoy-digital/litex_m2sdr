@@ -734,6 +734,12 @@ void m2sdr_config_init(struct m2sdr_config *cfg);
  * and optional BIST modes.
  */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
+/* Apply cfg only when no RF config has been applied yet, or when cfg matches
+ * the last successfully applied config. This avoids accidental AD9361 re-init
+ * while letting startup code call the helper idempotently. Returns
+ * M2SDR_ERR_STATE when the RFIC is already initialized with a different config. */
+int  m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
+                                  const struct m2sdr_config *cfg);
 
 /* Direction-based RF setters.
  *

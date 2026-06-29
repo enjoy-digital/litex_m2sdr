@@ -1304,6 +1304,69 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->sync_mode         = NULL;
 }
 
+static int m2sdr_normalize_config(const struct m2sdr_config *cfg,
+                                  struct m2sdr_config *normalized)
+{
+    enum m2sdr_clock_source clock_source;
+    enum m2sdr_channel_layout channel_layout;
+
+    if (!cfg || !normalized)
+        return M2SDR_ERR_INVAL;
+
+    if (m2sdr_clock_source_from_config(cfg, &clock_source) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+    if (m2sdr_channel_layout_from_config(cfg, &channel_layout) != M2SDR_ERR_OK)
+        return M2SDR_ERR_INVAL;
+
+    *normalized = *cfg;
+    normalized->clock_source = clock_source;
+    normalized->channel_layout = channel_layout;
+    normalized->chan_mode = NULL;
+    normalized->sync_mode = NULL;
+    return M2SDR_ERR_OK;
+}
+
+static bool m2sdr_configs_equal(const struct m2sdr_config *a,
+                                const struct m2sdr_config *b)
+{
+    return a->sample_rate == b->sample_rate &&
+           a->bandwidth == b->bandwidth &&
+           a->refclk_freq == b->refclk_freq &&
+           a->tx_freq == b->tx_freq &&
+           a->rx_freq == b->rx_freq &&
+           a->tx_att == b->tx_att &&
+           a->rx_gain1 == b->rx_gain1 &&
+           a->rx_gain2 == b->rx_gain2 &&
+           a->program_rx_gains == b->program_rx_gains &&
+           a->program_rx_gain_modes == b->program_rx_gain_modes &&
+           a->rx_gain_mode1 == b->rx_gain_mode1 &&
+           a->rx_gain_mode2 == b->rx_gain_mode2 &&
+           a->program_agc_pin == b->program_agc_pin &&
+           a->agc_pin_enable == b->agc_pin_enable &&
+           a->loopback == b->loopback &&
+           a->bist_tx_tone == b->bist_tx_tone &&
+           a->bist_rx_tone == b->bist_rx_tone &&
+           a->bist_prbs == b->bist_prbs &&
+           a->calibrate_interface_delay == b->calibrate_interface_delay &&
+           a->bist_tone_freq == b->bist_tone_freq &&
+           a->enable_8bit_mode == b->enable_8bit_mode &&
+           a->sample_format == b->sample_format &&
+           a->channel_layout == b->channel_layout &&
+           a->clock_source == b->clock_source;
+}
+
+static void m2sdr_store_applied_config(struct m2sdr_dev *dev,
+                                       const struct m2sdr_config *cfg)
+{
+    struct m2sdr_config normalized;
+
+    if (!dev || m2sdr_normalize_config(cfg, &normalized) != M2SDR_ERR_OK)
+        return;
+
+    dev->rf_last_config = normalized;
+    dev->rf_last_config_valid = 1;
+}
+
 /* Bind an externally-initialized AD9361 instance to libm2sdr, primarily for
  * the Soapy integration path. */
 int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
@@ -1455,7 +1518,34 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
             return rc;
     }
 
+    m2sdr_store_applied_config(dev, cfg);
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
+                                 const struct m2sdr_config *cfg)
+{
+    struct m2sdr_config normalized;
+    int rc;
+
+    if (!dev || !cfg)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_validate_config_values(cfg);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    rc = m2sdr_normalize_config(cfg, &normalized);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    if (dev->rf_last_config_valid &&
+        m2sdr_configs_equal(&dev->rf_last_config, &normalized))
+        return M2SDR_ERR_OK;
+
+    if (dev->ad9361_phy)
+        return M2SDR_ERR_STATE;
+
+    return m2sdr_apply_config(dev, cfg);
 }
 
 /* Program one LO frequency on the already-initialized AD9361 instance. */
