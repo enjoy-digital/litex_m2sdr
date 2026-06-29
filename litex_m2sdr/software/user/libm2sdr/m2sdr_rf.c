@@ -1429,11 +1429,15 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     AD9361_InitParam *init_param = m2sdr_dev_init_param(dev);
     if (!init_param)
         return M2SDR_ERR_NO_MEM;
-    init_param->reference_clk_rate = cfg->refclk_freq;
-    init_param->gpio_resetb        = AD9361_GPIO_RESET_PIN;
-    init_param->gpio_sync          = -1;
-    init_param->gpio_cal_sw1       = -1;
-    init_param->gpio_cal_sw2       = -1;
+    init_param->reference_clk_rate          = cfg->refclk_freq;
+    init_param->gpio_resetb                 = AD9361_GPIO_RESET_PIN;
+    init_param->gpio_sync                   = -1;
+    init_param->gpio_cal_sw1                = -1;
+    init_param->gpio_cal_sw2                = -1;
+    init_param->rx_synthesizer_frequency_hz = cfg->rx_freq;
+    init_param->tx_synthesizer_frequency_hz = cfg->tx_freq;
+    init_param->rf_rx_bandwidth_hz          = (uint32_t)cfg->bandwidth;
+    init_param->rf_tx_bandwidth_hz          = (uint32_t)cfg->bandwidth;
 
     {
         /* M2SDR_RF_CHANNEL=2 selects the second physical RF port pair
