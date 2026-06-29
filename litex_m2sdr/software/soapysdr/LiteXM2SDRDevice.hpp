@@ -483,6 +483,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC,
     };
     std::string _ad9361_fir_profile = "legacy"; /* legacy | bypass | match | wide */
+    bool _autoBandwidth = false;
     bool _sampleRateHwApplied = false;
     int64_t _sampleRateHw = 0;
     uint32_t _sampleRateHwBitMode = 0;
@@ -529,6 +530,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         bool holdLast,
         const long timeoutUs);
     void markTxRemainderTime(const long long payloadTimeNs);
+    void setBandwidthUnlocked(
+        const int direction,
+        const double bw);
     bool isLitePCIe() const {
         return _transport == M2SDR_TRANSPORT_KIND_LITEPCIE;
     }
