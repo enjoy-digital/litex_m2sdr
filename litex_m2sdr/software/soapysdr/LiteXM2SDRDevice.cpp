@@ -1009,6 +1009,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     SoapySDR::log(SOAPY_SDR_INFO, "Power down and cleanup");
+
+    _rx_stream.stop_requested.store(true);
+    _tx_stream.stop_requested.store(true);
+
+    std::lock_guard<std::recursive_mutex> rx_stream_lock(_rx_stream_mutex);
+    std::lock_guard<std::recursive_mutex> tx_stream_lock(_tx_stream_mutex);
+    std::lock_guard<std::mutex> lock(_mutex);
+
     spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
         stopRxStreamUnlocked();
