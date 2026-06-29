@@ -131,6 +131,11 @@ bool parse_bool_arg(const std::string &value)
     throw std::runtime_error("Invalid boolean argument: " + value);
 }
 
+double auto_bandwidth_from_sample_rate(double sample_rate)
+{
+    return std::min(std::max(sample_rate, 0.2e6), 56.0e6);
+}
+
 bool antenna_allowed(const std::vector<std::string> &ants, const std::string &name)
 {
     if (ants.empty())
@@ -774,6 +779,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         rx_agc_pin_requested = true;
         rx_agc_pin = parse_bool_arg(args.at("rx_agc_pin"));
     }
+    if (args.count("auto_bandwidth") > 0)
+        _autoBandwidth = parse_bool_arg(args.at("auto_bandwidth"));
 
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");
@@ -1812,6 +1819,8 @@ void SoapyLiteXM2SDR::setSampleRate(
         _sampleRateHwBitMode == _bitMode &&
         _sampleRateHwFirProfile == _ad9361_fir_profile) {
         setSampleMode();
+        if (_autoBandwidth)
+            setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate));
         if (direction == SOAPY_SDR_RX && _rx_stream.opened) {
             _rx_stream.time0_ns = this->getHardwareTime("");
             _rx_stream.time0_count = _rx_stream.user_count;
@@ -1877,6 +1886,7 @@ void SoapyLiteXM2SDR::setSampleRate(
     timeout.throw_if_timed_out();
 #endif
 
+    bool sample_rate_applied = false;
     {
         int rc = m2sdr_set_sample_rate(_dev, hw_sample_rate);
         if (rc != 0) {
@@ -1886,12 +1896,15 @@ void SoapyLiteXM2SDR::setSampleRate(
             _sampleRateHw = hw_sample_rate;
             _sampleRateHwBitMode = _bitMode;
             _sampleRateHwFirProfile = _ad9361_fir_profile;
+            sample_rate_applied = true;
         }
     }
 #if USE_LITEETH
     timeout.throw_if_timed_out();
 #endif
 
+    if (_autoBandwidth && sample_rate_applied)
+        setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate));
 
     /* Finally, update the sample mode (bit depth) based on the new configuration. */
     setSampleMode();
@@ -1985,13 +1998,12 @@ std::vector<std::string> SoapyLiteXM2SDR::getStreamFormats(
  *                                      Bandwidth API
  **************************************************************************************************/
 
-void SoapyLiteXM2SDR::setBandwidth(
+void SoapyLiteXM2SDR::setBandwidthUnlocked(
     const int direction,
-    const size_t channel,
-    const double bw) {
+    const double bw)
+{
     if (bw == 0.0)
         return;
-    std::lock_guard<std::mutex> lock(_mutex);
 
     uint32_t bwi = static_cast<uint32_t>(bw);
 
@@ -2016,6 +2028,16 @@ void SoapyLiteXM2SDR::setBandwidth(
 #if USE_LITEETH
     timeout.throw_if_timed_out();
 #endif
+}
+
+void SoapyLiteXM2SDR::setBandwidth(
+    const int direction,
+    const size_t /*channel*/,
+    const double bw)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+
+    setBandwidthUnlocked(direction, bw);
 }
 
 double SoapyLiteXM2SDR::getBandwidth(
