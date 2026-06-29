@@ -202,34 +202,49 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
     }
 }
 
-static void print_liteeth_udp_summary(struct m2sdr_dev *dev, uint8_t quiet)
+static void print_stream_summary(struct m2sdr_dev *dev, uint8_t quiet)
 {
-    struct m2sdr_liteeth_udp_stats stats;
+    struct m2sdr_stream_stats stats;
 
     if (quiet || !dev)
         return;
-    if (m2sdr_liteeth_get_udp_stats(dev, &stats) != 0)
+    if (m2sdr_get_stream_stats(dev, M2SDR_RX, &stats) != 0)
         return;
 
-    fprintf(stderr,
-            "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
-            " rx_source_drops=%" PRIu64 " rx_ring_full=%" PRIu64
-            " rx_flushes=%" PRIu64 " rx_recoveries=%" PRIu64
-            " rx_recv_errors=%" PRIu64 "\n",
-            stats.rx_buffers,
-            stats.rx_kernel_drops,
-            stats.rx_source_drops,
-            stats.rx_ring_full_events,
-            stats.rx_flushes,
-            stats.rx_timeout_recoveries,
-            stats.rx_recv_errors);
-    if (stats.so_rcvbuf_requested > 0) {
+    if (stats.transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        fprintf(stderr,
+                "LitePCIe RX: buffers=%" PRIu64 " ring_level=%" PRIu64
+                " high_water=%" PRIu64 "/%zu overflows=%" PRIu64
+                " overflow_buffers=%" PRIu64 "\n",
+                stats.rx_buffers,
+                stats.ring_level,
+                stats.ring_high_water,
+                stats.buffer_count,
+                stats.overflow_events,
+                stats.overflow_buffers);
+    } else if (stats.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+        struct m2sdr_liteeth_udp_stats udp;
+
+        fprintf(stderr,
+                "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
+                " rx_source_drops=%" PRIu64 " rx_ring_full=%" PRIu64
+                " rx_recoveries=%" PRIu64 " rx_recv_errors=%" PRIu64 "\n",
+                stats.rx_buffers,
+                stats.rx_kernel_drops,
+                stats.rx_source_drops,
+                stats.rx_ring_full_events,
+                stats.rx_timeout_recoveries,
+                stats.rx_recv_errors);
+        if (m2sdr_liteeth_get_udp_stats(dev, &udp) != 0)
+            return;
+        if (udp.so_rcvbuf_requested <= 0)
+            return;
         fprintf(stderr,
                 "LiteEth UDP SO_RCVBUF: requested=%d actual=%d\n",
-                stats.so_rcvbuf_requested,
-                stats.so_rcvbuf_actual);
-        if (stats.so_rcvbuf_actual > 0 &&
-            stats.so_rcvbuf_actual < stats.so_rcvbuf_requested) {
+                udp.so_rcvbuf_requested,
+                udp.so_rcvbuf_actual);
+        if (udp.so_rcvbuf_actual > 0 &&
+            udp.so_rcvbuf_actual < udp.so_rcvbuf_requested) {
             fprintf(stderr,
                     "LiteEth UDP SO_RCVBUF capped; increase net.core.rmem_max for more RX headroom.\n");
         }
@@ -509,12 +524,11 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     exit_status = 0;
 
 cleanup:
+    print_stream_summary(dev, quiet);
 #ifdef USE_LITEPCIE
     if (use_pcie_dma)
         litepcie_dma_cleanup(&dma);
 #endif
-    if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
-        print_liteeth_udp_summary(dev, quiet);
     if (fo && fo != stdout)
         fclose(fo);
     if (dev)
