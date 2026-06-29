@@ -111,6 +111,12 @@ struct litepcie_dma_chan {
 	uint8_t reader_enable;
 	uint8_t writer_lock;
 	uint8_t reader_lock;
+	uint64_t writer_level_high_water;
+	uint64_t writer_overflow_events;
+	uint64_t writer_overflow_buffers;
+	uint64_t reader_level_high_water;
+	uint64_t reader_underflow_events;
+	uint64_t reader_underflow_buffers;
 };
 
 struct litepcie_chan {
@@ -162,6 +168,89 @@ static int litepcie_major;
 static int litepcie_minor_idx;
 static struct class *litepcie_class;
 static dev_t litepcie_dev_t;
+
+static uint64_t litepcie_dma_nonnegative_level(int64_t level)
+{
+	return level > 0 ? (uint64_t)level : 0;
+}
+
+static void litepcie_dma_update_level_stats(struct litepcie_dma_chan *dma)
+{
+	uint64_t writer_level;
+	uint64_t reader_level;
+
+	writer_level = litepcie_dma_nonnegative_level(
+		dma->writer_hw_count - dma->writer_sw_count);
+	reader_level = litepcie_dma_nonnegative_level(
+		dma->reader_sw_count - dma->reader_hw_count);
+
+	if (writer_level > dma->writer_level_high_water)
+		dma->writer_level_high_water = writer_level;
+	if (reader_level > dma->reader_level_high_water)
+		dma->reader_level_high_water = reader_level;
+}
+
+static void litepcie_dma_clear_stats(struct litepcie_dma_chan *dma,
+				     uint8_t direction)
+{
+	if (direction == LITEPCIE_DMA_STATS_WRITER) {
+		dma->writer_level_high_water = litepcie_dma_nonnegative_level(
+			dma->writer_hw_count - dma->writer_sw_count);
+		dma->writer_overflow_events = 0;
+		dma->writer_overflow_buffers = 0;
+	} else {
+		dma->reader_level_high_water = litepcie_dma_nonnegative_level(
+			dma->reader_sw_count - dma->reader_hw_count);
+		dma->reader_underflow_events = 0;
+		dma->reader_underflow_buffers = 0;
+	}
+}
+
+static int litepcie_dma_fill_stats(struct litepcie_chan *chan,
+				   struct litepcie_ioctl_dma_stats *m)
+{
+	struct litepcie_dma_chan *dma = &chan->dma;
+
+	if (m->direction != LITEPCIE_DMA_STATS_WRITER &&
+	    m->direction != LITEPCIE_DMA_STATS_READER)
+		return -EINVAL;
+
+	litepcie_dma_update_level_stats(dma);
+	if (m->clear) {
+		litepcie_dma_clear_stats(dma, m->direction);
+		litepcie_dma_update_level_stats(dma);
+	}
+
+	m->buffer_size = DMA_BUFFER_SIZE;
+	m->buffer_count = DMA_BUFFER_COUNT;
+	m->reserved0 = 0;
+	m->reserved1 = 0;
+	memset(m->reserved, 0, sizeof(m->reserved));
+
+	if (m->direction == LITEPCIE_DMA_STATS_WRITER) {
+		m->hw_count = dma->writer_hw_count;
+		m->sw_count = dma->writer_sw_count;
+		m->ring_level = litepcie_dma_nonnegative_level(
+			dma->writer_hw_count - dma->writer_sw_count);
+		m->ring_high_water = dma->writer_level_high_water;
+		m->overflow_events = dma->writer_overflow_events;
+		m->overflow_buffers = dma->writer_overflow_buffers;
+		m->underflow_events = 0;
+		m->underflow_buffers = 0;
+	} else {
+		m->hw_count = dma->reader_hw_count;
+		m->sw_count = dma->reader_sw_count;
+		m->ring_level = litepcie_dma_nonnegative_level(
+			dma->reader_sw_count - dma->reader_hw_count);
+		m->ring_high_water = dma->reader_level_high_water;
+		m->overflow_events = 0;
+		m->overflow_buffers = 0;
+		m->underflow_events = dma->reader_underflow_events;
+		m->underflow_buffers = dma->reader_underflow_buffers;
+	}
+
+	return 0;
+}
 
 /* ----------------------------------------------------------------------------------------------- */
 /*                               LitePCIe CSR Access                                               */
@@ -685,6 +774,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			if (chan->dma.reader_hw_count_last > chan->dma.reader_hw_count)
 				chan->dma.reader_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
 			chan->dma.reader_hw_count_last = chan->dma.reader_hw_count;
+			litepcie_dma_update_level_stats(&chan->dma);
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Reader buf: %lld\n", i,
 				chan->dma.reader_hw_count);
@@ -701,6 +791,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			if (chan->dma.writer_hw_count_last > chan->dma.writer_hw_count)
 				chan->dma.writer_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
 			chan->dma.writer_hw_count_last = chan->dma.writer_hw_count;
+			litepcie_dma_update_level_stats(&chan->dma);
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Writer buf: %lld\n", i,
 				chan->dma.writer_hw_count);
@@ -816,6 +907,7 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	overflows = 0;
 	len = size;
 	while (len >= DMA_BUFFER_SIZE) {
+		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0) {
 			if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > DMA_BUFFER_COUNT/2) {
 				overflows++;
@@ -837,8 +929,11 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 		}
 	}
 
-	if (overflows)
+	if (overflows) {
+		chan->dma.writer_overflow_events++;
+		chan->dma.writer_overflow_buffers += overflows;
 		dev_err(&s->dev->dev, "Reading too late, %d buffers lost\n", overflows);
+	}
 
 #ifdef DEBUG_READ
 	dev_dbg(&s->dev->dev, "read: read %ld bytes out of %ld\n", size - len, size);
@@ -874,6 +969,7 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	underflows = 0;
 	len        = size;
 	while (len >= DMA_BUFFER_SIZE) {
+		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2) {
 			if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < 0) {
 				underflows++;
@@ -894,8 +990,11 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 		}
 	}
 
-	if (underflows)
+	if (underflows) {
+		chan->dma.reader_underflow_events++;
+		chan->dma.reader_underflow_buffers += underflows;
 		dev_err(&s->dev->dev, "Writing too late, %d buffers lost\n", underflows);
+	}
 
 #ifdef DEBUG_WRITE
 	dev_dbg(&s->dev->dev, "write: write %ld bytes out of %ld\n", size - len, size);
@@ -1073,6 +1172,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.writer_enable = m.enable;
+		litepcie_dma_update_level_stats(&chan->dma);
 
 		m.hw_count = chan->dma.writer_hw_count;
 		m.sw_count = chan->dma.writer_sw_count;
@@ -1104,6 +1204,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.reader_enable = m.enable;
+		litepcie_dma_update_level_stats(&chan->dma);
 
 		m.hw_count = chan->dma.reader_hw_count;
 		m.sw_count = chan->dma.reader_sw_count;
@@ -1150,6 +1251,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.writer_sw_count = m.sw_count;
+		litepcie_dma_update_level_stats(&chan->dma);
 	}
 	break;
 	case LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE:
@@ -1167,6 +1269,26 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.reader_sw_count = m.sw_count;
+		litepcie_dma_update_level_stats(&chan->dma);
+	}
+	break;
+	case LITEPCIE_IOCTL_DMA_STATS:
+	{
+		struct litepcie_ioctl_dma_stats m;
+
+		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = litepcie_dma_fill_stats(chan, &m);
+		if (ret)
+			break;
+
+		if (copy_to_user((void *)arg, &m, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
 	}
 	break;
 	case LITEPCIE_IOCTL_SATA_DMA:
