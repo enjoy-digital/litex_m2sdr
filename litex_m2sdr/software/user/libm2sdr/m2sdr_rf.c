@@ -1284,10 +1284,10 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->tx_att            = DEFAULT_TX_ATT;
     cfg->rx_gain1          = DEFAULT_RX_GAIN;
     cfg->rx_gain2          = DEFAULT_RX_GAIN;
-    cfg->program_rx_gains  = false;
+    cfg->program_rx_gains      = true;
     cfg->program_rx_gain_modes = false;
-    cfg->rx_gain_mode1     = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
-    cfg->rx_gain_mode2     = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    cfg->rx_gain_mode1     = M2SDR_RX_GAIN_MODE_MANUAL;
+    cfg->rx_gain_mode2     = M2SDR_RX_GAIN_MODE_MANUAL;
     cfg->program_agc_pin   = false;
     cfg->agc_pin_enable    = false;
     cfg->loopback          = DEFAULT_LOOPBACK;

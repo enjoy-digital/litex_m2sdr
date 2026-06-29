@@ -33,7 +33,6 @@ int main(int argc, char **argv)
     cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
     cfg.clock_source   = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg.rx_freq        = 100000000; /* 100 MHz */
-    cfg.program_rx_gains = true;
     cfg.rx_gain1       = 10;
     cfg.rx_gain2       = 10;
     if (m2sdr_apply_config(dev, &cfg) != 0) {

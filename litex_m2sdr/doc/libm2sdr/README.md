@@ -105,7 +105,6 @@ int main(void)
     cfg.clock_source   = M2SDR_CLOCK_SOURCE_INTERNAL;
     cfg.tx_freq        = 2400000000LL;
     cfg.rx_freq        = 2400000000LL;
-    cfg.program_rx_gains = true;
     cfg.rx_gain1       = 20;
     cfg.rx_gain2       = 20;
     if (m2sdr_apply_config(dev, &cfg) != 0)
@@ -185,19 +184,20 @@ For runtime retunes or small adjustments, prefer the per-field setters such as
 `m2sdr_set_tx_att()`. These setters require an RFIC that was already brought up
 with `m2sdr_apply_config()` or an advanced integration path such as SoapySDR.
 
-## Manual RX gain
+## RX gain mode
 
-The default config keeps RX gain under slow-attack AGC. If an application sets
-`rx_gain1` or `rx_gain2` and expects those values to be programmed, it must also
-set:
+`m2sdr_config_init()` defaults RX gain control to manual mode and programs
+`rx_gain1` / `rx_gain2` during `m2sdr_apply_config()`. Applications should set
+the gain values they want before applying the config:
 
 ```c
-cfg.program_rx_gains = true;
+cfg.rx_gain1 = 20;
+cfg.rx_gain2 = 20;
 ```
 
-To switch gain control mode explicitly, use `cfg.program_rx_gain_modes = true`
-with `cfg.rx_gain_mode1`/`cfg.rx_gain_mode2`, or call
-`m2sdr_set_rx_gain_mode()` after RF bring-up.
+To use AD9361 AGC instead, clear `cfg.program_rx_gains` and set
+`cfg.program_rx_gain_modes = true` with `cfg.rx_gain_mode1` /
+`cfg.rx_gain_mode2`, or call `m2sdr_set_rx_gain_mode()` after RF bring-up.
 
 ## Stream buffer sizing
 

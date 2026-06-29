@@ -534,9 +534,9 @@ static int test_rf_range_validation(void)
         return -1;
 
     m2sdr_config_init(&cfg);
-    if (cfg.program_rx_gains || cfg.program_rx_gain_modes ||
-        cfg.rx_gain_mode1 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC ||
-        cfg.rx_gain_mode2 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC)
+    if (!cfg.program_rx_gains || cfg.program_rx_gain_modes ||
+        cfg.rx_gain_mode1 != M2SDR_RX_GAIN_MODE_MANUAL ||
+        cfg.rx_gain_mode2 != M2SDR_RX_GAIN_MODE_MANUAL)
         return -1;
     cfg.program_rx_gain_modes = true;
     cfg.rx_gain_mode1 = (enum m2sdr_rx_gain_mode)99;

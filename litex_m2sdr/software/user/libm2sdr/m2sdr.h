@@ -565,7 +565,9 @@ struct m2sdr_config {
     int64_t rx_gain1;
     /* RX gain for channel 1 in dB. */
     int64_t rx_gain2;
-    /* Apply explicit RX gain programming and force manual gain mode. */
+    /* Apply explicit RX gain programming and force manual gain mode. Enabled
+     * by m2sdr_config_init(); clear this and set program_rx_gain_modes when
+     * using AD9361 AGC modes instead. */
     bool    program_rx_gains;
     /* Apply explicit AD9361 RX gain-control modes when not programming manual gains. */
     bool    program_rx_gain_modes;
