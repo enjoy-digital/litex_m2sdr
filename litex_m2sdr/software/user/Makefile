@@ -1,7 +1,7 @@
 PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
 SCAN_CIMGUI_DIR := cimgui
-M2SDR_VERSION := 1.0.0
+M2SDR_VERSION := 1.1.0
 
 # Backend selection: USE_RUNTIME (default), USE_LITEPCIE, or USE_LITEETH.
 # USE_RUNTIME builds one binary set that can open either pcie: or eth: devices.

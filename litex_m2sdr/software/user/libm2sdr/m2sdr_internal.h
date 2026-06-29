@@ -72,6 +72,10 @@ struct m2sdr_dev {
     int64_t rx_release_count;
     int64_t tx_user_count;
     int64_t tx_submit_count;
+    uint64_t pcie_rx_overflow_events;
+    uint64_t pcie_rx_overflow_buffers;
+    uint64_t pcie_tx_underflow_events;
+    uint64_t pcie_tx_underflow_buffers;
     struct ad9361_rf_phy *ad9361_phy;
     /* Per-device snapshot of the AD9361_InitParam used at RF bring-up.
      * The header-defined default_init_param template is per translation
@@ -91,6 +95,9 @@ extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;
 extern const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops;
 
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev);
+
+int m2sdr_log_is_enabled(void);
+void m2sdr_log_printf(const char *fmt, ...);
 
 int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);
 

@@ -59,9 +59,9 @@ enum m2sdr_error {
 
 /* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
  * major in sync with the installed shared-library SONAME. */
-#define M2SDR_API_VERSION 0x00010000
+#define M2SDR_API_VERSION 0x00010100
 #define M2SDR_ABI_VERSION 0x00010000
-#define M2SDR_VERSION_STRING "1.0.0"
+#define M2SDR_VERSION_STRING "1.1.0"
 
 struct m2sdr_version {
     uint32_t api;
@@ -180,6 +180,35 @@ struct m2sdr_liteeth_udp_stats {
     int so_rcvbuf_actual;
     int so_sndbuf_requested;
     int so_sndbuf_actual;
+};
+
+struct m2sdr_stream_stats {
+    enum m2sdr_transport_kind transport;
+    enum m2sdr_direction direction;
+    /* Backend descriptor payload size and ring depth. */
+    size_t buffer_size;
+    size_t buffer_count;
+    /* Raw backend ring counters when available. */
+    int64_t hw_count;
+    int64_t sw_count;
+    /* Current ring occupancy and observed high-water mark in descriptors. */
+    uint64_t ring_level;
+    uint64_t ring_high_water;
+    /* RX late-consumer diagnostics. */
+    uint64_t overflow_events;
+    uint64_t overflow_buffers;
+    /* TX late-producer diagnostics. */
+    uint64_t underflow_events;
+    uint64_t underflow_buffers;
+    /* Transport-specific counters mirrored from LiteEth when available. */
+    uint64_t rx_buffers;
+    uint64_t tx_buffers;
+    uint64_t rx_kernel_drops;
+    uint64_t rx_source_drops;
+    uint64_t rx_ring_full_events;
+    uint64_t rx_timeout_recoveries;
+    uint64_t rx_recv_errors;
+    uint64_t tx_send_errors;
 };
 
 struct m2sdr_stream_info {
@@ -777,6 +806,11 @@ int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *c
 int m2sdr_stream_get_info(struct m2sdr_dev *dev,
                           enum m2sdr_direction direction,
                           struct m2sdr_stream_info *info);
+int m2sdr_get_stream_stats(struct m2sdr_dev *dev,
+                           enum m2sdr_direction direction,
+                           struct m2sdr_stream_stats *stats);
+int m2sdr_clear_stream_stats(struct m2sdr_dev *dev,
+                             enum m2sdr_direction direction);
 int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 /* Re-enable a previously configured (and possibly deactivated) stream. On
  * LitePCIe this resyncs the userspace ring counters with the kernel, whose

@@ -413,6 +413,69 @@ static int test_stream_direction_validation(void)
     return 0;
 }
 
+static int test_stream_config_size_validation(void)
+{
+    struct m2sdr_dev dev;
+    unsigned sc16_samples = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    int log_enabled = m2sdr_log_is_enabled();
+    int ret = -1;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd = -1;
+    m2sdr_set_log_enabled(false);
+
+    if (m2sdr_sync_config(NULL, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
+                          0, sc16_samples, 0, 1000) != M2SDR_ERR_INVAL)
+        goto out;
+    if (m2sdr_sync_config(&dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
+                          0, 0, 0, 1000) != M2SDR_ERR_INVAL)
+        goto out;
+    if (m2sdr_sync_config(&dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
+                          0, sc16_samples - 1, 0, 1000) != M2SDR_ERR_RANGE)
+        goto out;
+    if (m2sdr_sync_config(&dev, M2SDR_RX, (enum m2sdr_format)99,
+                          0, sc16_samples, 0, 1000) != M2SDR_ERR_UNSUPPORTED)
+        goto out;
+
+    ret = 0;
+out:
+    m2sdr_set_log_enabled(log_enabled != 0);
+    return ret;
+}
+
+static int test_stream_stats_validation(void)
+{
+    struct m2sdr_dev dev;
+    struct m2sdr_stream_stats stats;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd = -1;
+    dev.transport = M2SDR_TRANSPORT_LITEPCIE;
+
+    if (m2sdr_get_stream_stats(NULL, M2SDR_RX, &stats) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_stream_stats(&dev, (enum m2sdr_direction)42, &stats) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_stream_stats(&dev, M2SDR_RX, NULL) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_get_stream_stats(&dev, M2SDR_RX, &stats) != M2SDR_ERR_STATE)
+        return -1;
+    if (m2sdr_clear_stream_stats(NULL, M2SDR_RX) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_clear_stream_stats(&dev, (enum m2sdr_direction)42) != M2SDR_ERR_INVAL)
+        return -1;
+    if (m2sdr_clear_stream_stats(&dev, M2SDR_TX) != M2SDR_ERR_STATE)
+        return -1;
+
+    dev.transport = M2SDR_TRANSPORT_LITEETH;
+    if (m2sdr_get_stream_stats(&dev, M2SDR_RX, &stats) != M2SDR_ERR_STATE)
+        return -1;
+    if (m2sdr_clear_stream_stats(&dev, M2SDR_RX) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+
+    return 0;
+}
+
 static int test_rf_range_validation(void)
 {
     struct m2sdr_dev dev;
@@ -471,7 +534,8 @@ static int test_rf_range_validation(void)
         return -1;
 
     m2sdr_config_init(&cfg);
-    if (cfg.program_rx_gain_modes || cfg.rx_gain_mode1 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC ||
+    if (cfg.program_rx_gains || cfg.program_rx_gain_modes ||
+        cfg.rx_gain_mode1 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC ||
         cfg.rx_gain_mode2 != M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC)
         return -1;
     cfg.program_rx_gain_modes = true;
@@ -573,6 +637,14 @@ int main(void)
     }
     if (test_stream_direction_validation() != 0) {
         fprintf(stderr, "test_stream_direction_validation failed\n");
+        return 1;
+    }
+    if (test_stream_config_size_validation() != 0) {
+        fprintf(stderr, "test_stream_config_size_validation failed\n");
+        return 1;
+    }
+    if (test_stream_stats_validation() != 0) {
+        fprintf(stderr, "test_stream_stats_validation failed\n");
         return 1;
     }
     if (test_rf_range_validation() != 0) {

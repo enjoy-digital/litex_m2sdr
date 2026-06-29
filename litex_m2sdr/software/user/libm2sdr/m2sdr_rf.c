@@ -12,6 +12,7 @@
 /*----------*/
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
@@ -53,7 +54,7 @@
 #endif
 
 static int m2sdr_log_enabled = M2SDR_LOG_ENABLED ? 1 : 0;
-#define M2SDR_LOGF(...) do { if (m2sdr_log_enabled) fprintf(stderr, __VA_ARGS__); } while (0)
+#define M2SDR_LOGF(...) m2sdr_log_printf(__VA_ARGS__)
 
 #if defined(__GNUC__) || defined(__clang__)
 #define M2SDR_WEAK __attribute__((weak))
@@ -93,6 +94,23 @@ int m2sdr_set_log_enabled(bool enable)
 {
     m2sdr_log_enabled = enable ? 1 : 0;
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_log_is_enabled(void)
+{
+    return m2sdr_log_enabled;
+}
+
+void m2sdr_log_printf(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (!m2sdr_log_enabled || !fmt)
+        return;
+
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
 }
 
 /* Return the raw backend connection object expected by the low-level AD9361
