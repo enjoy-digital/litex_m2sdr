@@ -526,7 +526,8 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
+            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas,
+                data_width=128 if with_rfic_oversampling else 64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -763,20 +764,35 @@ class BaseSoC(SoCMini):
 
         with_rfic_stream_fifos = with_eth and not with_pcie
         self.ad9361 = AD9361RFIC(
-            rfic_pads      = platform.request("ad9361_rfic"),
-            spi_pads       = platform.request("ad9361_spi"),
-            sys_clk_freq   = sys_clk_freq,
-            with_tx_fifo   = with_rfic_stream_fifos,
-            tx_fifo_depth  = 8192,
-            with_rx_fifo   = with_rfic_stream_fifos,
-            rx_fifo_depth  = 8192,
+            rfic_pads         = platform.request("ad9361_rfic"),
+            spi_pads          = platform.request("ad9361_spi"),
+            sys_clk_freq      = sys_clk_freq,
+            with_tx_fifo      = with_rfic_stream_fifos,
+            tx_fifo_depth     = 8192,
+            with_rx_fifo      = with_rfic_stream_fifos,
+            rx_fifo_depth     = 8192,
+            # Internal PHY TX->RX loopback (diagnostics-only runtime CSR). Omitted on Oversampling
+            # builds: its skid + high-fanout control net do not close timing at 491.52MHz rfic_clk
+            # and the 2T2R@122.88 datapath needs that margin.
+            with_phy_loopback = not with_rfic_oversampling,
+            # Per-lane RX IDELAYE2 deskew: at 983Mbps per lane (2T2R @ 122.88MSPS) the board's
+            # lane-to-lane skew exceeds the eye, and the AD9361's delay registers are global-only.
+            with_rx_deskew    = with_rfic_oversampling,
+            # Per-lane TX clock phase trim (MMCM + DRP): the TX-direction counterpart of the RX
+            # deskew; Artix-7 HR banks have no ODELAY, so the lane alignment is done by phasing each
+            # TX ODDR's clock instead. M2SDR_TX_OSERDES selects the OSERDESE2 TX serializer instead
+            # (needed for a clean TX eye at 2T2R@122.88, 983Mbps/lane); the two are mutually exclusive
+            # (both build the TX MMCM).
+            with_tx_phase     = with_rfic_oversampling and (os.environ.get("M2SDR_TX_OSERDES") is None),
+            with_tx_oserdes   = with_rfic_oversampling and (os.environ.get("M2SDR_TX_OSERDES") is not None),
+            wide              = with_rfic_oversampling,
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
-        self.header = TXRXHeader(data_width=64)
+        self.header = TXRXHeader(data_width=128 if with_rfic_oversampling else 64)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.time_gen.time),
@@ -787,7 +803,7 @@ class BaseSoC(SoCMini):
 
         # AD9361 <-> Loopback <-> Header.
         # -------------------------------
-        self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+        self.txrx_loopback = TXRXLoopback(data_width=128 if with_rfic_oversampling else 64, with_csr=True)
 
         # Header TX -> Loopback -> RFIC TX.
         self.comb += [
@@ -803,7 +819,7 @@ class BaseSoC(SoCMini):
 
         # Crossbar.
         # ---------
-        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+        self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=3, with_csr=True)
 
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
@@ -1124,13 +1140,111 @@ class BaseSoC(SoCMini):
         # RFIC clock domain.
         platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
 
+        if with_rfic_oversampling and not with_eth:
+            # TX CDC FIFO output register read in the rfic domain: its read-address cone is
+            # re-read every cycle, but the read pointer only advances when the consumer handshakes
+            # - the PHY takes one group every 4 rfic_clk cycles, and in the wide (128-bit) path the
+            # 128->64 scatter pulls a CDC word only every ~8 cycles - so dout is stable for many
+            # cycles before use. Relax its setup to 2 cycles (hold 0) to close at 491.52MHz. The
+            # register is `*storage_*_dat1_reg*` with LUTRAM storage and `*tx_cdc*dout*_reg*` with
+            # register_storage (the wide path); cover both. Scoped -from rfic_clk so the sys-side
+            # RX CDC output register (read back-to-back) is NOT relaxed.
+            platform.toolchain.pre_placement_commands += [
+                "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+                "NAME =~ *tx_cdc*dout*_reg*}}]",
+                "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+                "NAME =~ *tx_cdc*dout*_reg*}}]",
+                # The 2R2T PRBS checkers' compare/re-seed recurrence captures on a ce that the
+                # PHY asserts at most once per 4 rfic_clk cycles (one word per 4 DDR phases),
+                # and the capture is retimed so both compare operands are stable two cycles
+                # before every capture by construction: the recurrence paths into the state
+                # registers are exact 2-cycle paths.
+                # error_r captures the ce_rr-gated compare: on every cycle other than the
+                # (2-cycle-stable) sample cycle the gating flop forces the cone low, so the
+                # compare-dependent capture is also an exact 2-cycle path.
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                # Same retimed-capture property for the 1R1T checker's reference pair (which
+                # additionally never carries meaningful data at 491.52MHz: 1R1T caps DATA_CLK
+                # at 245.76MHz, and at 491.52MHz the design is necessarily in 2R2T mode).
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+            ]
+            # TX phase-trim (MMCM/phased-clock) constraints: only valid when with_tx_phase is on
+            # (the MMCM and *ad9361phy_clkout* clocks exist). An OSERDES build disables with_tx_phase,
+            # so these are omitted there (else they reference clocks that do not exist and Vivado
+            # errors on the empty clock group).
+            if os.environ.get("M2SDR_TX_OSERDES") is None:
+                platform.toolchain.pre_placement_commands += [
+                    # The TX phase-trim BUFGCTRL selects are quasi-static control (changed only
+                    # with TX idle; IGNORE0/1 make the mux asynchronous by design).
+                    "set_false_path -to [get_pins -hierarchical -filter {{NAME =~ *BUFGCTRL*/S?}}]",
+                    # TX ODDR paths captured by the BUFGCTRL bypass leg (pad clock): the bypass
+                    # only carries data at DATA_CLK <= 245.76MHz (period >= 4.07ns) - at 491.52MHz
+                    # the MMCM-phased leg is selected before TX is used - so the single-cycle
+                    # 491.52MHz check is over-constrained by 2x.
+                    "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+                    "-to [get_clocks ad9361_rfic_rx_clk_p]",
+                    "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+                    "-to [get_clocks ad9361_rfic_rx_clk_p]",
+                    # The TX BUFGCTRL muxes carry either the bypass (pad) clock or the MMCM-phased
+                    # clocks, never both: cross-leg paths are physically impossible.
+                    "set_clock_groups -logically_exclusive "
+                    "-group [get_clocks ad9361_rfic_rx_clk_p] "
+                    "-group [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
+                    # The rfic -> phased-lane-domain crossing's validity is enforced by the TX phase
+                    # calibration, not by static analysis: the lane trim moves the capture clock in
+                    # VCO/8 steps and a miscapture shows in the per-lane PRBS error counters the
+                    # calibration sweeps over (a fixed-phase same-frequency crossing, residual
+                    # -0.1..-0.35ns inter-clock-tree pessimism at 491.52MHz).
+                    "set_false_path -from [get_clocks rfic_clk] "
+                    "-to [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
+                ]
+            # OSERDES TX: the group (tx_data_*) is latched in rfic (491.52, updates once per 4
+            # cycles = one CLKDIV period) and re-registered into the oserdes_div (122.88) domain -
+            # a mesochronous crossing of a signal stable for a full CLKDIV period. Declare the
+            # OSERDES MMCM clocks asynchronous to rfic and bound the crossing by datapath delay.
+            if os.environ.get("M2SDR_TX_OSERDES") is not None:
+                platform.toolchain.pre_placement_commands += [
+                    # tx_data_* (rfic) -> *_d (oserdes_div) group register: the group is stable for a
+                    # full CLKDIV period (8.14ns) so this mesochronous transfer is bounded by datapath
+                    # delay only (not clock relationship). set_max_delay silently no-ops on an empty
+                    # match (unlike set_clock_groups), so it is robust to generated-clock naming.
+                    "set_max_delay 8.0 -datapath_only "
+                    "-from [get_cells -hierarchical -filter {{NAME =~ *tx_data_ia_reg* || "
+                    "NAME =~ *tx_data_qa_reg* || NAME =~ *tx_data_ib_reg* || NAME =~ *tx_data_qb_reg*}}] "
+                    "-to [get_cells -hierarchical -filter {{NAME =~ *ia_d_reg* || NAME =~ *qa_d_reg* || "
+                    "NAME =~ *ib_d_reg* || NAME =~ *qb_d_reg*}}]",
+                    # OSERDES reset is a quasi-static async reset (asserted only at bringup).
+                    "set_false_path -to [get_pins -hierarchical -filter {{NAME =~ *OSERDESE2*/RST}}]",
+                ]
+
         # Clk Measurements -------------------------------------------------------------------------
+
+        # At 491.52MHz rfic_clk a 64-bit free-running counter does not close timing; count a /4
+        # divided clock with increment=4 (same reported value, +/-4 cycles granularity).
+        if with_rfic_oversampling:
+            rfic_meas_div = Signal(2)
+            self.sync.rfic += rfic_meas_div.eq(rfic_meas_div + 1)
+            rfic_meas_clk = (rfic_meas_div[1], 4)
+        else:
+            rfic_meas_clk = ClockSignal("rfic")
 
         self.clk_measurement = MultiClkMeasurement(clks={
             "clk0" : ClockSignal("sys"),
             "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
-            "clk3" : ClockSignal("rfic"),
+            "clk3" : rfic_meas_clk,
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
@@ -1587,7 +1701,22 @@ def main():
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
-    builder.build(build_name=get_build_name(), run=args.build)
+    build_kwargs = {}
+    # Only pass the Vivado directives for actual builds: they are toolchain
+    # kwargs newer than some LiteX releases, and elaboration-only runs
+    # (run=False, e.g. CI) never reach Vivado.
+    if args.build:
+        # Extra placer/router effort for every image: the Oversampling build's
+        # 491.52MHz rfic_clk datapath needs it, and the base build's RX sc8
+        # block-floating-point path (rx_cdc -> bfp8_exponent) misses timing by
+        # ~0.5ns at the Vivado defaults but closes with these directives.
+        build_kwargs.update(
+            vivado_place_directive               = "ExtraTimingOpt",
+            vivado_post_place_phys_opt_directive = "AggressiveExplore",
+            vivado_route_directive               = "AggressiveExplore",
+            vivado_post_route_phys_opt_directive = "AggressiveExplore",
+        )
+    builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
