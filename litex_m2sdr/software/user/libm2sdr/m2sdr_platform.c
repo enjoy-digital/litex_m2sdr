@@ -106,6 +106,20 @@ int m2sdr_socket_error_is_interrupted(int err)
 
 void m2sdr_sleep_us(unsigned int usec)
 {
+    /* Sleep() rounds to the scheduler tick (~1-15.6 ms); busy-wait short
+     * delays so the AD9361 driver's udelay()-scale calls do not inflate
+     * ~1000x and blow the RF init deadline. */
+    if (usec < 2000) {
+        uint64_t now = m2sdr_monotonic_us();
+
+        if (now) {
+            uint64_t deadline = now + usec;
+
+            while (m2sdr_monotonic_us() < deadline)
+                YieldProcessor();
+            return;
+        }
+    }
     m2sdr_sleep_ms(((uint64_t)usec + 999ULL) / 1000ULL);
 }
 
