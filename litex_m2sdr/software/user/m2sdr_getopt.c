@@ -2,7 +2,7 @@
 
 #include "m2sdr_getopt.h"
 
-#if defined(_WIN32)
+#if defined(_MSC_VER)
 
 #include <stdio.h>
 #include <string.h>

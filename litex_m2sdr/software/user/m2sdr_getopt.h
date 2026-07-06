@@ -3,7 +3,9 @@
 #ifndef M2SDR_GETOPT_H
 #define M2SDR_GETOPT_H
 
-#if !defined(_WIN32)
+/* Only MSVC lacks getopt; MinGW-w64 ships a permuting getopt_long that
+ * matches the glibc behavior the tools rely on. */
+#if !defined(_MSC_VER)
 #include <getopt.h>
 #else
 
