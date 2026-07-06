@@ -1040,6 +1040,7 @@ static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *v
 				    unsigned long user_addr, void *cpu_addr)
 {
 	unsigned long offset;
+	int ret;
 
 	if (DMA_BUFFER_SIZE % PAGE_SIZE)
 		return -EINVAL;
@@ -1049,11 +1050,10 @@ static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *v
 	for (offset = 0; offset < DMA_BUFFER_SIZE; offset += PAGE_SIZE) {
 		unsigned long pfn = litepcie_dma_buffer_pfn((u8 *)cpu_addr + offset);
 
-		if (remap_pfn_range(vma, user_addr + offset, pfn, PAGE_SIZE,
-				    vma->vm_page_prot)) {
-			dev_err(dev, "mmap remap_pfn_range failed\n");
-			return -EAGAIN;
-		}
+		ret = remap_pfn_range(vma, user_addr + offset, pfn, PAGE_SIZE,
+				      vma->vm_page_prot);
+		if (ret)
+			return ret;
 	}
 
 	return 0;
@@ -1115,8 +1115,11 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		ret = litepcie_dma_buffer_mmap(&s->dev->dev, vma,
 					       vma->vm_start + i * DMA_BUFFER_SIZE,
 					       cpu_addr);
-		if (ret)
+		if (ret) {
+			dev_err(&s->dev->dev,
+				"mmap remap_pfn_range failed for buffer %d (ret=%d)\n", i, ret);
 			return ret;
+		}
 #endif
 	}
 
