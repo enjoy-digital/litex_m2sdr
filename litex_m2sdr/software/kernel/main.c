@@ -37,9 +37,13 @@
 #include <linux/platform_device.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/device.h>
 #include <linux/uaccess.h>
 #include <linux/vmalloc.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
+#include <linux/cc_platform.h>
+#endif
 #if defined(__arm__) || defined(__aarch64__)
 #include <linux/dma-direct.h>
 #endif
@@ -1016,6 +1020,22 @@ static unsigned long litepcie_dma_buffer_pfn(void *addr)
 	return page_to_pfn(virt_to_page(addr));
 }
 
+/* Replicate the dma_pgprot() attributes dma_mmap_coherent() would apply:
+ * coherent buffers are allocated decrypted in confidential guests and
+ * non-cached on platforms without cache-coherent DMA.
+ */
+static pgprot_t litepcie_dma_buffer_pgprot(struct device *dev, pgprot_t prot)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
+	if (cc_platform_has(CC_ATTR_GUEST_MEM_ENCRYPT))
+		prot = pgprot_decrypted(prot);
+#endif
+	if (!dev_is_dma_coherent(dev))
+		prot = pgprot_dmacoherent(prot);
+
+	return prot;
+}
+
 static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *vma,
 				    unsigned long user_addr, void *cpu_addr)
 {
@@ -1023,6 +1043,8 @@ static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *v
 
 	if (DMA_BUFFER_SIZE % PAGE_SIZE)
 		return -EINVAL;
+
+	vma->vm_page_prot = litepcie_dma_buffer_pgprot(dev, vma->vm_page_prot);
 
 	for (offset = 0; offset < DMA_BUFFER_SIZE; offset += PAGE_SIZE) {
 		unsigned long pfn = litepcie_dma_buffer_pfn((u8 *)cpu_addr + offset);
