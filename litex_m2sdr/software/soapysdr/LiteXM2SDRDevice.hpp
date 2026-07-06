@@ -334,6 +334,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /***********************************************************************************************
     *                                    Clocking API
     ***********************************************************************************************/
+    std::vector<std::string> listClockSources(void) const override;
+    void setClockSource(const std::string &source) override;
+    std::string getClockSource(void) const override;
+
     std::vector<std::string> listTimeSources(void) const override;
     void setTimeSource(const std::string &source) override;
     std::string getTimeSource(void) const override;
@@ -354,6 +358,20 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::string readSensor(const std::string &key) const override;
 
+    std::vector<std::string> listSensors(
+        const int direction,
+        const size_t channel) const override;
+
+    SoapySDR::ArgInfo getSensorInfo(
+        const int direction,
+        const size_t channel,
+        const std::string &key) const override;
+
+    std::string readSensor(
+        const int direction,
+        const size_t channel,
+        const std::string &key) const override;
+
 
  /**************************************************************************************************
  *                                        PRIVATE
@@ -366,6 +384,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     enum m2sdr_transport_kind _transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
     int _pcie_fd = -1;
+
+    /* Selected RFIC reference; canonical names: internal, external, fpga. */
+    std::string _clock_source = "internal";
+    int64_t _refclk_hz = 38400000;
 
     size_t _rx_buf_size = 0;
     size_t _tx_buf_size = 0;
@@ -385,6 +407,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     std::string _eth_ip;
     uint16_t _liteeth_rx_port = 2345;
     struct m2sdr_liteeth_rx_stream_config makeLiteEthRxStreamConfig() const;
+    void applyClockSource(const std::string &source);
+    bool referenceLocked(void) const;
 
     struct Stream {
         Stream() :

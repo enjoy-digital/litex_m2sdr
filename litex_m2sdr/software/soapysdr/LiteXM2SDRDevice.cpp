@@ -22,6 +22,7 @@
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
+#include "ad9361/ad9361.h"
 
 #include "libm2sdr/m2sdr_config.h"
 
@@ -153,6 +154,18 @@ bool has_eth_ptp_support(struct m2sdr_dev *dev)
         return false;
 
     return (caps.features & M2SDR_FEATURE_ETH_PTP_MASK) != 0;
+}
+
+/* Normalize the accepted clock source names onto internal/external/fpga. */
+static std::string canonical_clock_source(const std::string &source)
+{
+    if (source == "internal" || source == "external")
+        return source;
+    if (source == "fpga" || source == "si5351c-fpga" ||
+        source == "si5351c_fpga" || source == "pll")
+        return "fpga";
+    throw std::runtime_error("Unsupported clock_source '" + source +
+                             "' (supported: internal, external, fpga)");
 }
 
 std::string ptp_state_to_string(uint8_t state)
@@ -825,72 +838,18 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _rx_agc_mode[1] = parse_agc_mode(args.at("rx1_agc_mode"));
 
     /* RefClk Selection */
-    int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
-    std::string clock_source = "internal"; /* Default XO. */
     if (args.count("refclk_freq") > 0) {
-        refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
+        _refclk_hz = static_cast<int64_t>(std::stod(args.at("refclk_freq")));
     }
     if (args.count("clock_source") > 0) {
-        clock_source = args.at("clock_source");
+        _clock_source = canonical_clock_source(args.at("clock_source"));
     }
     if (do_init) {
 
         /* Initialize SI5351 Clocking */
 #ifdef CSR_SI5351_BASE
         SoapySDR::log(SOAPY_SDR_INFO, "Initializing SI5351");
-        if (clock_source == "internal") {
-            /* SI5351B, XO reference */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
-            if (refclk_hz == 40000000) {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_40m_config,
-                    sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0])))
-                    throw std::runtime_error("SI5351 internal-XO 40MHz config failed");
-            } else {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_xo_38p4m_config,
-                    sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0])))
-                    throw std::runtime_error("SI5351 internal-XO 38.4MHz config failed");
-            }
-        } else if (clock_source == "external") {
-            /* SI5351C, external 10 MHz CLKIN from u.FL */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                  SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-                  SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-            if (refclk_hz == 40000000) {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
-                    throw std::runtime_error("SI5351 external 10MHz/40MHz config failed");
-            } else {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
-                    throw std::runtime_error("SI5351 external 10MHz/38.4MHz config failed");
-            }
-        } else if ((clock_source == "fpga") ||
-                   (clock_source == "si5351c-fpga") ||
-                   (clock_source == "si5351c_fpga") ||
-                   (clock_source == "pll")) {
-            /* SI5351C, 10 MHz CLKIN regenerated from the FPGA clk10 path. */
-            litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
-                  SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
-                  SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
-            if (refclk_hz == 40000000) {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_40m_config,
-                    sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
-                    throw std::runtime_error("SI5351 FPGA 10MHz/40MHz config failed");
-            } else {
-                if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-                    si5351_clkin_10m_38p4m_config,
-                    sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
-                    throw std::runtime_error("SI5351 FPGA 10MHz/38.4MHz config failed");
-            }
-        } else {
-            throw std::runtime_error("Unsupported clock_source '" + clock_source + "' (supported: internal, external, fpga)");
-        }
+        applyClockSource(_clock_source);
 #endif
 
         /* Power-up AD9361 */
@@ -907,7 +866,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
      * libm2sdr so channel-layout switches re-init with the same parameters. */
     SoapySDR::log(SOAPY_SDR_INFO, "Initializing AD9361 RFIC");
     AD9361_InitParam init_param = default_init_param;
-    init_param.reference_clk_rate = refclk_hz;
+    init_param.reference_clk_rate = _refclk_hz;
     init_param.gpio_resetb        = AD9361_GPIO_RESET_PIN;
     init_param.gpio_sync          = -1;
     init_param.gpio_cal_sw1       = -1;
@@ -945,8 +904,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         /* Some defaults to avoid throwing. */
         SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
-
-        this->setClockSource("internal");
 
         /* Common for TX1/TX2 and RX1/RX2 */
         _rx_stream.samplerate   = 30.72e6;
@@ -2104,6 +2061,91 @@ SoapySDR::RangeList SoapyLiteXM2SDR::getBandwidthRange(
  *                                   Clocking API
  **************************************************************************************************/
 
+/* Reconfigure the SI5351 for the selected canonical reference source. */
+void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
+{
+#ifdef CSR_SI5351_BASE
+    if (source == "internal") {
+        /* SI5351B, XO reference */
+        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
+            SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET));
+        if (_refclk_hz == 40000000) {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_xo_40m_config,
+                sizeof(si5351_xo_40m_config)/sizeof(si5351_xo_40m_config[0])))
+                throw std::runtime_error("SI5351 internal-XO 40MHz config failed");
+        } else {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_xo_38p4m_config,
+                sizeof(si5351_xo_38p4m_config)/sizeof(si5351_xo_38p4m_config[0])))
+                throw std::runtime_error("SI5351 internal-XO 38.4MHz config failed");
+        }
+    } else if (source == "external") {
+        /* SI5351C, external 10 MHz CLKIN from u.FL */
+        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
+              SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+              SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
+        if (_refclk_hz == 40000000) {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_clkin_10m_40m_config,
+                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
+                throw std::runtime_error("SI5351 external 10MHz/40MHz config failed");
+        } else {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_clkin_10m_38p4m_config,
+                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
+                throw std::runtime_error("SI5351 external 10MHz/38.4MHz config failed");
+        }
+    } else if (source == "fpga") {
+        /* SI5351C, 10 MHz CLKIN regenerated from the FPGA clk10 path. */
+        litex_m2sdr_writel(_dev, CSR_SI5351_CONTROL_ADDR,
+              SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
+              SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET));
+        if (_refclk_hz == 40000000) {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_clkin_10m_40m_config,
+                sizeof(si5351_clkin_10m_40m_config)/sizeof(si5351_clkin_10m_40m_config[0])))
+                throw std::runtime_error("SI5351 FPGA 10MHz/40MHz config failed");
+        } else {
+            if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                si5351_clkin_10m_38p4m_config,
+                sizeof(si5351_clkin_10m_38p4m_config)/sizeof(si5351_clkin_10m_38p4m_config[0])))
+                throw std::runtime_error("SI5351 FPGA 10MHz/38.4MHz config failed");
+        }
+    } else {
+        throw std::runtime_error("Unsupported clock_source '" + source + "' (supported: internal, external, fpga)");
+    }
+#else
+    (void)source;
+#endif
+}
+
+std::vector<std::string> SoapyLiteXM2SDR::listClockSources(void) const
+{
+    return {"internal", "external", "fpga"};
+}
+
+void SoapyLiteXM2SDR::setClockSource(const std::string &source)
+{
+    std::string canonical = canonical_clock_source(source);
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (canonical == _clock_source)
+        return;
+    /* Reconfiguring the SI5351 glitches the RFIC reference clock; only
+     * allow it while no stream is open. */
+    if (_rx_stream.opened || _tx_stream.opened)
+        throw std::runtime_error(
+            "setClockSource: close RX/TX streams before changing the clock source");
+    applyClockSource(canonical);
+    _clock_source = canonical;
+}
+
+std::string SoapyLiteXM2SDR::getClockSource(void) const
+{
+    return _clock_source;
+}
+
 std::vector<std::string> SoapyLiteXM2SDR::listTimeSources(void) const
 {
     std::vector<std::string> sources = {"internal"};
@@ -2185,6 +2227,77 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
  *                                    Sensors API
  **************************************************************************************************/
 
+/* Report whether the selected RFIC reference is present and locked. */
+bool SoapyLiteXM2SDR::referenceLocked(void) const
+{
+    /* The internal XO free-runs: report it locked like other AD936x SDRs. */
+    if (_clock_source == "internal")
+        return true;
+
+#ifdef CSR_SI5351_BASE
+    {
+        /* SI5351 status register 0: SYS_INIT (bit 7) reports the device
+         * still initializing, LOS_CLKIN (bit 4) a missing 10 MHz CLKIN.
+         * The PLL loss-of-lock bits are ignored: the unused PLL reports a
+         * permanent loss-of-lock. */
+        uint8_t status = 0;
+        if (!m2sdr_si5351_i2c_read((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                                   0x00, &status, 1, true))
+            return false;
+        if (status & ((1 << 7) | (1 << 4)))
+            return false;
+    }
+#endif
+
+    /* Fold in the FPGA clk10 discipline state when the loop is active. */
+    if (_clock_source == "fpga") {
+        struct m2sdr_ptp_clock10_status st;
+        if (m2sdr_get_ptp_clock10_status(_dev, &st) == M2SDR_ERR_OK && st.active)
+            return st.reference_locked && st.clock_locked;
+    }
+
+    return true;
+}
+
+std::vector<std::string> SoapyLiteXM2SDR::listSensors(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
+    return {"lo_locked"};
+}
+
+SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
+    const int direction,
+    const size_t /*channel*/,
+    const std::string &key) const {
+    if (key == "lo_locked") {
+        SoapySDR::ArgInfo info;
+        info.key         = "lo_locked";
+        info.name        = (direction == SOAPY_SDR_RX) ? "RX LO lock" : "TX LO lock";
+        info.value       = "false";
+        info.description = "AD9361 RF synthesizer VCO lock detect";
+        info.type        = SoapySDR::ArgInfo::BOOL;
+        return info;
+    }
+    return getSensorInfo(key);
+}
+
+std::string SoapyLiteXM2SDR::readSensor(
+    const int direction,
+    const size_t /*channel*/,
+    const std::string &key) const {
+    if (key == "lo_locked") {
+        /* Both channels share the AD9361 RX/TX synthesizers. */
+        uint16_t reg = (direction == SOAPY_SDR_RX) ?
+            REG_RX_CP_OVERRANGE_VCO_LOCK : REG_TX_CP_OVERRANGE_VCO_LOCK;
+        uint8_t val = 0;
+        if (!m2sdr_ad9361_spi_read_checked((void *)(intptr_t)_fd, reg, &val))
+            return "false";
+        return (val & VCO_LOCK) ? "true" : "false";
+    }
+    /* Board-level sensors stay readable through the channel API. */
+    return readSensor(key);
+}
+
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     std::vector<std::string> sensors;
 #ifdef CSR_XADC_BASE
@@ -2194,6 +2307,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("fpga_vccbram");
 #endif
     sensors.push_back("ad9361_temp");
+    sensors.push_back("ref_locked");
     if (has_eth_ptp_support(_dev)) {
         sensors.push_back("ptp_locked");
         sensors.push_back("ptp_time_locked");
@@ -2283,6 +2397,19 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.units       = "°C";
                 info.description = "AD9361 temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return info;
+        }
+
+        /* Reference Sensors */
+        if (deviceStr == "ref") {
+            if (sensorStr == "locked") {
+                info.key         = "locked";
+                info.value       = "false";
+                info.description = "RFIC reference clock locked";
+                info.type        = SoapySDR::ArgInfo::BOOL;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
@@ -2435,6 +2562,14 @@ std::string SoapyLiteXM2SDR::readSensor(
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
             return sensorValue;
+        }
+
+        /* Reference Sensors */
+        if (deviceStr == "ref") {
+            if (sensorStr == "locked") {
+                return referenceLocked() ? "true" : "false";
+            }
+            throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") unknown sensor");
         }
 
         if (deviceStr == "ptp") {
