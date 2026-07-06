@@ -1151,6 +1151,21 @@ size_t SoapyLiteXM2SDR::getNumChannels(const int) const {
     return 2;
 }
 
+SoapySDR::Kwargs SoapyLiteXM2SDR::getChannelInfo(
+    const int direction,
+    const size_t channel) const {
+    SoapySDR::Kwargs info;
+
+    /* Name channels after the board RF connectors so applications can
+     * present a meaningful per-channel selection. */
+    if (direction == SOAPY_SDR_RX)
+        info["label"] = (channel == 0) ? "RX1" : "RX2";
+    else
+        info["label"] = (channel == 0) ? "TX1" : "TX2";
+
+    return info;
+}
+
 bool SoapyLiteXM2SDR::getFullDuplex(const int, const size_t) const {
     return true;
 }

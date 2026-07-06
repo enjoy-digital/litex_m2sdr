@@ -89,6 +89,7 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     *                                 Channels API
     ***********************************************************************************************/
     size_t getNumChannels(const int) const override;
+    SoapySDR::Kwargs getChannelInfo(const int direction, const size_t channel) const override;
     bool getFullDuplex(const int, const size_t) const override;
 
     /***********************************************************************************************
