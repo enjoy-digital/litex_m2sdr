@@ -539,8 +539,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                                  dev->eth_ip, listen_port,
                                  1, 1,
                                  buffer_size * m2sdr_sample_size(format),
-                                 num_buffers ? num_buffers : 0,
-                                 0) < 0) {
+                                 num_buffers ? num_buffers : 0) < 0) {
                 return M2SDR_ERR_IO;
             }
             (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);

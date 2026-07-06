@@ -168,8 +168,7 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
                      const char *listen_ip, uint16_t listen_port,
                      const char *remote_ip,  uint16_t remote_port,
                      int rx_enable, int tx_enable,
-                     size_t buffer_size, size_t buffer_count,
-                     int nonblock)
+                     size_t buffer_size, size_t buffer_count)
 {
     memset(u, 0, sizeof(*u));
     u->sock = M2SDR_SOCKET_INVALID;
@@ -184,7 +183,6 @@ int liteeth_udp_init(struct liteeth_udp_ctrl *u,
     u->tx_enable = tx_enable    ? 1 : 0;
     u->buf_size  = buffer_size  ? buffer_size  : LITEETH_BUFFER_SIZE;
     u->buf_count = buffer_count ? buffer_count : LITEETH_BUFFER_COUNT;
-    u->nonblock  = nonblock     ? 1 : 0;
 
     /* rings */
     if (u->rx_enable) {

@@ -80,7 +80,6 @@ struct liteeth_udp_ctrl {
     uint64_t      tx_send_errors;
 
     /* Options */
-    int           nonblock;
     int           so_rcvbuf_bytes;
     int           so_sndbuf_bytes;
     int           so_rcvbuf_actual_bytes;
@@ -91,8 +90,7 @@ int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
                       const char *listen_ip, uint16_t listen_port,
                       const char *remote_ip,  uint16_t remote_port,
                       int rx_enable, int tx_enable,
-                      size_t buffer_size, size_t buffer_count,
-                      int nonblock);
+                      size_t buffer_size, size_t buffer_count);
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u);
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms);
