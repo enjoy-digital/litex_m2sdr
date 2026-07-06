@@ -138,10 +138,17 @@ uint64_t m2sdr_monotonic_us(void)
 {
     LARGE_INTEGER freq;
     LARGE_INTEGER count;
+    uint64_t ticks;
+    uint64_t hz;
 
     if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&count))
         return 0;
-    return (uint64_t)((count.QuadPart * 1000000ULL) / freq.QuadPart);
+    /* Split the conversion: ticks * 1e6 overflows 64 bits after ~21 days of
+     * uptime at the standard 10 MHz counter frequency (sooner on TSC-backed
+     * counters). */
+    ticks = (uint64_t)count.QuadPart;
+    hz    = (uint64_t)freq.QuadPart;
+    return (ticks / hz) * 1000000ULL + ((ticks % hz) * 1000000ULL) / hz;
 }
 
 void *m2sdr_aligned_malloc(size_t alignment, size_t size)
