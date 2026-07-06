@@ -134,6 +134,13 @@ static ssize_t udp_recv_dontwait(struct liteeth_udp_ctrl *u, void *dst, size_t l
         nb = recvfrom(u->sock, dst, len, MSG_DONTWAIT | MSG_TRUNC,
 #endif
                       (struct sockaddr *)&src_addr, &src_len);
+#if defined(_WIN32)
+        /* Winsock copies the leading bytes of an oversized datagram and then
+         * fails with WSAEMSGSIZE; fold it into the MSG_TRUNC handling below
+         * instead of aborting the slot. */
+        if (nb < 0 && m2sdr_socket_last_error() == WSAEMSGSIZE)
+            nb = (ssize_t)len + 1;
+#endif
         if (nb >= 0 && (size_t)nb > len) {
             /* Real datagram length reported through MSG_TRUNC: the tail
              * beyond the slot space was dropped by the kernel. */
