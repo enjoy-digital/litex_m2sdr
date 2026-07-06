@@ -37,8 +37,13 @@
 #include <linux/platform_device.h>
 #include <linux/version.h>
 #include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/device.h>
 #include <linux/uaccess.h>
+#include <linux/vmalloc.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
+#include <linux/cc_platform.h>
+#endif
 #if defined(__arm__) || defined(__aarch64__)
 #include <linux/dma-direct.h>
 #endif
@@ -1003,6 +1008,63 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	return size - len;
 }
 
+/* Derive the PFN backing a coherent buffer CPU address. The DMA API does not
+ * guarantee this is possible in general, but for the configurations reaching
+ * this path (PCIe device, blocking GFP_KERNEL allocations, no per-device
+ * coherent pool) the address is either vmalloc-mapped (dma-iommu remap) or in
+ * the kernel linear map (dma-direct).
+ */
+static unsigned long litepcie_dma_buffer_pfn(void *addr)
+{
+	if (is_vmalloc_addr(addr))
+		return vmalloc_to_pfn(addr);
+
+	return page_to_pfn(virt_to_page(addr));
+}
+
+/* Replicate the dma_pgprot() attributes dma_mmap_coherent() would apply:
+ * coherent buffers are allocated decrypted in confidential guests and
+ * non-cached on platforms without cache-coherent DMA.
+ */
+static pgprot_t litepcie_dma_buffer_pgprot(struct device *dev, pgprot_t prot)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
+	if (cc_platform_has(CC_ATTR_GUEST_MEM_ENCRYPT))
+		prot = pgprot_decrypted(prot);
+#endif
+	if (!dev_is_dma_coherent(dev))
+		prot = pgprot_dmacoherent(prot);
+
+	return prot;
+}
+
+/* Map the per-buffer coherent allocations into one userspace VMA without
+ * using copied sub-VMAs: the PTEs must be installed with PFNMAP metadata on
+ * the real VMA so munmap() can tear the mapping down cleanly.
+ */
+static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *vma,
+				    unsigned long user_addr, void *cpu_addr)
+{
+	unsigned long offset;
+	int ret;
+
+	if (DMA_BUFFER_SIZE % PAGE_SIZE)
+		return -EINVAL;
+
+	vma->vm_page_prot = litepcie_dma_buffer_pgprot(dev, vma->vm_page_prot);
+
+	for (offset = 0; offset < DMA_BUFFER_SIZE; offset += PAGE_SIZE) {
+		unsigned long pfn = litepcie_dma_buffer_pfn((u8 *)cpu_addr + offset);
+
+		ret = remap_pfn_range(vma, user_addr + offset, pfn, PAGE_SIZE,
+				      vma->vm_page_prot);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 /* Memory map DMA buffers for user space access */
 static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 {
@@ -1047,29 +1109,21 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		}
 #else
 		void *cpu_addr;
-		dma_addr_t dma_handle;
-		struct vm_area_struct sub_vma = *vma; /* Map one chunk at a time */
 
 		if (i == 0)
 			dev_info(&s->dev->dev, "Using non-ARM DMA buffer handling");
 
-		if (is_tx) {
-			cpu_addr   = chan->dma.reader_addr[i];
-			dma_handle = chan->dma.reader_handle[i];
-		} else {
-			cpu_addr   = chan->dma.writer_addr[i];
-			dma_handle = chan->dma.writer_handle[i];
-		}
+		if (is_tx)
+			cpu_addr = chan->dma.reader_addr[i];
+		else
+			cpu_addr = chan->dma.writer_addr[i];
 
-		sub_vma.vm_start = vma->vm_start + (i * DMA_BUFFER_SIZE);
-		sub_vma.vm_end   = sub_vma.vm_start + DMA_BUFFER_SIZE;
-		sub_vma.vm_pgoff = 0; /* Required: offset inside each coherent buffer */
-
-		ret = dma_mmap_coherent(&s->dev->dev, &sub_vma,
-					cpu_addr, dma_handle, DMA_BUFFER_SIZE);
+		ret = litepcie_dma_buffer_mmap(&s->dev->dev, vma,
+					       vma->vm_start + i * DMA_BUFFER_SIZE,
+					       cpu_addr);
 		if (ret) {
 			dev_err(&s->dev->dev,
-				"dma_mmap_coherent failed for buffer %d (ret=%d)\n", i, ret);
+				"mmap remap_pfn_range failed for buffer %d (ret=%d)\n", i, ret);
 			return ret;
 		}
 #endif
