@@ -1008,9 +1008,11 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	return size - len;
 }
 
-/* Map the per-buffer coherent allocations into one userspace VMA without
- * using copied sub-VMAs: the PTEs must be installed with PFNMAP metadata on
- * the real VMA so munmap() can tear the mapping down cleanly.
+/* Derive the PFN backing a coherent buffer CPU address. The DMA API does not
+ * guarantee this is possible in general, but for the configurations reaching
+ * this path (PCIe device, blocking GFP_KERNEL allocations, no per-device
+ * coherent pool) the address is either vmalloc-mapped (dma-iommu remap) or in
+ * the kernel linear map (dma-direct).
  */
 static unsigned long litepcie_dma_buffer_pfn(void *addr)
 {
@@ -1036,6 +1038,10 @@ static pgprot_t litepcie_dma_buffer_pgprot(struct device *dev, pgprot_t prot)
 	return prot;
 }
 
+/* Map the per-buffer coherent allocations into one userspace VMA without
+ * using copied sub-VMAs: the PTEs must be installed with PFNMAP metadata on
+ * the real VMA so munmap() can tear the mapping down cleanly.
+ */
 static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *vma,
 				    unsigned long user_addr, void *cpu_addr)
 {
