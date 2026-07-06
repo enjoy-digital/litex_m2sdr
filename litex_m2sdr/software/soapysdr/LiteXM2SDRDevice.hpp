@@ -357,6 +357,20 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     std::string readSensor(const std::string &key) const override;
 
+    std::vector<std::string> listSensors(
+        const int direction,
+        const size_t channel) const override;
+
+    SoapySDR::ArgInfo getSensorInfo(
+        const int direction,
+        const size_t channel,
+        const std::string &key) const override;
+
+    std::string readSensor(
+        const int direction,
+        const size_t channel,
+        const std::string &key) const override;
+
 
  /**************************************************************************************************
  *                                        PRIVATE

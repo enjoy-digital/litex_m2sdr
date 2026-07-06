@@ -22,6 +22,7 @@
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
 #include "ad9361/ad9361_api.h"
+#include "ad9361/ad9361.h"
 
 #include "libm2sdr/m2sdr_config.h"
 
@@ -2211,6 +2212,77 @@ void SoapyLiteXM2SDR::setHardwareTime(const long long timeNs, const std::string 
  *                                    Sensors API
  **************************************************************************************************/
 
+/* Report whether the selected RFIC reference is present and locked. */
+bool SoapyLiteXM2SDR::referenceLocked(void) const
+{
+    /* The internal XO free-runs: report it locked like other AD936x SDRs. */
+    if (_clock_source == "internal")
+        return true;
+
+#ifdef CSR_SI5351_BASE
+    {
+        /* SI5351 status register 0: SYS_INIT (bit 7) reports the device
+         * still initializing, LOS_CLKIN (bit 4) a missing 10 MHz CLKIN.
+         * The PLL loss-of-lock bits are ignored: the unused PLL reports a
+         * permanent loss-of-lock. */
+        uint8_t status = 0;
+        if (!m2sdr_si5351_i2c_read((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+                                   0x00, &status, 1, true))
+            return false;
+        if (status & ((1 << 7) | (1 << 4)))
+            return false;
+    }
+#endif
+
+    /* Fold in the FPGA clk10 discipline state when the loop is active. */
+    if (_clock_source == "fpga") {
+        struct m2sdr_ptp_clock10_status st;
+        if (m2sdr_get_ptp_clock10_status(_dev, &st) == M2SDR_ERR_OK && st.active)
+            return st.reference_locked && st.clock_locked;
+    }
+
+    return true;
+}
+
+std::vector<std::string> SoapyLiteXM2SDR::listSensors(
+    const int /*direction*/,
+    const size_t /*channel*/) const {
+    return {"lo_locked"};
+}
+
+SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
+    const int direction,
+    const size_t /*channel*/,
+    const std::string &key) const {
+    if (key == "lo_locked") {
+        SoapySDR::ArgInfo info;
+        info.key         = "lo_locked";
+        info.name        = (direction == SOAPY_SDR_RX) ? "RX LO lock" : "TX LO lock";
+        info.value       = "false";
+        info.description = "AD9361 RF synthesizer VCO lock detect";
+        info.type        = SoapySDR::ArgInfo::BOOL;
+        return info;
+    }
+    return getSensorInfo(key);
+}
+
+std::string SoapyLiteXM2SDR::readSensor(
+    const int direction,
+    const size_t /*channel*/,
+    const std::string &key) const {
+    if (key == "lo_locked") {
+        /* Both channels share the AD9361 RX/TX synthesizers. */
+        uint16_t reg = (direction == SOAPY_SDR_RX) ?
+            REG_RX_CP_OVERRANGE_VCO_LOCK : REG_TX_CP_OVERRANGE_VCO_LOCK;
+        uint8_t val = 0;
+        if (!m2sdr_ad9361_spi_read_checked((void *)(intptr_t)_fd, reg, &val))
+            return "false";
+        return (val & VCO_LOCK) ? "true" : "false";
+    }
+    /* Board-level sensors stay readable through the channel API. */
+    return readSensor(key);
+}
+
 std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     std::vector<std::string> sensors;
 #ifdef CSR_XADC_BASE
@@ -2220,6 +2292,7 @@ std::vector<std::string> SoapyLiteXM2SDR::listSensors(void) const {
     sensors.push_back("fpga_vccbram");
 #endif
     sensors.push_back("ad9361_temp");
+    sensors.push_back("ref_locked");
     if (has_eth_ptp_support(_dev)) {
         sensors.push_back("ptp_locked");
         sensors.push_back("ptp_time_locked");
@@ -2309,6 +2382,19 @@ SoapySDR::ArgInfo SoapyLiteXM2SDR::getSensorInfo(
                 info.units       = "°C";
                 info.description = "AD9361 temperature";
                 info.type        = SoapySDR::ArgInfo::FLOAT;
+            } else {
+                throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
+            }
+            return info;
+        }
+
+        /* Reference Sensors */
+        if (deviceStr == "ref") {
+            if (sensorStr == "locked") {
+                info.key         = "locked";
+                info.value       = "false";
+                info.description = "RFIC reference clock locked";
+                info.type        = SoapySDR::ArgInfo::BOOL;
             } else {
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
@@ -2461,6 +2547,14 @@ std::string SoapyLiteXM2SDR::readSensor(
                 throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown sensor");
             }
             return sensorValue;
+        }
+
+        /* Reference Sensors */
+        if (deviceStr == "ref") {
+            if (sensorStr == "locked") {
+                return referenceLocked() ? "true" : "false";
+            }
+            throw std::runtime_error("SoapyLiteXM2SDR::readSensor(" + key + ") unknown sensor");
         }
 
         if (deviceStr == "ptp") {

@@ -85,6 +85,15 @@ You can pass device arguments to configure the driver. These are most useful whe
     On Ethernet PTP builds that also enable `--with-eth-ptp-rfic-clock`, use
     `m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on` and wait for
     the clk10 loop to lock before opening SoapySDR with `clock_source=fpga`.
+  - The same sources are exposed through the standard SoapySDR clocking API
+    (`listClockSources()`/`setClockSource()`/`getClockSource()`), so UHD
+    applications going through SoapyUHD (e.g. srsRAN) can select and query
+    the reference. Runtime switching is rejected while streams are open.
+  - Reference and LO lock state are reported as sensors: the board-level
+    `ref_locked` sensor follows the selected reference (SI5351 CLKIN
+    presence, plus the clk10 discipline state for `fpga`), and each RX/TX
+    channel reports an AD9361 `lo_locked` VCO lock-detect sensor, matching
+    what srsRAN's UHD backend polls after each retune.
 - **Ethernet RX mode** (Ethernet devices): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
