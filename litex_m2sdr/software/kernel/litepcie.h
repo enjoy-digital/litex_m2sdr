@@ -61,6 +61,29 @@ struct litepcie_ioctl_mmap_dma_update {
 	int64_t sw_count;
 };
 
+enum litepcie_dma_stats_direction {
+	LITEPCIE_DMA_STATS_WRITER = 0,
+	LITEPCIE_DMA_STATS_READER = 1,
+};
+
+struct litepcie_ioctl_dma_stats {
+	uint8_t direction;       /* enum litepcie_dma_stats_direction.              */
+	uint8_t clear;           /* Reset counters/high-water mark before reading.  */
+	uint16_t reserved0;
+	uint32_t reserved1;
+	uint64_t buffer_size;
+	uint64_t buffer_count;
+	int64_t hw_count;
+	int64_t sw_count;
+	uint64_t ring_level;
+	uint64_t ring_high_water;
+	uint64_t overflow_events;
+	uint64_t overflow_buffers;
+	uint64_t underflow_events;
+	uint64_t underflow_buffers;
+	uint64_t reserved[8];
+};
+
 enum litepcie_ioctl_sata_dma_direction {
 	LITEPCIE_SATA_DMA_HOST_TO_DEVICE = 0,
 	LITEPCIE_SATA_DMA_DEVICE_TO_HOST = 1,
@@ -91,5 +114,6 @@ struct litepcie_ioctl_sata_dma {
 #define LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE    _IOW(LITEPCIE_IOCTL,  26, struct litepcie_ioctl_mmap_dma_update)
 #define LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE    _IOW(LITEPCIE_IOCTL,  27, struct litepcie_ioctl_mmap_dma_update)
 #define LITEPCIE_IOCTL_SATA_DMA                  _IOWR(LITEPCIE_IOCTL, 28, struct litepcie_ioctl_sata_dma)
+#define LITEPCIE_IOCTL_DMA_STATS                 _IOWR(LITEPCIE_IOCTL, 29, struct litepcie_ioctl_dma_stats)
 
 #endif /* _LINUX_LITEPCIE_H */

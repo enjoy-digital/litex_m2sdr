@@ -19,10 +19,12 @@
 #include <time.h>
 #include <stdbool.h>
 #include <math.h>
+#include <pthread.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_getopt.h"
+#include "m2sdr_host_queue.h"
 #include "m2sdr_platform.h"
 #include "m2sdr_sigmf.h"
 #include "m2sdr_tool.h"
@@ -33,6 +35,16 @@
 #endif
 
 sig_atomic_t keep_running = 1;
+
+struct m2sdr_record_sink {
+    struct m2sdr_host_queue queue;
+    FILE *fo;
+    pthread_t thread;
+    int enabled;
+    int started;
+    int error;
+    size_t bytes_written;
+};
 
 void intHandler(int dummy) {
     (void)dummy;
@@ -56,6 +68,7 @@ static void help(void)
     puts("      --format FMT      Sample format: sc16, sc8 or encoded bfp8 (default: sc16).");
     puts("      --enable-header   Enable DMA header.");
     puts("      --strip-header    Strip DMA header from output.");
+    puts("      --host-buffers N  Queue N DMA buffers before writing output.");
     puts("");
     puts("SigMF output:");
     puts("      --sigmf           Write a SigMF dataset + metadata pair.");
@@ -207,34 +220,49 @@ static void sigmf_fill_defaults_from_device(struct m2sdr_dev *dev, struct m2sdr_
     }
 }
 
-static void print_liteeth_udp_summary(struct m2sdr_dev *dev, uint8_t quiet)
+static void print_stream_summary(struct m2sdr_dev *dev, uint8_t quiet)
 {
-    struct m2sdr_liteeth_udp_stats stats;
+    struct m2sdr_stream_stats stats;
 
     if (quiet || !dev)
         return;
-    if (m2sdr_liteeth_get_udp_stats(dev, &stats) != 0)
+    if (m2sdr_get_stream_stats(dev, M2SDR_RX, &stats) != 0)
         return;
 
-    fprintf(stderr,
-            "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
-            " rx_source_drops=%" PRIu64 " rx_ring_full=%" PRIu64
-            " rx_flushes=%" PRIu64 " rx_recoveries=%" PRIu64
-            " rx_recv_errors=%" PRIu64 "\n",
-            stats.rx_buffers,
-            stats.rx_kernel_drops,
-            stats.rx_source_drops,
-            stats.rx_ring_full_events,
-            stats.rx_flushes,
-            stats.rx_timeout_recoveries,
-            stats.rx_recv_errors);
-    if (stats.so_rcvbuf_requested > 0) {
+    if (stats.transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+        fprintf(stderr,
+                "LitePCIe RX: buffers=%" PRIu64 " ring_level=%" PRIu64
+                " high_water=%" PRIu64 "/%zu overflows=%" PRIu64
+                " overflow_buffers=%" PRIu64 "\n",
+                stats.rx_buffers,
+                stats.ring_level,
+                stats.ring_high_water,
+                stats.buffer_count,
+                stats.overflow_events,
+                stats.overflow_buffers);
+    } else if (stats.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+        struct m2sdr_liteeth_udp_stats udp;
+
+        fprintf(stderr,
+                "LiteEth UDP: rx_buffers=%" PRIu64 " rx_kernel_drops=%" PRIu64
+                " rx_source_drops=%" PRIu64 " rx_ring_full=%" PRIu64
+                " rx_recoveries=%" PRIu64 " rx_recv_errors=%" PRIu64 "\n",
+                stats.rx_buffers,
+                stats.rx_kernel_drops,
+                stats.rx_source_drops,
+                stats.rx_ring_full_events,
+                stats.rx_timeout_recoveries,
+                stats.rx_recv_errors);
+        if (m2sdr_liteeth_get_udp_stats(dev, &udp) != 0)
+            return;
+        if (udp.so_rcvbuf_requested <= 0)
+            return;
         fprintf(stderr,
                 "LiteEth UDP SO_RCVBUF: requested=%d actual=%d\n",
-                stats.so_rcvbuf_requested,
-                stats.so_rcvbuf_actual);
-        if (stats.so_rcvbuf_actual > 0 &&
-            stats.so_rcvbuf_actual < stats.so_rcvbuf_requested) {
+                udp.so_rcvbuf_requested,
+                udp.so_rcvbuf_actual);
+        if (udp.so_rcvbuf_actual > 0 &&
+            udp.so_rcvbuf_actual < udp.so_rcvbuf_requested) {
             fprintf(stderr,
                     "LiteEth UDP SO_RCVBUF capped; increase net.core.rmem_max for more RX headroom.\n");
         }
@@ -268,13 +296,104 @@ static void record_note_timestamp(uint64_t timestamp, size_t total_len, unsigned
     *prev_timestamp = timestamp;
 }
 
-static bool record_write_payload(FILE *fo, const void *data, size_t payload_bytes_per_buf,
-                                 size_t size, size_t *total_len)
+static size_t record_payload_len(size_t payload_bytes_per_buf, size_t size, size_t total_len)
 {
     size_t to_write = payload_bytes_per_buf;
 
-    if (size > 0 && to_write > size - *total_len)
-        to_write = size - *total_len;
+    if (size > 0 && to_write > size - total_len)
+        to_write = size - total_len;
+    return to_write;
+}
+
+static void *m2sdr_record_sink_worker(void *arg)
+{
+    struct m2sdr_record_sink *sink = arg;
+    uint8_t buf[DMA_BUFFER_SIZE];
+
+    while (1) {
+        size_t len = 0;
+        int rc = m2sdr_host_queue_pop(&sink->queue, buf, sizeof(buf), &len, NULL);
+
+        if (rc == M2SDR_HOST_QUEUE_CLOSED)
+            break;
+        if (rc != M2SDR_HOST_QUEUE_OK) {
+            if (rc != M2SDR_HOST_QUEUE_STOPPED)
+                sink->error = 1;
+            break;
+        }
+
+        if (sink->fo && fwrite(buf, 1, len, sink->fo) != len) {
+            perror("fwrite");
+            sink->error = 1;
+            m2sdr_host_queue_stop(&sink->queue);
+            break;
+        }
+        sink->bytes_written += len;
+    }
+
+    return NULL;
+}
+
+static int m2sdr_record_sink_start(struct m2sdr_record_sink *sink, FILE *fo, unsigned host_buffers)
+{
+    memset(sink, 0, sizeof(*sink));
+    if (!fo || host_buffers == 0)
+        return 0;
+
+    if (m2sdr_host_queue_init(&sink->queue, host_buffers, DMA_BUFFER_SIZE) != M2SDR_HOST_QUEUE_OK)
+        return -1;
+    sink->fo = fo;
+    sink->enabled = 1;
+    if (pthread_create(&sink->thread, NULL, m2sdr_record_sink_worker, sink) != 0) {
+        m2sdr_host_queue_destroy(&sink->queue);
+        memset(sink, 0, sizeof(*sink));
+        return -1;
+    }
+    sink->started = 1;
+    return 0;
+}
+
+static int m2sdr_record_sink_finish(struct m2sdr_record_sink *sink, bool drain)
+{
+    int error;
+
+    if (!sink->enabled)
+        return 0;
+
+    if (sink->started) {
+        if (drain)
+            m2sdr_host_queue_close_writer(&sink->queue);
+        else
+            m2sdr_host_queue_stop(&sink->queue);
+        if (pthread_join(sink->thread, NULL) != 0)
+            sink->error = 1;
+        sink->started = 0;
+    }
+
+    error = sink->error;
+    m2sdr_host_queue_destroy(&sink->queue);
+    sink->enabled = 0;
+    return error ? -1 : 0;
+}
+
+static bool record_submit_payload(FILE *fo, struct m2sdr_record_sink *sink, const void *data,
+                                  size_t payload_bytes_per_buf, size_t size, size_t *total_len)
+{
+    size_t to_write = record_payload_len(payload_bytes_per_buf, size, *total_len);
+
+    if (sink->enabled) {
+        int rc = m2sdr_host_queue_push(&sink->queue, data, to_write, 0);
+
+        if (rc == M2SDR_HOST_QUEUE_ERROR) {
+            sink->error = 1;
+            return false;
+        }
+        if (rc == M2SDR_HOST_QUEUE_STOPPED)
+            return false;
+        *total_len += to_write;
+        return true;
+    }
+
     if (fo && fwrite(data, 1, to_write, fo) != to_write) {
         perror("fwrite");
         return false;
@@ -286,7 +405,7 @@ static bool record_write_payload(FILE *fo, const void *data, size_t payload_byte
 static void m2sdr_record(const char *device_id, const char *filename, size_t size, uint8_t quiet,
                          uint8_t header, uint8_t strip_header, enum m2sdr_format format,
                          bool sigmf_enable, bool annotate_ts_jumps, double ts_jump_threshold_pct,
-                         struct m2sdr_sigmf_meta *sigmf_meta)
+                         struct m2sdr_sigmf_meta *sigmf_meta, unsigned host_buffers)
 {
     struct m2sdr_dev *dev = NULL;
     enum m2sdr_transport_kind transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
@@ -312,6 +431,7 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     bool stop = false;
     int exit_status = 1;
     uint8_t buf[DMA_BUFFER_SIZE];
+    struct m2sdr_record_sink sink = {0};
 
     if (m2sdr_open(&dev, device_id) != 0) {
         fprintf(stderr, "Could not open device: %s\n", device_id);
@@ -351,6 +471,11 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                 goto cleanup;
             }
         }
+    }
+
+    if (m2sdr_record_sink_start(&sink, fo, host_buffers) != 0) {
+        fprintf(stderr, "Could not start host output queue\n");
+        goto cleanup;
     }
 
 #ifdef USE_LITEPCIE
@@ -417,7 +542,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                         rx_data += 16;
                 }
 
-                if (!record_write_payload(fo, rx_data, payload_bytes_per_buf, size, &total_len)) {
+                if (!record_submit_payload(fo, &sink, rx_data, payload_bytes_per_buf,
+                                           size, &total_len)) {
                     stop = true;
                     break;
                 }
@@ -451,7 +577,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                                       &prev_timestamp, &nominal_dt);
             }
 
-            if (!record_write_payload(fo, rx_data, payload_bytes_per_buf, size, &total_len))
+            if (!record_submit_payload(fo, &sink, rx_data, payload_bytes_per_buf,
+                                       size, &total_len))
                 break;
 
             total_buffers++;
@@ -464,7 +591,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
             if (i % 10 == 0) {
                 if (header) {
-                    fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
+                    fprintf(stderr, "\e[1m%10s %10s %8s %23s\e[0m\n",
+                            "SPEED(Gbps)", "BUFFERS", "SIZE(MB)", "TIME");
                 } else {
                     fprintf(stderr, "\e[1m%10s %10s %9s\e[0m\n", "SPEED(Gbps)", "BUFFERS", "SIZE(MB)");
                 }
@@ -484,12 +612,21 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
                 fprintf(stderr, "%11.2f %10" PRIu64 " %8" PRIu64 " %19s.%03u\n",
                         speed, total_buffers, size_mb, time_str, ms);
             } else {
-                fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n", speed, total_buffers, size_mb);
+                fprintf(stderr, "%11.2f %10" PRIu64 " %9" PRIu64 "\n",
+                        speed, total_buffers, size_mb);
             }
 
             last_time = get_time_ms();
             last_buffers = total_buffers;
         }
+    }
+
+    if (sink.enabled) {
+        if (m2sdr_record_sink_finish(&sink, true) != 0) {
+            fprintf(stderr, "Host output queue failed\n");
+            goto cleanup;
+        }
+        total_len = sink.bytes_written;
     }
 
     if (sigmf_enable) {
@@ -514,12 +651,13 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
     exit_status = 0;
 
 cleanup:
+    if (sink.enabled)
+        m2sdr_record_sink_finish(&sink, false);
+    print_stream_summary(dev, quiet);
 #ifdef USE_LITEPCIE
     if (use_pcie_dma)
         litepcie_dma_cleanup(&dma);
 #endif
-    if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
-        print_liteeth_udp_summary(dev, quiet);
     if (fo && fo != stdout)
         fclose(fo);
     if (dev)
@@ -538,6 +676,7 @@ int main(int argc, char **argv)
     static uint8_t strip_header = 0;
     static uint8_t annotate_ts_jumps = 0;
     static enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
+    static unsigned host_buffers = 0;
     double ts_jump_threshold_pct = 5.0;
     struct m2sdr_sigmf_meta sigmf_meta;
     struct m2sdr_sigmf_annotation pending_annotation;
@@ -568,6 +707,7 @@ int main(int argc, char **argv)
         { "annotation-add", no_argument, NULL, 15 },
         { "annotate-ts-jumps", no_argument, NULL, 16 },
         { "ts-jump-threshold-pct", required_argument, NULL, 17 },
+        { "host-buffers", required_argument, NULL, 18 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -695,6 +835,12 @@ int main(int argc, char **argv)
                 return 1;
             }
             break;
+        case 18:
+            if (m2sdr_cli_parse_uint_range(optarg, 1, UINT32_MAX, &host_buffers) != 0) {
+                m2sdr_cli_error("invalid host buffer count '%s'", optarg);
+                return 1;
+            }
+            break;
         default:
             exit(1);
         }
@@ -766,6 +912,7 @@ int main(int argc, char **argv)
     }
 
     m2sdr_record(m2sdr_cli_device_id(&cli_dev), filename, size, quiet, header, strip_header, format,
-                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct, &sigmf_meta);
+                 sigmf_enable ? true : false, annotate_ts_jumps ? true : false, ts_jump_threshold_pct,
+                 &sigmf_meta, host_buffers);
     return 0;
 }

@@ -11,6 +11,7 @@
 /* Includes */
 /*----------*/
 
+#include <errno.h>
 #include <string.h>
 
 #include "config.h"
@@ -69,12 +70,21 @@ static void m2sdr_write_dma_header(uint8_t *buf, uint64_t timestamp)
 static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_per_buffer, unsigned bytes_per_buffer)
 {
     unsigned sz = m2sdr_sample_size(format);
+    unsigned expected_samples;
+
     if (!sz)
         return M2SDR_ERR_UNSUPPORTED;
     if (samples_per_buffer == 0)
         return M2SDR_ERR_INVAL;
-    if (samples_per_buffer * sz != bytes_per_buffer)
-        return M2SDR_ERR_INVAL;
+    expected_samples = bytes_per_buffer / sz;
+    if ((size_t)samples_per_buffer * sz != bytes_per_buffer) {
+        m2sdr_log_printf(
+            "m2sdr_sync_config: buffer_size is a fixed DMA descriptor size; "
+            "expected %u samples for format %d and %u payload bytes. "
+            "Use larger m2sdr_sync_rx()/m2sdr_sync_tx() requests to amortize syscalls.\n",
+            expected_samples, (int)format, bytes_per_buffer);
+        return M2SDR_ERR_RANGE;
+    }
     return M2SDR_ERR_OK;
 }
 
@@ -673,6 +683,160 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
     return M2SDR_ERR_UNSUPPORTED;
 }
 
+#if M2SDR_HAVE_LITEPCIE
+static int m2sdr_pcie_stats_fd(struct m2sdr_dev *dev,
+                               enum m2sdr_direction direction)
+{
+    if (direction == M2SDR_RX && dev->rx_configured && dev->rx_dma.fds.fd >= 0)
+        return dev->rx_dma.fds.fd;
+    if (direction == M2SDR_TX && dev->tx_configured && dev->tx_dma.fds.fd >= 0)
+        return dev->tx_dma.fds.fd;
+    if (dev->fd >= 0)
+        return dev->fd;
+    return -1;
+}
+
+static int m2sdr_pcie_stream_stats(struct m2sdr_dev *dev,
+                                   enum m2sdr_direction direction,
+                                   bool clear,
+                                   struct m2sdr_stream_stats *stats)
+{
+    struct litepcie_ioctl_dma_stats kstats;
+    int fd = m2sdr_pcie_stats_fd(dev, direction);
+
+    if (fd < 0)
+        return M2SDR_ERR_STATE;
+
+    memset(&kstats, 0, sizeof(kstats));
+    kstats.direction = (direction == M2SDR_RX) ?
+        LITEPCIE_DMA_STATS_WRITER : LITEPCIE_DMA_STATS_READER;
+    kstats.clear = clear ? 1 : 0;
+
+    if (ioctl(fd, LITEPCIE_IOCTL_DMA_STATS, &kstats) < 0) {
+        if (errno == ENOTTY || errno == ENODEV || errno == ENOSYS)
+            return M2SDR_ERR_UNSUPPORTED;
+        if (errno == EINVAL || errno == EFAULT)
+            return M2SDR_ERR_INVAL;
+        return M2SDR_ERR_IO;
+    }
+
+    if (!stats)
+        return M2SDR_ERR_OK;
+
+    stats->transport       = M2SDR_TRANSPORT_KIND_LITEPCIE;
+    stats->direction       = direction;
+    stats->buffer_size     = (size_t)kstats.buffer_size;
+    stats->buffer_count    = (size_t)kstats.buffer_count;
+    stats->hw_count        = kstats.hw_count;
+    stats->sw_count        = kstats.sw_count;
+    stats->ring_level      = kstats.ring_level;
+    stats->ring_high_water = kstats.ring_high_water;
+    stats->overflow_events = kstats.overflow_events;
+    stats->overflow_buffers = kstats.overflow_buffers;
+    stats->underflow_events = kstats.underflow_events;
+    stats->underflow_buffers = kstats.underflow_buffers;
+
+    if (direction == M2SDR_RX) {
+        stats->overflow_events += dev->pcie_rx_overflow_events;
+        stats->overflow_buffers += dev->pcie_rx_overflow_buffers;
+        stats->rx_buffers = kstats.hw_count >= 0 ? (uint64_t)kstats.hw_count : 0;
+    } else {
+        stats->underflow_events += dev->pcie_tx_underflow_events;
+        stats->underflow_buffers += dev->pcie_tx_underflow_buffers;
+        stats->tx_buffers = kstats.sw_count >= 0 ? (uint64_t)kstats.sw_count : 0;
+    }
+
+    return M2SDR_ERR_OK;
+}
+#endif
+
+static int m2sdr_liteeth_stream_stats(struct m2sdr_dev *dev,
+                                      enum m2sdr_direction direction,
+                                      struct m2sdr_stream_stats *stats)
+{
+    struct m2sdr_liteeth_udp_stats udp;
+
+    if (!dev->udp_inited)
+        return M2SDR_ERR_STATE;
+
+    if (m2sdr_liteeth_get_udp_stats(dev, &udp) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    stats->transport       = M2SDR_TRANSPORT_KIND_LITEETH;
+    stats->direction       = direction;
+    stats->buffer_size     = udp.buffer_size;
+    stats->buffer_count    = udp.buffer_count;
+    stats->rx_buffers      = udp.rx_buffers;
+    stats->tx_buffers      = udp.tx_buffers;
+    stats->rx_kernel_drops = udp.rx_kernel_drops;
+    stats->rx_source_drops = udp.rx_source_drops;
+    stats->rx_ring_full_events = udp.rx_ring_full_events;
+    stats->rx_timeout_recoveries = udp.rx_timeout_recoveries;
+    stats->rx_recv_errors  = udp.rx_recv_errors;
+    stats->tx_send_errors  = udp.tx_send_errors;
+
+    if (direction == M2SDR_RX) {
+        stats->overflow_events =
+            udp.rx_kernel_drops + udp.rx_ring_full_events;
+        stats->overflow_buffers =
+            udp.rx_kernel_drops + udp.rx_ring_full_events;
+    }
+
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_get_stream_stats(struct m2sdr_dev *dev,
+                           enum m2sdr_direction direction,
+                           struct m2sdr_stream_stats *stats)
+{
+    if (!dev || !stats)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    memset(stats, 0, sizeof(*stats));
+
+#if M2SDR_HAVE_LITEPCIE
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE)
+        return m2sdr_pcie_stream_stats(dev, direction, false, stats);
+#endif
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH)
+        return m2sdr_liteeth_stream_stats(dev, direction, stats);
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
+int m2sdr_clear_stream_stats(struct m2sdr_dev *dev,
+                             enum m2sdr_direction direction)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+#if M2SDR_HAVE_LITEPCIE
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        int rc = m2sdr_pcie_stream_stats(dev, direction, true, NULL);
+
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        if (direction == M2SDR_RX) {
+            dev->pcie_rx_overflow_events = 0;
+            dev->pcie_rx_overflow_buffers = 0;
+        } else {
+            dev->pcie_tx_underflow_events = 0;
+            dev->pcie_tx_underflow_buffers = 0;
+        }
+        return M2SDR_ERR_OK;
+    }
+#endif
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+
+    return M2SDR_ERR_UNSUPPORTED;
+}
+
 int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
 {
     if (!dev)
@@ -843,6 +1007,9 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
                 return M2SDR_ERR_STATE;
 
             if ((dma->writer_hw_count - dev->rx_release_count) > (buffer_count / 2)) {
+                dev->pcie_rx_overflow_events++;
+                dev->pcie_rx_overflow_buffers +=
+                    (uint64_t)(dma->writer_hw_count - dev->rx_release_count);
                 dev->rx_user_count = dma->writer_hw_count;
                 dev->rx_release_count = dma->writer_hw_count;
                 m2sdr_pcie_dma_update_rx_release(dev);
@@ -902,6 +1069,8 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
 
             int64_t buffers_pending = dev->tx_user_count - dma->reader_hw_count;
             if (buffers_pending < 0) {
+                dev->pcie_tx_underflow_events++;
+                dev->pcie_tx_underflow_buffers += (uint64_t)(-buffers_pending);
                 dev->tx_user_count = dma->reader_hw_count;
                 dev->tx_submit_count = dma->reader_hw_count;
                 return M2SDR_ERR_UNDERFLOW;

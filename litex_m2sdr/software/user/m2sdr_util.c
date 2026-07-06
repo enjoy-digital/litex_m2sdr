@@ -2559,18 +2559,24 @@ static void loopback_print_compact_progress(double gbps,
                                             uint64_t errors,
                                             struct m2sdr_dev *dev)
 {
-    struct m2sdr_liteeth_udp_stats stats;
+    struct m2sdr_stream_stats stats;
 
     printf("RX %.2f Gbps | checked %" PRIu64 " buffers | errors %" PRIu64,
         gbps, checked_buffers, errors);
-    if (m2sdr_liteeth_get_udp_stats(dev, &stats) == M2SDR_ERR_OK) {
-        if (stats.rx_kernel_drops || stats.rx_source_drops)
-            printf(" | drops kernel=%" PRIu64 " source=%" PRIu64,
-                stats.rx_kernel_drops, stats.rx_source_drops);
-        if (stats.rx_timeout_recoveries)
-            printf(" | recoveries=%" PRIu64, stats.rx_timeout_recoveries);
-        if (stats.tx_send_errors)
-            printf(" | tx_errors=%" PRIu64, stats.tx_send_errors);
+    if (m2sdr_get_stream_stats(dev, M2SDR_RX, &stats) == M2SDR_ERR_OK) {
+        if (stats.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+            if (stats.rx_kernel_drops || stats.rx_source_drops)
+                printf(" | drops kernel=%" PRIu64 " source=%" PRIu64,
+                    stats.rx_kernel_drops, stats.rx_source_drops);
+            if (stats.rx_timeout_recoveries)
+                printf(" | recoveries=%" PRIu64, stats.rx_timeout_recoveries);
+            if (stats.tx_send_errors)
+                printf(" | tx_errors=%" PRIu64, stats.tx_send_errors);
+        } else if (stats.transport == M2SDR_TRANSPORT_KIND_LITEPCIE) {
+            if (stats.overflow_events || stats.ring_high_water)
+                printf(" | rx_overflows=%" PRIu64 " high_water=%" PRIu64 "/%zu",
+                    stats.overflow_events, stats.ring_high_water, stats.buffer_count);
+        }
     }
     printf("\n");
 }
@@ -2586,23 +2592,51 @@ static double loopback_average_gbps(uint64_t checked_buffers, int64_t start_us)
         ((double)elapsed_us * 1e3);
 }
 
-static void loopback_print_udp_diagnostics(struct m2sdr_dev *dev)
+static void loopback_print_stream_diagnostics(struct m2sdr_dev *dev)
 {
-    struct m2sdr_liteeth_udp_stats stats;
+    struct m2sdr_stream_stats rx_stats;
+    struct m2sdr_stream_stats tx_stats;
+    int rx_rc = m2sdr_get_stream_stats(dev, M2SDR_RX, &rx_stats);
+    int tx_rc = m2sdr_get_stream_stats(dev, M2SDR_TX, &tx_stats);
 
-    if (m2sdr_liteeth_get_udp_stats(dev, &stats) != M2SDR_ERR_OK)
+    if (rx_rc != M2SDR_ERR_OK && tx_rc != M2SDR_ERR_OK)
         return;
 
-    printf("UDP diagnostics: kernel_drops=%" PRIu64
-           " source_drops=%" PRIu64
-           " ring_full=%" PRIu64
-           " recoveries=%" PRIu64
-           " tx_send_errors=%" PRIu64 "\n",
-        stats.rx_kernel_drops,
-        stats.rx_source_drops,
-        stats.rx_ring_full_events,
-        stats.rx_timeout_recoveries,
-        stats.tx_send_errors);
+    if (rx_rc == M2SDR_ERR_OK &&
+        rx_stats.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
+        printf("UDP diagnostics: kernel_drops=%" PRIu64
+               " source_drops=%" PRIu64
+               " ring_full=%" PRIu64
+               " recoveries=%" PRIu64
+               " tx_send_errors=%" PRIu64 "\n",
+            rx_stats.rx_kernel_drops,
+            rx_stats.rx_source_drops,
+            rx_stats.rx_ring_full_events,
+            rx_stats.rx_timeout_recoveries,
+            rx_stats.tx_send_errors);
+        return;
+    }
+
+    printf("Stream diagnostics:");
+    if (rx_rc == M2SDR_ERR_OK) {
+        printf(" rx_overflows=%" PRIu64
+               " rx_overflow_buffers=%" PRIu64
+               " rx_high_water=%" PRIu64 "/%zu",
+            rx_stats.overflow_events,
+            rx_stats.overflow_buffers,
+            rx_stats.ring_high_water,
+            rx_stats.buffer_count);
+    }
+    if (tx_rc == M2SDR_ERR_OK) {
+        printf(" tx_underflows=%" PRIu64
+               " tx_underflow_buffers=%" PRIu64
+               " tx_high_water=%" PRIu64 "/%zu",
+            tx_stats.underflow_events,
+            tx_stats.underflow_buffers,
+            tx_stats.ring_high_water,
+            tx_stats.buffer_count);
+    }
+    printf("\n");
 }
 
 static int loopback_reset_datapath(struct m2sdr_dev *dev, const char *phase)
@@ -2938,7 +2972,7 @@ static int stream_loopback_test(int data_width,
                " start_skip=%" PRIu64 " stale_start=%" PRIu64 "\n",
             tx_buffers, rx_buffers, checked_buffers,
             startup_skip_words, startup_discard_buffers);
-        loopback_print_udp_diagnostics(dev);
+        loopback_print_stream_diagnostics(dev);
     }
 
 cleanup_disable_loopback:
@@ -3556,7 +3590,7 @@ static int rfic_loopback_test(int duration,
                " errors=%" PRIu64 " warmup=%" PRIu64 " stale=%" PRIu64 "\n",
             tx_buffers, rx_buffers, checked_buffers,
             total_errors, warmup_buffers, stale_buffers);
-        loopback_print_udp_diagnostics(dev);
+        loopback_print_stream_diagnostics(dev);
     } else if (total_errors == 0) {
         double final_gbps = last_gbps > 0.0 ?
             last_gbps : loopback_average_gbps(checked_buffers, start_us);
@@ -3583,7 +3617,7 @@ static int rfic_loopback_test(int duration,
         printf("Diagnostics: tx=%" PRIu64 " rx=%" PRIu64
                " start_skip=%" PRIu64 " warmup=%" PRIu64 " stale=%" PRIu64 "\n",
             tx_buffers, rx_buffers, startup_skip_lanes, warmup_buffers, stale_buffers);
-        loopback_print_udp_diagnostics(dev);
+        loopback_print_stream_diagnostics(dev);
     }
 
 cleanup_disable_loopback:

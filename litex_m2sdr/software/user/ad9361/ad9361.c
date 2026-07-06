@@ -7497,6 +7497,106 @@ int32_t ad9361_rssi_gain_step_calib(struct ad9361_rf_phy *phy)
  * "Measured" notes below come from A/B experiments on a 100 MHz NR-FR1-TM3.1
  * loopback (per-band coherence effective SNR + MATLAB 5G Toolbox EVM),
  * cross-checked against an external receiver. */
+/* Chip-native wide BBF tune: re-run the AD9361's own RX/TX BBF tune
+ * calibrations with an out-of-range corner target by programming the tune
+ * dividers directly (the driver clamps BBBW to 28/20 MHz; the tune circuit
+ * itself is just a divided BBPLL clock plus the chip's R/C search, so it can
+ * tune wider). bbbw is half the complex bandwidth: 39 MHz gives an RX corner
+ * of 1.4x = ~54 MHz and a TX corner of 1.6x = ~62 MHz with BBPLL at
+ * 983.04 MHz. Returns true when both calibrations complete. */
+static bool ad9361_wide_bbf_tune(struct ad9361_rf_phy *phy, uint32_t bbbw)
+{
+    uint32_t bbpll = clk_get_rate(phy, phy->ref_clk_scale[BBPLL_CLK]);
+    uint32_t khz   = ((bbbw % 1000000u) * 128u + 500000u) / 1000000u;
+    uint32_t target, divider;
+    bool ok = true;
+    int i;
+
+    ad9361_ensm_force_state(phy, ENSM_STATE_ALERT);
+
+    /* RX: corner = 1.4 x BBBW; divider = ceil(BBPLL / (1.4 BBBW 2pi/ln2)). */
+    target  = 126906u * (bbbw / 10000u);
+    divider = (bbpll + target - 1) / target;
+    if (divider < 1)   divider = 1;
+    if (divider > 511) divider = 511;
+    ad9361_spi_write(phy->spi, REG_RX_BBF_TUNE_DIVIDE, divider & 0xff);
+    ad9361_spi_write(phy->spi, REG_RX_BBF_TUNE_CONFIG,
+        (ad9361_spi_read(phy->spi, REG_RX_BBF_TUNE_CONFIG) & ~1) | (divider >> 8));
+    phy->rxbbf_div = divider; /* keep the driver's view (ADC setup uses it). */
+    ad9361_spi_write(phy->spi, REG_RX_BBBW_MHZ, bbbw / 1000000u);
+    ad9361_spi_write(phy->spi, REG_RX_BBBW_KHZ, khz > 127 ? 127 : khz);
+    ad9361_spi_write(phy->spi, REG_RX_MIX_LO_CM, RX_MIX_LO_CM(0x3F));
+    ad9361_spi_write(phy->spi, REG_RX_MIX_GM_CONFIG, RX_MIX_GM_PLOAD(3));
+    ad9361_spi_write(phy->spi, REG_RX1_TUNE_CTRL, 0x02); /* Tune circuit on.  */
+    ad9361_spi_write(phy->spi, REG_RX2_TUNE_CTRL, 0x02);
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CTRL, RX_BB_TUNE_CAL);
+    for (i = 0; i < 200; i++) {
+        if (!(ad9361_spi_read(phy->spi, REG_CALIBRATION_CTRL) & RX_BB_TUNE_CAL))
+            break;
+        mdelay(1);
+    }
+    ok &= (i < 200);
+    printf("RFIC overclock: RX BBF tune div=%u %s.\n", divider,
+           (i < 200) ? "done" : "TIMEOUT");
+    ad9361_spi_write(phy->spi, REG_RX1_TUNE_CTRL, 0x03); /* Tune circuit off. */
+    ad9361_spi_write(phy->spi, REG_RX2_TUNE_CTRL, 0x03);
+
+    /* TX: corner = 1.6 x BBBW; divider = ceil(BBPLL / (1.6 BBBW 2pi/ln2)). */
+    target  = 145036u * (bbbw / 10000u);
+    divider = (bbpll + target - 1) / target;
+    if (divider < 1)   divider = 1;
+    if (divider > 511) divider = 511;
+    ad9361_spi_write(phy->spi, REG_TX_BBF_TUNE_DIVIDER, divider & 0xff);
+    ad9361_spi_write(phy->spi, REG_TX_BBF_TUNE_MODE,
+        (ad9361_spi_read(phy->spi, REG_TX_BBF_TUNE_MODE) & ~1) | (divider >> 8));
+    ad9361_spi_write(phy->spi, REG_TX_TUNE_CTRL, TUNER_RESAMPLE | TUNE_CTRL(1));
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CTRL, TX_BB_TUNE_CAL);
+    for (i = 0; i < 200; i++) {
+        if (!(ad9361_spi_read(phy->spi, REG_CALIBRATION_CTRL) & TX_BB_TUNE_CAL))
+            break;
+        mdelay(1);
+    }
+    ok &= (i < 200);
+    printf("RFIC overclock: TX BBF tune div=%u %s.\n", divider,
+           (i < 200) ? "done" : "TIMEOUT");
+    ad9361_spi_write(phy->spi, REG_TX_TUNE_CTRL,
+                     TUNER_RESAMPLE | TUNE_CTRL(1) | PD_TUNE);
+
+    ad9361_ensm_restore_prev_state(phy);
+    return ok;
+}
+
+/* Load an equalizer FIR (file of integer taps, one per line, multiple of 16)
+ * into the chip FIR engine. The engine corrupts data beyond a 245.76 MHz
+ * processing clock at this overclock (measured), which caps the taps per
+ * direction; the caller passes the cap and configures dec/int = 1. Returns
+ * the FIR-enable low bits for 0x002/0x003 (0x01 loaded, 0x00 off). */
+static uint8_t ad9361_load_eq_fir(struct ad9361_rf_phy *phy, const char *file,
+                                  enum fir_dest dest, int max_taps, const char *what)
+{
+    int16_t coefs[64];
+    FILE *ff = fopen(file, "r");
+    int n = 0;
+
+    if (ff) {
+        int v;
+        while (n < 64 && fscanf(ff, "%d", &v) == 1)
+            coefs[n++] = (int16_t)v;
+        fclose(ff);
+    }
+    if (n <= 0 || (n % 16) != 0 || n > max_taps) {
+        printf("RFIC overclock: bad %s EQ FIR file '%s' (%d taps), FIR off.\n",
+               what, file, n);
+        return 0x00;
+    }
+    if (ad9361_load_fir_filter_coef(phy, dest, 0, n, coefs) != 0) {
+        printf("RFIC overclock: %s EQ FIR load FAILED, FIR off.\n", what);
+        return 0x00;
+    }
+    printf("RFIC overclock: %d-tap %s EQ FIR loaded (%s).\n", n, what, file);
+    return 0x01;
+}
+
 void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
 {
     /* Filter-control registers: halve the decimation/interpolation so the data
@@ -7517,12 +7617,56 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
         /* 0x003 (Rx Enable & Filter Ctrl) low bits 0x14: RHB3 dec2 ([5:4]=01),
          * RHB2 bypassed ([3]=0), RHB1 dec2 ([2]=1), RX FIR off ([1:0]=00):
          * total decimation 4 from a 4x-rate ADC clock = 2x port rate. */
-        ad9361_spi_write(phy->spi, 0x003, (rx_ctrl & 0xC0) | 0x14);
+        uint8_t rx_fir = 0x00;
+        /* M2SDR_OC_RX_FIR_FILE: decimate-by-1 RX FIR as a passband flatness
+         * equalizer; the composite BBF + half-band response otherwise rolls
+         * off ~7-9.5dB over the outer +/-36-49MHz. Up to 32 taps: the engine
+         * processes at 2x the 122.88MHz output rate here, which 32 taps just
+         * meet. */
+        const char *fir_file = getenv("M2SDR_OC_RX_FIR_FILE");
+        if (fir_file != NULL) {
+            phy->rx_fir_dec = 1;
+            rx_fir = ad9361_load_eq_fir(phy, fir_file,
+                (enum fir_dest)(((rx_ctrl >> 6) & 0x3) | FIR_IS_RX), 32, "RX");
+        }
+        ad9361_spi_write(phy->spi, 0x003, (rx_ctrl & 0xC0) | 0x14 | rx_fir);
+        /* M2SDR_OC_TX_FIR_FILE: interpolate-by-1 TX FIR as a passband
+         * pre-emphasis equalizer (the composite TX BBF + DAC sinc response
+         * droops to ~-8dB over the outer +/-38-49MHz; measured flat to
+         * +/-1.3dB at +/-42 with the inverse design). IMPORTANT: in this
+         * mode the FIR processes in the 245.76MHz domain (each port sample
+         * seen twice with the interpolation stages bypassed), so the taps
+         * must be designed for fs = 245.76MHz, not the 122.88MHz port rate
+         * - a 122.88-designed filter applies frequency-stretched 2x and
+         * degenerates to its DC gain over the signal band - and the engine
+         * ceiling allows only 16 of them. Pre-emphasis costs its peak boost
+         * in maximum output power. */
+        uint8_t tx_fir = 0x00;
+        const char *tx_fir_file = getenv("M2SDR_OC_TX_FIR_FILE");
+        if (tx_fir_file != NULL) {
+            phy->tx_fir_int = 1;
+            tx_fir = ad9361_load_eq_fir(phy, tx_fir_file,
+                (enum fir_dest)((tx_ctrl >> 6) & 0x3), 16, "TX");
+        }
         /* 0x002 (Tx Enable & Filter Ctrl) low bits 0x00: all THB stages and
          * the TX FIR bypassed - the DAC runs directly at the port rate. */
-        ad9361_spi_write(phy->spi, 0x002, (tx_ctrl & 0xC0) | 0x00);
+        ad9361_spi_write(phy->spi, 0x002, (tx_ctrl & 0xC0) | 0x00 | tx_fir);
     }
 
+    /* Baseband filters: the default is the chip-native wide tune (the chip's
+     * own R/C search run against a ~54/62 MHz corner target), which keeps the
+     * calibrated noise behavior. M2SDR_OC_BBF_FORCE selects the register
+     * force-widening fallback below instead; M2SDR_OC_BBF_TUNE overrides the
+     * tune target (BBBW in Hz, half the complex bandwidth). */
+    bool bbf_tuned = false;
+    if (getenv("M2SDR_OC_BBF_FORCE") == NULL) {
+        const char *s = getenv("M2SDR_OC_BBF_TUNE");
+        uint32_t bbbw = s ? (uint32_t)strtoul(s, NULL, 0) : 39000000u;
+
+        bbf_tuned = ad9361_wide_bbf_tune(phy, bbbw);
+    }
+
+    if (!bbf_tuned) {
     /* TX baseband filter (3rd-order Butterworth, corner ~ 1/(2.pi.R.C)):
      * resistor words to 0x9f = override-enable bit (0x80) + maximum code
      * (0x1f), capacitor words to 0x00 = minimum C; both push the corner as
@@ -7542,6 +7686,7 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
     /* R2B is part of the same override set (0x0c2..0x0cb); maxing it
      * measures ~+1 dB effective SNR at the band edges. */
     ad9361_spi_write(phy->spi, 0x0cb, 0x1f); /* TX BBF R2B (max).     */
+    }
 
     /* TX secondary (post-BBF single-pole) filter capacitor word: the driver's
      * ad9361_tx_bb_second_filter_calib() places this pole at 2.5 x BBBW and
@@ -7556,7 +7701,7 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
      * R1A is the DENOMINATOR of the bi-quad gain (R4/R1A) and R5 of the pole
      * gain (R6/R5); zeroing them (as a naive copy of the TX recipe does)
      * collapses the RX path - measured as "no signal, ~0 dB IQ image". */
-    {
+    if (!bbf_tuned) {
         ad9361_spi_write(phy->spi, 0x1e0, 0xbf); /* RX BBF R1A: force + 0x3f (max). */
         ad9361_spi_write(phy->spi, 0x1e4, 0xff); /* RX BBF R5 (max).      */
         /* R5 tune (0x1f2) must be ZERO while R5 (0x1e4/0x1e5) is nonzero
@@ -7597,8 +7742,11 @@ void ad9361_enable_oversampling(struct ad9361_rf_phy *phy)
      * (full-scale noise) captures. Values below are the eye midpoints from
      * the PRBS delay scan (`m2sdr_rf --sample-rate 61.44e6 --calibrate-delay`,
      * 61.44 MSPS 2T2R = electrically the same DATA_CLK 245.76 MHz): RX eye
-     * 4 taps -> clk 1/data 2; TX eye 14 taps -> clk 6/data 7. */
-    ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, 0x12); /* clk 1 / data 2 */
+     * 4 taps -> clk 1/data 2; TX eye 14 taps -> clk 6/data 7. The RX clock
+     * delay also absorbs the ~0.6ns insertion delay of the per-lane RX
+     * IDELAYE2s in the deskew-capable gateware (measured midpoint clk 4 /
+     * data 3 with the IDELAYs at tap 0). */
+    ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, 0x43); /* clk 4 / data 3 */
     ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, 0x67); /* clk 6 / data 7 */
 
     /* Per-board override of the interface delays from the environment

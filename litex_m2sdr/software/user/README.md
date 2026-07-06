@@ -382,6 +382,8 @@ m2sdr_play [options] filename [loops]
 Common playback options:
 - `--format sc16|sc8`
 - `--timed-start`
+- `--host-buffers N`
+- `--prefill N`
 
 SigMF input:
 - `--capture-index`
@@ -389,10 +391,16 @@ SigMF input:
 `filename` can be a raw sample file, a `.sigmf-data` file, a `.sigmf-meta` file, or a SigMF basename when adjacent SigMF files exist.
 For SigMF inputs, `core:dataset` is honored and resolved relative to the metadata file when needed.
 M2SDR-specific SigMF datasets with `core:header_bytes=16` are also accepted and replayed with timestamps restored into TX metadata.
+Use `--host-buffers` to decouple input file/pipe reads from the TX loop.
+`--prefill` waits for a number of queued DMA buffers before playback starts,
+which can be useful when the input source has bursty latency. This is mainly
+useful for playback from stdin, slower/shared storage, or another process that
+can briefly stall; it does not increase sustained throughput.
 
 Example usage:
 ~~~~
 ./m2sdr_play --format sc16 tx_file.bin 10
+./m2sdr_play --host-buffers 64 --prefill 16 tx_file.bin 1
 ./m2sdr_play capture.sigmf-meta 10
 ./m2sdr_play --capture-index 1 capture.sigmf-meta 1
 ./m2sdr_play --capture-index 2 framed_capture.sigmf-meta 0
@@ -409,12 +417,13 @@ This is the matching `libm2sdr` RX example, including optional timestamp/header 
 m2sdr_record [options] filename size
 ~~~~
 - **filename**: Destination file for captured I/Q samples (or `-` for stdout).
-- **size**: Number of samples to capture.
+- **size**: Optional byte limit to capture.
 
 Common capture options:
 - `--format sc16|sc8`
 - `--enable-header`
 - `--strip-header`
+- `--host-buffers N`
 
 SigMF output:
 - `--sigmf`
@@ -436,9 +445,16 @@ SigMF annotations:
 - `--annotate-ts-jumps`
 - `--ts-jump-threshold-pct`
 
+Use `--host-buffers` to decouple RX DMA draining from host file/stdout writes.
+The default queue policy blocks when the queue is full and preserves output
+ordering. This is mainly useful when writing to a pipe, stdout consumer, or
+storage target that can briefly stall; it does not compensate for a sink that
+is continuously slower than the RX stream.
+
 Example usage:
 ~~~~
 ./m2sdr_record --enable-header --strip-header rx_file.bin 2000000
+./m2sdr_record --host-buffers 64 rx_file.bin 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --center-freq 2400000000 --enable-header --strip-header capture 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst --annotation-comment "loopback capture" capture 2000000
 ./m2sdr_record --sigmf --sample-rate 30720000 --annotation-label burst-a --annotation-start 0 --annotation-count 8192 --annotation-add --annotation-label burst-b --annotation-start 16384 --annotation-count 8192 capture 2000000

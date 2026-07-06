@@ -12,6 +12,93 @@ from litex.gen.genlib.misc import WaitTimer
 from litex.soc.interconnect import stream, wishbone
 
 
+# S7 PCIe Timing Constraints ----------------------------------------------------------------------
+
+S7_PCIE_PHY_CLOCKS = (
+    "*s7pciephy_clkout0*",
+    "*s7pciephy_clkout1*",
+    "*s7pciephy_clkout2*",
+    "*s7pciephy_clkout3*",
+    "*s7pciephy_clkout4*",
+    "*s7pciephy_clkout5*",
+)
+
+
+def _add_guarded_false_path(platform, clk0, clk1):
+    clk0 = "{{" + clk0 + "}}"
+    clk1 = "{{" + clk1 + "}}"
+    platform.toolchain.pre_placement_commands += [
+        f"set _pcie_clk0 [get_clocks -quiet {clk0}]",
+        f"set _pcie_clk1 [get_clocks -quiet {clk1}]",
+        "if {{[llength $_pcie_clk0] && [llength $_pcie_clk1]}} {{",
+        "    set_false_path -from $_pcie_clk0 -to $_pcie_clk1",
+        "}}",
+        "unset -nocomplain _pcie_clk0 _pcie_clk1",
+    ]
+
+
+def _add_guarded_false_paths(platform, clk0, clk1):
+    _add_guarded_false_path(platform, clk0, clk1)
+    _add_guarded_false_path(platform, clk1, clk0)
+
+
+def _add_s7_pcie_pclk_mux_constraints(platform, pcie_lanes):
+    # LitePCIe's S7 PHY selects the PIPE pclk through a BUFGCTRL. Match the
+    # hard-IP clocking with generated clocks on the mux output.
+    platform.add_platform_command(
+        "set_false_path -to [get_pins -quiet BUFGCTRL/S0]\n"
+        "set_false_path -to [get_pins -quiet BUFGCTRL/S1]"
+    )
+
+    commands = [
+        "set _pcie_pclk_i0 [get_pins -quiet BUFGCTRL/I0]",
+        "set _pcie_pclk_o [get_pins -quiet BUFGCTRL/O]",
+        "if {{[llength $_pcie_pclk_i0] && [llength $_pcie_pclk_o]}} {{",
+        "    create_generated_clock -name clk_125mhz_mux_phy -source $_pcie_pclk_i0 -divide_by 1 $_pcie_pclk_o",
+        "}}",
+    ]
+
+    # In x1 mode the mux output is the 125MHz PIPE pclk. Adding the unused
+    # 250MHz output clock over-constrains the hard-IP timing checks.
+    if pcie_lanes > 1:
+        commands += [
+            "set _pcie_pclk_i1 [get_pins -quiet BUFGCTRL/I1]",
+            "set _pcie_pclk250_master [get_clocks -quiet -of_objects [get_nets -quiet {{*s7pciephy_clkout1*}}]]",
+            "if {{[llength $_pcie_pclk_i1] && [llength $_pcie_pclk_o] && [llength $_pcie_pclk250_master]}} {{",
+            "    create_generated_clock -name clk_250mhz_mux_phy -source $_pcie_pclk_i1 -divide_by 1 -add -master_clock $_pcie_pclk250_master $_pcie_pclk_o",
+            "}}",
+            "set _pcie_pclk125 [get_clocks -quiet clk_125mhz_mux_phy]",
+            "set _pcie_pclk250 [get_clocks -quiet clk_250mhz_mux_phy]",
+            "if {{[llength $_pcie_pclk125] && [llength $_pcie_pclk250]}} {{",
+            "    set_clock_groups -name pcieclkmux -physically_exclusive -group $_pcie_pclk125 -group $_pcie_pclk250",
+            "}}",
+        ]
+
+    commands += [
+        "set _sys_clk [get_clocks -quiet {{*crg*clkout0*}}]",
+        "set _pcie_pclk_clks [get_clocks -quiet {{clk_125mhz_mux_phy clk_250mhz_mux_phy}}]",
+        "if {{[llength $_sys_clk] && [llength $_pcie_pclk_clks]}} {{",
+        "    set_false_path -from $_sys_clk -to $_pcie_pclk_clks",
+        "    set_false_path -from $_pcie_pclk_clks -to $_sys_clk",
+        "}}",
+        "unset -nocomplain _pcie_pclk_i0 _pcie_pclk_i1 _pcie_pclk_o",
+        "unset -nocomplain _pcie_pclk125 _pcie_pclk250 _pcie_pclk250_master",
+        "unset -nocomplain _sys_clk _pcie_pclk_clks",
+    ]
+    platform.toolchain.pre_placement_commands += commands
+
+
+def add_s7_pcie_timing_constraints(platform, pcie_lanes):
+    _add_s7_pcie_pclk_mux_constraints(platform, pcie_lanes)
+
+    # The PHY user clocks are CDC-only from sys, and the 125MHz/250MHz user-clock
+    # alternatives are muxed inside the PCIe IP.
+    for pcie_clk in S7_PCIE_PHY_CLOCKS:
+        _add_guarded_false_paths(platform, "*crg*clkout0*", pcie_clk)
+
+    _add_guarded_false_paths(platform, "*s7pciephy_clkout0*", "*s7pciephy_clkout1*")
+
+
 # PCIe Link Reset Workaround -----------------------------------------------------------------------
 
 class PCIeLinkResetWorkaround(LiteXModule):

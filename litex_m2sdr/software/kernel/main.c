@@ -111,6 +111,12 @@ struct litepcie_dma_chan {
 	uint8_t reader_enable;
 	uint8_t writer_lock;
 	uint8_t reader_lock;
+	uint64_t writer_level_high_water;
+	uint64_t writer_overflow_events;
+	uint64_t writer_overflow_buffers;
+	uint64_t reader_level_high_water;
+	uint64_t reader_underflow_events;
+	uint64_t reader_underflow_buffers;
 };
 
 struct litepcie_chan {
@@ -162,6 +168,89 @@ static int litepcie_major;
 static int litepcie_minor_idx;
 static struct class *litepcie_class;
 static dev_t litepcie_dev_t;
+
+static uint64_t litepcie_dma_nonnegative_level(int64_t level)
+{
+	return level > 0 ? (uint64_t)level : 0;
+}
+
+static void litepcie_dma_update_level_stats(struct litepcie_dma_chan *dma)
+{
+	uint64_t writer_level;
+	uint64_t reader_level;
+
+	writer_level = litepcie_dma_nonnegative_level(
+		dma->writer_hw_count - dma->writer_sw_count);
+	reader_level = litepcie_dma_nonnegative_level(
+		dma->reader_sw_count - dma->reader_hw_count);
+
+	if (writer_level > dma->writer_level_high_water)
+		dma->writer_level_high_water = writer_level;
+	if (reader_level > dma->reader_level_high_water)
+		dma->reader_level_high_water = reader_level;
+}
+
+static void litepcie_dma_clear_stats(struct litepcie_dma_chan *dma,
+				     uint8_t direction)
+{
+	if (direction == LITEPCIE_DMA_STATS_WRITER) {
+		dma->writer_level_high_water = litepcie_dma_nonnegative_level(
+			dma->writer_hw_count - dma->writer_sw_count);
+		dma->writer_overflow_events = 0;
+		dma->writer_overflow_buffers = 0;
+	} else {
+		dma->reader_level_high_water = litepcie_dma_nonnegative_level(
+			dma->reader_sw_count - dma->reader_hw_count);
+		dma->reader_underflow_events = 0;
+		dma->reader_underflow_buffers = 0;
+	}
+}
+
+static int litepcie_dma_fill_stats(struct litepcie_chan *chan,
+				   struct litepcie_ioctl_dma_stats *m)
+{
+	struct litepcie_dma_chan *dma = &chan->dma;
+
+	if (m->direction != LITEPCIE_DMA_STATS_WRITER &&
+	    m->direction != LITEPCIE_DMA_STATS_READER)
+		return -EINVAL;
+
+	litepcie_dma_update_level_stats(dma);
+	if (m->clear) {
+		litepcie_dma_clear_stats(dma, m->direction);
+		litepcie_dma_update_level_stats(dma);
+	}
+
+	m->buffer_size = DMA_BUFFER_SIZE;
+	m->buffer_count = DMA_BUFFER_COUNT;
+	m->reserved0 = 0;
+	m->reserved1 = 0;
+	memset(m->reserved, 0, sizeof(m->reserved));
+
+	if (m->direction == LITEPCIE_DMA_STATS_WRITER) {
+		m->hw_count = dma->writer_hw_count;
+		m->sw_count = dma->writer_sw_count;
+		m->ring_level = litepcie_dma_nonnegative_level(
+			dma->writer_hw_count - dma->writer_sw_count);
+		m->ring_high_water = dma->writer_level_high_water;
+		m->overflow_events = dma->writer_overflow_events;
+		m->overflow_buffers = dma->writer_overflow_buffers;
+		m->underflow_events = 0;
+		m->underflow_buffers = 0;
+	} else {
+		m->hw_count = dma->reader_hw_count;
+		m->sw_count = dma->reader_sw_count;
+		m->ring_level = litepcie_dma_nonnegative_level(
+			dma->reader_sw_count - dma->reader_hw_count);
+		m->ring_high_water = dma->reader_level_high_water;
+		m->overflow_events = 0;
+		m->overflow_buffers = 0;
+		m->underflow_events = dma->reader_underflow_events;
+		m->underflow_buffers = dma->reader_underflow_buffers;
+	}
+
+	return 0;
+}
 
 /* ----------------------------------------------------------------------------------------------- */
 /*                               LitePCIe CSR Access                                               */
@@ -391,10 +480,19 @@ static int litepcie_ioctl_sata_dma(struct litepcie_chan *chan,
 /*                               LitePCIe Interrupts                                              */
 /* -----------------------------------------------------------------------------------------------*/
 
-/* Function to enable a specific interrupt on a LitePCIe device */
+/* Function to enable a specific interrupt on a LitePCIe device.
+ *
+ * The MSI enable register is shared by all interrupt sources and the ioctl
+ * paths run concurrently (e.g. one thread starting the DMA writer while
+ * another starts the reader), so the read-modify-write must be locked: a
+ * lost update here leaves that source's hw_count frozen and its consumer
+ * starving while the hardware streams normally. */
 static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -404,12 +502,17 @@ static void litepcie_enable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* Function to disable a specific interrupt on a LitePCIe device */
 static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 {
+	unsigned long flags;
 	uint32_t v;
+
+	spin_lock_irqsave(&s->lock, flags);
 
 	/* Read the current interrupt enable register value */
 	v = litepcie_readl(s, CSR_PCIE_MSI_ENABLE_ADDR);
@@ -419,6 +522,8 @@ static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 
 	/* Write the updated value back to the register */
 	litepcie_writel(s, CSR_PCIE_MSI_ENABLE_ADDR, v);
+
+	spin_unlock_irqrestore(&s->lock, flags);
 }
 
 /* -----------------------------------------------------------------------------------------------*/
@@ -498,9 +603,15 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA Writer */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (RX only) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	/* Arm DMA Synchronizer (RX only) only if the Reader is not active:
+	 * re-arming drops `synced` and cuts the running Reader stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->reader_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b10);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Reader is active; skipping synchronizer re-arm in writer_start\n");
+	}
 }
 
 /* Stop DMA writer for a specific channel */
@@ -566,9 +677,15 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 	/* Start DMA reader */
 	litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 1);
 
-	/* Start DMA Synchronizer (TX & RX) */
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
-	litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	/* Arm DMA Synchronizer (TX & RX) only if the Writer is not active:
+	 * re-arming drops `synced` and cuts the running Writer stream mid-frame
+	 * (and stalls both directions until the next PPS edge). */
+	if (!dmachan->writer_enable) {
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b0);
+		litepcie_writel(s, dmachan->base + PCIE_DMA_SYNCHRONIZER_ENABLE_OFFSET, 0b01);
+	} else {
+		dev_dbg(&s->dev->dev, "DMA Writer is active; skipping synchronizer re-arm in reader_start\n");
+	}
 }
 
 /* Stop DMA reader for a specific channel */
@@ -657,6 +774,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			if (chan->dma.reader_hw_count_last > chan->dma.reader_hw_count)
 				chan->dma.reader_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
 			chan->dma.reader_hw_count_last = chan->dma.reader_hw_count;
+			litepcie_dma_update_level_stats(&chan->dma);
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Reader buf: %lld\n", i,
 				chan->dma.reader_hw_count);
@@ -673,6 +791,7 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 			if (chan->dma.writer_hw_count_last > chan->dma.writer_hw_count)
 				chan->dma.writer_hw_count += (1 << (ilog2(DMA_BUFFER_COUNT) + 16));
 			chan->dma.writer_hw_count_last = chan->dma.writer_hw_count;
+			litepcie_dma_update_level_stats(&chan->dma);
 #ifdef DEBUG_MSI
 			dev_dbg(&s->dev->dev, "MSI DMA%d Writer buf: %lld\n", i,
 				chan->dma.writer_hw_count);
@@ -788,6 +907,7 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	overflows = 0;
 	len = size;
 	while (len >= DMA_BUFFER_SIZE) {
+		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0) {
 			if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > DMA_BUFFER_COUNT/2) {
 				overflows++;
@@ -809,8 +929,11 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 		}
 	}
 
-	if (overflows)
+	if (overflows) {
+		chan->dma.writer_overflow_events++;
+		chan->dma.writer_overflow_buffers += overflows;
 		dev_err(&s->dev->dev, "Reading too late, %d buffers lost\n", overflows);
+	}
 
 #ifdef DEBUG_READ
 	dev_dbg(&s->dev->dev, "read: read %ld bytes out of %ld\n", size - len, size);
@@ -846,6 +969,7 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	underflows = 0;
 	len        = size;
 	while (len >= DMA_BUFFER_SIZE) {
+		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2) {
 			if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < 0) {
 				underflows++;
@@ -866,8 +990,11 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 		}
 	}
 
-	if (underflows)
+	if (underflows) {
+		chan->dma.reader_underflow_events++;
+		chan->dma.reader_underflow_buffers += underflows;
 		dev_err(&s->dev->dev, "Writing too late, %d buffers lost\n", underflows);
+	}
 
 #ifdef DEBUG_WRITE
 	dev_dbg(&s->dev->dev, "write: write %ld bytes out of %ld\n", size - len, size);
@@ -1045,6 +1172,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.writer_enable = m.enable;
+		litepcie_dma_update_level_stats(&chan->dma);
 
 		m.hw_count = chan->dma.writer_hw_count;
 		m.sw_count = chan->dma.writer_sw_count;
@@ -1076,6 +1204,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.reader_enable = m.enable;
+		litepcie_dma_update_level_stats(&chan->dma);
 
 		m.hw_count = chan->dma.reader_hw_count;
 		m.sw_count = chan->dma.reader_sw_count;
@@ -1122,6 +1251,7 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.writer_sw_count = m.sw_count;
+		litepcie_dma_update_level_stats(&chan->dma);
 	}
 	break;
 	case LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE:
@@ -1139,6 +1269,26 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 		}
 
 		chan->dma.reader_sw_count = m.sw_count;
+		litepcie_dma_update_level_stats(&chan->dma);
+	}
+	break;
+	case LITEPCIE_IOCTL_DMA_STATS:
+	{
+		struct litepcie_ioctl_dma_stats m;
+
+		if (copy_from_user(&m, (void *)arg, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = litepcie_dma_fill_stats(chan, &m);
+		if (ret)
+			break;
+
+		if (copy_to_user((void *)arg, &m, sizeof(m))) {
+			ret = -EFAULT;
+			break;
+		}
 	}
 	break;
 	case LITEPCIE_IOCTL_SATA_DMA:

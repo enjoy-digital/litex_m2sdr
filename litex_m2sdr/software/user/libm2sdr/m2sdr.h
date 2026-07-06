@@ -59,9 +59,9 @@ enum m2sdr_error {
 
 /* libm2sdr starts its public compatibility story at v1.0.0. Keep the ABI
  * major in sync with the installed shared-library SONAME. */
-#define M2SDR_API_VERSION 0x00010000
+#define M2SDR_API_VERSION 0x00010100
 #define M2SDR_ABI_VERSION 0x00010000
-#define M2SDR_VERSION_STRING "1.0.0"
+#define M2SDR_VERSION_STRING "1.1.0"
 
 struct m2sdr_version {
     uint32_t api;
@@ -180,6 +180,35 @@ struct m2sdr_liteeth_udp_stats {
     int so_rcvbuf_actual;
     int so_sndbuf_requested;
     int so_sndbuf_actual;
+};
+
+struct m2sdr_stream_stats {
+    enum m2sdr_transport_kind transport;
+    enum m2sdr_direction direction;
+    /* Backend descriptor payload size and ring depth. */
+    size_t buffer_size;
+    size_t buffer_count;
+    /* Raw backend ring counters when available. */
+    int64_t hw_count;
+    int64_t sw_count;
+    /* Current ring occupancy and observed high-water mark in descriptors. */
+    uint64_t ring_level;
+    uint64_t ring_high_water;
+    /* RX late-consumer diagnostics. */
+    uint64_t overflow_events;
+    uint64_t overflow_buffers;
+    /* TX late-producer diagnostics. */
+    uint64_t underflow_events;
+    uint64_t underflow_buffers;
+    /* Transport-specific counters mirrored from LiteEth when available. */
+    uint64_t rx_buffers;
+    uint64_t tx_buffers;
+    uint64_t rx_kernel_drops;
+    uint64_t rx_source_drops;
+    uint64_t rx_ring_full_events;
+    uint64_t rx_timeout_recoveries;
+    uint64_t rx_recv_errors;
+    uint64_t tx_send_errors;
 };
 
 struct m2sdr_stream_info {
@@ -536,7 +565,9 @@ struct m2sdr_config {
     int64_t rx_gain1;
     /* RX gain for channel 1 in dB. */
     int64_t rx_gain2;
-    /* Apply explicit RX gain programming and force manual gain mode. */
+    /* Apply explicit RX gain programming and force manual gain mode. Enabled
+     * by m2sdr_config_init(); clear this and set program_rx_gain_modes when
+     * using AD9361 AGC modes instead. */
     bool    program_rx_gains;
     /* Apply explicit AD9361 RX gain-control modes when not programming manual gains. */
     bool    program_rx_gain_modes;
@@ -703,6 +734,12 @@ void m2sdr_config_init(struct m2sdr_config *cfg);
  * and optional BIST modes.
  */
 int  m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg);
+/* Apply cfg only when no RF config has been applied yet, or when cfg matches
+ * the last successfully applied config. This avoids accidental AD9361 re-init
+ * while letting startup code call the helper idempotently. Returns
+ * M2SDR_ERR_STATE when the RFIC is already initialized with a different config. */
+int  m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
+                                  const struct m2sdr_config *cfg);
 
 /* Direction-based RF setters.
  *
@@ -753,10 +790,13 @@ int  m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.
  *
- * buffer_size is expressed in samples per buffer. For BFP8, one sample is one
- * encoded M2SDR_BFP8_BLOCK_BYTES block. Use
+ * buffer_size is the fixed backend descriptor payload size expressed in
+ * samples per buffer, not the size of each m2sdr_sync_rx()/m2sdr_sync_tx()
+ * request. For BFP8, one sample is one encoded M2SDR_BFP8_BLOCK_BYTES block.
+ * Use
  * m2sdr_bytes_to_samples(M2SDR_FORMAT_..., M2SDR_BUFFER_BYTES)
- * for the default DMA payload size.
+ * for the default DMA payload size. Larger per-call requests are passed to
+ * m2sdr_sync_rx()/m2sdr_sync_tx(), which drain/fill multiple descriptors.
  */
 int m2sdr_sync_config(struct m2sdr_dev *dev,
                       enum m2sdr_direction direction,
@@ -777,6 +817,11 @@ int m2sdr_stream_configure(struct m2sdr_dev *dev, const m2sdr_stream_config_t *c
 int m2sdr_stream_get_info(struct m2sdr_dev *dev,
                           enum m2sdr_direction direction,
                           struct m2sdr_stream_info *info);
+int m2sdr_get_stream_stats(struct m2sdr_dev *dev,
+                           enum m2sdr_direction direction,
+                           struct m2sdr_stream_stats *stats);
+int m2sdr_clear_stream_stats(struct m2sdr_dev *dev,
+                             enum m2sdr_direction direction);
 int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction direction);
 /* Re-enable a previously configured (and possibly deactivated) stream. On
  * LitePCIe this resyncs the userspace ring counters with the kernel, whose
@@ -806,6 +851,9 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
  *
  * timeout_ms = 0 uses the stream timeout configured through
  * m2sdr_sync_config()/m2sdr_sync_config_ex().
+ *
+ * num_samples is the requested transfer size and may be larger than the
+ * descriptor size configured with m2sdr_sync_config().
  *
  * When RX headers are enabled, meta carries the hardware timestamp of the
  * FIRST sample of the returned block (a request spanning several DMA buffers

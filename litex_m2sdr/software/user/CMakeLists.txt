@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(litex_m2sdr_user VERSION 1.0.0 LANGUAGES C CXX)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Threads REQUIRED)
 
 set(M2SDR_ENABLE_LITEPCIE AUTO CACHE STRING "Enable LitePCIe backend: AUTO, ON, or OFF")
 set_property(CACHE M2SDR_ENABLE_LITEPCIE PROPERTY STRINGS AUTO ON OFF)
@@ -152,6 +153,7 @@ endfunction()
 if(M2SDR_BUILD_TOOLS)
     set(M2SDR_CLI_SOURCES m2sdr_cli.c m2sdr_getopt.c)
     set(M2SDR_TOOL_SOURCES m2sdr_tool.c)
+    set(M2SDR_HOST_QUEUE_SOURCES m2sdr_host_queue.c)
     set(M2SDR_SATA_TOOL_SOURCES
         m2sdr_sata.c
         m2sdr_sata_capture_volume.c
@@ -164,8 +166,10 @@ if(M2SDR_BUILD_TOOLS)
     m2sdr_add_tool(m2sdr_rf ${M2SDR_CLI_SOURCES} m2sdr_rf.c)
     m2sdr_add_tool(m2sdr_gpio ${M2SDR_CLI_SOURCES} m2sdr_gpio.c)
     m2sdr_add_tool(m2sdr_sata ${M2SDR_CLI_SOURCES} ${M2SDR_SATA_TOOL_SOURCES})
-    m2sdr_add_tool(m2sdr_play ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_play.c)
-    m2sdr_add_tool(m2sdr_record ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_record.c)
+    m2sdr_add_tool(m2sdr_play ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} ${M2SDR_HOST_QUEUE_SOURCES} m2sdr_play.c)
+    target_link_libraries(m2sdr_play PRIVATE Threads::Threads)
+    m2sdr_add_tool(m2sdr_record ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} ${M2SDR_HOST_QUEUE_SOURCES} m2sdr_record.c)
+    target_link_libraries(m2sdr_record PRIVATE Threads::Threads)
     m2sdr_add_tool(m2sdr_gen ${M2SDR_CLI_SOURCES} ${M2SDR_TOOL_SOURCES} m2sdr_gen.c kissfft/kiss_fft.c)
     m2sdr_add_tool(m2sdr_sigmf m2sdr_getopt.c m2sdr_sigmf.c)
 endif()
@@ -187,6 +191,8 @@ if(M2SDR_BUILD_TESTS)
         m2sdr_add_tool(test_sigmf_capture_smoke tests/test_sigmf_capture_smoke.c)
         m2sdr_add_tool(test_m2sdr_sata_cli tests/test_m2sdr_sata_cli.c)
         m2sdr_add_tool(test_m2sdr_sata_hostio tests/test_m2sdr_sata_hostio.c m2sdr_sata_hostio.c)
+        m2sdr_add_tool(test_m2sdr_host_queue tests/test_m2sdr_host_queue.c m2sdr_host_queue.c)
+        target_link_libraries(test_m2sdr_host_queue PRIVATE Threads::Threads)
         add_executable(test_sigmf_cli tests/test_sigmf_cli.c)
 
         foreach(test_target
@@ -195,12 +201,14 @@ if(M2SDR_BUILD_TESTS)
             test_sigmf_capture_smoke
             test_m2sdr_sata_cli
             test_m2sdr_sata_hostio
+            test_m2sdr_host_queue
             test_sigmf_cli
         )
             m2sdr_keep_asserts(${test_target})
         endforeach()
 
         add_test(NAME test_libm2sdr COMMAND test_libm2sdr)
+        add_test(NAME test_m2sdr_host_queue COMMAND test_m2sdr_host_queue)
         add_test(NAME test_m2sdr_sigmf COMMAND test_m2sdr_sigmf)
         add_test(NAME test_sigmf_capture_smoke COMMAND test_sigmf_capture_smoke)
         add_test(NAME test_m2sdr_sata_hostio COMMAND test_m2sdr_sata_hostio)

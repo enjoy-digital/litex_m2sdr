@@ -9,7 +9,7 @@
 
 [> TL;DR
 ---------
-- **What?** LiteX‑based M.2 2280 SDR board featuring a Xilinx **Artix‑7 XC7A200T** FPGA and an **ADI AD9361** RFIC.
+- **What?** LiteX‑based M.2 2280 Key M SDR board featuring a Xilinx **Artix‑7 XC7A200T** FPGA and an **ADI AD9361** RFIC.
 - **Why?** Open‑source gateware/software, up to 61.44 MSPS (122.88 MSPS†) over PCIe Gen2 ×4, hack‑friendly clocking & debug.
 - **Who?** SDR tinkerers, FPGA devs, time‑sync enthusiasts, or anyone hitting the limits of other SDRs.
 - **How fast?** `apt install …` → `./build.py` → **stream/record IQ in ≈5 min** with our C API/tools or any SoapySDR compatible software.
@@ -19,9 +19,9 @@
 - Docs: `litex_m2sdr/doc/libm2sdr/README.md`
 - Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
 - Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
-- Current public library version: `1.0.0` (ABI `1`)
+- Current public library version: `1.1.0` (ABI `1`)
 - The library is built as a runtime PCIe/Ethernet library; external applications only need to link `libm2sdr`.
-- Recent API additions: backend accessors `m2sdr_get_transport()` / `m2sdr_get_eb_handle()` and finer-grained `parse`/`range`/`state` error classes.
+- Recent API additions: backend accessors, stream diagnostics, and finer-grained `parse`/`range`/`state` error classes.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">
@@ -42,12 +42,12 @@ Why yet another SDR based on this RFIC? Because we've been designing FPGA-based 
 </div>
 
 Imagine a minimalist AD9361-based SDR with:
-- A compact form factor (M2 2280). 📏
+- A compact form factor (M.2 2280). 📏
 - Minimal on-board RF frontend that could be specialized externally.
 - 2T2R / 12-bit @ 61.44MSPS (and 2T2R / 12-bit @ 122.88MSPS for those wanting to use/explore Cellwizard/BladeRF [findings](https://www.nuand.com/2023-02-release-122-88mhz-bandwidth/)).
 - PCIe Gen 2 X4 (~14Gbps of TX/RX bandwidth) with [LitePCIe](https://github.com/enjoy-digital/litepcie), providing MMAP and several possible DMAs (for direct I/Q samples transfer or processed I/Q samples). ⚡
 - A large XC7A200T FPGA where the base infrastructure only uses a fraction of the available resources, allowing you to integrate large RF processing blocks. 💪
-- The option to reuse some of the PCIe lanes of the M2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
+- The option to reuse some of the PCIe lanes of the M.2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
 - Or ... for SATA through the [LiteSATA](https://github.com/enjoy-digital/litesata) gateware core. 💾
 - Or ... for inter-board SerDes-based communication through [LiteICLink](https://github.com/enjoy-digital/liteiclink). 🔗
 - Powerful debug capabilities through LiteX [Host <-> FPGA bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC) and [LiteScope](https://github.com/enjoy-digital/litescope) logic analyzer. 🛠️
@@ -58,7 +58,7 @@ OK, you probably also realized this project is a showcase for LiteX capabilities
 
 This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/), managing the project and litex_m2sdr/gateware/software development, and our partner [Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
 
-Ideal for SDR enthusiasts, this versatile board fits directly into an M2 slot or can team up with others in a PCIe M2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
+Ideal for SDR enthusiasts, this versatile board fits directly into an M.2 slot or can team up with others in a PCIe M.2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
 
 For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
 
@@ -73,7 +73,7 @@ Unlock new possibilities in your SDR projects with this cutting-edge board—we'
 
 1. [Hardware Availability](#hardware-availability)
 2. [Capabilities Overview](#capabilities-overview)
-3. [M.2 / GPIO Voltage Levels](#m2-gpio-voltage-levels)
+3. [M.2 Keying / GPIO Voltage Levels](#m2-keying-gpio-voltage-levels)
 4. [PCIe SoC Design](#pcie-soc-design)
 5. [Ethernet SoC Design](#ethernet-soc-design)
 6. [Release Artifacts](#release-artifacts)
@@ -90,6 +90,8 @@ The hardware has been thoroughly tested with several SDR softwares compatible wi
 *We offer two variants:*
 - **SI5351C Variant** – Uses the SI5351C clock generator with flexible clocking (local XO or external 10MHz via FPGA/uFL). Host-side selection now exposes the dedicated SI5351C FPGA `10MHz` CLKIN path (`--sync fpga` / `clock_source=fpga`) in addition to the uFL `10MHz` input mode. **Recommended for general usage.** [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
 - **SI5351B Variant** – Uses the SI5351B clock generator, clocked from the local XO with FPGA-controlled VCXO for software-regulated loops. [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
+
+Both variants use the same **M.2 2280 Key M** module form factor.
 
 *Note: The differences between the variants are relevant only for specific use cases. The SI5351B variant is mostly intended for advanced users with specialized clock control requirements.*
 
@@ -138,9 +140,12 @@ The board exposes a single monochrome `user_led`, so the gateware uses it as a l
 
 When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
 
-[> M.2 / GPIO Voltage Levels
-----------------------------
+[> M.2 Keying / GPIO Voltage Levels
+-----------------------------------
+<a id="m2-keying-gpio-voltage-levels"></a>
 <a id="m2-gpio-voltage-levels"></a>
+
+LiteX-M2SDR is an **M.2 2280 Key M** module. Use it with M-keyed PCIe M.2 slots, carriers, or compatible adapters.
 
 LiteX-M2SDR does **not** use a single M.2 I/O voltage:
 - FPGA banks **13/14/15/16** on the SDR are powered at **3.3V**.
@@ -181,7 +186,7 @@ Additional notes:
 ------------------
 <a id="pcie-soc-design"></a>
 
-The PCIe design is the first variant developed for the board and does not require an additional baseboard. Just pop the M2SDR into a PCIe M2 slot, connect your antennas, and you're ready to go! 🚀
+The PCIe design is the first variant developed for the board and does not require an additional baseboard. Just pop the M2SDR into a PCIe M.2 slot, connect your antennas, and you're ready to go! 🚀
 
 The SoC has the following architecture:
 
@@ -228,20 +233,28 @@ The AD9361's analog baseband filters are normally limited to ~56 MHz. Requesting
 m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
 ```
 
-Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are force-widened with tuned register words, opening a true ~100 MHz analog passband at 122.88 MSPS. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
+Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are re-tuned by the chip's own BBF calibration against a ~54/62 MHz corner target (programming the tune dividers past the driver's bandwidth clamp), opening a true ~100 MHz analog passband at 122.88 MSPS while keeping the calibrated noise behavior. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
 
-Measured (loopback TX1->RX1 with 40 dB pad + external-receiver cross-check, 3.6 GHz, 100 MHz NR-FR1-TM3.1 64QAM test model):
+Measured at 3.6 GHz on the internal reference (RX side: clean external transmitter -> M2SDR RX, 50 MHz NR-FR1-TM3.1 64QAM, MATLAB 5G Toolbox EVM; in-band SNR: notch/NPR method):
 
-| Metric                          | Wide (overclock)        | Stock ~56 MHz       |
-|---------------------------------|-------------------------|---------------------|
-| Usable analog bandwidth         | ~100 MHz                | ~56 MHz             |
-| EVM, 100 MHz NR TM3.1 (PDSCH)   | ~10% RMS (*)            | n/a (BW > filter)   |
-| EVM, 10 MHz NR TM3.1            | ~3% RMS                 | ~3% RMS             |
-| No-signal RX floor (rx-gain 55) | -31.6 dBFS              | -34 dBFS            |
-| TX image rejection, tx-att 0    | ~30 dB                  | ~42 dB              |
-| TX image rejection, tx-att >=10 | ~44-58 dB               | ~44-58 dB           |
+| Metric (wide mode, 122.88 MSPS)            | Measured                          |
+|--------------------------------------------|-----------------------------------|
+| Usable analog bandwidth                    | ~100 MHz (full quality to +/-40)  |
+| RX EVM, 50 MHz TM3.1 centered              | ~6.0-6.6% RMS                     |
+| RX EVM, 50 MHz TM3.1 shifted +/-25 MHz     | ~8.7-9.2% RMS (touches band edge) |
+| RX in-band SNR (NPR), +/-10..31 MHz        | 26-29.5 dB                        |
+| RX in-band SNR (NPR), +/-41 / +/-45 MHz    | ~21 / ~17 dB                      |
+| RX passband flatness (with EQ FIR)         | +/-1.2 dB to +/-44 MHz            |
+| No-signal RX floor (rx-gain 55)            | -35.6 dBFS integrated             |
+| RX image rejection (quadrature tracking)   | ~40-43 dBc                        |
+| TX EVM, 50 MHz TM3.1 (flat over tx-att 0-18) | ~5.2-6% RMS                     |
+| TX image rejection (tx-att 0)              | ~44 dBc                           |
+| TX passband flatness (chip TX FIR EQ)      | +/-1.3 dB to +/-42 MHz (from -8 dB) |
 
-(*) With TX magnitude pre-emphasis flattening the widened-filter rolloff the per-band effective SNR is uniform (+/-50 MHz); the ~10% ceiling decomposes into ~7% TX (reference/LO phase noise) and ~8.5% RX (widened-BBF noise floor). Best EVM is obtained on the internal clock reference; an external 10 MHz reference costs ~6% EVM through the Si5351's higher multiplication ratio (N=84 vs N=34).
+The RX EVM bottoms out with the ADC filled to ~-12 dBFS RMS at the lowest rx-gain that gets there (the band-edge noise floor is gain-independent). TX EVM is constant-dBc (drive-independent over tx-att 0-18). The remaining limit on both sides is LO phase noise from the reference chain (Si5351 multiplication x94 into the RFPLLs); the RX band-edge limit (beyond ~+/-40 MHz) is the converter's own shaped noise at this oversampling ratio - both are silicon/architecture limits, not configuration. TX passband flatness over the full 100 MHz is achieved in-chip with a 16-tap TX FIR equalizer (`M2SDR_OC_TX_FIR_FILE`; the taps must be designed for the FIR's 245.76 MHz processing rate in this mode), so real-time transmitters need no host-side pre-emphasis; waveform pre-emphasis remains available as an alternative. Best EVM is obtained on the internal clock reference; an external 10 MHz reference costs ~6% EVM through the Si5351's higher multiplication ratio (N=84 vs N=34).
+
+
+Tuning/diagnostic environment variables (defaults are the measured optimum): `M2SDR_OC_BBF_TUNE` (BBF corner target), `M2SDR_OC_BBF_FORCE` (legacy register force-widening), `M2SDR_OC_RX_FIR_FILE` / `M2SDR_OC_TX_FIR_FILE` (passband flatness EQ FIR taps, max 16; TX taps designed for 245.76 MHz), `M2SDR_QEC_KEXP` (RX quadrature tracking loop gain), `M2SDR_RFPLL_CP_PERCENT` (RX RFPLL charge pump scale), `M2SDR_OC_RX_DELAY`/`M2SDR_OC_TX_DELAY` (interface delay overrides).
 
 [> Getting Started
 ------------------
@@ -263,7 +276,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
    - **Note**: For non-Ubuntu Linux distributions (e.g., Fedora, Arch), install the equivalent packages using your distribution's package manager (e.g., `dnf` for Fedora or `pacman` for Arch).
 
 2. **Connect the Board:**
-   - Insert the LiteX-M2SDR board into an available M2 slot on your Linux computer and connect your antennas.
+   - Insert the LiteX-M2SDR board into an available M.2 slot on your Linux computer and connect your antennas.
 
 > [!WARNING]
 >
@@ -373,9 +386,12 @@ The helper requires the GitHub CLI `gh` to be installed and authenticated with r
 > **ARM (ex NVIDIA Jetson/Orin)**:
 > ```bash
 > # Add to extlinux.conf (/boot/extlinux/extlinux.conf):
-> APPEND ... iommu.passthrough=1 arm-smmu.disable=1
+> APPEND ... iommu.passthrough=1
 > sudo reboot
 > ```
+> Keep the Tegra SMMU driver enabled. `iommu.passthrough=1` is the safer first
+> test knob for current L4T kernels; disabling `arm-smmu` globally can break
+> other Jetson devices. See [Jetson Orin host notes](doc/hosts/jetson-orin.md).
 
 > [!WARNING]
 > For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
@@ -393,6 +409,7 @@ For some platforms we created detailed tutorials. For everything else, please fo
 - [Install Ethernet-only host tools on Windows/macOS](doc/hosts/windows-macos.md)
 - [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
 - [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
+- [Use LiteX-M2SDR on Jetson Orin / NVIDIA L4T](doc/hosts/jetson-orin.md)
 
 ### For Software Developers
 
@@ -563,7 +580,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
    - After the clk10 loop is stable, use `m2sdr_rf --sync fpga` or SoapySDR `clock_source=fpga` so the SI5351C derives the AD9361 reference from the FPGA 10MHz path.
    - See [Ethernet PTP Bring-Up](doc/ptp/README.md) for known-good `ptp4l` configs, host timestamping checks, and smoke/soak validation commands.
-   - For PCIe tests, if the board is mounted directly in an M2 slot:
+   - For PCIe tests, if the board is mounted directly in an M.2 slot:
    ```
    ./litex_m2sdr.py --with-pcie --variant=m2 --build --load
    lspci

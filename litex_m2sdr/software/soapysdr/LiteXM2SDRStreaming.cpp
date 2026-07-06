@@ -351,6 +351,13 @@ struct m2sdr_liteeth_rx_stream_config SoapyLiteXM2SDR::makeLiteEthRxStreamConfig
 }
 #endif
 
+std::recursive_mutex &SoapyLiteXM2SDR::streamAccessMutex(SoapySDR::Stream *stream) const
+{
+    if (stream == RX_STREAM)
+        return _rx_stream_mutex;
+    return _tx_stream_mutex;
+}
+
 /* RX DMA headers are enabled at runtime when the gateware supports them
  * (see _rx_dma_header_bytes); they carry the hardware RX timestamps. */
 
@@ -367,6 +374,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     const std::string &format,
     const std::vector<size_t> &channels,
     const SoapySDR::Kwargs &args) {
+    if (direction != SOAPY_SDR_RX && direction != SOAPY_SDR_TX)
+        throw std::runtime_error("Invalid direction.");
+
+    std::lock_guard<std::recursive_mutex> stream_lock(
+        direction == SOAPY_SDR_RX ? _rx_stream_mutex : _tx_stream_mutex);
     std::unique_lock<std::mutex> lock(_mutex);
 
     SoapySDR::Kwargs searchArgs = args;
@@ -478,6 +490,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         _rx_stream.opened = true;
+        _rx_stream.stop_requested.store(false);
         _rx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
             _bitMode = 8;
@@ -603,6 +616,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         }
 
         _tx_stream.opened = true;
+        _tx_stream.stop_requested.store(false);
         _tx_stream.format = format;
         if (format == SOAPY_SDR_CS8) {
             _bitMode = 8;
@@ -723,6 +737,15 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
 /* Close the specified stream and release associated resources. */
 void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
+    if (stream != RX_STREAM && stream != TX_STREAM)
+        return;
+
+    if (stream == RX_STREAM)
+        _rx_stream.stop_requested.store(true);
+    else
+        _tx_stream.stop_requested.store(true);
+
+    std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
     std::lock_guard<std::mutex> lock(_mutex);
 
     if (stream == RX_STREAM) {
@@ -754,9 +777,14 @@ int SoapyLiteXM2SDR::activateStream(
     const int flags,
     const long long timeNs,
     const size_t /*numElems*/) {
+    if (stream != RX_STREAM && stream != TX_STREAM)
+        return SOAPY_SDR_NOT_SUPPORTED;
+
+    std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
 
     /* RX */
     if (stream == RX_STREAM) {
+        _rx_stream.stop_requested.store(false);
         if (isLitePCIe()) {
             for (size_t i = 0; i < _rx_stream.channels.size(); i++)
                 channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
@@ -816,6 +844,7 @@ int SoapyLiteXM2SDR::activateStream(
 
     /* TX */
     } else if (stream == TX_STREAM) {
+        _tx_stream.stop_requested.store(false);
         if (isLitePCIe()) {
             for (size_t i = 0; i < _tx_stream.channels.size(); i++)
                 channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
@@ -875,6 +904,16 @@ int SoapyLiteXM2SDR::deactivateStream(
     SoapySDR::Stream *stream,
     const int flags,
     const long long timeNs) {
+    if (stream != RX_STREAM && stream != TX_STREAM)
+        return SOAPY_SDR_NOT_SUPPORTED;
+
+    if (stream == RX_STREAM)
+        _rx_stream.stop_requested.store(true);
+    else
+        _tx_stream.stop_requested.store(true);
+
+    std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
+
     if (stream == RX_STREAM) {
         stopRxStreamUnlocked();
         if (flags & SOAPY_SDR_HAS_TIME) {
@@ -958,13 +997,17 @@ size_t SoapyLiteXM2SDR::getStreamMTU(SoapySDR::Stream *stream) const {
 
 /* Retrieve the number of direct access buffers available for a stream. */
 size_t SoapyLiteXM2SDR::getNumDirectAccessBuffers(SoapySDR::Stream *stream) {
+    if (stream != RX_STREAM && stream != TX_STREAM)
+        throw std::runtime_error("SoapySDR::getNumDirectAccessBuffers(): Invalid stream.");
+
+    std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
+
     if (stream == RX_STREAM) {
         return _rx_buf_count;
     } else if (stream == TX_STREAM) {
         return _tx_buf_count;
-    } else {
-        throw std::runtime_error("SoapySDR::getNumDirectAccessBuffers(): Invalid stream.");
     }
+    return 0;
 }
 
 /* Retrieve buffer addresses for a direct access buffer. */
@@ -972,6 +1015,12 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
     SoapySDR::Stream *stream,
     const size_t handle,
     void **buffs) {
+    if (stream != RX_STREAM && stream != TX_STREAM) {
+        throw std::runtime_error("SoapySDR::getDirectAccessBufferAddrs(): Invalid stream.");
+    }
+
+    std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
+
     if (stream == RX_STREAM) {
         if (isLitePCIe())
             buffs[0] = (char *)_rx_stream.buf + handle * _rx_buf_stride + _rx_dma_header_bytes;
@@ -982,8 +1031,6 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + TX_DMA_HEADER_SIZE;
         else
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_size;
-    } else {
-        throw std::runtime_error("SoapySDR::getDirectAccessBufferAddrs(): Invalid stream.");
     }
     return 0;
 }
@@ -1245,6 +1292,11 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
         return SOAPY_SDR_STREAM_ERROR;
     }
 
+    std::lock_guard<std::recursive_mutex> stream_lock(_rx_stream_mutex);
+
+    if (!_rx_stream.opened || _rx_stream.stop_requested.load())
+        return SOAPY_SDR_STREAM_ERROR;
+
     if (_rx_stream.burst_end)
         flags |= SOAPY_SDR_END_BURST;
 
@@ -1428,8 +1480,13 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
 
 /* Release a read buffer after use. */
 void SoapyLiteXM2SDR::releaseReadBuffer(
-    SoapySDR::Stream */*stream*/,
+    SoapySDR::Stream *stream,
     size_t handle) {
+    if (stream != RX_STREAM)
+        return;
+
+    std::lock_guard<std::recursive_mutex> stream_lock(_rx_stream_mutex);
+
     assert(handle != (size_t)-1 && "Attempt to release an invalid buffer (e.g., from an overflow).");
 
     if (isLitePCIe()) {
@@ -1456,6 +1513,11 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     if (stream != TX_STREAM) {
         return SOAPY_SDR_STREAM_ERROR;
     }
+
+    std::lock_guard<std::recursive_mutex> stream_lock(_tx_stream_mutex);
+
+    if (!_tx_stream.opened || _tx_stream.stop_requested.load())
+        return SOAPY_SDR_STREAM_ERROR;
 
     if (isLitePCIe()) {
         void *buffer = nullptr;
@@ -1504,6 +1566,11 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const size_t numElems,
     int &flags,
     const long long timeNs) {
+    if (stream != TX_STREAM)
+        return;
+
+    std::lock_guard<std::recursive_mutex> stream_lock(_tx_stream_mutex);
+
     if (flags & SOAPY_SDR_END_BURST) {
         _tx_stream.burst_end = true;
     }
@@ -1837,6 +1904,11 @@ int SoapyLiteXM2SDR::readStream(
         return SOAPY_SDR_NOT_SUPPORTED;
     }
 
+    std::lock_guard<std::recursive_mutex> stream_lock(_rx_stream_mutex);
+
+    if (!_rx_stream.opened || _rx_stream.stop_requested.load())
+        return SOAPY_SDR_STREAM_ERROR;
+
     /* Determine the number of samples to return, respecting the MTU. */
     size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
 
@@ -1963,6 +2035,11 @@ int SoapyLiteXM2SDR::writeStream(
     if (stream != TX_STREAM) {
         return SOAPY_SDR_NOT_SUPPORTED;
     }
+
+    std::lock_guard<std::recursive_mutex> stream_lock(_tx_stream_mutex);
+
+    if (!_tx_stream.opened || _tx_stream.stop_requested.load())
+        return SOAPY_SDR_STREAM_ERROR;
 
     const size_t returnedElems = std::min(numElems, this->getStreamMTU(stream));
     const bool forceFlush = (flags & (SOAPY_SDR_END_BURST | SOAPY_SDR_ONE_PACKET)) != 0;
