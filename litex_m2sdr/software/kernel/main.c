@@ -1981,11 +1981,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		/* Request IRQ */
 		ret = request_irq(irq, litepcie_interrupt, 0, LITEPCIE_NAME, litepcie_dev);
 		if (ret < 0) {
-			dev_err(&dev->dev, "Failed to allocate IRQ %d\n", dev->irq);
-			while (--i >= 0) {
-				irq = pci_irq_vector(dev, i);
-				free_irq(irq, dev);
-			}
+			dev_err(&dev->dev, "Failed to allocate IRQ %d\n", irq);
 			goto fail2;
 		}
 		litepcie_dev->irqs += 1;
@@ -2058,8 +2054,10 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	/* LiteUART platform device */
 #ifdef CSR_UART_XOVER_RXTX_ADDR
 	tty_res = devm_kzalloc(&dev->dev, sizeof(struct resource), GFP_KERNEL);
-	if (!tty_res)
-		return -ENOMEM;
+	if (!tty_res) {
+		ret = -ENOMEM;
+		goto fail3;
+	}
 	tty_res->start =
 		(resource_size_t) litepcie_dev->bar0_addr +
 		CSR_UART_XOVER_RXTX_ADDR - CSR_BASE;
@@ -2076,7 +2074,8 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	litepcie_dev->ptp_caps = litepcie_ptp_info;
 	litepcie_dev->litepcie_ptp_clock = ptp_clock_register(&litepcie_dev->ptp_caps, &dev->dev);
 	if (IS_ERR(litepcie_dev->litepcie_ptp_clock)) {
-		return PTR_ERR(litepcie_dev->litepcie_ptp_clock);
+		ret = PTR_ERR(litepcie_dev->litepcie_ptp_clock);
+		goto fail4;
 	}
 
 	/* Display created PTP device */
@@ -2111,9 +2110,23 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	return 0;
 
+#ifdef CSR_PTM_REQUESTER_BASE
+fail4:
+#ifdef CSR_UART_XOVER_RXTX_ADDR
+	platform_device_unregister(litepcie_dev->uart);
+#endif
+#endif
 fail3:
 	litepcie_free_chdev(litepcie_dev);
 fail2:
+	/* Release the requested IRQ handlers before dropping the vectors:
+	 * pci_free_irq_vectors() on a vector with a live handler hits the
+	 * free_msi_irqs() BUG_ON and turns a probe error into an Oops. */
+	while (litepcie_dev->irqs > 0) {
+		int irq = pci_irq_vector(dev, --litepcie_dev->irqs);
+
+		free_irq(irq, litepcie_dev);
+	}
 	pci_free_irq_vectors(dev);
 fail1:
 	return ret;
