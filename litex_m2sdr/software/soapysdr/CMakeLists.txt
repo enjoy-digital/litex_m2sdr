@@ -112,11 +112,6 @@ if(WIN32)
         _USE_MATH_DEFINES
     )
     target_link_libraries(SoapyLiteXM2SDR PRIVATE ws2_32)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        # The Soapy module provides per-instance AD9361 platform hooks while
-        # libm2sdr_static carries defaults for the standalone tools.
-        target_link_options(SoapyLiteXM2SDR PRIVATE -Wl,--allow-multiple-definition)
-    endif()
 elseif(NOT MSVC)
     target_link_libraries(SoapyLiteXM2SDR PRIVATE m)
 endif()

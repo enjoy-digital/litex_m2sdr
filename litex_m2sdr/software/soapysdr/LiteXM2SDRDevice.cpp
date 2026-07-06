@@ -499,9 +499,9 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
+static int soapy_spi_write_then_read(struct spi_device *spi,
+                                     const unsigned char *txbuf, unsigned n_tx,
+                                     unsigned char *rxbuf, unsigned n_rx)
 {
     litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
     if (!fd)
@@ -547,17 +547,17 @@ int spi_write_then_read(struct spi_device *spi,
 
 /* AD9361 Delays */
 
-void udelay(unsigned long usecs)
+static void soapy_udelay(unsigned long usecs)
 {
     std::this_thread::sleep_for(std::chrono::microseconds(usecs));
 }
 
-void mdelay(unsigned long msecs)
+static void soapy_mdelay(unsigned long msecs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
 
-unsigned long msleep_interruptible(unsigned int msecs)
+static unsigned long soapy_msleep_interruptible(unsigned int msecs)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
     return 0;
@@ -567,7 +567,7 @@ unsigned long msleep_interruptible(unsigned int msecs)
 
 #define AD9361_GPIO_RESET_PIN 0
 
-bool gpio_is_valid(int number)
+static bool soapy_gpio_is_valid(int number)
 {
     switch(number) {
        case AD9361_GPIO_RESET_PIN:
@@ -577,7 +577,18 @@ bool gpio_is_valid(int number)
     }
 }
 
-void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
+static void soapy_gpio_set_value(unsigned /*gpio*/, int /*value*/){}
+
+/* Registered with libm2sdr so the AD9361 driver dispatches to the module's
+ * per-instance hooks instead of the standalone-tool defaults. */
+static const struct m2sdr_rf_platform_hooks soapy_rf_platform_hooks = {
+    soapy_spi_write_then_read,
+    soapy_udelay,
+    soapy_mdelay,
+    soapy_msleep_interruptible,
+    soapy_gpio_is_valid,
+    soapy_gpio_set_value,
+};
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
@@ -657,6 +668,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("SoapyLiteXM2SDR(): unsupported transport");
     }
 
+    m2sdr_rf_set_platform_hooks(&soapy_rf_platform_hooks);
     _spi_id = spi_register_fd(_fd);
 
     /* A throwing constructor skips the destructor: release what has been
