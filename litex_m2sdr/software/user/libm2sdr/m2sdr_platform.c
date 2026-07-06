@@ -7,6 +7,9 @@
 
 #if defined(_WIN32)
 
+/* Device open/close and stream setup can run on different threads, so the
+ * Winsock reference count needs real synchronization. */
+static SRWLOCK m2sdr_winsock_lock = SRWLOCK_INIT;
 static int m2sdr_winsock_refs;
 
 static void m2sdr_sleep_ms(uint64_t ms)
@@ -22,23 +25,23 @@ static void m2sdr_sleep_ms(uint64_t ms)
 int m2sdr_platform_socket_init(void)
 {
     WSADATA wsa;
+    int ret = 0;
 
-    if (m2sdr_winsock_refs++ > 0)
-        return 0;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        m2sdr_winsock_refs = 0;
-        return -1;
-    }
-    return 0;
+    AcquireSRWLockExclusive(&m2sdr_winsock_lock);
+    if (m2sdr_winsock_refs == 0 && WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
+        ret = -1;
+    else
+        m2sdr_winsock_refs++;
+    ReleaseSRWLockExclusive(&m2sdr_winsock_lock);
+    return ret;
 }
 
 void m2sdr_platform_socket_cleanup(void)
 {
-    if (m2sdr_winsock_refs <= 0)
-        return;
-    m2sdr_winsock_refs--;
-    if (m2sdr_winsock_refs == 0)
+    AcquireSRWLockExclusive(&m2sdr_winsock_lock);
+    if (m2sdr_winsock_refs > 0 && --m2sdr_winsock_refs == 0)
         WSACleanup();
+    ReleaseSRWLockExclusive(&m2sdr_winsock_lock);
 }
 
 int m2sdr_clock_gettime(int clk_id, struct timespec *ts)
