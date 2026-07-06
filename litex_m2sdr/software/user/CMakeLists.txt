@@ -82,13 +82,17 @@ target_compile_features(m2sdr_objects PUBLIC c_std_11)
 set_target_properties(m2sdr_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(M2SDR_ENABLE_LITEETH)
-    target_compile_definitions(m2sdr_objects PUBLIC USE_LITEETH M2SDR_DEFAULT_TRANSPORT_LITEETH)
+    target_compile_definitions(m2sdr_objects PUBLIC USE_LITEETH)
 endif()
 if(M2SDR_LITEPCIE_ENABLED)
     target_compile_definitions(m2sdr_objects PUBLIC USE_LITEPCIE)
-    if(NOT M2SDR_ENABLE_LITEETH)
-        target_compile_definitions(m2sdr_objects PUBLIC M2SDR_DEFAULT_TRANSPORT_LITEPCIE)
-    endif()
+endif()
+# Match the Makefile's USE_RUNTIME default: prefer PCIe whenever it is
+# enabled so both build systems open the same default device.
+if(M2SDR_LITEPCIE_ENABLED)
+    target_compile_definitions(m2sdr_objects PUBLIC M2SDR_DEFAULT_TRANSPORT_LITEPCIE)
+else()
+    target_compile_definitions(m2sdr_objects PUBLIC M2SDR_DEFAULT_TRANSPORT_LITEETH)
 endif()
 if(WIN32)
     target_compile_definitions(m2sdr_objects PUBLIC
