@@ -333,6 +333,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 ### Host Requirements & Expectations
 
 - **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
+- **CPU Governor**: For sustained high sample rates, set the CPU frequency governor to `performance`; on-demand frequency scaling can cause RX overflows/TX underflows.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Runtime transport selection**: The installed user tools and SoapySDR module support both transports in one build. Use `--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234` with the CLI tools, and `driver=LiteXM2SDR,path=/dev/m2sdr0` or `driver=LiteXM2SDR,eth_ip=192.168.1.50` with SoapySDR.
 - **PCIe PTM host-time sync**: Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
@@ -397,6 +398,15 @@ The helper requires the GitHub CLI `gh` to be installed and authenticated with r
 > For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
 > add `intel_iommu=off` to `GRUB_CMDLINE_LINUX`. (This has been observed on
 > an *11th Gen Intel(R) Core(TM) i7-11700B @ 3.20GHz*)
+
+> [!TIP]
+> If you get RX overflows/TX underflows at high sample rates, put the CPU in performance mode:
+> ```bash
+> sudo apt install linux-tools-$(uname -r) linux-tools-common
+> sudo cpupower frequency-set -g performance
+> ```
+> The setting resets at reboot; make it persistent with your distribution's
+> preferred mechanism (e.g. a systemd unit or `cpufrequtils`).
 
 ### Tutorials for your platform
 
