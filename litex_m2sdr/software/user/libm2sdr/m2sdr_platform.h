@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 
 #if defined(_WIN32)
@@ -200,6 +201,7 @@ uint64_t m2sdr_monotonic_us(void);
 int64_t m2sdr_monotonic_ms(void);
 void *m2sdr_aligned_malloc(size_t alignment, size_t size);
 void m2sdr_aligned_free(void *ptr);
+FILE *m2sdr_tmpfile(void);
 
 #if !defined(USE_LITEPCIE)
 #ifndef get_time_ms

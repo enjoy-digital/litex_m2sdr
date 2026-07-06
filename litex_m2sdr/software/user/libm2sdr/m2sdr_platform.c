@@ -178,6 +178,23 @@ void m2sdr_aligned_free(void *ptr)
     _aligned_free(ptr);
 }
 
+FILE *m2sdr_tmpfile(void)
+{
+    char dir[MAX_PATH];
+    char path[MAX_PATH];
+    DWORD n;
+
+    /* The CRT tmpfile() creates its file in the root of the current drive,
+     * which fails for non-elevated users; use the user temp directory. */
+    n = GetTempPathA(sizeof(dir), dir);
+    if (n == 0 || n >= sizeof(dir))
+        return tmpfile();
+    if (GetTempFileNameA(dir, "m2s", 0, path) == 0)
+        return tmpfile();
+    /* MS CRT extension: temporary file, deleted on close. */
+    return fopen(path, "w+bTD");
+}
+
 #else
 
 #include <fcntl.h>
@@ -266,6 +283,11 @@ void *m2sdr_aligned_malloc(size_t alignment, size_t size)
 void m2sdr_aligned_free(void *ptr)
 {
     free(ptr);
+}
+
+FILE *m2sdr_tmpfile(void)
+{
+    return tmpfile();
 }
 
 #endif

@@ -2,6 +2,7 @@
 
 #include "m2sdr_sigmf.h"
 #include "m2sdr_json.h"
+#include "m2sdr_platform.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -279,7 +280,7 @@ int m2sdr_sigmf_write_text(const struct m2sdr_sigmf_meta *meta, char *buf, size_
     if (!meta || !buf || buf_len == 0)
         return -1;
 
-    f = tmpfile();
+    f = m2sdr_tmpfile();
     if (!f)
         return -1;
 
