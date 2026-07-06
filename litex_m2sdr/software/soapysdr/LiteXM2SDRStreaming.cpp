@@ -305,8 +305,7 @@ static void init_liteeth_udp(
                          /*rx_enable*/  settings.rx_enable ? 1 : 0,
                          /*tx_enable*/  settings.tx_enable ? 1 : 0,
                          /*buffer_size*/ settings.buffer_bytes,
-                         /*buffer_count*/settings.buffer_count,
-                         /*nonblock*/    0) < 0) {
+                         /*buffer_count*/settings.buffer_count) < 0) {
         throw std::runtime_error("UDP init failed.");
     }
     if (liteeth_udp_set_rx_source_filter(udp, source_filter_ip.c_str(), 0) != 0) {

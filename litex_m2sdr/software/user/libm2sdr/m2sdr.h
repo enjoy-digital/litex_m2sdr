@@ -786,6 +786,24 @@ int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
  * and size must be sizeof(AD9361_InitParam) (guards ABI mismatches). */
 int  m2sdr_rf_store_init_param(struct m2sdr_dev *dev,
                                const void *init_param, size_t size);
+/* Optional override of the AD9361 platform hooks libm2sdr provides as
+ * defaults for the standalone tools. An external integration (e.g. the
+ * SoapySDR module) registers its own set once before RF init; NULL members
+ * keep the default behavior. Registration replaces the strong-symbol
+ * override, which needs -Wl,--allow-multiple-definition on PE-COFF where
+ * weak symbols do not resolve. */
+struct spi_device;
+struct m2sdr_rf_platform_hooks {
+    int  (*spi_write_then_read)(struct spi_device *spi,
+                                const unsigned char *txbuf, unsigned n_tx,
+                                unsigned char *rxbuf, unsigned n_rx);
+    void (*udelay)(unsigned long usecs);
+    void (*mdelay)(unsigned long msecs);
+    unsigned long (*msleep_interruptible)(unsigned int msecs);
+    bool (*gpio_is_valid)(int number);
+    void (*gpio_set_value)(unsigned gpio, int value);
+};
+void m2sdr_rf_set_platform_hooks(const struct m2sdr_rf_platform_hooks *hooks);
 
 /* Streaming (BladeRF-like sync API) */
 /* Configure a stream directly.

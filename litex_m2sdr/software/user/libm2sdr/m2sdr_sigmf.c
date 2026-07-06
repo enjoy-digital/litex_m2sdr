@@ -2,6 +2,7 @@
 
 #include "m2sdr_sigmf.h"
 #include "m2sdr_json.h"
+#include "m2sdr_platform.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -274,18 +275,32 @@ int m2sdr_sigmf_write_text(const struct m2sdr_sigmf_meta *meta, char *buf, size_
 {
     FILE *f;
     int rc;
+    long text_len;
 
     if (!meta || !buf || buf_len == 0)
         return -1;
 
-    f = fmemopen(buf, buf_len, "w");
+    f = m2sdr_tmpfile();
     if (!f)
         return -1;
+
     rc = sigmf_write_file(f, meta);
+    if (rc == 0 && fflush(f) != 0)
+        rc = -1;
+    if (rc == 0 && fseek(f, 0, SEEK_END) != 0)
+        rc = -1;
+    text_len = rc == 0 ? ftell(f) : -1;
+    if (rc == 0 && (text_len < 0 || (size_t)text_len >= buf_len))
+        rc = -1;
+    if (rc == 0 && fseek(f, 0, SEEK_SET) != 0)
+        rc = -1;
+    if (rc == 0 && fread(buf, 1, (size_t)text_len, f) != (size_t)text_len)
+        rc = -1;
     if (fclose(f) != 0)
         rc = -1;
-    if (rc != 0 || buf[buf_len - 1] != '\0')
+    if (rc != 0)
         return -1;
+    buf[text_len] = '\0';
     return 0;
 }
 

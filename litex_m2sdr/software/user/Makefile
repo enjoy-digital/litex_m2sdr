@@ -12,7 +12,7 @@ ifeq ($(INTERFACE),USE_RUNTIME)
 else ifeq ($(INTERFACE),USE_LITEPCIE)
   TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEPCIE
 else ifeq ($(INTERFACE),USE_LITEETH)
-  TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEETH
+  TRANSPORT_CFLAGS := -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEETH
 else
   $(error INTERFACE must be USE_RUNTIME, USE_LITEPCIE, or USE_LITEETH)
 endif
@@ -94,12 +94,13 @@ LIBM2SDR_SHARED = libm2sdr/$(LIBM2SDR_SONAME) libm2sdr/libm2sdr.so
 PROGS    = $(BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx \
            ../../doc/libm2sdr/example_tone_tx ../../doc/libm2sdr/example_rx_n
-CLI_OBJS = m2sdr_cli.o
+CLI_OBJS = m2sdr_cli.o m2sdr_getopt.o
 TOOL_OBJS = m2sdr_tool.o
 HOST_QUEUE_OBJS = m2sdr_host_queue.o
 TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue
 
 LIBM2SDR_OBJS = \
+	libm2sdr/m2sdr_platform.o \
 	libm2sdr/m2sdr_si5351_i2c.o \
 	libm2sdr/m2sdr_ad9361_spi.o \
 	libm2sdr/m2sdr_flash.o \
@@ -110,16 +111,20 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_utils.o \
 	libm2sdr/m2sdr_json.o \
 	libm2sdr/m2sdr_sigmf.o \
-	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
-	liblitepcie/litepcie_dma.o \
-	liblitepcie/litepcie_helpers.o \
 	libliteeth/etherbone.o \
 	libliteeth/liteeth_udp.o \
 	ad9361/ad9361.o \
 	ad9361/ad9361_api.o \
 	ad9361/ad9361_conv.o \
 	ad9361/util.o
+
+ifneq ($(INTERFACE),USE_LITEETH)
+LIBM2SDR_OBJS += \
+	libm2sdr/m2sdr_hal_litepcie.o \
+	liblitepcie/litepcie_dma.o \
+	liblitepcie/litepcie_helpers.o
+endif
 
 M2SDR_IMGUI_SRCS := \
 	$(SCAN_CIMGUI_DIR)/cimgui.cpp \
@@ -245,8 +250,8 @@ m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr
 m2sdr_record: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
-m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_sigmf.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
+m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_getopt.o m2sdr_sigmf.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_getopt.o m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
 
 m2sdr_gpio: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_gpio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_gpio.o $(M2SDR_LINK_LIBS)

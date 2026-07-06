@@ -9,9 +9,12 @@
 
 #include <stdint.h>
 #include <string.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include "m2sdr.h"
+#include "m2sdr_platform.h"
 
 #if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_IDENTIFY_BASE)
 

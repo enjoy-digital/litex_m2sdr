@@ -13,10 +13,13 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdint.h>
 #include <time.h>
 
+#include "m2sdr_platform.h"
 #include "m2sdr_sata_lowlevel.h"
 #include "m2sdr_cli.h"
 #include "etherbone.h"

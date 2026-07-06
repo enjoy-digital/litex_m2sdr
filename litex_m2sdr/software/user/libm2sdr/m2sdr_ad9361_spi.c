@@ -11,11 +11,13 @@
 /*----------*/
 
 #include <stdio.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdint.h>
 
 #include "libm2sdr.h"
-#include "liblitepcie.h"
+#include "m2sdr_platform.h"
 
 #include "m2sdr_ad9361_spi.h"
 
@@ -38,14 +40,21 @@
 
 static int m2sdr_ad9361_spi_timeout_us(void *conn)
 {
-    return m2sdr_legacy_handle_is_fd(conn) ?
-        AD9361_SPI_TIMEOUT_PCIE_US : AD9361_SPI_TIMEOUT_ETH_US;
+#ifdef USE_LITEPCIE
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return AD9361_SPI_TIMEOUT_PCIE_US;
+#else
+    (void)conn;
+#endif
+    return AD9361_SPI_TIMEOUT_ETH_US;
 }
 
 static bool m2sdr_ad9361_bus_ok(void *conn)
 {
+#ifdef USE_LITEPCIE
     if (m2sdr_legacy_handle_is_fd(conn))
         return true;
+#endif
 
     return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
 }
@@ -58,12 +67,12 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
         /* The FPGA wrapper exposes the AD9361 reset line through the config
          * CSR, so an SPI reset here is really a short GPIO pulse. */
         m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b00);
-        usleep(AD9361_RESET_PULSE_US);
+        m2sdr_sleep_us(AD9361_RESET_PULSE_US);
     }
     /* Re-enable the AD9361 interface and leave a small settle time before the
      * imported driver starts issuing register transactions. */
     m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b11);
-    usleep(AD9361_RESET_SETTLE_US);
+    m2sdr_sleep_us(AD9361_RESET_SETTLE_US);
 }
 
 /* m2sdr_ad9361_spi_xfer */
@@ -99,7 +108,7 @@ bool m2sdr_ad9361_spi_xfer_checked(void *conn, uint8_t len, uint8_t *mosi, uint8
         }
         if (!m2sdr_ad9361_bus_ok(conn))
             return false;
-        usleep(1);
+        m2sdr_sleep_us(1);
     }
 #else
     done = true;

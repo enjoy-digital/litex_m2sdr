@@ -6,18 +6,19 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
-#include <unistd.h>
 #include <memory>
 #include <stdint.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 #include <stdexcept>
 #include <unordered_map>
 #include <algorithm>
 #include <cctype>
 #include <inttypes.h>
-#include <time.h>
+#include <chrono>
+#include <thread>
 
 #include "ad9361/platform.h"
 #include "ad9361/ad9361.h"
@@ -56,9 +57,14 @@ bool spi_warned_fallback = false;
 
 static bool soapy_handle_is_fd(void *conn)
 {
+#if USE_LITEPCIE
     intptr_t value = (intptr_t)conn;
 
     return value >= 0 && value < 1048576;
+#else
+    (void)conn;
+    return false;
+#endif
 }
 
 uint8_t spi_register_fd(litex_m2sdr_device_desc_t fd)
@@ -365,13 +371,9 @@ thread_local unsigned soapy_rf_op_depth = 0;
 
 uint64_t monotonic_time_us()
 {
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-        return 0;
-
-    return static_cast<uint64_t>(ts.tv_sec) * 1000000u +
-           static_cast<uint64_t>(ts.tv_nsec) / 1000u;
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(now).count());
 }
 
 class LiteEthRfOpTimeout {
@@ -497,9 +499,9 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
 //#define AD9361_SPI_WRITE_DEBUG
 //#define AD9361_SPI_READ_DEBUG
 
-int spi_write_then_read(struct spi_device *spi,
-                        const unsigned char *txbuf, unsigned n_tx,
-                        unsigned char *rxbuf, unsigned n_rx)
+static int soapy_spi_write_then_read(struct spi_device *spi,
+                                     const unsigned char *txbuf, unsigned n_tx,
+                                     unsigned char *rxbuf, unsigned n_rx)
 {
     litex_m2sdr_device_desc_t fd = spi_get_fd(spi);
     if (!fd)
@@ -545,19 +547,19 @@ int spi_write_then_read(struct spi_device *spi,
 
 /* AD9361 Delays */
 
-void udelay(unsigned long usecs)
+static void soapy_udelay(unsigned long usecs)
 {
-    usleep(usecs);
+    std::this_thread::sleep_for(std::chrono::microseconds(usecs));
 }
 
-void mdelay(unsigned long msecs)
+static void soapy_mdelay(unsigned long msecs)
 {
-    usleep(msecs * 1000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
 }
 
-unsigned long msleep_interruptible(unsigned int msecs)
+static unsigned long soapy_msleep_interruptible(unsigned int msecs)
 {
-    usleep(msecs * 1000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(msecs));
     return 0;
 }
 
@@ -565,7 +567,7 @@ unsigned long msleep_interruptible(unsigned int msecs)
 
 #define AD9361_GPIO_RESET_PIN 0
 
-bool gpio_is_valid(int number)
+static bool soapy_gpio_is_valid(int number)
 {
     switch(number) {
        case AD9361_GPIO_RESET_PIN:
@@ -575,7 +577,18 @@ bool gpio_is_valid(int number)
     }
 }
 
-void gpio_set_value(unsigned /*gpio*/, int /*value*/){}
+static void soapy_gpio_set_value(unsigned /*gpio*/, int /*value*/){}
+
+/* Registered with libm2sdr so the AD9361 driver dispatches to the module's
+ * per-instance hooks instead of the standalone-tool defaults. */
+static const struct m2sdr_rf_platform_hooks soapy_rf_platform_hooks = {
+    soapy_spi_write_then_read,
+    soapy_udelay,
+    soapy_mdelay,
+    soapy_msleep_interruptible,
+    soapy_gpio_is_valid,
+    soapy_gpio_set_value,
+};
 
 std::string getLiteXM2SDRSerial(struct m2sdr_dev *dev);
 std::string getLiteXM2SDRIdentification(struct m2sdr_dev *dev);
@@ -655,6 +668,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         throw std::runtime_error("SoapyLiteXM2SDR(): unsupported transport");
     }
 
+    m2sdr_rf_set_platform_hooks(&soapy_rf_platform_hooks);
     _spi_id = spi_register_fd(_fd);
 
     /* A throwing constructor skips the destructor: release what has been
@@ -824,6 +838,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("rx1_agc_mode") > 0)
         _rx_agc_mode[1] = parse_agc_mode(args.at("rx1_agc_mode"));
 
+    /* Keep bypass_init usable for discovery/probing without touching RFIC state. */
+    _rx_stream.samplerate   = 30.72e6;
+    _tx_stream.samplerate   = 30.72e6;
+    _rx_stream.frequency    = 1e6;
+    _tx_stream.frequency    = 1e6;
+    _rx_stream.bandwidth    = 30.72e6;
+    _tx_stream.bandwidth    = 30.72e6;
+    _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+    _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    _rx_stream.gainMode[0]  = true;
+    _rx_stream.gain[0]      = 0;
+    _tx_stream.gain[0]      = 20;
+    _rx_stream.iqbalance[0] = 1.0;
+    _tx_stream.iqbalance[0] = 1.0;
+    _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+    _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    _rx_stream.gainMode[1]  = true;
+    _rx_stream.gain[1]      = 0;
+    _tx_stream.gain[1]      = 20;
+    _rx_stream.iqbalance[1] = 1.0;
+    _tx_stream.iqbalance[1] = 1.0;
+
     /* RefClk Selection */
     int64_t refclk_hz        = 38400000;   /* Default 38.4 MHz. */
     std::string clock_source = "internal"; /* Default XO. */
@@ -948,34 +984,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
         this->setClockSource("internal");
 
-        /* Common for TX1/TX2 and RX1/RX2 */
-        _rx_stream.samplerate   = 30.72e6;
-        _tx_stream.samplerate   = 30.72e6;
-        _rx_stream.frequency    = 1e6;
-        _tx_stream.frequency    = 1e6;
-        _rx_stream.bandwidth    = 30.72e6;
-        _tx_stream.bandwidth    = 30.72e6;
-
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[0]  = true;
-        _rx_stream.gain[0]      = 0;
-        _tx_stream.gain[0]      = 20;
-        _rx_stream.iqbalance[0] = 1.0;
-        _tx_stream.iqbalance[0] = 1.0;
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 0");
         channel_configure(SOAPY_SDR_RX, 0);
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
-        _rx_stream.gainMode[1]  = true;
-        _rx_stream.gain[1]      = 0;
-        _tx_stream.gain[1]      = 20;
-        _rx_stream.iqbalance[1] = 1.0;
-        _tx_stream.iqbalance[1] = 1.0;
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring RX/TX channel 1");
         channel_configure(SOAPY_SDR_RX, 1);
         channel_configure(SOAPY_SDR_TX, 1);

@@ -49,7 +49,13 @@ enum class SoapyLiteXM2SDREthernetMode {
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
 #define LITEETH_8BIT_THRESHOLD   20.0e6
 
+#if defined(_WIN32)
+#define DLL_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__) || defined(__clang__)
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
+#else
+#define DLL_EXPORT
+#endif
 
 #define FD_INIT NULL
 typedef void *litex_m2sdr_device_desc_t;

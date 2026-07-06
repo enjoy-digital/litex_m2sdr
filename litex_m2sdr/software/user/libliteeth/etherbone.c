@@ -8,26 +8,14 @@
  * Copied from https://github.com/litex-hub/wishbone-utils/tree/master/libeb-c
  */
 
-#if defined(__FreeBSD__)
-#include <sys/endian.h>
-#else
-#include <endian.h>
-#endif
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/types.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <netdb.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 
 #include "etherbone.h"
+#include "m2sdr_platform.h"
 
 #define EB_DEFAULT_TIMEOUT_MS 1000
 #define EB_DIRECT_RX_SETTLE_US 20000
@@ -45,8 +33,8 @@
 #define EB_DATA_OFFSET (EB_ADDR_OFFSET + EB_ADDR_BYTES)                  /* 16 */
 
 struct eb_connection {
-    int fd;
-    int read_fd;
+    m2sdr_socket_t fd;
+    m2sdr_socket_t read_fd;
     int is_direct;
     int timeout_ms;
     int last_error;
@@ -205,12 +193,27 @@ static bool eb_validate_bulk_read_reply_header(const uint8_t *pkt,
     return true;
 }
 
-static int eb_wait_fd(struct eb_connection *conn, int fd, short events)
+static bool eb_direct_loopback_peer(const struct sockaddr *addr)
 {
-    struct pollfd pfd;
+    const struct sockaddr_in *sin;
+    uint32_t ip;
+
+    if (!addr || addr->sa_family != AF_INET)
+        return false;
+
+    sin = (const struct sockaddr_in *)addr;
+    ip = ntohl(sin->sin_addr.s_addr);
+
+    return (ip & 0xff000000u) == 0x7f000000u &&
+           ip != INADDR_LOOPBACK;
+}
+
+static int eb_wait_fd(struct eb_connection *conn, m2sdr_socket_t fd, short events)
+{
+    m2sdr_pollfd pfd;
     int ret;
 
-    if (!conn || fd < 0)
+    if (!conn || fd == M2SDR_SOCKET_INVALID)
         return eb_fail(conn, EB_ERR_IO);
 
     memset(&pfd, 0, sizeof(pfd));
@@ -218,13 +221,13 @@ static int eb_wait_fd(struct eb_connection *conn, int fd, short events)
     pfd.events = events;
 
     do {
-        ret = poll(&pfd, 1, conn->timeout_ms);
-    } while (ret < 0 && errno == EAGAIN);
+        ret = m2sdr_poll(&pfd, 1, conn->timeout_ms);
+    } while (ret < 0 && m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()));
 
     if (ret == 0)
         return eb_fail(conn, EB_ERR_TIMEOUT);
     if (ret < 0) {
-        if (errno == EINTR)
+        if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
             return eb_fail(conn, EB_ERR_INTERRUPTED);
         fprintf(stderr, "socket poll error: %s\n", strerror(errno));
         return eb_fail(conn, EB_ERR_IO);
@@ -255,19 +258,19 @@ static void eb_drain_direct_rx(struct eb_connection *conn)
 {
     uint8_t discard[256];
 
-    if (!conn || !conn->is_direct || conn->read_fd < 0)
+    if (!conn || !conn->is_direct || conn->read_fd == M2SDR_SOCKET_INVALID)
         return;
 
     for (;;) {
-        int ret = recvfrom(conn->read_fd, discard, sizeof(discard), MSG_DONTWAIT, NULL, NULL);
+        int ret = recvfrom(conn->read_fd, (char *)discard, sizeof(discard), 0, NULL, NULL);
 
         if (ret > 0)
             continue;
         if (ret == 0)
             return;
-        if (errno == EINTR)
+        if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
             continue;
-        if (errno == EAGAIN || errno == EWOULDBLOCK)
+        if (m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()))
             return;
         return;
     }
@@ -329,10 +332,10 @@ int eb_send(struct eb_connection *conn, const void *bytes, size_t len) {
         do {
             if (eb_wait_fd(conn, conn->fd, POLLOUT) != EB_ERR_OK)
                 return -1;
-            ret = sendto(conn->fd, bytes, len, 0, conn->addr->ai_addr, conn->addr->ai_addrlen);
-        } while (ret < 0 && errno == EAGAIN);
+            ret = sendto(conn->fd, (const char *)bytes, (int)len, 0, conn->addr->ai_addr, conn->addr->ai_addrlen);
+        } while (ret < 0 && m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()));
         if (ret < 0) {
-            if (errno == EINTR) {
+            if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error())) {
                 eb_fail(conn, EB_ERR_INTERRUPTED);
                 return ret;
             }
@@ -353,11 +356,11 @@ int eb_send(struct eb_connection *conn, const void *bytes, size_t len) {
     while (sent < len) {
         if (eb_wait_fd(conn, conn->fd, POLLOUT) != EB_ERR_OK)
             return -1;
-        int ret = write(conn->fd, (const uint8_t *)bytes + sent, len - sent);
+        int ret = send(conn->fd, (const char *)bytes + sent, (int)(len - sent), 0);
         if (ret < 0) {
-            if (errno == EAGAIN)
+            if (m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()))
                 continue;
-            if (errno == EINTR)
+            if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
                 return eb_fail(conn, EB_ERR_INTERRUPTED);
             fprintf(stderr, "socket send error: %s\n", strerror(errno));
             eb_fail(conn, EB_ERR_IO);
@@ -380,9 +383,9 @@ int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
 
             if (eb_wait_fd(conn, conn->read_fd, POLLIN) != EB_ERR_OK)
                 return -1;
-            ret = recvfrom(conn->read_fd, bytes, max_len, 0,
+            ret = recvfrom(conn->read_fd, (char *)bytes, (int)max_len, 0,
                            (struct sockaddr *)&src, &src_len);
-            if (ret < 0 && errno == EAGAIN)
+            if (ret < 0 && m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()))
                 continue;
             if (ret < 0)
                 break;
@@ -394,7 +397,7 @@ int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
             break;
         }
         if (ret < 0) {
-            if (errno == EINTR)
+            if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
                 return eb_fail(conn, EB_ERR_INTERRUPTED);
             fprintf(stderr, "socket recv error: %s\n", strerror(errno));
             eb_fail(conn, EB_ERR_IO);
@@ -407,10 +410,10 @@ int eb_recv(struct eb_connection *conn, void *bytes, size_t max_len) {
     do {
         if (eb_wait_fd(conn, conn->fd, POLLIN) != EB_ERR_OK)
             return -1;
-        ret = read(conn->fd, bytes, max_len);
-    } while (ret < 0 && errno == EAGAIN);
+        ret = recv(conn->fd, (char *)bytes, (int)max_len, 0);
+    } while (ret < 0 && m2sdr_socket_error_is_would_block(m2sdr_socket_last_error()));
     if (ret < 0) {
-        if (errno == EINTR)
+        if (m2sdr_socket_error_is_interrupted(m2sdr_socket_last_error()))
             return eb_fail(conn, EB_ERR_INTERRUPTED);
         fprintf(stderr, "socket recv error: %s\n", strerror(errno));
         eb_fail(conn, EB_ERR_IO);
@@ -837,9 +840,9 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     struct addrinfo hints;
     struct addrinfo* res = 0;
     int err;
-    int sock = -1;
-    int rx_socket = -1;
-    int tx_socket = -1;
+    m2sdr_socket_t sock = M2SDR_SOCKET_INVALID;
+    m2sdr_socket_t rx_socket = M2SDR_SOCKET_INVALID;
+    m2sdr_socket_t tx_socket = M2SDR_SOCKET_INVALID;
 
     struct eb_connection *conn = malloc(sizeof(struct eb_connection));
     if (!conn) {
@@ -847,10 +850,16 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         return NULL;
     }
     memset(conn, 0, sizeof(*conn));
-    conn->fd = -1;
-    conn->read_fd = -1;
+    conn->fd = M2SDR_SOCKET_INVALID;
+    conn->read_fd = M2SDR_SOCKET_INVALID;
     conn->timeout_ms = EB_DEFAULT_TIMEOUT_MS;
     conn->last_error = EB_ERR_OK;
+
+    if (m2sdr_platform_socket_init() != 0) {
+        fprintf(stderr, "failed to initialize sockets\n");
+        free(conn);
+        return NULL;
+    }
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -861,6 +870,7 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     if (err != 0) {
         fprintf(stderr, "failed to resolve remote socket address (err=%d / %s)\n", err, gai_strerror(err));
         free(conn);
+        m2sdr_platform_socket_cleanup();
         return NULL;
     }
 
@@ -869,22 +879,35 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     if (is_direct) {
         // Rx half
         struct sockaddr_in si_me;
+        struct in_addr direct_local_addr;
 
         memset((char *) &si_me, 0, sizeof(si_me));
+        memset(&direct_local_addr, 0, sizeof(direct_local_addr));
+        /* Keep same-port fake loopback tests on separate local addresses.
+         * Wildcard binds can steal packets from 127.0.0.2 on macOS. */
+        if (eb_direct_loopback_peer(res->ai_addr))
+            direct_local_addr.s_addr = htonl(INADDR_LOOPBACK);
+        else
+            direct_local_addr.s_addr = htonl(INADDR_ANY);
+
         si_me.sin_family = res->ai_family;
         si_me.sin_port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
-        si_me.sin_addr.s_addr = htobe32(INADDR_ANY);
+        si_me.sin_addr = direct_local_addr;
 
-        if ((rx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        if ((rx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == M2SDR_SOCKET_INVALID) {
             fprintf(stderr, "Unable to create Rx socket: %s\n", strerror(errno));
             goto error;
         }
         /* Enable address reuse on RX Socket */
         int opt = 1;
-        if (setsockopt(rx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        if (setsockopt(rx_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0) {
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on rx_socket failed: %s\n", strerror(errno));
             goto error;
         }
+#ifdef SO_REUSEPORT
+        (void)setsockopt(rx_socket, SOL_SOCKET, SO_REUSEPORT, (const char *)&opt, sizeof(opt));
+#endif
+        (void)m2sdr_socket_set_nonblock(rx_socket, 1);
         if (bind(rx_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
             fprintf(stderr, "Unable to bind Rx socket to port: %s\n", strerror(errno));
             goto error;
@@ -892,26 +915,38 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
 
         // Tx half
         tx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (tx_socket == -1) {
+        if (tx_socket == M2SDR_SOCKET_INVALID) {
             fprintf(stderr, "Unable to create socket: %s\n", strerror(errno));
             goto error;
         }
         /* Enable address reuse on TX Socket */
-        if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0) {
             fprintf(stderr, "setsockopt(SO_REUSEADDR) on tx_socket failed: %s\n", strerror(errno));
             goto error;
+        }
+        if (direct_local_addr.s_addr != htonl(INADDR_ANY)) {
+            struct sockaddr_in tx_local;
+
+            memset(&tx_local, 0, sizeof(tx_local));
+            tx_local.sin_family = res->ai_family;
+            tx_local.sin_port = 0;
+            tx_local.sin_addr = direct_local_addr;
+            if (bind(tx_socket, (struct sockaddr *)&tx_local, sizeof(tx_local)) == -1) {
+                fprintf(stderr, "Unable to bind Tx socket to loopback source: %s\n", strerror(errno));
+                goto error;
+            }
         }
 
         conn->read_fd = rx_socket;
         conn->fd = tx_socket;
         conn->addr = res;
         eb_drain_direct_rx(conn);
-        usleep(EB_DIRECT_RX_SETTLE_US);
+        m2sdr_sleep_us(EB_DIRECT_RX_SETTLE_US);
         eb_drain_direct_rx(conn);
     }
     else {
         sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock == -1) {
+        if (sock == M2SDR_SOCKET_INVALID) {
             fprintf(stderr, "failed to create socket: %s\n", strerror(errno));
             goto error;
         }
@@ -925,7 +960,7 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
         int ret;
         int val = 1;
 
-        ret = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val));
+        ret = setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&val, sizeof(val));
         if (ret < 0) {
             fprintf(stderr, "setsockopt error: %s\n", strerror(errno));
             goto error;
@@ -938,15 +973,16 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     return conn;
 
 error:
-    if (rx_socket >= 0)
-        close(rx_socket);
-    if (tx_socket >= 0)
-        close(tx_socket);
-    if (sock >= 0)
-        close(sock);
+    if (rx_socket != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close(rx_socket);
+    if (tx_socket != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close(tx_socket);
+    if (sock != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close(sock);
     if (res)
         freeaddrinfo(res);
     free(conn);
+    m2sdr_platform_socket_cleanup();
     return NULL;
 }
 
@@ -956,11 +992,12 @@ void eb_disconnect(struct eb_connection **conn) {
 
     if ((*conn)->addr)
         freeaddrinfo((*conn)->addr);
-    if ((*conn)->fd >= 0)
-        close((*conn)->fd);
-    if ((*conn)->read_fd >= 0)
-        close((*conn)->read_fd);
+    if ((*conn)->fd != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close((*conn)->fd);
+    if ((*conn)->read_fd != M2SDR_SOCKET_INVALID)
+        m2sdr_socket_close((*conn)->read_fd);
     free(*conn);
     *conn = NULL;
+    m2sdr_platform_socket_cleanup();
     return;
 }

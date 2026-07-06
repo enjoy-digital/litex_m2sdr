@@ -18,13 +18,9 @@
 #include "csr.h"
 #include "m2sdr_internal.h"
 
+#if M2SDR_HAVE_LITEPCIE
 #include "litepcie_helpers.h"
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#endif
 
 #define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
@@ -138,6 +134,7 @@ static void m2sdr_store_stream_config(struct m2sdr_dev *dev,
  * - user_count: buffers handed to the public caller.
  * - release/submit_count: buffers returned to the kernel driver.
  */
+#if M2SDR_HAVE_LITEPCIE
 static void m2sdr_pcie_dma_update_rx_release(struct m2sdr_dev *dev)
 {
     struct litepcie_ioctl_mmap_dma_update update;
@@ -153,13 +150,14 @@ static void m2sdr_pcie_dma_update_tx_submit(struct m2sdr_dev *dev)
     update.sw_count = dev->tx_submit_count;
     checked_ioctl(dev->tx_dma.fds.fd, LITEPCIE_IOCTL_MMAP_DMA_READER_UPDATE, &update);
 }
+#endif
 
 static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t remote_port, uint32_t *local_ip)
 {
     struct sockaddr_in remote_addr;
     struct sockaddr_in local_addr;
     socklen_t local_addr_len = sizeof(local_addr);
-    int sock = -1;
+    m2sdr_socket_t sock = M2SDR_SOCKET_INVALID;
     int ret = M2SDR_ERR_IO;
 
     if (!remote_ip || !local_ip)
@@ -171,9 +169,14 @@ static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t 
     if (inet_pton(AF_INET, remote_ip, &remote_addr.sin_addr) != 1)
         return M2SDR_ERR_INVAL;
 
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
+    if (m2sdr_platform_socket_init() != 0)
         return M2SDR_ERR_IO;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock == M2SDR_SOCKET_INVALID) {
+        m2sdr_platform_socket_cleanup();
+        return M2SDR_ERR_IO;
+    }
 
     /* UDP connect performs the kernel route lookup without sending traffic. */
     if (connect(sock, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) < 0)
@@ -189,7 +192,8 @@ static int m2sdr_liteeth_get_local_ip_for_route(const char *remote_ip, uint16_t 
     ret = M2SDR_ERR_OK;
 
 out:
-    close(sock);
+    m2sdr_socket_close(sock);
+    m2sdr_platform_socket_cleanup();
     return ret;
 }
 
@@ -381,7 +385,7 @@ int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
 #endif
     /* Gateware drains the TX streamer FIFO while disabled; this delay covers a
      * full 256 KiB FIFO at the Ethernet-only 100 MHz sys_clk with margin. */
-    usleep(M2SDR_LITEETH_TX_DRAIN_DELAY_US);
+    m2sdr_sleep_us(M2SDR_LITEETH_TX_DRAIN_DELAY_US);
     return M2SDR_ERR_OK;
 }
 
@@ -457,6 +461,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
     if (rc != M2SDR_ERR_OK)
         return rc;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         struct litepcie_dma_ctrl *dma = (direction == M2SDR_RX) ? &dev->rx_dma : &dev->tx_dma;
         memset(dma, 0, sizeof(*dma));
@@ -501,7 +506,9 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         } else {
             m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
         }
-    } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+    } else
+#endif
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         const uint16_t listen_port = 2345;
         struct m2sdr_liteeth_rx_stream_config eth_rx_config;
         int eth_rx_needs_activate = 0;
@@ -532,8 +539,7 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                                  dev->eth_ip, listen_port,
                                  1, 1,
                                  buffer_size * m2sdr_sample_size(format),
-                                 num_buffers ? num_buffers : 0,
-                                 0) < 0) {
+                                 num_buffers ? num_buffers : 0) < 0) {
                 return M2SDR_ERR_IO;
             }
             (void)liteeth_udp_set_so_rcvbuf(&dev->udp, M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES);
@@ -619,7 +625,9 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
 {
     enum m2sdr_format format;
     unsigned sample_sz;
+#if M2SDR_HAVE_LITEPCIE
     unsigned payload_bytes;
+#endif
 
     if (!dev || !info)
         return M2SDR_ERR_INVAL;
@@ -636,8 +644,11 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
     sample_sz = m2sdr_sample_size(format);
     if (!sample_sz)
         return M2SDR_ERR_UNSUPPORTED;
+#if M2SDR_HAVE_LITEPCIE
     payload_bytes = m2sdr_stream_payload_bytes(dev, direction, format);
+#endif
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         struct litepcie_dma_ctrl *dma = direction == M2SDR_RX ? &dev->rx_dma : &dev->tx_dma;
         info->buffer_bytes = payload_bytes;
@@ -656,6 +667,7 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
             info->buffer_stride = DMA_BUFFER_SIZE;
         return M2SDR_ERR_OK;
     }
+#endif
 
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         info->buffer_bytes = (direction == M2SDR_RX ? dev->rx_buffer_size : dev->tx_buffer_size) * sample_sz;
@@ -670,6 +682,7 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
     return M2SDR_ERR_UNSUPPORTED;
 }
 
+#if M2SDR_HAVE_LITEPCIE
 static int m2sdr_pcie_stats_fd(struct m2sdr_dev *dev,
                                enum m2sdr_direction direction)
 {
@@ -734,6 +747,7 @@ static int m2sdr_pcie_stream_stats(struct m2sdr_dev *dev,
 
     return M2SDR_ERR_OK;
 }
+#endif
 
 static int m2sdr_liteeth_stream_stats(struct m2sdr_dev *dev,
                                       enum m2sdr_direction direction,
@@ -781,8 +795,10 @@ int m2sdr_get_stream_stats(struct m2sdr_dev *dev,
 
     memset(stats, 0, sizeof(*stats));
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE)
         return m2sdr_pcie_stream_stats(dev, direction, false, stats);
+#endif
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         return m2sdr_liteeth_stream_stats(dev, direction, stats);
 
@@ -797,6 +813,7 @@ int m2sdr_clear_stream_stats(struct m2sdr_dev *dev,
     if (direction != M2SDR_RX && direction != M2SDR_TX)
         return M2SDR_ERR_INVAL;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         int rc = m2sdr_pcie_stream_stats(dev, direction, true, NULL);
 
@@ -811,6 +828,7 @@ int m2sdr_clear_stream_stats(struct m2sdr_dev *dev,
         }
         return M2SDR_ERR_OK;
     }
+#endif
 
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
@@ -825,6 +843,7 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
     if (direction != M2SDR_RX && direction != M2SDR_TX)
         return M2SDR_ERR_INVAL;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         /* Also clear the local enable flags: the wait helpers pass them to
          * the kernel on every poll and would silently re-enable the DMA. */
@@ -841,6 +860,7 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
         }
         return M2SDR_ERR_OK;
     }
+#endif
 
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (direction == M2SDR_RX)
@@ -858,6 +878,7 @@ int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
     if (direction != M2SDR_RX && direction != M2SDR_TX)
         return M2SDR_ERR_INVAL;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         /* The kernel clears its ring counters across a stop/start cycle, so
          * the userspace counters must be resynced or the ring arithmetic in
@@ -887,6 +908,7 @@ int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
         }
         return M2SDR_ERR_OK;
     }
+#endif
 
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (direction == M2SDR_RX) {
@@ -907,6 +929,7 @@ int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction)
     if (direction != M2SDR_RX && direction != M2SDR_TX)
         return M2SDR_ERR_INVAL;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (direction == M2SDR_RX && dev->rx_configured) {
             (void)m2sdr_stream_deactivate(dev, direction);
@@ -919,6 +942,7 @@ int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction)
         }
         return M2SDR_ERR_OK;
     }
+#endif
 
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (direction == M2SDR_RX && dev->rx_configured) {
@@ -943,12 +967,15 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
     if (!dev)
         return;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (dev->rx_configured)
             litepcie_dma_cleanup(&dev->rx_dma);
         if (dev->tx_configured)
             litepcie_dma_cleanup(&dev->tx_dma);
-    } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+    } else
+#endif
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (dev->rx_configured)
             (void)m2sdr_liteeth_rx_stream_deactivate(dev);
         if (dev->tx_configured)
@@ -963,6 +990,7 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
 
 /* PCIe sync helpers wait for the next DMA ring entry and enforce the public
  * timeout semantics in milliseconds. */
+#if M2SDR_HAVE_LITEPCIE
 static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
 {
     int64_t start = get_time_ms();
@@ -1081,6 +1109,7 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             return M2SDR_ERR_TIMEOUT;
     }
 }
+#endif
 
 static int m2sdr_liteeth_wait_rx_buffer(struct m2sdr_dev *dev,
                                         unsigned timeout_ms,
@@ -1146,6 +1175,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
     unsigned copied = 0;
 
     while (copied < total_bytes) {
+#if M2SDR_HAVE_LITEPCIE
         if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
             char *buf = NULL;
             int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
@@ -1175,7 +1205,9 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                 dev->rx_release_count++;
                 m2sdr_pcie_dma_update_rx_release(dev);
             }
-        } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        } else
+#endif
+        if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = NULL;
             int rc = m2sdr_liteeth_wait_rx_buffer(dev,
                                                   (timeout_ms ? timeout_ms : dev->rx_timeout_ms),
@@ -1226,6 +1258,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     unsigned copied = 0;
 
     while (copied < total_bytes) {
+#if M2SDR_HAVE_LITEPCIE
         if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
             char *buf = NULL;
             int rc = m2sdr_wait_tx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->tx_timeout_ms);
@@ -1251,7 +1284,9 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                 dev->tx_submit_count++;
                 m2sdr_pcie_dma_update_tx_submit(dev);
             }
-        } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        } else
+#endif
+        if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
             uint8_t *buf = liteeth_udp_next_write_buffer(&dev->udp);
             if (!buf)
                 return M2SDR_ERR_TIMEOUT;
@@ -1316,6 +1351,7 @@ static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
     if (!sample_sz)
         return M2SDR_ERR_UNSUPPORTED;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (direction == M2SDR_RX) {
             char *buf = NULL;
@@ -1332,7 +1368,9 @@ static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
                 return rc;
             *buffer = buf + payload_off;
         }
-    } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+    } else
+#endif
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (direction == M2SDR_RX) {
             uint8_t *buf = NULL;
             int rc = m2sdr_liteeth_wait_rx_buffer(dev,
@@ -1402,6 +1440,7 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
      * for its duration themselves. */
     (void)num_samples;
 
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         if (dev->zero_copy) {
             dev->tx_submit_count++;
@@ -1409,6 +1448,7 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
         }
         return M2SDR_ERR_OK;
     }
+#endif
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (liteeth_udp_write_submit(&dev->udp) < 0)
             return M2SDR_ERR_IO;
@@ -1425,10 +1465,12 @@ int m2sdr_release_buffer(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
     if (direction != M2SDR_RX)
         return M2SDR_ERR_INVAL;
+#if M2SDR_HAVE_LITEPCIE
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE && dev->zero_copy) {
         dev->rx_release_count++;
         m2sdr_pcie_dma_update_rx_release(dev);
     }
+#endif
     /* DMA/UDP ring advances on read in non-zero-copy and LiteEth modes. */
     return M2SDR_ERR_OK;
 }

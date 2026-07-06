@@ -29,3 +29,5 @@ __pycache__
 !/litex_m2sdr/software/user/*.c
 /litex_m2sdr/software/user/tests/test_*
 !/litex_m2sdr/software/user/tests/*.c
+/litex_m2sdr/software/user/build*/
+/litex_m2sdr/software/soapysdr/build*/

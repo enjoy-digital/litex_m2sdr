@@ -135,6 +135,8 @@ static int test_discovery_targets(void)
 
     m2sdr_discovery_config_init(&cfg);
     cfg.enable_liteeth = false;
+#if M2SDR_HAVE_LITEPCIE
+    cfg.enable_pcie = true;
     cfg.pcie_first = 2;
     cfg.pcie_count = 2;
     if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
@@ -148,6 +150,12 @@ static int test_discovery_targets(void)
 
     if (m2sdr_get_discovery_targets(&cfg, targets, 1, &count) != M2SDR_ERR_RANGE)
         return -1;
+#else
+    if (m2sdr_get_discovery_targets(&cfg, targets, 4, &count) != M2SDR_ERR_OK)
+        return -1;
+    if (count != 0)
+        return -1;
+#endif
 
     return 0;
 }
@@ -447,6 +455,8 @@ static int test_stream_stats_validation(void)
 {
     struct m2sdr_dev dev;
     struct m2sdr_stream_stats stats;
+    /* Without LitePCIe support the PCIe transport reports unsupported. */
+    const int pcie_stats_err = M2SDR_HAVE_LITEPCIE ? M2SDR_ERR_STATE : M2SDR_ERR_UNSUPPORTED;
 
     memset(&dev, 0, sizeof(dev));
     dev.fd = -1;
@@ -458,13 +468,13 @@ static int test_stream_stats_validation(void)
         return -1;
     if (m2sdr_get_stream_stats(&dev, M2SDR_RX, NULL) != M2SDR_ERR_INVAL)
         return -1;
-    if (m2sdr_get_stream_stats(&dev, M2SDR_RX, &stats) != M2SDR_ERR_STATE)
+    if (m2sdr_get_stream_stats(&dev, M2SDR_RX, &stats) != pcie_stats_err)
         return -1;
     if (m2sdr_clear_stream_stats(NULL, M2SDR_RX) != M2SDR_ERR_INVAL)
         return -1;
     if (m2sdr_clear_stream_stats(&dev, (enum m2sdr_direction)42) != M2SDR_ERR_INVAL)
         return -1;
-    if (m2sdr_clear_stream_stats(&dev, M2SDR_TX) != M2SDR_ERR_STATE)
+    if (m2sdr_clear_stream_stats(&dev, M2SDR_TX) != pcie_stats_err)
         return -1;
 
     dev.transport = M2SDR_TRANSPORT_LITEETH;

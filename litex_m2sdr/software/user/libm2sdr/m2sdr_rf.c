@@ -14,12 +14,13 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#ifndef _WIN32
 #include <strings.h>
 #include <unistd.h>
+#endif
 #include <limits.h>
 #include <errno.h>
 #include <stdint.h>
-#include <time.h>
 
 #include "ad9361.h"
 #include "ad9361_api.h"
@@ -27,6 +28,7 @@
 #include "m2sdr_ad9361_spi.h"
 #include "m2sdr_config.h"
 #include "m2sdr_internal.h"
+#include "m2sdr_platform.h"
 #include "m2sdr_si5351_i2c.h"
 #include "platform.h"
 
@@ -56,7 +58,7 @@
 static int m2sdr_log_enabled = M2SDR_LOG_ENABLED ? 1 : 0;
 #define M2SDR_LOGF(...) m2sdr_log_printf(__VA_ARGS__)
 
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_WIN32)
 #define M2SDR_WEAK __attribute__((weak))
 #else
 #define M2SDR_WEAK
@@ -67,7 +69,13 @@ static int m2sdr_log_enabled = M2SDR_LOG_ENABLED ? 1 : 0;
 
 /* The Analog Devices AD9361 code expects Linux-like platform hooks with a
  * single implicit active device. libm2sdr keeps that glue local here. */
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#if defined(_WIN32)
+static __declspec(thread) struct m2sdr_dev *tls_rf_dev;
+#ifdef USE_LITEETH
+static __declspec(thread) uint64_t tls_rf_init_deadline_us;
+static __declspec(thread) bool tls_rf_init_timed_out;
+#endif
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
 static _Thread_local struct m2sdr_dev *tls_rf_dev;
 #ifdef USE_LITEETH
 static _Thread_local uint64_t tls_rf_init_deadline_us;
@@ -123,12 +131,7 @@ static void *m2sdr_conn(struct m2sdr_dev *dev)
 #ifdef USE_LITEETH
 static uint64_t m2sdr_time_us(void)
 {
-    struct timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
-        return 0;
-
-    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+    return m2sdr_monotonic_us();
 }
 
 static void m2sdr_start_rf_init_timeout(void)
@@ -502,7 +505,7 @@ static int m2sdr_wait_si5351_ready(struct m2sdr_dev *dev, void *conn)
             return M2SDR_ERR_OK;
         }
 
-        usleep(1000);
+        m2sdr_sleep_us(1000);
     }
 
     M2SDR_LOGF("SI5351 did not report ready before AD9361 init (status 0x%02x).\n", status);
@@ -1189,6 +1192,15 @@ static int m2sdr_run_bist(const struct m2sdr_config *cfg, struct m2sdr_dev *dev,
 /* AD9361 platform hooks */
 /*-----------------------*/
 
+/* External integrations register their own hooks here instead of overriding
+ * the symbols below: weak overrides do not resolve on PE-COFF links. */
+static const struct m2sdr_rf_platform_hooks *m2sdr_rf_hooks;
+
+void m2sdr_rf_set_platform_hooks(const struct m2sdr_rf_platform_hooks *hooks)
+{
+    m2sdr_rf_hooks = hooks;
+}
+
 /* Bridge the AD9361 platform SPI callback onto libm2sdr's backend-neutral
  * SPI helpers. */
 int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
@@ -1196,6 +1208,9 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
                                    unsigned char *rxbuf, unsigned n_rx)
 {
     void *conn;
+
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->spi_write_then_read)
+        return m2sdr_rf_hooks->spi_write_then_read(spi, txbuf, n_tx, rxbuf, n_rx);
 
     (void)spi;
     if (!tls_rf_dev)
@@ -1236,31 +1251,47 @@ int M2SDR_WEAK spi_write_then_read(struct spi_device *spi,
 /* AD9361 platform delay hook in microseconds. */
 void M2SDR_WEAK udelay(unsigned long usecs)
 {
-    usleep(usecs);
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->udelay) {
+        m2sdr_rf_hooks->udelay(usecs);
+        return;
+    }
+    m2sdr_sleep_us(usecs);
 }
 
 /* AD9361 platform delay hook in milliseconds. */
 void M2SDR_WEAK mdelay(unsigned long msecs)
 {
-    usleep(msecs * 1000);
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->mdelay) {
+        m2sdr_rf_hooks->mdelay(msecs);
+        return;
+    }
+    m2sdr_sleep_us(msecs * 1000);
 }
 
 /* AD9361 platform sleep hook used by the imported driver code. */
 unsigned long M2SDR_WEAK msleep_interruptible(unsigned int msecs)
 {
-    usleep(msecs * 1000);
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->msleep_interruptible)
+        return m2sdr_rf_hooks->msleep_interruptible(msecs);
+    m2sdr_sleep_us(msecs * 1000);
     return 0;
 }
 
 /* Report which GPIO number is valid for the AD9361 reset hook. */
 bool M2SDR_WEAK gpio_is_valid(int number)
 {
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->gpio_is_valid)
+        return m2sdr_rf_hooks->gpio_is_valid(number);
     return number == AD9361_GPIO_RESET_PIN;
 }
 
 /* Placeholder GPIO setter required by the AD9361 platform layer. */
 void M2SDR_WEAK gpio_set_value(unsigned gpio, int value)
 {
+    if (m2sdr_rf_hooks && m2sdr_rf_hooks->gpio_set_value) {
+        m2sdr_rf_hooks->gpio_set_value(gpio, value);
+        return;
+    }
     (void)gpio;
     (void)value;
 }

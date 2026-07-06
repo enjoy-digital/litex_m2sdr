@@ -12,9 +12,8 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <poll.h>
-#include <sys/types.h>
-#include <netinet/in.h>
+
+#include "m2sdr_platform.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,8 +35,8 @@ struct liteeth_udp_ctrl {
     size_t        buf_count;
 
     /* Socket */
-    int           sock;
-    struct pollfd pfd;
+    m2sdr_socket_t sock;
+    m2sdr_pollfd pfd;
     struct sockaddr_in remote;   /* TX destination */
     int           have_remote;
     struct sockaddr_in rx_source;
@@ -81,7 +80,6 @@ struct liteeth_udp_ctrl {
     uint64_t      tx_send_errors;
 
     /* Options */
-    int           nonblock;
     int           so_rcvbuf_bytes;
     int           so_sndbuf_bytes;
     int           so_rcvbuf_actual_bytes;
@@ -92,8 +90,7 @@ int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
                       const char *listen_ip, uint16_t listen_port,
                       const char *remote_ip,  uint16_t remote_port,
                       int rx_enable, int tx_enable,
-                      size_t buffer_size, size_t buffer_count,
-                      int nonblock);
+                      size_t buffer_size, size_t buffer_count);
 
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u);
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms);
