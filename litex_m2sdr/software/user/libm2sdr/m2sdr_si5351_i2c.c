@@ -29,6 +29,14 @@
 #define SI5351_STATUS_LOL_B    0x40
 #define SI5351_CONFIG_TIMEOUT_MS 100
 
+/* PLLB feedback Multisynth register block (AN619 registers 34..41) and the
+ * valid a + b/c feedback multiplier range. */
+#define SI5351_PLLB_FB_BASE_REG  0x22
+#define SI5351_PLLB_FB_NUM_REGS  8
+#define SI5351_PLL_FB_MULT_MIN   15.0
+#define SI5351_PLL_FB_MULT_MAX   90.0
+#define SI5351_PLL_FB_TRIM_DENOM 1000000
+
 /* Functions */
 /*-----------*/
 
@@ -346,4 +354,79 @@ bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t
 
 void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length) {
     (void)m2sdr_si5351_i2c_config_checked(conn, i2c_addr, i2c_config, i2c_length);
+}
+
+/* m2sdr_si5351_i2c_trim_pllb_ppm */
+/*--------------------------------*/
+
+bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length, double ppm) {
+    uint8_t  regs[SI5351_PLLB_FB_NUM_REGS];
+    size_t   found = 0;
+    uint32_t p1, p2, p3;
+    uint32_t fb_int;
+    uint64_t fb_frac;
+    double   multiplier;
+    size_t   i;
+
+    /* Recover the nominal PLLB feedback registers from the config table so
+     * the correction is always relative to the shipped clock tree, never to a
+     * previously trimmed state. */
+    for (i = 0; i < i2c_length; i++) {
+        uint8_t reg = i2c_config[i][0];
+        if (reg >= SI5351_PLLB_FB_BASE_REG &&
+            reg <  SI5351_PLLB_FB_BASE_REG + SI5351_PLLB_FB_NUM_REGS) {
+            regs[reg - SI5351_PLLB_FB_BASE_REG] = i2c_config[i][1];
+            found++;
+        }
+    }
+    if (found != SI5351_PLLB_FB_NUM_REGS)
+        return false;
+
+    /* Decode the P1/P2/P3 encoding back to the a + b/c feedback multiplier
+     * (AN619: P1 = 128*a + floor(128*b/c) - 512, P2 = 128*b - c*floor(128*b/c),
+     * P3 = c). */
+    p3 = ((uint32_t)(regs[5] & 0xF0) << 12) | ((uint32_t)regs[0] << 8) | regs[1];
+    p1 = ((uint32_t)(regs[2] & 0x03) << 16) | ((uint32_t)regs[3] << 8) | regs[4];
+    p2 = ((uint32_t)(regs[5] & 0x0F) << 16) | ((uint32_t)regs[6] << 8) | regs[7];
+    if (p3 == 0)
+        return false;
+    multiplier  = (double)((p1 + 512) >> 7);
+    multiplier += (double)(((uint64_t)((p1 + 512) & 0x7F) * p3) + p2) / (128.0 * (double)p3);
+
+    /* Scale the multiplier so all outputs land back on their nominal
+     * frequencies: a reference running fast by +ppm needs the feedback
+     * reduced by the same ratio. */
+    multiplier /= 1.0 + ppm * 1e-6;
+    if (multiplier < SI5351_PLL_FB_MULT_MIN || multiplier > SI5351_PLL_FB_MULT_MAX)
+        return false;
+
+    /* Re-encode with a fixed 1e6 denominator, giving a ~0.03 ppm trim
+     * resolution on the shipped clock trees. */
+    fb_int  = (uint32_t)multiplier;
+    fb_frac = (uint64_t)((multiplier - (double)fb_int) * SI5351_PLL_FB_TRIM_DENOM + 0.5);
+    if (fb_frac >= SI5351_PLL_FB_TRIM_DENOM) {
+        fb_int += 1;
+        fb_frac = 0;
+    }
+    p1 = 128 * fb_int + (uint32_t)((128 * fb_frac) / SI5351_PLL_FB_TRIM_DENOM) - 512;
+    p2 = (uint32_t)(128 * fb_frac - SI5351_PLL_FB_TRIM_DENOM * ((128 * fb_frac) / SI5351_PLL_FB_TRIM_DENOM));
+    p3 = SI5351_PLL_FB_TRIM_DENOM;
+
+    regs[0] = (p3 >> 8)  & 0xFF;
+    regs[1] = (p3 >> 0)  & 0xFF;
+    regs[2] = (p1 >> 16) & 0x03;
+    regs[3] = (p1 >> 8)  & 0xFF;
+    regs[4] = (p1 >> 0)  & 0xFF;
+    regs[5] = ((p3 >> 12) & 0xF0) | ((p2 >> 16) & 0x0F);
+    regs[6] = (p2 >> 8)  & 0xFF;
+    regs[7] = (p2 >> 0)  & 0xFF;
+
+    /* Fractional feedback updates take effect without a PLL soft reset, so
+     * the trim pulls the running clock tree smoothly. */
+    for (i = 0; i < SI5351_PLLB_FB_NUM_REGS; i++) {
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, SI5351_PLLB_FB_BASE_REG + i, &regs[i], 1))
+            return false;
+    }
+
+    return true;
 }
