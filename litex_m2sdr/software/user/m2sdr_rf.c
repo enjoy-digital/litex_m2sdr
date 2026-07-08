@@ -41,6 +41,8 @@ static void help(void)
            "      --sync MODE        Clock source: internal, external, or fpga.\n"
            "\n"
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
+           "      --refclk-ppm PPM   Compensate a measured RefClk error in ppm through the\n"
+           "                         SI5351 PLL (positive = clock runs fast, default: 0).\n"
            "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6\n"
            "                         or 20M). Rates above 61.44 MSPS select the\n"
            "                         wide-bandwidth mode (~100 MHz analog passband).\n"
@@ -105,6 +107,8 @@ int main(int argc, char **argv)
         { "sync", required_argument, NULL, 5 },
         { "refclk-freq", required_argument, NULL, 6 },
         { "refclk_freq", required_argument, NULL, 6 },
+        { "refclk-ppm", required_argument, NULL, 25 },
+        { "refclk_ppm", required_argument, NULL, 25 },
         { "sample-rate", required_argument, NULL, 7 },
         { "samplerate", required_argument, NULL, 7 },
         { "bandwidth", required_argument, NULL, 8 },
@@ -208,6 +212,14 @@ int main(int argc, char **argv)
         case 6:
             if (parse_i64_option("refclk frequency", optarg, &cfg.refclk_freq) != 0)
                 return 1;
+            break;
+        case 25:
+            if (m2sdr_cli_parse_double_range(optarg, -M2SDR_REFCLK_PPM_MAX,
+                                             M2SDR_REFCLK_PPM_MAX, &cfg.refclk_ppm) != 0) {
+                m2sdr_cli_error("invalid refclk ppm '%s' (expected -%.0f to %.0f)",
+                                optarg, M2SDR_REFCLK_PPM_MAX, M2SDR_REFCLK_PPM_MAX);
+                return 1;
+            }
             break;
         case 7:
             if (parse_i64_option("sample rate", optarg, &cfg.sample_rate) != 0)
