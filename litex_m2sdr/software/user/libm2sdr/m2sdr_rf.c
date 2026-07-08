@@ -23,6 +23,10 @@
 
 #include "ad9361.h"
 #include "ad9361_api.h"
+
+/* Analog BBF widening (defined in ad9361.c); used by the native overclock path
+ * to widen the passband without the digital filter-bypass of the 2x-port trick. */
+bool ad9361_wide_bbf_tune(struct ad9361_rf_phy *phy, uint32_t bbbw);
 #include "csr.h"
 #include "m2sdr_ad9361_spi.h"
 #include "m2sdr_config.h"
@@ -308,6 +312,10 @@ static int m2sdr_validate_config_values(const struct m2sdr_config *cfg)
         return M2SDR_ERR_RANGE;
     if (cfg->refclk_freq <= 0 || cfg->refclk_freq > UINT32_MAX)
         return M2SDR_ERR_RANGE;
+    /* Written to also reject NaN. */
+    if (!(cfg->refclk_ppm >= -M2SDR_REFCLK_PPM_MAX &&
+          cfg->refclk_ppm <=  M2SDR_REFCLK_PPM_MAX))
+        return M2SDR_ERR_RANGE;
     if (cfg->tx_freq <= 0 || cfg->rx_freq <= 0)
         return M2SDR_ERR_RANGE;
     if (cfg->tx_att < M2SDR_TX_ATT_MIN_DB || cfg->tx_att > M2SDR_TX_ATT_MAX_DB)
@@ -447,7 +455,14 @@ static int m2sdr_apply_channel_layout(struct m2sdr_dev *dev,
         init_param->one_rx_one_tx_mode_use_rx_num = 1;
         init_param->one_rx_one_tx_mode_use_tx_num = 1;
         init_param->two_t_two_r_timing_enable     = 1;
-        if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, 0) != 0)
+        /* mode=0 (2R2T). At the doubled DATA_CLK the chip's TX channel/IQ de-interleave
+         * locks to TX_FRAME; the frame-vs-data slot rotation is set via the FPGA
+         * tx_frame_offset (PHY_CONTROL bits[3:2]) here, before the chip locks.
+         * Diagnostic override: M2SDR_TX_FRAME_OFFSET (0..3). */
+        uint32_t phy_ctrl = 0;
+        if (getenv("M2SDR_TX_FRAME_OFFSET"))
+            phy_ctrl |= (strtoul(getenv("M2SDR_TX_FRAME_OFFSET"), NULL, 0) & 0x3u) << 2;
+        if (m2sdr_reg_write(dev, CSR_AD9361_PHY_CONTROL_ADDR, phy_ctrl) != 0)
             return M2SDR_ERR_IO;
     }
 
@@ -481,6 +496,31 @@ static int m2sdr_stream_to_ad9361_sample_rate(int64_t stream_rate,
 }
 
 #ifdef CSR_SI5351_BASE
+/* Select the precomputed SI5351 register table for a reference topology. */
+static void m2sdr_si5351_select_config(enum m2sdr_clock_source clock_source,
+                                       int64_t refclk_freq,
+                                       const uint8_t (**config)[2],
+                                       size_t *length)
+{
+    if (clock_source == M2SDR_CLOCK_SOURCE_INTERNAL) {
+        if (refclk_freq == 40000000) {
+            *config = si5351_xo_40m_config;
+            *length = sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0]);
+        } else {
+            *config = si5351_xo_38p4m_config;
+            *length = sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]);
+        }
+    } else {
+        if (refclk_freq == 40000000) {
+            *config = si5351_clkin_10m_40m_config;
+            *length = sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0]);
+        } else {
+            *config = si5351_clkin_10m_38p4m_config;
+            *length = sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0]);
+        }
+    }
+}
+
 static int m2sdr_wait_si5351_ready(struct m2sdr_dev *dev, void *conn)
 {
     uint8_t status = 0xff;
@@ -517,63 +557,47 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
                                      enum m2sdr_clock_source clock_source)
 {
 #ifdef CSR_SI5351_BASE
+    const uint8_t (*si5351_config)[2];
+    size_t si5351_length;
+
     M2SDR_LOGF("Initializing SI5351 Clocking...\n");
 
     if (clock_source == M2SDR_CLOCK_SOURCE_INTERNAL) {
-        /* The table selection is driven only by the requested AD9361 refclk.
-         * The SI5351 profile itself encodes the rest of the clock tree. */
         M2SDR_LOGF("Using internal XO as SI5351 CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
             SI5351B_VERSION * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET)) != 0)
             return M2SDR_ERR_IO;
-
-        if (cfg->refclk_freq == 40000000) {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_xo_40m_config,
-                sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0])))
-                return m2sdr_transport_error(dev);
-        } else {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_xo_38p4m_config,
-                sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0])))
-                return m2sdr_transport_error(dev);
-        }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_EXTERNAL) {
         M2SDR_LOGF("Using external 10MHz from uFL as SI5351C CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION               * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
               SI5351C_10MHZ_CLK_IN_FROM_UFL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)) != 0)
             return M2SDR_ERR_IO;
-
-        if (cfg->refclk_freq == 40000000) {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0])))
-                return m2sdr_transport_error(dev);
-        } else {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0])))
-                return m2sdr_transport_error(dev);
-        }
     } else if (clock_source == M2SDR_CLOCK_SOURCE_SI5351C_FPGA) {
         M2SDR_LOGF("Using FPGA 10MHz as SI5351C CLKIN source...\n");
         if (m2sdr_reg_write(dev, CSR_SI5351_CONTROL_ADDR,
               SI5351C_VERSION                * (1 << CSR_SI5351_CONTROL_VERSION_OFFSET) |
               SI5351C_10MHZ_CLK_IN_FROM_PLL * (1 << CSR_SI5351_CONTROL_CLKIN_SRC_OFFSET)) != 0)
             return M2SDR_ERR_IO;
+    }
 
-        if (cfg->refclk_freq == 40000000) {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_40m_config,
-                sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0])))
-                return m2sdr_transport_error(dev);
-        } else {
-            if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
-                si5351_clkin_10m_38p4m_config,
-                sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0])))
-                return m2sdr_transport_error(dev);
-        }
+    /* The table selection is driven only by the clock source and requested
+     * AD9361 refclk. The SI5351 profile itself encodes the rest of the clock
+     * tree. */
+    m2sdr_si5351_select_config(clock_source, cfg->refclk_freq,
+                               &si5351_config, &si5351_length);
+    if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
+        si5351_config, si5351_length))
+        return m2sdr_transport_error(dev);
+
+    /* Compensate the measured reference error by trimming the PLL feedback
+     * away from the nominal table, correcting the AD9361 reference and all
+     * derived clocks together. */
+    if (cfg->refclk_ppm != 0) {
+        M2SDR_LOGF("Trimming SI5351 PLL by %.3f ppm.\n", cfg->refclk_ppm);
+        if (!m2sdr_si5351_i2c_trim_pllb_ppm(conn, SI5351_I2C_ADDR,
+            si5351_config, si5351_length, cfg->refclk_ppm))
+            return m2sdr_transport_error(dev);
     }
 
     return m2sdr_wait_si5351_ready(dev, conn);
@@ -598,11 +622,13 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
     M2SDR_LOGF("Setting TX/RX Samplerate to %f MSPS.\n", cfg->sample_rate / 1e6);
 
     (void)channel_layout;
-    /* Rates above the AD9361 clock-chain limit (61.44 MSPS, up to 122.88) run
-     * the chip's clock chain at half rate with the data port at 2x
-     * (wide-bandwidth mode, see ad9361_enable_oversampling()). */
+    /* Rates above the AD9361 clock-chain limit (61.44 MSPS, up to 122.88) need an
+     * overclock mode. The default WIDE mode runs the chip's clock chain at half
+     * rate with the data port at 2x (see ad9361_enable_oversampling()); NATIVE mode
+     * (M2SDR_OC_NATIVE) instead runs the normal chain at 2x full rate. */
+    int native = getenv("M2SDR_OC_NATIVE") != NULL;
     rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate,
-        cfg->sample_rate > 61440000, &actual_samplerate);
+        cfg->sample_rate > 61440000 && !native, &actual_samplerate);
     if (rc != M2SDR_ERR_OK)
         return rc;
 
@@ -611,7 +637,7 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
             actual_samplerate / 1e6);
     }
 
-    if (actual_samplerate > 61440000U) {
+    if (actual_samplerate > 61440000U && !native) {
         fprintf(stderr, "Requested sample rate %.3f MSPS exceeds the maximum of 122.880 MSPS.\n",
             cfg->sample_rate / 1e6);
         return M2SDR_ERR_INVAL;
@@ -659,7 +685,6 @@ static int m2sdr_configure_bandwidth(struct ad9361_rf_phy *phy, const struct m2s
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
-
 
 /* Program the TX and RX local oscillator frequencies. */
 static int m2sdr_configure_frequencies(struct ad9361_rf_phy *phy, const struct m2sdr_config *cfg)
@@ -1016,6 +1041,338 @@ restore:
     return rc;
 }
 
+#ifdef CSR_AD9361_RX_DESKEW_IDELAY_ADDR
+/* Per-lane RX interface deskew at the doubled DATA_CLK rate.
+ *
+ * At 983Mbps per lane (2T2R wide-bandwidth) the board's lane-to-lane skew
+ * exceeds the eye, and the AD9361's RX delay register shifts all lanes
+ * together - so each lane gets an FPGA-side IDELAYE2 instead. The error
+ * metric: with the chip BIST PRBS in 2R2T mode both channel slots carry the
+ * same word, so the gateware counts ch1-vs-ch2 differences per lane. Sweep
+ * all taps once (counters for all lanes update in parallel), then center
+ * each lane in its widest error-free run.
+ *
+ * Only valid in 2R2T PHY mode (in 1R1T the slots are consecutive samples);
+ * callers in 1R1T skip this (their DATA_CLK also stays at the in-spec rate).
+ */
+static int m2sdr_rx_deskew_set_lane(struct m2sdr_dev *dev, unsigned lane, unsigned tap)
+{
+    return m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_IDELAY_ADDR,
+        (tap  << CSR_AD9361_RX_DESKEW_IDELAY_VALUE_OFFSET) |
+        (lane << CSR_AD9361_RX_DESKEW_IDELAY_LANE_OFFSET)) ? M2SDR_ERR_IO : M2SDR_ERR_OK;
+}
+
+static int m2sdr_deskew_rx_lanes(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+{
+    /* The IDELAYE2s can only add delay and a lane shifted by a full UI lands
+     * on the wrong DDR edge, so only each lane's first eye is usable: every
+     * lane must start at-or-before its eye. Delaying the chip's DATA_CLK
+     * output (advancing all data lanes against it) moves the eyes into
+     * positive IDELAY territory; try increasing clock delays until all lanes
+     * find an error-free window. The global delay scan that follows the
+     * deskew shifts all lanes jointly, so it preserves the lane alignment. */
+    static const uint8_t clk_delays[] = {2, 3, 4, 1};
+    uint32_t errs[6][32];
+    uint8_t bist;
+    unsigned ci, tap, lane;
+    int rc = M2SDR_ERR_OK;
+
+    bist = ad9361_spi_read(phy->spi, REG_BIST_CONFIG);
+    ad9361_spi_write(phy->spi, REG_BIST_CONFIG, BIST_CTRL_POINT(2) | BIST_ENABLE);
+
+    for (ci = 0; ci < sizeof(clk_delays); ci++) {
+        unsigned center[6];
+        bool all_found = true;
+
+        ad9361_spi_write(phy->spi, REG_RX_CLOCK_DATA_DELAY, clk_delays[ci] << 4);
+        mdelay(2);
+
+        for (tap = 0; tap < 32; tap++) {
+            for (lane = 0; lane < 6; lane++) {
+                rc = m2sdr_rx_deskew_set_lane(dev, lane, tap);
+                if (rc != M2SDR_ERR_OK)
+                    goto restore;
+            }
+            /* Latch-and-clear opens the window; the second latch closes it. */
+            m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);
+            mdelay(2);
+            m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);
+            for (lane = 0; lane < 6; lane++) {
+                if (m2sdr_reg_read(dev, CSR_AD9361_RX_DESKEW_ERR0_ADDR +
+                        lane * (CSR_AD9361_RX_DESKEW_ERR1_ADDR - CSR_AD9361_RX_DESKEW_ERR0_ADDR),
+                        &errs[lane][tap]) != 0) {
+                    rc = M2SDR_ERR_IO;
+                    goto restore;
+                }
+            }
+        }
+
+        for (lane = 0; lane < 6; lane++) {
+            unsigned best_start = 0, best_run = 0, start = 0, run = 0;
+
+            for (tap = 0; tap < 32; tap++) {
+                if (errs[lane][tap] == 0) {
+                    if (run == 0)
+                        start = tap;
+                    run++;
+                    if (run > best_run) {
+                        best_run = run;
+                        best_start = start;
+                    }
+                } else {
+                    run = 0;
+                }
+            }
+            if (best_run == 0) {
+                all_found = false;
+                break;
+            }
+            center[lane] = best_start + best_run / 2;
+            M2SDR_LOGF("RX deskew: clk %u lane %u window [%u..%u] -> tap %u.\n",
+                clk_delays[ci], lane, best_start, best_start + best_run - 1, center[lane]);
+        }
+        if (!all_found) {
+            M2SDR_LOGF("RX deskew: clk %u: lane %u has no error-free tap.\n",
+                clk_delays[ci], lane);
+            continue;
+        }
+        for (lane = 0; lane < 6; lane++) {
+            rc = m2sdr_rx_deskew_set_lane(dev, lane, center[lane]);
+            if (rc != M2SDR_ERR_OK)
+                goto restore;
+        }
+        goto restore; /* rc == M2SDR_ERR_OK */
+    }
+    rc = M2SDR_ERR_IO;
+
+restore:
+    ad9361_spi_write(phy->spi, REG_BIST_CONFIG, bist);
+    return rc;
+}
+
+#ifdef CSR_AD9361_PHY_TX_PHASE_ADDR
+/* TX per-lane clock-phase alignment at the doubled DATA_CLK rate (2R2T).
+ *
+ * The TX lanes' 983Mbps eyes are mutually skewed by ~300ps with no per-lane
+ * delay primitive available on the FPGA outputs; instead each TX ODDR is
+ * clocked from an MMCM output whose static phase is re-programmed through
+ * the DRP in VCO/8 (~85ps) steps. FB_CLK's output (CLKOUT6, constant
+ * pattern) provides the unrestricted global axis; the data lanes (CLKOUT0-5)
+ * take small forward trims so the rfic-domain launch registers keep setup
+ * margin. The error metric reuses the per-lane deskew counters: with the
+ * FPGA PRBS through the chip's data-port loopback every channel slot carries
+ * the same word, so slot mismatches on an aligned RX count TX errors. */
+static const uint8_t m2sdr_mmcm_clkreg1[7] = {
+    0x08, 0x0A, 0x0C, 0x0E, 0x10, 0x06, 0x12 /* CLKOUT0..6 (XAPP888). */
+};
+
+static int m2sdr_mmcm_drp_rmw(struct m2sdr_dev *dev, unsigned adr, uint32_t mask, uint32_t val)
+{
+    uint32_t v;
+    int i;
+
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_MMCM_DRP_ADR_ADDR, adr);
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_MMCM_DRP_READ_ADDR, 1);
+    for (i = 0; i < 100; i++) {
+        if (m2sdr_reg_read(dev, CSR_AD9361_PHY_TX_MMCM_DRP_DRDY_ADDR, &v) == 0 && v)
+            break;
+    }
+    m2sdr_reg_read(dev, CSR_AD9361_PHY_TX_MMCM_DRP_DAT_R_ADDR, &v);
+    v = (v & ~mask) | (val & mask);
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_MMCM_DRP_DAT_W_ADDR, v);
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_MMCM_DRP_WRITE_ADDR, 1);
+    for (i = 0; i < 100; i++) {
+        if (m2sdr_reg_read(dev, CSR_AD9361_PHY_TX_MMCM_DRP_DRDY_ADDR, &v) == 0 && v)
+            return M2SDR_ERR_OK;
+    }
+    return M2SDR_ERR_IO;
+}
+
+/* Set a CLKOUT's phase: phase_mux in VCO/8 (~85ps at the 1474.56MHz VCO)
+ * steps plus delay_time in whole VCO cycles (~678ps). The calibration trims
+ * with phase_mux only; delay_time is written so the clean-slate pass clears
+ * values persisting in the DRP from earlier configurations. */
+static int m2sdr_tx_phase_write_full(struct m2sdr_dev *dev, unsigned clkout,
+                                     unsigned phase_mux, unsigned delay_time)
+{
+    uint32_t v;
+    int i;
+    int rc;
+
+    /* Hold the MMCM in reset around the DRP access (XAPP888). */
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_PHASE_ADDR,
+        (1u << CSR_AD9361_PHY_TX_PHASE_EN_OFFSET) |
+        (1u << CSR_AD9361_PHY_TX_PHASE_MMCM_RESET_OFFSET));
+    rc = m2sdr_mmcm_drp_rmw(dev, m2sdr_mmcm_clkreg1[clkout],
+        0x7u << 13, (uint32_t)(phase_mux & 0x7) << 13);
+    if (rc == M2SDR_ERR_OK)
+        rc = m2sdr_mmcm_drp_rmw(dev, m2sdr_mmcm_clkreg1[clkout] + 1,
+            0x3Fu, delay_time & 0x3F);
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_PHASE_ADDR,
+        (1u << CSR_AD9361_PHY_TX_PHASE_EN_OFFSET));
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    for (i = 0; i < 200; i++) {
+        if (m2sdr_reg_read(dev, CSR_AD9361_PHY_TX_MMCM_DRP_LOCKED_ADDR, &v) == 0 && v)
+            return M2SDR_ERR_OK;
+        mdelay(1);
+    }
+    return M2SDR_ERR_IO;
+}
+
+static int m2sdr_tx_phase_write(struct m2sdr_dev *dev, unsigned clkout, unsigned phase_mux)
+{
+    return m2sdr_tx_phase_write_full(dev, clkout, phase_mux, 0);
+}
+
+static int m2sdr_tx_phase_align(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+{
+    uint32_t errs[6][8][8];
+    uint32_t saved_prbs_tx = 0;
+    uint8_t obs;
+    unsigned fb, trim, lane, best_fb = 0, best_fb_score = 0;
+    int rc = M2SDR_ERR_OK;
+    uint32_t v;
+
+    if (m2sdr_reg_read(dev, CSR_AD9361_PHY_TX_MMCM_DRP_LOCKED_ADDR, &v) != 0 || !v) {
+        M2SDR_LOGF("TX phase align: MMCM not locked, skipping.\n");
+        return M2SDR_ERR_IO;
+    }
+    if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_TX_ADDR, &saved_prbs_tx) != 0)
+        return M2SDR_ERR_IO;
+    obs = ad9361_spi_read(phy->spi, REG_OBSERVE_CONFIG);
+
+    /* Clean DRP slate: phases and whole-cycle delays persist across
+     * configurations. */
+    for (lane = 0; lane < 7; lane++) {
+        rc = m2sdr_tx_phase_write_full(dev, lane, 0, 0);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+
+    /* Known-good global chip tap; the FB_CLK phase does the fine centering. */
+    (void)m2sdr_program_delay_reg(phy, true, 0, 2, false);
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG,
+        (uint8_t)((obs & ~DATA_PORT_SP_HD_LOOP_TEST_OE) | DATA_PORT_LOOP_TEST_ENABLE));
+    (void)m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+    m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_PHASE_ADDR,
+        (1u << CSR_AD9361_PHY_TX_PHASE_EN_OFFSET));
+
+    for (fb = 0; fb < 8; fb++) {
+        rc = m2sdr_tx_phase_write(dev, 6, fb);
+        if (rc != M2SDR_ERR_OK)
+            goto restore;
+        for (trim = 0; trim < 8; trim++) {
+            for (lane = 0; lane < 6; lane++) {
+                rc = m2sdr_tx_phase_write(dev, lane, trim);
+                if (rc != M2SDR_ERR_OK)
+                    goto restore;
+            }
+            /* Latch-and-clear opens the window; the second latch closes it. */
+            m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);
+            mdelay(2);
+            m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);
+            for (lane = 0; lane < 6; lane++) {
+                if (m2sdr_reg_read(dev, CSR_AD9361_RX_DESKEW_ERR0_ADDR +
+                        lane * (CSR_AD9361_RX_DESKEW_ERR1_ADDR - CSR_AD9361_RX_DESKEW_ERR0_ADDR),
+                        &errs[lane][fb][trim]) != 0) {
+                    rc = M2SDR_ERR_IO;
+                    goto restore;
+                }
+            }
+        }
+    }
+
+    /* Choose the global FB phase maximizing lanes with an error-free trim. */
+    for (fb = 0; fb < 8; fb++) {
+        unsigned score = 0;
+        for (lane = 0; lane < 6; lane++)
+            for (trim = 0; trim < 8; trim++)
+                if (errs[lane][fb][trim] == 0) {
+                    score++;
+                    break;
+                }
+        if (score > best_fb_score) {
+            best_fb_score = score;
+            best_fb = fb;
+        }
+    }
+    M2SDR_LOGF("TX phase align: FB phase %u, %u/6 lanes with a clean trim.\n",
+        best_fb, best_fb_score);
+    rc = m2sdr_tx_phase_write(dev, 6, best_fb);
+    if (rc != M2SDR_ERR_OK)
+        goto restore;
+    for (lane = 0; lane < 6; lane++) {
+        unsigned best_trim = 0;
+        uint32_t best_err = 0xFFFFFFFF;
+        for (trim = 0; trim < 8; trim++)
+            if (errs[lane][best_fb][trim] < best_err) {
+                best_err = errs[lane][best_fb][trim];
+                best_trim = trim;
+            }
+        M2SDR_LOGF("TX phase align: lane %u trim %u (errs %u).\n", lane, best_trim, best_err);
+        rc = m2sdr_tx_phase_write(dev, lane, best_trim);
+        if (rc != M2SDR_ERR_OK)
+            goto restore;
+    }
+    /* The per-lane counters are the authoritative alignment metric here: the
+     * sequence-exact PRBS checker cannot verify this direction because the
+     * chip's data-port loopback observer runs at the chip's internal
+     * (pre-oversampling) clock view and decimates the word stream, so it
+     * never syncs at this rate even with bit-clean lanes. */
+    if (best_fb_score < 6)
+        rc = M2SDR_ERR_IO;
+
+restore:
+    (void)m2sdr_write_prbs_tx_ctrl(dev, saved_prbs_tx);
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG, obs);
+    return rc;
+}
+#endif
+
+/* TX interface tune at the doubled DATA_CLK rate.
+ *
+ * Sweeps the chip's global TX data delay (FB_CLK delay stays 0, so no ENSM
+ * round-trips that would re-roll the interface framing) and checks each
+ * point with the FPGA PRBS through the chip's data-port loopback. Candidates
+ * are ordered by measured likelihood. Requires an already-aligned RX. */
+static int m2sdr_tune_tx_delay(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+{
+    static const uint8_t dat_delays[] = {1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint32_t saved_prbs_tx = 0;
+    uint8_t obs;
+    bool synced = false;
+    unsigned di;
+    int i;
+
+    if (m2sdr_reg_read(dev, CSR_AD9361_PRBS_TX_ADDR, &saved_prbs_tx) != 0)
+        return M2SDR_ERR_IO;
+    obs = ad9361_spi_read(phy->spi, REG_OBSERVE_CONFIG);
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG,
+        (uint8_t)((obs & ~DATA_PORT_SP_HD_LOOP_TEST_OE) | DATA_PORT_LOOP_TEST_ENABLE));
+
+    for (di = 0; di < sizeof(dat_delays) && !synced; di++) {
+        if (m2sdr_program_delay_reg(phy, true, 0, dat_delays[di], false) != M2SDR_ERR_OK)
+            break;
+        (void)m2sdr_write_prbs_tx_ctrl(dev, 0);
+        mdelay(2);
+        (void)m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+        for (i = 0; i < 12 && !synced; i++) {
+            mdelay(5);
+            (void)m2sdr_read_prbs_synced(dev, &synced);
+        }
+        if (synced)
+            M2SDR_LOGF("TX delay tune: Clk 0, Dat %u verified.\n", dat_delays[di]);
+    }
+    if (!synced)
+        M2SDR_LOGF("TX delay tune: no working TX delay found.\n");
+
+    (void)m2sdr_write_prbs_tx_ctrl(dev, saved_prbs_tx);
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG, obs);
+    return synced ? M2SDR_ERR_OK : M2SDR_ERR_IO;
+}
+#endif
+
 /* In-mode digital interface alignment verify for the wide-bandwidth mode.
  *
  * The doubled-DATA_CLK interface can come up misaligned (the capture lands
@@ -1091,6 +1448,41 @@ static int m2sdr_wide_bandwidth_verify(struct m2sdr_dev *dev)
     return synced ? M2SDR_ERR_OK : M2SDR_ERR_IO;
 }
 
+#if defined(CSR_AD9361_RX_DESKEW_CTRL_ADDR) && defined(CSR_AD9361_PRBS_TX_ADDR)
+/* Cable-free 2R2T TX-framing self-check. At the doubled DATA_CLK the chip's 8-way TX de-interleave
+ * locks to one of several phases each bringup; ~20% land wrong (a clean tone then splatters to fs/2).
+ * Detect a wrong lock WITHOUT any external loopback: run the FPGA PRBS through the AD9361 data-port
+ * loop test - a framing slip breaks the PRBS *sequence*, so the per-lane RX-deskew error counters go
+ * nonzero (validated: sum==0 <-> clean, sum~1e6 <-> degraded, every bringup). The loop test disturbs
+ * only the RX capture (caller re-deskews after) and preserves the TX de-interleave lock; a single
+ * check does not corrupt a good lock. Returns true if the TX framing is good. Clears PRBS/loop. */
+static bool m2sdr_tx_framing_ok(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
+{
+    uint32_t sum = 0, e;
+    uint8_t obs;
+    unsigned lane;
+
+    obs = ad9361_spi_read(phy->spi, REG_OBSERVE_CONFIG);
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG,
+        (uint8_t)((obs & ~DATA_PORT_SP_HD_LOOP_TEST_OE) | DATA_PORT_LOOP_TEST_ENABLE));
+    (void)m2sdr_write_prbs_tx_ctrl(dev, 1u << CSR_AD9361_PRBS_TX_ENABLE_OFFSET);
+    mdelay(3);
+    m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);  /* open error window */
+    mdelay(3);
+    m2sdr_reg_write(dev, CSR_AD9361_RX_DESKEW_CTRL_ADDR, 1);  /* close window / latch */
+    for (lane = 0; lane < 6; lane++) {
+        if (m2sdr_reg_read(dev, CSR_AD9361_RX_DESKEW_ERR0_ADDR +
+                lane * (CSR_AD9361_RX_DESKEW_ERR1_ADDR - CSR_AD9361_RX_DESKEW_ERR0_ADDR), &e) == 0)
+            sum += e;
+    }
+    (void)m2sdr_write_prbs_tx_ctrl(dev, 0);
+    m2sdr_reg_write(dev, CSR_AD9361_PRBS_TX_ADDR, 0);   /* clear explicitly (stuck PRBS = garbage TX) */
+    ad9361_spi_write(phy->spi, REG_OBSERVE_CONFIG,
+        (uint8_t)(obs & ~(DATA_PORT_LOOP_TEST_ENABLE | DATA_PORT_SP_HD_LOOP_TEST_OE)));
+    return sum == 0;
+}
+#endif
+
 /* Program the AD9361 sampling clocks for the wide-bandwidth mode and verify
  * the doubled-rate interface, retrying in place: the interface framing phase
  * is re-rolled by each clock programming, so a misaligned outcome is
@@ -1102,16 +1494,71 @@ static int m2sdr_wide_bandwidth_bringup(struct m2sdr_dev *dev,
 {
     int rc = M2SDR_ERR_IO;
     int try_;
+    /* Native overclock (M2SDR_OC_NATIVE): program the chip at the FULL rate
+     * with its normal div=4 clock chain (ADC 491.52 / DAC 245.76 / BBPLL
+     * 983.04, all in spec) instead of the 61.44 + 2x-port bypass trick. The
+     * 2x-port trick mis-handles the 2R2T port timing (the chip's sample-rate
+     * notion stays 61.44 while the port runs 2x, so the 2-channel demux
+     * splatters); at native rate the 2R2T demux runs exactly as it does in
+     * spec, only clocked 2x. Analog BBF widening still applies; the digital
+     * half-bands are kept (one fewer than in-spec, the div=4 chain) so they
+     * perform the channel demux. */
+    int native = getenv("M2SDR_OC_NATIVE") != NULL;
 
     for (try_ = 1; try_ <= 20; try_++) {
         if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, ad9361_rate)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_sampling_freq(phy, ad9361_rate)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
-        ad9361_enable_oversampling(phy);
+        if (native)
+            (void)ad9361_wide_bbf_tune(phy, getenv("M2SDR_OC_BBF_TUNE") ?
+                (uint32_t)strtoul(getenv("M2SDR_OC_BBF_TUNE"), NULL, 0) : 39000000u);
+        else
+            ad9361_enable_oversampling(phy);
+#ifdef CSR_AD9361_RX_DESKEW_IDELAY_ADDR
+        /* 2R2T at the doubled rate runs 983Mbps per lane, where lane-to-lane
+         * skew exceeds the eye; deskew per-lane before checking alignment
+         * (2R2T only: the metric needs identical words in both slots). In
+         * 1R1T the taps must be zero: the lane rate stays in spec there and
+         * the bringup's chip-side delays assume undelayed lanes, but taps
+         * from an earlier 2R2T configuration persist in the IDELAYE2s. */
+        {
+            uint32_t phy_control = 0;
+
+            (void)m2sdr_reg_read(dev, CSR_AD9361_PHY_CONTROL_ADDR, &phy_control);
+            if (!(phy_control & (1u << CSR_AD9361_PHY_CONTROL_MODE_OFFSET))) {
+                (void)m2sdr_deskew_rx_lanes(dev, phy);
+            } else {
+                unsigned lane;
+
+                for (lane = 0; lane < 6; lane++)
+                    (void)m2sdr_rx_deskew_set_lane(dev, lane, 0);
+#ifdef CSR_AD9361_PHY_TX_PHASE_ADDR
+                /* 1R1T wide mode runs DATA_CLK at 245.76MHz: the TX phase
+                 * MMCM is unlocked there, keep the bypass selected. */
+                m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_PHASE_ADDR, 0);
+#endif
+            }
+        }
+#endif
         rc = m2sdr_wide_bandwidth_verify(dev);
         if (rc == M2SDR_ERR_OK) {
             M2SDR_LOGF("Wide-bandwidth interface verified aligned (try %d).\n", try_);
+#ifdef CSR_AD9361_RX_DESKEW_IDELAY_ADDR
+            /* The FPGA->chip direction needs its own delay at the doubled
+             * rate (2R2T only; in 1R1T the interface rate stays in spec). */
+            {
+                uint32_t phy_control = 0;
+
+                (void)m2sdr_reg_read(dev, CSR_AD9361_PHY_CONTROL_ADDR, &phy_control);
+                if (!(phy_control & (1u << CSR_AD9361_PHY_CONTROL_MODE_OFFSET))) {
+#ifdef CSR_AD9361_PHY_TX_PHASE_ADDR
+                    if (m2sdr_tx_phase_align(dev, phy) != M2SDR_ERR_OK)
+#endif
+                        (void)m2sdr_tune_tx_delay(dev, phy);
+                }
+            }
+#endif
             /* RX quadrature tracking loop gain: at the driver default
              * (K exp 0x15) the loop is effectively inert in this mode and
              * the image rejection settles at ~23-28dBc - a direct 3.5-7%
@@ -1279,6 +1726,7 @@ void m2sdr_config_init(struct m2sdr_config *cfg)
     cfg->sample_rate       = DEFAULT_SAMPLERATE;
     cfg->bandwidth         = DEFAULT_BANDWIDTH;
     cfg->refclk_freq       = DEFAULT_REFCLK_FREQ;
+    cfg->refclk_ppm        = 0;
     cfg->tx_freq           = DEFAULT_TX_FREQ;
     cfg->rx_freq           = DEFAULT_RX_FREQ;
     cfg->tx_att            = DEFAULT_TX_ATT;
@@ -1332,6 +1780,7 @@ static bool m2sdr_configs_equal(const struct m2sdr_config *a,
     return a->sample_rate == b->sample_rate &&
            a->bandwidth == b->bandwidth &&
            a->refclk_freq == b->refclk_freq &&
+           a->refclk_ppm == b->refclk_ppm &&
            a->tx_freq == b->tx_freq &&
            a->rx_freq == b->rx_freq &&
            a->tx_att == b->tx_att &&
@@ -1383,6 +1832,94 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
     if (phy)
         tls_rf_dev = dev;
 
+    return M2SDR_ERR_OK;
+}
+
+/* Configure the datapath for one bring-up attempt: sample rate, bandwidth, frequencies, FIR
+ * tables, gains, modes, optional interface-delay calibration, BIST, then the rate-dependent
+ * interface - the wide-bandwidth doubled-rate bring-up above 61.44 MSPS, or the in-spec delay
+ * programming below it. Factored out of m2sdr_apply_config so the 2R2T@122.88 TX-framing re-roll
+ * can re-run the whole sequence in a loop (see the caller). */
+static int m2sdr_configure_datapath(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy,
+                                    const struct m2sdr_config *cfg,
+                                    enum m2sdr_channel_layout channel_layout)
+{
+    int rc;
+
+    rc = m2sdr_configure_samplerate(phy, cfg, channel_layout);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    rc = m2sdr_configure_bandwidth(phy, cfg);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    rc = m2sdr_configure_frequencies(phy, cfg);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    /* Re-apply the default FIR tables after the sample-rate step so the
+     * AD9361 state stays aligned with the shipped utility behavior. */
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_config)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    rc = m2sdr_configure_gains(phy, cfg, channel_layout);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    rc = m2sdr_configure_modes(dev, phy, cfg);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (cfg->calibrate_interface_delay) {
+        rc = m2sdr_calibrate_interface_delay(dev, phy);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+    rc = m2sdr_run_bist(cfg, dev, phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    /* Applied last: above the AD9361 clock-chain limit the chip ran at half
+     * rate so far; now switch the data port to 2x and open the analog
+     * passband to ~100 MHz (wide-bandwidth mode). The caller verifies the
+     * doubled-rate interface and re-rolls this whole sequence if misaligned. */
+    if (cfg->sample_rate > 61440000) {
+        uint32_t ad9361_rate;
+
+        M2SDR_LOGF("Applying wide-bandwidth mode (AD9361 oversampling + BBF widening).\n");
+        rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate,
+            getenv("M2SDR_OC_NATIVE") == NULL, &ad9361_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        rc = m2sdr_wide_bandwidth_bringup(dev, phy, ad9361_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
+#ifdef CSR_AD9361_RX_DESKEW_IDELAY_ADDR
+    else {
+        /* In-spec rates on the deskew-capable gateware: the per-lane RX
+         * IDELAYE2s add ~0.6ns of insertion delay that the chip's init-table
+         * interface delays predate, leaving the interface misaligned
+         * (full-scale noise captures). Apply the PRBS-calibrated midpoints
+         * (clk 4 / data 3 RX, clk 6 / data 7 TX, measured at DATA_CLK
+         * 245.76MHz) and zero any per-lane taps left by an earlier
+         * wide-mode configuration. */
+        unsigned lane;
+
+        rc = m2sdr_program_delay_reg(phy, false, 4, 3, true);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        rc = m2sdr_program_delay_reg(phy, true, 6, 7, true);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        for (lane = 0; lane < 6; lane++)
+            (void)m2sdr_rx_deskew_set_lane(dev, lane, 0);
+#ifdef CSR_AD9361_PHY_TX_PHASE_ADDR
+        /* The TX clock-phase mux persists across configurations; off the
+         * 491.52MHz DATA_CLK the MMCM is unlocked and its leg is dead. */
+        m2sdr_reg_write(dev, CSR_AD9361_PHY_TX_PHASE_ADDR, 0);
+#endif
+    }
+#endif
     return M2SDR_ERR_OK;
 }
 
@@ -1474,53 +2011,50 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     /* Wide-bandwidth (2x data port) is selected by the requested rate. */
     dev->rf_oversample_enabled = (cfg->sample_rate > 61440000) ? 1 : 0;
 
-    rc = m2sdr_configure_samplerate(phy, cfg, channel_layout);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-    rc = m2sdr_configure_bandwidth(phy, cfg);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-    rc = m2sdr_configure_frequencies(phy, cfg);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
+    /* Configure the datapath, re-rolling the whole sequence on a 2R2T@122.88 TX-framing mis-lock:
+     * at the doubled DATA_CLK the chip's 8-way TX de-interleave locks to one of several phases
+     * (~20% wrong), and the only thing that reliably re-rolls it is a full SPI re-init + re-run (an
+     * in-place clock re-program does not). Bounded to 12 re-rolls; the base build has no framing
+     * self-check, so it configures once. */
+#if defined(CSR_AD9361_RX_DESKEW_CTRL_ADDR) && defined(CSR_AD9361_PRBS_TX_ADDR)
+    for (unsigned fr_attempts = 0; ; fr_attempts++) {
+        if (fr_attempts > 0) {
+            /* Re-roll: a full SPI re-init (GPIO reset masked to avoid the mid-session reset
+             * timeout, like the layout-switch path) re-establishes the data-port framing. The old
+             * phy is leaked (the no-OS ADI driver has no cleanup entry point; retries are bounded). */
+            AD9361_InitParam reinit_param = *init_param;
+            struct ad9361_rf_phy *new_phy = NULL;
 
-    /* Re-apply the default FIR tables after the sample-rate step so the
-     * AD9361 state stays aligned with the shipped utility behavior. */
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
-    rc = m2sdr_configure_gains(phy, cfg, channel_layout);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-    rc = m2sdr_configure_modes(dev, phy, cfg);
-    if (rc != M2SDR_ERR_OK)
-        return rc;
-    if (cfg->calibrate_interface_delay) {
-        rc = m2sdr_calibrate_interface_delay(dev, phy);
+            reinit_param.gpio_resetb = -1;
+            if (m2sdr_from_ad9361_rc(ad9361_init(&new_phy, &reinit_param, 1)) != M2SDR_ERR_OK || !new_phy)
+                return M2SDR_ERR_IO;
+            dev->ad9361_phy = new_phy;
+            phy = new_phy;
+        }
+        rc = m2sdr_configure_datapath(dev, phy, cfg, channel_layout);
         if (rc != M2SDR_ERR_OK)
             return rc;
+
+        /* Verify the 2R2T TX de-interleave lock cable-free; a mis-lock re-runs the whole sequence.
+         * On a good lock the check disturbed only the RX capture, so re-deskew RX to recover it (the
+         * TX lock is preserved). Once the bound is hit, proceed with the last attempt. */
+        if (cfg->sample_rate > 61440000 && channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R) {
+            if (!m2sdr_tx_framing_ok(dev, phy) && fr_attempts < 12) {
+                M2SDR_LOGF("TX framing mis-locked (attempt %u), re-rolling.\n", fr_attempts + 1);
+                continue;
+            }
+            M2SDR_LOGF("TX framing verified (attempt %u).\n", fr_attempts);
+#ifdef CSR_AD9361_RX_DESKEW_IDELAY_ADDR
+            (void)m2sdr_deskew_rx_lanes(dev, phy);
+#endif
+        }
+        break;
     }
-    rc = m2sdr_run_bist(cfg, dev, phy);
+#else
+    rc = m2sdr_configure_datapath(dev, phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
-
-    /* Applied last: above the AD9361 clock-chain limit the chip ran at half
-     * rate so far; now switch the data port to 2x and open the analog
-     * passband to ~100 MHz (wide-bandwidth mode), verified and retried in
-     * place until the doubled-rate interface comes up aligned. */
-    if (cfg->sample_rate > 61440000) {
-        uint32_t ad9361_rate;
-
-        M2SDR_LOGF("Applying wide-bandwidth mode (AD9361 oversampling + BBF widening).\n");
-        rc = m2sdr_stream_to_ad9361_sample_rate(cfg->sample_rate, true, &ad9361_rate);
-        if (rc != M2SDR_ERR_OK)
-            return rc;
-        rc = m2sdr_wide_bandwidth_bringup(dev, phy, ad9361_rate);
-        if (rc != M2SDR_ERR_OK)
-            return rc;
-    }
+#endif
 
     m2sdr_store_applied_config(dev, cfg);
     return M2SDR_ERR_OK;
@@ -1553,6 +2087,8 @@ int m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
 }
 
 /* Program one LO frequency on the already-initialized AD9361 instance. */
+static void m2sdr_apply_rx_qec_kexp(struct ad9361_rf_phy *phy);
+
 int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq)
 {
     struct ad9361_rf_phy *phy;
@@ -1573,9 +2109,27 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
     } else {
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
+        /* The RX LO retune re-runs the AD9361 quad cal, which reverts the QEC
+         * loop gain to the inert default; re-apply the fix so it sticks. */
+        m2sdr_apply_rx_qec_kexp(phy);
     }
 
     return M2SDR_ERR_OK;
+}
+
+/* Apply the RX quadrature-tracking loop gain (K_exp). The AD9361 driver default
+ * (0x15) leaves the loop inert -> ~25 dBc image rejection = a 3.5-7% EVM floor
+ * that corrupts wideband PDSCH LDPC (coherent image, HARQ-combining can't help);
+ * 0x0a converges to ~40-43 dBc. Previously applied ONLY in the wide-BW bring-up,
+ * so normal-rate RX missed it. M2SDR_QEC_KEXP overrides. */
+static void m2sdr_apply_rx_qec_kexp(struct ad9361_rf_phy *phy)
+{
+    const char *s = getenv("M2SDR_QEC_KEXP");
+    uint8_t kexp = s ? (uint8_t)(strtoul(s, NULL, 0) & 0x1F) : 0x0a;
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_2,
+        CALIBRATION_CONFIG2_DFLT | K_EXP_PHASE(kexp));
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_3,
+        PREVENT_POS_LOOP_GAIN | K_EXP_AMPLITUDE(kexp));
 }
 
 /* Program a common sample rate on both RX and TX paths. */
@@ -1638,6 +2192,45 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
+}
+
+/* Trim the SI5351 PLL to compensate a measured reference clock error. */
+int m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm)
+{
+#ifdef CSR_SI5351_BASE
+    const uint8_t (*si5351_config)[2];
+    size_t si5351_length;
+    void *conn;
+
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    /* Written to also reject NaN. */
+    if (!(ppm >= -M2SDR_REFCLK_PPM_MAX && ppm <= M2SDR_REFCLK_PPM_MAX))
+        return M2SDR_ERR_RANGE;
+    /* The nominal SI5351 table is recovered from the last applied RF config;
+     * without it the active clock topology is unknown. */
+    if (!dev->rf_last_config_valid)
+        return M2SDR_ERR_STATE;
+
+    conn = m2sdr_conn(dev);
+    if (!m2sdr_si5351_i2c_check_litei2c(conn))
+        return M2SDR_ERR_UNSUPPORTED;
+
+    m2sdr_si5351_select_config(dev->rf_last_config.clock_source,
+                               dev->rf_last_config.refclk_freq,
+                               &si5351_config, &si5351_length);
+    M2SDR_LOGF("Trimming SI5351 PLL by %.3f ppm.\n", ppm);
+    if (!m2sdr_si5351_i2c_trim_pllb_ppm(conn, SI5351_I2C_ADDR,
+        si5351_config, si5351_length, ppm))
+        return m2sdr_transport_error(dev);
+
+    dev->rf_last_config.refclk_ppm = ppm;
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)ppm;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
 }
 
 int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,

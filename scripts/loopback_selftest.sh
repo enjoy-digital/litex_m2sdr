@@ -42,8 +42,18 @@ cc -O3 -Wall -Wextra -o "$ENGINE" "$REPO/scripts/loopback_selftest.c" \
    -I"$LIBDIR" -I"$KERNDIR" "$LIBDIR/libm2sdr.a" -lm -lpthread || exit 1
 
 # name | engine args
-# 2T2R @ 122.88 is RX-only: the AD9361 TX datapath scrambles in the
-# 2R2T-oversampled mode (chip-internal limitation, see RESULTS_overclock.md).
+#
+# The matrix is split by the gateware build that can run each config, because
+# TX has no single bitstream that covers every rate:
+#   - STANDARD build (default, non-oversampling): TX+RX for every rate whose
+#     DATA_CLK stays <= 245.76MHz - i.e. all 1T1R rates and 2T2R <= 61.44. These
+#     are CONFIGS below.
+#   - OVERSAMPLING+OSERDES build (M2SDR_TX_OSERDES=1 --with-rfic-oversampling):
+#     the only build that transmits at 2T2R@122.88 (DATA_CLK 491.52MHz, 983Mbps
+#     lanes via the OSERDESE2 serializer). Its TX MMCM locks ONLY at 491.52, so
+#     it does NOT transmit at the lower rates. These are OVERSAMPLING_CONFIGS.
+# Flash the matching build, then run this script with --config to pick configs
+# that build supports (or plain, which runs the group for the default build).
 CONFIGS=(
     "1t1r-30.72-sc16  | --layout 1t1r --rate 30720000  "
     "1t1r-61.44-sc16  | --layout 1t1r --rate 61440000  "
@@ -51,14 +61,21 @@ CONFIGS=(
     "1t1r-122.88-sc16 | --layout 1t1r --rate 122880000 "
     "1t1r-122.88-sc8  | --layout 1t1r --rate 122880000 --sc8"
 )
-# KNOWN LIMITATION (run on demand with --config 2t2r-122.88-rx): 2T2R @
-# 122.88 MSPS RX-to-host drops ~17% of samples regardless of format (sc16
-# and sc8 both measure ~1.208x the nominal buffer period): the sys-domain
-# RX datapath tops out at ~101.7M frames/s. The FPGA<->AD9361 interface is
-# clean at this rate (PRBS/deskew verified); the ceiling is internal, and
-# only the DMA-header timestamps make the loss visible. TX is additionally
-# blocked chip-internally (see RESULTS_overclock.md), hence --no-tx.
-EXTRA_CONFIGS=(
+# Oversampling+OSERDES build only (run on demand: --config 2t2r-122.88[-*]).
+# 2t2r-122.88     : full TX+RX loopback - the OSERDESE2 TX path now transmits
+#                   here (was previously believed chip-blocked; the real cause
+#                   was the ODDR TX eye at 983Mbps, fixed by the serializer).
+# 2t2r-122.88-rx  : RX-only, to isolate the host-RX drop ceiling from TX. At
+#                   2T2R@122.88 the RX-to-host path drops ~17% of samples (sc8
+#                   and sc16 both measure ~1.208x the nominal buffer period):
+#                   the sys-domain RX datapath tops out at ~101.7M frames/s. The
+#                   FPGA<->AD9361 link is clean (PRBS/deskew verified); the
+#                   ceiling is internal and only the DMA-header timestamps make
+#                   the loss visible. This drop also perturbs the full-loopback
+#                   sample-continuity check, so treat 2t2r-122.88 TX results via
+#                   the tone/SNR metrics, not strict phase continuity.
+OVERSAMPLING_CONFIGS=(
+    "2t2r-122.88      | --layout 2t2r --rate 122880000 --sc8"
     "2t2r-122.88-rx   | --layout 2t2r --rate 122880000 --no-tx --sc8"
 )
 if [ "$QUICK" = 1 ]; then
@@ -70,15 +87,15 @@ fi
 
 declare -A RESULT
 FAILED=0
-for entry in "${CONFIGS[@]}" "${EXTRA_CONFIGS[@]}"; do
+for entry in "${CONFIGS[@]}" "${OVERSAMPLING_CONFIGS[@]}"; do
     name="${entry%%|*}"; name="${name// /}"
     args="${entry#*|}"
     if [ -n "$ONLY" ]; then
         [ "$name" != "$ONLY" ] && continue
     else
-        # EXTRA_CONFIGS run only when explicitly selected.
+        # OVERSAMPLING_CONFIGS run only when explicitly selected.
         skip_extra=0
-        for x in "${EXTRA_CONFIGS[@]}"; do
+        for x in "${OVERSAMPLING_CONFIGS[@]}"; do
             xn="${x%%|*}"; xn="${xn// /}"
             [ "$name" = "$xn" ] && skip_extra=1
         done
@@ -97,7 +114,7 @@ done
 
 echo
 echo "===== summary ====="
-for entry in "${CONFIGS[@]}" "${EXTRA_CONFIGS[@]}"; do
+for entry in "${CONFIGS[@]}" "${OVERSAMPLING_CONFIGS[@]}"; do
     name="${entry%%|*}"; name="${name// /}"
     [ -z "${RESULT[$name]:-}" ] && continue
     printf "%-20s %s\n" "$name" "${RESULT[$name]}"

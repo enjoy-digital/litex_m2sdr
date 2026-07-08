@@ -134,9 +134,9 @@ class TimeGenerator(LiteXModule):
         self.specials += MultiReg(self._control.fields.sync_enable, self.sync_enable)
 
         # Time Read (FPGA -> SW). The full 64-bit snapshot crosses through one
-        # handshaked crossing: per-bit synchronizers would let software observe
-        # torn values while the snapshot settles (the C library used to need a
-        # multi-attempt stable-read workaround for exactly this).
+        # handshaked crossing so software reads it atomically; per-bit
+        # synchronizers would let software observe torn values while the
+        # snapshot settles.
         time_read_ps = PulseSynchronizer("sys", "time")
         self.submodules += time_read_ps
         self.comb += time_read_ps.i.eq(self._control.fields.read)
