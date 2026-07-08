@@ -41,5 +41,9 @@ bool m2sdr_si5351_i2c_check_litei2c(void *conn);
 /* Apply one of the predefined SI5351 register tables from m2sdr_config.h. */
 bool m2sdr_si5351_i2c_config_checked(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
 void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length);
+/* Rescale the PLLB feedback multiplier of a running SI5351 to compensate a
+ * measured reference error in ppm. i2c_config/i2c_length must be the nominal
+ * register table the device was configured with. */
+bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length, double ppm);
 
 #endif /* M2SDR_LIB_SI5351_I2C_H */

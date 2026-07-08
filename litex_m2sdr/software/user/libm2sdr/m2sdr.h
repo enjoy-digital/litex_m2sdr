@@ -547,6 +547,9 @@ struct m2sdr_agc_counter_config {
     uint16_t threshold;
 };
 
+/* Maximum accepted |refclk_ppm| reference clock correction. */
+#define M2SDR_REFCLK_PPM_MAX 100.0
+
 /* RF configuration (matches existing utilities defaults) */
 struct m2sdr_config {
     /* Common TX/RX sample rate in SPS. */
@@ -555,6 +558,10 @@ struct m2sdr_config {
     int64_t bandwidth;
     /* AD9361 reference clock in Hz. */
     int64_t refclk_freq;
+    /* Measured reference clock error in ppm (positive = clock runs fast).
+     * Compensated by trimming the SI5351 PLL feedback multiplier, so the
+     * AD9361 reference and all derived clocks are corrected together. */
+    double  refclk_ppm;
     /* TX LO in Hz. */
     int64_t tx_freq;
     /* RX LO in Hz. */
@@ -749,6 +756,13 @@ int  m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
 int  m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq);
 int  m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate);
 int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
+/* Trim the SI5351 PLL to compensate a measured reference clock error in ppm
+ * (positive = reference runs fast). The correction is always relative to the
+ * nominal clock tree and pulls all SI5351-derived clocks together, without
+ * resetting the PLL, so it can track a slowly drifting reference at runtime.
+ * Requires a prior m2sdr_apply_config() so the active clock topology is
+ * known. */
+int  m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
 /* Switch the 1T1R/2T2R channel layout. Re-initializes the AD9361 from the
  * shared init parameters (the device must have completed RF bring-up once),
