@@ -1099,7 +1099,7 @@ static unsigned int litepcie_poll(struct file *file, poll_table *wait)
 		chan->dma.reader_hw_count, chan->dma.reader_sw_count);
 #endif
 
-	if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 2)
+	if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0)
 		mask |= POLLIN | POLLRDNORM;
 
 	if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2)
