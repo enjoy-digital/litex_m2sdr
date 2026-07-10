@@ -1553,6 +1553,8 @@ int m2sdr_apply_config_if_needed(struct m2sdr_dev *dev,
 }
 
 /* Program one LO frequency on the already-initialized AD9361 instance. */
+static void m2sdr_apply_rx_qec_kexp(struct ad9361_rf_phy *phy);
+
 int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, uint64_t freq)
 {
     struct ad9361_rf_phy *phy;
@@ -1573,9 +1575,26 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
     } else {
         if (m2sdr_from_ad9361_rc(ad9361_set_rx_lo_freq(phy, freq)) != M2SDR_ERR_OK)
             return M2SDR_ERR_IO;
+        /* The RX LO retune re-runs the AD9361 quad cal, which reverts the QEC
+         * loop gain to the inert default; re-apply the fix so it sticks. */
+        m2sdr_apply_rx_qec_kexp(phy);
     }
 
     return M2SDR_ERR_OK;
+}
+
+/* Apply the RX quadrature-tracking loop gain (K_exp). The AD9361 driver default
+ * (0x15) leaves the loop inert -> ~25 dBc image rejection = a 3.5-7% EVM floor
+ * that corrupts wideband PDSCH LDPC (coherent image, HARQ-combining cannot help);
+ * 0x0a converges to ~40-43 dBc. M2SDR_QEC_KEXP overrides. */
+static void m2sdr_apply_rx_qec_kexp(struct ad9361_rf_phy *phy)
+{
+    const char *s = getenv("M2SDR_QEC_KEXP");
+    uint8_t kexp = s ? (uint8_t)(strtoul(s, NULL, 0) & 0x1F) : 0x0a;
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_2,
+        CALIBRATION_CONFIG2_DFLT | K_EXP_PHASE(kexp));
+    ad9361_spi_write(phy->spi, REG_CALIBRATION_CONFIG_3,
+        PREVENT_POS_LOOP_GAIN | K_EXP_AMPLITUDE(kexp));
 }
 
 /* Program a common sample rate on both RX and TX paths. */
