@@ -884,6 +884,16 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                   struct m2sdr_metadata *meta,
                   unsigned timeout_ms);
 
+/* Current TX ring lead (host-submitted-but-not-yet-transmitted DMA buffers) — the
+ * free-running reader's air-time latency. Multiply by the TX buffer payload for the
+ * lead in samples. Call from the m2sdr_sync_tx thread. LitePCIe only. */
+int m2sdr_get_tx_lead(struct m2sdr_dev *dev, int64_t *lead_buffers);
+
+/* Cap the TX ring lead: m2sdr_sync_tx blocks the caller once it is this many DMA
+ * buffers ahead of the reader (instead of the full ring), holding a small fixed TX
+ * latency. 0 = default (full ring). Set before streaming. */
+int m2sdr_set_tx_lead_cap(struct m2sdr_dev *dev, int64_t lead_buffers);
+
 /* Zero-copy buffer API.
  *
  * These helpers expose backend-owned buffers directly. RX buffers must be

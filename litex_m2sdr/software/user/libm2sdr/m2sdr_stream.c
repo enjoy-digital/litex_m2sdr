@@ -1046,7 +1046,14 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
                 dev->tx_submit_count = dma->reader_hw_count;
                 return M2SDR_ERR_UNDERFLOW;
             }
-            if (buffers_pending < buffer_count) {
+            /* Cap the host lead at tx_lead_cap buffers (if set) instead of the full
+             * ring, so sync_tx paces the caller to a small, fixed ring lead (low TX
+             * latency for k2=1). Blocking here at the cap holds the lead with no
+             * skips - the continuous stream stays intact. */
+            int64_t lead_gate = buffer_count;
+            if (dev->tx_lead_cap > 0 && dev->tx_lead_cap < lead_gate)
+                lead_gate = dev->tx_lead_cap;
+            if (buffers_pending < lead_gate) {
                 int buf_offset = dev->tx_user_count % buffer_count;
                 *buf = dma->buf_wr + buf_offset * dma->mmap_dma_info.dma_tx_buf_size;
                 dev->tx_user_count++;
@@ -1276,6 +1283,36 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
         }
     }
 
+    return M2SDR_ERR_OK;
+}
+
+/* Current TX ring lead in DMA buffers: how many host-submitted buffers the reader
+ * has not yet transmitted (tx_user_count - reader_hw_count). It is the free-running
+ * reader's air-time latency: multiply by the TX buffer payload (samples) for the
+ * lead in samples. Refreshes the reader hardware position first (litepcie ioctl).
+ * Read-only diagnostic; call from the same thread that drives m2sdr_sync_tx. */
+int m2sdr_get_tx_lead(struct m2sdr_dev *dev, int64_t *lead_buffers)
+{
+    if (!dev || !lead_buffers)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    struct litepcie_dma_ctrl *dma = &dev->tx_dma;
+    int64_t hw = 0, sw = 0;
+    litepcie_dma_reader(dma->fds.fd, dma->reader_enable, &hw, &sw);
+    dma->reader_hw_count = hw;
+    *lead_buffers = dev->tx_user_count - hw;
+    return M2SDR_ERR_OK;
+}
+
+/* Cap the TX ring lead: m2sdr_sync_tx will block the caller once it is this many
+ * DMA buffers ahead of the reader, instead of allowing the full ring. Holds a small,
+ * fixed TX latency (low k2). 0 restores the default (full ring). Set before streaming. */
+int m2sdr_set_tx_lead_cap(struct m2sdr_dev *dev, int64_t lead_buffers)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    dev->tx_lead_cap = lead_buffers > 0 ? lead_buffers : 0;
     return M2SDR_ERR_OK;
 }
 

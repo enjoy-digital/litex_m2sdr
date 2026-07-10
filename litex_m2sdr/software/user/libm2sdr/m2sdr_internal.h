@@ -72,6 +72,7 @@ struct m2sdr_dev {
     int64_t rx_release_count;
     int64_t tx_user_count;
     int64_t tx_submit_count;
+    int64_t tx_lead_cap;   /* max TX ring lead in buffers; 0 = full ring (default) */
     uint64_t pcie_rx_overflow_events;
     uint64_t pcie_rx_overflow_buffers;
     uint64_t pcie_tx_underflow_events;
