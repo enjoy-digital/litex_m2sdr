@@ -23,10 +23,19 @@ SATA_HOST_BUFFER_BASE = 0x00020000
 # inferred RAM topology simple. 256KiB was tested and caused RAMB cascade DRC
 # issues on the current Artix-7 target.
 SATA_HOST_BUFFER_SIZE = 128 * 1024
-# Keep RF stream captures in multi-sector SATA commands. This avoids the
-# command/ACK overhead of issuing one write per 512-byte sector while keeping
-# progress and interrupt latency bounded.
-SATA_STREAM_BURST_SECTORS = 4096
+# Use long SATA commands while buffering enough RF data to present the drive in
+# contiguous bursts. A 384-sector preload / 512-sector FIFO is 192KiB / 256KiB
+# respectively. The FIFO naturally alternates between refill and drain while a
+# command remains active, avoiding both sparse word-by-word writes and the
+# command/activate/ack overhead of issuing one command per small buffer.
+#
+# 0xffff is the largest non-zero ATA DMA EXT sector count represented directly
+# by LiteSATA's 16-bit user port. Keeping the FIFO depth at a power of two avoids
+# inefficient Artix-7 BRAM cascading.
+SATA_STREAM_COMMAND_SECTORS = 0xffff
+SATA_STREAM_PRELOAD_SECTORS = 384
+SATA_STREAM_LOW_WATERMARK_SECTORS = 64
+SATA_STREAM_FIFO_SECTORS    = 512
 
 
 # Helpers ------------------------------------------------------------------------------------------
@@ -61,6 +70,43 @@ def _sata_word(data):
     # LiteSATA presents drive words in the opposite byte order from the local
     # little-endian host/radio streams.
     return reverse_bytes(data)
+
+
+class SATAStreamTap(LiteXModule):
+    """Losslessly duplicate a primary stream while the tap is enabled.
+
+    A word is presented to each output only when the other output can accept
+    it, so neither consumer can advance independently and observe duplicates.
+    With the tap disabled, the primary path is a normal transparent link.
+    """
+    def __init__(self, layout):
+        self.sink    = stream.Endpoint(layout)
+        self.source  = stream.Endpoint(layout)
+        self.tap     = stream.Endpoint(layout)
+        self.enable  = Signal()
+
+        # # #
+
+        self.primary_fifo = primary_fifo = stream.SyncFIFO(layout, depth=4, buffered=True)
+        self.tap_fifo = tap_fifo = ResetInserter()(stream.SyncFIFO(layout, depth=4, buffered=True))
+
+        self.comb += [
+            self.sink.connect(primary_fifo.sink, omit={"valid", "ready"}),
+            self.sink.connect(tap_fifo.sink,     omit={"valid", "ready"}),
+            primary_fifo.source.connect(self.source),
+            tap_fifo.source.connect(self.tap),
+
+            # Both queues accept a tapped word in the same cycle.  Their
+            # registered occupancy breaks the ready/valid path between the
+            # PCIe and SATA consumers while sustaining one word per cycle.
+            primary_fifo.sink.valid.eq(
+                self.sink.valid & (~self.enable | tap_fifo.sink.ready)),
+            tap_fifo.sink.valid.eq(
+                self.sink.valid & self.enable & primary_fifo.sink.ready),
+            self.sink.ready.eq(
+                primary_fifo.sink.ready & (~self.enable | tap_fifo.sink.ready)),
+            tap_fifo.reset.eq(~self.enable),
+        ]
 
 
 # SATA Host Buffer ---------------------------------------------------------------------------------
@@ -429,7 +475,11 @@ class M2SDRLiteSATAMem2SectorDMA(LiteXModule):
 
 class M2SDRLiteSATAStream2Sectors(LiteXModule):
     """LiteSATA Stream2Sectors with contiguous multi-sector SATA writes."""
-    def __init__(self, port, data_width=64):
+    def __init__(self, port, data_width=64,
+        burst_sectors=SATA_STREAM_COMMAND_SECTORS,
+        preload_sectors=SATA_STREAM_PRELOAD_SECTORS,
+        low_watermark_sectors=SATA_STREAM_LOW_WATERMARK_SECTORS,
+        fifo_sectors=SATA_STREAM_FIFO_SECTORS):
         self.port     = port
         self.sector   = CSRStorage(48, description="First SATA sector.")
         self.nsectors = CSRStorage(32, description="Number of SATA sectors to record.")
@@ -437,6 +487,8 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         self.done     = CSRStatus(reset=1, description="Asserted when recording has completed.")
         self.error    = CSRStatus(description="Asserted when recording has failed.")
         self.progress = CSRStatus(32, description="Number of SATA sectors written in the current recording.")
+        self.tap      = CSRStorage(description=
+            "Duplicate the selected host RX stream into this recorder while preserving the host path.")
         self.irq      = Signal()
 
         self.sink     = stream.Endpoint([("data", data_width)])
@@ -448,21 +500,49 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         # Full-sector writes: require exact 512B chunks.
         assert (logical_sector_size % stream_bytes) == 0
 
-        words_per_sector = _words_per_sector(port.dw)
-        max_burst_sectors = min(SATA_STREAM_BURST_SECTORS, 0xffff)
+        words_per_sector        = _words_per_sector(port.dw)
+        stream_words_per_sector = logical_sector_size//stream_bytes
+        max_command_sectors     = min(burst_sectors, 0xffff)
+        max_preload_sectors     = min(preload_sectors, fifo_sectors - 1,
+                                      max_command_sectors)
+        low_watermark_sectors   = min(low_watermark_sectors,
+                                      max_preload_sectors - 1)
+        fifo_depth              = fifo_sectors * stream_words_per_sector
+        low_stream_words        = low_watermark_sectors * stream_words_per_sector
+        low_port_words          = low_watermark_sectors * words_per_sector
+
+        assert max_command_sectors > 0
+        assert max_preload_sectors > 0
+        assert low_watermark_sectors > 0
+        assert fifo_sectors > max_preload_sectors
+
+        # Accumulate a useful reservoir before presenting a long command to
+        # LiteSATA. The FIFO continues accepting RF words throughout the
+        # command. When SATA drains it faster than RF can refill it, valid is
+        # temporarily deasserted. High/low-watermark hysteresis prevents the
+        # FIFO from draining completely and degenerating back into sparse
+        # word-by-word SATA traffic. The same command resumes after the FIFO
+        # refills, avoiding command overhead for every reservoir-sized chunk.
+        self.input_fifo = input_fifo = stream.SyncFIFO(
+            [("data", data_width)], depth=fifo_depth, buffered=True)
 
         send_count        = Signal(32)
-        burst_words       = Signal(32)
-        burst_sectors     = Signal(16)
+        command_words       = Signal(32)
+        preload_stream_words = Signal(32)
+        command_sectors     = Signal(16)
         remaining_sectors = Signal(32)
         crt_sec           = Signal(48)
         progress          = Signal(32)
+        drain_enabled     = Signal()
 
         # Converter.
         self.conv = conv = stream.Converter(nbits_from=data_width, nbits_to=port.dw)
 
-        # Connect Stream to Converter.
-        self.comb += self.sink.connect(conv.sink, keep={"valid", "ready", "data", "last"})
+        # Connect Stream through the burst reservoir to the converter.
+        self.comb += [
+            self.sink.connect(input_fifo.sink, keep={"valid", "ready", "data", "last"}),
+            input_fifo.source.connect(conv.sink, keep={"valid", "ready", "data", "last"}),
+        ]
         self.comb += self.progress.status.eq(progress)
 
         # Control FSM.
@@ -470,11 +550,13 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         fsm.act("IDLE",
             If(self.start.re,
                 NextValue(send_count,        0),
-                NextValue(burst_words,       0),
-                NextValue(burst_sectors,     0),
+                NextValue(command_words,       0),
+                NextValue(preload_stream_words, 0),
+                NextValue(command_sectors,     0),
                 NextValue(remaining_sectors, self.nsectors.storage),
                 NextValue(crt_sec,           self.sector.storage),
                 NextValue(progress,          0),
+                NextValue(drain_enabled,     0),
                 *_clear_transfer_status(self.done, self.error),
                 NextState("LOAD-BURST")
             ),
@@ -482,26 +564,53 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         )
         fsm.act("LOAD-BURST",
             NextValue(send_count, 0),
-            If(remaining_sectors > max_burst_sectors,
-                NextValue(burst_sectors, max_burst_sectors),
-                NextValue(burst_words,   max_burst_sectors * words_per_sector),
+            If(remaining_sectors > max_command_sectors,
+                NextValue(command_sectors, max_command_sectors),
+                NextValue(command_words,   max_command_sectors * words_per_sector),
+                NextValue(preload_stream_words,
+                    max_preload_sectors * stream_words_per_sector),
             ).Else(
-                NextValue(burst_sectors, remaining_sectors[:16]),
-                NextValue(burst_words,   remaining_sectors * words_per_sector),
+                NextValue(command_sectors, remaining_sectors[:16]),
+                NextValue(command_words,   remaining_sectors * words_per_sector),
+                If(remaining_sectors > max_preload_sectors,
+                    NextValue(preload_stream_words,
+                        max_preload_sectors * stream_words_per_sector),
+                ).Else(
+                    NextValue(preload_stream_words,
+                        remaining_sectors * stream_words_per_sector),
+                )
             ),
-            NextState("SEND-CMD-AND-DATA")
+            NextState("WAIT-BURST-DATA")
+        )
+        fsm.act("WAIT-BURST-DATA",
+            If(input_fifo.level >= preload_stream_words,
+                NextValue(drain_enabled, 1),
+                NextState("SEND-CMD-AND-DATA")
+            )
         )
         fsm.act("SEND-CMD-AND-DATA",
             # Send one write command/data stream for the current burst. Gate
             # valid with converter output so the first SATA beat cannot use
             # stale data.
-            port.sink.valid.eq(conv.source.valid),
-            port.sink.last.eq(send_count == (burst_words - 1)),
+            port.sink.valid.eq(conv.source.valid & drain_enabled),
+            port.sink.last.eq(send_count == (command_words - 1)),
             port.sink.write.eq(1),
             port.sink.sector.eq(crt_sec),
-            port.sink.count.eq(burst_sectors),
+            port.sink.count.eq(command_sectors),
             port.sink.data.eq(_sata_word(conv.source.data)),
-            conv.source.ready.eq(port.sink.ready),
+            conv.source.ready.eq(port.sink.ready & drain_enabled),
+            # Send only contiguous reservoir bursts. Keep draining the last
+            # low-watermark portion of a command so a short final command
+            # cannot wait for data that belongs to the next command.
+            If(drain_enabled,
+                If((input_fifo.level <= low_stream_words) &
+                   (command_sectors > low_watermark_sectors) &
+                   (send_count < (command_words - low_port_words)),
+                    NextValue(drain_enabled, 0)
+                )
+            ).Elif(input_fifo.level >= preload_stream_words,
+                NextValue(drain_enabled, 1)
+            ),
             If(port.sink.valid & port.sink.ready,
                 NextValue(send_count, send_count + 1),
                 If(port.sink.last,
@@ -523,13 +632,13 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
                     *_fail_transfer(self.done, self.error, self.irq),
                     NextState("IDLE")
                 ).Else(
-                    NextValue(progress, progress + burst_sectors),
-                    If(remaining_sectors <= burst_sectors,
+                    NextValue(progress, progress + command_sectors),
+                    If(remaining_sectors <= command_sectors,
                         *_finish_transfer(self.done, self.irq),
                         NextState("IDLE")
                     ).Else(
-                        NextValue(remaining_sectors, remaining_sectors - burst_sectors),
-                        NextValue(crt_sec, crt_sec + burst_sectors),
+                        NextValue(remaining_sectors, remaining_sectors - command_sectors),
+                        NextValue(crt_sec, crt_sec + command_sectors),
                         NextState("LOAD-BURST")
                     )
                 )
@@ -540,19 +649,29 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
 # SATA Sectors2Stream ------------------------------------------------------------------------------
 
 class M2SDRLiteSATASectors2Stream(LiteXModule):
-    """LiteSATA Sectors2Stream with port-width byte ordering.
+    """Buffered, paced LiteSATA Sectors2Stream.
 
     LiteSATA exposes a 32-bit port on the M2SDR design while the radio/PCIe
     stream is 64-bit. Reverse bytes at the SATA-port word width before
     up-conversion so the Stream2Sectors path is the exact inverse.
+
+    Reads are issued as long multi-sector commands through a bounded FIFO.
+    Ready/valid backpressure pauses the drive whenever that FIFO fills, while
+    the optional pacer releases 64-bit words at the recorded RF byte rate.
     """
-    def __init__(self, port, data_width=64):
+    def __init__(self, port, data_width=64, sys_clk_freq=int(100e6),
+        burst_sectors=SATA_STREAM_COMMAND_SECTORS,
+        fifo_sectors=SATA_STREAM_FIFO_SECTORS):
         self.port     = port
         self.sector   = CSRStorage(48, description="First SATA sector.")
         self.nsectors = CSRStorage(32, description="Number of SATA sectors to play.")
+        self.pace     = CSRStorage(32, description=
+            "Replay rate in 64-bit stream words/s. Zero disables pacing.")
         self.start    = CSR()
         self.done     = CSRStatus(reset=1, description="Asserted when playback has completed.")
         self.error    = CSRStatus(description="Asserted when playback has failed.")
+        self.progress = CSRStatus(32, description=
+            "Number of SATA sectors read in the current playback.")
         self.irq      = Signal()
 
         self.source   = stream.Endpoint([("data", data_width)])
@@ -564,75 +683,189 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
         # Whole-sector streaming.
         assert (logical_sector_size % stream_bytes) == 0
 
-        crt_sec  = Signal(48)
-        last_sec = Signal(48)
+        stream_words_per_sector = logical_sector_size//stream_bytes
+        port_words_per_sector   = _words_per_sector(port.dw)
+        max_command_sectors     = min(burst_sectors, 0xffff)
+        fifo_depth              = fifo_sectors * stream_words_per_sector
 
-        # Sector buffer.
-        self.buf = buf = stream.SyncFIFO([("data", port.dw)], _words_per_sector(port.dw))
+        assert data_width == 64
+        assert max_command_sectors > 0
+        assert fifo_sectors > 0
+
+        crt_sec            = Signal(48)
+        remaining_sectors  = Signal(32)
+        command_sectors    = Signal(16)
+        command_port_words = Signal(32)
+        receive_count      = Signal(32)
+        progress           = Signal(32)
+        final_output_seen  = Signal()
+
+        # FIFO after width conversion lets SATA fetch the next burst while the
+        # current one is being released at the RF stream rate.
+        self.output_fifo = output_fifo = stream.SyncFIFO(
+            [("data", data_width)], depth=fifo_depth, buffered=True)
 
         # Converter.
         self.conv = conv = stream.Converter(nbits_from=port.dw, nbits_to=data_width)
 
-        # Connect Port to Sector Buffer. Reverse per SATA word, not per output
-        # stream beat, so the down-conversion path writes the same words back.
+        # Connect the read response to the converter only while a command is
+        # active. Reverse per SATA word, not per output stream beat, so the
+        # down-conversion path writes the same words back.
         self.comb += [
-            buf.sink.valid.eq(port.source.valid),
-            buf.sink.last.eq(port.source.last),
-            buf.sink.data.eq(_sata_word(port.source.data)),
-            port.source.ready.eq(buf.sink.ready),
+            conv.sink.valid.eq(0),
+            conv.sink.last.eq(0),
+            conv.sink.data.eq(_sata_word(port.source.data)),
+            port.source.ready.eq(0),
+
+            output_fifo.sink.valid.eq(conv.source.valid),
+            output_fifo.sink.last.eq(
+                conv.source.last & (remaining_sectors <= command_sectors)),
+            output_fifo.sink.data.eq(conv.source.data),
+            conv.source.ready.eq(output_fifo.sink.ready),
         ]
 
-        # Connect Sector Buffer to Converter.
-        self.comb += buf.source.connect(conv.sink)
+        self.comb += self.progress.status.eq(progress)
+
+        # Fractional word-rate pacer. A single pending credit is retained when
+        # the downstream host is backpressured; credits are deliberately not
+        # accumulated into a burst.
+        pace_accumulator = Signal(max=max(2, int(sys_clk_freq)))
+        pace_sum         = Signal(33)
+        pace_credit      = Signal()
+        pace_full_rate   = Signal()
+        pace_tick        = Signal()
+        pace_allow       = Signal()
+        output_fire      = Signal()
+
+        self.comb += [
+            pace_sum.eq(pace_accumulator + self.pace.storage),
+            pace_full_rate.eq(
+                (self.pace.storage == 0) | (self.pace.storage >= int(sys_clk_freq))),
+            pace_tick.eq(pace_sum >= int(sys_clk_freq)),
+            pace_allow.eq(pace_full_rate | pace_credit | pace_tick),
+
+            self.source.valid.eq(output_fifo.source.valid & pace_allow),
+            self.source.last.eq(output_fifo.source.last),
+            self.source.data.eq(output_fifo.source.data),
+            output_fifo.source.ready.eq(self.source.ready & pace_allow),
+            output_fire.eq(self.source.valid & self.source.ready),
+        ]
+
+        self.sync += [
+            If(self.start.re,
+                pace_accumulator.eq(0),
+                pace_credit.eq(0),
+                final_output_seen.eq(0),
+            ).Elif(pace_full_rate,
+                pace_accumulator.eq(0),
+                pace_credit.eq(0),
+            ).Elif(pace_credit,
+                If(output_fire,
+                    pace_credit.eq(0),
+                )
+            ).Else(
+                If(pace_tick,
+                    pace_accumulator.eq(pace_sum - int(sys_clk_freq)),
+                    If(~output_fire,
+                        pace_credit.eq(1),
+                    )
+                ).Else(
+                    pace_accumulator.eq(pace_sum),
+                )
+            ),
+            If(output_fire & self.source.last,
+                final_output_seen.eq(1),
+            )
+        ]
 
         # Control FSM.
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm.act("IDLE",
             If(self.start.re,
-                NextValue(crt_sec,  self.sector.storage),
-                NextValue(last_sec, self.sector.storage + self.nsectors.storage - 1),
+                NextValue(crt_sec,           self.sector.storage),
+                NextValue(remaining_sectors, self.nsectors.storage),
+                NextValue(command_sectors,   0),
+                NextValue(command_port_words, 0),
+                NextValue(receive_count,    0),
+                NextValue(progress,          0),
                 *_clear_transfer_status(self.done, self.error),
-                NextState("SEND-CMD")
+                NextState("LOAD-BURST")
+            )
+        )
+        fsm.act("LOAD-BURST",
+            If(remaining_sectors > max_command_sectors,
+                NextValue(command_sectors, max_command_sectors),
+                NextValue(command_port_words,
+                    max_command_sectors * port_words_per_sector),
+            ).Else(
+                NextValue(command_sectors, remaining_sectors[:16]),
+                NextValue(command_port_words,
+                    remaining_sectors * port_words_per_sector),
             ),
-            conv.source.ready.eq(1)
+            NextState("WAIT-FIFO-SPACE")
+        )
+        fsm.act("WAIT-FIFO-SPACE",
+            # A command can be much larger than the FIFO: LiteSATA propagates
+            # ready/valid backpressure to the drive while paced output makes
+            # room. Start with half the reservoir free so useful read data can
+            # arrive before the first HOLD/backpressure interval.
+            If(output_fifo.level <= (fifo_depth >> 1),
+                NextState("SEND-CMD")
+            )
         )
         fsm.act("SEND-CMD",
-            # Send read command for 1 sector.
+            # Send one command for the complete burst.
             port.sink.valid.eq(1),
             port.sink.last.eq(1),
             port.sink.read.eq(1),
             port.sink.sector.eq(crt_sec),
-            port.sink.count.eq(1),
+            port.sink.count.eq(command_sectors),
             If(port.sink.ready,
+                NextValue(receive_count, 0),
                 NextState("RECEIVE-DATA-STREAM")
             )
         )
         fsm.act("RECEIVE-DATA-STREAM",
-            # Connect Converter to Stream.
-            self.source.valid.eq(conv.source.valid),
-            self.source.data.eq(conv.source.data),
-
-            # End-of-transfer framing:
-            # Assert last only on the last word of the last sector.
-            self.source.last.eq(conv.source.last & (crt_sec == last_sec)),
-
-            conv.source.ready.eq(self.source.ready),
-
-            If(self.source.valid & self.source.ready,
-                If(conv.source.last,
-                    If(crt_sec == last_sec,
-                        *_finish_transfer(self.done, self.irq),
-                        NextState("IDLE")
+            # A multi-sector read can contain multiple DATA FIS packets, each
+            # with last asserted. Count payload words and wait for the separate
+            # end response instead of treating a packet boundary as command
+            # completion.
+            conv.sink.valid.eq(port.source.valid & port.source.read & ~port.source.end),
+            conv.sink.last.eq(receive_count == (command_port_words - 1)),
+            port.source.ready.eq(
+                conv.sink.ready & port.source.read & ~port.source.end),
+            If(port.source.valid & port.source.ready,
+                If(port.source.failed,
+                    *_fail_transfer(self.done, self.error, self.irq),
+                    NextState("IDLE")
+                ).Elif(receive_count == (command_port_words - 1),
+                    NextState("WAIT-RESPONSE")
+                ).Else(
+                    NextValue(receive_count, receive_count + 1)
+                )
+            )
+        )
+        fsm.act("WAIT-RESPONSE",
+            port.source.ready.eq(1),
+            If(port.source.valid & port.source.ready,
+                If(port.source.failed,
+                    *_fail_transfer(self.done, self.error, self.irq),
+                    NextState("IDLE")
+                ).Elif(port.source.read & port.source.end,
+                    NextValue(progress, progress + command_sectors),
+                    If(remaining_sectors <= command_sectors,
+                        NextState("DRAIN-FINAL")
                     ).Else(
-                        NextValue(crt_sec, crt_sec + 1),
-                        NextState("SEND-CMD")
+                        NextValue(remaining_sectors, remaining_sectors - command_sectors),
+                        NextValue(crt_sec, crt_sec + command_sectors),
+                        NextState("LOAD-BURST")
                     )
                 )
-            ),
-
-            # Monitor errors.
-            If(port.source.valid & port.source.ready & port.source.failed,
-                *_fail_transfer(self.done, self.error, self.irq),
+            )
+        )
+        fsm.act("DRAIN-FINAL",
+            If(final_output_seen,
+                *_finish_transfer(self.done, self.irq),
                 NextState("IDLE")
             )
         )

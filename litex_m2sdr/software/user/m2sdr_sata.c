@@ -341,29 +341,49 @@ static unsigned capture_volume_entry_channel_count(const struct sata_capture_ent
     return 0;
 }
 
-static void format_capture_duration(char *buf, size_t len, const struct sata_capture_entry *e)
+/* Byte rate of a capture entry's sample stream; 0 when the metadata is
+ * invalid or the rate overflows. */
+static uint64_t capture_volume_entry_bytes_per_second(const struct sata_capture_entry *e)
 {
     enum m2sdr_format format;
     unsigned channels;
     size_t sample_bytes;
-    uint64_t bytes;
-    long double seconds;
 
     if (!e || e->sample_rate <= 0 ||
-        m2sdr_cli_parse_format(e->format, &format) != 0) {
-        snprintf(buf, len, "-");
-        return;
-    }
-    channels = capture_volume_entry_channel_count(e);
+        m2sdr_cli_parse_format(e->format, &format) != 0)
+        return 0;
+    channels     = capture_volume_entry_channel_count(e);
     sample_bytes = m2sdr_format_size(format);
-    bytes = capture_volume_entry_payload_bytes(e);
-    if (channels == 0 || sample_bytes == 0 || bytes == 0) {
+    if (channels == 0 || sample_bytes == 0 ||
+        (uint64_t)e->sample_rate > UINT64_MAX / channels / sample_bytes)
+        return 0;
+    return (uint64_t)e->sample_rate * channels * sample_bytes;
+}
+
+static void format_capture_duration(char *buf, size_t len, const struct sata_capture_entry *e)
+{
+    uint64_t bytes_per_second = capture_volume_entry_bytes_per_second(e);
+    uint64_t bytes            = capture_volume_entry_payload_bytes(e);
+
+    if (bytes_per_second == 0 || bytes == 0) {
         snprintf(buf, len, "-");
         return;
     }
-    seconds = (long double)bytes /
-              ((long double)e->sample_rate * (long double)channels * (long double)sample_bytes);
-    snprintf(buf, len, "%.3Lfs", seconds);
+    snprintf(buf, len, "%.3Lfs", (long double)bytes / (long double)bytes_per_second);
+}
+
+static int capture_volume_entry_replay_word_rate(
+    const struct sata_capture_entry *e, uint32_t *words_per_second)
+{
+    uint64_t bytes_per_second = capture_volume_entry_bytes_per_second(e);
+
+    if (!words_per_second || bytes_per_second == 0 ||
+        bytes_per_second > (uint64_t)UINT32_MAX * 8u) {
+        fprintf(stderr, "Capture has an invalid or out-of-range replay rate.\n");
+        return 1;
+    }
+    *words_per_second = (uint32_t)((bytes_per_second + 7u) / 8u);
+    return 0;
 }
 
 #endif
@@ -527,10 +547,13 @@ static enum sata_wait_result wait_done_report(const char *name,
                     double rate_error = mibps / capture_mibps;
                     double time_error = elapsed_s - capture_seconds;
 
-                    if (rate_error < 0.95 || rate_error > 1.05) {
+                    if ((rate_error < 0.95 || rate_error > 1.05) &&
+                        (time_error < -0.5 || time_error > 0.5)) {
                         fprintf(stderr,
                             "%s: warning: stream average %.2f MiB/s differs from requested capture %.2f MiB/s; "
-                            "elapsed %.3f s vs requested %.3f s. Check RF clock/sample-rate configuration.\n",
+                            "elapsed %.3f s vs requested %.3f s. The RX source may exceed sustained SATA "
+                            "write throughput and backpressure the live host stream; check the RF sample "
+                            "rate and reduce sample rate, bit depth, or channel count.\n",
                             name, mibps, capture_mibps, elapsed_s, capture_seconds);
                     } else if (time_error < -0.5 || time_error > 0.5) {
                         fprintf(stderr,
@@ -622,31 +645,6 @@ static enum sata_wait_result wait_done_report(const char *name,
     }
 }
 
-static enum sata_wait_result wait_done(const char *name,
-                                       uint32_t (*done_fn)(void *),
-                                       uint32_t (*err_fn)(void *),
-                                       void *conn,
-                                       int timeout_ms,
-                                       uint64_t nsectors)
-{
-    return wait_done_report(name, done_fn, err_fn, NULL, conn, timeout_ms, nsectors,
-        0.0, 0.0, true);
-}
-
-static enum sata_wait_result wait_done_capture(const char *name,
-                                               uint32_t (*done_fn)(void *),
-                                               uint32_t (*err_fn)(void *),
-                                               uint32_t (*progress_fn)(void *),
-                                               void *conn,
-                                               int timeout_ms,
-                                               uint64_t nsectors,
-                                               double capture_mibps,
-                                               double capture_seconds)
-{
-    return wait_done_report(name, done_fn, err_fn, progress_fn, conn, timeout_ms, nsectors,
-        capture_mibps, capture_seconds, true);
-}
-
 static enum sata_wait_result wait_done_quiet(const char *name,
                                              uint32_t (*done_fn)(void *),
                                              uint32_t (*err_fn)(void *),
@@ -656,6 +654,7 @@ static enum sata_wait_result wait_done_quiet(const char *name,
     return wait_done_report(name, done_fn, err_fn, NULL, conn, timeout_ms, 1,
         0.0, 0.0, false);
 }
+
 
 static void print_planned_transfer(const char *name,
                                    uint64_t src_sector,
@@ -2282,38 +2281,59 @@ static int do_verify_pattern(uint64_t src_sector, uint32_t nsectors,
 #endif
 
 static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms,
-                     bool dry_run, double capture_mibps, double capture_seconds)
+                     bool dry_run, double capture_mibps, double capture_seconds,
+                     bool tap)
 {
+    if (tap && !sata_rx_tap_supported()) {
+        fprintf(stderr,
+            "capture-current requires gateware with the SATA RX tap. "
+            "Rebuild and reload the FPGA bitstream.\n");
+        return 1;
+    }
+
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
     int txsrc = (int)m2sdr_read32(conn, CSR_CROSSBAR_MUX_SEL_ADDR);
+    int rxdst = RXDST_SATA;
+    const char *name = tap ? "SATA_RX(tap)" : "SATA_RX(record)";
 
-    /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
-    txrx_loopback_set(conn, 0);
-    crossbar_set(conn,
-        txsrc,
-        RXDST_SATA
-    );
+    if (tap) {
+        /* Tap mode duplicates the live host RX stream without rerouting it. */
+        rxdst = (int)m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR);
+        if (rxdst != RXDST_PCIE && rxdst != RXDST_ETH) {
+            fprintf(stderr,
+                "capture-current requires an active PCIe or Ethernet RX path; "
+                "the current RX destination is %d.\n", rxdst);
+            sata_operation_finish(&op);
+            return 1;
+        }
+    } else {
+        /* Normal path: RX -> demux -> SATA_RX_STREAMER. */
+        txrx_loopback_set(conn, 0);
+        crossbar_set(conn, txsrc, RXDST_SATA);
+    }
 
+    /* A previous capture (or a still-tapped source) can leave prefetched
+     * words in the reservoir; start every capture from an empty FIFO. */
+    sata_streamers_reset(conn, true, false);
     sata_rx_program(conn, dst_sector, nsectors);
     if (dry_run) {
-        print_planned_transfer("record", UINT64_MAX, dst_sector, nsectors, txsrc, RXDST_SATA, 0, timeout_ms);
+        print_planned_transfer(tap ? "record-current" : "record", UINT64_MAX,
+            dst_sector, nsectors, txsrc, rxdst, 0, timeout_ms);
         sata_operation_finish(&op);
         return 0;
     }
-    sata_rx_start(conn);
 
+    sata_rx_set_tap(conn, tap);
+    sata_rx_start(conn);
     uint32_t (*progress_fn)(void *) =
         sata_rx_progress_supported() ? sata_rx_progress : NULL;
-    enum sata_wait_result rc;
-
-    if (capture_mibps > 0.0) {
-        rc = wait_done_capture("SATA_RX(record)", sata_rx_done, sata_rx_error,
-            progress_fn, conn, timeout_ms, nsectors, capture_mibps, capture_seconds);
-    } else {
-        rc = wait_done_report("SATA_RX(record)", sata_rx_done, sata_rx_error,
-            progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
-    }
+    enum sata_wait_result rc = wait_done_report(name, sata_rx_done,
+        sata_rx_error, progress_fn, conn, timeout_ms, nsectors,
+        capture_mibps, capture_seconds, true);
+    sata_rx_set_tap(conn, false);
+    if (rc != SATA_WAIT_OK)
+        sata_streamers_reset(conn, true, false);
     sata_operation_finish(&op);
     return rc == SATA_WAIT_OK ? 0 : 1;
 }
@@ -2326,6 +2346,7 @@ static int do_record_start(uint64_t dst_sector, uint32_t nsectors, int timeout_m
     sata_require_csrs();
     txrx_loopback_set(conn, 0);
     crossbar_set(conn, txsrc, RXDST_SATA);
+    sata_streamers_reset(conn, true, false);
     sata_rx_program(conn, dst_sector, nsectors);
     if (dry_run) {
         print_planned_transfer("record-start", UINT64_MAX, dst_sector, nsectors, txsrc, RXDST_SATA, 0, timeout_ms);
@@ -2352,16 +2373,22 @@ static int do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool 
         rxdst
     );
 
+    sata_streamers_reset(conn, false, true);
     sata_tx_program(conn, src_sector, nsectors);
     if (dry_run) {
         print_planned_transfer("play", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 0, timeout_ms);
         sata_operation_finish(&op);
         return 0;
     }
+    sata_tx_set_pace(conn, 0);
     sata_tx_start(conn);
 
-    enum sata_wait_result rc =
-        wait_done("SATA_TX(play)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    uint32_t (*play_progress_fn)(void *) =
+        sata_tx_progress_supported() ? sata_tx_progress : NULL;
+    enum sata_wait_result rc = wait_done_report("SATA_TX(play)", sata_tx_done,
+        sata_tx_error, play_progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
+    if (rc != SATA_WAIT_OK)
+        sata_streamers_reset(conn, false, true);
     sata_operation_finish(&op);
     return rc == SATA_WAIT_OK ? 0 : 1;
 }
@@ -2374,12 +2401,14 @@ static int do_play_start(uint64_t src_sector, uint32_t nsectors, int timeout_ms,
     sata_require_csrs();
     txrx_loopback_set(conn, 0);
     crossbar_set(conn, TXSRC_SATA, rxdst);
+    sata_streamers_reset(conn, false, true);
     sata_tx_program(conn, src_sector, nsectors);
     if (dry_run) {
         print_planned_transfer("play-start", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 0, timeout_ms);
         m2sdr_close_dev(conn);
         return 0;
     }
+    sata_tx_set_pace(conn, 0);
     sata_tx_start(conn);
     printf("SATA_TX(play): started sector=0x%016" PRIx64 " nsectors=%" PRIu32 "\n",
         src_sector, nsectors);
@@ -2387,7 +2416,8 @@ static int do_play_start(uint64_t src_sector, uint32_t nsectors, int timeout_ms,
     return 0;
 }
 
-static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, int timeout_ms, bool dry_run)
+static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
+                     uint32_t words_per_second, int timeout_ms, bool dry_run)
 {
     struct sata_operation op = sata_operation_begin();
     struct m2sdr_dev *conn = op.conn;
@@ -2398,16 +2428,30 @@ static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s, 
     crossbar_set(conn, TXSRC_SATA, rxdst);
     txrx_loopback_set(conn, 1);
 
+    sata_streamers_reset(conn, false, true);
     sata_tx_program(conn, src_sector, nsectors);
     if (dry_run) {
         print_planned_transfer("replay", src_sector, UINT64_MAX, nsectors, TXSRC_SATA, rxdst, 1, timeout_ms);
+        printf("  Replay pace        %" PRIu32 " x 64-bit words/s\n",
+            words_per_second);
         sata_operation_finish(&op);
         return 0;
     }
+    sata_tx_set_pace(conn, words_per_second);
+    if (words_per_second != 0) {
+        printf("SATA_TX(replay): pacing at %" PRIu32
+               " x 64-bit words/s (%.2f MiB/s)\n",
+            words_per_second,
+            (double)words_per_second * 8.0 / (1024.0 * 1024.0));
+    }
     sata_tx_start(conn);
 
-    enum sata_wait_result rc =
-        wait_done("SATA_TX(replay)", sata_tx_done, sata_tx_error, conn, timeout_ms, nsectors);
+    uint32_t (*replay_progress_fn)(void *) =
+        sata_tx_progress_supported() ? sata_tx_progress : NULL;
+    enum sata_wait_result rc = wait_done_report("SATA_TX(replay)", sata_tx_done,
+        sata_tx_error, replay_progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
+    if (rc != SATA_WAIT_OK)
+        sata_streamers_reset(conn, false, true);
     sata_operation_finish(&op);
     return rc == SATA_WAIT_OK ? 0 : 1;
 }
@@ -2435,6 +2479,7 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
         sata_operation_finish(&op);
         return 0;
     }
+    sata_tx_set_pace(conn, 0);
 
     for (uint32_t i = 0; i < nsectors; i++) {
         sata_rx_program(conn, dst_sector + i, 1);
@@ -2509,6 +2554,8 @@ static int do_stream_stop(const char *which_s, bool dry_run)
     sata_require_csrs();
 
 #ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
+    if (rx)
+        sata_rx_set_tap(conn, false);
     sata_streamers_reset(conn, rx, tx);
     printf("SATA streamer reset: %s\n", which_s);
     m2sdr_close_dev(conn);
@@ -2536,6 +2583,46 @@ static void capture_options_init(struct capture_options *opts)
 {
     memset(opts, 0, sizeof(*opts));
     named_transfer_options_init(&opts->named);
+}
+
+static int capture_options_from_active_stream(struct capture_options *opts)
+{
+#if defined(CSR_AD9361_ACTIVE_SAMPLE_RATE_ADDR) && \
+    defined(CSR_AD9361_ACTIVE_RX_FREQUENCY_KHZ_ADDR) && \
+    defined(CSR_AD9361_ACTIVE_BANDWIDTH_ADDR) && \
+    defined(CSR_AD9361_BITMODE_ADDR) && defined(CSR_AD9361_PHY_CONTROL_ADDR)
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t sample_rate = m2sdr_read32(conn, CSR_AD9361_ACTIVE_SAMPLE_RATE_ADDR);
+    uint32_t frequency_khz = m2sdr_read32(conn, CSR_AD9361_ACTIVE_RX_FREQUENCY_KHZ_ADDR);
+    uint32_t bandwidth = m2sdr_read32(conn, CSR_AD9361_ACTIVE_BANDWIDTH_ADDR);
+    uint32_t format = m2sdr_read32(conn, CSR_AD9361_BITMODE_ADDR) & 0x3;
+    uint32_t one_channel = m2sdr_read32(conn, CSR_AD9361_PHY_CONTROL_ADDR) & 0x1;
+
+    m2sdr_close_dev(conn);
+    if (sample_rate == 0) {
+        fprintf(stderr,
+            "No active RF stream configuration is published. Start GQRX "
+            "and enable its DSP before capture-current.\n");
+        return 1;
+    }
+    if (format > 1) {
+        fprintf(stderr, "capture-current does not yet support active sample format %u.\n", format);
+        return 1;
+    }
+    opts->named.sample_rate = sample_rate;
+    opts->named.rx_freq = (uint64_t)frequency_khz * 1000;
+    opts->named.bandwidth = bandwidth;
+    opts->named.format = format ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
+    opts->named.channel_layout = one_channel ?
+        M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
+    return 0;
+#else
+    (void)opts;
+    fprintf(stderr,
+        "capture-current requires active-stream status CSRs. "
+        "Rebuild the software and FPGA bitstream.\n");
+    return 1;
+#endif
 }
 
 static int parse_capture_option(struct capture_options *opts, int argc, char **argv, int *index)
@@ -2783,7 +2870,7 @@ static void parse_replay_rf_overrides(struct named_transfer_options *opts,
 
 static int do_capture_named(const char *name, int argc, char **argv, int argi,
                             int timeout_ms, bool timeout_explicit,
-                            bool start_only, bool dry_run)
+                            bool start_only, bool current_stream, bool dry_run)
 {
     struct sata_capture_volume cat;
     struct capture_options opts;
@@ -2797,6 +2884,8 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
     double capture_mibps = 0.0;
 
     capture_options_init(&opts);
+    if (current_stream && capture_options_from_active_stream(&opts) != 0)
+        return 1;
     while (argi < argc) {
         if (!parse_capture_option(&opts, argc, argv, &argi)) {
             fprintf(stderr, "Unexpected argument: %s\n", argv[argi]);
@@ -2824,7 +2913,7 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
         printf("%s dry-run: name=%s sector=0x%016" PRIx64 " nsectors=%" PRIu32
                " bytes=%" PRIu64 " sigmf_sector=0x%016" PRIx64 " sigmf_nsectors=%u"
                " sample_rate=%" PRId64 " format=%s channels=%s capture_rate=%.2f MiB/s\n",
-            start_only ? "capture-start" : "capture",
+            start_only ? "capture-start" : (current_stream ? "capture-current" : "capture"),
             name, sector, nsectors, bytes,
             meta_sector, M2SDR_SATA_SIGMF_META_SECTORS,
             opts.named.sample_rate,
@@ -2833,7 +2922,7 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
         return 0;
     }
 
-    if (apply_rf_config_from_options(&opts.named) != 0)
+    if (!current_stream && apply_rf_config_from_options(&opts.named) != 0)
         return 1;
     if (start_only) {
         capture_volume_entry_from_options(&entry, name, &opts.named, sector, nsectors, bytes,
@@ -2850,8 +2939,12 @@ static int do_capture_named(const char *name, int argc, char **argv, int argi,
             name, sector, nsectors);
         return 0;
     } else {
-        if (do_record(sector, nsectors, timeout_ms, false,
-                      capture_mibps, capture_seconds) != 0)
+        int record_rc = current_stream ?
+            do_record(sector, nsectors, timeout_ms, false,
+                      capture_mibps, capture_seconds, true) :
+            do_record(sector, nsectors, timeout_ms, false,
+                      capture_mibps, capture_seconds, false);
+        if (record_rc != 0)
             return 1;
     }
 
@@ -2874,6 +2967,7 @@ static int do_replay_host_named(const char *name, int argc, char **argv, int arg
     struct sata_capture_volume cat;
     struct sata_capture_entry *e;
     const char *dst = NULL;
+    uint32_t words_per_second;
 
     while (argi < argc) {
         if (!strcmp(argv[argi], "--dst")) {
@@ -2905,7 +2999,10 @@ static int do_replay_host_named(const char *name, int argc, char **argv, int arg
         fprintf(stderr, "Capture '%s' not found.\n", name);
         return 1;
     }
-    return do_replay(e->sector, e->nsectors, dst, timeout_ms, dry_run);
+    if (capture_volume_entry_replay_word_rate(e, &words_per_second) != 0)
+        return 1;
+    return do_replay(e->sector, e->nsectors, dst, words_per_second,
+        timeout_ms, dry_run);
 }
 
 static int do_replay_rf_named(const char *name, int argc, char **argv, int argi,
@@ -3139,6 +3236,9 @@ static void help(void)
            "capture NAME --seconds SEC|--size BYTES [RF options]\n"
            "    Tune RF, record RX stream to SATA, and store SigMF metadata.\n"
            "\n"
+           "capture-current NAME --seconds SEC|--size BYTES [metadata overrides]\n"
+           "    Tap the active GQRX/host RX stream to SATA without retuning or interrupting it.\n"
+           "\n"
            "capture-start NAME --seconds SEC|--size BYTES [RF options]\n"
            "    Start a named RX-to-SATA capture and return immediately.\n"
            "\n"
@@ -3343,7 +3443,18 @@ int main(int argc, char **argv)
         }
         const char *name = argv[optind++];
         return do_capture_named(name, argc, argv, optind, timeout_ms,
-            timeout_explicit, false, dry_run);
+            timeout_explicit, false, false, dry_run);
+    }
+
+    if (!strcmp(cmd, "capture-current")) {
+        const char *name;
+        if (optind >= argc) {
+            help();
+            return 1;
+        }
+        name = argv[optind++];
+        return do_capture_named(name, argc, argv, optind, timeout_ms,
+            timeout_explicit, false, true, dry_run);
     }
 
     if (!strcmp(cmd, "capture-start")) {
@@ -3353,7 +3464,7 @@ int main(int argc, char **argv)
         }
         const char *name = argv[optind++];
         return do_capture_named(name, argc, argv, optind, timeout_ms,
-            timeout_explicit, true, dry_run);
+            timeout_explicit, true, false, dry_run);
     }
 
     if (!strcmp(cmd, "import")) {
@@ -3419,6 +3530,7 @@ int main(int argc, char **argv)
 #else
     if (!strcmp(cmd, "init") || !strcmp(cmd, "list") || !strcmp(cmd, "show") ||
         !strcmp(cmd, "delete") || !strcmp(cmd, "check") || !strcmp(cmd, "capture") ||
+        !strcmp(cmd, "capture-current") ||
         !strcmp(cmd, "capture-start") || !strcmp(cmd, "import") || !strcmp(cmd, "export") ||
         !strcmp(cmd, "play") || !strcmp(cmd, "serve") || !strcmp(cmd, "stop")) {
         fprintf(stderr, "Command '%s' not available: SATA not present in this gateware.\n", cmd);
@@ -3491,7 +3603,7 @@ int main(int argc, char **argv)
             if (reject_extra_args(argc, argv, optind) != 0)
                 return 1;
             return !strcmp(diag_cmd, "record") ?
-                do_record(dst_sector, nsectors, timeout_ms, dry_run, 0.0, 0.0) :
+                do_record(dst_sector, nsectors, timeout_ms, dry_run, 0.0, 0.0, false) :
                 do_record_start(dst_sector, nsectors, timeout_ms, dry_run);
         }
 
@@ -3527,7 +3639,7 @@ int main(int argc, char **argv)
             }
             if (reject_extra_args(argc, argv, optind) != 0)
                 return 1;
-            return do_replay(src_sector, nsectors, dst, timeout_ms, dry_run);
+            return do_replay(src_sector, nsectors, dst, 0, timeout_ms, dry_run);
         }
 
         if (!strcmp(diag_cmd, "copy")) {

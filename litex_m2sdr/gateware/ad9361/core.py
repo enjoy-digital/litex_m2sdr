@@ -142,6 +142,15 @@ class AD9361RFIC(LiteXModule):
                 ("``0b10``", "BFP8 block-floating transport mode."),
             ], description="Sample format.")
         ])
+        # Last stream settings programmed by host software.  These scratch
+        # CSRs let an independent SATA control process describe and size the
+        # stream already configured by GQRX without touching the RFIC.
+        self._active_sample_rate = CSRStorage(32,
+            description="Active host stream sample rate in samples/s.")
+        self._active_rx_frequency_khz = CSRStorage(32,
+            description="Active RX center frequency in kHz.")
+        self._active_bandwidth = CSRStorage(32,
+            description="Active RX bandwidth in Hz.")
 
         # # #
 

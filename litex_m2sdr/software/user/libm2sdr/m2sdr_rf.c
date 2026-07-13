@@ -1403,6 +1403,40 @@ int m2sdr_rf_bind(struct m2sdr_dev *dev, void *phy)
 
 /* Execute the full RF bring-up sequence: clocks, AD9361 init, rates, gains,
  * loopback, bit mode, and optional built-in tests. */
+/* Publish the applied stream parameters to the active-config mailbox CSRs so
+ * other processes (e.g. m2sdr_sata capture-current) can read them. Best
+ * effort: the CSRs only exist on gateware built with the mailbox. */
+static void m2sdr_publish_active_sample_rate(struct m2sdr_dev *dev, int64_t rate)
+{
+#ifdef CSR_AD9361_ACTIVE_SAMPLE_RATE_ADDR
+    (void)m2sdr_reg_write(dev, CSR_AD9361_ACTIVE_SAMPLE_RATE_ADDR, (uint32_t)rate);
+#else
+    (void)dev;
+    (void)rate;
+#endif
+}
+
+static void m2sdr_publish_active_rx_freq(struct m2sdr_dev *dev, int64_t freq)
+{
+#ifdef CSR_AD9361_ACTIVE_RX_FREQUENCY_KHZ_ADDR
+    (void)m2sdr_reg_write(dev, CSR_AD9361_ACTIVE_RX_FREQUENCY_KHZ_ADDR,
+                          (uint32_t)(freq / 1000));
+#else
+    (void)dev;
+    (void)freq;
+#endif
+}
+
+static void m2sdr_publish_active_bandwidth(struct m2sdr_dev *dev, int64_t bw)
+{
+#ifdef CSR_AD9361_ACTIVE_BANDWIDTH_ADDR
+    (void)m2sdr_reg_write(dev, CSR_AD9361_ACTIVE_BANDWIDTH_ADDR, (uint32_t)bw);
+#else
+    (void)dev;
+    (void)bw;
+#endif
+}
+
 int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
 {
     void *conn;
@@ -1538,6 +1572,9 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     }
 
     m2sdr_store_applied_config(dev, cfg);
+    m2sdr_publish_active_sample_rate(dev, cfg->sample_rate);
+    m2sdr_publish_active_rx_freq(dev, cfg->rx_freq);
+    m2sdr_publish_active_bandwidth(dev, cfg->bandwidth);
     return M2SDR_ERR_OK;
 }
 
@@ -1593,6 +1630,7 @@ int m2sdr_set_frequency(struct m2sdr_dev *dev, enum m2sdr_direction direction, u
         /* The RX LO retune re-runs the AD9361 quad cal, which reverts the QEC
          * loop gain to the inert default; re-apply the fix so it sticks. */
         m2sdr_apply_rx_qec_kexp(phy);
+        m2sdr_publish_active_rx_freq(dev, freq);
     }
 
     return M2SDR_ERR_OK;
@@ -1650,6 +1688,7 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 
         dev->rf_oversample_enabled = wide ? 1 : 0;
     }
+    m2sdr_publish_active_sample_rate(dev, rate);
     return M2SDR_ERR_OK;
 }
 
@@ -1671,6 +1710,7 @@ int m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw)
         return M2SDR_ERR_IO;
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_rf_bandwidth(phy, bw)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
+    m2sdr_publish_active_bandwidth(dev, bw);
     return M2SDR_ERR_OK;
 }
 

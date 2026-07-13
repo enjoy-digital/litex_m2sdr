@@ -20,7 +20,9 @@
 #include "mem.h"
 
 #define M2SDR_SATA_ETHERBONE_BULK_WORDS  128u
-#define M2SDR_SATA_ETHERBONE_READ_WINDOW 8u
+/* One outstanding bulk read keeps catalog traffic cooperative with a live
+ * SoapySDR/GQRX client sharing the same gateware Etherbone endpoint. */
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW 1u
 
 enum {
     TXSRC_PCIE = 0,
@@ -93,6 +95,9 @@ void sata_require_csrs(void);
 void txrx_loopback_set(void *conn, int enable);
 void sata_rx_program(void *conn, uint64_t sector, uint32_t nsectors);
 void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors);
+bool sata_rx_tap_supported(void);
+void sata_rx_set_tap(void *conn, bool enable);
+void sata_tx_set_pace(void *conn, uint32_t words_per_second);
 void sata_rx_start(void *conn);
 void sata_tx_start(void *conn);
 int  sata_streamers_reset(void *conn, bool rx, bool tx);
@@ -103,6 +108,8 @@ uint32_t sata_rx_error(void *conn);
 uint32_t sata_tx_error(void *conn);
 bool     sata_rx_progress_supported(void);
 uint32_t sata_rx_progress(void *conn);
+bool     sata_tx_progress_supported(void);
+uint32_t sata_tx_progress(void *conn);
 
 void m2sdr_sata_set_no_bulk_etherbone(bool no_bulk);
 enum sata_pattern_kind parse_pattern(const char *text);

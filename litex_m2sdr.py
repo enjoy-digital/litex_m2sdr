@@ -36,6 +36,7 @@ from litex.build.generic_platform import IOStandard
 from litepcie.common            import *
 from litepcie.phy.s7pciephy     import S7PCIEPHY
 from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
+from liteeth.core             import LiteEthUDPIPCore
 from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
 from liteeth.core.ptp         import LiteEthPTP
 
@@ -62,6 +63,7 @@ from litex_m2sdr.gateware.pcie        import (
     add_s7_pcie_timing_constraints,
 )
 from litex_m2sdr.gateware.header      import TXRXHeader
+from litex_m2sdr.gateware.etherbone   import SharedLiteEthEtherbone
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
@@ -72,7 +74,7 @@ from litex_m2sdr.gateware.sata        import (
     SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer,
     SATADMAMemoryRouter,
     M2SDRLiteSATASector2MemDMA, M2SDRLiteSATAMem2SectorDMA,
-    M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream)
+    M2SDRLiteSATAStream2Sectors, M2SDRLiteSATASectors2Stream, SATAStreamTap)
 
 from litex_m2sdr.software import generate_litepcie_software
 
@@ -613,7 +615,7 @@ class BaseSoC(SoCMini):
                     igmp_groups   = ptp_igmp_groups,
                     igmp_interval = eth_ptp_igmp_interval,
                 )
-            self.add_etherbone(**eth_etherbone_kwargs)
+            self.add_shared_etherbone(**eth_etherbone_kwargs)
 
             if with_eth_ptp:
                 nominal_time_inc = int(round((1e9/100e6) * (1 << 24)))
@@ -803,6 +805,9 @@ class BaseSoC(SoCMini):
 
         # Crossbar.
         # ---------
+        # Port indices match the host-side TXSRC_*/RXDST_* enums in
+        # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA.
+        crossbar_sata_port = 2
         self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
 
         # TX: Comms -> Crossbar -> Header.
@@ -836,7 +841,28 @@ class BaseSoC(SoCMini):
 
         # RX: Header -> Crossbar -> Comms.
         # --------------------------------
-        self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+        if with_sata:
+            # Keep the normal host RX path active while optionally duplicating
+            # each accepted word into the SATA recorder.  The small mux also
+            # preserves the original exclusive RX->SATA routing mode.
+            self.sata_rx_tap = SATAStreamTap(dma_layout(64))
+            self.sata_rx_mux = stream.Multiplexer(dma_layout(64), n=2)
+            sata_tap_active = Signal()
+            self.comb += [
+                sata_tap_active.eq(
+                    self.sata_rx_streamer.tap.storage &
+                    (self.crossbar.demux.sel != crossbar_sata_port)
+                ),
+                self.header.rx.source.connect(self.sata_rx_tap.sink),
+                self.sata_rx_tap.source.connect(self.crossbar.demux.sink),
+                self.crossbar.demux.source2.connect(self.sata_rx_mux.sink0),
+                self.sata_rx_tap.tap.connect(self.sata_rx_mux.sink1),
+                self.sata_rx_mux.sel.eq(sata_tap_active),
+                self.sata_rx_mux.source.connect(self.sata_rx_streamer.sink, omit={"error"}),
+                self.sata_rx_tap.enable.eq(sata_tap_active),
+            ]
+        else:
+            self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
         if with_pcie:
             self.comb += [
                 self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
@@ -856,9 +882,6 @@ class BaseSoC(SoCMini):
                 ]
             else:
                 self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
-        if with_sata:
-            self.comb += self.crossbar.demux.source2.connect(self.sata_rx_streamer.sink, omit={"error"})
-
         # Leds -------------------------------------------------------------------------------------
 
         led_pad = platform.request("user_led")
@@ -1145,6 +1168,53 @@ class BaseSoC(SoCMini):
             mode       = mode,
         )
 
+    def add_shared_etherbone(self, phy, ip_address, data_width=32,
+        arp_entries=4, buffer_depth=16, with_igmp=False,
+        igmp_groups=None, igmp_interval=10):
+        """Add Etherbone with replies routed to each UDP client's source port.
+
+        Mirrors LiteXSoC.add_etherbone with the frontend swapped for
+        SharedLiteEthEtherbone; re-diff against upstream on LiteX bumps.
+        """
+        if data_width != 32:
+            raise ValueError("Shared Etherbone currently requires a 32-bit datapath.")
+
+        ethcore = LiteEthUDPIPCore(
+            phy                  = phy,
+            mac_address          = 0x10e2d5000000,
+            ip_address           = ip_address,
+            clk_freq             = self.clk_freq,
+            arp_entries          = arp_entries,
+            dw                   = data_width,
+            with_ip_broadcast    = True,
+            with_sys_datapath    = True,
+            with_igmp            = with_igmp,
+            igmp_groups          = igmp_groups,
+            igmp_interval        = igmp_interval,
+            interface            = "crossbar",
+            endianness           = "big",
+        )
+        self.add_module(name="ethcore_etherbone", module=ethcore)
+
+        etherbone = SharedLiteEthEtherbone(
+            ethcore.udp,
+            udp_port    = 1234,
+            buffer_depth= buffer_depth,
+            cd          = "sys",
+        )
+        self.add_module(name="etherbone", module=etherbone)
+        self.bus.add_master(name="etherbone", master=etherbone.wishbone.bus)
+
+        eth_rx_clk = getattr(phy, "crg", phy).cd_eth_rx.clk
+        eth_tx_clk = getattr(phy, "crg", phy).cd_eth_tx.clk
+        self.platform.add_period_constraint(eth_rx_clk, 1e9/phy.rx_clk_freq)
+        if eth_rx_clk is not eth_tx_clk:
+            self.platform.add_period_constraint(eth_tx_clk, 1e9/phy.tx_clk_freq)
+            self.platform.add_false_path_constraints(
+                self.crg.cd_sys.clk, eth_rx_clk, eth_tx_clk)
+        else:
+            self.platform.add_false_path_constraints(self.crg.cd_sys.clk, eth_rx_clk)
+
     def add_sata(self, platform, sys_clk_freq, sata_gen=2, with_pcie=False, pcie_msis=None):
         if with_pcie and pcie_msis is None:
             raise ValueError("PCIe MSI map is required when SATA and PCIe are enabled.")
@@ -1237,7 +1307,10 @@ class BaseSoC(SoCMini):
         # Streamers.
         # ----------
         self.sata_rx_streamer = ResetInserter()(M2SDRLiteSATAStream2Sectors(port=self.sata_crossbar.get_port()))
-        self.sata_tx_streamer = ResetInserter()(M2SDRLiteSATASectors2Stream(port=self.sata_crossbar.get_port()))
+        self.sata_tx_streamer = ResetInserter()(M2SDRLiteSATASectors2Stream(
+            port         = self.sata_crossbar.get_port(),
+            sys_clk_freq = sys_clk_freq,
+        ))
         self.sata_streamer_control = CSRStorage(fields=[
             CSRField("rx_reset", size=1, offset=0, pulse=True,
                 description="Pulse reset on the SATA Stream2Sectors streamer."),

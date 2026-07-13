@@ -33,6 +33,82 @@ make m2sdr_sata
 
 ## Capture And Retrieve
 
+### Record and replay what GQRX is receiving
+
+Build and load the Ethernet + SATA image, then rebuild the user software and
+SoapySDR module so gateware and software use the same CSR map:
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-eth --with-sata --build --flash
+make -C litex_m2sdr/software/user clean
+make -C litex_m2sdr/software/user
+cmake -S litex_m2sdr/software/soapysdr -B /tmp/litex_m2sdr_soapy \
+    -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build /tmp/litex_m2sdr_soapy
+sudo cmake --install /tmp/litex_m2sdr_soapy
+```
+
+The clean user build is important after changing gateware because generated CSR
+offsets are compiled into `libm2sdr` and the SoapySDR module.  Installing with
+the `/usr` prefix replaces the module in Debian/Ubuntu's multiarch SoapySDR
+directory; a default `/usr/local` install can otherwise be shadowed by an older
+module under `/usr`.
+
+Start GQRX normally with the Ethernet device
+`driver=LiteXM2SDR,eth_ip=192.168.1.50`, tune it, and enable DSP. The SATA
+utility can then record the exact RX stream that continues to feed GQRX:
+
+```sh
+cd litex_m2sdr/software/user
+./m2sdr_sata -i 192.168.1.50 capture-current my_capture --seconds 10
+```
+
+`capture-current` reads the active sample rate, format, channel layout,
+frequency, and bandwidth published by the SoapySDR driver. It does not retune
+the RFIC or disconnect GQRX. An explicit `--size` can be used instead of
+`--seconds`.
+
+The required sustained write rate is:
+
+```text
+sample rate x bytes per complex sample x channel count
+```
+
+For example, 1T1R SC16 needs 15.26 MiB/s at 4 MS/s and 38.15 MiB/s at
+10 MS/s. The WDC WDS120G1G0A used during Ethernet validation sustained about
+18--20 MiB/s on long LiteSATA writes: 4 MS/s SC16 captured in 10.009 seconds
+and replayed in 9.990 seconds, while 10 MS/s backpressured the shared RX path
+and took about 20 seconds. This is a sustained-drive limit, not an Ethernet or
+FIFO-capacity limit; short writes can be much faster because they are cached.
+Use a rate below the measured sustained write speed when GQRX must remain
+smooth. If the utility reports that elapsed capture time differs from the
+requested time, treat that capture as backpressured and lower the rate, bit
+depth, or channel count.
+
+Replay the named capture into the same Ethernet RX path:
+
+```sh
+./m2sdr_sata -i 192.168.1.50 serve my_capture
+```
+
+GQRX remains open and DSP-active: during `serve` it displays the samples read
+from SATA, and when replay finishes the normal live RF stream is restored.
+Etherbone control is shared by routing replies to each process's UDP source
+port; no second control port or dashboard is required.
+
+To reset an idle or cleanly stopped streamer frontend:
+
+```sh
+./m2sdr_sata -i 192.168.1.50 stop both
+```
+
+The frontend reset cannot abort an ATA command that was already accepted by
+the SATA core. After a timeout, run `info`. If it reports `Drive: Not present`
+while the PHY is still ready, reload the FPGA bitstream before issuing another
+SATA command.
+
+### Standalone RF capture
+
 Record RF samples directly to SATA:
 
 ```sh

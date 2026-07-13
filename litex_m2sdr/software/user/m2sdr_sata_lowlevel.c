@@ -258,6 +258,40 @@ void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
     m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
+bool sata_rx_tap_supported(void)
+{
+#ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
+    return true;
+#else
+    return false;
+#endif
+}
+
+void sata_rx_set_tap(void *conn, bool enable)
+{
+#ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
+    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_TAP_ADDR, enable ? 1 : 0);
+#else
+    (void)conn;
+    (void)enable;
+#endif
+}
+
+void sata_tx_set_pace(void *conn, uint32_t words_per_second)
+{
+#ifdef CSR_SATA_TX_STREAMER_PACE_ADDR
+    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_PACE_ADDR, words_per_second);
+#else
+    (void)conn;
+    if (words_per_second != 0) {
+        fprintf(stderr,
+            "Paced replay requires gateware with the SATA TX pace CSR. "
+            "Rebuild and reload the FPGA bitstream.\n");
+        exit(1);
+    }
+#endif
+}
+
 void sata_rx_start(void *conn)
 {
     m2sdr_write32(conn, CSR_SATA_RX_STREAMER_START_ADDR, 1);
@@ -318,6 +352,25 @@ uint32_t sata_rx_progress(void *conn)
 {
 #ifdef CSR_SATA_RX_STREAMER_PROGRESS_ADDR
     return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_PROGRESS_ADDR);
+#else
+    (void)conn;
+    return 0;
+#endif
+}
+
+bool sata_tx_progress_supported(void)
+{
+#ifdef CSR_SATA_TX_STREAMER_PROGRESS_ADDR
+    return true;
+#else
+    return false;
+#endif
+}
+
+uint32_t sata_tx_progress(void *conn)
+{
+#ifdef CSR_SATA_TX_STREAMER_PROGRESS_ADDR
+    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_PROGRESS_ADDR);
 #else
     (void)conn;
     return 0;
@@ -453,6 +506,7 @@ static bool etherbone_is_liteeth(struct m2sdr_dev *conn)
     return m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK &&
            transport == M2SDR_TRANSPORT_KIND_LITEETH;
 }
+
 
 void etherbone_fill_test_words(uint32_t *words, uint32_t count)
 {
