@@ -94,6 +94,9 @@ You can pass device arguments to configure the driver. These are most useful whe
     presence, plus the clk10 discipline state for `fpga`), and each RX/TX
     channel reports an AD9361 `lo_locked` VCO lock-detect sensor, matching
     what srsRAN's UHD backend polls after each retune.
+- **Reference clock trim**: `refclk_ppm=-5.75`
+  - Compensates a measured reference clock error in ppm (positive = clock runs fast) by trimming the SI5351 PLL feedback multiplier, correcting the AD9361 reference and all derived clocks (LOs and sample clocks) together with ~`0.03ppm` resolution.
+  - Useful on the internal XO to remove the CFO caused by the crystal tolerance without switching to an external reference: measure the offset on a known-good signal (`ppm = -offset_hz / carrier_hz * 1e6`) and pass it as a per-board calibration constant.
 - **Ethernet RX mode** (Ethernet devices): `eth_mode=udp|vrt`
   - `vrt` enables FPGA VRT RX streaming and Soapy RX will parse/strip VRT signal headers.
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.

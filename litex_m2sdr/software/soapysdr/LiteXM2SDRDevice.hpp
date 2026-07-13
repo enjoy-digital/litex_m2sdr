@@ -388,6 +388,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* Selected RFIC reference; canonical names: internal, external, fpga. */
     std::string _clock_source = "internal";
     int64_t _refclk_hz = 38400000;
+    /* Measured reference clock error in ppm, compensated through the SI5351
+     * PLL feedback multiplier (positive = clock runs fast). */
+    double _refclk_ppm = 0.0;
 
     size_t _rx_buf_size = 0;
     size_t _tx_buf_size = 0;
