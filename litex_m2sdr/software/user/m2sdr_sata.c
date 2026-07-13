@@ -3070,7 +3070,9 @@ static void status(void)
 #ifdef CSR_SATA_PHY_BASE
     {
         struct m2sdr_sata_info sata_info;
-        int sata_rc = m2sdr_get_sata_info(conn, &sata_info, 1000);
+        /* A drive busy with garbage collection can stall IDENTIFY for
+         * seconds; a short budget misreports it as absent. */
+        int sata_rc = m2sdr_get_sata_info(conn, &sata_info, 5000);
 
         printf("SATA:\n");
         if (sata_rc == M2SDR_ERR_OK) {
