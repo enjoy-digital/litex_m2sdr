@@ -398,6 +398,9 @@ class BaseSoC(SoCMini):
             jtagbone       = with_jtagbone,
             eth_sfp        = eth_sfp,
             wr_sfp         = capability_wr_sfp,
+
+            # RFIC.
+            rfic_oversampling = with_rfic_oversampling,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -778,13 +781,11 @@ class BaseSoC(SoCMini):
             # Per-lane RX IDELAYE2 deskew: at 983Mbps per lane (2T2R @ 122.88MSPS) the board's
             # lane-to-lane skew exceeds the eye, and the AD9361's delay registers are global-only.
             with_rx_deskew    = with_rfic_oversampling,
-            # Per-lane TX clock phase trim (MMCM + DRP): the TX-direction counterpart of the RX
-            # deskew; Artix-7 HR banks have no ODELAY, so the lane alignment is done by phasing each
-            # TX ODDR's clock instead. M2SDR_TX_OSERDES selects the OSERDESE2 TX serializer instead
-            # (needed for a clean TX eye at 2T2R@122.88, 983Mbps/lane); the two are mutually exclusive
-            # (both build the TX MMCM).
-            with_tx_phase     = with_rfic_oversampling and (os.environ.get("M2SDR_TX_OSERDES") is None),
-            with_tx_oserdes   = with_rfic_oversampling and (os.environ.get("M2SDR_TX_OSERDES") is not None),
+            # OSERDESE2 TX serializer (oversampling build): at 2T2R@122.88 the TX LVDS runs
+            # 983Mbps/lane and the chip cannot de-interleave a fabric-ODDR eye, so drive the 6 TX
+            # lanes + TX_FRAME from OSERDESE2. Its MMCM only locks at the 491.52MHz DATA_CLK, so the
+            # oversampling image transmits only at 2T2R@122.88 (use the standard image for lower rates).
+            with_tx_oserdes   = with_rfic_oversampling,
             wide              = with_rfic_oversampling,
         )
         self.ad9361.add_prbs()
@@ -1180,41 +1181,11 @@ class BaseSoC(SoCMini):
                 "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
                 "NAME =~ *prbs_checker_1r1t_error_r*}}]",
             ]
-            # TX phase-trim (MMCM/phased-clock) constraints: only valid when with_tx_phase is on
-            # (the MMCM and *ad9361phy_clkout* clocks exist). An OSERDES build disables with_tx_phase,
-            # so these are omitted there (else they reference clocks that do not exist and Vivado
-            # errors on the empty clock group).
-            if os.environ.get("M2SDR_TX_OSERDES") is None:
-                platform.toolchain.pre_placement_commands += [
-                    # The TX phase-trim BUFGCTRL selects are quasi-static control (changed only
-                    # with TX idle; IGNORE0/1 make the mux asynchronous by design).
-                    "set_false_path -to [get_pins -hierarchical -filter {{NAME =~ *BUFGCTRL*/S?}}]",
-                    # TX ODDR paths captured by the BUFGCTRL bypass leg (pad clock): the bypass
-                    # only carries data at DATA_CLK <= 245.76MHz (period >= 4.07ns) - at 491.52MHz
-                    # the MMCM-phased leg is selected before TX is used - so the single-cycle
-                    # 491.52MHz check is over-constrained by 2x.
-                    "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
-                    "-to [get_clocks ad9361_rfic_rx_clk_p]",
-                    "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
-                    "-to [get_clocks ad9361_rfic_rx_clk_p]",
-                    # The TX BUFGCTRL muxes carry either the bypass (pad) clock or the MMCM-phased
-                    # clocks, never both: cross-leg paths are physically impossible.
-                    "set_clock_groups -logically_exclusive "
-                    "-group [get_clocks ad9361_rfic_rx_clk_p] "
-                    "-group [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
-                    # The rfic -> phased-lane-domain crossing's validity is enforced by the TX phase
-                    # calibration, not by static analysis: the lane trim moves the capture clock in
-                    # VCO/8 steps and a miscapture shows in the per-lane PRBS error counters the
-                    # calibration sweeps over (a fixed-phase same-frequency crossing, residual
-                    # -0.1..-0.35ns inter-clock-tree pessimism at 491.52MHz).
-                    "set_false_path -from [get_clocks rfic_clk] "
-                    "-to [get_clocks -filter {{NAME =~ *ad9361phy_clkout*}}]",
-                ]
             # OSERDES TX: the group (tx_data_*) is latched in rfic (491.52, updates once per 4
             # cycles = one CLKDIV period) and re-registered into the oserdes_div (122.88) domain -
             # a mesochronous crossing of a signal stable for a full CLKDIV period. Declare the
             # OSERDES MMCM clocks asynchronous to rfic and bound the crossing by datapath delay.
-            if os.environ.get("M2SDR_TX_OSERDES") is not None:
+            if with_rfic_oversampling:
                 platform.toolchain.pre_placement_commands += [
                     # tx_data_* (rfic) -> *_d (oserdes_div) group register: the group is stable for a
                     # full CLKDIV period (8.14ns) so this mesochronous transfer is bounded by datapath

@@ -1955,6 +1955,25 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     if (m2sdr_channel_layout_from_config(cfg, &channel_layout) != M2SDR_ERR_OK)
         return M2SDR_ERR_INVAL;
 
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    /* Fail loudly on a rate/layout the loaded image cannot run instead of silently
+     * corrupting. 2T2R above 61.44 MSPS needs DATA_CLK 491.52 MHz = the RFIC-
+     * oversampling image; on a standard image the interface never aligns. Gated on
+     * the capability bit so this only runs when the tools know the image can report
+     * it (older csr.h -> M2SDR_FEATURE_RFIC_OVERSAMPLING==0 -> no false rejection). */
+    if (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R && cfg->sample_rate > 61440000) {
+        struct m2sdr_capabilities caps;
+        if (m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+            !(caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING)) {
+            fprintf(stderr,
+                "2T2R @ %.3f MSPS needs the RFIC-oversampling gateware image, but a "
+                "standard image is loaded. Flash the *_rfic_oversampling image, or use "
+                "1T1R or a rate <= 61.44 MSPS.\n", cfg->sample_rate / 1e6);
+            return M2SDR_ERR_INVAL;
+        }
+    }
+#endif
+
     rc = m2sdr_configure_clocking(dev, conn, cfg, clock_source);
     if (rc != M2SDR_ERR_OK)
         return rc;

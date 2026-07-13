@@ -24,7 +24,9 @@ class Capability(LiteXModule):
         # White Rabbit.
         wr_enabled,
         # Board.
-        variant, jtagbone, eth_sfp, wr_sfp):
+        variant, jtagbone, eth_sfp, wr_sfp,
+        # RFIC.
+        rfic_oversampling=0):
 
         # API Version.
         # ------------
@@ -46,6 +48,8 @@ class Capability(LiteXModule):
             CSRField("eth_ptp",  size=1, offset=6, reset=int(eth_ptp),      description="Ethernet PTP time discipline is present."),
             CSRField("eth_ptp_rfic_clock", size=1, offset=7, reset=int(eth_ptp_rfic_clock),
                 description="Ethernet PTP can discipline the RFIC reference clock path."),
+            CSRField("rfic_oversampling", size=1, offset=8, reset=int(rfic_oversampling),
+                description="RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 

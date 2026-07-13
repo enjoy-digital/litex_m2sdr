@@ -70,25 +70,15 @@ class AD9361PHY(LiteXModule):
             board's ~300ps lane-to-lane skew leaves no common eye, so per-lane deskew is required.
             Drive rx_idelay_value/rx_idelay_ld from the sys domain to load per-lane tap values
             (requires an IDELAYCTRL with a 200MHz reference in the design).
-        with_tx_phase: Clock each TX data lane's ODDR (and the FB_CLK ODDR) from an MMCM-phased
-            copy of rfic_clk instead of rfic_clk directly, selectable at runtime. The TX
-            direction has no per-lane delay primitive in Artix-7 HR banks; the MMCM's per-output
-            static phase (re-programmable through its DRP, VCO/8 steps) provides the per-lane
-            trim that aligns the 983Mbps TX eyes at 491.52MHz DATA_CLK. FB_CLK's ODDR drives a
-            constant pattern, so its output can be phased across the full bit period (the global
-            search axis); the data lanes accept small forward trims. The MMCM only locks at the
-            491.52MHz DATA_CLK; at other rates leave the bypass selected (ODDRs on rfic_clk).
     """
     def __init__(self, pads, with_loopback=True, with_rx_idelay=False,
-                 with_tx_phase=False, with_tx_oserdes=False):
+                 with_tx_oserdes=False):
         # with_tx_oserdes: drive the 6 TX-data lanes + TX_FRAME from OSERDESE2 (8:1 DDR, CLK 491.52 /
         # CLKDIV 122.88) instead of fabric-clocked ODDRs. At 2T2R@122.88 the TX LVDS runs 983Mbps/lane
         # and the ODDR output eye is too poor for the chip to de-interleave (a clean tone splatters to
         # fs/2); OSERDESE2 gives a clean eye and the datapath fabric runs at 122.88 (the CLKDIV). Uses
         # a single shared clock for all lanes; the MMCM only locks at the 491.52 DATA_CLK, so an
-        # OSERDES build supports TX only at 2T2R@122.88. Mutually exclusive with with_tx_phase (both
-        # build the TX MMCM).
-        assert not (with_tx_oserdes and with_tx_phase), "with_tx_oserdes and with_tx_phase are exclusive"
+        # OSERDES build supports TX only at 2T2R@122.88.
         self.sink    = sink   = stream.Endpoint(phy_layout()) # TX input  stream.
         self.source  = source = stream.Endpoint(phy_layout()) # RX output stream.
         self.control = CSRStorage(fields=[
@@ -371,46 +361,9 @@ class AD9361PHY(LiteXModule):
 
         # TX Phase Trim (Oversampling).
         # -----------------------------
-        # MMCM-phased copies of rfic_clk for the TX ODDRs, with a per-output glitching async
-        # bypass mux back to rfic_clk (used whenever DATA_CLK is not 491.52MHz and the MMCM is
-        # unlocked). Phases are static (0 at build, analyzed as such) and re-programmed at
-        # runtime through the DRP; data-lane trims stay small and forward so the rfic-domain
-        # launch registers keep setup margin into the phased ODDRs.
-        if with_tx_phase:
-            self.tx_phase = CSRStorage(fields=[
-                CSRField("en", size=1, offset=0,
-                    description="Clock the TX ODDRs from the MMCM-phased clocks."),
-                CSRField("mmcm_reset", size=1, offset=1,
-                    description="Hold the TX MMCM in reset (assert around DRP phase writes)."),
-            ])
-            self.tx_mmcm = S7MMCM(speedgrade=-3)
-            # Feed the MMCM and the bypass inputs from the IBUFDS output (dedicated routes);
-            # cascading out of the rfic BUFG is not placeable.
-            self.tx_mmcm.register_clkin(rx_clk_ibufds, 491.52e6)
-            self.comb += self.tx_mmcm.reset.eq(self.tx_phase.fields.mmcm_reset)
-            tx_ph_cds = []
-            for i in range(7):
-                cd_raw = ClockDomain(f"rfic_txphraw{i}", reset_less=True)
-                self.clock_domains += cd_raw
-                self.tx_mmcm.create_clkout(cd_raw, 491.52e6, phase=0, buf=None, with_reset=False)
-                cd_mux = ClockDomain(f"rfic_txph{i}", reset_less=True)
-                self.clock_domains += cd_mux
-                self.specials += Instance("BUFGCTRL",
-                    i_I0      = rx_clk_ibufds,
-                    i_I1      = cd_raw.clk,
-                    i_S0      = ~self.tx_phase.fields.en,
-                    i_S1      = self.tx_phase.fields.en,
-                    i_CE0     = 1,
-                    i_CE1     = 1,
-                    i_IGNORE0 = 1,
-                    i_IGNORE1 = 1,
-                    o_O       = cd_mux.clk,
-                )
-                tx_ph_cds.append(cd_mux)
-            self.tx_mmcm.expose_drp()
-            tx_lane_clk = [cd.clk for cd in tx_ph_cds[:6]]
-            tx_fb_clk   = tx_ph_cds[6].clk
-        elif with_tx_oserdes:
+        # TX serializer clock: the OSERDES build (2T2R@122.88) uses a dedicated MMCM off DATA_CLK;
+        # the standard build clocks the TX ODDRs from rfic_clk directly.
+        if with_tx_oserdes:
             # OSERDES clocking: CLK=491.52MHz (DDR bit clock -> 983Mbps), CLKDIV=122.88MHz (8:1
             # parallel-load clock). A dedicated MMCM off the DATA_CLK IBUFDS; both clocks are BUFG'd
             # and phase-coherent. The MMCM only locks at the 491.52 DATA_CLK (2T2R@122.88), so an
@@ -483,10 +436,7 @@ class AD9361PHY(LiteXModule):
                 })
             )
         ]
-        if with_tx_phase:
-            frame_sync = self.sync.rfic_txph0
-        else:
-            frame_sync = self.sync.rfic
+        frame_sync = self.sync.rfic
         self.sync.rfic += tx_frame_r.eq(tx_frame)
         frame_sync += tx_frame_r2.eq(tx_frame_r)
         if not with_tx_oserdes:
@@ -543,10 +493,7 @@ class AD9361PHY(LiteXModule):
         tx_data_half_i_r2 = Signal(6)
         tx_data_half_q_r2 = Signal(6)
         for i in range(6):
-            if with_tx_phase:
-                lane_sync = getattr(self.sync, f"rfic_txph{i}")
-            else:
-                lane_sync = self.sync.rfic
+            lane_sync = self.sync.rfic
             lane_sync += [
                 tx_data_half_i_r2[i].eq(tx_data_half_i_r[i]),
                 tx_data_half_q_r2[i].eq(tx_data_half_q_r[i]),

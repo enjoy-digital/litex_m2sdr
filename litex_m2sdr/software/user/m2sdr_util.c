@@ -1296,6 +1296,12 @@ static void info(void)
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
     printf("  Ethernet PTP   : %s\n", eth_ptp_enabled ? "Yes" : "No");
     printf("  PTP RFIC Clock : %s\n", eth_ptp_rfic_clock_enabled ? "Yes" : "No");
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    bool rfic_oversampling_enabled =
+        (caps.features >> CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET) &
+        ((1 << CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_SIZE) - 1);
+    printf("  Oversampling   : %s\n", rfic_oversampling_enabled ? "Yes (128-bit, 2T2R@122.88)" : "No");
+#endif
 
     if (pcie_enabled) {
         int pcie_speed = (caps.pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
