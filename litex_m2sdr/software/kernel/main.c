@@ -1906,6 +1906,12 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		goto fail1;
 	}
 
+	/* Keep the device from bus-mastering until the core is reset and its DMA
+	 * buffers are (re)mapped: a device left bus-mastering by an unclean teardown
+	 * would otherwise DMA to stale addresses and fault the IOMMU before we are
+	 * ready. Bus mastering is enabled below, after litepcie_dma_init(). */
+	pci_clear_master(dev);
+
 	ret = -EIO;
 
 	/* Check the device version */
@@ -1944,7 +1950,6 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		fpga_identifier[i] = litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE + i * 4);
 	dev_info(&dev->dev, "Version %s\n", fpga_identifier);
 
-	pci_set_master(dev);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
 	ret = pci_set_dma_mask(dev, DMA_BIT_MASK(DMA_ADDR_WIDTH));
 #else
@@ -2046,6 +2051,10 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		goto fail3;
 	}
 
+	/* Core was reset and DMA buffers are now mapped: it is safe to let the
+	 * device bus-master (held off since pcim_enable_device above). */
+	pci_set_master(dev);
+
 #ifdef LITEPCIE_HAS_SATA_DMA
 	if (litepcie_soc_has_sata(litepcie_dev))
 		litepcie_sata_dma_alloc(litepcie_dev);
@@ -2141,6 +2150,14 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 	litepcie_dev = pci_get_drvdata(dev);
 
 	dev_info(&dev->dev, "\e[1m[Removing device]\e[0m\n");
+
+	/* Stop DMA at the PCIe level FIRST: clearing Bus Master Enable in config
+	 * space stops the device issuing any new DMA immediately, even if the MMIO
+	 * stop below cannot reach a wedged core. Otherwise a still-bus-mastering
+	 * FPGA writes into the buffers we are about to free -> IOMMU IO_PAGE_FAULT,
+	 * which can escalate (probe soft-lockup, D3cold) to a power-cycle-only wedge.
+	 * In-flight transactions complete cleanly; only new ones are blocked. */
+	pci_clear_master(dev);
 
 	/* Stop the DMAs */
 	litepcie_stop_dma(litepcie_dev);
