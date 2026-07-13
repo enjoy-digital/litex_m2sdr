@@ -95,6 +95,7 @@ void sata_require_csrs(void);
 void txrx_loopback_set(void *conn, int enable);
 void sata_rx_program(void *conn, uint64_t sector, uint32_t nsectors);
 void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors);
+int  sata_eth_replay_destination_prepare(void *conn);
 bool sata_rx_tap_supported(void);
 void sata_rx_set_tap(void *conn, bool enable);
 void sata_tx_set_pace(void *conn, uint32_t words_per_second);

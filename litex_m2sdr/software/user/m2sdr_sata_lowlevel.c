@@ -258,6 +258,7 @@ void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
     m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
+
 bool sata_rx_tap_supported(void)
 {
 #ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
@@ -505,6 +506,49 @@ static bool etherbone_is_liteeth(struct m2sdr_dev *conn)
 
     return m2sdr_get_transport(conn, &transport) == M2SDR_ERR_OK &&
            transport == M2SDR_TRANSPORT_KIND_LITEETH;
+}
+
+int sata_eth_replay_destination_prepare(void *conn)
+{
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+    uint32_t enable = m2sdr_read32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR) & 0x1u;
+    uint32_t ip     = m2sdr_read32(conn, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR);
+
+    /* A live SoapySDR/GQRX client owns the destination; leave it in place.
+     * The enable bit alone cannot identify a client because it resets to 1;
+     * a programmed destination address is what marks an active session. */
+    if (enable && ip != 0)
+        return 0;
+
+    /* The streamer resets with ip=0.0.0.0 after a bitstream load, and a
+     * SoapySDR stream deactivation leaves it disabled. A replay toward an
+     * unresolvable destination stalls LiteEth's shared TX path on ARP and
+     * takes Etherbone and ICMP down with it until the FPGA is reloaded; one
+     * toward a disabled streamer backpressures the SATA command mid-transfer.
+     * Program this host as the destination and enable the streamer. */
+    if (etherbone_is_liteeth(conn)) {
+        struct m2sdr_liteeth_rx_stream_config config;
+
+        m2sdr_liteeth_rx_stream_config_init(&config);
+        if (m2sdr_liteeth_rx_stream_prepare(conn, &config) != M2SDR_ERR_OK) {
+            m2sdr_cli_error("Failed to program the Ethernet replay destination");
+            return -1;
+        }
+    } else if (ip == 0) {
+        m2sdr_cli_error("Ethernet replay destination is unset and no local IP "
+                        "could be determined; start a SoapySDR/GQRX session or "
+                        "use the Etherbone transport");
+        return -1;
+    }
+    if (!enable)
+        m2sdr_write32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
+    return 0;
+#else
+    (void)conn;
+    return 0;
+#endif
 }
 
 

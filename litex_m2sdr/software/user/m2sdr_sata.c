@@ -2424,6 +2424,15 @@ static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
 
     int rxdst = parse_rxdst(dst_s);
 
+    /* An Ethernet replay needs a resolvable UDP destination before the RX
+     * path is routed to the LiteEth streamer; see
+     * sata_eth_replay_destination_prepare(). */
+    if (rxdst == RXDST_ETH && !dry_run &&
+        sata_eth_replay_destination_prepare(conn) != 0) {
+        sata_operation_finish(&op);
+        return 1;
+    }
+
     /* SATA -> TX -> loopback -> RX destination. */
     crossbar_set(conn, TXSRC_SATA, rxdst);
     txrx_loopback_set(conn, 1);
