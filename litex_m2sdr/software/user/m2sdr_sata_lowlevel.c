@@ -258,7 +258,6 @@ void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
     m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
-
 bool sata_rx_tap_supported(void)
 {
 #ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
@@ -276,6 +275,39 @@ void sata_rx_set_tap(void *conn, bool enable)
     (void)conn;
     (void)enable;
 #endif
+}
+
+bool sata_streamer_stop_supported(bool rx, bool tx)
+{
+    bool supported = true;
+
+#ifndef CSR_SATA_RX_STREAMER_STOP_ADDR
+    if (rx)
+        supported = false;
+#endif
+#ifndef CSR_SATA_TX_STREAMER_STOP_ADDR
+    if (tx)
+        supported = false;
+#endif
+    return supported && (rx || tx);
+}
+
+/* Request a stop at the next ATA command boundary. The streamer keeps its
+ * done/error semantics: poll done afterwards, then reset the frontend to
+ * flush any words left in its FIFO. */
+void sata_streamer_request_stop(void *conn, bool rx, bool tx)
+{
+#ifdef CSR_SATA_RX_STREAMER_STOP_ADDR
+    if (rx)
+        m2sdr_write32(conn, CSR_SATA_RX_STREAMER_STOP_ADDR, 1);
+#endif
+#ifdef CSR_SATA_TX_STREAMER_STOP_ADDR
+    if (tx)
+        m2sdr_write32(conn, CSR_SATA_TX_STREAMER_STOP_ADDR, 1);
+#endif
+    (void)conn;
+    (void)rx;
+    (void)tx;
 }
 
 void sata_tx_set_pace(void *conn, uint32_t words_per_second)
@@ -550,7 +582,6 @@ int sata_eth_replay_destination_prepare(void *conn)
     return 0;
 #endif
 }
-
 
 void etherbone_fill_test_words(uint32_t *words, uint32_t count)
 {

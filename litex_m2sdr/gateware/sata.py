@@ -489,6 +489,7 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         self.progress = CSRStatus(32, description="Number of SATA sectors written in the current recording.")
         self.tap      = CSRStorage(description=
             "Duplicate the selected host RX stream into this recorder while preserving the host path.")
+        self.stop     = CSR()
         self.irq      = Signal()
 
         self.sink     = stream.Endpoint([("data", data_width)])
@@ -534,6 +535,14 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
         crt_sec           = Signal(48)
         progress          = Signal(32)
         drain_enabled     = Signal()
+
+        # An accepted ATA command cannot be aborted, so a stop request is
+        # honored at the next command boundary instead of mid-transfer.
+        stop_pending = Signal()
+        self.sync += [
+            If(self.stop.re,  stop_pending.eq(1)),
+            If(self.start.re, stop_pending.eq(0)),
+        ]
 
         # Converter.
         self.conv = conv = stream.Converter(nbits_from=data_width, nbits_to=port.dw)
@@ -583,7 +592,12 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
             NextState("WAIT-BURST-DATA")
         )
         fsm.act("WAIT-BURST-DATA",
-            If(input_fifo.level >= preload_stream_words,
+            # No command is in flight while the reservoir fills: a stop can
+            # complete immediately.
+            If(stop_pending,
+                *_finish_transfer(self.done, self.irq),
+                NextState("IDLE")
+            ).Elif(input_fifo.level >= preload_stream_words,
                 NextValue(drain_enabled, 1),
                 NextState("SEND-CMD-AND-DATA")
             )
@@ -633,7 +647,7 @@ class M2SDRLiteSATAStream2Sectors(LiteXModule):
                     NextState("IDLE")
                 ).Else(
                     NextValue(progress, progress + command_sectors),
-                    If(remaining_sectors <= command_sectors,
+                    If(stop_pending | (remaining_sectors <= command_sectors),
                         *_finish_transfer(self.done, self.irq),
                         NextState("IDLE")
                     ).Else(
@@ -672,6 +686,7 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
         self.error    = CSRStatus(description="Asserted when playback has failed.")
         self.progress = CSRStatus(32, description=
             "Number of SATA sectors read in the current playback.")
+        self.stop     = CSR()
         self.irq      = Signal()
 
         self.source   = stream.Endpoint([("data", data_width)])
@@ -699,6 +714,16 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
         receive_count      = Signal(32)
         progress           = Signal(32)
         final_output_seen  = Signal()
+
+        # An accepted ATA command cannot be aborted, so a stop request is
+        # honored at the next command boundary instead of mid-transfer. Words
+        # left in the output FIFO are the host's to flush with the frontend
+        # reset.
+        stop_pending = Signal()
+        self.sync += [
+            If(self.stop.re,  stop_pending.eq(1)),
+            If(self.start.re, stop_pending.eq(0)),
+        ]
 
         # FIFO after width conversion lets SATA fetch the next burst while the
         # current one is being released at the RF stream rate.
@@ -805,11 +830,16 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
             NextState("WAIT-FIFO-SPACE")
         )
         fsm.act("WAIT-FIFO-SPACE",
+            # No command is in flight while waiting for FIFO space: a stop
+            # can complete immediately.
+            If(stop_pending,
+                *_finish_transfer(self.done, self.irq),
+                NextState("IDLE")
             # A command can be much larger than the FIFO: LiteSATA propagates
             # ready/valid backpressure to the drive while paced output makes
             # room. Start with half the reservoir free so useful read data can
             # arrive before the first HOLD/backpressure interval.
-            If(output_fifo.level <= (fifo_depth >> 1),
+            ).Elif(output_fifo.level <= (fifo_depth >> 1),
                 NextState("SEND-CMD")
             )
         )
@@ -853,7 +883,10 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
                     NextState("IDLE")
                 ).Elif(port.source.read & port.source.end,
                     NextValue(progress, progress + command_sectors),
-                    If(remaining_sectors <= command_sectors,
+                    If(stop_pending,
+                        *_finish_transfer(self.done, self.irq),
+                        NextState("IDLE")
+                    ).Elif(remaining_sectors <= command_sectors,
                         NextState("DRAIN-FINAL")
                     ).Else(
                         NextValue(remaining_sectors, remaining_sectors - command_sectors),
@@ -864,7 +897,9 @@ class M2SDRLiteSATASectors2Stream(LiteXModule):
             )
         )
         fsm.act("DRAIN-FINAL",
-            If(final_output_seen,
+            # A stopped playback does not wait for the paced output to drain;
+            # the host flushes the remaining words with the frontend reset.
+            If(final_output_seen | stop_pending,
                 *_finish_transfer(self.done, self.irq),
                 NextState("IDLE")
             )

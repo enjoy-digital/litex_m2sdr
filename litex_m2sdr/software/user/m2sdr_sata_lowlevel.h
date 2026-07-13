@@ -100,6 +100,8 @@ void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors);
 int  sata_eth_replay_destination_prepare(void *conn);
 bool sata_rx_tap_supported(void);
 void sata_rx_set_tap(void *conn, bool enable);
+bool sata_streamer_stop_supported(bool rx, bool tx);
+void sata_streamer_request_stop(void *conn, bool rx, bool tx);
 void sata_tx_set_pace(void *conn, uint32_t words_per_second);
 void sata_rx_start(void *conn);
 void sata_tx_start(void *conn);

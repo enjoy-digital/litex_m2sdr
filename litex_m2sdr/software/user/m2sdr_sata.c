@@ -655,6 +655,79 @@ static enum sata_wait_result wait_done_quiet(const char *name,
         0.0, 0.0, false);
 }
 
+/* An accepted ATA command cannot be aborted: resetting the streamer frontend
+ * abandons it mid-transfer and the SATA core keeps its crossbar grant until
+ * the FPGA bitstream is reloaded. When a streamer wait is interrupted,
+ * request a stop at the current command boundary when the gateware supports
+ * it, otherwise finish the programmed transfer; unpacing a replay lets the
+ * remainder drain as fast as the destination accepts. A second interrupt
+ * abandons the transfer with an explicit recovery warning.
+ *
+ * A stopped transfer is deliberately reported as interrupted so callers
+ * reset the frontend (flushing FIFO leftovers) and do not register a
+ * partial capture; a fully drained transfer keeps its normal result. */
+static enum sata_wait_result wait_finish_interrupted(const char *name,
+                                                     uint32_t (*done_fn)(void *),
+                                                     uint32_t (*err_fn)(void *),
+                                                     uint32_t (*progress_fn)(void *),
+                                                     void *conn,
+                                                     int timeout_ms,
+                                                     uint64_t nsectors,
+                                                     bool rx, bool tx,
+                                                     bool allow_stop)
+{
+    bool graceful = allow_stop && sata_streamer_stop_supported(rx, tx);
+    enum sata_wait_result rc;
+
+    keep_running = 1;
+    if (tx)
+        sata_tx_set_pace(conn, 0);
+    if (graceful) {
+        sata_streamer_request_stop(conn, rx, tx);
+        fprintf(stderr,
+            "%s: interrupted; stopping at the current SATA command boundary "
+            "(Ctrl-C again to abandon immediately).\n", name);
+    } else {
+        fprintf(stderr,
+            "%s: interrupted; finishing the programmed transfer so the SATA "
+            "core stays usable (Ctrl-C again to abandon it).\n", name);
+    }
+    rc = wait_done_report(name, done_fn, err_fn, progress_fn, conn, timeout_ms,
+        nsectors, 0.0, 0.0, true);
+    if (rc != SATA_WAIT_OK) {
+        fprintf(stderr,
+            "%s: abandoned with a SATA command in flight; SATA commands will "
+            "hang until the FPGA bitstream is reloaded.\n", name);
+        return rc;
+    }
+    return graceful ? SATA_WAIT_INTERRUPTED : SATA_WAIT_OK;
+}
+
+/* Wait for a streamer transfer, finishing it cleanly when interrupted. The
+ * direction selects the done/error/progress accessors; allow_stop selects
+ * whether an interrupt may stop at the next command boundary (a multi-step
+ * caller like copy finishes its current single-sector command instead). */
+static enum sata_wait_result wait_streamer_transfer(const char *name, bool rx,
+                                                    void *conn, int timeout_ms,
+                                                    uint64_t nsectors,
+                                                    double capture_mibps,
+                                                    double capture_seconds,
+                                                    bool allow_stop)
+{
+    uint32_t (*done_fn)(void *) = rx ? sata_rx_done  : sata_tx_done;
+    uint32_t (*err_fn)(void *)  = rx ? sata_rx_error : sata_tx_error;
+    uint32_t (*progress_fn)(void *) = rx ?
+        (sata_rx_progress_supported() ? sata_rx_progress : NULL) :
+        (sata_tx_progress_supported() ? sata_tx_progress : NULL);
+    enum sata_wait_result rc;
+
+    rc = wait_done_report(name, done_fn, err_fn, progress_fn, conn, timeout_ms,
+        nsectors, capture_mibps, capture_seconds, true);
+    if (rc == SATA_WAIT_INTERRUPTED)
+        rc = wait_finish_interrupted(name, done_fn, err_fn, progress_fn, conn,
+            timeout_ms, nsectors, rx, !rx, allow_stop);
+    return rc;
+}
 
 static void print_planned_transfer(const char *name,
                                    uint64_t src_sector,
@@ -2326,11 +2399,10 @@ static int do_record(uint64_t dst_sector, uint32_t nsectors, int timeout_ms,
 
     sata_rx_set_tap(conn, tap);
     sata_rx_start(conn);
-    uint32_t (*progress_fn)(void *) =
-        sata_rx_progress_supported() ? sata_rx_progress : NULL;
-    enum sata_wait_result rc = wait_done_report(name, sata_rx_done,
-        sata_rx_error, progress_fn, conn, timeout_ms, nsectors,
-        capture_mibps, capture_seconds, true);
+    enum sata_wait_result rc = wait_streamer_transfer(name, true, conn,
+        timeout_ms, nsectors, capture_mibps, capture_seconds, true);
+    /* The tap keeps feeding the reservoir while an interrupted transfer
+     * finishes; disabling it earlier would starve the in-flight command. */
     sata_rx_set_tap(conn, false);
     if (rc != SATA_WAIT_OK)
         sata_streamers_reset(conn, true, false);
@@ -2383,10 +2455,8 @@ static int do_play(uint64_t src_sector, uint32_t nsectors, int timeout_ms, bool 
     sata_tx_set_pace(conn, 0);
     sata_tx_start(conn);
 
-    uint32_t (*play_progress_fn)(void *) =
-        sata_tx_progress_supported() ? sata_tx_progress : NULL;
-    enum sata_wait_result rc = wait_done_report("SATA_TX(play)", sata_tx_done,
-        sata_tx_error, play_progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
+    enum sata_wait_result rc = wait_streamer_transfer("SATA_TX(play)", false,
+        conn, timeout_ms, nsectors, 0.0, 0.0, true);
     if (rc != SATA_WAIT_OK)
         sata_streamers_reset(conn, false, true);
     sata_operation_finish(&op);
@@ -2455,10 +2525,8 @@ static int do_replay(uint64_t src_sector, uint32_t nsectors, const char *dst_s,
     }
     sata_tx_start(conn);
 
-    uint32_t (*replay_progress_fn)(void *) =
-        sata_tx_progress_supported() ? sata_tx_progress : NULL;
-    enum sata_wait_result rc = wait_done_report("SATA_TX(replay)", sata_tx_done,
-        sata_tx_error, replay_progress_fn, conn, timeout_ms, nsectors, 0.0, 0.0, true);
+    enum sata_wait_result rc = wait_streamer_transfer("SATA_TX(replay)", false,
+        conn, timeout_ms, nsectors, 0.0, 0.0, true);
     if (rc != SATA_WAIT_OK)
         sata_streamers_reset(conn, false, true);
     sata_operation_finish(&op);
@@ -2499,12 +2567,31 @@ static int do_copy(uint64_t src_sector, uint64_t dst_sector, uint32_t nsectors, 
         usleep(SATA_COPY_RX_TX_START_DELAY_US);
         sata_tx_start(conn);
 
+        bool user_abort = false;
+
         tx_rc = wait_done_quiet("SATA_TX(copy-src)", sata_tx_done, sata_tx_error, conn, timeout_ms);
-        if (tx_rc == SATA_WAIT_OK)
+        if (tx_rc == SATA_WAIT_INTERRUPTED) {
+            tx_rc = wait_finish_interrupted("SATA_TX(copy-src)", sata_tx_done,
+                sata_tx_error, NULL, conn, timeout_ms, 1, false, true, false);
+            user_abort = true;
+        }
+        if (tx_rc == SATA_WAIT_OK) {
             rx_rc = wait_done_quiet("SATA_RX(copy-dst)", sata_rx_done, sata_rx_error, conn, timeout_ms);
+            if (rx_rc == SATA_WAIT_INTERRUPTED) {
+                rx_rc = wait_finish_interrupted("SATA_RX(copy-dst)", sata_rx_done,
+                    sata_rx_error, NULL, conn, timeout_ms, 1, true, false, false);
+                user_abort = true;
+            }
+        }
 
         if (tx_rc != SATA_WAIT_OK || rx_rc != SATA_WAIT_OK) {
             sata_streamers_reset(conn, true, true);
+            rc = 1;
+            break;
+        }
+        if (user_abort) {
+            fprintf(stderr, "copy: interrupted after %" PRIu32
+                " sectors; both streamers are idle.\n", i + 1);
             rc = 1;
             break;
         }
@@ -2565,6 +2652,23 @@ static int do_stream_stop(const char *which_s, bool dry_run)
 #ifdef M2SDR_CSR_SATA_STREAMER_CONTROL_ADDR
     if (rx)
         sata_rx_set_tap(conn, false);
+    /* Stop an active transfer at its command boundary before resetting the
+     * frontend, so a reset never abandons an accepted ATA command (which
+     * would keep the SATA core busy until a bitstream reload). */
+    if (sata_streamer_stop_supported(rx, tx)) {
+        bool rx_busy = rx && !sata_rx_done(conn);
+        bool tx_busy = tx && !sata_tx_done(conn);
+
+        if (rx_busy || tx_busy) {
+            sata_streamer_request_stop(conn, rx_busy, tx_busy);
+            for (int waited_ms = 0; waited_ms < 10000; waited_ms += 10) {
+                if ((!rx_busy || sata_rx_done(conn)) &&
+                    (!tx_busy || sata_tx_done(conn)))
+                    break;
+                usleep(10000);
+            }
+        }
+    }
     sata_streamers_reset(conn, rx, tx);
     printf("SATA streamer reset: %s\n", which_s);
     m2sdr_close_dev(conn);
