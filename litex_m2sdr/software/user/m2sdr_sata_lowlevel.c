@@ -656,6 +656,33 @@ void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t b
     }
 }
 
+/* Etherbone read pipelining depth for the current session. Reads are only
+ * held to one outstanding burst while a live SoapySDR/GQRX client is actually
+ * streaming through the shared endpoint: RX routed to Ethernet with the
+ * streamer enabled and a programmed destination. The enable bit alone is not
+ * a client indicator since it resets to 1. Checked once per process, matching
+ * the bulk-words probe. */
+static size_t sata_etherbone_read_window(struct m2sdr_dev *conn)
+{
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR)
+    static bool checked = false;
+    static size_t cached_window = M2SDR_SATA_ETHERBONE_READ_WINDOW;
+
+    if (!checked) {
+        if ((m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR) == RXDST_ETH) &&
+            (m2sdr_read32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR) & 0x1u) &&
+            (m2sdr_read32(conn, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) != 0))
+            cached_window = M2SDR_SATA_ETHERBONE_READ_WINDOW_SHARED;
+        checked = true;
+    }
+    return cached_window;
+#else
+    (void)conn;
+    return M2SDR_SATA_ETHERBONE_READ_WINDOW;
+#endif
+}
+
 void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 {
     uint32_t burst = sata_host_buffer_bulk_words(conn);
@@ -668,7 +695,7 @@ void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 
         if (eb && pipeline_words) {
             int rc = eb_read32_bulk_pipeline_checked(eb, SATA_HOST_BUFFER_BASE,
-                pipeline_words, word_count, burst, M2SDR_SATA_ETHERBONE_READ_WINDOW);
+                pipeline_words, word_count, burst, sata_etherbone_read_window(conn));
 
             if (rc == EB_ERR_OK) {
                 for (size_t i = 0; i < word_count; i++)

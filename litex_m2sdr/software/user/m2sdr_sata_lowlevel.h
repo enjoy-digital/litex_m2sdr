@@ -20,9 +20,11 @@
 #include "mem.h"
 
 #define M2SDR_SATA_ETHERBONE_BULK_WORDS  128u
-/* One outstanding bulk read keeps catalog traffic cooperative with a live
- * SoapySDR/GQRX client sharing the same gateware Etherbone endpoint. */
-#define M2SDR_SATA_ETHERBONE_READ_WINDOW 1u
+/* Pipelined bulk reads when the Etherbone endpoint is otherwise idle. A
+ * single outstanding read keeps catalog traffic cooperative while a live
+ * SoapySDR/GQRX client shares the same gateware Etherbone endpoint. */
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW        8u
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW_SHARED 1u
 
 enum {
     TXSRC_PCIE = 0,
