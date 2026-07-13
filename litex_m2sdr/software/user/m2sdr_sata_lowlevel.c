@@ -258,6 +258,73 @@ void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors)
     m2sdr_write32(conn, CSR_SATA_TX_STREAMER_NSECTORS_ADDR, nsectors);
 }
 
+bool sata_rx_tap_supported(void)
+{
+#ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
+    return true;
+#else
+    return false;
+#endif
+}
+
+void sata_rx_set_tap(void *conn, bool enable)
+{
+#ifdef CSR_SATA_RX_STREAMER_TAP_ADDR
+    m2sdr_write32(conn, CSR_SATA_RX_STREAMER_TAP_ADDR, enable ? 1 : 0);
+#else
+    (void)conn;
+    (void)enable;
+#endif
+}
+
+bool sata_streamer_stop_supported(bool rx, bool tx)
+{
+    bool supported = true;
+
+#ifndef CSR_SATA_RX_STREAMER_STOP_ADDR
+    if (rx)
+        supported = false;
+#endif
+#ifndef CSR_SATA_TX_STREAMER_STOP_ADDR
+    if (tx)
+        supported = false;
+#endif
+    return supported && (rx || tx);
+}
+
+/* Request a stop at the next ATA command boundary. The streamer keeps its
+ * done/error semantics: poll done afterwards, then reset the frontend to
+ * flush any words left in its FIFO. */
+void sata_streamer_request_stop(void *conn, bool rx, bool tx)
+{
+#ifdef CSR_SATA_RX_STREAMER_STOP_ADDR
+    if (rx)
+        m2sdr_write32(conn, CSR_SATA_RX_STREAMER_STOP_ADDR, 1);
+#endif
+#ifdef CSR_SATA_TX_STREAMER_STOP_ADDR
+    if (tx)
+        m2sdr_write32(conn, CSR_SATA_TX_STREAMER_STOP_ADDR, 1);
+#endif
+    (void)conn;
+    (void)rx;
+    (void)tx;
+}
+
+void sata_tx_set_pace(void *conn, uint32_t words_per_second)
+{
+#ifdef CSR_SATA_TX_STREAMER_PACE_ADDR
+    m2sdr_write32(conn, CSR_SATA_TX_STREAMER_PACE_ADDR, words_per_second);
+#else
+    (void)conn;
+    if (words_per_second != 0) {
+        fprintf(stderr,
+            "Paced replay requires gateware with the SATA TX pace CSR. "
+            "Rebuild and reload the FPGA bitstream.\n");
+        exit(1);
+    }
+#endif
+}
+
 void sata_rx_start(void *conn)
 {
     m2sdr_write32(conn, CSR_SATA_RX_STREAMER_START_ADDR, 1);
@@ -318,6 +385,25 @@ uint32_t sata_rx_progress(void *conn)
 {
 #ifdef CSR_SATA_RX_STREAMER_PROGRESS_ADDR
     return m2sdr_read32(conn, CSR_SATA_RX_STREAMER_PROGRESS_ADDR);
+#else
+    (void)conn;
+    return 0;
+#endif
+}
+
+bool sata_tx_progress_supported(void)
+{
+#ifdef CSR_SATA_TX_STREAMER_PROGRESS_ADDR
+    return true;
+#else
+    return false;
+#endif
+}
+
+uint32_t sata_tx_progress(void *conn)
+{
+#ifdef CSR_SATA_TX_STREAMER_PROGRESS_ADDR
+    return m2sdr_read32(conn, CSR_SATA_TX_STREAMER_PROGRESS_ADDR);
 #else
     (void)conn;
     return 0;
@@ -454,6 +540,49 @@ static bool etherbone_is_liteeth(struct m2sdr_dev *conn)
            transport == M2SDR_TRANSPORT_KIND_LITEETH;
 }
 
+int sata_eth_replay_destination_prepare(void *conn)
+{
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_UDP_PORT_ADDR)
+    uint32_t enable = m2sdr_read32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR) & 0x1u;
+    uint32_t ip     = m2sdr_read32(conn, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR);
+
+    /* A live SoapySDR/GQRX client owns the destination; leave it in place.
+     * The enable bit alone cannot identify a client because it resets to 1;
+     * a programmed destination address is what marks an active session. */
+    if (enable && ip != 0)
+        return 0;
+
+    /* The streamer resets with ip=0.0.0.0 after a bitstream load, and a
+     * SoapySDR stream deactivation leaves it disabled. A replay toward an
+     * unresolvable destination stalls LiteEth's shared TX path on ARP and
+     * takes Etherbone and ICMP down with it until the FPGA is reloaded; one
+     * toward a disabled streamer backpressures the SATA command mid-transfer.
+     * Program this host as the destination and enable the streamer. */
+    if (etherbone_is_liteeth(conn)) {
+        struct m2sdr_liteeth_rx_stream_config config;
+
+        m2sdr_liteeth_rx_stream_config_init(&config);
+        if (m2sdr_liteeth_rx_stream_prepare(conn, &config) != M2SDR_ERR_OK) {
+            m2sdr_cli_error("Failed to program the Ethernet replay destination");
+            return -1;
+        }
+    } else if (ip == 0) {
+        m2sdr_cli_error("Ethernet replay destination is unset and no local IP "
+                        "could be determined; start a SoapySDR/GQRX session or "
+                        "use the Etherbone transport");
+        return -1;
+    }
+    if (!enable)
+        m2sdr_write32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1);
+    return 0;
+#else
+    (void)conn;
+    return 0;
+#endif
+}
+
 void etherbone_fill_test_words(uint32_t *words, uint32_t count)
 {
     for (uint32_t i = 0; i < count; i++)
@@ -558,6 +687,33 @@ void sata_host_buffer_write(struct m2sdr_dev *conn, const uint8_t *buf, size_t b
     }
 }
 
+/* Etherbone read pipelining depth for the current session. Reads are only
+ * held to one outstanding burst while a live SoapySDR/GQRX client is actually
+ * streaming through the shared endpoint: RX routed to Ethernet with the
+ * streamer enabled and a programmed destination. The enable bit alone is not
+ * a client indicator since it resets to 1. Checked once per process, matching
+ * the bulk-words probe. */
+static size_t sata_etherbone_read_window(struct m2sdr_dev *conn)
+{
+#if defined(CSR_ETH_RX_STREAMER_ENABLE_ADDR) && \
+    defined(CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR)
+    static bool checked = false;
+    static size_t cached_window = M2SDR_SATA_ETHERBONE_READ_WINDOW;
+
+    if (!checked) {
+        if ((m2sdr_read32(conn, CSR_CROSSBAR_DEMUX_SEL_ADDR) == RXDST_ETH) &&
+            (m2sdr_read32(conn, CSR_ETH_RX_STREAMER_ENABLE_ADDR) & 0x1u) &&
+            (m2sdr_read32(conn, CSR_ETH_RX_STREAMER_IP_ADDRESS_ADDR) != 0))
+            cached_window = M2SDR_SATA_ETHERBONE_READ_WINDOW_SHARED;
+        checked = true;
+    }
+    return cached_window;
+#else
+    (void)conn;
+    return M2SDR_SATA_ETHERBONE_READ_WINDOW;
+#endif
+}
+
 void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 {
     uint32_t burst = sata_host_buffer_bulk_words(conn);
@@ -570,7 +726,7 @@ void sata_host_buffer_read(struct m2sdr_dev *conn, uint8_t *buf, size_t bytes)
 
         if (eb && pipeline_words) {
             int rc = eb_read32_bulk_pipeline_checked(eb, SATA_HOST_BUFFER_BASE,
-                pipeline_words, word_count, burst, M2SDR_SATA_ETHERBONE_READ_WINDOW);
+                pipeline_words, word_count, burst, sata_etherbone_read_window(conn));
 
             if (rc == EB_ERR_OK) {
                 for (size_t i = 0; i < word_count; i++)

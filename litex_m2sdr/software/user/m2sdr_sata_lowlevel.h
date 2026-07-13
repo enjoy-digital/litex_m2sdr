@@ -20,7 +20,11 @@
 #include "mem.h"
 
 #define M2SDR_SATA_ETHERBONE_BULK_WORDS  128u
-#define M2SDR_SATA_ETHERBONE_READ_WINDOW 8u
+/* Pipelined bulk reads when the Etherbone endpoint is otherwise idle. A
+ * single outstanding read keeps catalog traffic cooperative while a live
+ * SoapySDR/GQRX client shares the same gateware Etherbone endpoint. */
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW        8u
+#define M2SDR_SATA_ETHERBONE_READ_WINDOW_SHARED 1u
 
 enum {
     TXSRC_PCIE = 0,
@@ -93,6 +97,12 @@ void sata_require_csrs(void);
 void txrx_loopback_set(void *conn, int enable);
 void sata_rx_program(void *conn, uint64_t sector, uint32_t nsectors);
 void sata_tx_program(void *conn, uint64_t sector, uint32_t nsectors);
+int  sata_eth_replay_destination_prepare(void *conn);
+bool sata_rx_tap_supported(void);
+void sata_rx_set_tap(void *conn, bool enable);
+bool sata_streamer_stop_supported(bool rx, bool tx);
+void sata_streamer_request_stop(void *conn, bool rx, bool tx);
+void sata_tx_set_pace(void *conn, uint32_t words_per_second);
 void sata_rx_start(void *conn);
 void sata_tx_start(void *conn);
 int  sata_streamers_reset(void *conn, bool rx, bool tx);
@@ -103,6 +113,8 @@ uint32_t sata_rx_error(void *conn);
 uint32_t sata_tx_error(void *conn);
 bool     sata_rx_progress_supported(void);
 uint32_t sata_rx_progress(void *conn);
+bool     sata_tx_progress_supported(void);
+uint32_t sata_tx_progress(void *conn);
 
 void m2sdr_sata_set_no_bulk_etherbone(bool no_bulk);
 enum sata_pattern_kind parse_pattern(const char *text);

@@ -838,8 +838,7 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     struct addrinfo* res = 0;
     int err;
     int sock = -1;
-    int rx_socket = -1;
-    int tx_socket = -1;
+    int direct_socket = -1;
 
     struct eb_connection *conn = malloc(sizeof(struct eb_connection));
     if (!conn) {
@@ -867,43 +866,29 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     conn->is_direct = is_direct;
 
     if (is_direct) {
-        // Rx half
+        /* Use one ephemeral UDP socket for both request and reply traffic.
+         * The shared gateware Etherbone frontend returns replies to the
+         * request's source port, so every process can own an independent
+         * socket instead of racing on a shared bind to the service port. */
         struct sockaddr_in si_me;
 
         memset((char *) &si_me, 0, sizeof(si_me));
         si_me.sin_family = res->ai_family;
-        si_me.sin_port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
+        si_me.sin_port = htobe16(0);
         si_me.sin_addr.s_addr = htobe32(INADDR_ANY);
 
-        if ((rx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
-            fprintf(stderr, "Unable to create Rx socket: %s\n", strerror(errno));
+        direct_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (direct_socket == -1) {
+            fprintf(stderr, "Unable to create Etherbone socket: %s\n", strerror(errno));
             goto error;
         }
-        /* Enable address reuse on RX Socket */
-        int opt = 1;
-        if (setsockopt(rx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            fprintf(stderr, "setsockopt(SO_REUSEADDR) on rx_socket failed: %s\n", strerror(errno));
-            goto error;
-        }
-        if (bind(rx_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
-            fprintf(stderr, "Unable to bind Rx socket to port: %s\n", strerror(errno));
+        if (bind(direct_socket, (struct sockaddr*)&si_me, sizeof(si_me)) == -1) {
+            fprintf(stderr, "Unable to bind Etherbone socket: %s\n", strerror(errno));
             goto error;
         }
 
-        // Tx half
-        tx_socket = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-        if (tx_socket == -1) {
-            fprintf(stderr, "Unable to create socket: %s\n", strerror(errno));
-            goto error;
-        }
-        /* Enable address reuse on TX Socket */
-        if (setsockopt(tx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-            fprintf(stderr, "setsockopt(SO_REUSEADDR) on tx_socket failed: %s\n", strerror(errno));
-            goto error;
-        }
-
-        conn->read_fd = rx_socket;
-        conn->fd = tx_socket;
+        conn->read_fd = direct_socket;
+        conn->fd = direct_socket;
         conn->addr = res;
         eb_drain_direct_rx(conn);
         usleep(EB_DIRECT_RX_SETTLE_US);
@@ -938,10 +923,8 @@ struct eb_connection *eb_connect(const char *addr, const char *port, int is_dire
     return conn;
 
 error:
-    if (rx_socket >= 0)
-        close(rx_socket);
-    if (tx_socket >= 0)
-        close(tx_socket);
+    if (direct_socket >= 0)
+        close(direct_socket);
     if (sock >= 0)
         close(sock);
     if (res)
@@ -958,7 +941,7 @@ void eb_disconnect(struct eb_connection **conn) {
         freeaddrinfo((*conn)->addr);
     if ((*conn)->fd >= 0)
         close((*conn)->fd);
-    if ((*conn)->read_fd >= 0)
+    if ((*conn)->read_fd >= 0 && (*conn)->read_fd != (*conn)->fd)
         close((*conn)->read_fd);
     free(*conn);
     *conn = NULL;

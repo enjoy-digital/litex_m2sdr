@@ -37,7 +37,24 @@ for host-buffer workflows and avoids the RAMB cascade DRC issue observed with a
 
 ## Current Hardware Numbers
 
-These are the latest validated numbers from the 2026-05-24 hardware run.
+RF streamer-path numbers from the 2026-07-13 hardware run with a Samsung
+850 EVO 250GB on the Ethernet + SATA baseboard build (Gen2, write cache
+enabled). All captures completed in real time through `Stream2Sectors`
+while the recorded data demand stayed below the drive's sustained rate:
+
+| Path | Test | Result | Validation |
+| ---- | ---- | ------ | ---------- |
+| RF -> SATA | 10 MS/s SC16 1T1R, 10 s (381.5 MiB) | 38.13 MiB/s, elapsed 10.005 s | real-time, no backpressure |
+| RF -> SATA | 30.72 MS/s SC16 1T1R, 4 s (468.8 MiB) | 117.15 MiB/s, elapsed 4.001 s | real-time, no backpressure |
+| RF -> SATA | 30.72 MS/s SC16 2T2R, 15 s (3.43 GiB) | 232.94 MiB/s, elapsed 15.092 s | real-time, past the drive's TurboWrite cache |
+| Host -> SATA | 1 GiB `diag write` | 43.9 MiB/s | Etherbone staging path limit, not the drive |
+| SATA -> host | 64 MiB `diag read`, idle endpoint | 26-30 MiB/s | readback matched with `cmp` |
+
+The same gateware with a degraded, never-TRIMmed WDC WDS120G1G0A sustained
+only 10-25 MiB/s on long writes; see `sata-bandwidth-investigation.md` for
+that investigation and the drive benchmarking recipe.
+
+The host-buffer numbers below are from the 2026-05-24 hardware run.
 
 | Transport | User-visible path | Host to SATA | SATA to host | Validation |
 | --------- | ----------------- | ------------ | ------------ | ---------- |

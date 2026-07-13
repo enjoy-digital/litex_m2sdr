@@ -15,7 +15,9 @@
 
 #if defined(CSR_SATA_PHY_BASE) && defined(CSR_SATA_IDENTIFY_BASE)
 
-#define SATA_IDENT_WORDS 128
+/* Full 512-byte ATA IDENTIFY block. Draining all of it keeps no residue in
+ * the identify FIFO for the next identify. */
+#define SATA_IDENT_WORDS 256
 #define SATA_DEFAULT_IDENT_TIMEOUT_MS 1000u
 
 static int sata_read32(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
@@ -99,6 +101,24 @@ static void sata_decode_identify(struct m2sdr_sata_info *info, const uint16_t *w
     info->logical_sector_size = logical_sector_size;
 }
 
+/* Poll the identify engine's done flag; *done reflects the last read. */
+static int sata_identify_wait_done(struct m2sdr_dev *dev, unsigned timeout_ms,
+                                   unsigned poll_ms, bool *done)
+{
+    unsigned elapsed_ms = 0;
+    uint32_t value = 0;
+
+    for (;;) {
+        if (sata_read32(dev, CSR_SATA_IDENTIFY_DONE_ADDR, &value) != 0)
+            return M2SDR_ERR_IO;
+        *done = (value & 0x1u) != 0;
+        if (*done || elapsed_ms >= timeout_ms)
+            return M2SDR_ERR_OK;
+        sata_msleep(poll_ms);
+        elapsed_ms += poll_ms;
+    }
+}
+
 #endif
 
 int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, unsigned timeout_ms)
@@ -108,6 +128,11 @@ int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, uns
     uint16_t words[SATA_IDENT_WORDS];
     unsigned elapsed_ms = 0;
     unsigned poll_ms = 10;
+    /* Link training completes within milliseconds or not at all; only the
+     * identify phases need the extended budget for drives stalled by
+     * garbage collection. */
+    unsigned phy_timeout_ms = timeout_ms < 1000 ? timeout_ms : 1000;
+    bool idle = false;
 
     if (!dev || !info)
         return M2SDR_ERR_INVAL;
@@ -141,39 +166,60 @@ int m2sdr_get_sata_info(struct m2sdr_dev *dev, struct m2sdr_sata_info *info, uns
 
         if (info->phy_ready)
             break;
-        if (elapsed_ms >= timeout_ms)
+        if (elapsed_ms >= phy_timeout_ms)
             return M2SDR_ERR_OK;
         sata_msleep(poll_ms);
         elapsed_ms += poll_ms;
     }
+
+    /* A previous identify can still be in flight: a drive busy with garbage
+     * collection can spread the PIO data over hundreds of milliseconds, and
+     * the identify FSM silently ignores a start while it is receiving. Wait
+     * for it to go idle instead of firing a start into a busy engine. */
+    if (sata_identify_wait_done(dev, timeout_ms, poll_ms, &idle) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (!idle)
+        return M2SDR_ERR_OK;
 
     if (sata_write32(dev, CSR_SATA_IDENTIFY_START_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
 
-    elapsed_ms = 0;
-    for (;;) {
-        if (sata_read32(dev, CSR_SATA_IDENTIFY_DONE_ADDR, &value) != 0)
-            return M2SDR_ERR_IO;
-        info->identify_done = (value & 0x1u) != 0;
-        if (info->identify_done)
-            break;
-        if (elapsed_ms >= timeout_ms)
-            return M2SDR_ERR_OK;
-        sata_msleep(poll_ms);
-        elapsed_ms += poll_ms;
-    }
+    if (sata_identify_wait_done(dev, timeout_ms, poll_ms,
+                                &info->identify_done) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (!info->identify_done)
+        return M2SDR_ERR_OK;
 
-    for (unsigned i = 0; i < SATA_IDENT_WORDS; i += 2) {
+    /* Drain the complete identify block. The FIFO can momentarily run empty
+     * while a slow transfer is still arriving, so retry on empty until the
+     * block is complete or the timeout budget is spent. Draining everything
+     * also keeps no residue behind for the next identify. */
+    unsigned drained  = 0;
+    unsigned empty_ms = 0;
+    while (drained < SATA_IDENT_WORDS && empty_ms < timeout_ms) {
         if (sata_read32(dev, CSR_SATA_IDENTIFY_SOURCE_VALID_ADDR, &value) != 0)
             return M2SDR_ERR_IO;
-        if ((value & 0x1u) == 0)
-            break;
+        if ((value & 0x1u) == 0) {
+            sata_msleep(poll_ms);
+            empty_ms += poll_ms;
+            continue;
+        }
+        empty_ms = 0;
         if (sata_read32(dev, CSR_SATA_IDENTIFY_SOURCE_DATA_ADDR, &value) != 0)
             return M2SDR_ERR_IO;
         if (sata_write32(dev, CSR_SATA_IDENTIFY_SOURCE_READY_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
-        words[i + 0] = (uint16_t)((value >>  0) & 0xffffu);
-        words[i + 1] = (uint16_t)((value >> 16) & 0xffffu);
+        words[drained + 0] = (uint16_t)((value >>  0) & 0xffffu);
+        words[drained + 1] = (uint16_t)((value >> 16) & 0xffffu);
+        drained += 2;
+    }
+
+    /* A half-up link (e.g. right after drive hot-plug) can complete with a
+     * partial identify block. Decoding the zero-filled tail silently reports
+     * a bogus LBA28-sized drive, so require the full block. */
+    if (drained < SATA_IDENT_WORDS) {
+        info->identify_done = false;
+        return M2SDR_ERR_OK;
     }
 
     sata_decode_identify(info, words);
