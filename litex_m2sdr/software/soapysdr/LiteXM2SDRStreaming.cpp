@@ -722,6 +722,9 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
     lock.unlock();
 
     if (channel_mode_changed) {
+        /* The channel-mode change re-ran the AD9361 bring-up, which resets
+         * the interface delay registers to the header defaults. */
+        reapplyInterfaceDelays("channel-mode change");
         if (_rx_stream.opened) {
             for (size_t chan : _rx_stream.channels)
                 channel_configure(SOAPY_SDR_RX, chan);
@@ -781,6 +784,10 @@ int SoapyLiteXM2SDR::activateStream(
         return SOAPY_SDR_NOT_SUPPORTED;
 
     std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
+
+    /* Last line of defense for calibrated interface delays: any RFIC
+     * re-initialization since calibration reset them to the defaults. */
+    reapplyInterfaceDelays("stream activation");
 
     /* RX */
     if (stream == RX_STREAM) {
