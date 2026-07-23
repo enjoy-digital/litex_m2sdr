@@ -493,6 +493,21 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
             fprintf(stderr, "litepcie_dma_init failed\n");
             goto cleanup;
         }
+        /* Walk the ring with the size the kernel reports for this channel, not
+         * the build-time default: a channel loaded with a smaller
+         * dma_buffer_size would otherwise be read past the end of every slot.
+         * Larger buffers do not fit this tool's fixed-size staging buffers. */
+        if (dma.rd_buf_size > DMA_BUFFER_SIZE) {
+            fprintf(stderr,
+                    "DMA buffer size %llu exceeds this build's %d-byte staging buffers; "
+                    "rebuild with a matching DMA_BUFFER_SIZE\n",
+                    (unsigned long long)dma.rd_buf_size, DMA_BUFFER_SIZE);
+            goto cleanup;
+        }
+        payload_bytes_per_buf = (size_t)dma.rd_buf_size;
+        if (header && strip_header)
+            payload_bytes_per_buf -= 16;
+        samples_per_buf = payload_bytes_per_buf / sample_size;
         dma.writer_enable = 1;
         use_pcie_dma = true;
     } else
@@ -581,8 +596,8 @@ static void m2sdr_record(const char *device_id, const char *filename, size_t siz
 
         int64_t duration = get_time_ms() - last_time;
         if (!quiet && duration > 200) {
-            double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
-            uint64_t size_mb = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
+            double speed  = (double)(total_buffers - last_buffers) * payload_bytes_per_buf * 8 / ((double)duration * 1e6);
+            uint64_t size_mb = (total_buffers * payload_bytes_per_buf) / 1024 / 1024;
 
             if (i % 10 == 0) {
                 if (header) {

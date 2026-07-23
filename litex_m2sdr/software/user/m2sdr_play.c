@@ -353,6 +353,19 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
             fprintf(stderr, "litepcie_dma_init failed\n");
             goto cleanup;
         }
+        /* Fill the ring in the size the kernel reports for this channel, not
+         * the build-time default: a channel loaded with a smaller
+         * dma_buffer_size would otherwise be fed frames that do not fit a slot.
+         * Larger buffers do not fit this tool's fixed-size staging buffers. */
+        if (dma.wr_buf_size > DMA_BUFFER_SIZE) {
+            fprintf(stderr,
+                    "DMA buffer size %llu exceeds this build's %d-byte staging buffers; "
+                    "rebuild with a matching DMA_BUFFER_SIZE\n",
+                    (unsigned long long)dma.wr_buf_size, DMA_BUFFER_SIZE);
+            goto cleanup;
+        }
+        samples_per_buf = (unsigned)((dma.wr_buf_size - header_bytes) / sample_size);
+        frame_bytes = (size_t)samples_per_buf * sample_size + header_bytes;
         dma.reader_enable = 1;
         use_pcie_dma = true;
     } else
@@ -479,8 +492,8 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         {
             int64_t duration = get_time_ms() - last_time;
             if (!quiet && duration > 200) {
-                double speed  = (double)(total_buffers - last_buffers) * DMA_BUFFER_SIZE * 8 / ((double)duration * 1e6);
-                uint64_t size = (total_buffers * DMA_BUFFER_SIZE) / 1024 / 1024;
+                double speed  = (double)(total_buffers - last_buffers) * frame_bytes * 8 / ((double)duration * 1e6);
+                uint64_t size = (total_buffers * frame_bytes) / 1024 / 1024;
 
                 if (i % 10 == 0)
                     fprintf(stderr, "\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   LOOP UNDERFLOWS\e[0m\n");

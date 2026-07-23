@@ -90,11 +90,26 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
 
     litepcie_dma_set_loopback(dma->fds.fd, dma->loopback);
 
+    /* Fetch the DMA ring geometry (per-buffer size and buffer count) from the
+     * kernel. This lets userspace adapt to whatever DMA_BUFFER_SIZE /
+     * DMA_BUFFER_COUNT the loaded kernel module was built with, WITHOUT being
+     * recompiled to match. The compile-time macros are only used as a fallback
+     * for older kernels that do not report the geometry. */
+    checked_ioctl(dma->fds.fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &dma->mmap_dma_info);
+    dma->rd_buf_size  = dma->mmap_dma_info.dma_rx_buf_size;
+    dma->rd_buf_count = dma->mmap_dma_info.dma_rx_buf_count;
+    dma->wr_buf_size  = dma->mmap_dma_info.dma_tx_buf_size;
+    dma->wr_buf_count = dma->mmap_dma_info.dma_tx_buf_count;
+    if (!dma->rd_buf_size)  dma->rd_buf_size  = DMA_BUFFER_SIZE;
+    if (!dma->rd_buf_count) dma->rd_buf_count = DMA_BUFFER_COUNT;
+    if (!dma->wr_buf_size)  dma->wr_buf_size  = DMA_BUFFER_SIZE;
+    if (!dma->wr_buf_count) dma->wr_buf_count = DMA_BUFFER_COUNT;
+
     if (dma->zero_copy) {
         /* if mmap: get it from the kernel */
-        checked_ioctl(dma->fds.fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &dma->mmap_dma_info);
         if (dma->use_writer) {
-            dma->buf_rd = mmap(NULL, DMA_BUFFER_TOTAL_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+            dma->buf_rd = mmap(NULL, (size_t)dma->rd_buf_size * dma->rd_buf_count,
+                               PROT_READ | PROT_WRITE, MAP_SHARED,
                                dma->fds.fd, dma->mmap_dma_info.dma_rx_buf_offset);
             if (dma->buf_rd == MAP_FAILED) {
                 fprintf(stderr, "MMAP failed\n");
@@ -102,7 +117,8 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
             }
         }
         if (dma->use_reader) {
-            dma->buf_wr = mmap(NULL, DMA_BUFFER_TOTAL_SIZE, PROT_WRITE, MAP_SHARED,
+            dma->buf_wr = mmap(NULL, (size_t)dma->wr_buf_size * dma->wr_buf_count,
+                               PROT_WRITE, MAP_SHARED,
                                dma->fds.fd, dma->mmap_dma_info.dma_tx_buf_offset);
             if (dma->buf_wr == MAP_FAILED) {
                 fprintf(stderr, "MMAP failed\n");
@@ -112,14 +128,14 @@ int litepcie_dma_init(struct litepcie_dma_ctrl *dma, const char *device_name, ui
     } else {
         /* else: allocate it */
         if (dma->use_writer) {
-            dma->buf_rd = calloc(1, DMA_BUFFER_TOTAL_SIZE);
+            dma->buf_rd = calloc(1, (size_t)dma->rd_buf_size * dma->rd_buf_count);
             if (!dma->buf_rd) {
                 fprintf(stderr, "%d: alloc failed\n", __LINE__);
                 return -1;
             }
         }
         if (dma->use_reader) {
-            dma->buf_wr = calloc(1, DMA_BUFFER_TOTAL_SIZE);
+            dma->buf_wr = calloc(1, (size_t)dma->wr_buf_size * dma->wr_buf_count);
             if (!dma->buf_wr) {
                 free(dma->buf_rd);
                 fprintf(stderr, "%d: alloc failed\n", __LINE__);
@@ -143,11 +159,11 @@ void litepcie_dma_cleanup(struct litepcie_dma_ctrl *dma)
     if (dma->zero_copy) {
         /* Unmap with the same length the buffers were mapped with. */
         if (dma->use_reader) {
-            munmap(dma->buf_wr, DMA_BUFFER_TOTAL_SIZE);
+            munmap(dma->buf_wr, (size_t)dma->wr_buf_size * dma->wr_buf_count);
             dma->buf_wr = NULL;
         }
         if (dma->use_writer) {
-            munmap(dma->buf_rd, DMA_BUFFER_TOTAL_SIZE);
+            munmap(dma->buf_rd, (size_t)dma->rd_buf_size * dma->rd_buf_count);
             dma->buf_rd = NULL;
         }
     } else {
@@ -193,18 +209,18 @@ void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
         if (dma->zero_copy) {
             /* count available buffers */
             dma->buffers_available_read = dma->writer_hw_count - dma->writer_sw_count;
-            dma->usr_read_buf_offset = dma->writer_sw_count % DMA_BUFFER_COUNT;
+            dma->usr_read_buf_offset = dma->writer_sw_count % dma->rd_buf_count;
 
             /* update dma sw_count*/
             dma->mmap_dma_update.sw_count = dma->writer_sw_count + dma->buffers_available_read;
             checked_ioctl(dma->fds.fd, LITEPCIE_IOCTL_MMAP_DMA_WRITER_UPDATE, &dma->mmap_dma_update);
         } else {
-            len = read(dma->fds.fd, dma->buf_rd, DMA_BUFFER_TOTAL_SIZE);
+            len = read(dma->fds.fd, dma->buf_rd, (size_t)dma->rd_buf_size * dma->rd_buf_count);
             if (len < 0) {
                 perror("read");
                 abort();
             }
-            dma->buffers_available_read = len / DMA_BUFFER_SIZE;
+            dma->buffers_available_read = len / dma->rd_buf_size;
             dma->usr_read_buf_offset = 0;
         }
     } else {
@@ -215,8 +231,8 @@ void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
     if (dma->fds.revents & POLLOUT) {
         if (dma->zero_copy) {
             /* count available buffers */
-            dma->buffers_available_write = DMA_BUFFER_COUNT / 2 - (dma->reader_sw_count - dma->reader_hw_count);
-            dma->usr_write_buf_offset = dma->reader_sw_count % DMA_BUFFER_COUNT;
+            dma->buffers_available_write = dma->wr_buf_count / 2 - (dma->reader_sw_count - dma->reader_hw_count);
+            dma->usr_write_buf_offset = dma->reader_sw_count % dma->wr_buf_count;
 
             /* update dma sw_count */
             dma->mmap_dma_update.sw_count = dma->reader_sw_count + dma->buffers_available_write;
@@ -245,9 +261,9 @@ void litepcie_dma_process(struct litepcie_dma_ctrl *dma)
                 uint64_t in_flight = dma->usr_write_fill_count -
                                      dma->usr_write_flush_count;
                 dma->buffers_available_write =
-                    DMA_BUFFER_COUNT - (unsigned)in_flight;
+                    dma->wr_buf_count - (unsigned)in_flight;
             }
-            dma->usr_write_buf_offset = dma->usr_write_fill_count % DMA_BUFFER_COUNT;
+            dma->usr_write_buf_offset = dma->usr_write_fill_count % dma->wr_buf_count;
         }
     } else {
         dma->buffers_available_write = 0;
@@ -259,8 +275,8 @@ char *litepcie_dma_next_read_buffer(struct litepcie_dma_ctrl *dma)
     if (!dma->buffers_available_read)
         return NULL;
     dma->buffers_available_read --;
-    char *ret = dma->buf_rd + dma->usr_read_buf_offset * DMA_BUFFER_SIZE;
-    dma->usr_read_buf_offset = (dma->usr_read_buf_offset + 1) % DMA_BUFFER_COUNT;
+    char *ret = dma->buf_rd + (size_t)dma->usr_read_buf_offset * dma->rd_buf_size;
+    dma->usr_read_buf_offset = (dma->usr_read_buf_offset + 1) % dma->rd_buf_count;
     return ret;
 }
 
@@ -275,21 +291,21 @@ static void litepcie_dma_flush_writes(struct litepcie_dma_ctrl *dma)
     while (dma->usr_write_fill_count != dma->usr_write_flush_count) {
         int64_t pending = (int64_t)(dma->usr_write_fill_count -
                                     dma->usr_write_flush_count);
-        unsigned off  = dma->usr_write_flush_count % DMA_BUFFER_COUNT;
-        unsigned span = DMA_BUFFER_COUNT - off;
+        unsigned off  = dma->usr_write_flush_count % dma->wr_buf_count;
+        unsigned span = dma->wr_buf_count - off;
         if ((int64_t)span > pending)
             span = (unsigned)pending;
         len = write(dma->fds.fd,
-                    dma->buf_wr + (size_t)off * DMA_BUFFER_SIZE,
-                    (size_t)span * DMA_BUFFER_SIZE);
+                    dma->buf_wr + (size_t)off * dma->wr_buf_size,
+                    (size_t)span * dma->wr_buf_size);
         if (len < 0) {
             if (errno == EAGAIN || errno == EINTR)
                 break;
             perror("write");
             abort();
         }
-        dma->usr_write_flush_count += (uint64_t)(len / DMA_BUFFER_SIZE);
-        if (len < (ssize_t)((size_t)span * DMA_BUFFER_SIZE))
+        dma->usr_write_flush_count += (uint64_t)(len / dma->wr_buf_size);
+        if (len < (ssize_t)((size_t)span * dma->wr_buf_size))
             break; /* kernel ring full; retry on the next flush */
     }
 }
@@ -309,14 +325,14 @@ char *litepcie_dma_next_write_buffer(struct litepcie_dma_ctrl *dma)
         /* Zero-copy: buffers are the kernel ring itself; the slot follows the
          * ring position established by litepcie_dma_process(). */
         dma->buffers_available_write --;
-        char *ret = dma->buf_wr + (size_t)dma->usr_write_buf_offset * DMA_BUFFER_SIZE;
-        dma->usr_write_buf_offset = (dma->usr_write_buf_offset + 1) % DMA_BUFFER_COUNT;
+        char *ret = dma->buf_wr + (size_t)dma->usr_write_buf_offset * dma->wr_buf_size;
+        dma->usr_write_buf_offset = (dma->usr_write_buf_offset + 1) % dma->wr_buf_count;
         return ret;
     }
     litepcie_dma_flush_writes(dma);
     dma->buffers_available_write --;
     char *ret = dma->buf_wr +
-        (size_t)(dma->usr_write_fill_count % DMA_BUFFER_COUNT) * DMA_BUFFER_SIZE;
+        (size_t)(dma->usr_write_fill_count % dma->wr_buf_count) * dma->wr_buf_size;
     dma->usr_write_fill_count++;
     return ret;
 }
