@@ -26,10 +26,17 @@ struct litepcie_dma_ctrl {
     unsigned buffers_available_read, buffers_available_write;
     unsigned usr_read_buf_offset, usr_write_buf_offset;
     /* TX staging cursors: buffers filled by the user vs flushed to the
-     * kernel. Monotonic; slot = count % DMA_BUFFER_COUNT. */
+     * kernel. Monotonic; slot = count % wr_buf_count. */
     uint64_t usr_write_fill_count, usr_write_flush_count;
     struct litepcie_ioctl_mmap_dma_info mmap_dma_info;
     struct litepcie_ioctl_mmap_dma_update mmap_dma_update;
+    /* DMA ring geometry, read from the kernel (LITEPCIE_IOCTL_MMAP_DMA_INFO) in
+     * litepcie_dma_init(). Userspace uses these instead of the compile-time
+     * DMA_BUFFER_SIZE / DMA_BUFFER_COUNT macros so it adapts to whatever the
+     * loaded kernel module was built with. rd_* is the RX (device->host) path,
+     * wr_* is the TX (host->device) path. */
+    uint64_t rd_buf_size, rd_buf_count;
+    uint64_t wr_buf_size, wr_buf_count;
 };
 
 void litepcie_dma_set_loopback(int fd, uint8_t loopback_enable);

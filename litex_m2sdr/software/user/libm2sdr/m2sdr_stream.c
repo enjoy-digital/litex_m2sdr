@@ -640,7 +640,6 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
 
     if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
         struct litepcie_dma_ctrl *dma = direction == M2SDR_RX ? &dev->rx_dma : &dev->tx_dma;
-        info->buffer_bytes = payload_bytes;
         if (direction == M2SDR_RX) {
             info->buffer_count = dma->mmap_dma_info.dma_rx_buf_count;
             info->buffer_stride = dma->mmap_dma_info.dma_rx_buf_size;
@@ -654,6 +653,11 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
             info->buffer_count = DMA_BUFFER_COUNT;
         if (!info->buffer_stride)
             info->buffer_stride = DMA_BUFFER_SIZE;
+        /* payload_bytes was derived from the compile-time DMA_BUFFER_SIZE; rebase
+         * it on the actual (runtime) buffer stride so callers that step the ring
+         * by buffer_stride receive the whole per-buffer payload when the loaded
+         * kernel module uses a larger DMA buffer size. */
+        info->buffer_bytes = (unsigned)(info->buffer_stride - (DMA_BUFFER_SIZE - payload_bytes));
         return M2SDR_ERR_OK;
     }
 
