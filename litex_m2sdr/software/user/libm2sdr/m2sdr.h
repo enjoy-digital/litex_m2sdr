@@ -794,6 +794,22 @@ int  m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable);
 int  m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced);
 /* Advanced integration hook used by the SoapySDR driver. */
 int  m2sdr_rf_bind(struct m2sdr_dev *dev, void *ad9361_phy);
+/* Scan/program the FPGA <-> AD9361 interface clock/data delays with the PRBS
+ * path (same procedure as m2sdr_rf --calibrate-delay). Requires an initialized
+ * RFIC and an idle datapath: the PRBS scan corrupts any active stream, and on
+ * gateware without a 1R1T-aware PRBS checker it only converges in 2T2R mode. */
+int  m2sdr_rf_calibrate_interface_delay(struct m2sdr_dev *dev);
+/* Read/write the raw AD9361 interface delay register for one direction
+ * (clock delay in bits [7:4], data delay in bits [3:0], ~0.3 ns per tap).
+ * The setter briefly forces the ENSM through ALERT so the new delays latch;
+ * unlike the PRBS scan it is cheap and safe to call between reconfigurations
+ * to re-apply a previously calibrated value (RFIC re-init resets it). */
+int  m2sdr_rf_get_interface_delay(struct m2sdr_dev *dev,
+                                  enum m2sdr_direction direction,
+                                  uint8_t *delay_reg);
+int  m2sdr_rf_set_interface_delay(struct m2sdr_dev *dev,
+                                  enum m2sdr_direction direction,
+                                  uint8_t delay_reg);
 /* Store the AD9361_InitParam an external integration initialized the RFIC
  * with, so m2sdr_set_channel_mode() re-initializes with the same reference
  * clock, SPI id and GPIO setup. init_param must point to an AD9361_InitParam

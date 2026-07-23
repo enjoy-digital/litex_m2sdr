@@ -332,7 +332,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 
 ### Host Requirements & Expectations
 
-- **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
+- **IOMMU / DMA**: PCIe streaming works with the IOMMU enabled on current `m2sdr.ko` builds. If you don't see I/Q data streams in your SDR app with an older kernel module, update the driver first; setting the IOMMU to passthrough mode is the legacy workaround.
 - **CPU Governor**: For sustained high sample rates, set the CPU frequency governor to `performance`; on-demand frequency scaling can cause RX overflows/TX underflows.
 - **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
 - **Runtime transport selection**: The installed user tools and SoapySDR module support both transports in one build. Use `--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234` with the CLI tools, and `driver=LiteXM2SDR,path=/dev/m2sdr0` or `driver=LiteXM2SDR,eth_ip=192.168.1.50` with SoapySDR.
@@ -375,7 +375,13 @@ scripts/github_release.py --date 2026_05_15
 The helper requires the GitHub CLI `gh` to be installed and authenticated with release write access. It checks for a clean tracked tree, verifies that the expected `build/*_2026_05_15.zip` files exist, reads each archive manifest, creates and pushes the annotated `2026_05_15` tag on the manifest git revision, extracts the matching `CHANGELOG.md` section as release notes, and uploads the archive set to the GitHub release.
 
 > [!TIP]
-> If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
+> If you don't see I/Q data streams in your SDR app, first make sure the
+> `m2sdr.ko` kernel module matches this source tree: older builds mapped the
+> wrong pages for zero-copy DMA on hosts with an active IOMMU/SMMU (mostly/all-
+> zero RX buffers through SoapySDR), which made IOMMU passthrough look like a
+> requirement. Current builds stream with the IOMMU enabled (verified on Jetson
+> Orin, JetPack 7 / L4T R39, without `iommu.passthrough=1`). When running an
+> older driver, passthrough remains the legacy workaround:
 >
 > **x86/PC**:
 > ```bash
@@ -390,8 +396,7 @@ The helper requires the GitHub CLI `gh` to be installed and authenticated with r
 > APPEND ... iommu.passthrough=1
 > sudo reboot
 > ```
-> Keep the Tegra SMMU driver enabled. `iommu.passthrough=1` is the safer first
-> test knob for current L4T kernels; disabling `arm-smmu` globally can break
+> Keep the Tegra SMMU driver enabled; disabling `arm-smmu` globally can break
 > other Jetson devices. See [Jetson Orin host notes](doc/hosts/jetson-orin.md).
 
 > [!WARNING]

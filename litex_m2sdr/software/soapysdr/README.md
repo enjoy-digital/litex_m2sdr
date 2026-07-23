@@ -111,6 +111,9 @@ You can pass device arguments to configure the driver. These are most useful whe
   - `tx_late_margin_ns=M`: lateness tolerance before a timed write is rejected (default: one MTU duration).
 - **RX DMA headers** (PCIe): `rx_dma_header=1|0`
   - `1` (default) uses the FPGA per-buffer hardware timestamps for RX time reporting when the gateware supports them (probed at open; falls back to software accounting otherwise).
+- **Interface delay calibration**: `calibrate_delay=1|0`
+  - `0` (default) keeps the AD9361 digital-interface clock/data delays from the driver defaults, which suit most boards.
+  - `1` runs the PRBS delay scan (same procedure as `m2sdr_rf --calibrate-delay`, a few seconds at open) for boards whose timing eye sits at the edge of the defaults and RX/TX capture zeros or noise otherwise. The calibrated delays are cached and re-applied automatically after channel-mode or sample-rate reconfigurations. Ignored with `bypass_init=1`.
 
 Example:
 ```bash

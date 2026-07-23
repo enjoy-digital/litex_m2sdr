@@ -2023,3 +2023,59 @@ int m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced)
 {
     return m2sdr_read_prbs_synced(dev, synced);
 }
+
+int m2sdr_rf_calibrate_interface_delay(struct m2sdr_dev *dev)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    return m2sdr_calibrate_interface_delay(dev, phy);
+}
+
+int m2sdr_rf_get_interface_delay(struct m2sdr_dev *dev,
+                                 enum m2sdr_direction direction,
+                                 uint8_t *delay_reg)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    if (!delay_reg)
+        return M2SDR_ERR_INVAL;
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    *delay_reg = ad9361_spi_read(phy->spi,
+        direction == M2SDR_TX ? REG_TX_CLOCK_DATA_DELAY : REG_RX_CLOCK_DATA_DELAY);
+    return M2SDR_ERR_OK;
+}
+
+int m2sdr_rf_set_interface_delay(struct m2sdr_dev *dev,
+                                 enum m2sdr_direction direction,
+                                 uint8_t delay_reg)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    if (direction != M2SDR_RX && direction != M2SDR_TX)
+        return M2SDR_ERR_INVAL;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    /* Delay changes only latch cleanly outside the active ENSM data states. */
+    ad9361_ensm_force_state(phy, ENSM_STATE_ALERT);
+    rc = m2sdr_from_ad9361_rc(ad9361_spi_write(phy->spi,
+        direction == M2SDR_TX ? REG_TX_CLOCK_DATA_DELAY : REG_RX_CLOCK_DATA_DELAY,
+        delay_reg));
+    ad9361_ensm_force_state(phy, ENSM_STATE_FDD);
+    return rc;
+}
