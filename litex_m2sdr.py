@@ -289,8 +289,27 @@ class BaseSoC(SoCMini):
         "vrt_streamer"     : 36,
     }
 
+    def add_rx_datapath_processing(self, rx_stream):
+        """User extension hook for on-FPGA RX processing.
+
+        Called once during ``__init__`` with the RX sample-stream Endpoint
+        (64-bit ``dma_layout``, sys clock domain) that normally feeds the host
+        comms crossbar (PCIe/Eth/SATA). Override in a subclass to insert custom
+        RX processing and/or losslessly tap the samples into an on-FPGA DSP
+        block (e.g. GNSS downconversion + correlation), then return the
+        Endpoint that should continue to the crossbar.
+
+        The default implementation is a transparent passthrough, so the stock
+        design is bit-identical. When it runs, ``add_pcie()`` has already
+        completed, so a subclass may drive an extra DMA channel here (request
+        it with ``pcie_dmas > 1``) to stream side-band results to the host
+        without disturbing the DMA0 I/Q path. Submodules added here are
+        registered normally as long as the SoC is not yet finalized.
+        """
+        return rx_stream
+
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
+        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, pcie_dmas=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_igmp=True, eth_ptp_igmp_interval=2,
         with_eth_ptp_rfic_clock = False,
@@ -483,7 +502,11 @@ class BaseSoC(SoCMini):
             # ----
             if variant == "baseboard":
                 assert pcie_lanes == 1
-            pcie_dmas = 1
+            # Number of LitePCIe DMA channels. Defaults to 1 (DMA0 = RFIC I/Q
+            # stream). Subclasses may request extra channels (e.g. to carry a
+            # side-band stream produced by custom RX processing, see
+            # add_rx_datapath_processing()); DMA0 keeps its original role.
+            assert pcie_dmas >= 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width                = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size                 = 0x10_0000,
@@ -839,8 +862,13 @@ class BaseSoC(SoCMini):
             self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
 
-        # RX: Header -> Crossbar -> Comms.
-        # --------------------------------
+        # RX: Header -> [User Processing] -> Crossbar -> Comms.
+        # -----------------------------------------------------
+        # User hook: optionally process/tap the RX stream before it reaches the
+        # host comms crossbar. Default is a transparent passthrough, so the
+        # stock design is unchanged.
+        rx_source = self.add_rx_datapath_processing(self.header.rx.source)
+
         if with_sata:
             # Keep the normal host RX path active while optionally duplicating
             # each accepted word into the SATA recorder.  The small mux also
@@ -853,7 +881,7 @@ class BaseSoC(SoCMini):
                     self.sata_rx_streamer.tap.storage &
                     (self.crossbar.demux.sel != crossbar_sata_port)
                 ),
-                self.header.rx.source.connect(self.sata_rx_tap.sink),
+                rx_source.connect(self.sata_rx_tap.sink),
                 self.sata_rx_tap.source.connect(self.crossbar.demux.sink),
                 self.crossbar.demux.source2.connect(self.sata_rx_mux.sink0),
                 self.sata_rx_tap.tap.connect(self.sata_rx_mux.sink1),
@@ -862,7 +890,7 @@ class BaseSoC(SoCMini):
                 self.sata_rx_tap.enable.eq(sata_tap_active),
             ]
         else:
-            self.comb += self.header.rx.source.connect(self.crossbar.demux.sink)
+            self.comb += rx_source.connect(self.crossbar.demux.sink)
         if with_pcie:
             self.comb += [
                 self.crossbar.demux.source0.connect(self.pcie_dma0.sink),
@@ -1487,6 +1515,7 @@ def main():
     parser.add_argument("--with-pcie-reset-workaround", action="store_true", help="Toggle PCIe reset periodically until link-up.")
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+    parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -1581,6 +1610,7 @@ def main():
         with_pcie_reset_workaround = args.with_pcie_reset_workaround,
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
+        pcie_dmas     = args.pcie_dmas,
 
         # Ethernet.
         with_eth      = args.with_eth,
