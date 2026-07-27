@@ -74,6 +74,11 @@
 //#define DEBUG_READ
 //#define DEBUG_WRITE
 
+/* How long a recovery reset may take to make BAR0 respond again. Each failed
+ * read costs a PCIe completion timeout, so poll coarsely. */
+#define LITEPCIE_BAR0_READY_POLL_MS     50U
+#define LITEPCIE_BAR0_READY_TIMEOUT_MS  1000U
+
 #define LITEPCIE_SATA_SECTOR_SIZE 512U
 #define LITEPCIE_SATA_DMA_BUFFER_SIZE \
 	(LITEPCIE_SATA_DMA_MAX_SECTORS * LITEPCIE_SATA_SECTOR_SIZE)
@@ -149,6 +154,7 @@ struct litepcie_device {
 	int minor_base;                               /* Base minor number for the device */
 	int irqs;                                     /* Number of IRQs */
 	int channels;                                 /* Number of DMA channels */
+	unsigned int generation;                      /* Bumped by each PCIe recovery reset */
 	struct mutex sata_dma_lock;                   /* Serialize SATA userspace DMA copies */
 	void *sata_dma_cpu;                           /* Coherent buffer for SATA userspace DMA */
 	dma_addr_t sata_dma_handle;                   /* Bus address for SATA userspace DMA */
@@ -167,6 +173,7 @@ struct litepcie_chan_priv {
 	struct litepcie_chan *chan;
 	bool reader;
 	bool writer;
+	unsigned int generation; /* Device generation this fd was opened against */
 };
 
 static int litepcie_major;
@@ -280,6 +287,45 @@ static inline void litepcie_writel(struct litepcie_device *s, uint32_t addr, uin
 	dev_dbg(&s->dev->dev, "csr_write: 0x%08x @ 0x%08x", val, addr);
 #endif
 	writel(val, s->bar0_addr + addr - CSR_BASE);
+}
+
+/* -----------------------------------------------------------------------------------------------*/
+/*                                 PCIe Link State                                                */
+/* -----------------------------------------------------------------------------------------------*/
+
+/* True while the PCI core considers the link unusable: from error_detected() to
+ * resume() during AER/DPC recovery, and after a surprise removal. MMIO is not
+ * allowed then (and every read would return 0xffffffff after burning a full
+ * completion timeout), so the paths below give up instead of touching the
+ * device. */
+static bool litepcie_dev_offline(struct litepcie_device *s)
+{
+	return pci_channel_offline(s->dev);
+}
+
+/* True once a file descriptor can no longer be used: either the link is offline,
+ * or a PCIe recovery reset the core underneath it. A reset leaves the DMA engines
+ * disabled and their descriptor tables empty, so the counters this fd streams
+ * against describe hardware state that no longer exists; userspace has to close
+ * and reopen. */
+static bool litepcie_fd_stale(struct litepcie_chan_priv *chan_priv)
+{
+	struct litepcie_device *s = chan_priv->chan->litepcie_dev;
+
+	return litepcie_dev_offline(s) ||
+	       READ_ONCE(s->generation) != chan_priv->generation;
+}
+
+/* Wake every DMA waiter so blocked read()/write() calls re-test litepcie_fd_stale()
+ * and return -EIO, instead of waiting for counters that can never advance again. */
+static void litepcie_wake_all(struct litepcie_device *s)
+{
+	int i;
+
+	for (i = 0; i < s->channels; i++) {
+		wake_up_interruptible(&s->chan[i].wait_rd);
+		wake_up_interruptible(&s->chan[i].wait_wr);
+	}
 }
 
 /* -----------------------------------------------------------------------------------------------*/
@@ -743,6 +789,12 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	uint32_t clear_mask, irq_vector, irq_enable;
 	int i;
 
+	/* An offline link answers every register read with 0xffffffff, which would
+	 * look like "every interrupt fired" and feed garbage loop status into the
+	 * DMA counters. */
+	if (litepcie_dev_offline(s))
+		return IRQ_NONE;
+
 	/* Determine IRQ vector */
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
 	/* Single MSI */
@@ -834,13 +886,20 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 static int litepcie_open(struct inode *inode, struct file *file)
 {
 	struct litepcie_chan *chan = container_of(inode->i_cdev, struct litepcie_chan, cdev);
-	struct litepcie_chan_priv *chan_priv = kzalloc(sizeof(*chan_priv), GFP_KERNEL);
+	struct litepcie_chan_priv *chan_priv;
 
+	/* Refuse to hand out a descriptor while the link is down: every access
+	 * through it would stall for a completion timeout and fail. */
+	if (litepcie_dev_offline(chan->litepcie_dev))
+		return -EIO;
+
+	chan_priv = kzalloc(sizeof(*chan_priv), GFP_KERNEL);
 	if (!chan_priv)
 		return -ENOMEM;
 
-	chan_priv->chan    = chan;
-	file->private_data = chan_priv;
+	chan_priv->chan       = chan;
+	chan_priv->generation = READ_ONCE(chan->litepcie_dev->generation);
+	file->private_data    = chan_priv;
 
 	if (chan->dma.reader_enable == 0) { /* Clear only if disabled */
 		chan->dma.reader_hw_count      = 0;
@@ -861,21 +920,29 @@ static int litepcie_release(struct inode *inode, struct file *file)
 {
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan *chan = chan_priv->chan;
+	/* Only touch the hardware while it is reachable. The DMA locks and enable
+	 * flags are software state and are always released, so a later open() is
+	 * not left locked out by a descriptor closed during an outage. */
+	bool offline = litepcie_dev_offline(chan->litepcie_dev);
 
 	if (chan_priv->reader) {
-		/* Disable interrupt */
-		litepcie_disable_interrupt(chan->litepcie_dev, chan->dma.reader_interrupt);
-		/* Disable DMA */
-		litepcie_dma_reader_stop(chan->litepcie_dev, chan->index);
+		if (!offline) {
+			/* Disable interrupt */
+			litepcie_disable_interrupt(chan->litepcie_dev, chan->dma.reader_interrupt);
+			/* Disable DMA */
+			litepcie_dma_reader_stop(chan->litepcie_dev, chan->index);
+		}
 		chan->dma.reader_lock   = 0;
 		chan->dma.reader_enable = 0;
 	}
 
 	if (chan_priv->writer) {
-		/* Disable interrupt */
-		litepcie_disable_interrupt(chan->litepcie_dev, chan->dma.writer_interrupt);
-		/* Disable DMA */
-		litepcie_dma_writer_stop(chan->litepcie_dev, chan->index);
+		if (!offline) {
+			/* Disable interrupt */
+			litepcie_disable_interrupt(chan->litepcie_dev, chan->dma.writer_interrupt);
+			/* Disable DMA */
+			litepcie_dma_writer_stop(chan->litepcie_dev, chan->index);
+		}
 		chan->dma.writer_lock   = 0;
 		chan->dma.writer_enable = 0;
 	}
@@ -895,6 +962,9 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	struct litepcie_chan      *chan      = chan_priv->chan;
 	struct litepcie_device    *s         = chan->litepcie_dev;
 
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
+
 	if (file->f_flags & O_NONBLOCK) {
 		if (chan->dma.writer_hw_count == chan->dma.writer_sw_count)
 			ret = -EAGAIN;
@@ -902,11 +972,18 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 			ret = 0;
 	} else {
 		ret = wait_event_interruptible(chan->wait_rd,
-						   (chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0);
+						   (chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0 ||
+						   litepcie_fd_stale(chan_priv));
 	}
 
 	if (ret < 0)
 		return ret;
+
+	/* The link went down (or the core was reset) while we were waiting: the
+	 * counters cannot advance any more, so report the error instead of
+	 * handing back stale buffer contents. */
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
 
 	i = 0;
 	overflows = 0;
@@ -961,6 +1038,9 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	struct litepcie_chan      *chan      = chan_priv->chan;
 	struct litepcie_device    *s         = chan->litepcie_dev;
 
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
+
 	if (file->f_flags & O_NONBLOCK) {
 		if (chan->dma.reader_hw_count == chan->dma.reader_sw_count)
 			ret = -EAGAIN;
@@ -968,11 +1048,17 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 			ret = 0;
 	} else {
 		ret = wait_event_interruptible(chan->wait_wr,
-						   (chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2);
+						   (chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2 ||
+						   litepcie_fd_stale(chan_priv));
 	}
 
 	if (ret < 0)
 		return ret;
+
+	/* See litepcie_read(): do not keep filling a ring the device stopped
+	 * draining because the link went down under us. */
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
 
 	i          = 0;
 	underflows = 0;
@@ -1083,6 +1169,9 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 #endif
 	int is_tx, i;
 
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
+
 	if (vma->vm_end - vma->vm_start != DMA_BUFFER_TOTAL_SIZE)
 		return -EINVAL;
 
@@ -1151,6 +1240,11 @@ static unsigned int litepcie_poll(struct file *file, poll_table *wait)
 	poll_wait(file, &chan->wait_rd, wait);
 	poll_wait(file, &chan->wait_wr, wait);
 
+	/* Report the error condition rather than "no data yet": an event-loop
+	 * waiting on this fd would otherwise never be told the device is gone. */
+	if (litepcie_fd_stale(chan_priv))
+		return POLLERR | POLLHUP;
+
 #ifdef DEBUG_POLL
 	dev_dbg(&s->dev->dev, "poll: writer hw_count: %10lld / sw_count %10lld\n",
 		chan->dma.writer_hw_count, chan->dma.writer_sw_count);
@@ -1176,6 +1270,11 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan      *chan      = chan_priv->chan;
 	struct litepcie_device    *dev       = chan->litepcie_dev;
+
+	/* Every command below either touches CSRs or reports DMA state that a
+	 * recovery reset invalidated, so none of them can be served. */
+	if (litepcie_fd_stale(chan_priv))
+		return -EIO;
 
 	switch (cmd) {
 	case LITEPCIE_IOCTL_REG:
@@ -1661,6 +1760,9 @@ static int litepcie_ptp_gettimex64(struct ptp_clock_info *ptp,
 							   ptp_caps);
 	unsigned long flags;
 
+	if (litepcie_dev_offline(dev))
+		return -EIO;
+
 	/* Acquire lock to ensure consistent time reading */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
 
@@ -1681,6 +1783,9 @@ static int litepcie_ptp_settime(struct ptp_clock_info *ptp, const struct timespe
 	struct litepcie_device *dev = container_of(ptp, struct litepcie_device,
 							   ptp_caps);
 	unsigned long flags;
+
+	if (litepcie_dev_offline(dev))
+		return -EIO;
 
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
@@ -1705,6 +1810,9 @@ static int litepcie_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 	struct litepcie_device *dev = container_of(ptp, struct litepcie_device,
 							   ptp_caps);
 	unsigned long flags;
+
+	if (litepcie_dev_offline(dev))
+		return -EIO;
 
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
@@ -1740,6 +1848,9 @@ static int litepcie_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	struct timespec64 now, then = ns_to_timespec64(delta);
 	unsigned long flags;
 
+	if (litepcie_dev_offline(dev))
+		return -EIO;
+
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
 
@@ -1772,6 +1883,9 @@ static int litepcie_phc_get_syncdevicetime(ktime_t *device,
 	u64 t1_curr;
 	ktime_t t1, t2_curr;
 	int count = 100;
+
+	if (litepcie_dev_offline(dev))
+		return -EIO;
 
 	/* Get a snapshot of system clocks to use as historic value */
 	ktime_get_snapshot(&dev->snapshot);
@@ -1868,6 +1982,38 @@ static struct ptp_clock_info litepcie_ptp_info = {
 	.getcrosststamp = litepcie_ptp_getcrosststamp,
 	.enable         = litepcie_ptp_enable,
 };
+
+/* Enable the board time counter and prime the PTM requester, leaving T1/T4 ready
+ * for the next request. Called at probe and again after a recovery reset, which
+ * puts both register blocks back to their defaults. */
+static void litepcie_time_ptm_init(struct litepcie_device *s)
+{
+	int count = 100;
+
+	/* Enable timer (time) counter */
+	litepcie_writel(s, CSR_TIME_GEN_CONTROL_ADDR, TIME_CONTROL_ENABLE | TIME_CONTROL_SYNC_ENABLE);
+
+	/* Enable PTM control and start first request */
+	litepcie_writel(s, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
+
+	/* Prepare T1 & T4 for next request */
+	do {
+		if ((litepcie_readl(s, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
+			break;
+	} while (--count);
+
+	litepcie_writel(s, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
+	count = 100;
+	do {
+		if ((litepcie_readl(s, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
+			break;
+	} while (--count);
+
+	s->t4_prev = litepcie_read64(s, CSR_PTM_REQUESTER_T4_TIME_ADDR);
+
+	s->t1_prev = (((u64)litepcie_readl(s, PTM_T1_TIME_L) << 32) |
+		litepcie_readl(s, PTM_T1_TIME_H));
+}
 #endif
 
 /* -----------------------------------------------------------------------------------------------*/
@@ -1885,9 +2031,6 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	struct litepcie_device *litepcie_dev = NULL;
 #ifdef CSR_UART_XOVER_RXTX_ADDR
 	struct resource *tty_res = NULL;
-#endif
-#ifdef CSR_PTM_REQUESTER_BASE
-	int count = 100;
 #endif
 
 	dev_info(&dev->dev, "\e[1m[Probing device]\e[0m\n");
@@ -2119,29 +2262,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	/* Display created PTP device */
 	dev_info(&dev->dev, "PTP clock registered as /dev/ptp%d\n", ptp_clock_index(litepcie_dev->litepcie_ptp_clock));
 
-	/* Enable timer (time) counter */
-	litepcie_writel(litepcie_dev, CSR_TIME_GEN_CONTROL_ADDR, TIME_CONTROL_ENABLE | TIME_CONTROL_SYNC_ENABLE);
-
-	/* Enable PTM control and start first request */
-	litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
-
-	/* Prepare T1 & T4 for next request */
-	do {
-		if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
-			break;
-	} while (--count);
-
-	litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
-	count = 100;
-	do {
-		if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
-			break;
-	} while (--count);
-
-	litepcie_dev->t4_prev = litepcie_read64(litepcie_dev, CSR_PTM_REQUESTER_T4_TIME_ADDR);
-
-	litepcie_dev->t1_prev = (((u64)litepcie_readl(litepcie_dev, PTM_T1_TIME_L) << 32) |
-		litepcie_readl(litepcie_dev, PTM_T1_TIME_H));
+	litepcie_time_ptm_init(litepcie_dev);
 
 	spin_lock_init(&litepcie_dev->tmreg_lock);
 #endif
@@ -2191,20 +2312,25 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 	/* Stop the DMAs */
 	litepcie_stop_dma(litepcie_dev);
 
+	/* Everything below only makes sense while the device answers MMIO: on an
+	 * offline link each access burns a completion timeout and changes nothing,
+	 * so skip straight to releasing the host-side resources. */
+	if (!litepcie_dev_offline(litepcie_dev)) {
 #ifdef CSR_SATA_PHY_BASE
-if (litepcie_soc_has_sata(litepcie_dev)) {
-	/* Disable SATA interrupts */
+	if (litepcie_soc_has_sata(litepcie_dev)) {
+		/* Disable SATA interrupts */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
-    litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
+	    litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
 #endif
 #ifdef SATA_MEM2SECTOR_INTERRUPT
-    litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+	    litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
 #endif
-}
+	}
 #endif
 
-	/* Disable all interrupts */
-	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
+		/* Disable all interrupts */
+		litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
+	}
 
     /* Unregister PTP */
 #ifdef CSR_PTM_REQUESTER_BASE
@@ -2229,6 +2355,147 @@ if (litepcie_soc_has_sata(litepcie_dev)) {
 	pci_free_irq_vectors(dev);
 }
 
+/* ----------------------------------------------------------------------------------------------- */
+/*                                    PCIe Error Recovery                                          */
+/* ----------------------------------------------------------------------------------------------- */
+
+/* Poll BAR0 until the core answers MMIO again. The identifier region starts with
+ * the ASCII version string, so an all-ones readback can only mean the access did
+ * not reach the core. */
+static bool litepcie_wait_bar0_ready(struct litepcie_device *s)
+{
+	unsigned int waited;
+
+	for (waited = 0; ; waited += LITEPCIE_BAR0_READY_POLL_MS) {
+		if (litepcie_readl(s, CSR_IDENTIFIER_MEM_BASE) != 0xffffffff)
+			return true;
+
+		if (waited >= LITEPCIE_BAR0_READY_TIMEOUT_MS)
+			return false;
+
+		msleep(LITEPCIE_BAR0_READY_POLL_MS);
+	}
+}
+
+/* Called by the PCI core when the port above us reports an error (AER/DPC).
+ *
+ * Without these callbacks the kernel gives up on a fatal error with
+ * "can't recover (no error_detected callback)" and the board stays dead until the
+ * host is rebooted. All we have to do here is stop using the device: MMIO is
+ * forbidden while the channel is frozen, and the recovery reset happens between
+ * this callback and slot_reset() below. */
+static pci_ers_result_t litepcie_pci_error_detected(struct pci_dev *dev,
+						    pci_channel_state_t state)
+{
+	struct litepcie_device *litepcie_dev = pci_get_drvdata(dev);
+
+	dev_err(&dev->dev, "PCIe error detected (channel state %u)\n", (unsigned int)state);
+
+	if (state == pci_channel_io_normal) {
+		/* Non-fatal: the link still works, nothing to tear down. */
+		return PCI_ERS_RESULT_CAN_RECOVER;
+	}
+
+	/* litepcie_dev_offline() already reports the device as unusable (the core
+	 * set the io state before calling us), which fences off the file
+	 * operations, the interrupt handler and the PTP callbacks. Waiters have to
+	 * be kicked explicitly: their DMA counters can never advance again. */
+	if (litepcie_dev)
+		litepcie_wake_all(litepcie_dev);
+
+	if (state == pci_channel_io_perm_failure)
+		return PCI_ERS_RESULT_DISCONNECT;
+
+	return PCI_ERS_RESULT_NEED_RESET;
+}
+
+/* Called after the core has reset the slot/bus for us: bring the endpoint back
+ * to the state litepcie_pci_probe() leaves it in, minus the host-side resources
+ * (chardevs, IRQs, DMA buffers) which were never released. */
+static pci_ers_result_t litepcie_pci_slot_reset(struct pci_dev *dev)
+{
+	struct litepcie_device *litepcie_dev = pci_get_drvdata(dev);
+	int i;
+
+	if (!litepcie_dev)
+		return PCI_ERS_RESULT_DISCONNECT;
+
+	/* Config space has been restored by the core, which may have re-enabled
+	 * bus mastering: hold it off until the core is reset and its engines are
+	 * known to be idle, for the same reason as in litepcie_pci_probe(). */
+	pci_clear_master(dev);
+
+	/* Wait for the endpoint to answer MMIO again. The PCI core waits for the
+	 * link to retrain and for config space to respond before calling us, but the
+	 * FPGA's PCIe block and the LiteX SoC behind it need longer than that: on a
+	 * Jetson Orin, BAR0 still read all-ones 24 ms after the root port reported
+	 * "link has been reset". */
+	if (!litepcie_wait_bar0_ready(litepcie_dev)) {
+		dev_err(&dev->dev, "Slot reset did not restore BAR0 access\n");
+		return PCI_ERS_RESULT_DISCONNECT;
+	}
+
+	/* Reset the LitePCIe core */
+#ifdef CSR_CTRL_RESET_ADDR
+	litepcie_writel(litepcie_dev, CSR_CTRL_RESET_ADDR, 1);
+	msleep(10);
+	if (!litepcie_wait_bar0_ready(litepcie_dev)) {
+		dev_err(&dev->dev, "Core did not come back from reset\n");
+		return PCI_ERS_RESULT_DISCONNECT;
+	}
+#endif
+
+	/* Mask all interrupts: the enables belong to DMA engines the reset has
+	 * disabled, and userspace re-arms them when it restarts a stream. */
+	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
+
+	/* Drop the DMA state the reset invalidated. The DMA locks are deliberately
+	 * left alone: they belong to the file descriptors that still hold them,
+	 * and those are retired by the generation bump below. */
+	for (i = 0; i < litepcie_dev->channels; i++) {
+		struct litepcie_dma_chan *dmachan = &litepcie_dev->chan[i].dma;
+
+		dmachan->writer_enable        = 0;
+		dmachan->reader_enable        = 0;
+		dmachan->writer_hw_count      = 0;
+		dmachan->writer_hw_count_last = 0;
+		dmachan->writer_sw_count      = 0;
+		dmachan->reader_hw_count      = 0;
+		dmachan->reader_hw_count_last = 0;
+		dmachan->reader_sw_count      = 0;
+	}
+
+	/* Retire every file descriptor opened before the reset: the streams they
+	 * were driving are gone and their counters mean nothing now. */
+	WRITE_ONCE(litepcie_dev->generation, litepcie_dev->generation + 1);
+
+#ifdef CSR_PTM_REQUESTER_BASE
+	/* The reset also cleared the time/PTM registers. */
+	litepcie_time_ptm_init(litepcie_dev);
+#endif
+
+	/* The DMA buffers are still allocated and mapped, so the core may DMA
+	 * again as soon as a stream is restarted. */
+	pci_set_master(dev);
+
+	dev_info(&dev->dev, "Core reset after PCIe error, reopen the device to stream again\n");
+
+	return PCI_ERS_RESULT_RECOVERED;
+}
+
+/* Called once recovery is complete; the core has already put the device back
+ * into the pci_channel_io_normal state, so new open() calls succeed from here. */
+static void litepcie_pci_resume(struct pci_dev *dev)
+{
+	dev_info(&dev->dev, "PCIe error recovery finished, device usable again\n");
+}
+
+static const struct pci_error_handlers litepcie_pci_err_handlers = {
+	.error_detected = litepcie_pci_error_detected,
+	.slot_reset     = litepcie_pci_slot_reset,
+	.resume         = litepcie_pci_resume,
+};
+
 /* PCI device ID table */
 static const struct pci_device_id litepcie_pci_ids[] = {
 	{ PCI_DEVICE(PCIE_XILINX_VENDOR_ID, PCIE_XILINX_DEVICE_ID_S7_GEN2_X1), },
@@ -2240,10 +2507,11 @@ MODULE_DEVICE_TABLE(pci, litepcie_pci_ids);
 
 /* PCI driver structure */
 static struct pci_driver litepcie_pci_driver = {
-	.name     = LITEPCIE_NAME,
-	.id_table = litepcie_pci_ids,
-	.probe    = litepcie_pci_probe,
-	.remove   = litepcie_pci_remove,
+	.name        = LITEPCIE_NAME,
+	.id_table    = litepcie_pci_ids,
+	.probe       = litepcie_pci_probe,
+	.remove      = litepcie_pci_remove,
+	.err_handler = &litepcie_pci_err_handlers,
 };
 
 /* Module initialization function */
