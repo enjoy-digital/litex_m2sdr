@@ -2020,17 +2020,13 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	litepcie_dev->channels = DMA_CHANNELS;
 
-	/* Create all chardev in /dev */
-	ret = litepcie_alloc_chdev(litepcie_dev);
-	if (ret) {
-		dev_err(&dev->dev, "Failed to allocate character device\n");
-		goto fail2;
-	}
-
+	/* Initialize the channels before publishing them: litepcie_alloc_chdev()
+	 * below creates the /dev nodes, and an open() racing with probe must not
+	 * find a channel without its device back-pointer or wait queues. */
 	for (i = 0; i < litepcie_dev->channels; i++) {
 		litepcie_dev->chan[i].index           = i;
 		litepcie_dev->chan[i].block_size      = DMA_BUFFER_SIZE;
-		litepcie_dev->chan[i].minor           = litepcie_dev->minor_base + i;
+		litepcie_dev->chan[i].minor           = litepcie_minor_idx + i;
 		litepcie_dev->chan[i].litepcie_dev    = litepcie_dev;
 		litepcie_dev->chan[i].dma.writer_lock = 0;
 		litepcie_dev->chan[i].dma.reader_lock = 0;
@@ -2068,6 +2064,13 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		}
 		break;
 		}
+	}
+
+	/* Create all chardev in /dev */
+	ret = litepcie_alloc_chdev(litepcie_dev);
+	if (ret) {
+		dev_err(&dev->dev, "Failed to allocate character device\n");
+		goto fail2;
 	}
 
 	/* Allocate all DMA buffers */
