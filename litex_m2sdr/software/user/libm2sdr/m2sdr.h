@@ -108,8 +108,16 @@ enum m2sdr_format {
     M2SDR_FORMAT_BFP8_Q11 = 2,
 };
 
+/* TX air-time quantization. The FPGA time counter advances in M2SDR_TX_TIME_GRID_NS
+ * steps (the time-clock period), and hardware timed-TX releases each frame on a grid
+ * tick. A TX timestamp is therefore QUANTIZED to this grid: the library rounds it to
+ * the nearest multiple before writing it into the DMA header, so the on-air time is a
+ * deterministic function of the requested timestamp (round-to-nearest; ties round up). */
+#define M2SDR_TX_TIME_GRID_NS 10   /* 100 MHz FPGA time clock -> 10 ns */
+
 struct m2sdr_metadata {
-    /* Timestamp in ns when M2SDR_META_FLAG_HAS_TIME is set. */
+    /* Air-time in ns when M2SDR_META_FLAG_HAS_TIME is set. TX: the requested transmit
+     * time, quantized to M2SDR_TX_TIME_GRID_NS (see above). RX: the frame capture time. */
     uint64_t timestamp;
     /* Bitmask of M2SDR_META_FLAG_* values. */
     uint32_t flags;
@@ -883,6 +891,46 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                   unsigned num_samples,
                   struct m2sdr_metadata *meta,
                   unsigned timeout_ms);
+
+/* Set the timed-TX pipeline offset (ns). The hardware timed-TX gate releases each timed
+ * frame the cycle (FPGA time + tx_offset) reaches the frame's air-time, so tx_offset
+ * compensates the fixed TX-pipeline latency (packer/CDC/serializer/DAC/analog) between the
+ * gate and the antenna: calibrated, "transmit at X" puts the signal on the air at X.
+ * Untimed frames (header timestamp 0) always transmit immediately, unaffected by this.
+ * Loopback-calibrated. LitePCIe only; may be set before or during streaming. */
+int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
+
+/* Read the running hardware TX underflow count: timed frames that missed their air-time.
+ * A timed frame whose air-time had already passed when it reached the gate is dropped
+ * whole (the RFIC airs zeros for it) and counted here. A steadily rising value means timed
+ * frames are submitted later than their air-times (increase the lead or check tx_offset).
+ * This is the on-air TX underflow measured at the gate; the m2sdr_get_stats() underflow
+ * fields count the separate DMA-ring underflow (reader starved of any buffer). LitePCIe. */
+int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
+
+/* Set the zero-copy TX fill lead, in buffers, ahead of the LIVE DMA reader cursor (LitePCIe).
+ *
+ * The zero-copy TX path paces how far ahead of the free-running reader the host fills the ring;
+ * that lead x the per-buffer air-time IS the timed-TX pipeline latency. Because the reader loops
+ * with no backpressure, the host must stay far enough ahead that a submitted frame is not
+ * overrun before the reader reaches it. Steering off the live hardware cursor (accurate to
+ * < ring depth) lets that lead be small and deterministic.
+ *
+ *  - lead_buffers == 0: legacy behavior -- fill the whole ring (maximum throughput, and the
+ *    maximum ~ring-depth pipeline latency). Best for continuous streaming.
+ *  - lead_buffers  > 0: hold the host this many buffers ahead of the reader; latency drops to
+ *    lead x buffer air-time. It MUST be strictly greater than the kernel's dma_buffer_per_irq (the
+ *    IRQ-coalescing depth): the fill paces against the IRQ-updated reader cursor, which the
+ *    free-running reader can run up to dma_buffer_per_irq buffers ahead of, so a lead at or below
+ *    that lets the reader overtake a just-filled slot and air stale samples with no error signal.
+ *    With the low-latency insmod (dma_buffer_per_irq=2) use lead >= 3 (nonzero values are floored
+ *    to 3); with the default coalescing (dma_buffer_per_irq=8) such a small lead is not meaningful
+ *    -- use 0. The consumer must also be real-time: a stall longer than the lead underflows the
+ *    reader.
+ *
+ * Clamped to the ring depth. Takes effect on the next m2sdr_get_buffer(TX). Returns M2SDR_ERR_OK
+ * on a LitePCIe device, M2SDR_ERR_UNSUPPORTED otherwise. */
+int m2sdr_set_tx_lead_buffers(struct m2sdr_dev *dev, unsigned lead_buffers);
 
 /* Zero-copy buffer API.
  *

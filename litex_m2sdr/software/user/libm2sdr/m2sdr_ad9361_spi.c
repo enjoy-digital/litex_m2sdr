@@ -31,7 +31,16 @@
 #define AD9361_SPI_TIMEOUT_PCIE_US 100000
 #define AD9361_SPI_TIMEOUT_ETH_US   10000
 #define AD9361_RESET_PULSE_US 1000
-#define AD9361_RESET_SETTLE_US 10000
+
+/* Post-RESETB bring-up: poll the product-ID until the AD9361 answers, so bring-up proceeds as soon
+ * as the chip is ready. Bounded by _MAX_US so a non-answering chip still returns and the caller's
+ * ad9361_init() reports the failure. */
+#define AD9361_RESET_SETTLE_MIN_US  1000    /* quiet time before the first SPI probe   */
+#define AD9361_RESET_SETTLE_MAX_US  100000  /* upper bound on the whole settle wait     */
+#define AD9361_RESET_POLL_US        1000    /* product-ID poll interval                 */
+#define AD9361_REG_PRODUCT_ID       0x037
+#define AD9361_PRODUCT_ID_MASK      0xF8    /* REG_PRODUCT_ID mask (ad9361.h)           */
+#define AD9361_PRODUCT_ID_9361      0x08    /* PRODUCT_ID_9361     (ad9361.h)           */
 
 /* Helpers */
 /*---------*/
@@ -60,10 +69,23 @@ void m2sdr_ad9361_spi_init(void *conn, uint8_t reset) {
         m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b00);
         usleep(AD9361_RESET_PULSE_US);
     }
-    /* Re-enable the AD9361 interface and leave a small settle time before the
-     * imported driver starts issuing register transactions. */
+    /* Re-enable the AD9361 interface, then wait for the chip to actually answer on
+     * SPI before the imported driver starts issuing register transactions. After
+     * RESETB deasserts (REFCLK already present from the SI5351) the part needs a
+     * short internal reset; polling the product-ID lets bring-up proceed as soon as
+     * the chip is ready. A chip that never answers still returns within
+     * AD9361_RESET_SETTLE_MAX_US so ad9361_init() surfaces the real error. */
     m2sdr_writel(conn, CSR_AD9361_CONFIG_ADDR, 0b11);
-    usleep(AD9361_RESET_SETTLE_US);
+    usleep(AD9361_RESET_SETTLE_MIN_US);
+    for (int waited_us = AD9361_RESET_SETTLE_MIN_US;
+         waited_us < AD9361_RESET_SETTLE_MAX_US;
+         waited_us += AD9361_RESET_POLL_US) {
+        uint8_t id = 0;
+        if (m2sdr_ad9361_spi_read_checked(conn, AD9361_REG_PRODUCT_ID, &id) &&
+            (id & AD9361_PRODUCT_ID_MASK) == AD9361_PRODUCT_ID_9361)
+            return;
+        usleep(AD9361_RESET_POLL_US);
+    }
 }
 
 /* m2sdr_ad9361_spi_xfer */
