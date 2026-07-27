@@ -102,6 +102,8 @@ struct litepcie_dma_chan {
 	uint32_t base;
 	uint32_t writer_interrupt;
 	uint32_t reader_interrupt;
+	uint32_t buf_size;    /* Per-channel DMA buffer size (bytes)  */
+	uint32_t buf_per_irq; /* Per-channel MSI divisor (buffers)    */
 	dma_addr_t reader_handle[DMA_BUFFER_COUNT];
 	dma_addr_t writer_handle[DMA_BUFFER_COUNT];
 	uint32_t *reader_addr[DMA_BUFFER_COUNT];
@@ -128,7 +130,6 @@ struct litepcie_chan {
 	struct litepcie_device *litepcie_dev;
 	struct litepcie_dma_chan dma;
 	struct cdev cdev;
-	uint32_t block_size;
 	uint32_t core_base;
 	wait_queue_head_t wait_rd; /* to wait for an ongoing read */
 	wait_queue_head_t wait_wr; /* to wait for an ongoing write */
@@ -226,7 +227,8 @@ static int litepcie_dma_fill_stats(struct litepcie_chan *chan,
 		litepcie_dma_update_level_stats(dma);
 	}
 
-	m->buffer_size = DMA_BUFFER_SIZE;
+	/* Geometry of this channel: the buffer size is per channel. */
+	m->buffer_size = dma->buf_size;
 	m->buffer_count = DMA_BUFFER_COUNT;
 	m->reserved0 = 0;
 	m->reserved1 = 0;
@@ -535,6 +537,107 @@ static void litepcie_disable_interrupt(struct litepcie_device *s, int irq_num)
 /*                               LitePCIe DMAs                                                    */
 /* -----------------------------------------------------------------------------------------------*/
 
+/* Per-channel DMA ring geometry.
+ *
+ * The buffer length is a per-descriptor field in hardware, so each DMA channel
+ * can run its own buffer size and MSI divisor: a bulk I/Q channel wants large
+ * buffers (throughput, few IRQs, deep ring) while a low-rate side channel wants
+ * small buffers and an MSI per buffer (a buffer completes, and is seen by the
+ * host, in buf_size / byte_rate).
+ *
+ * The defaults reproduce the historical global behavior for every channel; a
+ * channel only differs when explicitly asked for, e.g. 8 KiB buffers with an
+ * MSI every 8 buffers on DMA0 and 512-byte buffers with an MSI per buffer on
+ * DMA1:
+ *
+ *   modprobe m2sdr dma_buffer_size=8192,512 dma_buffer_per_irq=8,1
+ */
+static unsigned int dma_buffer_size[DMA_CHANNEL_COUNT] = {
+	[0 ... DMA_CHANNEL_COUNT - 1] = DMA_BUFFER_SIZE
+};
+static unsigned int dma_buffer_per_irq[DMA_CHANNEL_COUNT] = {
+	[0 ... DMA_CHANNEL_COUNT - 1] = DMA_BUFFER_PER_IRQ
+};
+static int dma_buffer_size_argc;
+static int dma_buffer_per_irq_argc;
+
+module_param_array(dma_buffer_size, uint, &dma_buffer_size_argc, 0444);
+MODULE_PARM_DESC(dma_buffer_size,
+	"Per-DMA-channel buffer size in bytes, comma separated (default "
+	__stringify(DMA_BUFFER_SIZE) " for every channel)");
+module_param_array(dma_buffer_per_irq, uint, &dma_buffer_per_irq_argc, 0444);
+MODULE_PARM_DESC(dma_buffer_per_irq,
+	"Per-DMA-channel number of buffers per MSI, comma separated (default "
+	__stringify(DMA_BUFFER_PER_IRQ) " for every channel)");
+
+/* Number of DMA buffers packed into a single coherent allocation.
+ *
+ * The DMA allocator works at page granularity, so sub-page buffers are packed
+ * several per allocation. This keeps the ring dense (buffer n always starts at
+ * n * buf_size), which is what read()/write() and mmap() expose to userspace,
+ * and keeps every buffer inside a page (a DMA request never crosses a 4 KiB
+ * boundary).
+ */
+static inline unsigned int litepcie_dma_bufs_per_alloc(uint32_t buf_size)
+{
+	return (buf_size < PAGE_SIZE) ? PAGE_SIZE / buf_size : 1;
+}
+
+/* Total size of one direction of a channel's ring (mmap window size) */
+static inline size_t litepcie_dma_total_size(struct litepcie_dma_chan *dmachan)
+{
+	return (size_t)DMA_BUFFER_COUNT * dmachan->buf_size;
+}
+
+/* Validate the per-channel DMA geometry given on the module command line */
+static int litepcie_dma_check_params(void)
+{
+	int i;
+
+	for (i = 0; i < DMA_CHANNEL_COUNT; i++) {
+		uint32_t size    = dma_buffer_size[i];
+		uint32_t per_irq = dma_buffer_per_irq[i];
+
+		if (size == 0 || size > DMA_BUFFER_SIZE_MAX ||
+		    (size % DMA_BUFFER_SIZE_ALIGN)) {
+			pr_err("dma_buffer_size[%d]=%u: must be a multiple of %d and <= %d\n",
+			       i, size, DMA_BUFFER_SIZE_ALIGN, DMA_BUFFER_SIZE_MAX);
+			return -EINVAL;
+		}
+
+		/* mmap() hands out whole pages and the ring must stay dense, so a
+		 * buffer is either a multiple of a page or an exact divisor of one. */
+		if (size >= PAGE_SIZE) {
+			if (size % PAGE_SIZE) {
+				pr_err("dma_buffer_size[%d]=%u: must be a multiple of PAGE_SIZE (%lu)\n",
+				       i, size, PAGE_SIZE);
+				return -EINVAL;
+			}
+		} else {
+			if (PAGE_SIZE % size) {
+				pr_err("dma_buffer_size[%d]=%u: sub-page sizes must divide PAGE_SIZE (%lu)\n",
+				       i, size, PAGE_SIZE);
+				return -EINVAL;
+			}
+			if (DMA_BUFFER_COUNT % litepcie_dma_bufs_per_alloc(size)) {
+				pr_err("dma_buffer_size[%d]=%u: %u buffers per page does not divide the %d buffer ring\n",
+				       i, size, litepcie_dma_bufs_per_alloc(size), DMA_BUFFER_COUNT);
+				return -EINVAL;
+			}
+		}
+
+		/* Keep the MSI spacing uniform across ring wraps */
+		if (per_irq == 0 || per_irq > DMA_BUFFER_COUNT ||
+		    (DMA_BUFFER_COUNT % per_irq)) {
+			pr_err("dma_buffer_per_irq[%d]=%u: must be a divisor of the %d buffer ring\n",
+			       i, per_irq, DMA_BUFFER_COUNT);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 /* Initialize DMA buffers for all channels */
 static int litepcie_dma_init(struct litepcie_device *s)
 {
@@ -547,25 +650,44 @@ static int litepcie_dma_init(struct litepcie_device *s)
 
 	/* For each DMA channel */
 	for (i = 0; i < s->channels; i++) {
-		dmachan = &s->chan[i].dma;
-		/* For each DMA buffer */
-		for (j = 0; j < DMA_BUFFER_COUNT; j++) {
-			/* Allocate reader buffer */
-			dmachan->reader_addr[j] = dmam_alloc_coherent(
+		unsigned int bufs_per_alloc;
+		size_t alloc_size;
+
+		dmachan        = &s->chan[i].dma;
+		bufs_per_alloc = litepcie_dma_bufs_per_alloc(dmachan->buf_size);
+		alloc_size     = (size_t)dmachan->buf_size * bufs_per_alloc;
+
+		/* For each group of DMA buffers sharing an allocation */
+		for (j = 0; j < DMA_BUFFER_COUNT; j += bufs_per_alloc) {
+			void *reader_addr, *writer_addr;
+			dma_addr_t reader_handle, writer_handle;
+			unsigned int k;
+
+			/* Allocate reader buffer(s) */
+			reader_addr = dmam_alloc_coherent(
 				&s->dev->dev,
-				DMA_BUFFER_SIZE,
-				&dmachan->reader_handle[j],
+				alloc_size,
+				&reader_handle,
 				GFP_KERNEL);
-			/* Allocate writer buffer */
-			dmachan->writer_addr[j] = dmam_alloc_coherent(
+			/* Allocate writer buffer(s) */
+			writer_addr = dmam_alloc_coherent(
 				&s->dev->dev,
-				DMA_BUFFER_SIZE,
-				&dmachan->writer_handle[j],
+				alloc_size,
+				&writer_handle,
 				GFP_KERNEL);
 			/* Check allocation success */
-			if (!dmachan->writer_addr[j] || !dmachan->reader_addr[j]) {
+			if (!writer_addr || !reader_addr) {
 				dev_err(&s->dev->dev, "Failed to allocate DMA buffers\n");
 				return -ENOMEM;
+			}
+			/* Split the allocation in buffers */
+			for (k = 0; k < bufs_per_alloc; k++) {
+				size_t offset = (size_t)k * dmachan->buf_size;
+
+				dmachan->reader_addr[j + k]   = reader_addr + offset;
+				dmachan->reader_handle[j + k] = reader_handle + offset;
+				dmachan->writer_addr[j + k]   = writer_addr + offset;
+				dmachan->writer_handle[j + k] = writer_handle + offset;
 			}
 		}
 	}
@@ -591,8 +713,8 @@ static void litepcie_dma_writer_start(struct litepcie_device *s, int chan_num)
 #ifndef DMA_BUFFER_ALIGNED
 			DMA_LAST_DISABLE |
 #endif
-			(!(i % DMA_BUFFER_PER_IRQ == 0)) * DMA_IRQ_DISABLE | /* Generate an MSI every n buffers */
-			DMA_BUFFER_SIZE);
+			(!(i % dmachan->buf_per_irq == 0)) * DMA_IRQ_DISABLE | /* Generate an MSI every n buffers */
+			dmachan->buf_size);
 		/* Fill 32-bit Address LSB */
 		litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_TABLE_VALUE_OFFSET + 4, (dmachan->writer_handle[i] >>  0) & 0xffffffff);
 		/* Write descriptor (and fill 32-bit Address MSB for 64-bit mode) */
@@ -665,8 +787,8 @@ static void litepcie_dma_reader_start(struct litepcie_device *s, int chan_num)
 #ifndef DMA_BUFFER_ALIGNED
 			DMA_LAST_DISABLE |
 #endif
-			(!(i % DMA_BUFFER_PER_IRQ == 0)) * DMA_IRQ_DISABLE | /* Generate an MSI every n buffers */
-			DMA_BUFFER_SIZE);
+			(!(i % dmachan->buf_per_irq == 0)) * DMA_IRQ_DISABLE | /* Generate an MSI every n buffers */
+			dmachan->buf_size);
 		/* Fill 32-bit Address LSB */
 		litepcie_writel(s, dmachan->base + PCIE_DMA_READER_TABLE_VALUE_OFFSET + 4, (dmachan->reader_handle[i] >>  0) & 0xffffffff);
 		/* Write descriptor (and fill 32-bit Address MSB for 64-bit mode) */
@@ -894,6 +1016,7 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan      *chan      = chan_priv->chan;
 	struct litepcie_device    *s         = chan->litepcie_dev;
+	uint32_t                   buf_size  = chan->dma.buf_size;
 
 	if (file->f_flags & O_NONBLOCK) {
 		if (chan->dma.writer_hw_count == chan->dma.writer_sw_count)
@@ -911,7 +1034,7 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	i = 0;
 	overflows = 0;
 	len = size;
-	while (len >= DMA_BUFFER_SIZE) {
+	while (len >= buf_size) {
 		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0) {
 			if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > DMA_BUFFER_COUNT/2) {
@@ -920,13 +1043,13 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 				/* Order the buffer read after the hw_count check on
 				 * weakly-ordered architectures. */
 				dma_rmb();
-				ret = copy_to_user(data + (chan->block_size * i),
+				ret = copy_to_user(data + ((size_t)buf_size * i),
 						   chan->dma.writer_addr[chan->dma.writer_sw_count % DMA_BUFFER_COUNT],
-						   DMA_BUFFER_SIZE);
+						   buf_size);
 				if (ret)
 					return -EFAULT;
 			}
-			len -= DMA_BUFFER_SIZE;
+			len -= buf_size;
 			chan->dma.writer_sw_count += 1;
 			i++;
 		} else {
@@ -956,6 +1079,7 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan      *chan      = chan_priv->chan;
 	struct litepcie_device    *s         = chan->litepcie_dev;
+	uint32_t                   buf_size  = chan->dma.buf_size;
 
 	if (file->f_flags & O_NONBLOCK) {
 		if (chan->dma.reader_hw_count == chan->dma.reader_sw_count)
@@ -973,21 +1097,21 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	i          = 0;
 	underflows = 0;
 	len        = size;
-	while (len >= DMA_BUFFER_SIZE) {
+	while (len >= buf_size) {
 		litepcie_dma_update_level_stats(&chan->dma);
 		if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2) {
 			if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < 0) {
 				underflows++;
 			} else {
 				ret = copy_from_user(chan->dma.reader_addr[chan->dma.reader_sw_count % DMA_BUFFER_COUNT],
-							 data + (chan->block_size * i), DMA_BUFFER_SIZE);
+							 data + ((size_t)buf_size * i), buf_size);
 				if (ret)
 					return -EFAULT;
 				/* Make the buffer contents visible before the count
 				 * update exposes them to the DMA reader. */
 				dma_wmb();
 			}
-			len -= DMA_BUFFER_SIZE;
+			len -= buf_size;
 			chan->dma.reader_sw_count += 1;
 			i++;
 		} else {
@@ -1038,22 +1162,24 @@ static pgprot_t litepcie_dma_buffer_pgprot(struct device *dev, pgprot_t prot)
 	return prot;
 }
 
-/* Map the per-buffer coherent allocations into one userspace VMA without
- * using copied sub-VMAs: the PTEs must be installed with PFNMAP metadata on
- * the real VMA so munmap() can tear the mapping down cleanly.
+/* Map one coherent allocation (one DMA buffer, or the several sub-page buffers
+ * sharing it) into one userspace VMA without using copied sub-VMAs: the PTEs
+ * must be installed with PFNMAP metadata on the real VMA so munmap() can tear
+ * the mapping down cleanly.
  */
 static int litepcie_dma_buffer_mmap(struct device *dev, struct vm_area_struct *vma,
-				    unsigned long user_addr, void *cpu_addr)
+				    unsigned long user_addr, void *cpu_addr,
+				    size_t size)
 {
 	unsigned long offset;
 	int ret;
 
-	if (DMA_BUFFER_SIZE % PAGE_SIZE)
+	if (size % PAGE_SIZE)
 		return -EINVAL;
 
 	vma->vm_page_prot = litepcie_dma_buffer_pgprot(dev, vma->vm_page_prot);
 
-	for (offset = 0; offset < DMA_BUFFER_SIZE; offset += PAGE_SIZE) {
+	for (offset = 0; offset < size; offset += PAGE_SIZE) {
 		unsigned long pfn = litepcie_dma_buffer_pfn((u8 *)cpu_addr + offset);
 
 		ret = remap_pfn_range(vma, user_addr + offset, pfn, PAGE_SIZE,
@@ -1077,18 +1203,24 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	int ret;
 #endif
 	int is_tx, i;
+	uint32_t buf_size            = chan->dma.buf_size;
+	unsigned int bufs_per_alloc  = litepcie_dma_bufs_per_alloc(buf_size);
+	size_t alloc_size            = (size_t)buf_size * bufs_per_alloc;
+	size_t total_size            = litepcie_dma_total_size(&chan->dma);
 
-	if (vma->vm_end - vma->vm_start != DMA_BUFFER_TOTAL_SIZE)
+	if (vma->vm_end - vma->vm_start != total_size)
 		return -EINVAL;
 
 	if (vma->vm_pgoff == 0)
 		is_tx = 1;
-	else if (vma->vm_pgoff == (DMA_BUFFER_TOTAL_SIZE >> PAGE_SHIFT))
+	else if (vma->vm_pgoff == (total_size >> PAGE_SHIFT))
 		is_tx = 0;
 	else
 		return -EINVAL;
 
-	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
+	/* Map one allocation at a time: buffers are dense in the mapping (buffer n
+	 * at n * buf_size), sub-page buffers simply share an allocation. */
+	for (i = 0; i < DMA_BUFFER_COUNT; i += bufs_per_alloc) {
 #if defined(__arm__) || defined(__aarch64__)
 		void *va;
 		if (i == 0)
@@ -1102,8 +1234,8 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		 * Note: the memory is cached, so the user must explicitly
 		 * flush the CPU caches on architectures which require it.
 		 */
-		if (remap_pfn_range(vma, vma->vm_start + i * DMA_BUFFER_SIZE, pfn,
-					DMA_BUFFER_SIZE, vma->vm_page_prot)) {
+		if (remap_pfn_range(vma, vma->vm_start + (size_t)i * buf_size, pfn,
+					alloc_size, vma->vm_page_prot)) {
 			dev_err(&s->dev->dev, "mmap remap_pfn_range failed\n");
 			return -EAGAIN;
 		}
@@ -1119,8 +1251,8 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 			cpu_addr = chan->dma.writer_addr[i];
 
 		ret = litepcie_dma_buffer_mmap(&s->dev->dev, vma,
-					       vma->vm_start + i * DMA_BUFFER_SIZE,
-					       cpu_addr);
+					       vma->vm_start + (size_t)i * buf_size,
+					       cpu_addr, alloc_size);
 		if (ret) {
 			dev_err(&s->dev->dev,
 				"mmap remap_pfn_range failed for buffer %d (ret=%d)\n", i, ret);
@@ -1153,7 +1285,12 @@ static unsigned int litepcie_poll(struct file *file, poll_table *wait)
 		chan->dma.reader_hw_count, chan->dma.reader_sw_count);
 #endif
 
-	if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 2)
+	/* Report readable as soon as the MSI granularity allows: the historical
+	 * 2-buffer hysteresis avoids waking up for a single buffer when one MSI
+	 * covers several, but on a channel raising an MSI per buffer it would add
+	 * two buffer times of latency to every record. */
+	if ((chan->dma.writer_hw_count - chan->dma.writer_sw_count) >
+	    min_t(uint32_t, 2, chan->dma.buf_per_irq - 1))
 		mask |= POLLIN | POLLRDNORM;
 
 	if ((chan->dma.reader_sw_count - chan->dma.reader_hw_count) < DMA_BUFFER_COUNT/2)
@@ -1273,12 +1410,15 @@ static long litepcie_ioctl(struct file *file, unsigned int cmd,
 	{
 		struct litepcie_ioctl_mmap_dma_info m;
 
+		/* Geometry of *this* channel: each DMA channel has its own chardev, so
+		 * a channel configured with a different buffer size reports it here
+		 * instead of the compile-time default. */
 		m.dma_tx_buf_offset = 0;
-		m.dma_tx_buf_size   = DMA_BUFFER_SIZE;
+		m.dma_tx_buf_size   = chan->dma.buf_size;
 		m.dma_tx_buf_count  = DMA_BUFFER_COUNT;
 
-		m.dma_rx_buf_offset = DMA_BUFFER_TOTAL_SIZE;
-		m.dma_rx_buf_size   = DMA_BUFFER_SIZE;
+		m.dma_rx_buf_offset = litepcie_dma_total_size(&chan->dma);
+		m.dma_rx_buf_size   = chan->dma.buf_size;
 		m.dma_rx_buf_count  = DMA_BUFFER_COUNT;
 
 		if (copy_to_user((void *)arg, &m, sizeof(m))) {
@@ -2003,9 +2143,10 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	for (i = 0; i < litepcie_dev->channels; i++) {
 		litepcie_dev->chan[i].index           = i;
-		litepcie_dev->chan[i].block_size      = DMA_BUFFER_SIZE;
 		litepcie_dev->chan[i].minor           = litepcie_dev->minor_base + i;
 		litepcie_dev->chan[i].litepcie_dev    = litepcie_dev;
+		litepcie_dev->chan[i].dma.buf_size    = dma_buffer_size[i];
+		litepcie_dev->chan[i].dma.buf_per_irq = dma_buffer_per_irq[i];
 		litepcie_dev->chan[i].dma.writer_lock = 0;
 		litepcie_dev->chan[i].dma.reader_lock = 0;
 		init_waitqueue_head(&litepcie_dev->chan[i].wait_rd);
@@ -2042,6 +2183,15 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		}
 		break;
 		}
+	}
+
+	/* Report the DMA ring geometry of each channel */
+	for (i = 0; i < litepcie_dev->channels; i++) {
+		struct litepcie_dma_chan *dmachan = &litepcie_dev->chan[i].dma;
+
+		dev_info(&dev->dev, "DMA%d: %d x %u bytes (%zu KiB ring), MSI every %u buffer(s)\n",
+			 i, DMA_BUFFER_COUNT, dmachan->buf_size,
+			 litepcie_dma_total_size(dmachan) / 1024, dmachan->buf_per_irq);
 	}
 
 	/* Allocate all DMA buffers */
@@ -2222,6 +2372,11 @@ static int __init litepcie_module_init(void)
 {
 	int ret;
 	int res;
+
+	/* Check the per-channel DMA geometry before touching anything else */
+	ret = litepcie_dma_check_params();
+	if (ret)
+		return ret;
 
 	res = liteuart_init();
 	if (res)
