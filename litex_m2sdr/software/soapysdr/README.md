@@ -111,6 +111,13 @@ You can pass device arguments to configure the driver. These are most useful whe
   - `tx_late_margin_ns=M`: lateness tolerance before a timed write is rejected (default: one MTU duration).
 - **RX DMA headers** (PCIe): `rx_dma_header=1|0`
   - `1` (default) uses the FPGA per-buffer hardware timestamps for RX time reporting when the gateware supports them (probed at open; falls back to software accounting otherwise).
+- **TX DMA headers / hardware timed TX** (PCIe): `tx_dma_header=1|0`
+  - `1` (default) stamps each TX buffer with its air-time so the FPGA **timed-TX gate** holds the buffer until board time reaches it — the timestamp you pass with `SOAPY_SDR_HAS_TIME` *is* the on-air time, deterministic to the 10 ns grid. Probed at open (the control register only exists when the header module is in the bitstream); on gateware without it the driver logs a warning and falls back to the software timeline.
+  - Buffers written without `SOAPY_SDR_HAS_TIME` carry air-time `0`, which the gate passes through immediately, so continuous streaming is unaffected.
+  - A frame that reaches the gate after its air-time is dropped whole and counted as a TX underflow, rather than airing late.
+- **Timed-TX calibration** (PCIe): `tx_offset=<ns>`
+  - Compensates the deterministic TX pipeline latency (gate → RFIC → antenna) so a requested air-time *X* actually airs at *X*. Unset, the driver derives a default from the active sample rate and channel layout (~43 RFIC cycles for 1T1R, ~38 for 2T2R: about 1.4 µs / 1.2 µs at 30.72 MSPS, 0.35 µs at 122.88 MSPS 1T1R).
+  - The exact figure is board- and rate-specific; measure it with `scripts/timed_tx_selftest` over a TX→RX loopback (it prints the calibrated `tx_offset`) and pass that value. Measured on one board over a cabled loopback (mean / std of the on-air latency): 1T1R 1358 ns / 19 ns at 30.72, 694 / 10 at 61.44, 373 / 5 at 122.88; 2T2R 1215 / 10 at 30.72, 627 / 8 at 61.44. After programming the calibrated value the residual air-time error was 3 ns mean / 8.5 ns std.
 
 Example:
 ```bash
