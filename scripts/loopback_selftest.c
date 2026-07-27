@@ -122,7 +122,6 @@ static atomic_long   tx_underflows = 0;
 static pthread_t     tx_thread;
 static int           tx_running = 0;
 
-#define TX_TS_BASE 0x4000000000000000ull /* synthetic, never 0 */
 
 static void tx_fill(void *buf, long bufidx, int gated_off)
 {
@@ -191,11 +190,11 @@ static void *tx_main(void *arg)
                         ((idx % BURST_PERIOD) >= BURST_ON);
         tx_fill(buf, idx, gated_off);
 
-        struct m2sdr_metadata meta = {
-            .timestamp = TX_TS_BASE + (uint64_t)idx,
-            .flags     = M2SDR_META_FLAG_HAS_TIME,
-        };
-        int rc = m2sdr_sync_tx(dev, buf, spb, &meta, 1000);
+        /* Untimed continuous stream: a header timestamp of 0 (NULL meta) makes the timed-TX
+         * gate transmit each buffer immediately -- this is the continuous-streaming path all
+         * normal / SoapySDR clients use. Timed-TX air-time accuracy, the header-timestamp
+         * CSR tracking, and the too-late drop/underflow behavior are covered by phase_timed(). */
+        int rc = m2sdr_sync_tx(dev, buf, spb, NULL, 1000);
         if (rc == M2SDR_ERR_UNDERFLOW) {
             atomic_fetch_add(&tx_underflows, 1);
         } else if (rc != M2SDR_ERR_OK && rc != M2SDR_ERR_TIMEOUT) {
@@ -377,22 +376,39 @@ static int warmup(void *payload, int want_tone, int max_ms)
     return -1;
 }
 
-static void phase_cadence(void *payload, const char *tag, int nbufs,
-                          int with_tone_checks)
+static void phase_cadence(const char *tag, int nbufs, int with_tone_checks)
 {
     char name[64];
     int hdr_ok = 0, zero_mid = 0, ovf = 0;
     int n = 0;
 
+    /* Decouple acquisition from analysis. At 2T2R@122.88 full-duplex the RX
+     * stream is 983 MB/s; the single-bin DFT in analyze() (per-sample trig over
+     * a whole buffer) is far too slow to run inline between reads. Doing so
+     * stalls the single reader thread long enough for the free-running FPGA to
+     * lap the finite DMA ring -> intermittent, spurious ring overflows that look
+     * like a full-duplex board fault but are pure host-side analysis latency.
+     * So first drain every buffer out of the ring (wait+copy+release only, which
+     * easily keeps up), then analyze the captured copies. */
+    size_t bufbytes = (size_t)spb * sample_sz;
+    uint8_t *capture = malloc((size_t)nbufs * bufbytes);
+    if (!capture) {
+        check(tag, 0, "capture alloc (%zu bytes) failed",
+              (size_t)nbufs * bufbytes);
+        return;
+    }
     for (n = 0; n < nbufs; n++) {
-        if (read_buf(&stats[n], payload, &ovf, 1000) != 0)
+        if (read_buf(&stats[n], capture + (size_t)n * bufbytes, &ovf, 1000) != 0)
             break;
-        analyze(payload, &stats[n]);
-        if (stats[n].has_ts)
+    }
+    for (int m = 0; m < n; m++) {
+        analyze(capture + (size_t)m * bufbytes, &stats[m]);
+        if (stats[m].has_ts)
             hdr_ok++;
-        if (stats[n].zero && n > 0 && !stats[n - 1].zero)
+        if (stats[m].zero && m > 0 && !stats[m - 1].zero)
             zero_mid++;
     }
+    free(capture);
 
     snprintf(name, sizeof(name), "%s.headers", tag);
     check(name, n == nbufs && hdr_ok == n,
@@ -556,7 +572,7 @@ static void phase_stall(void *payload)
           missing / 1e6, opt.stall_ms, 256 * dt_nom / 1e6);
 
     /* Post-recovery re-verification. */
-    phase_cadence(payload, "recovery", opt.nbufs / 2, !opt.no_tx);
+    phase_cadence("recovery", opt.nbufs / 2, !opt.no_tx);
 }
 
 static void phase_tx_csrs(void)
@@ -567,30 +583,25 @@ static void phase_tx_csrs(void)
     }
     uint64_t hdr = csr_read64(CSR_HEADER_LAST_TX_HEADER_ADDR);
     uint64_t ts  = csr_read64(CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
-    long idx_now = atomic_load(&tx_bufs);
 
     check("txhdr.magic", hdr == MAGIC,
           "extractor last header %016llx", (unsigned long long)hdr);
 
-    long idx = (long)(ts - TX_TS_BASE);
-    check("txhdr.timestamp-tracks", ts >= TX_TS_BASE &&
-          idx <= idx_now && idx >= idx_now - 512,
-          "extracted ts -> buffer %ld, host at %ld (lag %ld)",
-          idx, idx_now, idx_now - idx);
-
-    usleep(50 * 1000);
-    uint64_t ts2 = csr_read64(CSR_HEADER_LAST_TX_TIMESTAMP_ADDR);
-    check("txhdr.timestamp-advances", ts2 > ts,
-          "%llu -> %llu over 50ms",
-          (unsigned long long)(ts - TX_TS_BASE),
-          (unsigned long long)(ts2 - TX_TS_BASE));
+    /* This harness streams UNTIMED TX (air-time 0 -> the timed-TX gate transmits each buffer
+     * immediately, the continuous path all normal clients use), so the extractor captures a
+     * zero timestamp. Timed-TX air-time accuracy, the header-timestamp tracking of a non-zero
+     * air-time, and the too-late-drop/underflow path are covered by scripts/timed_tx_selftest
+     * (hardware) and test/test_header.py (gateware sim). */
+    check("txhdr.timestamp-untimed", ts == 0,
+          "untimed continuous TX writes air-time 0, extractor captured %llu",
+          (unsigned long long)ts);
 
     uint64_t rxh = csr_read64(CSR_HEADER_LAST_RX_HEADER_ADDR);
     check("rxhdr.magic-csr", rxh == MAGIC,
           "inserter last header %016llx", (unsigned long long)rxh);
 }
 
-static void phase_burst(void *payload)
+static void phase_burst(void)
 {
     if (opt.no_tx) {
         skip("burst.spacing", "TX disabled in this configuration");
@@ -603,22 +614,42 @@ static void phase_burst(void *payload)
         return;
     }
 
-    atomic_store(&tx_mode, TX_BURST);
-
-    struct bufstat st;
-    double arrivals[24];
-    int n_arr = 0, low_run = 0;
     /* settle two periods, then collect 16 bursts (bounded read budget) */
     int budget = BURST_PERIOD * (16 + 4);
-    int settled = 0;
 
+    /* Same decoupling as phase_cadence: at 983 MB/s the inline analyze() stalls
+     * the reader and the ring overflows, which read_buf recovers by SKIPPING a
+     * buffer - and a skip at a burst boundary drops one rising edge, reading as
+     * a single burst interval of ~2x the period. Capture the whole budget fast,
+     * then detect burst edges offline from the copies. */
+    size_t bufbytes = (size_t)spb * sample_sz;
+    uint8_t *capture = malloc((size_t)budget * bufbytes);
+    struct bufstat *bts = malloc((size_t)budget * sizeof(*bts));
+    if (!capture || !bts) {
+        check("burst.spacing", 0, "capture alloc failed");
+        free(capture); free(bts);
+        return;
+    }
+
+    atomic_store(&tx_mode, TX_BURST);
+    int got = 0;
+    for (; got < budget; got++) {
+        if (read_buf(&bts[got], capture + (size_t)got * bufbytes, NULL, 1000) != 0)
+            break;
+    }
+    atomic_store(&tx_mode, TX_TONE);
+
+    double arrivals[24];
+    int n_arr = 0, low_run = 0, settled = 0;
     const float fs = opt.sc8 ? 127.0f : 2047.0f;
     float p_thr = (float)(0.25 * steady_amp[c] * steady_amp[c] * 2);
 
-    while (budget-- > 0 && n_arr < 16) {
-        if (read_buf(&st, payload, NULL, 1000) != 0)
-            break;
+    for (int b = 0; b < got && n_arr < 16; b++) {
+        void *payload = capture + (size_t)b * bufbytes;
+        struct bufstat st;
         analyze(payload, &st);
+        st.ts = bts[b].ts;
+        st.has_ts = bts[b].has_ts;
         if (settled < 2 * BURST_PERIOD) {
             settled++;
             low_run = (st.amp[c] < thr_lo) ? low_run + 1 : 0;
@@ -650,7 +681,8 @@ static void phase_burst(void *payload)
         low_run = 0;
     }
 
-    atomic_store(&tx_mode, TX_TONE);
+    free(capture);
+    free(bts);
 
     if (n_arr < 6) {
         check("burst.spacing", 0, "only %d burst edges detected", n_arr);
@@ -901,10 +933,10 @@ int main(int argc, char **argv)
         }
     }
 
-    phase_cadence(payload, "run", opt.nbufs, !opt.no_tx);
+    phase_cadence("run", opt.nbufs, !opt.no_tx);
     phase_stall(payload);
     phase_tx_csrs();
-    phase_burst(payload);
+    phase_burst();
 
     if (!opt.no_tx) {
         long uf = atomic_load(&tx_underflows);
