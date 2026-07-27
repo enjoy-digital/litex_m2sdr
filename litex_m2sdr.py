@@ -9,6 +9,7 @@
 import os
 import sys
 import argparse
+import inspect
 import subprocess
 
 from migen import *
@@ -806,6 +807,9 @@ class BaseSoC(SoCMini):
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
         self.header = TXRXHeader(data_width=64)
+        # Timed-TX gate: feed the FPGA time so the TX header extractor holds each frame until
+        # its air-time (header timestamp) and drops too-late frames (see gateware/header.py).
+        self.comb += self.header.tx.time.eq(self.time_gen.time)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.time_gen.time),
@@ -1724,7 +1728,23 @@ def main():
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
-    builder.build(build_name=get_build_name(), run=args.build)
+    # Timing-closure directives. The 125 MHz sys clock is the design's critical domain; direct
+    # place and route for timing and run the post-place and post-route physical-optimization passes
+    # so every PCIe variant meets timing at the stock clock. These are implementation-stage
+    # directives only -- synthesis/logic-optimization directives are intentionally left at their
+    # defaults, as steering them degrades this design's sys-clock result. A bitstream that misses
+    # timing must never be flashed: a marginal image mis-clocks the AD9361 and presents as a dead
+    # RFIC (scripts/qualify_image.sh asserts WNS >= 0 before it will flash anything).
+    build_kwargs = {}
+    toolchain = getattr(getattr(soc, "platform", None), "toolchain", None)
+    if toolchain is not None and "vivado_place_directive" in inspect.signature(toolchain.build).parameters:
+        build_kwargs.update(
+            vivado_place_directive               = "ExtraTimingOpt",
+            vivado_post_place_phys_opt_directive = "AggressiveExplore",
+            vivado_route_directive               = "AggressiveExplore",
+            vivado_post_route_phys_opt_directive = "AggressiveExplore",
+        )
+    builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
