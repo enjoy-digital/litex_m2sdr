@@ -79,6 +79,15 @@
 #define LITEPCIE_BAR0_READY_POLL_MS     50U
 #define LITEPCIE_BAR0_READY_TIMEOUT_MS  1000U
 
+/* Bit 1 of a DMA engine's ENABLE register reads back the engine FSM being in its
+ * IDLE state (LitePCIe exports fsm.ongoing("IDLE") there); bit 0 is the enable
+ * itself. Polled at teardown to confirm no descriptor is still executing. */
+#define PCIE_DMA_IDLE_STATUS            (1 << 1)
+#define LITEPCIE_DMA_IDLE_POLL_US       10U
+/* One descriptor is at most DMA_BUFFER_SIZE, split into max_payload_size writes:
+ * a couple of microseconds on a healthy Gen2 link, so this is ~100x margin. */
+#define LITEPCIE_DMA_IDLE_TIMEOUT_US    1000U
+
 #define LITEPCIE_SATA_SECTOR_SIZE 512U
 #define LITEPCIE_SATA_DMA_BUFFER_SIZE \
 	(LITEPCIE_SATA_DMA_MAX_SECTORS * LITEPCIE_SATA_SECTOR_SIZE)
@@ -767,16 +776,69 @@ static void litepcie_dma_reader_stop(struct litepcie_device *s, int chan_num)
 	dmachan->reader_sw_count      = 0;
 }
 
-/* Stop all DMA channels */
+/* Wait for one DMA engine to report its FSM idle after ENABLE was cleared.
+ *
+ * Bounded: a core that is wedged (or whose requests can no longer complete)
+ * must not hold up teardown, so a timeout only warns. */
+static void litepcie_dma_wait_idle(struct litepcie_device *s, uint32_t enable_addr,
+				   const char *what)
+{
+	unsigned int i;
+	uint32_t val;
+
+	for (i = 0; i < LITEPCIE_DMA_IDLE_TIMEOUT_US / LITEPCIE_DMA_IDLE_POLL_US; i++) {
+		val = litepcie_readl(s, enable_addr);
+
+		/* Link gone: there is nothing left to wait for and nothing that
+		 * could still reach the host. */
+		if (val == 0xffffffff)
+			return;
+
+		if (val & PCIE_DMA_IDLE_STATUS)
+			return;
+
+		udelay(LITEPCIE_DMA_IDLE_POLL_US);
+	}
+
+	dev_warn(&s->dev->dev, "%s still busy %u us after being disabled\n",
+		 what, LITEPCIE_DMA_IDLE_TIMEOUT_US);
+}
+
+/* Stop all DMA channels and wait for the engines to go idle.
+ *
+ * Clearing ENABLE only tells the engine to stop taking new descriptors; the one
+ * being executed still runs to completion. Waiting for the idle status makes the
+ * "no descriptor is in flight" precondition explicit before the caller releases
+ * the coherent buffers those descriptors point at - a stale device write into
+ * freed memory is an IOMMU/fabric fault, i.e. exactly the class of failure this
+ * teardown path exists to avoid. */
 static void litepcie_stop_dma(struct litepcie_device *s)
 {
 	struct litepcie_dma_chan *dmachan;
 	int i;
 
+	if (litepcie_dev_offline(s)) {
+		dev_warn(&s->dev->dev, "Link offline, skipping DMA stop\n");
+		return;
+	}
+
 	for (i = 0; i < s->channels; i++) {
 		dmachan = &s->chan[i].dma;
 		litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 0b0);
 		litepcie_writel(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET, 0b0);
+	}
+
+	/* Only an engine this driver actually started can have a descriptor in
+	 * flight. Skipping the others also keeps teardown quiet and prompt on
+	 * gateware predating the idle status bit, where the readback is always 0. */
+	for (i = 0; i < s->channels; i++) {
+		dmachan = &s->chan[i].dma;
+		if (dmachan->writer_enable)
+			litepcie_dma_wait_idle(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET,
+					       "DMA writer");
+		if (dmachan->reader_enable)
+			litepcie_dma_wait_idle(s, dmachan->base + PCIE_DMA_READER_ENABLE_OFFSET,
+					       "DMA reader");
 	}
 }
 
