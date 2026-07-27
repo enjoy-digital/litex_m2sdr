@@ -937,7 +937,11 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 	if (overflows) {
 		chan->dma.writer_overflow_events++;
 		chan->dma.writer_overflow_buffers += overflows;
-		dev_err(&s->dev->dev, "Reading too late, %d buffers lost\n", overflows);
+		/* Ratelimited: an overrun burst fires this once per read() call, and
+		 * thousands of console lines in a few seconds starve the very CPU the
+		 * stream needs to catch up (observed alongside RT throttling). The
+		 * exact counts stay available through LITEPCIE_IOCTL_DMA_STATS. */
+		dev_err_ratelimited(&s->dev->dev, "Reading too late, %d buffers lost\n", overflows);
 	}
 
 #ifdef DEBUG_READ
@@ -998,7 +1002,8 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 	if (underflows) {
 		chan->dma.reader_underflow_events++;
 		chan->dma.reader_underflow_buffers += underflows;
-		dev_err(&s->dev->dev, "Writing too late, %d buffers lost\n", underflows);
+		/* Ratelimited for the same reason as the read() overrun above. */
+		dev_err_ratelimited(&s->dev->dev, "Writing too late, %d buffers lost\n", underflows);
 	}
 
 #ifdef DEBUG_WRITE
