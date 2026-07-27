@@ -1945,9 +1945,30 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	msleep(10);
 #endif
 
-	/* Read and display the FPGA identifier */
-	for (i = 0; i < 256; i++)
-		fpga_identifier[i] = litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE + i * 4);
+	/* Read and display the FPGA identifier.
+	 *
+	 * Bail out on the first all-ones word: an unreachable core reads back
+	 * 0xffffffff on every access and each of those reads costs a full PCIe
+	 * completion timeout (up to 50 ms). Blindly reading the whole 256-word
+	 * region then stalls the machine for the best part of a minute before
+	 * logging a "Version \xff\xff..." string and continuing into a probe that
+	 * cannot work anyway. */
+	for (i = 0; i < sizeof(fpga_identifier) - 1; i++) {
+		uint32_t word = litepcie_readl(litepcie_dev, CSR_IDENTIFIER_MEM_BASE + i * 4);
+
+		if (word == 0xffffffff) {
+			dev_err(&dev->dev,
+				"BAR0 reads all-ones at identifier word %d: link down or core unresponsive\n",
+				i);
+			ret = -EIO;
+			goto fail1;
+		}
+
+		fpga_identifier[i] = word;
+		if (!fpga_identifier[i])
+			break;
+	}
+	fpga_identifier[sizeof(fpga_identifier) - 1] = '\0';
 	dev_info(&dev->dev, "Version %s\n", fpga_identifier);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
