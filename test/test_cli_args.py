@@ -35,6 +35,18 @@ def test_rfic_clk_freq_policy():
     ) == 122.88e6
 
 
+def test_eth_phy_kwargs_policy():
+    soc_mod = _load_soc_module()
+
+    assert soc_mod.get_eth_phy_kwargs("1000basex") == {}
+    assert soc_mod.get_eth_phy_kwargs("2500basex") == {
+        "tx_cm_type"       : "MMCM",
+        "rx_cm_type"       : "MMCM",
+        "pcs_kwargs"       : {"eth_tx_clk_freq": 125e6},
+        "with_pcs_buffers" : True,
+    }
+
+
 def test_main_exposes_base_soc_optional_args(monkeypatch):
     soc_mod = _load_soc_module()
     captured = {}
@@ -118,6 +130,52 @@ def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
 
     assert captured["kwargs"]["sys_clk_freq"] == 100000000
     assert captured["build_name"] == "litex_m2sdr_baseboard_pcie_x1_eth"
+    assert captured["output_dir"].endswith(captured["build_name"])
+
+
+def test_main_selects_2500basex_and_raw_rx_probe(monkeypatch):
+    soc_mod = _load_soc_module()
+    captured = {}
+
+    class FakeSoC:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def add_eth_phy_rx_probe(self):
+            captured["eth_phy_rx_probe"] = True
+
+    class FakeBuilder:
+        def __init__(self, soc, **kwargs):
+            captured["builder_soc"] = soc
+            captured.update(kwargs)
+            self.gateware_dir = "build/fake/gateware"
+
+        def build(self, build_name, run):
+            captured["build_name"] = build_name
+            captured["run"] = run
+
+    monkeypatch.setattr(soc_mod, "BaseSoC", FakeSoC)
+    monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
+    monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "litex_m2sdr.py",
+            "--variant=baseboard",
+            "--with-eth",
+            "--eth-sfp=0",
+            "--eth-phy=2500basex",
+            "--with-eth-phy-rx-probe",
+        ],
+    )
+
+    soc_mod.main()
+
+    assert captured["kwargs"]["eth_phy"] == "2500basex"
+    assert captured["kwargs"]["sys_clk_freq"] == 125_000_000
+    assert captured["eth_phy_rx_probe"] is True
+    assert captured["build_name"] == "litex_m2sdr_baseboard_eth_2500basex"
     assert captured["output_dir"].endswith(captured["build_name"])
 
 

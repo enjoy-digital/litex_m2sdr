@@ -57,7 +57,7 @@ def test_shared_qpll_dual_configuration_assigns_distinct_channels(monkeypatch):
     assert dut.get_channel("pcie") is dut.qpll.channels[0]
     assert dut.get_channel("eth") is dut.qpll.channels[1]
     assert dut.qpll.kwargs["qpllsettings1"] == qpll_mod.QPLLSettings(
-        refclksel  = 0b111,
+        refclksel  = 0b001,
         fbdiv      = 5,
         fbdiv_45   = 4,
         refclk_div = 1,
@@ -80,6 +80,22 @@ def test_shared_qpll_eth_sata_configuration_assigns_distinct_channels(monkeypatc
         fbdiv_45   = 4,
         refclk_div = 1,
     )
+
+
+def test_shared_qpll_can_use_system_clock_as_eth_reference(monkeypatch):
+    monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
+    platform = _DummyPlatform()
+
+    dut = SharedQPLL(
+        platform,
+        with_eth          = True,
+        eth_phy           = "2500basex",
+        eth_refclk_freq   = 125e6,
+        eth_refclk_direct = True,
+    )
+
+    assert dut.qpll.kwargs["gtrefclk0"].cd == "sys"
+    assert dut.qpll.kwargs["gtgrefclk0"] is None
 
 
 @pytest.mark.parametrize("eth_phy, refclk_freq, out_div, expected_linerate", [
