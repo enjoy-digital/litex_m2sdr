@@ -63,10 +63,14 @@ class MultiClkMeasurement(LiteXModule):
     def __init__(self, clks, with_csr=True, with_latch_all=True):
         assert isinstance(clks, dict)
 
-        # Clock Measurement Modules.
+        # Clock Measurement Modules. Each value is a clock signal or a (clock, increment) tuple,
+        # for counting a divided clock while still reporting source-clock cycles.
         self.clk_modules = {}
         for name, clk in clks.items():
-            self.clk_modules[name] = ClkMeasurement(clk, with_csr=with_csr)
+            increment = 1
+            if isinstance(clk, (tuple, list)):
+                clk, increment = clk
+            self.clk_modules[name] = ClkMeasurement(clk, increment=increment, with_csr=with_csr)
             self.add_module(name=name, module=self.clk_modules[name])
 
         # Latch All CSR (Optional)

@@ -16,7 +16,7 @@ from litepcie.common import dma_layout
 
 class TXRXLoopback(LiteXModule):
     def __init__(self, data_width=64, with_csr=True):
-        assert data_width == 64
+        assert data_width in [64, 128]
         self.tx_sink   = tx_sink   = stream.Endpoint(dma_layout(data_width)) # i
         self.tx_source = tx_source = stream.Endpoint(dma_layout(data_width)) # o
         self.rx_sink   = rx_sink   = stream.Endpoint(dma_layout(data_width)) # i
