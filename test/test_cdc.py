@@ -84,3 +84,48 @@ def test_value_strobe_cdc_on_change():
 
     run_simulation(dut, {"sys": gen(), "dst": mon()}, clocks={"sys": 10, "dst": 7})
     assert received == [111, 222]
+
+
+# AsyncFIFORegistered (OSERDES TX group hand-off) --------------------------------------------------
+
+
+def test_async_fifo_registered_group_handoff():
+    """The OSERDES TX group FIFO transfers whole words, in order, with a 4x-fast write clock
+    writing one group per 4 write cycles and a continuous reader - the phy.py rfic -> CLKDIV
+    hand-off pattern. Groups must never tear or reorder regardless of the domains' phase."""
+    from litex_m2sdr.gateware.ad9361.cdc import AsyncFIFORegistered
+
+    # In hardware both clocks derive from DATA_CLK at an exact 4:1 ratio, so the reader is never
+    # slower than the group rate; sweep matched and faster-reader periods to vary the phase.
+    for read_period in (5, 7, 8):
+        dut = AsyncFIFORegistered(width=48, depth=8, register_storage=True,
+                                  registered_write=True)
+        got = []
+
+        def wr(dut=dut):
+            yield dut.we.eq(0)
+            for _ in range(4):
+                yield
+            for n in range(1, 201):
+                # One write per 4 write-domain cycles (the tx_count group strobe).
+                yield dut.din.eq(n)
+                yield dut.we.eq(1)
+                yield
+                yield dut.we.eq(0)
+                for _ in range(3):
+                    yield
+            for _ in range(40):
+                yield
+
+        def rd(dut=dut, got=got):
+            yield dut.re.eq(1)
+            for _ in range(280):
+                if (yield dut.readable):
+                    got.append((yield dut.dout))
+                yield
+
+        run_simulation(dut, {"write": wr(), "read": rd()},
+                       clocks={"write": 2, "read": read_period})
+        assert len(got) > 100, (read_period, len(got))
+        for a, b in zip(got, got[1:]):
+            assert b == a + 1, (read_period, a, b)

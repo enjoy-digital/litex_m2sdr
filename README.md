@@ -237,6 +237,8 @@ m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
 
 Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are re-tuned by the chip's own BBF calibration against a ~54/62 MHz corner target (programming the tune dividers past the driver's bandwidth clamp), opening a true ~100 MHz analog passband at 122.88 MSPS while keeping the calibrated noise behavior. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
 
+Full-duplex **2T2R @ 122.88 MSPS** (both TX and both RX channels) is supported on the `--with-rfic-oversampling` image: the TX lanes run at 983 Mbps through an OSERDESE2 serializer, per-lane RX deskew aligns the doubled-rate RX capture, and the bring-up self-checks the AD9361's 2R2T TX framing lock and re-rolls it when needed. The image identifies itself through the `rfic_oversampling` capability bit (`m2sdr_util info`), and its TX only operates at 2T2R @ 122.88 (lower TX rates use the standard image). See `doc/2t2r-122mhz-tx.md`.
+
 Measured at 3.6 GHz on the internal reference (RX side: clean external transmitter -> M2SDR RX, 50 MHz NR-FR1-TM3.1 64QAM, MATLAB 5G Toolbox EVM; in-band SNR: notch/NPR method):
 
 | Metric (wide mode, 122.88 MSPS)            | Measured                          |

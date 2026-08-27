@@ -117,6 +117,107 @@ def test_header_extractor():
     assert [l for _, l in out_payload[:3]] == [0, 0, 1]
 
 
+def test_header_inserter_single_word_128():
+    """128-bit: the inserter emits the whole header ([timestamp|sync] in ONE word, low half =
+    sync = first buffer bytes) and then the payload, with correct framing flags."""
+    dut = HeaderInserterExtractor(mode="inserter", data_width=128, with_csr=False)
+
+    payload = [0x100, 0x101, 0x102]
+    header = 0x1122334455667788
+    timestamp = 0x0123456789ABCDEF
+    captured = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.header.eq(header)
+        yield dut.timestamp.eq(timestamp)
+        yield dut.source.ready.eq(1)
+
+        for i, word in enumerate(payload):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(payload) - 1)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append(((yield dut.source.data), (yield dut.source.first), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert [w for w, _, _ in captured[:4]] == [(timestamp << 64) | header] + payload
+    assert [f for _, f, _ in captured[:4]] == [1, 0, 0, 0]
+    assert [l for _, _, l in captured[:4]] == [0, 0, 0, 1]
+
+
+def test_header_extractor_single_word_128():
+    """128-bit: the extractor captures sync + timestamp from the single header word and
+    forwards the payload with correct framing flags."""
+    dut = HeaderInserterExtractor(mode="extractor", data_width=128, with_csr=False)
+
+    header = 0xA1A2A3A4A5A6A7A8
+    timestamp = 0x0F1E2D3C4B5A6978
+    payload = [0x200, 0x201, 0x202]
+    out_payload = []
+    updates = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.source.ready.eq(1)
+        # Release the timed-TX gate immediately (FPGA time == air-time, see the gate tests).
+        yield dut.time.eq(timestamp)
+
+        sequence = [(timestamp << 64) | header] + payload
+        for i, word in enumerate(sequence):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(sequence) - 1)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.update):
+                updates.append(((yield dut.header), (yield dut.timestamp)))
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out_payload.append(((yield dut.source.data), (yield dut.source.last)))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert updates
+    assert updates[-1] == (header, timestamp)
+    assert [w for w, _ in out_payload[:3]] == payload
+    assert [l for _, l in out_payload[:3]] == [0, 0, 1]
+
+
 def test_header_inserter_header_disabled_passthrough():
     """Verify inserter is payload passthrough when header insertion is disabled."""
     dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
@@ -368,19 +469,23 @@ def test_header_extractor_header_disabled_passthrough():
 # transmit immediately" sentinel; a frame already past its air-time on arrival is dropped whole
 # and counted in dut.underflow. Payload is forwarded only after the gate releases.
 
-def _gate_frame_words(header, timestamp, payload):
-    """Wire words for one framed buffer: a sync word, then a timestamp word, then the payload."""
+def _gate_frame_words(data_width, header, timestamp, payload):
+    """Wire words for one framed buffer: 128-bit packs [timestamp|sync] into one header word,
+    64-bit uses a sync word then a timestamp word."""
+    if data_width == 128:
+        return [((timestamp << 64) | header)] + list(payload)
     return [header, timestamp] + list(payload)
 
 
-def _run_gate(timestamp, time_start, time_release=None, tx_offset=0, frame_cycles=3):
+def _run_gate(timestamp, time_start, time_release=None, tx_offset=0, frame_cycles=3,
+              data_width=64):
     """Push one framed buffer through the extractor gate. dut.time starts at time_start and,
     if time_release is given, is raised to it after the frame is captured (models the FPGA
     time crossing the air-time while the frame is held). Returns (out_payload, underflow)."""
-    dut = HeaderInserterExtractor(mode="extractor", data_width=64, with_csr=False)
+    dut = HeaderInserterExtractor(mode="extractor", data_width=data_width, with_csr=False)
     header  = 0xA1A2A3A4A5A6A7A8
     payload = [0x300 + i for i in range(frame_cycles)]
-    words   = _gate_frame_words(header, timestamp, payload)
+    words   = _gate_frame_words(data_width, header, timestamp, payload)
     out     = []
     result  = {}
 
@@ -433,60 +538,67 @@ def _run_gate(timestamp, time_start, time_release=None, tx_offset=0, frame_cycle
 def test_gate_untimed_passthrough():
     """timestamp 0 (untimed) transmits immediately, even with FPGA time far ahead."""
     payload = [0x300, 0x301, 0x302]
-    out, underflow = _run_gate(timestamp=0, time_start=1_000_000)
-    assert out == payload, out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        out, underflow = _run_gate(timestamp=0, time_start=1_000_000, data_width=dw)
+        assert out == payload, (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
 def test_gate_release_at_exact_time():
     """A timed frame whose air-time equals the current FPGA time forwards immediately."""
     payload = [0x300, 0x301, 0x302]
-    out, underflow = _run_gate(timestamp=5000, time_start=5000)
-    assert out == payload, out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        out, underflow = _run_gate(timestamp=5000, time_start=5000, data_width=dw)
+        assert out == payload, (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
 def test_gate_hold_then_release():
     """A timed frame is held (no output) while FPGA time < air-time, then forwarded the
     moment time crosses the air-time."""
     payload = [0x300, 0x301, 0x302]
-    # time starts below the air-time (held), then rises to exactly the air-time.
-    out, underflow = _run_gate(timestamp=5000, time_start=1000, time_release=5000)
-    assert out == payload, out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        # time starts below the air-time (held), then rises to exactly the air-time.
+        out, underflow = _run_gate(timestamp=5000, time_start=1000, time_release=5000,
+                                   data_width=dw)
+        assert out == payload, (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
 def test_gate_drop_when_late():
     """A timed frame already past its air-time on arrival is dropped: the extractor airs ZEROS
     for the frame's whole duration (paced to the RFIC sample rate, like a real frame -- NOT
     fast-drained, which would race the DMA reader) and counts one TX underflow."""
-    out, underflow = _run_gate(timestamp=5000, time_start=9000)
-    assert out == [0, 0, 0], out   # frame_cycles=3 zero words aired for the dropped frame
-    assert underflow == 1, underflow
+    for dw in (64, 128):
+        out, underflow = _run_gate(timestamp=5000, time_start=9000, data_width=dw)
+        assert out == [0, 0, 0], (dw, out)  # frame_cycles=3 zero words aired for the dropped frame
+        assert underflow == 1, (dw, underflow)
 
 
 def test_gate_tx_offset_shifts_release():
     """tx_offset is added to FPGA time before comparing to the air-time: with time=air-time-
     offset the frame is due now and forwards."""
     payload = [0x300, 0x301, 0x302]
-    out, underflow = _run_gate(timestamp=5000, time_start=4000, tx_offset=1000)
-    assert out == payload, out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        out, underflow = _run_gate(timestamp=5000, time_start=4000, tx_offset=1000,
+                                   data_width=dw)
+        assert out == payload, (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
-def _run_gate_frames(frames, time_start, time_release=None, frame_cycles=3):
+def _run_gate_frames(frames, time_start, time_release=None, frame_cycles=3, data_width=64):
     """Push several framed buffers through the extractor gate. dut.time starts at time_start and,
     if time_release is given, is raised to it after the frames are captured (models FPGA time
     crossing the air-times while frames are held). Frame boundaries are driven by sink.first +
     frame_cycles (the gate keys on the header, not sink.last).
     frames is a list of (timestamp, payload). Returns (out_payload, final_underflow)."""
-    dut    = HeaderInserterExtractor(mode="extractor", data_width=64, with_csr=False)
+    dut    = HeaderInserterExtractor(mode="extractor", data_width=data_width, with_csr=False)
     header = 0xA1A2A3A4A5A6A7A8
     words  = []
     starts = set()
     for ts, payload in frames:
         starts.add(len(words))
-        words += _gate_frame_words(header, ts, payload)
+        words += _gate_frame_words(data_width, header, ts, payload)
     out    = []
     result = {}
 
@@ -536,10 +648,12 @@ def _run_gate_frames(frames, time_start, time_release=None, frame_cycles=3):
 def test_gate_back_to_back_timed_air():
     """Two consecutive TIMED frames both air as FPGA time rises past their air-times -- the gate
     re-anchors on the second header rather than staying latched on the first frame's air-time."""
-    frames = [(5000, [0x300, 0x301, 0x302]), (8000, [0x400, 0x401, 0x402])]
-    out, underflow = _run_gate_frames(frames, time_start=1000, time_release=8000)
-    assert out == [0x300, 0x301, 0x302, 0x400, 0x401, 0x402], out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        frames = [(5000, [0x300, 0x301, 0x302]), (8000, [0x400, 0x401, 0x402])]
+        out, underflow = _run_gate_frames(frames, time_start=1000, time_release=8000,
+                                          data_width=dw)
+        assert out == [0x300, 0x301, 0x302, 0x400, 0x401, 0x402], (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
 def test_gate_wait_overshoot_release():
@@ -547,26 +661,30 @@ def test_gate_wait_overshoot_release():
     timestamp): the held frame still releases -- exercises the WAIT `gate_now >= timestamp` branch
     on its strict-greater side (the GATE-state check only ever sees `==`)."""
     payload = [0x300, 0x301, 0x302]
-    out, underflow = _run_gate(timestamp=5000, time_start=1000, time_release=6000)
-    assert out == payload, out
-    assert underflow == 0, underflow
+    for dw in (64, 128):
+        out, underflow = _run_gate(timestamp=5000, time_start=1000, time_release=6000,
+                                   data_width=dw)
+        assert out == payload, (dw, out)
+        assert underflow == 0, (dw, underflow)
 
 
 def test_gate_drop_recovers():
     """A late frame drops (airs zeros, underflow++), then the next untimed frame airs normally,
     confirming the gate re-anchors on the following header after a drop."""
-    frames = [(5000, [0x300, 0x301, 0x302]),   # air-time in the past -> dropped
-              (0,    [0x400, 0x401, 0x402])]    # untimed -> immediate
-    out, underflow = _run_gate_frames(frames, time_start=9000)
-    assert out == [0, 0, 0, 0x400, 0x401, 0x402], out
-    assert underflow == 1, underflow
+    for dw in (64, 128):
+        frames = [(5000, [0x300, 0x301, 0x302]),   # air-time in the past -> dropped
+                  (0,    [0x400, 0x401, 0x402])]    # untimed -> immediate
+        out, underflow = _run_gate_frames(frames, time_start=9000, data_width=dw)
+        assert out == [0, 0, 0, 0x400, 0x401, 0x402], (dw, out)
+        assert underflow == 1, (dw, underflow)
 
 
 def test_gate_drop_frame_cycles_gt3_reanchors():
     """A dropped frame airs EXACTLY frame_cycles zero words (here 5, not the default 3) and the
     gate re-anchors on the next header, so the following untimed 5-word frame airs intact."""
-    frames = [(5000, [0x300 + i for i in range(5)]),   # late -> dropped (5 zero words)
-              (0,    [0x400 + i for i in range(5)])]    # untimed -> immediate
-    out, underflow = _run_gate_frames(frames, time_start=9000, frame_cycles=5)
-    assert out == [0]*5 + [0x400, 0x401, 0x402, 0x403, 0x404], out
-    assert underflow == 1, underflow
+    for dw in (64, 128):
+        frames = [(5000, [0x300 + i for i in range(5)]),   # late -> dropped (5 zero words)
+                  (0,    [0x400 + i for i in range(5)])]    # untimed -> immediate
+        out, underflow = _run_gate_frames(frames, time_start=9000, frame_cycles=5, data_width=dw)
+        assert out == [0]*5 + [0x400, 0x401, 0x402, 0x403, 0x404], (dw, out)
+        assert underflow == 1, (dw, underflow)
