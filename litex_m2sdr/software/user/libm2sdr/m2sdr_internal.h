@@ -96,6 +96,16 @@ struct m2sdr_dev {
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
     int rf_oversample_enabled;
+    /* Last verified-good AD9361 RX clock delay (REG 0x006 high nibble) chosen by the
+     * 2R2T RX-lane deskew; 0 = none yet. The per-lane pair-mismatch metric is blind
+     * to some whole-UI capture shifts, so a clock delay can look clean per lane and
+     * still fail the sequence-level PRBS verify -- the bring-up rotates through the
+     * candidates across verify retries and records the one that verified, so later
+     * re-deskews (e.g. after the TX-framing check) reuse it instead of re-rolling. */
+    uint8_t rf_deskew_clk;
+    /* Last verified-good RX frame-slot rotation (PHY_CONTROL rx_frame_offset);
+     * the bring-up's probe order starts here. */
+    uint8_t rf_rx_frame_offset;
 
     /* Serializes register transactions on the shared Etherbone connection;
      * PCIe register access is a single atomic syscall and bypasses it. */
