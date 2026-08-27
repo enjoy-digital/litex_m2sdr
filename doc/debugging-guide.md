@@ -388,6 +388,7 @@ probe that matches the current question:
 ./litex_m2sdr.py --variant=m2 --with-pcie --with-pcie-probe --build --load
 ./litex_m2sdr.py --variant=m2 --with-pcie --with-pcie-dma-probe --build --load
 ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-tx-probe --build --load
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-phy=2500basex --with-eth-phy-rx-probe --build --load
 ./litex_m2sdr.py --with-ad9361-data-probe --build --load
 ```
 
@@ -397,6 +398,23 @@ Use `litescope_cli` through a running `litex_server`:
 litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv --list
 litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv --rising-edge <signal> --dump /tmp/capture.vcd
 ```
+
+The Ethernet PHY RX probe samples both raw 10-bit GTP symbols at 156.25MHz in
+2.5GBASE-X mode, avoiding analyzer logic on the 312.5MHz PCS clock. Through a
+JTAGBone `litex_server`, an untriggered capture should show the repeating
+`K28.5`/idle ordered set on a quiet link. To catch a packet start, trigger on
+either symbol lane for `/S/` (`K27.7`, encoded as `0x05b` or `0x3a4` depending
+on running disparity):
+
+```bash
+litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv --list
+litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv \
+  --value-trigger eth_phy_rx_symbol0 0x05b --offset 0x100 --dump /tmp/eth-rx.vcd
+```
+
+If one lane/disparity does not trigger, try `eth_phy_rx_symbol1` and the other
+encoded value. The PCS status CSR reports link state, SGMII detection, and the
+received link-partner ability word before a LiteScope capture is needed.
 
 If the predefined probes are too wide, add a temporary narrow probe and commit
 only the reusable version. For a one-off analyzer, document the captured signals

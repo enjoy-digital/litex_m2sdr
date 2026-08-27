@@ -13,7 +13,8 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 # Shared QPLL --------------------------------------------------------------------------------------
 
 class SharedQPLL(LiteXModule):
-    def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6, eth_phy="1000basex", with_sata=False):
+    def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6,
+        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False):
         assert not (with_pcie and with_eth and with_sata) # QPLL only has 2 PLLs :(
 
         # PCIe QPLL Settings.
@@ -26,7 +27,9 @@ class SharedQPLL(LiteXModule):
 
         # Ethernet QPLL Settings.
         qpll_eth_settings = QPLLSettings(
-            refclksel  = 0b111,
+            # Match the original Acorn 2.5G topology on GTREFCLK0 while
+            # preserving the existing internal reference for 1000BASE-X.
+            refclksel  = {"1000basex": 0b111, "2500basex": 0b001}[eth_phy],
             fbdiv      = {"1000basex": 4, "2500basex": 5}[eth_phy],
             fbdiv_45   = {125e6: 5, 156.25e6 : 4}[eth_refclk_freq],
             refclk_div = 1,
@@ -54,7 +57,7 @@ class SharedQPLL(LiteXModule):
             )
         if with_eth:
             configs["eth"] = QPLLConfig(
-                refclk   = ClockSignal("refclk_eth"),
+                refclk   = ClockSignal("sys") if eth_refclk_direct else ClockSignal("refclk_eth"),
                 settings = qpll_eth_settings,
             )
         if with_sata:

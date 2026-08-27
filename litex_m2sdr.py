@@ -136,10 +136,24 @@ def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversamplin
         True  : 491.52e6, # Max rfic_clk for 122.88MSPS / 2T2R (Oversampling).
     }[with_rfic_oversampling]
 
+def get_eth_phy_kwargs(eth_phy):
+    if eth_phy == "2500basex":
+        # Keep the clocking and accelerated Clause-37 timers used by the original Acorn
+        # Baseboard Mini 2.5G bring-up. Some copper SFPs do not complete autonegotiation
+        # with wall-clock-scaled 2.5G timers.
+        return {
+            "tx_cm_type"       : "MMCM",
+            "rx_cm_type"       : "MMCM",
+            "pcs_kwargs"       : {"eth_tx_clk_freq": 125e6},
+            "with_pcs_buffers" : True,
+        }
+    return {}
+
 # CRG ----------------------------------------------------------------------------------------------
 
 class CRG(LiteXModule):
-    def __init__(self, platform, sys_clk_freq, with_eth=False, eth_refclk_freq=125e6, with_sata=False, with_white_rabbit=False):
+    def __init__(self, platform, sys_clk_freq, with_eth=False, eth_refclk_freq=125e6,
+        eth_refclk_direct=False, with_sata=False, with_white_rabbit=False):
         self.rst              = Signal()
         self.cd_sys           = ClockDomain()
         self.cd_clk10         = ClockDomain()
@@ -190,7 +204,14 @@ class CRG(LiteXModule):
 
         # Ethernet PLL.
         # -------------
-        if with_eth or with_sata or with_white_rabbit:
+        if eth_refclk_direct:
+            if sys_clk_freq != eth_refclk_freq:
+                raise ValueError("A direct Ethernet reference requires sys_clk_freq == eth_refclk_freq.")
+            self.comb += [
+                self.cd_refclk_eth.clk.eq(self.cd_sys.clk),
+                self.cd_refclk_eth.rst.eq(self.cd_sys.rst),
+            ]
+        elif with_eth or with_sata or with_white_rabbit:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, eth_refclk_freq, margin=0)
@@ -346,12 +367,15 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
-        eth_refclk_freq = 156.25e6 if (with_eth and eth_phy == "2500basex") else 125e6
+        # Match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
+        # divider configuration. 1000BASE-X already uses 125MHz here.
+        eth_refclk_freq = 125e6
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
             with_eth          = with_eth,
             eth_refclk_freq   = eth_refclk_freq,
+            eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata         = with_sata,
             with_white_rabbit = with_white_rabbit,
         )
@@ -362,6 +386,7 @@ class BaseSoC(SoCMini):
             with_eth        = with_eth | with_white_rabbit,
             eth_phy         = eth_phy,
             eth_refclk_freq = eth_refclk_freq,
+            eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata       = with_sata,
         )
 
@@ -594,7 +619,9 @@ class BaseSoC(SoCMini):
                 sys_clk_freq = sys_clk_freq,
                 rx_polarity  = 1, # Inverted on M2SDR.
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
+                **get_eth_phy_kwargs(eth_phy),
             )
+            self.eth_phy.pcs.add_csr()
 
             # Core + MMAP (Etherbone).
             # ------------------------
@@ -1143,6 +1170,20 @@ class BaseSoC(SoCMini):
             platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
             platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
+            if eth_phy == "2500basex":
+                # The two halves of the RX gearbox exchange state/data on each
+                # 312.5MHz cycle. The named half-rate fabric net is optimized
+                # away, so recover its generated clock from RXUSRCLK2 and bound
+                # both directions to one full-rate period.
+                rx_period = 1e9/self.eth_phy.rx_clk_freq
+                platform.toolchain.pre_placement_commands += [
+                    "set _eth_rx_half_clk [get_clocks -quiet -of_objects [get_pins -quiet -hier -filter {{REF_PIN_NAME == RXUSRCLK2}}]]",
+                    "set _eth_rx_clk [get_clocks -quiet -of_objects [get_nets -quiet {{eth_rx_clk}}]]",
+                    "if {{[llength $_eth_rx_half_clk] && [llength $_eth_rx_clk]}} {{",
+                    f"    set_max_delay {rx_period} -datapath_only -from $_eth_rx_half_clk -to $_eth_rx_clk",
+                    f"    set_max_delay {rx_period} -datapath_only -from $_eth_rx_clk -to $_eth_rx_half_clk",
+                    "}}",
+                ]
 
         # RFIC clock domain.
         platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
@@ -1427,6 +1468,24 @@ class BaseSoC(SoCMini):
         )
 
     # Ethernet.
+    def add_eth_phy_rx_probe(self, depth=4096):
+        assert hasattr(self, "eth_phy")
+        self.eth_phy_rx_symbol0 = Signal(10)
+        self.eth_phy_rx_symbol1 = Signal(10)
+        self.comb += [
+            self.eth_phy_rx_symbol0.eq(self.eth_phy.gearbox.rx_data_half[0:10]),
+            self.eth_phy_rx_symbol1.eq(self.eth_phy.gearbox.rx_data_half[10:20]),
+        ]
+        self.analyzer = LiteScopeAnalyzer([
+            self.eth_phy_rx_symbol0,
+            self.eth_phy_rx_symbol1,
+        ],
+            depth        = depth,
+            clock_domain = "eth_rx_half",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
     def add_eth_tx_probe(self, depth=1024):
         assert hasattr(self, "eth_tx_streamer")
         analyzer_signals = [
@@ -1527,6 +1586,7 @@ def main():
     probeopts.add_argument("--with-pcie-probe",        action="store_true", help="Enable PCIe Probe.")
     probeopts.add_argument("--with-pcie-dma-probe",    action="store_true", help="Enable PCIe DMA Probe.")
     probeopts.add_argument("--with-si5351-i2c-probe",  action="store_true", help="Enable SI5351 I2C Probe.")
+    probeopts.add_argument("--with-eth-phy-rx-probe",  action="store_true", help="Enable raw Ethernet PHY RX Probe.")
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
@@ -1562,7 +1622,7 @@ def main():
     if args.wr_status and not args.with_white_rabbit:
         return
 
-    default_sys_clk_freq = 100e6 if args.with_eth else 125e6
+    default_sys_clk_freq = 125e6 if (args.with_eth and args.eth_phy == "2500basex") else (100e6 if args.with_eth else 125e6)
     if args.sys_clk_freq is None:
         args.sys_clk_freq = default_sys_clk_freq
 
@@ -1623,6 +1683,8 @@ def main():
         soc.add_pcie_dma_probe()
     if args.with_si5351_i2c_probe:
         soc.add_si5351_i2c_probe()
+    if args.with_eth_phy_rx_probe:
+        soc.add_eth_phy_rx_probe()
     if args.with_eth_tx_probe:
         soc.add_eth_tx_probe()
     if args.with_ad9361_spi_probe:
@@ -1639,6 +1701,8 @@ def main():
             r += f"_pcie_x{args.pcie_lanes}"
         if args.with_eth:
             r += f"_eth"
+            if args.eth_phy != "1000basex":
+                r += f"_{args.eth_phy}"
             if args.with_eth_ptp:
                 r += "_ptp"
                 if args.with_eth_ptp_rfic_clock:

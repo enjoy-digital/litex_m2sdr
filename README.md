@@ -220,6 +220,8 @@ In this design, the PCIe core will then be replaced with [LiteEth](https://githu
 
 The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path. The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC clock to the selected link speed.
 
+The 2.5GBASE-X mode has been hardware-validated in SFP0/J3 with a LianGuo LG 2.5GE copper SFP, the Acorn Baseboard Mini's JP1 and JP4 fitted, and the board reachable at `192.168.1.50`. Build it explicitly with `--eth-phy=2500basex`; this selects the 125MHz GTP reference, MMCM PHY clocking, Clause-37 timing, and gearbox constraints needed by the copper module. SFP EEPROM I2C is not required for link or packet traffic. On M2SDR r02, fit `R82`/`R83` only when the optional M.2 SMBus path is needed; an absent or NACKing EEPROM must not be treated as a link failure.
+
 Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, using SATA on PCIe lane 0 and Ethernet on the selected SFP lane. PCIe, Ethernet/White-Rabbit, and SATA cannot all be enabled in one image because the shared QPLL exposes two channels.
 
 When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
@@ -500,6 +502,13 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build --load
    ping 192.168.1.50
    ```
+   - For 2.5GBASE-X with the LianGuo LG 2.5GE copper SFP in SFP0/J3:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --eth-phy=2500basex --build --load
+   ping 192.168.1.50
+   ```
+     The validated baseboard configuration has JP1 and JP4 fitted. `R82`/`R83`
+     are needed only for optional SFP EEPROM I2C access, not for Ethernet link.
    - After loading an Ethernet image, use `m2sdr_util` loopback tests to
      exercise the stream path before starting Soapy/Gqrx:
    ```
