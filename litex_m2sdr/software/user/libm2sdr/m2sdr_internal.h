@@ -72,6 +72,15 @@ struct m2sdr_dev {
     int64_t rx_release_count;
     int64_t tx_user_count;
     int64_t tx_submit_count;
+    /* Zero-copy TX fill lead ahead of the LIVE reader cursor, in buffers. 0 = legacy
+     * full-ring fill (max throughput/latency); small values (e.g. 2-3) hold the host a tight
+     * lead ahead of the free-running reader for low-latency timed TX. See m2sdr_set_tx_lead_buffers. */
+    int tx_lead_buffers;
+    /* Low-latency zero-copy RX wait via MONITORX/MWAITX. Lazy-init at first RX wait from CPUID
+     * support + the M2SDR_RX_WAIT=poll env (rx_wait_initialized guards the calloc-zeroed state). */
+    int rx_wait_initialized;
+    int rx_wait_mwaitx;                  /* 0 = poll(), 1 = mwaitx (valid once initialized) */
+    uint32_t rx_mwaitx_timeout_cycles;   /* MWAITX safety-net timeout in TSC cycles */
     uint64_t pcie_rx_overflow_events;
     uint64_t pcie_rx_overflow_buffers;
     uint64_t pcie_tx_underflow_events;
@@ -86,7 +95,21 @@ struct m2sdr_dev {
     int rf_last_config_valid;
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
+    /* Last stream sample rate applied to the RFIC. Kept so a later channel-layout switch can
+     * check the resulting (layout, rate) pair against what the loaded image can drive. */
+    int64_t rf_sample_rate;
+    int rf_sample_rate_valid;
     int rf_oversample_enabled;
+    /* Last verified-good AD9361 RX clock delay (REG 0x006 high nibble) chosen by the
+     * 2R2T RX-lane deskew; 0 = none yet. The per-lane pair-mismatch metric is blind
+     * to some whole-UI capture shifts, so a clock delay can look clean per lane and
+     * still fail the sequence-level PRBS verify -- the bring-up rotates through the
+     * candidates across verify retries and records the one that verified, so later
+     * re-deskews (e.g. after the TX-framing check) reuse it instead of re-rolling. */
+    uint8_t rf_deskew_clk;
+    /* Last verified-good RX frame-slot rotation (PHY_CONTROL rx_frame_offset);
+     * the bring-up's probe order starts here. */
+    uint8_t rf_rx_frame_offset;
 
     /* Serializes register transactions on the shared Etherbone connection;
      * PCIe register access is a single atomic syscall and bypasses it. */
@@ -98,9 +121,23 @@ extern const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops;
 
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev);
 
+/* MONITORX/MWAITX helpers (m2sdr_mwaitx.c) for the low-latency RX wait. */
+int m2sdr_mwaitx_supported(void);
+void m2sdr_monitorx(const void *addr);
+void m2sdr_mwaitx(unsigned int extensions, unsigned int hints, unsigned int clocks);
+uint64_t m2sdr_tsc_hz(void);
+
 int m2sdr_log_is_enabled(void);
 void m2sdr_log_printf(const char *fmt, ...);
 
 int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out);
+
+/* AD9361 LVDS interface clock (DATA_CLK) for a stream configuration, in Hz. */
+int64_t m2sdr_interface_clk_hz(enum m2sdr_channel_layout layout, int64_t sample_rate);
+
+/* Why the loaded gateware image cannot run a stream configuration, or NULL if it can.
+ * Pure function of the image and the configuration, so it is unit-testable without a device. */
+const char *m2sdr_image_rate_error(bool image_has_oversampling,
+                                   enum m2sdr_channel_layout layout, int64_t sample_rate);
 
 #endif /* M2SDR_INTERNAL_H */

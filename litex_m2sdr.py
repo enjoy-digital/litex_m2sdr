@@ -9,6 +9,7 @@
 import os
 import sys
 import argparse
+import inspect
 import subprocess
 
 from migen import *
@@ -246,10 +247,46 @@ class CRG(LiteXModule):
             self.dmtd_mmcm.expose_dps("clk200", with_csr=False)
             self.dmtd_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
 
+# SoC CSR Banks ------------------------------------------------------------------------------------
+
+# A CSR declared directly on the SoC lands in LiteX's catch-all "main" bank, whose contents (and
+# so whose addresses) follow the enabled features: the VRT build put eth_rx_mode at the bank's
+# first address and the SATA build put an unrelated streamer-control register at that same
+# address. Every CSR therefore belongs to a module with its own location in csr_map, and
+# test_csr_layout.py fails the build configuration matrix if a "main" bank reappears.
+
+class EthRXMode(LiteXModule):
+    """Ethernet RX routing selector (raw UDP streamer, VRT streamer or flush)."""
+    def __init__(self):
+        self.control = CSRStorage(fields=[
+            CSRField("sel", size=2, offset=0, reset=1, values=[
+                ("``0b00``", "Disable/flush Ethernet RX output."),
+                ("``0b01``", "Route Ethernet RX to raw UDP streamer."),
+                ("``0b10``", "Route Ethernet RX to VRT UDP streamer."),
+            ])
+        ], description="Ethernet RX routing.")
+
+
+class SATAStreamerControl(LiteXModule):
+    """Reset control for the SATA record/replay streamers."""
+    def __init__(self):
+        self.control = CSRStorage(fields=[
+            CSRField("rx_reset", size=1, offset=0, pulse=True,
+                description="Pulse reset on the SATA Stream2Sectors streamer."),
+            CSRField("tx_reset", size=1, offset=1, pulse=True,
+                description="Pulse reset on the SATA Sectors2Stream streamer."),
+        ], description="SATA streamer control.")
+
+
 # BaseSoC ------------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    SoCCore.csr_map = {
+    # Defined on BaseSoC itself, not assigned onto SoCCore/SoCMini: those are shared by every
+    # LiteX SoC in the process, so a third-party SoC class that sets its own (litex_wr_nic does
+    # SoCMini.csr_map = {...} when it is imported for --with-pcie-ptm/--with-white-rabbit) would
+    # otherwise shadow this map for every SoC built afterwards. Owning the attribute keeps it
+    # first in the MRO and makes the map independent of what else has been imported.
+    csr_map = {
         # SoC.
         "ctrl"             :  0,
         "uart"             :  1,
@@ -308,6 +345,17 @@ class BaseSoC(SoCMini):
         "analyzer"         : 31,
         "eth_rx_mode"      : 35,
         "vrt_streamer"     : 36,
+
+        # Sub-core CSR banks. LitePCIe names this one itself, but it still has to be pinned: an
+        # unpinned region is auto-allocated to the lowest free location, which depends on the
+        # feature set (pcie_endpoint landed on location 22 in a PCIe-only build and on 42 once
+        # another build claimed 22).
+        "pcie_endpoint"    : 42,
+        "sata_streamer"    : 43,
+        # The White Rabbit build adds the WR firmware console UART. The kernel driver binds a
+        # serial port to it (CSR_UART_XOVER_RXTX_ADDR in software/kernel/main.c), so it is host
+        # visible and needs a fixed location like everything else.
+        "uart_xover"       : 44,
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
@@ -425,6 +473,9 @@ class BaseSoC(SoCMini):
             jtagbone       = with_jtagbone,
             eth_sfp        = eth_sfp,
             wr_sfp         = capability_wr_sfp,
+
+            # RFIC.
+            rfic_oversampling = with_rfic_oversampling,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -553,7 +604,8 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
+            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas,
+                data_width=128 if with_rfic_oversampling else 64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -747,16 +799,10 @@ class BaseSoC(SoCMini):
             ]
 
             if with_eth_vrt:
-                self.eth_rx_mode = CSRStorage(fields=[
-                    CSRField("sel", size=2, offset=0, reset=1, values=[
-                        ("``0b00``", "Disable/flush Ethernet RX output."),
-                        ("``0b01``", "Route Ethernet RX to raw UDP streamer."),
-                        ("``0b10``", "Route Ethernet RX to VRT UDP streamer."),
-                    ])
-                ])
+                self.eth_rx_mode = EthRXMode()
 
                 self.eth_rx_demux = stream.Demultiplexer(layout=dma_layout(64), n=3, with_csr=False)
-                self.comb += self.eth_rx_demux.sel.eq(self.eth_rx_mode.fields.sel)
+                self.comb += self.eth_rx_demux.sel.eq(self.eth_rx_mode.control.fields.sel)
                 self.comb += self.eth_rx_demux.source0.ready.eq(1)  # Flush path.
 
                 self.vrt_rx_conv = stream.Converter(64, 32)
@@ -792,20 +838,41 @@ class BaseSoC(SoCMini):
 
         with_rfic_stream_fifos = with_eth and not with_pcie
         self.ad9361 = AD9361RFIC(
-            rfic_pads      = platform.request("ad9361_rfic"),
-            spi_pads       = platform.request("ad9361_spi"),
-            sys_clk_freq   = sys_clk_freq,
-            with_tx_fifo   = with_rfic_stream_fifos,
-            tx_fifo_depth  = 8192,
-            with_rx_fifo   = with_rfic_stream_fifos,
-            rx_fifo_depth  = 8192,
+            rfic_pads         = platform.request("ad9361_rfic"),
+            spi_pads          = platform.request("ad9361_spi"),
+            sys_clk_freq      = sys_clk_freq,
+            with_tx_fifo      = with_rfic_stream_fifos,
+            tx_fifo_depth     = 8192,
+            with_rx_fifo      = with_rfic_stream_fifos,
+            rx_fifo_depth     = 8192,
+            # Internal PHY TX->RX loopback (diagnostics-only runtime CSR). Omitted on Oversampling
+            # builds: its skid + high-fanout control net do not close timing at 491.52MHz rfic_clk
+            # and the 2T2R@122.88 datapath needs that margin.
+            with_phy_loopback = not with_rfic_oversampling,
+            # Per-lane RX IDELAYE2 deskew: at 983Mbps per lane (2T2R @ 122.88MSPS) the board's
+            # lane-to-lane skew exceeds the eye, and the AD9361's delay registers are global-only.
+            with_rx_deskew    = with_rfic_oversampling,
+            # OSERDESE2 TX serializer (oversampling build): at 2T2R@122.88 the TX LVDS runs
+            # 983Mbps/lane and the chip cannot de-interleave a fabric-ODDR eye, so drive the 6 TX
+            # lanes + TX_FRAME from OSERDESE2. Its MMCM is fixed for the 491.52MHz DATA_CLK and locks
+            # only over 184.62..492.31MHz, so this image covers 2T2R@61.44/122.88 and 1T1R@122.88;
+            # below that it cannot lock and TX airs zeros (the driver refuses those rates).
+            with_tx_oserdes   = with_rfic_oversampling,
+            wide              = with_rfic_oversampling,
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
+        # Optional CSR blocks are added after the unconditional ones so they append to the end of
+        # the AD9361 region: every build then agrees on the address of every shared register.
+        if with_rfic_oversampling:
+            self.ad9361.add_rx_deskew()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
-        self.header = TXRXHeader(data_width=64)
+        self.header = TXRXHeader(data_width=128 if with_rfic_oversampling else 64)
+        # Timed-TX gate: feed the FPGA time so the TX header extractor holds each frame until
+        # its air-time (header timestamp) and drops too-late frames (see gateware/header.py).
+        self.comb += self.header.tx.time.eq(self.time_gen.time)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.time_gen.time),
@@ -816,7 +883,7 @@ class BaseSoC(SoCMini):
 
         # AD9361 <-> Loopback <-> Header.
         # -------------------------------
-        self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+        self.txrx_loopback = TXRXLoopback(data_width=128 if with_rfic_oversampling else 64, with_csr=True)
 
         # Header TX -> Loopback -> RFIC TX.
         self.comb += [
@@ -835,7 +902,7 @@ class BaseSoC(SoCMini):
         # Port indices match the host-side TXSRC_*/RXDST_* enums in
         # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA.
         crossbar_sata_port = 2
-        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+        self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=3, with_csr=True)
 
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
@@ -1188,13 +1255,81 @@ class BaseSoC(SoCMini):
         # RFIC clock domain.
         platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
 
+        if with_rfic_oversampling and not with_eth:
+            # TX CDC FIFO output register read in the rfic domain: its read-address cone is
+            # re-read every cycle, but the read pointer only advances when the consumer handshakes
+            # - the PHY takes one group every 4 rfic_clk cycles, and in the wide (128-bit) path the
+            # 128->64 scatter pulls a CDC word only every ~8 cycles - so dout is stable for many
+            # cycles before use. Relax its setup to 2 cycles (hold 0) to close at 491.52MHz. The
+            # register is `*storage_*_dat1_reg*` with LUTRAM storage and `*tx_cdc*dout*_reg*` with
+            # register_storage (the wide path); cover both. Scoped -from rfic_clk so the sys-side
+            # RX CDC output register (read back-to-back) is NOT relaxed.
+            platform.toolchain.pre_placement_commands += [
+                "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+                "NAME =~ *tx_cdc*dout*_reg*}}]",
+                "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+                "NAME =~ *tx_cdc*dout*_reg*}}]",
+                # The 2R2T PRBS checkers' compare/re-seed recurrence captures on a ce that the
+                # PHY asserts at most once per 4 rfic_clk cycles (one word per 4 DDR phases),
+                # and the capture is retimed so both compare operands are stable two cycles
+                # before every capture by construction: the recurrence paths into the state
+                # registers are exact 2-cycle paths.
+                # error_r captures the ce_rr-gated compare: on every cycle other than the
+                # (2-cycle-stable) sample cycle the gating flop forces the cone low, so the
+                # compare-dependent capture is also an exact 2-cycle path.
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+                "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+                # Same retimed-capture property for the 1R1T checker's reference pair (which
+                # additionally never carries meaningful data at 491.52MHz: 1R1T caps DATA_CLK
+                # at 245.76MHz, and at 491.52MHz the design is necessarily in 2R2T mode).
+                "set_multicycle_path 2 -setup "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+                "set_multicycle_path 1 -hold "
+                "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+                "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+            ]
+            # OSERDES TX: every rfic (491.52, BUFG of DATA_CLK) <-> OSERDES-MMCM-clock (CLK/CLKDIV)
+            # crossing goes through the phy.py gray-pointer FIFO (pointers via MultiReg, storage ->
+            # dout qualified by the handshake, resets via AsyncResetSynchronizer), so the pair is
+            # asynchronous like the design's other CDC clock pairs - a phase analysis of an
+            # MMCM-vs-BUFG pair of the same input pin would be wrong across MMCM locks anyway.
+            # Guarded like the platform's own clock-group commands (set_clock_groups errors on an
+            # empty group, and the generated-clock names depend on the LiteX netlist naming).
+            if with_rfic_oversampling:
+                platform.toolchain.pre_placement_commands += [
+                    "set _clk0 [get_clocks -quiet rfic_clk]; "
+                    "set _clk1 [get_clocks -quiet *ad9361phy_clkout*]; "
+                    "if {{[llength $_clk0] && [llength $_clk1]}} {{ "
+                    "set_clock_groups -asynchronous -group $_clk0 -group $_clk1 }}",
+                    # First stage of the shared OSERDES-reset synchronizer (phy.py): an async
+                    # capture of the sys reset / MMCM-lock condition into the CLKDIV domain.
+                    "set_false_path -quiet -to [get_cells -hierarchical "
+                    "-filter {{NAME =~ *oserdes_rst_meta*}}]",
+                ]
+
         # Clk Measurements -------------------------------------------------------------------------
+
+        # At 491.52MHz rfic_clk a 64-bit free-running counter does not close timing; count a /4
+        # divided clock with increment=4 (same reported value, +/-4 cycles granularity).
+        if with_rfic_oversampling:
+            rfic_meas_div = Signal(2)
+            self.sync.rfic += rfic_meas_div.eq(rfic_meas_div + 1)
+            rfic_meas_clk = (rfic_meas_div[1], 4)
+        else:
+            rfic_meas_clk = ClockSignal("rfic")
 
         self.clk_measurement = MultiClkMeasurement(clks={
             "clk0" : ClockSignal("sys"),
             "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
-            "clk3" : ClockSignal("rfic"),
+            "clk3" : rfic_meas_clk,
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
@@ -1352,15 +1487,10 @@ class BaseSoC(SoCMini):
             port         = self.sata_crossbar.get_port(),
             sys_clk_freq = sys_clk_freq,
         ))
-        self.sata_streamer_control = CSRStorage(fields=[
-            CSRField("rx_reset", size=1, offset=0, pulse=True,
-                description="Pulse reset on the SATA Stream2Sectors streamer."),
-            CSRField("tx_reset", size=1, offset=1, pulse=True,
-                description="Pulse reset on the SATA Sectors2Stream streamer."),
-        ], description="SATA streamer control.")
+        self.sata_streamer = SATAStreamerControl()
         self.comb += [
-            self.sata_rx_streamer.reset.eq(self.sata_streamer_control.fields.rx_reset),
-            self.sata_tx_streamer.reset.eq(self.sata_streamer_control.fields.tx_reset),
+            self.sata_rx_streamer.reset.eq(self.sata_streamer.control.fields.rx_reset),
+            self.sata_tx_streamer.reset.eq(self.sata_streamer.control.fields.tx_reset),
         ]
 
         # IRQs.
@@ -1386,6 +1516,23 @@ class BaseSoC(SoCMini):
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
     # PCIe.
+    def check_csr_map(self):
+        """Fail the build if a CSR region has no fixed location in csr_map.
+
+        An unpinned region is auto-allocated to the lowest free location and a CSR declared
+        directly on the SoC lands in LiteX's catch-all "main" bank: either way its address
+        follows the enabled features, so the same address means a different register in a
+        different image and host software built against one image silently misreads another.
+        Every region is pinned instead, which is what lets one set of headers describe them all
+        (see litex_m2sdr/build_configs.py and scripts/gen_kernel_headers.py).
+        """
+        unpinned = sorted(region for region in self.csr_regions if region not in self.csr_map)
+        if unpinned:
+            raise ValueError(
+                f"CSR region(s) without a fixed csr_map location: {', '.join(unpinned)}. "
+                f"Add them to BaseSoC.csr_map; a CSR declared directly on the SoC lands in the "
+                f"\"main\" bank and needs to be moved into a module of its own.")
+
     def add_pcie_probe(self, depth=4096):
         self.pcie_phy.add_ltssm_tracer()
         self.pcie_clk_count = Signal(16)
@@ -1724,10 +1871,35 @@ def main():
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
-    builder.build(build_name=get_build_name(), run=args.build)
+    # Timing-closure directives. The 125 MHz sys clock is the design's critical domain (and the
+    # Oversampling build adds the 491.52 MHz rfic_clk datapath); direct place and route for timing
+    # and run the post-place and post-route physical-optimization passes so every PCIe variant
+    # meets timing at the stock clock. These are implementation-stage directives only --
+    # synthesis/logic-optimization directives are intentionally left at their defaults, as
+    # steering them degrades this design's sys-clock result. A bitstream that misses timing must
+    # never be flashed: a marginal image mis-clocks the AD9361 and presents as a dead RFIC
+    # (scripts/qualify_image.sh asserts WNS >= 0 before it will flash anything).
+    build_kwargs = {}
+    toolchain = getattr(getattr(soc, "platform", None), "toolchain", None)
+    if toolchain is not None and "vivado_place_directive" in inspect.signature(toolchain.build).parameters:
+        build_kwargs.update(
+            vivado_place_directive               = "ExtraTimingOpt",
+            vivado_post_place_phys_opt_directive = "AggressiveExplore",
+            vivado_route_directive               = "AggressiveExplore",
+            vivado_post_route_phys_opt_directive = "AggressiveExplore",
+        )
+    builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
-    # Generate LitePCIe Driver.
-    generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
+    # CSR Map.
+    soc.check_csr_map()
+
+    # Generate LitePCIe Driver. The tracked litex_m2sdr/software/kernel headers cover every
+    # supported configuration at once and are regenerated by scripts/gen_kernel_headers.py, not
+    # per build; this build's own headers go next to its bitstream.
+    generate_litepcie_software(soc, "litex_m2sdr/software",
+        use_litepcie_software = args.driver,
+        header_dir            = os.path.join(builder.output_dir, "kernel"),
+    )
 
     # Reset Device.
     if args.reset:

@@ -33,7 +33,14 @@ def generate_litepcie_software_headers(soc, dst):
     mem_header = get_mem_header(soc.mem_regions)
     tools.write_to_file(os.path.join(dst, "mem.h"), mem_header)
 
-def generate_litepcie_software(soc, dst, use_litepcie_software=False):
+def generate_litepcie_software(soc, dst, use_litepcie_software=False, header_dir=None):
+    """Copy the LitePCIe software into dst and export this SoC's CSR headers to header_dir.
+
+    The headers tracked in dst/kernel are not written here: they describe every supported build
+    configuration at once (see scripts/gen_kernel_headers.py) so that host software built once
+    works with any image. header_dir gets the headers for the configuration just built, next to
+    its bitstream, for tooling that needs to inspect one specific image.
+    """
     from litepcie.software import copy_litepcie_software
 
     if use_litepcie_software:
@@ -41,4 +48,6 @@ def generate_litepcie_software(soc, dst, use_litepcie_software=False):
         os.system(f"cp {cdir}/__init__.py {cdir}/__init__.py.orig")
         copy_litepcie_software(dst)
         os.system(f"cp {cdir}/__init__.py.orig {cdir}/__init__.py")
-    generate_litepcie_software_headers(soc, os.path.join(dst, "kernel"))
+    if header_dir is not None:
+        os.makedirs(header_dir, exist_ok=True)
+        generate_litepcie_software_headers(soc, header_dir)

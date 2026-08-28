@@ -16,10 +16,68 @@ from datetime import datetime, timezone
 
 # Build Utilities ----------------------------------------------------------------------------------
 
-GENERATED_TRACKED_FILES = [
-    Path("litex_m2sdr", "software", "kernel", "csr.h"),
-    Path("litex_m2sdr", "software", "kernel", "mem.h"),
-    Path("litex_m2sdr", "software", "kernel", "soc.h"),
+# Configurations built for a release. Every one of them is covered by
+# litex_m2sdr/build_configs.py, so their CSR maps are verified to agree (test_csr_layout.py).
+RELEASE_CONFIGURATIONS = [
+    # Baseboard variant with Ethernet only.
+    {
+        "variant"                   : "baseboard",
+        "with_pcie"                 : False,
+        "pcie_lanes"                : 0,
+        "with_eth"                  : True,
+        "eth_sfp"                   : 0,
+        "with_eth_ptp"              : False,
+        "with_eth_ptp_rfic_clock"   : False,
+        "build_name"                : "litex_m2sdr_baseboard_eth",
+    },
+
+    # Baseboard variant with Ethernet PTP and PTP-disciplined RFIC clock path.
+    {
+        "variant"                   : "baseboard",
+        "with_pcie"                 : False,
+        "pcie_lanes"                : 0,
+        "with_eth"                  : True,
+        "eth_sfp"                   : 0,
+        "with_eth_ptp"              : True,
+        "with_eth_ptp_rfic_clock"   : True,
+        "build_name"                : "litex_m2sdr_baseboard_eth_ptp_rfic_clock",
+    },
+
+    # Baseboard variant with PCIe Gen2-X1 and Ethernet.
+    {
+        "variant"                   : "baseboard",
+        "with_pcie"                 : True,
+        "pcie_lanes"                : 1,
+        "with_eth"                  : True,
+        "eth_sfp"                   : 0,
+        "with_eth_ptp"              : False,
+        "with_eth_ptp_rfic_clock"   : False,
+        "build_name"                : "litex_m2sdr_baseboard_pcie_x1_eth",
+    },
+
+    # M2 variant with PCIe Gen2-X1.
+    {
+        "variant"                   : "m2",
+        "with_pcie"                 : True,
+        "pcie_lanes"                : 1,
+        "with_eth"                  : False,
+        "eth_sfp"                   : 0,
+        "with_eth_ptp"              : False,
+        "with_eth_ptp_rfic_clock"   : False,
+        "build_name"                : "litex_m2sdr_m2_pcie_x1",
+    },
+
+    # M2 variant with PCIe Gen2-X2.
+    {
+        "variant"                   : "m2",
+        "with_pcie"                 : True,
+        "pcie_lanes"                : 2,
+        "with_eth"                  : False,
+        "eth_sfp"                   : 0,
+        "with_eth_ptp"              : False,
+        "with_eth_ptp_rfic_clock"   : False,
+        "build_name"                : "litex_m2sdr_m2_pcie_x2",
+    }
 ]
 
 def run_command(command):
@@ -35,20 +93,6 @@ def git_output(args):
         return subprocess.check_output(["git", *args], text=True).strip()
     except subprocess.CalledProcessError:
         return "unknown"
-
-def snapshot_files(files):
-    return {
-        path: path.read_bytes() if path.exists() else None
-        for path in files
-    }
-
-def restore_snapshot(snapshot):
-    for path, contents in snapshot.items():
-        if contents is None:
-            if path.exists():
-                path.unlink()
-        else:
-            path.write_bytes(contents)
 
 def parse_number(value):
     """Convert Vivado timing table values while preserving N/A entries."""
@@ -237,86 +281,22 @@ def main():
         "git_dirty"    : bool(git_output(["status", "--short", "--untracked-files=no"])),
     }
 
-    # Define first-release configurations.
-    configurations = [
-        # Baseboard variant with Ethernet only.
-        {
-            "variant"                   : "baseboard",
-            "with_pcie"                 : False,
-            "pcie_lanes"                : 0,
-            "with_eth"                  : True,
-            "eth_sfp"                   : 0,
-            "with_eth_ptp"              : False,
-            "with_eth_ptp_rfic_clock"   : False,
-            "build_name"                : "litex_m2sdr_baseboard_eth",
-        },
+    configurations = RELEASE_CONFIGURATIONS
 
-        # Baseboard variant with Ethernet PTP and PTP-disciplined RFIC clock path.
-        {
-            "variant"                   : "baseboard",
-            "with_pcie"                 : False,
-            "pcie_lanes"                : 0,
-            "with_eth"                  : True,
-            "eth_sfp"                   : 0,
-            "with_eth_ptp"              : True,
-            "with_eth_ptp_rfic_clock"   : True,
-            "build_name"                : "litex_m2sdr_baseboard_eth_ptp_rfic_clock",
-        },
-
-        # Baseboard variant with PCIe Gen2-X1 and Ethernet.
-        {
-            "variant"                   : "baseboard",
-            "with_pcie"                 : True,
-            "pcie_lanes"                : 1,
-            "with_eth"                  : True,
-            "eth_sfp"                   : 0,
-            "with_eth_ptp"              : False,
-            "with_eth_ptp_rfic_clock"   : False,
-            "build_name"                : "litex_m2sdr_baseboard_pcie_x1_eth",
-        },
-
-        # M2 variant with PCIe Gen2-X1.
-        {
-            "variant"                   : "m2",
-            "with_pcie"                 : True,
-            "pcie_lanes"                : 1,
-            "with_eth"                  : False,
-            "eth_sfp"                   : 0,
-            "with_eth_ptp"              : False,
-            "with_eth_ptp_rfic_clock"   : False,
-            "build_name"                : "litex_m2sdr_m2_pcie_x1",
-        },
-
-        # M2 variant with PCIe Gen2-X2.
-        {
-            "variant"                   : "m2",
-            "with_pcie"                 : True,
-            "pcie_lanes"                : 2,
-            "with_eth"                  : False,
-            "eth_sfp"                   : 0,
-            "with_eth_ptp"              : False,
-            "with_eth_ptp_rfic_clock"   : False,
-            "build_name"                : "litex_m2sdr_m2_pcie_x2",
-        }
-    ]
-
-    # Build each configuration. Preserve generated tracked headers so running
-    # the release flow does not leave the source tree dirty.
-    generated_snapshot = snapshot_files(GENERATED_TRACKED_FILES)
-    try:
-        for config in configurations:
-            command = build_configuration(config, nobuild=args.nobuild)
-            timing_summary = None
-            if not args.nobuild:
-                timing_summary = check_timing(
-                    build_dir,
-                    config["build_name"],
-                    allow_pcie_pulse_width_warning=config["with_pcie"],
-                )
-            # Create archive for this build and move it to build_dir.
-            create_archive(build_dir, config["build_name"], date_str, config, command, release_metadata, timing_summary, args.nobuild)
-    finally:
-        restore_snapshot(generated_snapshot)
+    # Build each configuration. A build writes its CSR headers next to its own bitstream; the
+    # tracked litex_m2sdr/software/kernel headers cover every configuration at once and are
+    # regenerated by scripts/gen_kernel_headers.py, so the release flow leaves them alone.
+    for config in configurations:
+        command = build_configuration(config, nobuild=args.nobuild)
+        timing_summary = None
+        if not args.nobuild:
+            timing_summary = check_timing(
+                build_dir,
+                config["build_name"],
+                allow_pcie_pulse_width_warning=config["with_pcie"],
+            )
+        # Create archive for this build and move it to build_dir.
+        create_archive(build_dir, config["build_name"], date_str, config, command, release_metadata, timing_summary, args.nobuild)
 
     print(f"All builds completed successfully. Archives created with date: {date_str}")
 

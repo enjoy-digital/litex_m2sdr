@@ -35,12 +35,11 @@ make m2sdr_sata
 
 ### Record and replay what GQRX is receiving
 
-Build and load the Ethernet + SATA image, then rebuild the user software and
-SoapySDR module so gateware and software use the same CSR map:
+Build and load the Ethernet + SATA image, then build the user software and SoapySDR
+module (one CSR map covers every image, so these binaries are not image-specific):
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-eth --with-sata --build --flash
-make -C litex_m2sdr/software/user clean
 make -C litex_m2sdr/software/user
 cmake -S litex_m2sdr/software/soapysdr -B /tmp/litex_m2sdr_soapy \
     -DCMAKE_INSTALL_PREFIX=/usr

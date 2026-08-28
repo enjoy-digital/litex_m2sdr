@@ -634,6 +634,47 @@ static int test_transport_helpers(void)
     return 0;
 }
 
+/* The image split is a footgun if it is silent: neither image reports a TX that never leaves the
+ * chip, so the rate/layout has to be refused before bring-up. */
+static int test_image_rate_validation(void)
+{
+    const int64_t rate_30m72  =  30720000;
+    const int64_t rate_61m44  =  61440000;
+    const int64_t rate_122m88 = 122880000;
+
+    /* DATA_CLK is 2x the sample rate per channel. */
+    if (m2sdr_interface_clk_hz(M2SDR_CHANNEL_LAYOUT_1T1R, rate_122m88) != 245760000)
+        return -1;
+    if (m2sdr_interface_clk_hz(M2SDR_CHANNEL_LAYOUT_2T2R, rate_122m88) != 491520000)
+        return -1;
+
+    /* Standard image: everything up to DATA_CLK 245.76 MHz. */
+    if (m2sdr_image_rate_error(false, M2SDR_CHANNEL_LAYOUT_1T1R, rate_122m88) != NULL)
+        return -1;
+    if (m2sdr_image_rate_error(false, M2SDR_CHANNEL_LAYOUT_2T2R, rate_61m44) != NULL)
+        return -1;
+    if (m2sdr_image_rate_error(false, M2SDR_CHANNEL_LAYOUT_2T2R, rate_122m88) == NULL)
+        return -1;
+
+    /* Oversampling image: whatever its TX serializer MMCM can lock at, i.e. DATA_CLK 184.62 to
+     * 492.31 MHz. Below that the MMCM never locks and TX airs zeros, so those rates are refused
+     * rather than brought up mute. */
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_2T2R, rate_122m88) != NULL)
+        return -1;
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_2T2R, rate_61m44) != NULL)
+        return -1;   /* DATA_CLK 245.76 MHz -> VCO 798.72 MHz, locks. */
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_1T1R, rate_122m88) != NULL)
+        return -1;   /* DATA_CLK 245.76 MHz as well. */
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_2T2R, rate_30m72) == NULL)
+        return -1;   /* DATA_CLK 122.88 MHz -> VCO 399.36 MHz, below the 600 MHz minimum. */
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_1T1R, rate_61m44) == NULL)
+        return -1;   /* DATA_CLK 122.88 MHz too. */
+    if (m2sdr_image_rate_error(true, M2SDR_CHANNEL_LAYOUT_1T1R, rate_30m72) == NULL)
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -690,6 +731,10 @@ int main(void)
     }
     if (test_apply_config_if_needed_validation() != 0) {
         fprintf(stderr, "test_apply_config_if_needed_validation failed\n");
+        return 1;
+    }
+    if (test_image_rate_validation() != 0) {
+        fprintf(stderr, "test_image_rate_validation failed\n");
         return 1;
     }
     if (test_transport_helpers() != 0) {
