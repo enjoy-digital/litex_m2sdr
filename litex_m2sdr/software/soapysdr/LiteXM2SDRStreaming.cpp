@@ -361,12 +361,8 @@ std::recursive_mutex &SoapyLiteXM2SDR::streamAccessMutex(SoapySDR::Stream *strea
 /* RX DMA headers are enabled at runtime when the gateware supports them
  * (see _rx_dma_header_bytes); they carry the hardware RX timestamps. */
 
-/* TX DMA Header */
-#if USE_LITEPCIE && defined(_TX_DMA_HEADER_TEST)
-static constexpr size_t TX_DMA_HEADER_SIZE = 16;
-#else
-static constexpr size_t TX_DMA_HEADER_SIZE = 0;
-#endif
+/* TX DMA headers are enabled at runtime when the gateware supports them (see
+ * _tx_dma_header_bytes); they carry the per-buffer air-time used by the hardware timed-TX gate. */
 
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
@@ -562,8 +558,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             config.direction = M2SDR_TX;
             config.format = m2fmt;
             config.zero_copy = true;
-            config.tx_header_enable = TX_DMA_HEADER_SIZE != 0;
-            config.buffer_size = m2sdr_bytes_to_samples(m2fmt, M2SDR_BUFFER_BYTES - TX_DMA_HEADER_SIZE);
+            config.tx_header_enable = _tx_dma_header_bytes != 0;
+            config.buffer_size = m2sdr_bytes_to_samples(m2fmt, M2SDR_BUFFER_BYTES - _tx_dma_header_bytes);
             int rc = m2sdr_stream_configure(_dev, &config);
             if (rc != M2SDR_ERR_OK)
                 throw std::runtime_error("m2sdr_stream_configure(TX) failed: " + std::string(m2sdr_strerror(rc)));
@@ -1028,7 +1024,7 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
             buffs[0] = (char *)_rx_stream.buf + handle * _rx_buf_size;
     } else if (stream == TX_STREAM) {
         if (isLitePCIe())
-            buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + TX_DMA_HEADER_SIZE;
+            buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + _tx_dma_header_bytes;
         else
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_size;
     }

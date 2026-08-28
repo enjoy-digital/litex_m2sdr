@@ -41,9 +41,9 @@ enum class SoapyLiteXM2SDREthernetMode {
 
 #define DEBUG
 
-/* RX DMA headers are runtime-probed (rx_dma_header device arg); TX header
- * insertion remains experimental. */
-//#define _TX_DMA_HEADER_TEST
+/* RX and TX DMA headers are both runtime-probed (rx_dma_header / tx_dma_header device args):
+ * RX headers carry the hardware receive timestamps, TX headers the per-buffer air-time consumed
+ * by the hardware timed-TX gate. */
 
 /* Thresholds relevant to 8-bit sample-packing policy. */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
@@ -403,6 +403,18 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
      * construction since older bitstreams lack the header module. */
     bool _rx_dma_header_supported = false;
     size_t _rx_dma_header_bytes = 0;
+
+    /* TX DMA headers carry the per-buffer air-time consumed by the hardware timed-TX gate; probed
+     * at construction like the RX ones, since older bitstreams lack the header module. When absent,
+     * TX falls back to the software timeline and absolute-time TX is not available. */
+    bool _tx_dma_header_supported = false;
+    size_t _tx_dma_header_bytes = 0;
+
+    /* Timed-TX gate pipeline compensation (ns) written to CSR_HEADER_TX_TX_OFFSET so a calibrated
+     * "transmit at X" airs at X. -1 = auto (derived from the sample rate in setSampleRate);
+     * >= 0 = an explicit value from the tx_offset device arg. Applied only when the TX header module
+     * is present (_tx_dma_header_supported), so the gate CSR is never poked on a bitstream without it. */
+    long long _tx_offset_ns = -1;
 
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
