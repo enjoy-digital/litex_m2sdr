@@ -47,7 +47,7 @@ Imagine a minimalist AD9361-based SDR with:
 - 2T2R / 12-bit @ 61.44MSPS (and 2T2R / 12-bit @ 122.88MSPS for those wanting to use/explore Cellwizard/BladeRF [findings](https://www.nuand.com/2023-02-release-122-88mhz-bandwidth/)).
 - PCIe Gen 2 X4 (~14Gbps of TX/RX bandwidth) with [LitePCIe](https://github.com/enjoy-digital/litepcie), providing MMAP and several possible DMAs (for direct I/Q samples transfer or processed I/Q samples). ⚡
 - A large XC7A200T FPGA where the base infrastructure only uses a fraction of the available resources, allowing you to integrate large RF processing blocks. 💪
-- The option to reuse some of the PCIe lanes of the M.2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
+- The option to reuse some of the PCIe lanes of the M.2 connector for 1Gbps, 2.5Gbps, or experimental 5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
 - Or ... for SATA through the [LiteSATA](https://github.com/enjoy-digital/litesata) gateware core. 💾
 - Or ... for inter-board SerDes-based communication through [LiteICLink](https://github.com/enjoy-digital/liteiclink). 🔗
 - Powerful debug capabilities through LiteX [Host <-> FPGA bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC) and [LiteScope](https://github.com/enjoy-digital/litescope) logic analyzer. 🛠️
@@ -60,7 +60,7 @@ This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enj
 
 Ideal for SDR enthusiasts, this versatile board fits directly into an M.2 slot or can team up with others in a PCIe M.2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
 
-For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
+For Ethernet support with 1000BaseX/2500BaseX (and experimental 5Gbps operation) and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/fb75aeeb-4e99-45b5-9582-0c4dbd079af6" width="100%">
@@ -110,7 +110,7 @@ Both variants use the same **M.2 2280 Key M** module form factor.
 |                                 |                              |                              |                                               |
 | **Connectivity**                |                              |                              |                                               |
 | PCIe (up to Gen2 x4)            | ✅                           | ✅ (x1 only)                 | `--with-pcie --pcie-lanes=1|2|4`              |
-| Ethernet (1G/2.5G)              | ❌                           | ✅                           | `--with-eth`                                  |
+| Ethernet (1G/2.5G/experimental 5G) | ❌                        | ✅                           | `--with-eth --eth-phy=...`                    |
 | ├─ Ethernet RX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
 | └─ Ethernet TX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
 |                                 |                              |                              |                                               |
@@ -201,26 +201,60 @@ The SoC has the following architecture:
 
 The PCIe design has already been validated at the maximum AD9361 specified sample rate: 2T2R @ 61.44MSPS (and also seems to correctly handle the oversampling at 2T2R @ 122.88MSPS with 7.9 Gbps of bandwidth on the PCIe bus; this oversampling feature is already in place and more tests/experiments will be done with it in the future).
 
-[> Ethernet SoC Design (1/2.5Gbps x 1 or 2).
---------------------------------------------
+[> Ethernet SoC Design (1/2.5Gbps, Experimental 5Gbps).
+--------------------------------------------------------
 <a id="ethernet-soc-design"></a>
 
 > [!NOTE]
 >
 > Ethernet support is intended for LiteX Acorn Baseboard Mini deployments and
-> is bandwidth-limited by the selected 1000BaseX/2500BaseX link.
+> is bandwidth-limited by the selected Ethernet link. The 5Gbps mode is an
+> experimental 6.25Gbaud 8b/10b extension and is not IEEE 5GBASE-KR or 10GBASE-R.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/bbcc0c79-4ae8-4e5b-94d8-aa7aff89bae2" width="100%">
 </div>
 
-The Ethernet design variant gives flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe hardened PHY in the case of a PCIe application but can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
+The Ethernet design variant gives flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe hardened PHY in the case of a PCIe application but can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, experimental 5Gbps Ethernet, SATA, etc...
 
-In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
+In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the Ethernet PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
 
 The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path. The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC clock to the selected link speed.
 
 The 2.5GBASE-X mode has been hardware-validated in SFP0/J3 with a LianGuo LG 2.5GE copper SFP, the Acorn Baseboard Mini's JP1 and JP4 fitted, and the board reachable at `192.168.1.50`. Build it explicitly with `--eth-phy=2500basex`; this selects the 125MHz GTP reference, MMCM PHY clocking, Clause-37 timing, and gearbox constraints needed by the copper module. SFP EEPROM I2C is not required for link or packet traffic. On M2SDR r02, fit `R82`/`R83` only when the optional M.2 SMBus path is needed; an absent or NACKing EEPROM must not be treated as a link failure.
+
+The `5000basex` mode is experimental. It runs the Artix-7 GTP at 6.25Gbaud,
+uses the GTPE2's 20-bit internal datapath clock at 312.5MHz and its 40-bit
+fabric/PCS interface at 156.25MHz, and deliberately keeps the validated
+61.44MSPS RFIC budget. It cannot operate a module whose host interface
+is fixed at 10.3125Gbaud: the M2SDR Artix-7 GTP is limited to 6.6Gbps. In
+particular, the public 6COM `6C-SFP-10G-T` data sheet specifies a 10GBASE-T/SFP+
+host interface and does not promise a 6.25Gbaud host mode. Hardware probing of
+this module found CDR lock but no 8b/10b comma/byte alignment at 6.25Gbaud;
+LiteScope showed a repeating, undecodable serial pattern. Its copper-side
+2.5/5Gbps negotiation therefore does not provide a compatible 6.25Gbaud host
+mode. The same image reached byte alignment and completed Clause-37 negotiation
+in normal-traffic near-PMA loopback, independently validating the four-symbol
+PCS. Use a module that explicitly supports 6.25Gbaud host signaling. The module
+is rated up to 2.5W, so provide airflow and monitor temperature.
+
+Build the instrumented image and load it only after timing passes:
+
+```bash
+./litex_m2sdr.py --variant=baseboard --sys-clk-freq=100000000 \
+  --with-eth --eth-sfp=0 \
+  --eth-phy=5000basex --with-sfp-i2c --with-eth-phy-probe --build --load
+```
+
+This debug build exposes stable GTP/PCS counters, internal PRBS controls, a
+narrow RX LiteScope analyzer, and the SFP management bus. Start JTAGBone with
+`litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg`, then run
+`python3 scripts/sfp_eeprom.py --repeat 10` and
+`python3 scripts/eth_phy_prbs.py --loopback near-pma --duration 10`. The EEPROM
+script performs identification reads only; it never writes vendor registers.
+After the internal PRBS test, return to normal PCS traffic and check
+`ping 192.168.1.50`. Ethernet PTP is intentionally rejected in this first 5G
+implementation.
 
 Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, using SATA on PCIe lane 0 and Ethernet on the selected SFP lane. PCIe, Ethernet/White-Rabbit, and SATA cannot all be enabled in one image because the shared QPLL exposes two channels.
 
@@ -341,7 +375,7 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
 - **PCIe PTM host-time sync**: Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
 - **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
 - **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`. `m2sdr_sata` supports low-level sector tests and named capture workflows for RF-to-SATA recording, host import/export, SATA-to-RF replay, and SATA replay into the normal PCIe/Ethernet RX path used by SoapySDR/GQRX.
-- **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
+- **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex` or experimental `5000basex`. The initial 5G mode intentionally keeps the validated 61.44MSPS RFIC data rate. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
 - **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
 - **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
 
@@ -509,6 +543,21 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ```
      The validated baseboard configuration has JP1 and JP4 fitted. `R82`/`R83`
      are needed only for optional SFP EEPROM I2C access, not for Ethernet link.
+   - For experimental 6.25Gbaud/5Gbps bring-up with I2C, PRBS counters, and
+     LiteScope:
+   ```
+   ./litex_m2sdr.py --variant=baseboard --sys-clk-freq=100000000 \
+     --with-eth --eth-sfp=0 \
+     --eth-phy=5000basex --with-sfp-i2c --with-eth-phy-probe --build --load
+   litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
+   python3 scripts/sfp_eeprom.py --repeat 10
+   python3 scripts/eth_phy_prbs.py --loopback near-pma --duration 10
+   ping 192.168.1.50
+   ```
+     A 6COM `6C-SFP-10G-T` was tested and is not compatible at 6.25Gbaud: its
+     public data sheet documents a 10.3125Gbaud SFP+ host interface, and the
+     capture did not achieve byte alignment. Do not attempt 10G line rate on
+     the Artix-7 GTP.
    - After loading an Ethernet image, use `m2sdr_util` loopback tests to
      exercise the stream path before starting Soapy/Gqrx:
    ```

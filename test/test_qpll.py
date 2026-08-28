@@ -103,6 +103,8 @@ def test_shared_qpll_can_use_system_clock_as_eth_reference(monkeypatch):
     ("1000basex", 156.25e6, 4, 1.25e9),
     ("2500basex", 125e6,    2, 3.125e9),
     ("2500basex", 156.25e6, 2, 3.125e9),
+    ("5000basex", 125e6,    1, 6.25e9),
+    ("5000basex", 156.25e6, 1, 6.25e9),
 ])
 def test_shared_qpll_eth_settings_generate_expected_linerate(monkeypatch, eth_phy, refclk_freq, out_div, expected_linerate):
     monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
