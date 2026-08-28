@@ -377,4 +377,6 @@ check:
 	cmake -S ../soapysdr -B ../soapysdr/build
 	cmake --build ../soapysdr/build
 
--include $(wildcard *.d tests/*.d libm2sdr/*.d)
+# Every -MMD dependency file, so a change to a generated CSR header rebuilds the objects
+# that read it -- including the ones under liblitepcie/, libliteeth/ and ad9361/.
+-include $(wildcard *.d tests/*.d libm2sdr/*.d liblitepcie/*.d libliteeth/*.d ad9361/*.d kissfft/*.d)

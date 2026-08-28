@@ -110,18 +110,11 @@ hdr()  { echo; echo "== $* =="; }
 # 0. build the in-repo tools we depend on (never the installed copy)
 # ---------------------------------------------------------------------------
 hdr "prep"
-# The tools MUST be built against the csr.h that the gateware build generated: the CSR map shifts
-# with the gateware, and tools compiled against a different map drive registers at wrong addresses
-# (an AD9361 SPI read then returns 0x0/0xFF and looks like a dead RFIC). Always rebuild when we are
-# about to flash an image, so tools and bitstream match by construction.
-if [ -n "$BUILD_DIR" ] || [ -n "$IMAGE" ]; then
-    echo "rebuilding in-repo user tools against the current generated csr.h ..."
-    make -C "$USERDIR" clean >/dev/null 2>&1
-    make -C "$USERDIR" libm2sdr/libm2sdr.a m2sdr_util m2sdr_rf >/dev/null || die "user tool build failed"
-elif [ ! -x "$UTIL" ] || [ ! -x "$RF" ] || [ ! -f "$LIBDIR/libm2sdr.a" ]; then
-    echo "building in-repo user tools ..."
-    make -C "$USERDIR" libm2sdr/libm2sdr.a m2sdr_util m2sdr_rf >/dev/null || die "user tool build failed"
-fi
+# Build the in-repo tools, never the installed copy. litex_m2sdr/software/kernel/csr.h describes
+# every supported image (scripts/gen_kernel_headers.py), so the binaries do not depend on which
+# bitstream is about to be flashed; make rebuilds them if that header changed.
+echo "building in-repo user tools ..."
+make -C "$USERDIR" libm2sdr/libm2sdr.a m2sdr_util m2sdr_rf >/dev/null || die "user tool build failed"
 echo "repo:   $REPO"
 echo "commit: $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?')"
 

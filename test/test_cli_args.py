@@ -55,11 +55,15 @@ def test_main_exposes_base_soc_optional_args(monkeypatch):
         def __init__(self, **kwargs):
             captured["kwargs"] = kwargs
 
+        def check_csr_map(self):
+            captured["csr_map_checked"] = True
+
     class FakeBuilder:
         def __init__(self, soc, **kwargs):
             captured["builder_soc"] = soc
             captured.update(kwargs)
             self.gateware_dir = "build/fake/gateware"
+            self.output_dir   = kwargs.get("output_dir", "build/fake")
 
         def build(self, build_name, run):
             captured["build_name"] = build_name
@@ -90,6 +94,8 @@ def test_main_exposes_base_soc_optional_args(monkeypatch):
     assert captured["output_dir"].endswith(captured["build_name"])
     assert captured["csr_csv"] == "scripts/csr.csv"
     assert captured["run"] is False
+    # Every build asserts its CSR regions are pinned, so no image can quietly move a register.
+    assert captured["csr_map_checked"] is True
 
 
 def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
@@ -100,11 +106,15 @@ def test_main_defaults_ethernet_pcie_builds_to_100mhz_sysclk(monkeypatch):
         def __init__(self, **kwargs):
             captured["kwargs"] = kwargs
 
+        def check_csr_map(self):
+            captured["csr_map_checked"] = True
+
     class FakeBuilder:
         def __init__(self, soc, **kwargs):
             captured["builder_soc"] = soc
             captured.update(kwargs)
             self.gateware_dir = "build/fake/gateware"
+            self.output_dir   = kwargs.get("output_dir", "build/fake")
 
         def build(self, build_name, run):
             captured["build_name"] = build_name
@@ -144,11 +154,15 @@ def test_main_selects_2500basex_and_raw_rx_probe(monkeypatch):
         def add_eth_phy_rx_probe(self):
             captured["eth_phy_rx_probe"] = True
 
+        def check_csr_map(self):
+            captured["csr_map_checked"] = True
+
     class FakeBuilder:
         def __init__(self, soc, **kwargs):
             captured["builder_soc"] = soc
             captured.update(kwargs)
             self.gateware_dir = "build/fake/gateware"
+            self.output_dir   = kwargs.get("output_dir", "build/fake")
 
         def build(self, build_name, run):
             captured["build_name"] = build_name
@@ -187,11 +201,15 @@ def test_main_accepts_ethernet_sata_source_build(monkeypatch):
         def __init__(self, **kwargs):
             captured["kwargs"] = kwargs
 
+        def check_csr_map(self):
+            captured["csr_map_checked"] = True
+
     class FakeBuilder:
         def __init__(self, soc, **kwargs):
             captured["builder_soc"] = soc
             captured.update(kwargs)
             self.gateware_dir = "build/fake/gateware"
+            self.output_dir   = kwargs.get("output_dir", "build/fake")
 
         def build(self, build_name, run):
             captured["build_name"] = build_name

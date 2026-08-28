@@ -301,15 +301,15 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 #else
         return M2SDR_ERR_UNSUPPORTED;
 #endif
-#ifdef CSR_ETH_RX_MODE_ADDR
-        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 1) != 0)
+#ifdef CSR_ETH_RX_MODE_CONTROL_ADDR
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_CONTROL_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
 #endif
         break;
 
     case M2SDR_LITEETH_RX_MODE_VRT:
-#ifdef CSR_ETH_RX_MODE_ADDR
-        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 2) != 0)
+#ifdef CSR_ETH_RX_MODE_CONTROL_ADDR
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_CONTROL_ADDR, 2) != 0)
             return M2SDR_ERR_IO;
 #else
         return M2SDR_ERR_UNSUPPORTED;
@@ -342,10 +342,10 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
-#ifdef CSR_ETH_RX_MODE_ADDR
+#ifdef CSR_ETH_RX_MODE_CONTROL_ADDR
     /* Raw streamer enable is not a safe stop on all bitstreams. Use the
      * Ethernet RX mode flush branch when present, then route RX away. */
-    (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
+    (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_CONTROL_ADDR, 0);
 #endif
 #ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
     (void)m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0);

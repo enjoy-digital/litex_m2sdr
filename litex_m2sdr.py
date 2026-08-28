@@ -247,10 +247,46 @@ class CRG(LiteXModule):
             self.dmtd_mmcm.expose_dps("clk200", with_csr=False)
             self.dmtd_mmcm.params.update(p_CLKOUT0_USE_FINE_PS="TRUE")
 
+# SoC CSR Banks ------------------------------------------------------------------------------------
+
+# A CSR declared directly on the SoC lands in LiteX's catch-all "main" bank, whose contents (and
+# so whose addresses) follow the enabled features: the VRT build put eth_rx_mode at the bank's
+# first address and the SATA build put an unrelated streamer-control register at that same
+# address. Every CSR therefore belongs to a module with its own location in csr_map, and
+# test_csr_layout.py fails the build configuration matrix if a "main" bank reappears.
+
+class EthRXMode(LiteXModule):
+    """Ethernet RX routing selector (raw UDP streamer, VRT streamer or flush)."""
+    def __init__(self):
+        self.control = CSRStorage(fields=[
+            CSRField("sel", size=2, offset=0, reset=1, values=[
+                ("``0b00``", "Disable/flush Ethernet RX output."),
+                ("``0b01``", "Route Ethernet RX to raw UDP streamer."),
+                ("``0b10``", "Route Ethernet RX to VRT UDP streamer."),
+            ])
+        ], description="Ethernet RX routing.")
+
+
+class SATAStreamerControl(LiteXModule):
+    """Reset control for the SATA record/replay streamers."""
+    def __init__(self):
+        self.control = CSRStorage(fields=[
+            CSRField("rx_reset", size=1, offset=0, pulse=True,
+                description="Pulse reset on the SATA Stream2Sectors streamer."),
+            CSRField("tx_reset", size=1, offset=1, pulse=True,
+                description="Pulse reset on the SATA Sectors2Stream streamer."),
+        ], description="SATA streamer control.")
+
+
 # BaseSoC ------------------------------------------------------------------------------------------
 
 class BaseSoC(SoCMini):
-    SoCCore.csr_map = {
+    # Defined on BaseSoC itself, not assigned onto SoCCore/SoCMini: those are shared by every
+    # LiteX SoC in the process, so a third-party SoC class that sets its own (litex_wr_nic does
+    # SoCMini.csr_map = {...} when it is imported for --with-pcie-ptm/--with-white-rabbit) would
+    # otherwise shadow this map for every SoC built afterwards. Owning the attribute keeps it
+    # first in the MRO and makes the map independent of what else has been imported.
+    csr_map = {
         # SoC.
         "ctrl"             :  0,
         "uart"             :  1,
@@ -309,6 +345,17 @@ class BaseSoC(SoCMini):
         "analyzer"         : 31,
         "eth_rx_mode"      : 35,
         "vrt_streamer"     : 36,
+
+        # Sub-core CSR banks. LitePCIe names this one itself, but it still has to be pinned: an
+        # unpinned region is auto-allocated to the lowest free location, which depends on the
+        # feature set (pcie_endpoint landed on location 22 in a PCIe-only build and on 42 once
+        # another build claimed 22).
+        "pcie_endpoint"    : 42,
+        "sata_streamer"    : 43,
+        # The White Rabbit build adds the WR firmware console UART. The kernel driver binds a
+        # serial port to it (CSR_UART_XOVER_RXTX_ADDR in software/kernel/main.c), so it is host
+        # visible and needs a fixed location like everything else.
+        "uart_xover"       : 44,
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
@@ -752,16 +799,10 @@ class BaseSoC(SoCMini):
             ]
 
             if with_eth_vrt:
-                self.eth_rx_mode = CSRStorage(fields=[
-                    CSRField("sel", size=2, offset=0, reset=1, values=[
-                        ("``0b00``", "Disable/flush Ethernet RX output."),
-                        ("``0b01``", "Route Ethernet RX to raw UDP streamer."),
-                        ("``0b10``", "Route Ethernet RX to VRT UDP streamer."),
-                    ])
-                ])
+                self.eth_rx_mode = EthRXMode()
 
                 self.eth_rx_demux = stream.Demultiplexer(layout=dma_layout(64), n=3, with_csr=False)
-                self.comb += self.eth_rx_demux.sel.eq(self.eth_rx_mode.fields.sel)
+                self.comb += self.eth_rx_demux.sel.eq(self.eth_rx_mode.control.fields.sel)
                 self.comb += self.eth_rx_demux.source0.ready.eq(1)  # Flush path.
 
                 self.vrt_rx_conv = stream.Converter(64, 32)
@@ -820,6 +861,10 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
+        # Optional CSR blocks are added after the unconditional ones so they append to the end of
+        # the AD9361 region: every build then agrees on the address of every shared register.
+        if with_rfic_oversampling:
+            self.ad9361.add_rx_deskew()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -1441,15 +1486,10 @@ class BaseSoC(SoCMini):
             port         = self.sata_crossbar.get_port(),
             sys_clk_freq = sys_clk_freq,
         ))
-        self.sata_streamer_control = CSRStorage(fields=[
-            CSRField("rx_reset", size=1, offset=0, pulse=True,
-                description="Pulse reset on the SATA Stream2Sectors streamer."),
-            CSRField("tx_reset", size=1, offset=1, pulse=True,
-                description="Pulse reset on the SATA Sectors2Stream streamer."),
-        ], description="SATA streamer control.")
+        self.sata_streamer = SATAStreamerControl()
         self.comb += [
-            self.sata_rx_streamer.reset.eq(self.sata_streamer_control.fields.rx_reset),
-            self.sata_tx_streamer.reset.eq(self.sata_streamer_control.fields.tx_reset),
+            self.sata_rx_streamer.reset.eq(self.sata_streamer.control.fields.rx_reset),
+            self.sata_tx_streamer.reset.eq(self.sata_streamer.control.fields.tx_reset),
         ]
 
         # IRQs.
@@ -1475,6 +1515,23 @@ class BaseSoC(SoCMini):
     # LiteScope Probes (Debug) ---------------------------------------------------------------------
 
     # PCIe.
+    def check_csr_map(self):
+        """Fail the build if a CSR region has no fixed location in csr_map.
+
+        An unpinned region is auto-allocated to the lowest free location and a CSR declared
+        directly on the SoC lands in LiteX's catch-all "main" bank: either way its address
+        follows the enabled features, so the same address means a different register in a
+        different image and host software built against one image silently misreads another.
+        Every region is pinned instead, which is what lets one set of headers describe them all
+        (see litex_m2sdr/build_configs.py and scripts/gen_kernel_headers.py).
+        """
+        unpinned = sorted(region for region in self.csr_regions if region not in self.csr_map)
+        if unpinned:
+            raise ValueError(
+                f"CSR region(s) without a fixed csr_map location: {', '.join(unpinned)}. "
+                f"Add them to BaseSoC.csr_map; a CSR declared directly on the SoC lands in the "
+                f"\"main\" bank and needs to be moved into a module of its own.")
+
     def add_pcie_probe(self, depth=4096):
         self.pcie_phy.add_ltssm_tracer()
         self.pcie_clk_count = Signal(16)
@@ -1832,8 +1889,16 @@ def main():
         )
     builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
-    # Generate LitePCIe Driver.
-    generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
+    # CSR Map.
+    soc.check_csr_map()
+
+    # Generate LitePCIe Driver. The tracked litex_m2sdr/software/kernel headers cover every
+    # supported configuration at once and are regenerated by scripts/gen_kernel_headers.py, not
+    # per build; this build's own headers go next to its bitstream.
+    generate_litepcie_software(soc, "litex_m2sdr/software",
+        use_litepcie_software = args.driver,
+        header_dir            = os.path.join(builder.output_dir, "kernel"),
+    )
 
     # Reset Device.
     if args.reset:

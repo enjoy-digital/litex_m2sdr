@@ -1522,7 +1522,6 @@ static void litepcie_free_chdev(struct litepcie_device *s)
 /*                                       PTP/PTM                                                  */
 /* -----------------------------------------------------------------------------------------------*/
 
-#ifdef CSR_PTM_REQUESTER_BASE
 
 /* Time Control Register Addresses */
 /* Write Time Low and High Addresses */
@@ -1895,7 +1894,6 @@ static struct ptp_clock_info litepcie_ptp_info = {
 	.getcrosststamp = litepcie_ptp_getcrosststamp,
 	.enable         = litepcie_ptp_enable,
 };
-#endif
 
 /* -----------------------------------------------------------------------------------------------*/
 /*                                 Probe / Remove / Module                                        */
@@ -1913,9 +1911,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 #ifdef CSR_UART_XOVER_RXTX_ADDR
 	struct resource *tty_res = NULL;
 #endif
-#ifdef CSR_PTM_REQUESTER_BASE
 	int count = 100;
-#endif
 
 	dev_info(&dev->dev, "\e[1m[Probing device]\e[0m\n");
 
@@ -2110,52 +2106,56 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	}
 #endif
 
-	/* PTP setup */
-#ifdef CSR_PTM_REQUESTER_BASE
-	litepcie_dev->ptp_caps = litepcie_ptp_info;
-	litepcie_dev->litepcie_ptp_clock = ptp_clock_register(&litepcie_dev->ptp_caps, &dev->dev);
-	if (IS_ERR(litepcie_dev->litepcie_ptp_clock)) {
-		ret = PTR_ERR(litepcie_dev->litepcie_ptp_clock);
-		goto fail4;
-	}
-
-	/* Display created PTP device */
-	dev_info(&dev->dev, "PTP clock registered as /dev/ptp%d\n", ptp_clock_index(litepcie_dev->litepcie_ptp_clock));
-
-	/* Enable timer (time) counter */
+	/* Enable timer (time) counter. Every image has the time generator: it timestamps the DMA
+	 * headers whether or not the image also implements PTM. */
 	litepcie_writel(litepcie_dev, CSR_TIME_GEN_CONTROL_ADDR, TIME_CONTROL_ENABLE | TIME_CONTROL_SYNC_ENABLE);
 
-	/* Enable PTM control and start first request */
-	litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
+	/* PTP setup. Every image shares one CSR map, so the PTM requester registers are always
+	 * declared; the capability register is what says whether this image implements PTM. On an
+	 * image without it those registers read back 0, and the PTP clock would advertise a time
+	 * the hardware cannot produce.
+	 */
+	if (litepcie_readl(litepcie_dev, CSR_CAPABILITY_PCIE_CONFIG_ADDR) &
+	    (1 << CSR_CAPABILITY_PCIE_CONFIG_PTM_OFFSET)) {
+		litepcie_dev->ptp_caps = litepcie_ptp_info;
+		litepcie_dev->litepcie_ptp_clock = ptp_clock_register(&litepcie_dev->ptp_caps, &dev->dev);
+		if (IS_ERR(litepcie_dev->litepcie_ptp_clock)) {
+			ret = PTR_ERR(litepcie_dev->litepcie_ptp_clock);
+			goto fail4;
+		}
 
-	/* Prepare T1 & T4 for next request */
-	do {
-		if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
-			break;
-	} while (--count);
+		/* Display created PTP device */
+		dev_info(&dev->dev, "PTP clock registered as /dev/ptp%d\n", ptp_clock_index(litepcie_dev->litepcie_ptp_clock));
 
-	litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
-	count = 100;
-	do {
-		if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
-			break;
-	} while (--count);
+		/* Enable PTM control and start first request */
+		litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
 
-	litepcie_dev->t4_prev = litepcie_read64(litepcie_dev, CSR_PTM_REQUESTER_T4_TIME_ADDR);
+		/* Prepare T1 & T4 for next request */
+		do {
+			if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
+				break;
+		} while (--count);
 
-	litepcie_dev->t1_prev = (((u64)litepcie_readl(litepcie_dev, PTM_T1_TIME_L) << 32) |
-		litepcie_readl(litepcie_dev, PTM_T1_TIME_H));
+		litepcie_writel(litepcie_dev, CSR_PTM_REQUESTER_CONTROL_ADDR, PTM_CONTROL_ENABLE | PTM_CONTROL_TRIGGER);
+		count = 100;
+		do {
+			if ((litepcie_readl(litepcie_dev, CSR_PTM_REQUESTER_STATUS_ADDR) & PTM_STATUS_BUSY) == 0)
+				break;
+		} while (--count);
 
-	spin_lock_init(&litepcie_dev->tmreg_lock);
-#endif
+		litepcie_dev->t4_prev = litepcie_read64(litepcie_dev, CSR_PTM_REQUESTER_T4_TIME_ADDR);
+
+		litepcie_dev->t1_prev = (((u64)litepcie_readl(litepcie_dev, PTM_T1_TIME_L) << 32) |
+			litepcie_readl(litepcie_dev, PTM_T1_TIME_H));
+
+		spin_lock_init(&litepcie_dev->tmreg_lock);
+	}
 
 	return 0;
 
-#ifdef CSR_PTM_REQUESTER_BASE
 fail4:
 #ifdef CSR_UART_XOVER_RXTX_ADDR
 	platform_device_unregister(litepcie_dev->uart);
-#endif
 #endif
 fail3:
 	litepcie_free_chdev(litepcie_dev);
@@ -2210,12 +2210,10 @@ if (litepcie_soc_has_sata(litepcie_dev)) {
 	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
 
     /* Unregister PTP */
-#ifdef CSR_PTM_REQUESTER_BASE
 	if (litepcie_dev->litepcie_ptp_clock) {
 		ptp_clock_unregister(litepcie_dev->litepcie_ptp_clock);
 		litepcie_dev->litepcie_ptp_clock = NULL;
 	}
-#endif
 
 	/* Free all IRQs */
 	for (i = 0; i < litepcie_dev->irqs; i++) {

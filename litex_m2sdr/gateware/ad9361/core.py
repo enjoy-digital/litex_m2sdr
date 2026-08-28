@@ -111,6 +111,11 @@ class AD9361RFIC(LiteXModule):
         # 128->64 scatter (TX) and 64->128 gather (RX) sit at the PHY boundary in the rfic domain
         # (which has 4x headroom at 491.52MHz). Used by the Oversampling build only.
         self.wide = wide
+        # add_rx_deskew() is called by the SoC after add_prbs()/add_agc() rather than from here:
+        # a CSR's address is its declaration order within the region, so an optional block declared
+        # mid-region shifts every CSR after it and the same register lands at different addresses
+        # in different builds. Optional CSRs are declared last so they only ever append.
+        self.with_rx_deskew = with_rx_deskew
         dw = 128 if wide else 64
         # Stream Endpoints -------------------------------------------------------------------------
         self.sink   = stream.Endpoint(dma_layout(dw))
@@ -188,8 +193,6 @@ class AD9361RFIC(LiteXModule):
         # PHY --------------------------------------------------------------------------------------
         self.phy = AD9361PHY(rfic_pads, with_loopback=with_phy_loopback,
             with_rx_idelay=with_rx_deskew, with_tx_oserdes=with_tx_oserdes)
-        if with_rx_deskew:
-            self.add_rx_deskew()
 
         # TX/RX UnPacker/Packer (GPIOs) ------------------------------------------------------------
 
@@ -311,7 +314,11 @@ class AD9361RFIC(LiteXModule):
         PRBS enabled in 2R2T mode the chip sends the same word in both slots, so any ch1/ch2
         difference on a lane's two word bits is a capture error on that lane. Software sweeps the
         IDELAYE2 taps and reads the counters to center each lane in its eye.
+
+        Declared after the unconditional CSRs (the SoC calls this last) so the optional block
+        appends to the end of the AD9361 region instead of shifting the registers that follow it.
         """
+        assert self.with_rx_deskew, "add_rx_deskew() needs the IDELAYE2 PHY (with_rx_deskew=True)."
         self.rx_deskew_idelay = CSRStorage(fields=[
             CSRField("value", size=5, offset=0, description="IDELAYE2 tap value to load."),
             CSRField("lane",  size=3, offset=8, description="RX data lane to load (0-5)."),
