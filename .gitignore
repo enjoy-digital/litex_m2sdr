@@ -29,3 +29,10 @@ __pycache__
 !/litex_m2sdr/software/user/*.c
 /litex_m2sdr/software/user/tests/test_*
 !/litex_m2sdr/software/user/tests/*.c
+
+# scripts/ test-utility binaries (built by scripts/Makefile; sources are *.c)
+/scripts/timed_tx_selftest
+/scripts/loopback_selftest
+/scripts/qual_records/
+/litex_m2sdr/software/soapysdr/build/
+/litex_m2sdr/software/soapysdr/build_liteeth/

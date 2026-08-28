@@ -237,6 +237,8 @@ m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
 
 Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are re-tuned by the chip's own BBF calibration against a ~54/62 MHz corner target (programming the tune dividers past the driver's bandwidth clamp), opening a true ~100 MHz analog passband at 122.88 MSPS while keeping the calibrated noise behavior. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
 
+Full-duplex **2T2R @ 122.88 MSPS** (both TX and both RX channels) is supported on the `--with-rfic-oversampling` image: the TX lanes run at 983 Mbps through an OSERDESE2 serializer, per-lane RX deskew aligns the doubled-rate RX capture, and the bring-up self-checks the AD9361's 2R2T TX framing lock and re-rolls it when needed. The image identifies itself through the `rfic_oversampling` capability bit (`m2sdr_util info`), and its TX only operates at 2T2R @ 122.88 (lower TX rates use the standard image). See `doc/2t2r-122mhz-tx.md`.
+
 Measured at 3.6 GHz on the internal reference (RX side: clean external transmitter -> M2SDR RX, 50 MHz NR-FR1-TM3.1 64QAM, MATLAB 5G Toolbox EVM; in-band SNR: notch/NPR method):
 
 | Metric (wide mode, 122.88 MSPS)            | Measured                          |
@@ -257,6 +259,59 @@ The RX EVM bottoms out with the ADC filled to ~-12 dBFS RMS at the lowest rx-gai
 
 
 Tuning/diagnostic environment variables (defaults are the measured optimum): `M2SDR_OC_BBF_TUNE` (BBF corner target), `M2SDR_OC_BBF_FORCE` (legacy register force-widening), `M2SDR_OC_RX_FIR_FILE` / `M2SDR_OC_TX_FIR_FILE` (passband flatness EQ FIR taps, max 16; TX taps designed for 245.76 MHz), `M2SDR_QEC_KEXP` (RX quadrature tracking loop gain), `M2SDR_RFPLL_CP_PERCENT` (RX RFPLL charge pump scale), `M2SDR_OC_RX_DELAY`/`M2SDR_OC_TX_DELAY` (interface delay overrides).
+
+[> Low-Latency & Timed TX
+-------------------------
+<a id="low-latency"></a>
+
+Two optional features for real-time transmit (e.g. 5G uplink):
+
+- **Deterministic on-air TX timing** — a hardware gate holds each TX buffer until the FPGA time
+  reaches the buffer's header air-time, so a written timestamp *is* the on-air time (10 ns grid).
+- **Low delivery latency** — a shallow DMA ring plus an FPGA-write-triggered RX wake.
+
+**1. Shallow DMA ring (opt-in at module load).** The default 256-buffer ring is tuned for
+full-throughput streaming; a small ring lowers the timed-TX latency floor. The floor is the ring
+drain time, `dma_buffer_count × 8192 B / (rate × bytes_per_sample)` — e.g. at 30.72 MSPS 2T2R
+(8 B/sample) that is ≈ 8.5 ms for 256 buffers and ≈ 0.27 ms for 8 (double these for 1T1R, which is
+4 B/sample). A small ring buffers less host jitter, so the consumer must be real-time.
+
+```bash
+sudo insmod m2sdr.ko dma_buffer_count=8 dma_buffer_per_irq=2
+sudo scripts/pin_m2sdr_irq.sh          # keep the DMA IRQ on your radio-loop core (re-run after each insmod)
+```
+
+**2. RX low-latency wake — automatic.** On AMD CPUs with MONITORX/MWAITX the RX read sleeps until the
+FPGA's DMA write lands (sub-microsecond, no spinning); other CPUs use `poll()`. Force poll with
+`M2SDR_RX_WAIT=poll`.
+
+**3. Timed TX.** Stamp a timed burst's first buffer with its air-time; untimed buffers (timestamp 0)
+transmit immediately, so both can be mixed freely. Calibrate the fixed pipeline delay once over a
+TX→RX loopback — `scripts/timed_tx_selftest` prints the `tx_offset` to use. It is on the order of a
+microsecond and depends on both the sample rate and the channel layout (e.g. 1T1R ≈ 1358 ns at
+30.72 MSPS falling to ≈ 373 ns at 122.88; 2T2R ≈ 1215 ns at 30.72), so measure it for your config.
+
+*libm2sdr:*
+```c
+m2sdr_set_tx_header(dev, true);          /* REQUIRED: enable per-buffer air-time headers for the gate */
+m2sdr_set_tx_lead_buffers(dev, 3);       /* fill a few buffers ahead of the DMA reader */
+m2sdr_set_tx_offset(dev, 1212);          /* ns, from timed_tx_selftest */
+struct m2sdr_metadata m = { .timestamp = air_time_ns, .flags = M2SDR_META_FLAG_HAS_TIME };
+m2sdr_sync_tx(dev, buf, n, &m, timeout_ms);   /* returns M2SDR_ERR_STATE if the header is not enabled */
+uint32_t uf; m2sdr_get_tx_underflow(dev, &uf);   /* frames that missed their air-time */
+```
+
+*SoapySDR* — the standard timed-TX contract, no code change:
+
+```
+driver=LiteXM2SDR,tx_offset=1212         # ns; omit to auto-derive from sample rate/layout
+```
+
+then call `writeStream()` with `SOAPY_SDR_HAS_TIME` and `timeNs`. `tx_dma_header=0` disables the
+gate (software timeline instead).
+
+With a shallow ring, run the radio thread on an isolated core (`isolcpus=`, `SCHED_FIFO`, `mlockall`)
+on the same core as the pinned IRQ, and confirm **0 overflow / 0 underflow** under load.
 
 [> Getting Started
 ------------------
