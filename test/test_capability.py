@@ -33,3 +33,28 @@ def test_capability_builds_with_valid_configuration():
         wr_sfp=1,
     )
     assert dut is not None
+
+
+def test_capability_encodes_5000baser_speed():
+    dut = Capability(
+        api_version_str="1.2",
+        pcie_enabled=False,
+        pcie_speed="gen1",
+        pcie_lanes=1,
+        pcie_ptm=False,
+        eth_enabled=True,
+        eth_speed="5000baser",
+        eth_ptp=False,
+        eth_ptp_rfic_clock=False,
+        sata_enabled=False,
+        sata_gen="gen1",
+        sata_mode="read-only",
+        gpio_enabled=False,
+        wr_enabled=False,
+        variant="baseboard",
+        jtagbone=True,
+        eth_sfp=0,
+        wr_sfp=1,
+    )
+
+    assert dut._eth_config.fields.speed.reset.value == 2

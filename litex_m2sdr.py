@@ -126,10 +126,11 @@ def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
 def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversampling=False):
     if with_eth:
         # Ethernet builds are limited by streaming bandwidth. Size the RFIC clock for 2T2R SC8:
-        # 1000BaseX -> 30.72MSPS, 2500BaseX -> 61.44MSPS.
+        # 1000BASE-X -> 30.72MSPS, 2500BASE-X/5GBASE-R -> 61.44MSPS.
         return {
             "1000basex" : 122.88e6,
             "2500basex" : 245.76e6,
+            "5000baser" : 245.76e6,
         }[eth_phy]
     return {
         False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
@@ -367,9 +368,11 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
-        # Match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
-        # divider configuration. 1000BASE-X already uses 125MHz here.
-        eth_refclk_freq = 125e6
+        eth_refclk_freq = {
+            "1000basex" : 125e6,
+            "2500basex" : 125e6,
+            "5000baser" : 103.125e6,
+        }[eth_phy] if with_eth else 125e6
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
@@ -609,11 +612,15 @@ class BaseSoC(SoCMini):
         if with_eth:
             # PHY.
             # ----
-            eth_phy_cls = {
-                "1000basex" : A7_1000BASEX,
-                "2500basex" : A7_2500BASEX,
-            }[eth_phy]
-            self.eth_phy = eth_phy_cls(
+            if eth_phy == "5000baser":
+                from liteeth.phy.a7_1000basex import A7_5000BASER
+                eth_phy_cls = A7_5000BASER
+            else:
+                eth_phy_cls = {
+                    "1000basex" : A7_1000BASEX,
+                    "2500basex" : A7_2500BASEX,
+                }[eth_phy]
+            eth_phy_kwargs = dict(
                 qpll_channel = self.qpll.get_channel("eth"),
                 data_pads    = self.platform.request("sfp", eth_sfp),
                 sys_clk_freq = sys_clk_freq,
@@ -621,7 +628,11 @@ class BaseSoC(SoCMini):
                 tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
                 **get_eth_phy_kwargs(eth_phy),
             )
-            self.eth_phy.pcs.add_csr()
+            if eth_phy == "5000baser":
+                eth_phy_kwargs["platform"] = platform
+            self.eth_phy = eth_phy_cls(**eth_phy_kwargs)
+            if not getattr(self.eth_phy, "baser", False):
+                self.eth_phy.pcs.add_csr()
 
             # Core + MMAP (Etherbone).
             # ------------------------
@@ -1167,8 +1178,9 @@ class BaseSoC(SoCMini):
 
         # Ethernet transceiver clocks.
         if with_eth:
-            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            if not getattr(self.eth_phy, "baser", False):
+                platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+                platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.rx_clk_freq/2))
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
             if eth_phy == "2500basex":
                 # The two halves of the RX gearbox exchange state/data on each
@@ -1498,6 +1510,96 @@ class BaseSoC(SoCMini):
             csr_csv      = "test/analyzer.csv"
         )
 
+    def add_eth_phy_probe(self, depth=4096):
+        """Add 5GBASE-R status CSRs and a receive-side LiteScope probe."""
+        assert hasattr(self, "eth_phy")
+        if not getattr(self.eth_phy, "baser", False):
+            raise ValueError("The Ethernet PHY probe currently targets the BASE-R datapath.")
+
+        control = self.eth_phy._baser_control = CSRStorage(name="baser_control", fields=[
+            CSRField("tx_prbs31", size=1, offset=0, description="Transmit BASE-R PRBS31 blocks."),
+            CSRField("rx_prbs31", size=1, offset=1, description="Check BASE-R PRBS31 blocks."),
+            CSRField("loopback", size=3, offset=2,
+                description="GTP LOOPBACK control (010 selects near-end PMA loopback)."),
+        ], description="5GBASE-R PCS diagnostics.")
+        tx_prbs31 = Signal()
+        rx_prbs31 = Signal()
+        loopback  = Signal(3)
+        self.specials += [
+            MultiReg(control.fields.tx_prbs31, tx_prbs31, "eth_tx"),
+            MultiReg(control.fields.rx_prbs31, rx_prbs31, "eth_rx"),
+            MultiReg(control.fields.loopback,  loopback,  "eth_tx"),
+        ]
+        self.comb += [
+            self.eth_phy.pcs.tx_prbs31_enable.eq(tx_prbs31),
+            self.eth_phy.pcs.rx_prbs31_enable.eq(rx_prbs31),
+            self.eth_phy.loopback.eq(loopback),
+        ]
+
+        status_signals = [Signal() for _ in range(8)]
+        self.specials += [
+            MultiReg(self.eth_phy.qpll_lock,              status_signals[0]),
+            MultiReg(self.eth_phy.tx_reset_done,          status_signals[1]),
+            MultiReg(self.eth_phy.rx_reset_done,          status_signals[2]),
+            MultiReg(self.eth_phy.rx_pma_reset_done,      status_signals[3]),
+            MultiReg(self.eth_phy.pcs.rx_block_lock,      status_signals[4]),
+            MultiReg(self.eth_phy.pcs.rx_high_ber,        status_signals[5]),
+            MultiReg(self.eth_phy.pcs.rx_status,          status_signals[6]),
+            MultiReg(self.eth_phy.pcs.rx_sequence_error,  status_signals[7]),
+        ]
+        self.eth_phy._baser_status = CSRStatus(name="baser_status", fields=[
+            CSRField("qpll_lock",         size=1, offset=0),
+            CSRField("tx_reset_done",     size=1, offset=1),
+            CSRField("rx_reset_done",     size=1, offset=2),
+            CSRField("rx_pma_reset_done", size=1, offset=3),
+            CSRField("rx_block_lock",     size=1, offset=4),
+            CSRField("rx_high_ber",       size=1, offset=5),
+            CSRField("rx_status",         size=1, offset=6),
+            CSRField("rx_sequence_error", size=1, offset=7),
+        ], description="5GBASE-R GTP and PCS status.")
+        self.comb += [
+            self.eth_phy._baser_status.fields.qpll_lock.eq(status_signals[0]),
+            self.eth_phy._baser_status.fields.tx_reset_done.eq(status_signals[1]),
+            self.eth_phy._baser_status.fields.rx_reset_done.eq(status_signals[2]),
+            self.eth_phy._baser_status.fields.rx_pma_reset_done.eq(status_signals[3]),
+            self.eth_phy._baser_status.fields.rx_block_lock.eq(status_signals[4]),
+            self.eth_phy._baser_status.fields.rx_high_ber.eq(status_signals[5]),
+            self.eth_phy._baser_status.fields.rx_status.eq(status_signals[6]),
+            self.eth_phy._baser_status.fields.rx_sequence_error.eq(status_signals[7]),
+        ]
+
+        self.eth_phy._baser_rx_error_count = CSRStatus(7,
+            name        = "baser_rx_error_count",
+            description = "BASE-R PRBS31 error count from the most recent PCS interval.",
+        )
+        self.specials += MultiReg(
+            self.eth_phy.pcs.rx_error_count,
+            self.eth_phy._baser_rx_error_count.status,
+        )
+
+        analyzer_signals = [
+            self.eth_phy.rx_data_valid,
+            self.eth_phy.rx_header_valid,
+            self.eth_phy.rx_block_ce,
+            self.eth_phy.pcs.serdes_rx_hdr,
+            self.eth_phy.pcs.serdes_rx_data,
+            self.eth_phy.pcs.rx_block_lock,
+            self.eth_phy.pcs.rx_high_ber,
+            self.eth_phy.pcs.rx_bad_block,
+            self.eth_phy.pcs.rx_sequence_error,
+            self.eth_phy.pcs.rx_status,
+            self.eth_phy.source.valid,
+            self.eth_phy.source.last,
+            self.eth_phy.source.error,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            samplerate   = self.eth_phy.rx_clk_freq,
+            clock_domain = "eth_rx",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
     # RFIC.
     def add_ad9361_spi_probe(self, depth=4096):
         analyzer_signals = [self.platform.lookup_request("ad9361_spi")]
@@ -1550,7 +1652,8 @@ def main():
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
-    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
+    parser.add_argument("--eth-phy", default="1000basex", help="Ethernet PHY.",
+        choices=["1000basex", "2500basex", "5000baser"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
@@ -1588,6 +1691,8 @@ def main():
     probeopts.add_argument("--with-si5351-i2c-probe",  action="store_true", help="Enable SI5351 I2C Probe.")
     probeopts.add_argument("--with-eth-phy-rx-probe",  action="store_true", help="Enable raw Ethernet PHY RX Probe.")
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
+    probeopts.add_argument("--with-eth-phy-probe", action="store_true",
+        help="Enable 5GBASE-R GTP/PCS status and RX Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
     probeopts.add_argument("--with-ad9361-data-probe", action="store_true", help="Enable AD9361 Data Probe.")
 
@@ -1687,6 +1792,8 @@ def main():
         soc.add_eth_phy_rx_probe()
     if args.with_eth_tx_probe:
         soc.add_eth_tx_probe()
+    if args.with_eth_phy_probe:
+        soc.add_eth_phy_probe()
     if args.with_ad9361_spi_probe:
         soc.add_ad9361_spi_probe()
     if args.with_ad9361_data_probe:
