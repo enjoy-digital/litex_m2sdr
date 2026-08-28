@@ -28,6 +28,7 @@ def test_rfic_clk_freq_policy():
     assert soc_mod.get_rfic_clk_freq(with_rfic_oversampling=True) == 491.52e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="1000basex") == 122.88e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="2500basex") == 245.76e6
+    assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="5000baser") == 245.76e6
     assert soc_mod.get_rfic_clk_freq(
         with_eth=True,
         eth_phy="1000basex",
