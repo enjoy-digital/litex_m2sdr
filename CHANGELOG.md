@@ -4,6 +4,14 @@
 
 The LiteX M2 SDR project is actively under development. We maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. Date-named bitstream archive releases complement the development summaries below.
 
+[> 2026 Q3 to date (Jul - )
+---------------------------
+**Kernel Driver PCIe Fault Handling**
+- Added PCIe error recovery to the kernel driver: AER/DPC events now reach `error_detected`/`slot_reset`/`resume` handlers that stop using the device, re-initialize the core after the reset, and retire the file descriptors the reset invalidated, so a fatal link error no longer leaves the board dead until the host is rebooted (#156).
+- Bounded the probe identifier read on an unreachable core: the driver bails out on the first all-ones word instead of issuing 256 MMIO reads that each cost a full PCIe completion timeout, which stalled the machine for ~1 minute per failed probe (#156).
+- Ratelimited the DMA overrun/underrun messages, which could otherwise flood the log with thousands of lines during a stream overrun and starve the CPU the stream needed to catch up (#156).
+- Made DMA teardown wait for the engines to report idle before the coherent buffers behind their descriptors are released (#156).
+
 [> 2026-05-15 First Date-Named Release
 --------------------------------------
 **Feature Status at Release**
