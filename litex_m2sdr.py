@@ -854,8 +854,9 @@ class BaseSoC(SoCMini):
             with_rx_deskew    = with_rfic_oversampling,
             # OSERDESE2 TX serializer (oversampling build): at 2T2R@122.88 the TX LVDS runs
             # 983Mbps/lane and the chip cannot de-interleave a fabric-ODDR eye, so drive the 6 TX
-            # lanes + TX_FRAME from OSERDESE2. Its MMCM only locks at the 491.52MHz DATA_CLK, so the
-            # oversampling image transmits only at 2T2R@122.88 (use the standard image for lower rates).
+            # lanes + TX_FRAME from OSERDESE2. Its MMCM is fixed for the 491.52MHz DATA_CLK and locks
+            # only over 184.62..492.31MHz, so this image covers 2T2R@61.44/122.88 and 1T1R@122.88;
+            # below that it cannot lock and TX airs zeros (the driver refuses those rates).
             with_tx_oserdes   = with_rfic_oversampling,
             wide              = with_rfic_oversampling,
         )

@@ -2,8 +2,8 @@
 # Full two-image loopback regression.
 #
 # The board needs two different gateware images to cover every TX mode (one
-# bitstream cannot: the Oversampling image's TX serializer MMCM locks only at
-# 491.52MHz DATA_CLK, the base image's ODDR TX eye is too poor at 983Mbps). So
+# bitstream cannot: the Oversampling image's TX serializer MMCM locks only over
+# DATA_CLK 184.62-492.31MHz, the base image's ODDR TX eye is too poor at 983Mbps). So
 # this driver flashes each image in turn and runs scripts/loopback_selftest.sh
 # for the configs the image supports:
 #

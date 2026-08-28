@@ -58,6 +58,8 @@ QUICK=0
 FORCE=0
 RATE=30720000
 LAYOUT=1t1r
+RATE_SET=0
+LAYOUT_SET=0
 # Loopback link budget. Defaults suit a bare TX->RX cable; a conducted loopback with fixed
 # attenuators must compensate them or the tone/marker lands in the noise and the datapath checks
 # fail on a perfectly good image (measured on this bench: 40 dB pads need rx-gain ~54 on the TX1/RX1
@@ -75,8 +77,8 @@ while [ $# -gt 0 ]; do
         --build-dir) BUILD_DIR="${2:-}"; shift 2 ;;
         --image)     IMAGE="${2:-}"; shift 2 ;;
         --chan)      CHAN="${2:-}"; shift 2 ;;
-        --rate)      RATE="${2:-}"; shift 2 ;;
-        --layout)    LAYOUT="${2:-}"; shift 2 ;;
+        --rate)      RATE="${2:-}"; RATE_SET=1; shift 2 ;;
+        --layout)    LAYOUT="${2:-}"; LAYOUT_SET=1; shift 2 ;;
         --rx-gain)   RX_GAIN="${2:-}"; shift 2 ;;
         --tx-att)    TX_ATT="${2:-}"; shift 2 ;;
         --config)    LB_CONFIG="${2:-}"; shift 2 ;;
@@ -202,6 +204,19 @@ util() { sudo "$UTIL" "$@" 2>&1; }
 #    A failure here with REFCLK present is the tools<->gateware CSR-map mismatch
 #    signature (see the clocks step), not a dead chip.
 # ---------------------------------------------------------------------------
+# The two images cover disjoint rates - the oversampling image drives only 2T2R@122.88 (its TX
+# serializer MMCM locks at no other DATA_CLK) and the standard image everything up to DATA_CLK
+# 245.76MHz - so the default config follows the image that is actually loaded. libm2sdr refuses
+# the wrong pair outright, which would otherwise fail the qualification on a good image.
+if "$UTIL" info 2>/dev/null | grep -q "Oversampling   : Yes"; then
+    if [ "$RATE_SET" = 0 ]; then
+        RATE=122880000
+    fi
+    if [ "$LAYOUT_SET" = 0 ]; then
+        LAYOUT=2t2r
+    fi
+fi
+
 MSPS="$(awk "BEGIN{printf \"%.2f\", $RATE/1e6}")"
 hdr "hardware: RFIC bring-up ($LAYOUT @ ${MSPS} MSPS)"
 BU="$(sudo "$RF" --sample-rate "$RATE" --channel-layout "$LAYOUT" 2>&1)"

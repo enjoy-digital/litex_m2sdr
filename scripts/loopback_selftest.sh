@@ -50,8 +50,10 @@ cc -O3 -Wall -Wextra -o "$ENGINE" "$REPO/scripts/loopback_selftest.c" \
 #     are CONFIGS below.
 #   - OVERSAMPLING build (--with-rfic-oversampling, OSERDESE2 TX serializer):
 #     the only build that transmits at 2T2R@122.88 (DATA_CLK 491.52MHz, 983Mbps
-#     lanes via the OSERDESE2 serializer). Its TX MMCM locks ONLY at 491.52, so
-#     it does NOT transmit at the lower rates. These are OVERSAMPLING_CONFIGS.
+#     lanes via the OSERDESE2 serializer). Its TX MMCM is fixed for that DATA_CLK
+#     and locks only over 184.62-492.31MHz, so this image covers DATA_CLK 245.76
+#     too (2T2R@61.44) but nothing below - libm2sdr refuses those outright. These
+#     are OVERSAMPLING_CONFIGS.
 # The default run auto-selects the group for the LOADED image (the
 # rfic_oversampling capability bit via m2sdr_util info); --config picks one
 # config explicitly.
@@ -77,7 +79,13 @@ CONFIGS=(
 OVERSAMPLING_CONFIGS=(
     "2t2r-122.88      | --layout 2t2r --rate 122880000 --sc8"
     "2t2r-122.88-rx   | --layout 2t2r --rate 122880000 --no-tx --sc8"
+    # DATA_CLK 245.76MHz: the low end of the TX MMCM's lock range on this image, where the
+    # OSERDESE2 lanes run 491.52Mbps and the RX IDELAYE2 insertion delay is compensated by the
+    # in-spec delay midpoints rather than a per-lane deskew.
+    "2t2r-61.44       | --layout 2t2r --rate 61440000"
 )
+# 1t1r-122.88-* from CONFIGS also runs on the oversampling image (DATA_CLK 245.76MHz as well;
+# verified 25/25 on the bench). It stays in the standard group so --config picks one entry.
 if [ "$QUICK" = 1 ]; then
     CONFIGS=(
         "1t1r-61.44-sc16  | --layout 1t1r --rate 61440000  "

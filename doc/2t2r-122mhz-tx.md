@@ -41,8 +41,12 @@ loopback, matching the 61.44 reference), for both SC8 and SC16 host formats.
 
 Constraints of the oversampling build:
 
-- The OSERDES MMCM only locks at the 491.52 `DATA_CLK`, so **TX is supported only at 2T2R@122.88**
-  on this image (RX works at all rates; lower-rate TX uses the standard image).
+- The OSERDES MMCM's multiply/divide are fixed for the 491.52 MHz `DATA_CLK` (13/4, DIVCLK 1),
+  so both outputs and the 8:1 ratio scale with the input and the **VCO range is what limits the
+  image**: it locks for `DATA_CLK` 184.62-492.31 MHz, i.e. **2T2R @ 61.44 and 122.88, and
+  1T1R @ 122.88**. Below that (`DATA_CLK` <= 122.88 MHz) the MMCM never locks, which holds every
+  serializer in reset and airs zeros while the bring-up still reports success -- so `libm2sdr`
+  refuses those rates rather than come up mute. Use the standard image for them.
 - The image identifies itself through the `rfic_oversampling` capability bit
   (`m2sdr_util info` prints "Oversampling: Yes/No"), and the driver rejects 2T2R above
   61.44 MSPS on a standard image with a clear error instead of misconfiguring the RFIC.

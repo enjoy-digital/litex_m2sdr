@@ -79,8 +79,11 @@ class AD9361PHY(LiteXModule):
         # CLKDIV 122.88) instead of fabric-clocked ODDRs. At 2T2R@122.88 the TX LVDS runs 983Mbps/lane
         # and the ODDR output eye is too poor for the chip to de-interleave (a clean tone splatters to
         # fs/2); OSERDESE2 gives a clean eye and the datapath fabric runs at 122.88 (the CLKDIV). Uses
-        # a single shared clock for all lanes; the MMCM only locks at the 491.52 DATA_CLK, so an
-        # OSERDES build supports TX only at 2T2R@122.88.
+        # a single shared clock for all lanes. The MMCM's multiply/divide are fixed for the 491.52
+        # DATA_CLK, so its outputs (and the 8:1 ratio) track the input, and the VCO range is what
+        # bounds the build: it locks for DATA_CLK 184.62..492.31MHz and nowhere else. Outside that
+        # ~locked holds the serializers in reset and TX airs zeros, so the driver refuses those
+        # rates outright (see test_ad9361_phy_clocking.py and libm2sdr's m2sdr_image_rate_error()).
         self.sink    = sink   = stream.Endpoint(phy_layout()) # TX input  stream.
         self.source  = source = stream.Endpoint(phy_layout()) # RX output stream.
         self.control = CSRStorage(fields=[
@@ -379,8 +382,9 @@ class AD9361PHY(LiteXModule):
         if with_tx_oserdes:
             # OSERDES clocking: CLK=491.52MHz (DDR bit clock -> 983Mbps), CLKDIV=122.88MHz (8:1
             # parallel-load clock). A dedicated MMCM off the DATA_CLK IBUFDS; both clocks are BUFG'd
-            # and phase-coherent. The MMCM only locks at the 491.52 DATA_CLK (2T2R@122.88), so an
-            # OSERDES build supports TX only at that rate. No per-lane phasing (shared CLK).
+            # and phase-coherent. M/D are computed here for 491.52 and then fixed in the bitstream,
+            # so both outputs scale with DATA_CLK and the VCO range (600..1600MHz on -3) is what
+            # limits the build to DATA_CLK 184.62..492.31MHz. No per-lane phasing (shared CLK).
             self.tx_oserdes_mmcm = S7MMCM(speedgrade=-3)
             self.tx_oserdes_mmcm.register_clkin(rx_clk_ibufds, 491.52e6)
             self.clock_domains.cd_oserdes     = ClockDomain(reset_less=True)  # 491.52 CLK.

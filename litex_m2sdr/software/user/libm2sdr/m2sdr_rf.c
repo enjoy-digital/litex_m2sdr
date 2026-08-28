@@ -1041,6 +1041,62 @@ restore:
     return rc;
 }
 
+/* The oversampling image serializes TX through OSERDESE2s clocked by an MMCM whose multiply and
+ * divide are fixed at build time for a 491.52 MHz DATA_CLK: CLKFBOUT_MULT_F 13/4, DIVCLK_DIVIDE 1,
+ * so VCO = DATA_CLK * 13/4 and both outputs (CLK = VCO/3.25, CLKDIV = VCO/13) track the input --
+ * the 8:1 serializer ratio holds at any input the MMCM can lock. Locking is the whole constraint,
+ * and it is the -3 speedgrade VCO range that bounds it: DATA_CLK from 184.62 to 492.31 MHz.
+ * test/test_ad9361_phy_clocking.py fails if the gateware stops matching these numbers. */
+#define M2SDR_OSERDES_MMCM_MULT_NUM             13LL
+#define M2SDR_OSERDES_MMCM_MULT_DEN              4LL
+#define M2SDR_OSERDES_MMCM_VCO_MIN_HZ    600000000LL
+#define M2SDR_OSERDES_MMCM_VCO_MAX_HZ   1600000000LL
+
+/* Highest DATA_CLK the standard image's fabric-clocked TX ODDRs keep an eye at. */
+#define M2SDR_STANDARD_MAX_INTERFACE_CLK_HZ  245760000LL
+
+/* AD9361 LVDS interface clock (DATA_CLK). The data port carries 12-bit I and Q over 6 DDR lanes,
+ * so it clocks at twice the sample rate per channel: 2x in 1T1R, 4x in 2T2R. Which images can
+ * drive a given DATA_CLK is the whole of the image split, see m2sdr_image_rate_error(). */
+int64_t m2sdr_interface_clk_hz(enum m2sdr_channel_layout layout, int64_t sample_rate)
+{
+    return sample_rate * (layout == M2SDR_CHANNEL_LAYOUT_2T2R ? 4 : 2);
+}
+
+/* TX is what splits the images, and neither of them fails gracefully at the wrong DATA_CLK:
+ *
+ *  - The standard image clocks the TX ODDRs from rfic_clk. Above DATA_CLK 245.76 MHz the output
+ *    eye is too poor for the AD9361 to de-interleave, and a clean tone splatters to fs/2.
+ *  - The oversampling image needs its TX serializer MMCM to lock. Outside the VCO range that
+ *    never happens, and ~locked holds every serializer in reset: the transmitter airs zeros
+ *    while the whole bring-up still reports success.
+ *
+ * Neither is detectable from the host after the fact, so the configuration is refused up front.
+ */
+const char *m2sdr_image_rate_error(bool image_has_oversampling,
+                                   enum m2sdr_channel_layout layout, int64_t sample_rate)
+{
+    const int64_t interface_clk = m2sdr_interface_clk_hz(layout, sample_rate);
+
+    if (image_has_oversampling) {
+        const int64_t vco = interface_clk * M2SDR_OSERDES_MMCM_MULT_NUM /
+            M2SDR_OSERDES_MMCM_MULT_DEN;
+
+        if (vco < M2SDR_OSERDES_MMCM_VCO_MIN_HZ)
+            return "the RFIC-oversampling image drives TX from an MMCM fixed for DATA_CLK "
+                   "491.52 MHz, and below DATA_CLK 184.62 MHz its VCO cannot lock, which holds "
+                   "the serializers in reset and airs zeros; flash the standard image";
+        if (vco > M2SDR_OSERDES_MMCM_VCO_MAX_HZ)
+            return "the RFIC-oversampling image's TX serializer MMCM cannot lock above "
+                   "DATA_CLK 492.31 MHz";
+        return NULL;
+    }
+    if (interface_clk > M2SDR_STANDARD_MAX_INTERFACE_CLK_HZ)
+        return "the standard image clocks TX from rfic_clk, whose output eye closes above "
+               "DATA_CLK 245.76 MHz; 2T2R above 61.44 MSPS needs the *_rfic_oversampling image";
+    return NULL;
+}
+
 /* Whether the loaded image implements the RFIC-oversampling datapath: the per-lane RX IDELAYE2s
  * and the OSERDESE2 TX serializer. Every image shares one CSR map
  * (scripts/gen_kernel_headers.py), so the deskew registers are declared whatever is flashed and
@@ -1051,6 +1107,38 @@ static bool m2sdr_has_rfic_oversampling(struct m2sdr_dev *dev)
 
     return m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
            (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING) != 0;
+}
+
+/* Refuse a stream configuration the loaded image cannot run, and say why. */
+static int m2sdr_check_image_rate(struct m2sdr_dev *dev, enum m2sdr_channel_layout layout,
+                                  int64_t sample_rate)
+{
+    const char *why = m2sdr_image_rate_error(m2sdr_has_rfic_oversampling(dev), layout,
+        sample_rate);
+
+    if (!why)
+        return M2SDR_ERR_OK;
+    fprintf(stderr, "%s @ %.3f MSPS (DATA_CLK %.2f MHz) is not supported by the loaded gateware "
+        "image: %s.\n", layout == M2SDR_CHANNEL_LAYOUT_2T2R ? "2T2R" : "1T1R",
+        sample_rate / 1e6, m2sdr_interface_clk_hz(layout, sample_rate) / 1e6, why);
+    return M2SDR_ERR_INVAL;
+}
+
+/* Refuse a rate no channel layout can run on the loaded image. Used where the layout is not
+ * settled yet -- SoapySDR sets the rate before it picks the layout at setupStream() -- so that
+ * an impossible rate still fails at the call that requested it; m2sdr_set_channel_mode() then
+ * checks the exact pair. */
+static int m2sdr_check_image_rate_any_layout(struct m2sdr_dev *dev, int64_t sample_rate)
+{
+    const bool oversampling = m2sdr_has_rfic_oversampling(dev);
+    const char *why         = m2sdr_image_rate_error(oversampling,
+        M2SDR_CHANNEL_LAYOUT_2T2R, sample_rate);
+
+    if (!why || !m2sdr_image_rate_error(oversampling, M2SDR_CHANNEL_LAYOUT_1T1R, sample_rate))
+        return M2SDR_ERR_OK;
+    fprintf(stderr, "%.3f MSPS is not supported by the loaded gateware image in any channel "
+        "layout: %s.\n", sample_rate / 1e6, why);
+    return M2SDR_ERR_INVAL;
 }
 
 /* Per-lane RX interface deskew at the doubled DATA_CLK rate.
@@ -1737,6 +1825,8 @@ static void m2sdr_store_applied_config(struct m2sdr_dev *dev,
 
     dev->rf_last_config = normalized;
     dev->rf_last_config_valid = 1;
+    dev->rf_sample_rate = normalized.sample_rate;
+    dev->rf_sample_rate_valid = 1;
 }
 
 /* Bind an externally-initialized AD9361 instance to libm2sdr, primarily for
@@ -1818,7 +1908,8 @@ static int m2sdr_configure_datapath(struct m2sdr_dev *dev, struct ad9361_rf_phy 
             return rc;
     }
     else if (m2sdr_has_rfic_oversampling(dev)) {
-        /* In-spec rates on the deskew-capable gateware: the per-lane RX IDELAYE2s add ~0.6ns of
+        /* In-spec rates on the deskew-capable gateware (2T2R @ 61.44, DATA_CLK 245.76MHz -- the
+         * lowest the TX serializer MMCM still locks at): the per-lane RX IDELAYE2s add ~0.6ns of
          * insertion delay that the chip's init-table interface delays predate, leaving the
          * interface misaligned (full-scale noise captures). Apply the PRBS-calibrated midpoints
          * (clk 4 / data 3 RX, clk 6 / data 7 TX, measured at DATA_CLK 245.76MHz) and zero any
@@ -1906,18 +1997,9 @@ int m2sdr_apply_config(struct m2sdr_dev *dev, const struct m2sdr_config *cfg)
     /* Refuse a rate/layout the loaded image cannot run, instead of bringing up a transmitter
      * that reports success and airs nothing. The CSR map is the same for both images, so the
      * capability register is what tells them apart. */
-    /* Fail loudly on a rate/layout the loaded image cannot run instead of silently
-     * corrupting. 2T2R above 61.44 MSPS needs DATA_CLK 491.52 MHz = the RFIC-
-     * oversampling image; on a standard image the interface never aligns. The CSR map
-     * is the same for both images, so the capability register is what tells them apart. */
-    if (channel_layout == M2SDR_CHANNEL_LAYOUT_2T2R && cfg->sample_rate > 61440000 &&
-        !m2sdr_has_rfic_oversampling(dev)) {
-        fprintf(stderr,
-            "2T2R @ %.3f MSPS needs the RFIC-oversampling gateware image, but a "
-            "standard image is loaded. Flash the *_rfic_oversampling image, or use "
-            "1T1R or a rate <= 61.44 MSPS.\n", cfg->sample_rate / 1e6);
-        return M2SDR_ERR_INVAL;
-    }
+    rc = m2sdr_check_image_rate(dev, channel_layout, cfg->sample_rate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     rc = m2sdr_configure_clocking(dev, conn, cfg, clock_source);
     if (rc != M2SDR_ERR_OK)
@@ -2106,6 +2188,15 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     if (rc != M2SDR_ERR_OK)
         return rc;
 
+    /* Same image/rate rule as m2sdr_apply_config(): this is the entry point SoapySDR and any
+     * other caller use to retune an already-configured device, and moving off a rate the image
+     * can drive would silently kill TX. */
+    rc = dev->rf_channel_layout_valid ?
+        m2sdr_check_image_rate(dev, dev->rf_channel_layout, rate) :
+        m2sdr_check_image_rate_any_layout(dev, rate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
     /* Rates above the AD9361 clock-chain limit select the wide-bandwidth
      * mode (see ad9361_enable_oversampling()). Callers pass the STREAM rate;
      * the halving is handled here. */
@@ -2129,6 +2220,8 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
 
         dev->rf_oversample_enabled = wide ? 1 : 0;
     }
+    dev->rf_sample_rate = rate;
+    dev->rf_sample_rate_valid = 1;
     m2sdr_publish_active_sample_rate(dev, rate);
     return M2SDR_ERR_OK;
 }
@@ -2227,6 +2320,15 @@ int m2sdr_set_channel_mode(struct m2sdr_dev *dev, unsigned channel_count,
 
     channel_layout = channel_count == 1 ?
         M2SDR_CHANNEL_LAYOUT_1T1R : M2SDR_CHANNEL_LAYOUT_2T2R;
+
+    /* The layout doubles DATA_CLK, so a rate the image could drive in 1T1R may be out of reach
+     * in 2T2R (and vice versa on the oversampling image). This is the last point where both are
+     * known before streaming, so refuse the pair here rather than transmit nothing. */
+    if (dev->rf_sample_rate_valid) {
+        rc = m2sdr_check_image_rate(dev, channel_layout, dev->rf_sample_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+    }
 
     rc = m2sdr_apply_channel_layout(dev, init_param, channel_layout,
                                     rx_channel, tx_channel);
