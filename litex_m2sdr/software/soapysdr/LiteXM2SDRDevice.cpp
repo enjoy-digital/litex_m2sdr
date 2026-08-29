@@ -945,6 +945,35 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 1);
     }
 
+    /* FPGA <-> AD9361 interface delay calibration (opt-in via
+     * calibrate_delay=1): scans the digital interface clock/data delays with
+     * the PRBS path, like `m2sdr_rf --calibrate-delay`, for boards where the
+     * header defaults sit at the edge of the timing eye. Runs here because
+     * the RFIC is still in its bring-up 2T2R layout (gateware without a
+     * 1R1T-aware PRBS checker cannot converge in 1T1R) and no stream is
+     * active yet; the result is cached and re-applied whenever a later RFIC
+     * re-initialization resets the delay registers. */
+    if (args.count("calibrate_delay") > 0)
+        _ifaceDelayCalRequested = args.at("calibrate_delay") != "0";
+    if (_ifaceDelayCalRequested && do_init) {
+        int rc = m2sdr_rf_calibrate_interface_delay(_dev);
+        if (rc == M2SDR_ERR_OK &&
+            m2sdr_rf_get_interface_delay(_dev, M2SDR_RX, &_rxIfaceDelayReg) == M2SDR_ERR_OK &&
+            m2sdr_rf_get_interface_delay(_dev, M2SDR_TX, &_txIfaceDelayReg) == M2SDR_ERR_OK) {
+            _ifaceDelayCalValid = true;
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "Interface delay calibration done: RX reg 0x%02x, TX reg 0x%02x",
+                _rxIfaceDelayReg, _txIfaceDelayReg);
+        } else {
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Interface delay calibration failed (%s); keeping default delays",
+                m2sdr_strerror(rc));
+        }
+    } else if (_ifaceDelayCalRequested) {
+        SoapySDR::log(SOAPY_SDR_WARNING,
+            "calibrate_delay=1 ignored with bypass_init=1 (the PRBS scan would disturb the external RF configuration)");
+    }
+
     if (args.count("rx_antenna0") > 0)
         _rx_stream.antenna[0] = args.at("rx_antenna0");
     if (args.count("rx_antenna1") > 0)
@@ -1064,6 +1093,35 @@ void SoapyLiteXM2SDR::invalidateRfHardwareCache() {
     _txFrequencyHwApplied = false;
     _txAttHwApplied = false;
     _bitModeHwApplied = false;
+}
+
+void SoapyLiteXM2SDR::reapplyInterfaceDelays(const char *context) {
+    if (!_ifaceDelayCalValid)
+        return;
+    /* Rates above 61.44 MSPS use the wide-bandwidth bring-up, which programs
+     * its own delay tuning for the doubled DATA_CLK; the values calibrated at
+     * the regular interface rate do not apply there. */
+    if (_sampleRateHwApplied && _sampleRateHw > 61440000)
+        return;
+
+    uint8_t rx_reg = 0;
+    uint8_t tx_reg = 0;
+    if (m2sdr_rf_get_interface_delay(_dev, M2SDR_RX, &rx_reg) != M2SDR_ERR_OK ||
+        m2sdr_rf_get_interface_delay(_dev, M2SDR_TX, &tx_reg) != M2SDR_ERR_OK)
+        return;
+    if (rx_reg == _rxIfaceDelayReg && tx_reg == _txIfaceDelayReg)
+        return;
+
+    int rc_rx = m2sdr_rf_set_interface_delay(_dev, M2SDR_RX, _rxIfaceDelayReg);
+    int rc_tx = m2sdr_rf_set_interface_delay(_dev, M2SDR_TX, _txIfaceDelayReg);
+    if (rc_rx != M2SDR_ERR_OK || rc_tx != M2SDR_ERR_OK) {
+        SoapySDR::logf(SOAPY_SDR_WARNING,
+            "Re-applying calibrated interface delays failed after %s", context);
+        return;
+    }
+    SoapySDR::logf(SOAPY_SDR_DEBUG,
+        "Re-applied calibrated interface delays (RX 0x%02x, TX 0x%02x) after %s",
+        _rxIfaceDelayReg, _txIfaceDelayReg, context);
 }
 
 /***************************************************************************************************
@@ -1889,6 +1947,11 @@ void SoapyLiteXM2SDR::setSampleRate(
 #if USE_LITEETH
     timeout.throw_if_timed_out();
 #endif
+
+    /* Covers dropping back from the wide-bandwidth mode, whose bring-up
+     * leaves its own delay tuning in the registers. */
+    if (sample_rate_applied)
+        reapplyInterfaceDelays("sample-rate change");
 
     if (_autoBandwidth && sample_rate_applied)
         setBandwidthUnlocked(direction, auto_bandwidth_from_sample_rate(rate));

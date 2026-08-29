@@ -27,12 +27,19 @@ the `KERNEL_PATH=...` make variable.
 
 ## IOMMU / SMMU
 
-Keep the Tegra SMMU driver enabled. Do not add `arm-smmu.disable=1` as a
-default workaround; it disables the SMMU globally and can break unrelated
-Jetson peripherals.
+The SMMU can stay fully enabled: current `m2sdr.ko` builds stream correctly
+with SMMU address translation active (verified on JetPack 7 / L4T R39 with the
+stock kernel command line, no `iommu.passthrough=1`). Older kernel-module
+builds mapped the wrong pages for zero-copy DMA behind an IOMMU/SMMU, which
+made SoapySDR RX return mostly/all-zero buffers and made IOMMU passthrough
+look like a requirement on Jetson; that driver bug is fixed.
 
-If PCIe enumeration works but DMA streaming does not produce samples, first try
-IOMMU passthrough:
+Do not add `arm-smmu.disable=1` as a default workaround; it disables the SMMU
+globally and can break unrelated Jetson peripherals.
+
+If you must run an older driver build and DMA streaming does not produce
+samples even though PCIe enumeration works, IOMMU passthrough remains the
+legacy workaround:
 
 ```bash
 # /boot/extlinux/extlinux.conf

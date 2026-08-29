@@ -531,6 +531,15 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     uint32_t _rxChannelMaskHw = 0;
     uint32_t _txChannelMaskHw = 0;
 
+    /* FPGA <-> AD9361 interface delay calibration (calibrate_delay=1): the
+     * PRBS-scanned delay register values, cached so they can be re-applied
+     * after RFIC re-initializations (channel-mode changes) reset them. */
+    bool _ifaceDelayCalRequested = false;
+    bool _ifaceDelayCalValid = false;
+    uint8_t _rxIfaceDelayReg = 0;
+    uint8_t _txIfaceDelayReg = 0;
+    void reapplyInterfaceDelays(const char *context);
+
     void invalidateRfHardwareCache();
     std::recursive_mutex &streamAccessMutex(SoapySDR::Stream *stream) const;
     void resetDatapathUnlocked();

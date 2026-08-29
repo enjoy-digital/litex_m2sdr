@@ -4,6 +4,12 @@
 
 The LiteX M2 SDR project is actively under development. We maintain this changelog to allow users and potential clients of the hardware to follow the project's progress and stay up to date with the latest features and improvements. Date-named bitstream archive releases complement the development summaries below.
 
+[> 2026 Q3 to date (Jul - )
+---------------------------
+**Host Stack Fixes**
+- Fixed zero-copy DMA mmap on IOMMU/SMMU platforms (e.g. Jetson Orin): the kernel driver mapped the wrong pages on ARM/AArch64, so SoapySDR RX delivered mostly-zero buffers while the copy-mode tools streamed correctly (#149).
+- Added opt-in FPGA <-> AD9361 interface delay calibration to the SoapySDR driver (`calibrate_delay=1`) with cached delays re-applied across RFIC reconfigurations, plus the matching `libm2sdr` interface-delay API.
+
 [> 2026-05-15 First Date-Named Release
 --------------------------------------
 **Feature Status at Release**
