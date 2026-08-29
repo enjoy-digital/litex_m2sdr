@@ -6,6 +6,7 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import inspect
 import os
 import sys
 import argparse
@@ -1724,7 +1725,22 @@ def main():
         return r
 
     builder = Builder(soc, output_dir=os.path.join("build", get_build_name()), csr_csv="scripts/csr.csv")
-    builder.build(build_name=get_build_name(), run=args.build)
+    # Timing-closure directives. The 125 MHz sys clock is this design's critical domain: direct
+    # place and route for timing and run the post-place and post-route physical-optimization
+    # passes so the PCIe variants meet timing at the stock clock. Implementation-stage directives
+    # only -- steering synthesis/logic optimization degrades this design's sys-clock result. A
+    # bitstream that misses timing must never be flashed: a marginal image mis-clocks the AD9361
+    # and presents as a dead RFIC.
+    build_kwargs = {}
+    toolchain = getattr(getattr(soc, "platform", None), "toolchain", None)
+    if toolchain is not None and "vivado_place_directive" in inspect.signature(toolchain.build).parameters:
+        build_kwargs.update(
+            vivado_place_directive               = "ExtraTimingOpt",
+            vivado_post_place_phys_opt_directive = "AggressiveExplore",
+            vivado_route_directive               = "AggressiveExplore",
+            vivado_post_route_phys_opt_directive = "AggressiveExplore",
+        )
+    builder.build(build_name=get_build_name(), run=args.build, **build_kwargs)
 
     # Generate LitePCIe Driver.
     generate_litepcie_software(soc, "litex_m2sdr/software", use_litepcie_software=args.driver)
