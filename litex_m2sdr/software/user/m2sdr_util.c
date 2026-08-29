@@ -2634,6 +2634,18 @@ static void loopback_print_stream_diagnostics(struct m2sdr_dev *dev)
     printf("\n");
 }
 
+/* The TX crossbar mux selects the stream source: 0 = PCIe DMA, 1 = Ethernet TX streamer. The
+ * prefill hold/release below only makes sense for an Ethernet device, but USE_LITEETH is defined
+ * in every build (all three Makefile INTERFACE settings emit -DUSE_LITEPCIE -DUSE_LITEETH), so it
+ * has to be gated on the transport actually in use. */
+static bool loopback_is_liteeth(struct m2sdr_dev *dev)
+{
+    enum m2sdr_transport_kind transport;
+
+    return m2sdr_get_transport(dev, &transport) == M2SDR_ERR_OK &&
+           transport == M2SDR_TRANSPORT_KIND_LITEETH;
+}
+
 static int loopback_reset_datapath(struct m2sdr_dev *dev, const char *phase)
 {
     int rc = m2sdr_reset_datapath(dev);
@@ -2782,7 +2794,7 @@ static int stream_loopback_test(int data_width,
         goto cleanup_disable_loopback;
     }
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
+    if (loopback_is_liteeth(dev) && m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
         fprintf(stderr, "m2sdr TX prefill hold failed\n");
         goto cleanup_disable_loopback;
     }
@@ -2810,7 +2822,7 @@ static int stream_loopback_test(int data_width,
             rx_observed_base = stats.rx_buffers;
     }
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
+    if (loopback_is_liteeth(dev) && m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
         fprintf(stderr, "m2sdr TX prefill release failed\n");
         goto cleanup_disable_loopback;
     }
