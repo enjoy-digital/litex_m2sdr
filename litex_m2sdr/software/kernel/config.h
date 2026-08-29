@@ -35,6 +35,19 @@
 #define DMA_BUFFER_TOTAL_SIZE (DMA_BUFFER_COUNT*DMA_BUFFER_SIZE)
 //#define DMA_BUFFER_ALIGNED
 
+/* DMA_BUFFER_SIZE / DMA_BUFFER_PER_IRQ are only the defaults: both are
+ * per-channel and can be overridden per channel with the dma_buffer_size /
+ * dma_buffer_per_irq module parameters (see software/kernel/README.md).
+ *
+ * Constraints on a per-channel buffer size:
+ * - the descriptor length field is 24-bit;
+ * - PCIe requests are dword granular and the DMA datapath is up to 256-bit
+ *   wide, so keep buffers 64-byte aligned to stay word-aligned in every
+ *   configuration.
+ */
+#define DMA_BUFFER_SIZE_ALIGN  64
+#define DMA_BUFFER_SIZE_MAX    (0x1000000 - DMA_BUFFER_SIZE_ALIGN)
+
 /* DMA Offsets */
 #define PCIE_DMA_WRITER_ENABLE_OFFSET               0x0000
 #define PCIE_DMA_WRITER_TABLE_VALUE_OFFSET          0x0004
