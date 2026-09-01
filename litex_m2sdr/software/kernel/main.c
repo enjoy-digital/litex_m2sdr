@@ -35,6 +35,7 @@
 #include <linux/jiffies.h>
 #include <linux/cdev.h>
 #include <linux/kref.h>
+#include <linux/idr.h>
 #include <linux/rwsem.h>
 #include <linux/platform_device.h>
 #include <linux/version.h>
@@ -151,6 +152,7 @@ struct litepcie_device {
 	struct litepcie_chan chan[DMA_CHANNEL_COUNT]; /* DMA channel information */
 	spinlock_t lock;                              /* Spinlock for synchronization */
 	int minor_base;                               /* Base minor number for the device */
+	int minor_idx;                                /* IDA allocated device index */
 	int irqs;                                     /* Number of IRQs */
 	int channels;                                 /* Number of DMA channels */
 	struct kref ref;                              /* Allocation lifetime */
@@ -223,7 +225,7 @@ static void litepcie_exit(struct litepcie_device *s)
 }
 
 static int litepcie_major;
-static int litepcie_minor_idx;
+static DEFINE_IDA(litepcie_ida);
 static struct class *litepcie_class;
 static dev_t litepcie_dev_t;
 
@@ -1555,13 +1557,25 @@ static const struct file_operations litepcie_fops = {
 /* ----------------------------------------------------------------------------------------------- */
 
 /* Reserve this device's minor range. Kept separate from litepcie_alloc_chdev()
- * so that the chardevs can be created at the end of probe while the liteuart
- * platform device id, which is taken from litepcie_minor_idx, is unchanged.
+ * so that the chardevs can be created at the end of probe.
  */
-static void litepcie_reserve_minors(struct litepcie_device *s)
+static int litepcie_reserve_minors(struct litepcie_device *s)
 {
-	s->minor_base = litepcie_minor_idx;
-	litepcie_minor_idx += s->channels;
+	int id = ida_alloc_max(&litepcie_ida,
+			       LITEPCIE_MINOR_COUNT / s->channels - 1, GFP_KERNEL);
+
+	if (id < 0)
+		return id;
+
+	s->minor_idx  = id;
+	s->minor_base = MINOR(litepcie_dev_t) + id * s->channels;
+
+	return 0;
+}
+
+static void litepcie_release_minors(struct litepcie_device *s)
+{
+	ida_free(&litepcie_ida, s->minor_idx);
 }
 
 /* Allocate character devices for DMA channels */
@@ -2148,7 +2162,11 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	litepcie_dev->channels = DMA_CHANNELS;
 
-	litepcie_reserve_minors(litepcie_dev);
+	ret = litepcie_reserve_minors(litepcie_dev);
+	if (ret < 0) {
+		dev_err(&dev->dev, "Failed to allocate a minor range\n");
+		goto fail2;
+	}
 
 	for (i = 0; i < litepcie_dev->channels; i++) {
 		litepcie_dev->chan[i].index           = i;
@@ -2219,7 +2237,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 		(resource_size_t) litepcie_dev->bar0_addr +
 		CSR_UART_XOVER_RXTX_ADDR - CSR_BASE;
 	tty_res->flags = IORESOURCE_REG;
-	litepcie_dev->uart = platform_device_register_simple("liteuart", litepcie_minor_idx, tty_res, 1);
+	litepcie_dev->uart = platform_device_register_simple("liteuart", litepcie_dev->minor_idx, tty_res, 1);
 	if (IS_ERR(litepcie_dev->uart)) {
 		ret = PTR_ERR(litepcie_dev->uart);
 		goto fail2;
@@ -2295,6 +2313,7 @@ fail2:
 		free_irq(irq, litepcie_dev);
 	}
 	pci_free_irq_vectors(dev);
+	litepcie_release_minors(litepcie_dev);
 fail1:
 	/* The chardevs were never created, so this drops the last reference. */
 	kref_put(&litepcie_dev->ref, litepcie_dev_free);
@@ -2389,6 +2408,7 @@ if (litepcie_soc_has_sata(litepcie_dev)) {
 	 * operation it can still make is refused by the gate above.
 	 */
 	litepcie_release_chdevs(litepcie_dev);
+	litepcie_release_minors(litepcie_dev);
 	kref_put(&litepcie_dev->ref, litepcie_dev_free);
 }
 
@@ -2436,7 +2456,6 @@ static int __init litepcie_module_init(void)
 		goto fail_alloc_chrdev_region;
 	}
 	litepcie_major = MAJOR(litepcie_dev_t);
-	litepcie_minor_idx = MINOR(litepcie_dev_t);
 
 	ret = pci_register_driver(&litepcie_pci_driver);
 	if (ret < 0) {
@@ -2459,6 +2478,7 @@ static void __exit litepcie_module_exit(void)
 {
 	pci_unregister_driver(&litepcie_pci_driver);
 	unregister_chrdev_region(litepcie_dev_t, LITEPCIE_MINOR_COUNT);
+	ida_destroy(&litepcie_ida);
 	class_destroy(litepcie_class);
 
 	liteuart_exit();
