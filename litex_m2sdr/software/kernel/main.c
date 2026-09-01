@@ -1443,6 +1443,16 @@ static const struct file_operations litepcie_fops = {
 /*                                    Device Management                                            */
 /* ----------------------------------------------------------------------------------------------- */
 
+/* Reserve this device's minor range. Kept separate from litepcie_alloc_chdev()
+ * so that the chardevs can be created at the end of probe while the liteuart
+ * platform device id, which is taken from litepcie_minor_idx, is unchanged.
+ */
+static void litepcie_reserve_minors(struct litepcie_device *s)
+{
+	s->minor_base = litepcie_minor_idx;
+	litepcie_minor_idx += s->channels;
+}
+
 /* Allocate character devices for DMA channels */
 static int litepcie_alloc_chdev(struct litepcie_device *s)
 {
@@ -1450,8 +1460,7 @@ static int litepcie_alloc_chdev(struct litepcie_device *s)
 	int ret;
 	int index;
 
-	index         = litepcie_minor_idx;
-	s->minor_base = litepcie_minor_idx;
+	index = s->minor_base;
 	for (i = 0; i < s->channels; i++) {
 		cdev_init(&s->chan[i].cdev, &litepcie_fops);
 		ret = cdev_add(&s->chan[i].cdev, MKDEV(litepcie_major, index), 1);
@@ -1462,7 +1471,7 @@ static int litepcie_alloc_chdev(struct litepcie_device *s)
 		index++;
 	}
 
-	index = litepcie_minor_idx;
+	index = s->minor_base;
 	for (i = 0; i < s->channels; i++) {
 		dev_info(&s->dev->dev, "Creating /dev/m2sdr%d\n", index);
 		if (!device_create(litepcie_class, NULL, MKDEV(litepcie_major, index), NULL, "m2sdr%d", index)) {
@@ -1473,11 +1482,10 @@ static int litepcie_alloc_chdev(struct litepcie_device *s)
 		index++;
 	}
 
-	litepcie_minor_idx = index;
 	return 0;
 
 fail_create:
-	index = litepcie_minor_idx;
+	index = s->minor_base;
 	for (j = 0; j < i; j++)
 		device_destroy(litepcie_class, MKDEV(litepcie_major, index++));
 
@@ -2008,12 +2016,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 
 	litepcie_dev->channels = DMA_CHANNELS;
 
-	/* Create all chardev in /dev */
-	ret = litepcie_alloc_chdev(litepcie_dev);
-	if (ret) {
-		dev_err(&dev->dev, "Failed to allocate character device\n");
-		goto fail2;
-	}
+	litepcie_reserve_minors(litepcie_dev);
 
 	for (i = 0; i < litepcie_dev->channels; i++) {
 		litepcie_dev->chan[i].index           = i;
@@ -2062,7 +2065,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	ret = litepcie_dma_init(litepcie_dev);
 	if (ret) {
 		dev_err(&dev->dev, "Failed to allocate DMA\n");
-		goto fail3;
+		goto fail2;
 	}
 
 	/* Core was reset and DMA buffers are now mapped: it is safe to let the
@@ -2088,7 +2091,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	litepcie_dev->uart = platform_device_register_simple("liteuart", litepcie_minor_idx, tty_res, 1);
 	if (IS_ERR(litepcie_dev->uart)) {
 		ret = PTR_ERR(litepcie_dev->uart);
-		goto fail3;
+		goto fail2;
 	}
 #endif
 
@@ -2098,7 +2101,7 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	litepcie_dev->litepcie_ptp_clock = ptp_clock_register(&litepcie_dev->ptp_caps, &dev->dev);
 	if (IS_ERR(litepcie_dev->litepcie_ptp_clock)) {
 		ret = PTR_ERR(litepcie_dev->litepcie_ptp_clock);
-		goto fail4;
+		goto fail3;
 	}
 
 	/* Display created PTP device */
@@ -2131,16 +2134,26 @@ static int litepcie_pci_probe(struct pci_dev *dev, const struct pci_device_id *i
 	spin_lock_init(&litepcie_dev->tmreg_lock);
 #endif
 
+	/* Create all chardev in /dev. This is the last step of probe: everything
+	 * they expose to userspace is initialised above.
+	 */
+	ret = litepcie_alloc_chdev(litepcie_dev);
+	if (ret) {
+		dev_err(&dev->dev, "Failed to allocate character device\n");
+		goto fail3;
+	}
+
 	return 0;
 
-#ifdef CSR_PTM_REQUESTER_BASE
-fail4:
-#ifdef CSR_UART_XOVER_RXTX_ADDR
-	platform_device_unregister(litepcie_dev->uart);
-#endif
-#endif
 fail3:
-	litepcie_free_chdev(litepcie_dev);
+#ifdef CSR_PTM_REQUESTER_BASE
+	if (!IS_ERR_OR_NULL(litepcie_dev->litepcie_ptp_clock))
+		ptp_clock_unregister(litepcie_dev->litepcie_ptp_clock);
+#endif
+#ifdef CSR_UART_XOVER_RXTX_ADDR
+	if (!IS_ERR_OR_NULL(litepcie_dev->uart))
+		platform_device_unregister(litepcie_dev->uart);
+#endif
 fail2:
 	/* Release the requested IRQ handlers before dropping the vectors:
 	 * pci_free_irq_vectors() on a vector with a live handler hits the
