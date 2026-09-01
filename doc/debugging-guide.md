@@ -389,6 +389,7 @@ probe that matches the current question:
 ./litex_m2sdr.py --variant=m2 --with-pcie --with-pcie-dma-probe --build --load
 ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-tx-probe --build --load
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-phy=2500basex --with-eth-phy-rx-probe --build --load
+./litex_m2sdr.py --variant=baseboard --sys-clk-freq=100000000 --with-eth --eth-phy=5000basex --with-sfp-i2c --with-eth-phy-probe --build --load
 ./litex_m2sdr.py --with-ad9361-data-probe --build --load
 ```
 
@@ -415,6 +416,62 @@ litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv \
 If one lane/disparity does not trigger, try `eth_phy_rx_symbol1` and the other
 encoded value. The PCS status CSR reports link state, SGMII detection, and the
 received link-partner ability word before a LiteScope capture is needed.
+
+### Experimental 5Gbps PHY Bring-Up
+
+The `5000basex` target is a 6.25Gbaud, four-symbol-wide 8b/10b experiment. It is
+not 5GBASE-KR and cannot drive a 10.3125Gbaud SFP+ host interface. Qualify it in
+layers through JTAGBone before relying on packet traffic:
+
+```bash
+./litex_m2sdr.py --variant=baseboard --sys-clk-freq=100000000 \
+  --with-eth --eth-sfp=0 --eth-phy=5000basex --with-sfp-i2c \
+  --with-eth-phy-probe --build --load
+
+litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg
+
+# Probe A0/A2, read A0, verify its checksums, then repeat the identity read ten times.
+python3 scripts/sfp_eeprom.py --csr-csv scripts/csr.csv --repeat 10
+
+# Bypass the module and validate the FPGA GTP/QPLL/CDR with PRBS31.
+python3 scripts/eth_phy_prbs.py --csr-csv scripts/csr.csv \
+  --loopback near-pma --mode prbs31 --duration 10 --inject-error
+
+# Return to normal PCS traffic (the PRBS utility does this automatically).
+ping 192.168.1.50
+```
+
+The PRBS report includes QPLL lock, CDR lock, reset completion, byte alignment,
+PCS link, lock-loss counts, and 8b/10b code/disparity counters. The PCS counters
+are expected to advance while PRBS is selected because PRBS is not 8b/10b data;
+use them only after the utility restores normal traffic. `RXPRBSERR` is a
+per-word indication rather than an exact erroneous-bit count; zero indications
+is decisive, while a non-zero `minimum_BER` is only a lower bound. An injected
+error proves that the checker and counter path are live.
+
+The full Ethernet probe captures the 40-bit raw TBI word, GTP lock/alignment
+status, PCS decode errors, and stream framing in the 156.25MHz `eth_rx` domain.
+List the generated signal names before selecting a trigger:
+
+```bash
+litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv --list
+litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv \
+  --rising-edge <error_or_packet_signal> --dump /tmp/eth-5g-rx.vcd
+```
+
+The 6COM `6C-SFP-10G-T` has been probed with this flow. At 6.25Gbaud the GTP CDR
+locked, but comma detection, byte alignment, Clause-37 link, and ping all
+remained down; the capture contained a short repeating undecodable pattern.
+This is consistent with its documented fixed 10.3125Gbaud SFP+ host interface:
+the advertised 2.5/5Gbps rates are copper-side rates, not 6.25Gbaud host modes.
+With the module bypassed, normal-traffic near-PMA loopback achieved byte
+alignment and completed Clause-37 negotiation, confirming that the GTP and
+four-symbol PCS work together.
+
+For the Acorn Baseboard Mini management path, fit JP1/JP4 and populate M2SDR
+r02 `R82`/`R83`. An I2C NACK does not by itself imply that the high-speed link
+is bad. The EEPROM utility performs read-only identity transactions and does
+not alter vendor pages.
 
 If the predefined probes are too wide, add a temporary narrow probe and commit
 only the reusable version. For a one-off analyzer, document the captured signals

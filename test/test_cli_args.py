@@ -28,6 +28,7 @@ def test_rfic_clk_freq_policy():
     assert soc_mod.get_rfic_clk_freq(with_rfic_oversampling=True) == 491.52e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="1000basex") == 122.88e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="2500basex") == 245.76e6
+    assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="5000basex") == 245.76e6
     assert soc_mod.get_rfic_clk_freq(
         with_eth=True,
         eth_phy="1000basex",
@@ -45,6 +46,68 @@ def test_eth_phy_kwargs_policy():
         "pcs_kwargs"       : {"eth_tx_clk_freq": 125e6},
         "with_pcs_buffers" : True,
     }
+    assert soc_mod.get_eth_phy_kwargs("5000basex") == {
+        "tx_cm_type"       : "MMCM",
+        "rx_cm_type"       : "MMCM",
+        "with_pcs_buffers" : True,
+    }
+
+
+def test_main_selects_5000basex_with_i2c_and_phy_probe(monkeypatch):
+    soc_mod = _load_soc_module()
+    captured = {}
+
+    class FakeSoC:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def add_sfp_i2c(self):
+            captured["sfp_i2c"] = True
+
+        def add_eth_phy_probe(self):
+            captured["eth_phy_probe"] = True
+
+    class FakeBuilder:
+        def __init__(self, soc, **kwargs):
+            captured.update(kwargs)
+            self.gateware_dir = "build/fake/gateware"
+
+        def build(self, build_name, run):
+            captured["build_name"] = build_name
+            captured["run"] = run
+
+    monkeypatch.setattr(soc_mod, "BaseSoC", FakeSoC)
+    monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
+    monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sys, "argv", [
+        "litex_m2sdr.py",
+        "--variant=baseboard",
+        "--with-eth",
+        "--eth-phy=5000basex",
+        "--with-sfp-i2c",
+        "--with-eth-phy-probe",
+    ])
+
+    soc_mod.main()
+
+    assert captured["kwargs"]["eth_phy"] == "5000basex"
+    assert captured["kwargs"]["sys_clk_freq"] == 100_000_000
+    assert captured["sfp_i2c"] is True
+    assert captured["eth_phy_probe"] is True
+    assert captured["build_name"] == "litex_m2sdr_baseboard_eth_5000basex_sfp_i2c"
+
+
+def test_main_rejects_ptp_with_experimental_5000basex(monkeypatch):
+    soc_mod = _load_soc_module()
+    monkeypatch.setattr(sys, "argv", [
+        "litex_m2sdr.py",
+        "--variant=baseboard",
+        "--with-eth",
+        "--eth-phy=5000basex",
+        "--with-eth-ptp",
+    ])
+    with pytest.raises(SystemExit):
+        soc_mod.main()
 
 
 def test_main_exposes_base_soc_optional_args(monkeypatch):

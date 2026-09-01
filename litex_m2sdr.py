@@ -12,8 +12,10 @@ import argparse
 import subprocess
 
 from migen import *
+from migen.genlib.cdc import MultiReg, PulseSynchronizer
 
 from litex.gen import *
+from litex.gen.genlib.cdc import BusSynchronizer
 from litex.build.generic_platform import Subsignal, Pins
 
 from litex.soc.interconnect.csr import *
@@ -35,10 +37,10 @@ from litex.build.generic_platform import IOStandard
 
 from litepcie.common            import *
 from litepcie.phy.s7pciephy     import S7PCIEPHY
-from liteeth.phy.a7_1000basex import A7_1000BASEX, A7_2500BASEX
-from liteeth.core             import LiteEthUDPIPCore
-from liteeth.frontend.stream  import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
-from liteeth.core.ptp         import LiteEthPTP
+from liteeth.phy.a7_1000basex   import A7_1000BASEX, A7_2500BASEX, A7_5000BASEX
+from liteeth.core               import LiteEthUDPIPCore
+from liteeth.frontend.stream    import LiteEthStream2UDPTX, LiteEthUDP2StreamRX
+from liteeth.core.ptp           import LiteEthPTP
 
 from litesata.phy                  import LiteSATAPHY
 from litesata.core                 import LiteSATACore
@@ -126,10 +128,13 @@ def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
 def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversampling=False):
     if with_eth:
         # Ethernet builds are limited by streaming bandwidth. Size the RFIC clock for 2T2R SC8:
-        # 1000BaseX -> 30.72MSPS, 2500BaseX -> 61.44MSPS.
+        # 1000BaseX -> 30.72MSPS, 2500/5000BaseX -> 61.44MSPS. The
+        # experimental 5G mode initially keeps the validated RFIC clock; full
+        # 122.88MSPS streaming is a separate qualification step.
         return {
             "1000basex" : 122.88e6,
             "2500basex" : 245.76e6,
+            "5000basex" : 245.76e6,
         }[eth_phy]
     return {
         False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
@@ -145,6 +150,12 @@ def get_eth_phy_kwargs(eth_phy):
             "tx_cm_type"       : "MMCM",
             "rx_cm_type"       : "MMCM",
             "pcs_kwargs"       : {"eth_tx_clk_freq": 125e6},
+            "with_pcs_buffers" : True,
+        }
+    if eth_phy == "5000basex":
+        return {
+            "tx_cm_type"       : "MMCM",
+            "rx_cm_type"       : "MMCM",
             "with_pcs_buffers" : True,
         }
     return {}
@@ -298,6 +309,7 @@ class BaseSoC(SoCMini):
         "si5351"           : 20,
         "clk10_discipline" : 40,
         "ptp_clk10_discipline" : 41,
+        "sfp_i2c"          : 42,
         "header"           : 23,
         "ad9361"           : 24,
         "crossbar"         : 25,
@@ -350,6 +362,8 @@ class BaseSoC(SoCMini):
             raise ValueError("White Rabbit SFP must be resolved before BaseSoC initialization.")
         if with_eth_ptp and not with_eth:
             raise ValueError("Ethernet PTP requires --with-eth.")
+        if with_eth_ptp and eth_phy == "5000basex":
+            raise ValueError("PTP is not yet qualified with experimental 5000BASE-X.")
         if with_eth_ptp and with_white_rabbit:
             raise ValueError("Ethernet PTP and White Rabbit cannot both own the board time generator in the same build yet.")
         if with_eth_ptp_rfic_clock and not with_eth_ptp:
@@ -369,25 +383,26 @@ class BaseSoC(SoCMini):
 
         # Match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
         # divider configuration. 1000BASE-X already uses 125MHz here.
-        eth_refclk_freq = 125e6
+        eth_refclk_freq   = 125e6
+        eth_refclk_direct = with_eth and (eth_phy in ["2500basex", "5000basex"]) and (sys_clk_freq == eth_refclk_freq)
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
             with_eth          = with_eth,
             eth_refclk_freq   = eth_refclk_freq,
-            eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
+            eth_refclk_direct = eth_refclk_direct,
             with_sata         = with_sata,
             with_white_rabbit = with_white_rabbit,
         )
 
         # Shared QPLL.
         self.qpll = SharedQPLL(platform,
-            with_pcie       = with_pcie,
-            with_eth        = with_eth | with_white_rabbit,
-            eth_phy         = eth_phy,
-            eth_refclk_freq = eth_refclk_freq,
-            eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
-            with_sata       = with_sata,
+            with_pcie         = with_pcie,
+            with_eth          = with_eth | with_white_rabbit,
+            eth_phy           = eth_phy,
+            eth_refclk_freq   = eth_refclk_freq,
+            eth_refclk_direct = eth_refclk_direct,
+            with_sata         = with_sata,
         )
 
         # Capability -------------------------------------------------------------------------------
@@ -612,6 +627,7 @@ class BaseSoC(SoCMini):
             eth_phy_cls = {
                 "1000basex" : A7_1000BASEX,
                 "2500basex" : A7_2500BASEX,
+                "5000basex" : A7_5000BASEX,
             }[eth_phy]
             self.eth_phy = eth_phy_cls(
                 qpll_channel = self.qpll.get_channel("eth"),
@@ -1167,8 +1183,8 @@ class BaseSoC(SoCMini):
 
         # Ethernet transceiver clocks.
         if with_eth:
-            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/self.eth_phy.gtp_clk_freq)
+            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/self.eth_phy.gtp_clk_freq)
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
             if eth_phy == "2500basex":
                 # The two halves of the RX gearbox exchange state/data on each
@@ -1468,20 +1484,229 @@ class BaseSoC(SoCMini):
         )
 
     # Ethernet.
+    def add_sfp_i2c(self):
+        """Expose the baseboard SFP management bus through LiteI2C CSRs."""
+        sfp_i2c_io = [
+            ("sfp_i2c", 0,
+                Subsignal("sda", Pins("M2:SMB_DAT")),
+                Subsignal("scl", Pins("M2:SMB_CLK")),
+                IOStandard("LVCMOS33"),
+            ),
+        ]
+        self.platform.add_extension(sfp_i2c_io)
+        self.add_i2c_master(
+            name                     = "sfp_i2c",
+            pads                     = self.platform.request("sfp_i2c"),
+            i2c_master_tx_fifo_depth = 8,
+            i2c_master_rx_fifo_depth = 8,
+        )
+
+    def add_sfp_i2c_probe(self, depth=4096):
+        assert hasattr(self, "sfp_i2c")
+        analyzer_signals = [
+            self.sfp_i2c.phy.clkgen.scl_i,
+            self.sfp_i2c.phy.clkgen.scl_oe,
+            self.sfp_i2c.phy.sda_i,
+            self.sfp_i2c.phy.sda_o,
+            self.sfp_i2c.phy.sda_oe,
+            self.sfp_i2c.phy.active,
+            self.sfp_i2c.master.active,
+            self.sfp_i2c.master.source,
+            self.sfp_i2c.master.sink,
+        ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            samplerate   = self.sys_clk_freq,
+            clock_domain = "sys",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
+    def add_eth_phy_probe(self, depth=2048):
+        """Add persistent GTP/PCS counters and a narrow RX-domain analyzer."""
+        assert hasattr(self, "eth_phy")
+
+        control = self.eth_phy._prbs_control = CSRStorage(name="prbs_control", fields=[
+            CSRField("loopback",      size=3, offset=0, description="GTPE2 LOOPBACK control."),
+            CSRField("tx_select",     size=3, offset=4, description="GTPE2 TXPRBSSEL control."),
+            CSRField("rx_select",     size=3, offset=8, description="GTPE2 RXPRBSSEL control."),
+            CSRField("force_error",   size=1, offset=12, pulse=True, description="Inject one TX PRBS error."),
+            CSRField("counter_reset", size=1, offset=13, pulse=True, description="Clear PRBS/PCS counters."),
+        ], description="Experimental Ethernet GTP PRBS controls.")
+        loopback_gt       = Signal(3)
+        tx_prbs_select_gt = Signal(3)
+        rx_prbs_select_gt = Signal(3)
+        gtp_tx_cd = self.eth_phy.gtp_tx_clock_domain
+        gtp_rx_cd = self.eth_phy.gtp_rx_clock_domain
+        self.specials += [
+            MultiReg(control.fields.loopback,  loopback_gt,       gtp_tx_cd),
+            MultiReg(control.fields.tx_select, tx_prbs_select_gt, gtp_tx_cd),
+            MultiReg(control.fields.rx_select, rx_prbs_select_gt, gtp_rx_cd),
+        ]
+        self.comb += [
+            self.eth_phy.loopback.eq(loopback_gt),
+            self.eth_phy.tx_prbs_config.eq(tx_prbs_select_gt),
+            self.eth_phy.rx_prbs_config.eq(rx_prbs_select_gt),
+        ]
+
+        force_error        = PulseSynchronizer("sys", gtp_tx_cd)
+        counter_reset      = PulseSynchronizer("sys", "eth_rx")
+        prbs_counter_reset = PulseSynchronizer("sys", gtp_rx_cd)
+        self.submodules += force_error, counter_reset, prbs_counter_reset
+        self.comb += [
+            force_error.i.eq(control.fields.force_error),
+            self.eth_phy.tx_prbs_force_error.eq(force_error.o),
+            counter_reset.i.eq(control.fields.counter_reset),
+            prbs_counter_reset.i.eq(control.fields.counter_reset),
+            self.eth_phy.rx_prbs_counter_reset.eq(prbs_counter_reset.o),
+        ]
+
+        rx_prbs_select = Signal(3)
+        self.specials += MultiReg(self.eth_phy.rx_prbs_config, rx_prbs_select, "eth_rx")
+
+        prbs_bits           = Signal(64)
+        prbs_errors         = Signal(64)
+        pcs_code_errors     = Signal(64)
+        pcs_disp_errors     = Signal(64)
+        cdr_lock_losses     = Signal(32)
+        rx_cdr_lock_d       = Signal()
+        rx_code_error       = getattr(self.eth_phy.pcs.rx, "code_error", Signal(4))
+        rx_disp_error       = getattr(self.eth_phy.pcs.rx, "disparity_error", Signal(4))
+        rx_overflow         = getattr(self.eth_phy.pcs.rx, "overflow", Signal())
+        rx_code_error_count = Signal(3)
+        rx_disp_error_count = Signal(3)
+        self.sync.eth_rx += [
+            rx_cdr_lock_d.eq(self.eth_phy.rx_cdr_lock),
+            If(counter_reset.o,
+                rx_code_error_count.eq(0),
+                rx_disp_error_count.eq(0),
+                prbs_bits.eq(0),
+                prbs_errors.eq(0),
+                pcs_code_errors.eq(0),
+                pcs_disp_errors.eq(0),
+                cdr_lock_losses.eq(0),
+            ).Else(
+                # Register the popcounts before the wide counters. This keeps
+                # the GTP/decode path independent of the 64-bit incrementers
+                # at the 156.25MHz experimental 5G PCS rate.
+                rx_code_error_count.eq(Reduce("ADD", [rx_code_error[n] for n in range(4)])),
+                rx_disp_error_count.eq(Reduce("ADD", [rx_disp_error[n] for n in range(4)])),
+                If(rx_prbs_select != 0,
+                    prbs_bits.eq(prbs_bits + self.eth_phy.gtp_dw),
+                    If(self.eth_phy.rx_prbs_error,
+                        prbs_errors.eq(prbs_errors + 1)
+                    )
+                ),
+                If(rx_code_error_count != 0,
+                    pcs_code_errors.eq(pcs_code_errors + rx_code_error_count)
+                ),
+                If(rx_disp_error_count != 0,
+                    pcs_disp_errors.eq(pcs_disp_errors + rx_disp_error_count)
+                ),
+                If(rx_cdr_lock_d & ~self.eth_phy.rx_cdr_lock,
+                    cdr_lock_losses.eq(cdr_lock_losses + 1)
+                )
+            )
+        ]
+
+        for name, signal in [
+            ("prbs_bits",       prbs_bits),
+            ("prbs_errors",     prbs_errors),
+            ("pcs_code_errors", pcs_code_errors),
+            ("pcs_disp_errors", pcs_disp_errors),
+        ]:
+            cdc = BusSynchronizer(64, "eth_rx", "sys")
+            self.submodules += cdc
+            self.comb += cdc.i.eq(signal)
+            status = CSRStatus(64, name=name, description=f"Wrapping Ethernet {name.replace('_', ' ')} counter.")
+            setattr(self.eth_phy, f"_{name}", status)
+            self.comb += status.status.eq(cdc.o)
+
+        cdr_losses_cdc = BusSynchronizer(32, "eth_rx", "sys")
+        self.submodules += cdr_losses_cdc
+        self.comb += cdr_losses_cdc.i.eq(cdr_lock_losses)
+        status_signals = [Signal() for _ in range(8)]
+        self.specials += [
+            MultiReg(self.qpll.get_channel("eth").lock, status_signals[0]),
+            MultiReg(self.eth_phy.rx_cdr_lock, status_signals[1]),
+            MultiReg(self.eth_phy.tx_reset_done, status_signals[2]),
+            MultiReg(self.eth_phy.rx_reset_done, status_signals[3]),
+            MultiReg(self.eth_phy.rx_byte_is_aligned, status_signals[4]),
+            MultiReg(self.eth_phy.pcs.link_up, status_signals[5]),
+            MultiReg(rx_overflow, status_signals[6]),
+            MultiReg(self.eth_phy.rx_prbs_error, status_signals[7]),
+        ]
+        self.eth_phy._cdr_lock_losses = CSRStatus(32,
+            name        = "cdr_lock_losses",
+            description = "Wrapping RX CDR lock-loss counter.",
+        )
+        self.comb += self.eth_phy._cdr_lock_losses.status.eq(cdr_losses_cdc.o)
+        self.eth_phy._debug_status = CSRStatus(name="debug_status", fields=[
+            CSRField("qpll_lock",       size=1, offset=0),
+            CSRField("rx_cdr_lock",     size=1, offset=1),
+            CSRField("tx_reset_done",   size=1, offset=2),
+            CSRField("rx_reset_done",   size=1, offset=3),
+            CSRField("byte_aligned",    size=1, offset=4),
+            CSRField("pcs_link_up",     size=1, offset=5),
+            CSRField("rx_overflow",     size=1, offset=6),
+            CSRField("rx_prbs_error",   size=1, offset=7),
+        ], description="Ethernet GTP/PCS status.")
+        self.comb += [
+            self.eth_phy._debug_status.fields.qpll_lock.eq(status_signals[0]),
+            self.eth_phy._debug_status.fields.rx_cdr_lock.eq(status_signals[1]),
+            self.eth_phy._debug_status.fields.tx_reset_done.eq(status_signals[2]),
+            self.eth_phy._debug_status.fields.rx_reset_done.eq(status_signals[3]),
+            self.eth_phy._debug_status.fields.byte_aligned.eq(status_signals[4]),
+            self.eth_phy._debug_status.fields.pcs_link_up.eq(status_signals[5]),
+            self.eth_phy._debug_status.fields.rx_overflow.eq(status_signals[6]),
+            self.eth_phy._debug_status.fields.rx_prbs_error.eq(status_signals[7]),
+        ]
+
+        analyzer_signals = [
+            self.eth_phy.pcs.tbi_rx,
+            self.eth_phy.rx_cdr_lock,
+            self.eth_phy.rx_byte_is_aligned,
+            self.eth_phy.rx_byte_realign,
+            self.eth_phy.rx_comma_detect,
+            self.eth_phy.rx_prbs_error,
+            rx_code_error,
+            rx_disp_error,
+            self.eth_phy.pcs.source.valid,
+            self.eth_phy.pcs.source.ready,
+            self.eth_phy.pcs.source.last,
+            self.eth_phy.pcs.source.last_be,
+            self.eth_phy.pcs.source.error,
+        ]
+        if hasattr(self.eth_phy.pcs.rx, "ctrl_state"):
+            analyzer_signals += [
+                self.eth_phy.pcs.rx.ctrl_state,
+                self.eth_phy.pcs.rx.in_packet,
+                self.eth_phy.pcs.rx.first_word,
+                self.eth_phy.pcs.rx.phase,
+            ]
+        self.analyzer = LiteScopeAnalyzer(analyzer_signals,
+            depth        = depth,
+            samplerate   = self.eth_phy.rx_clk_freq,
+            clock_domain = "eth_rx",
+            register     = True,
+            csr_csv      = "test/analyzer.csv"
+        )
+
     def add_eth_phy_rx_probe(self, depth=4096):
         assert hasattr(self, "eth_phy")
-        self.eth_phy_rx_symbol0 = Signal(10)
-        self.eth_phy_rx_symbol1 = Signal(10)
-        self.comb += [
-            self.eth_phy_rx_symbol0.eq(self.eth_phy.gearbox.rx_data_half[0:10]),
-            self.eth_phy_rx_symbol1.eq(self.eth_phy.gearbox.rx_data_half[10:20]),
-        ]
-        self.analyzer = LiteScopeAnalyzer([
-            self.eth_phy_rx_symbol0,
-            self.eth_phy_rx_symbol1,
-        ],
+        if hasattr(self.eth_phy, "gearbox"):
+            raw = self.eth_phy.gearbox.rx_data_half
+            clock_domain = "eth_rx_half"
+        else:
+            raw = self.eth_phy.pcs.tbi_rx
+            clock_domain = "eth_rx"
+        symbols = [Signal(10, name=f"eth_phy_rx_symbol{n}") for n in range(len(raw)//10)]
+        for n, symbol in enumerate(symbols):
+            setattr(self, f"eth_phy_rx_symbol{n}", symbol)
+            self.comb += symbol.eq(raw[10*n:10*(n + 1)])
+        self.analyzer = LiteScopeAnalyzer(symbols,
             depth        = depth,
-            clock_domain = "eth_rx_half",
+            clock_domain = clock_domain,
             register     = True,
             csr_csv      = "test/analyzer.csv"
         )
@@ -1550,7 +1775,7 @@ def main():
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
-    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
+    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex", "5000basex"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
@@ -1561,6 +1786,7 @@ def main():
     parser.add_argument("--with-eth-vrt",    action="store_true",     help="Enable Ethernet RX VRT UDP streamer path.")
     parser.add_argument("--vrt-dst-ip",      default="239.168.1.100", help="VRT destination IP address (when --with-eth-vrt).")
     parser.add_argument("--vrt-dst-port",    default=4991, type=int,  help="VRT destination UDP port (when --with-eth-vrt).")
+    parser.add_argument("--with-sfp-i2c",    action="store_true",     help="Enable CSR access to the baseboard SFP management bus.")
 
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
@@ -1586,6 +1812,8 @@ def main():
     probeopts.add_argument("--with-pcie-probe",        action="store_true", help="Enable PCIe Probe.")
     probeopts.add_argument("--with-pcie-dma-probe",    action="store_true", help="Enable PCIe DMA Probe.")
     probeopts.add_argument("--with-si5351-i2c-probe",  action="store_true", help="Enable SI5351 I2C Probe.")
+    probeopts.add_argument("--with-sfp-i2c-probe",     action="store_true", help="Enable SFP management-bus Probe (requires --with-sfp-i2c).")
+    probeopts.add_argument("--with-eth-phy-probe",     action="store_true", help="Enable Ethernet GTP/PCS counters and RX Probe.")
     probeopts.add_argument("--with-eth-phy-rx-probe",  action="store_true", help="Enable raw Ethernet PHY RX Probe.")
     probeopts.add_argument("--with-eth-tx-probe",      action="store_true", help="Enable Ethernet Tx Probe.")
     probeopts.add_argument("--with-ad9361-spi-probe",  action="store_true", help="Enable AD9361 SPI Probe.")
@@ -1622,9 +1850,22 @@ def main():
     if args.wr_status and not args.with_white_rabbit:
         return
 
+    # Keep 2500BASE-X on its validated direct 125MHz system/reference clock.
+    # The wider experimental 5G PCS closes timing reliably with a separate
+    # 125MHz reference PLL and a 100MHz system domain.
     default_sys_clk_freq = 125e6 if (args.with_eth and args.eth_phy == "2500basex") else (100e6 if args.with_eth else 125e6)
     if args.sys_clk_freq is None:
         args.sys_clk_freq = default_sys_clk_freq
+    if args.eth_phy == "5000basex" and args.with_eth_ptp:
+        parser.error("PTP is not yet qualified with experimental 5000BASE-X")
+    if args.with_sfp_i2c and args.variant != "baseboard":
+        parser.error("--with-sfp-i2c requires --variant=baseboard")
+    if args.with_sfp_i2c and args.with_white_rabbit:
+        parser.error("--with-sfp-i2c and White Rabbit cannot share the SFP management bus")
+    if args.with_sfp_i2c_probe and not args.with_sfp_i2c:
+        parser.error("--with-sfp-i2c-probe requires --with-sfp-i2c")
+    if (args.with_eth_phy_probe or args.with_eth_phy_rx_probe) and not args.with_eth:
+        parser.error("Ethernet PHY probes require --with-eth")
 
     # Build SoC.
     soc = BaseSoC(
@@ -1677,12 +1918,18 @@ def main():
     )
 
     # LiteScope Analyzer Probes.
+    if args.with_sfp_i2c:
+        soc.add_sfp_i2c()
     if args.with_pcie_probe:
         soc.add_pcie_probe()
     if args.with_pcie_dma_probe:
         soc.add_pcie_dma_probe()
     if args.with_si5351_i2c_probe:
         soc.add_si5351_i2c_probe()
+    if args.with_sfp_i2c_probe:
+        soc.add_sfp_i2c_probe()
+    if args.with_eth_phy_probe:
+        soc.add_eth_phy_probe()
     if args.with_eth_phy_rx_probe:
         soc.add_eth_phy_rx_probe()
     if args.with_eth_tx_probe:
@@ -1713,6 +1960,8 @@ def main():
                     r += "_no_igmp"
             if args.with_eth_vrt:
                 r += "_vrt"
+        if args.with_sfp_i2c:
+            r += "_sfp_i2c"
         if args.with_sata:
             r += f"_sata"
         if args.with_white_rabbit:
