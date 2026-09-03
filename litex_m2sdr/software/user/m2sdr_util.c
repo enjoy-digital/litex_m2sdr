@@ -1874,11 +1874,11 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 #ifdef DMA_CHECK_DATA
     uint32_t seed_wr = 0;
     uint32_t seed_rd = 0;
-    const int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
+    int dma_word_count = DMA_BUFFER_SIZE / sizeof(uint32_t);
     const uint32_t data_mask = get_data_mask(data_width);
     uint64_t validated_buffers = 0;
     uint8_t  run = (auto_rx_delay == 0);
-    const uint32_t rx_delay_errors_threshold = dma_word_count / 8;
+    uint32_t rx_delay_errors_threshold = dma_word_count / 8;
     const int rx_delay_confirmations_needed = 3;
     const int rx_delay_max_attempts = 128;
     uint32_t rx_delay_candidate = UINT32_MAX;
@@ -1897,6 +1897,14 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
 
     if (unlikely(litepcie_dma_init(&dma, pcie_path, zero_copy)))
         exit(1);
+
+#ifdef DMA_CHECK_DATA
+    /* Check the pattern over the ring's real buffer size: the kernel reports it
+     * per channel, so a channel loaded with a non-default dma_buffer_size is
+     * validated over the right number of words. */
+    dma_word_count = (int)(dma.rd_buf_size / sizeof(uint32_t));
+    rx_delay_errors_threshold = dma_word_count / 8;
+#endif
 
     dma.reader_enable = 1;
     dma.writer_enable = 1;
@@ -2003,7 +2011,7 @@ static int dma_test(uint8_t zero_copy, uint8_t external_loopback, int data_width
             i++;
             /* Print statistics. */
             printf("%14.2f\t%10" PRIu64 "\t%10" PRIu64 "\t%4" PRIu64 "\t%6u\n",
-                   (double)(dma.reader_sw_count - reader_sw_count_last) * DMA_BUFFER_SIZE * 8 * data_width / (get_next_pow2(data_width) * (double)duration_ms * 1e6),
+                   (double)(dma.reader_sw_count - reader_sw_count_last) * dma.wr_buf_size * 8 * data_width / (get_next_pow2(data_width) * (double)duration_ms * 1e6),
                    dma.reader_sw_count,
                    dma.writer_sw_count,
                    (uint64_t) llabs(dma.reader_sw_count - dma.writer_sw_count),

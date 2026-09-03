@@ -92,20 +92,36 @@ static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_pe
     return M2SDR_ERR_OK;
 }
 
+/* Size of one DMA buffer of the ring backing this direction.
+ *
+ * The kernel reports it per channel (litepcie_dma_init() reads it from
+ * LITEPCIE_IOCTL_MMAP_DMA_INFO), so a channel loaded with a non-default
+ * dma_buffer_size is handled without rebuilding userspace. Falls back to the
+ * compile-time macro when the geometry is not available (LiteEth transport, or
+ * a kernel that does not report it). */
+static unsigned m2sdr_dma_buffer_bytes(struct m2sdr_dev *dev,
+                                       enum m2sdr_direction direction)
+{
+    uint64_t size = (direction == M2SDR_RX) ? dev->rx_dma.rd_buf_size
+                                            : dev->tx_dma.wr_buf_size;
+
+    return size ? (unsigned)size : DMA_BUFFER_SIZE;
+}
+
 static unsigned m2sdr_stream_payload_bytes(struct m2sdr_dev *dev,
                                            enum m2sdr_direction direction,
                                            enum m2sdr_format format)
 {
-    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
+    unsigned bytes_per_buffer = m2sdr_dma_buffer_bytes(dev, direction);
 
     (void)format;
 
     /* The public sync API exposes payload samples. Header bytes are accounted
      * for here so the caller does not need backend-specific math. */
     if (direction == M2SDR_RX && dev->rx_header_enable && dev->rx_strip_header)
-        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        bytes_per_buffer -= M2SDR_DMA_HEADER_SIZE;
     if (direction == M2SDR_TX && dev->tx_header_enable)
-        bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
+        bytes_per_buffer -= M2SDR_DMA_HEADER_SIZE;
 
     return bytes_per_buffer;
 }
@@ -1151,12 +1167,10 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
             int rc = m2sdr_wait_rx_buffer(dev, &buf, timeout_ms ? timeout_ms : dev->rx_timeout_ms);
             if (rc != M2SDR_ERR_OK)
                 return rc;
-            unsigned to_copy = DMA_BUFFER_SIZE;
+            unsigned to_copy = m2sdr_stream_payload_bytes(dev, M2SDR_RX, dev->rx_format);
             unsigned payload_off = 0;
-            if (dev->rx_header_enable && dev->rx_strip_header) {
+            if (dev->rx_header_enable && dev->rx_strip_header)
                 payload_off = M2SDR_DMA_HEADER_SIZE;
-                to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-            }
             if (to_copy > total_bytes - copied)
                 to_copy = total_bytes - copied;
             if (dev->rx_header_enable) {
@@ -1233,11 +1247,10 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                 return rc;
             /* When enabled, the header is synthesized by libm2sdr from the
              * public metadata structure before the payload is copied in. */
-            unsigned to_copy = DMA_BUFFER_SIZE;
+            unsigned to_copy = m2sdr_stream_payload_bytes(dev, M2SDR_TX, dev->tx_format);
             unsigned payload_off = 0;
             if (dev->tx_header_enable) {
                 payload_off = M2SDR_DMA_HEADER_SIZE;
-                to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
                 uint64_t ts = 0;
                 if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
                     ts = meta->timestamp;
@@ -1292,25 +1305,23 @@ static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
         return M2SDR_ERR_INVAL;
 
     unsigned sample_sz = 0;
-    unsigned bytes_per_buffer = DMA_BUFFER_SIZE;
+    unsigned bytes_per_buffer;
     unsigned payload_off = 0;
 
     if (direction == M2SDR_RX) {
         if (!dev->rx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->rx_format);
-        if (dev->rx_header_enable && dev->rx_strip_header) {
+        bytes_per_buffer = m2sdr_stream_payload_bytes(dev, M2SDR_RX, dev->rx_format);
+        if (dev->rx_header_enable && dev->rx_strip_header)
             payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
     } else {
         if (!dev->tx_configured)
             return M2SDR_ERR_STATE;
         sample_sz = m2sdr_sample_size(dev->tx_format);
-        if (dev->tx_header_enable) {
+        bytes_per_buffer = m2sdr_stream_payload_bytes(dev, M2SDR_TX, dev->tx_format);
+        if (dev->tx_header_enable)
             payload_off = M2SDR_DMA_HEADER_SIZE;
-            bytes_per_buffer = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
-        }
     }
 
     if (!sample_sz)

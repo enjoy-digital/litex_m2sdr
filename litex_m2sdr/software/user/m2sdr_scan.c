@@ -1667,7 +1667,7 @@ static bool capture_iq_block(struct scan_state *s)
             }
 
             const int16_t *iq = (const int16_t *)buf;
-            int iq_count = (int)(DMA_BUFFER_SIZE / (int)sizeof(int16_t));
+            int iq_count = (int)(s->dma.rd_buf_size / sizeof(int16_t));
             int pairs = iq_count / 2;
             int p;
 
@@ -1713,7 +1713,7 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
                 break;
 
             const int16_t *iq = (const int16_t *)buf;
-            int iq_count = (int)(DMA_BUFFER_SIZE / (int)sizeof(int16_t));
+            int iq_count = (int)(s->dma.rd_buf_size / sizeof(int16_t));
             int pairs = iq_count / 2;
             int p;
 
