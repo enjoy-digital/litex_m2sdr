@@ -8,9 +8,13 @@ The default is uRV with 128 KiB of private RAM and embedded firmware.
 
 This integration requires the core, memory/boot, management and clock APIs from
 [LiteX-WR-NIC #72–#77](https://github.com/enjoy-digital/litex_wr_nic/pull/77).
-CI pins commit `6a2c7e646d1ca2f1118cc151378bbb856fcbafd4` while that series is
+CI pins commit `98034d6ea2545bc3d9b513030221e6ef577e3479` while that series is
 pending merge. Select a checkout containing that commit or the merged APIs.
 The dependency's MMCM backend still needs physical clock/WR servo qualification.
+It preserves the previous nominal MMCM tuning rate and polarity; this update
+does not retune the Acorn firmware PI coefficients. The dependency also keeps
+the original `PSGen` implementation for older integrations. M2SDR explicitly
+uses `WRMMCMBackend` with both completion signals connected.
 
 Run the following commands from the M2SDR repository, with the dependency path
 pointing to the **repository root**:
