@@ -203,9 +203,9 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
-        # IDelayCtrl.
-        # -----------
-        self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
+        # No IDELAY/ODELAY primitives are used by this target. An unused
+        # IDELAYCTRL can remain unplaced in Vivado; keep only its 200 MHz
+        # clock, which also supplies the MMCM phase-shift interfaces.
 
         # Ethernet PLL.
         # -------------
@@ -1085,6 +1085,9 @@ class BaseSoC(SoCMini):
 
             # Timings Constraints.
             # --------------------
+            # Tuning commands cross an asynchronous FIFO into PSCLK. The
+            # disciplined WR clock has no fixed phase relative to PSCLK.
+            platform.add_false_path_constraints(self.crg.cd_clk200.clk, wr.cd_wr_sys.clk)
             platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-123]")
             if wr_ext_clk10_port is not None:
                 platform.add_platform_command(
