@@ -126,7 +126,7 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/enjoy-digital/litex_wr_nic.git /tmp/litex_wr_nic
           # Reusable core, CPU memory/boot, management and MMCM APIs (#72-#77).
-          git -C /tmp/litex_wr_nic fetch --depth=1 origin 98034d6ea2545bc3d9b513030221e6ef577e3479
+          git -C /tmp/litex_wr_nic fetch --depth=1 origin 6e4fd67bae0463caa8da563ba58ee811828b2dfb
           git -C /tmp/litex_wr_nic checkout --detach FETCH_HEAD
 
       - name: Run White Rabbit integration smoke tests

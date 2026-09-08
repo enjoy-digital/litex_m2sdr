@@ -86,6 +86,18 @@ def test_wr_cpu_memory_console_and_automatic_sources(wr_soc, tmp_path, sfp, cpu,
         assert "csr_register,wr_cpu_boot_host_ready," in csr_csv
 
 
+def test_wr_mmcm_configuration_supports_fine_phase_shifting(wr_soc):
+    create, _ = wr_soc
+    soc = create(wr_sfp=0)
+    for mmcm, frequency in [(soc.crg.refclk_mmcm, 125e6), (soc.crg.dmtd_mmcm, 62.5e6)]:
+        config = mmcm.compute_config()
+        assert config["clkfbout_mult"] == int(config["clkfbout_mult"])
+        assert config["clkout0_divide"] == int(config["clkout0_divide"])
+        assert config["clkout0_freq"] == frequency
+        assert mmcm.params["p_CLKOUT0_USE_FINE_PS"] == "TRUE"
+    assert soc.crg.refclk_mmcm.params["p_CLKOUT1_USE_FINE_PS"] == "TRUE"
+
+
 def test_wr_tuning_uses_system_clock_and_waits_for_both_mmcm_completions(wr_soc):
     create, _ = wr_soc
     soc = create(wr_sfp=0)

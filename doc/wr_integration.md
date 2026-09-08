@@ -8,7 +8,7 @@ The default is uRV with 128 KiB of private RAM and embedded firmware.
 
 This integration requires the core, memory/boot, management and clock APIs from
 [LiteX-WR-NIC #72–#77](https://github.com/enjoy-digital/litex_wr_nic/pull/77).
-CI pins commit `98034d6ea2545bc3d9b513030221e6ef577e3479` while that series is
+CI pins commit `6e4fd67bae0463caa8da563ba58ee811828b2dfb` while that series is
 pending merge. Select a checkout containing that commit or the merged APIs.
 The dependency's MMCM backend still needs physical clock/WR servo qualification.
 It preserves the previous nominal MMCM tuning rate and polarity; this update
@@ -96,6 +96,29 @@ Both MMCM backends accept coherent tuning commands from `wr_sys` and wait for
 their own `PSDONE` in `clk200`. Their status/counters report busy, completion
 timeout, completed shifts and superseded commands. A completion timeout requires
 resetting the backend and MMCM, for example by reloading the FPGA.
+
+Both WR MMCMs explicitly use `fractional=False`: fine phase shifting requires
+integer output division. Their nominal outputs remain 125 MHz and 62.5 MHz.
+The selected VCO is 1.5 GHz, giving approximately 11.905 ps per shift. The
+previous fractional DMTD configuration used a 1.59375 GHz VCO and an output
+divider of 25.5, which is incompatible with fine phase shifting. Correcting it
+changes the DMTD phase-step size by 6.25%; firmware PI coefficients are unchanged.
+
+The dependency's XSim tests exercise the real Xilinx MMCM models for both
+M2SDR clock configurations, including phase wraparound, completion timing and
+reset/relock. Full-width RTL tests also cover frequent small corrections,
+completion faults and stopped-clock resets. Same-direction command updates
+retain fractional phase, and the FIFO waits for both clocks after reset to
+prevent old commands from replaying. To run these checks in the dependency:
+
+```sh
+cd "$LITEX_WR_NIC_DIR"
+pytest -q test/test_wr_clock.py test/test_wr_mmcm.py
+```
+
+Vivado's `xvlog`, `xelab` and `xsim` must be on `PATH` for the MMCM model tests;
+otherwise pytest reports them as skipped. These digital simulations do not
+measure physical clock jitter or closed-loop WR performance.
 
 `read-time` snapshots WR's native time. The existing SDR `time_gen` is a separate
 timebase; this update does not connect WR timecode to SDR sample timestamps.
