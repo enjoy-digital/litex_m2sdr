@@ -22,9 +22,9 @@ from litex.soc.integration.builder import Builder
 @pytest.fixture
 def wr_soc(monkeypatch, tmp_path):
     wr_core = pytest.importorskip("litex_wr_nic.gateware.wr_core")
-    root = Path(__file__).resolve().parents[1]
-    spec = importlib.util.spec_from_file_location("litex_m2sdr_soc", root / "litex_m2sdr.py")
-    module = importlib.util.module_from_spec(spec)
+    root    = Path(__file__).resolve().parents[1]
+    spec    = importlib.util.spec_from_file_location("litex_m2sdr_soc", root / "litex_m2sdr.py")
+    module  = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     registered = []
     # The board tests elaborate WR as an HDL instance; the dependency's own
@@ -133,7 +133,7 @@ def test_wr_tuning_uses_system_clock_and_waits_for_both_mmcm_completions(wr_soc)
                 if pending == 0:
                     completed[index] += 1
             if (yield mmcm.psen):
-                pending = delay
+                pending   = delay
                 direction = yield mmcm.psincdec
             yield mmcm.psdone.eq(pending == 1)
             assert not (yield backend.fault)

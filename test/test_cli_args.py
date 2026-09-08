@@ -270,7 +270,7 @@ def test_main_wr_status_uses_lazy_wr_integration(monkeypatch):
         "vexriscv", "integrated", "host", "_vexriscv_lite_integrated_host"),
 ])
 def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options, cpu, memory, boot, suffix):
-    soc_mod = _load_soc_module()
+    soc_mod  = _load_soc_module()
     captured = {}
 
     class FakeSoC:
@@ -306,7 +306,7 @@ def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options
 
 @pytest.mark.parametrize("package_path", [False, True])
 def test_wr_loader_prefers_explicit_checkout_over_sibling(tmp_path, package_path):
-    root = Path(__file__).resolve().parents[1]
+    root    = Path(__file__).resolve().parents[1]
     project = tmp_path / "m2sdr"
     project.mkdir()
     for name in ("selected", "litex_wr_nic"):

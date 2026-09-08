@@ -1019,16 +1019,16 @@ class BaseSoC(SoCMini):
             sfp_i2c_pads = platform.request("sfp_i2c")
             wr = add_white_rabbit(self,
                 # CPU.
-                cpu_firmware = wr_firmware,
-                cpu_type     = wr_cpu_type,
-                cpu_variant  = wr_cpu_variant,
+                cpu_firmware    = wr_firmware,
+                cpu_type        = wr_cpu_type,
+                cpu_variant     = wr_cpu_variant,
                 **wr_memory,
 
                 # Board name.
-                board_name = "SAWR",
+                board_name      = "SAWR",
 
                 # Main/DMTD PLL.
-                dac_bits = wr_dac_bits,
+                dac_bits        = wr_dac_bits,
 
                 # SFP.
                 sfp_pads        = platform.request("sfp", wr_sfp),
@@ -1063,8 +1063,8 @@ class BaseSoC(SoCMini):
             )
             self.comb += [
                 wr.refclk_tuning.connect(self.refclk_mmcm_ps_gen.command),
-                self.crg.refclk_mmcm.psen.eq(self.refclk_mmcm_ps_gen.psen),
-                self.crg.refclk_mmcm.psincdec.eq(self.refclk_mmcm_ps_gen.psincdec),
+                self.crg.refclk_mmcm.psen.eq(     self.refclk_mmcm_ps_gen.psen),
+                self.crg.refclk_mmcm.psincdec.eq( self.refclk_mmcm_ps_gen.psincdec),
                 self.refclk_mmcm_ps_gen.psdone.eq(self.crg.refclk_mmcm.psdone),
             ]
 
@@ -1077,8 +1077,8 @@ class BaseSoC(SoCMini):
             )
             self.comb += [
                 wr.dmtd_tuning.connect(self.dmtd_mmcm_ps_gen.command),
-                self.crg.dmtd_mmcm.psen.eq(self.dmtd_mmcm_ps_gen.psen),
-                self.crg.dmtd_mmcm.psincdec.eq(self.dmtd_mmcm_ps_gen.psincdec),
+                self.crg.dmtd_mmcm.psen.eq(     self.dmtd_mmcm_ps_gen.psen),
+                self.crg.dmtd_mmcm.psincdec.eq( self.dmtd_mmcm_ps_gen.psincdec),
                 self.dmtd_mmcm_ps_gen.psdone.eq(self.crg.dmtd_mmcm.psdone),
             ]
 
@@ -1589,20 +1589,20 @@ def main():
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
-    parser.add_argument("--with-white-rabbit",   action="store_true",                    help="Enable White-Rabbit Support.")
-    parser.add_argument("--wr-sfp",              default=None, type=int,                 help="White Rabbit SFP (default: auto-select first available).", choices=[0, 1])
-    parser.add_argument("--wr-dac-bits",         default=16, type=int,                   help="White Rabbit MMCM phase-shift control word width (in bits).")
+    parser.add_argument("--with-white-rabbit",   action="store_true",                        help="Enable White-Rabbit Support.")
+    parser.add_argument("--wr-sfp",              default=None, type=int,                     help="White Rabbit SFP (default: auto-select first available).", choices=[0, 1])
+    parser.add_argument("--wr-dac-bits",         default=16, type=int,                       help="White Rabbit MMCM phase-shift control word width (in bits).")
     parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
-    parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
-    parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
-    parser.add_argument("--wr-cpu-type",    default="urv",      choices=["urv", "vexriscv"], help="WR CPU implementation.")
-    parser.add_argument("--wr-cpu-variant", default=None,       choices=["lite"],            help="LiteX WR CPU variant (VexRiscv only).")
-    parser.add_argument("--wr-cpu-memory",  default="private",  choices=["private", "integrated"], help="WR CPU memory.")
-    parser.add_argument("--wr-cpu-boot",    default="embedded", choices=["embedded", "host"], help="WR firmware source (host requires integrated RAM).")
-    parser.add_argument("--wr-status",           action="store_true",                    help="Print resolved WR environment status.")
-    parser.add_argument("--wr-ext-clk10-port",   default=None,                           help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
-    parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,              help="External 10MHz clock period in ns for constraint.")
-    parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                 help="External 10MHz clock name for constraint.")
+    parser.add_argument("--wr-firmware",         default=None,                               help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
+    parser.add_argument("--wr-firmware-target",  default="acorn",                            help="WR firmware build target passed to build.py (when --build).")
+    parser.add_argument("--wr-cpu-type",         default="urv",                              help="WR CPU implementation.", choices=["urv", "vexriscv"])
+    parser.add_argument("--wr-cpu-variant",      default=None,                               help="LiteX WR CPU variant (VexRiscv only).", choices=["lite"])
+    parser.add_argument("--wr-cpu-memory",       default="private",                          help="WR CPU memory.", choices=["private", "integrated"])
+    parser.add_argument("--wr-cpu-boot",         default="embedded",                         help="WR firmware source (host requires integrated RAM).", choices=["embedded", "host"])
+    parser.add_argument("--wr-status",           action="store_true",                        help="Print resolved WR environment status.")
+    parser.add_argument("--wr-ext-clk10-port",   default=None,                               help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
+    parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,                  help="External 10MHz clock period in ns for constraint.")
+    parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                     help="External 10MHz clock name for constraint.")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -1628,19 +1628,19 @@ def main():
     if args.with_white_rabbit or args.wr_status:
         prepare_wr_environment = _load_prepare_wr_environment(this_dir, args.wr_nic_dir)
         wr_env = prepare_wr_environment(
-            root_dir          = this_dir,
-            variant           = args.variant,
-            baseboard_io      = _io_baseboard,
-            with_white_rabbit = args.with_white_rabbit,
-            wr_sfp            = args.wr_sfp,
-            wr_nic_dir        = args.wr_nic_dir,
-            wr_firmware       = args.wr_firmware,
-            wr_firmware_target= args.wr_firmware_target,
-            wr_cpu_type       = args.wr_cpu_type,
-            wr_cpu_variant    = args.wr_cpu_variant,
-            wr_cpu_memory     = args.wr_cpu_memory,
-            build             = args.build,
-            status            = args.wr_status,
+            root_dir           = this_dir,
+            variant            = args.variant,
+            baseboard_io       = _io_baseboard,
+            with_white_rabbit  = args.with_white_rabbit,
+            wr_sfp             = args.wr_sfp,
+            wr_nic_dir         = args.wr_nic_dir,
+            wr_firmware        = args.wr_firmware,
+            wr_firmware_target = args.wr_firmware_target,
+            wr_cpu_type        = args.wr_cpu_type,
+            wr_cpu_variant     = args.wr_cpu_variant,
+            wr_cpu_memory      = args.wr_cpu_memory,
+            build              = args.build,
+            status             = args.wr_status,
         )
     wr_firmware = wr_env["wr_firmware"]
     wr_sfp      = wr_env["wr_sfp"]
@@ -1692,15 +1692,15 @@ def main():
         with_jtagbone = not args.without_jtagbone,
 
         # White Rabbit.
-        with_white_rabbit = args.with_white_rabbit,
-        wr_sfp            = wr_sfp,
-        wr_dac_bits       = args.wr_dac_bits,
-        wr_firmware       = wr_firmware,
-        wr_nic_dir        = wr_env["wr_nic_dir"],
-        wr_cpu_type       = args.wr_cpu_type,
-        wr_cpu_variant    = args.wr_cpu_variant,
-        wr_cpu_memory     = args.wr_cpu_memory,
-        wr_cpu_boot       = args.wr_cpu_boot,
+        with_white_rabbit  = args.with_white_rabbit,
+        wr_sfp             = wr_sfp,
+        wr_dac_bits        = args.wr_dac_bits,
+        wr_firmware        = wr_firmware,
+        wr_nic_dir         = wr_env["wr_nic_dir"],
+        wr_cpu_type        = args.wr_cpu_type,
+        wr_cpu_variant     = args.wr_cpu_variant,
+        wr_cpu_memory      = args.wr_cpu_memory,
+        wr_cpu_boot        = args.wr_cpu_boot,
         wr_ext_clk10_port   = args.wr_ext_clk10_port,
         wr_ext_clk10_period = args.wr_ext_clk10_period,
         wr_ext_clk10_name   = args.wr_ext_clk10_name,
