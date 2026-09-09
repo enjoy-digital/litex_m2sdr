@@ -5,8 +5,9 @@
 # Copyright (c) 2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-import importlib.util
 import sys
+import subprocess
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -259,6 +260,77 @@ def test_main_wr_status_uses_lazy_wr_integration(monkeypatch):
     assert captured["loader_wr_nic_dir"] == "/tmp/litex_wr_nic"
     assert captured["prepare_kwargs"]["status"] is True
     assert captured["prepare_kwargs"]["with_white_rabbit"] is False
+
+
+@pytest.mark.parametrize("options,cpu,memory,boot,suffix", [
+    ([], "urv", "private", "embedded", ""),
+    (["--wr-cpu-type=vexriscv", "--wr-cpu-memory=integrated"],
+        "vexriscv", "integrated", "embedded", "_vexriscv_integrated"),
+    (["--wr-cpu-type=vexriscv", "--wr-cpu-variant=lite", "--wr-cpu-memory=integrated", "--wr-cpu-boot=host"],
+        "vexriscv", "integrated", "host", "_vexriscv_lite_integrated_host"),
+])
+def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options, cpu, memory, boot, suffix):
+    soc_mod  = _load_soc_module()
+    captured = {}
+
+    class FakeSoC:
+        def __init__(self, **kwargs):
+            captured["soc"] = kwargs
+
+    class FakeBuilder:
+        def __init__(self, soc, **kwargs):
+            self.gateware_dir = "build/fake/gateware"
+
+        def build(self, build_name, run):
+            captured["build_name"] = build_name
+
+    def prepare(**kwargs):
+        captured["prepare"] = kwargs
+        return dict(wr_nic_dir="/tmp/wr", wr_firmware="/tmp/wr/firmware.bram", wr_sfp=0)
+
+    monkeypatch.setattr(soc_mod, "BaseSoC", FakeSoC)
+    monkeypatch.setattr(soc_mod, "Builder", FakeBuilder)
+    monkeypatch.setattr(soc_mod, "_load_prepare_wr_environment", lambda *args: prepare)
+    monkeypatch.setattr(soc_mod, "generate_litepcie_software", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sys, "argv", [
+        "litex_m2sdr.py", "--variant=baseboard", "--with-white-rabbit", *options,
+    ])
+    soc_mod.main()
+    for name in ("soc", "prepare"):
+        assert captured[name]["wr_cpu_type"] == cpu
+        assert captured[name]["wr_cpu_memory"] == memory
+    assert captured["soc"]["wr_cpu_boot"] == boot
+    assert captured["soc"]["wr_cpu_variant"] == captured["prepare"]["wr_cpu_variant"]
+    assert captured["build_name"] == "litex_m2sdr_baseboard_white_rabbit" + suffix
+
+
+@pytest.mark.parametrize("package_path", [False, True])
+def test_wr_loader_prefers_explicit_checkout_over_sibling(tmp_path, package_path):
+    root    = Path(__file__).resolve().parents[1]
+    project = tmp_path / "m2sdr"
+    project.mkdir()
+    for name in ("selected", "litex_wr_nic"):
+        package = tmp_path / name / "litex_wr_nic"
+        package.mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "integration.py").write_text(
+            f"def prepare_wr_environment():\n    return {name!r}\n", encoding="utf-8")
+    selected = tmp_path / "selected"
+    if package_path:
+        selected /= "litex_wr_nic"
+    # A fresh interpreter prevents prior WR tests' cached imports from masking
+    # which checkout the command-line loader actually selects.
+    script = """
+import importlib.util
+import sys
+spec = importlib.util.spec_from_file_location("m2sdr_soc", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+prepare = module._load_prepare_wr_environment(sys.argv[2], sys.argv[3])
+assert prepare() == "selected"
+"""
+    subprocess.run([sys.executable, "-c", script, str(root / "litex_m2sdr.py"),
+        str(project), str(selected)], check=True)
 
 
 def test_base_soc_rejects_pcie_eth_sata_triple_use():

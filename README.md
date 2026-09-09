@@ -637,6 +637,7 @@ For those who want to explore the full potential of the LiteX-M2SDR board, inclu
    ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
    ```
    - The White Rabbit helper logic is provided by `litex_wr_nic`; install it, set `LITEX_WR_NIC_DIR`, or keep a sibling `../litex_wr_nic` checkout.
+   - Use the reusable-core/MMCM API version documented in the [WR integration guide](doc/wr_integration.md). The default remains uRV with private RAM; VexRiscv, integrated RAM and host loading are selectable. The guide includes dependency setup, build commands and WR console access.
    - `--wr-sfp` is optional; when omitted, the first available `sfp` index is auto-selected.
    - Firmware path lookup order:
      1. `--wr-firmware`

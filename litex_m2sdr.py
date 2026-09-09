@@ -108,10 +108,14 @@ def _iter_wr_nic_import_candidates(root_dir, wr_nic_dir=None):
 
 
 def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
-    for candidate in _iter_wr_nic_import_candidates(root_dir, wr_nic_dir):
-        for path in (candidate, os.path.dirname(candidate)):
-            if path not in sys.path:
-                sys.path.insert(0, path)
+    # Inserting at the front reverses priority: process fallbacks first so an
+    # explicit checkout wins over a stale sibling or an installed package.
+    candidates = list(_iter_wr_nic_import_candidates(root_dir, wr_nic_dir))
+    for candidate in reversed(candidates):
+        for path in (os.path.dirname(candidate), candidate):
+            if path in sys.path:
+                sys.path.remove(path)
+            sys.path.insert(0, path)
 
     try:
         from litex_wr_nic.integration import prepare_wr_environment
@@ -199,20 +203,21 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
-        # IDelayCtrl.
-        # -----------
-        self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
+        # No IDELAY/ODELAY primitives are used by this target. An unused
+        # IDELAYCTRL can remain unplaced in Vivado; keep only its 200 MHz
+        # clock, which also supplies the MMCM phase-shift interfaces.
 
         # Ethernet PLL.
         # -------------
-        if eth_refclk_direct:
+        # WR's tunable MMCM owns refclk_eth when enabled.
+        if eth_refclk_direct and not with_white_rabbit:
             if sys_clk_freq != eth_refclk_freq:
                 raise ValueError("A direct Ethernet reference requires sys_clk_freq == eth_refclk_freq.")
             self.comb += [
                 self.cd_refclk_eth.clk.eq(self.cd_sys.clk),
                 self.cd_refclk_eth.rst.eq(self.cd_sys.rst),
             ]
-        elif with_eth or with_sata or with_white_rabbit:
+        elif (with_eth or with_sata) and not with_white_rabbit:
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, eth_refclk_freq, margin=0)
@@ -228,7 +233,8 @@ class CRG(LiteXModule):
         # -------------------
         if with_white_rabbit:
             # RefClk MMCM (125MHz).
-            self.refclk_mmcm = S7MMCM(speedgrade=-3)
+            # Fine phase shifting requires integer feedback/output division (UG472).
+            self.refclk_mmcm = S7MMCM(speedgrade=-3, fractional=False)
             self.comb += self.refclk_mmcm.reset.eq(self.rst)
             self.refclk_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.refclk_mmcm.expose_dps("clk200", with_csr=False)
@@ -240,7 +246,7 @@ class CRG(LiteXModule):
             self.refclk_mmcm.params.update(p_CLKOUT1_USE_FINE_PS="TRUE")
 
             # DMTD MMCM (62.5MHz).
-            self.dmtd_mmcm = S7MMCM(speedgrade=-3)
+            self.dmtd_mmcm = S7MMCM(speedgrade=-3, fractional=False)
             self.comb += self.dmtd_mmcm.reset.eq(self.rst)
             self.dmtd_mmcm.register_clkin(ClockSignal("clk100"), 100e6)
             self.dmtd_mmcm.create_clkout(self.cd_clk_62m5_dmtd, 62.5e6, margin=0)
@@ -320,6 +326,7 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
         wr_nic_dir             = None,
+        wr_cpu_type            = "urv", wr_cpu_variant=None, wr_cpu_memory="private", wr_cpu_boot="embedded",
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
@@ -963,10 +970,17 @@ class BaseSoC(SoCMini):
                     if path not in sys.path:
                         sys.path.insert(0, path)
 
-            from litex.soc.cores.uart import UARTPHY, UART
+            from litex_wr_nic.gateware.uart import (
+                UARTPads, UARTShared, WR_UART_CROSSOVER_MODE, WR_UART_MANUAL_MODE,
+            )
+            from litex_wr_nic.gateware.wr_core   import add_white_rabbit
+            from litex_wr_nic.gateware.wr_clock  import WRMMCMBackend
+            from litex_wr_nic.gateware.wr_memory import add_wr_cpu_memory
 
-            from litex_wr_nic.gateware.soc  import LiteXWRNICSoC
-            from litex_wr_nic.gateware.ps_gen  import PSGen
+            if wr_cpu_memory not in ("private", "integrated"):
+                raise ValueError("M2SDR WR CPU memory must be private or integrated.")
+            if wr_cpu_boot not in ("embedded", "host"):
+                raise ValueError("M2SDR WR CPU boot must be embedded or host.")
 
             # IOs.
             # ----
@@ -983,33 +997,39 @@ class BaseSoC(SoCMini):
             # UART.
             # -----
 
-            class UARTPads:
-                def __init__(self):
-                    self.tx = Signal()
-                    self.rx = Signal()
+            # M2SDR exposes the WR console over CSRs. Keep the unused physical
+            # RX idle and use the shared console's buffered crossover path.
+            wr_uart_pads = UARTPads()
+            self.comb += wr_uart_pads.rx.eq(1)
+            self.uart = UARTShared(wr_uart_pads, sys_clk_freq,
+                default_sel  = WR_UART_CROSSOVER_MODE,
+                default_mode = WR_UART_MANUAL_MODE,
+            )
 
-            self.uart_xover_pads = UARTPads()
-            self.shared_pads     = UARTPads()
-            self.uart_xover_phy  = UARTPHY(self.uart_xover_pads, clk_freq=sys_clk_freq, baudrate=115200)
-            self.uart_xover      = UART(self.uart_xover_phy, rx_fifo_depth=128, rx_fifo_rx_we=True)
-
-            self.comb += [
-                self.uart_xover_pads.rx.eq(self.shared_pads.tx),
-                self.shared_pads.rx.eq(self.uart_xover_pads.tx),
-            ]
+            # CPU Memory / Boot.
+            # ------------------
+            wr_memory = add_wr_cpu_memory(self,
+                cpu_type = wr_cpu_type,
+                memory   = wr_cpu_memory,
+                boot     = wr_cpu_boot,
+                firmware = os.path.splitext(wr_firmware)[0] + ".bin",
+            )
 
             # Core Instance.
             # --------------
             sfp_i2c_pads = platform.request("sfp_i2c")
-            LiteXWRNICSoC.add_wr_core(self,
+            wr = add_white_rabbit(self,
                 # CPU.
                 cpu_firmware    = wr_firmware,
+                cpu_type        = wr_cpu_type,
+                cpu_variant     = wr_cpu_variant,
+                **wr_memory,
 
                 # Board name.
-                board_name       = "SAWR",
+                board_name      = "SAWR",
 
                 # Main/DMTD PLL.
-                dac_bits = wr_dac_bits,
+                dac_bits        = wr_dac_bits,
 
                 # SFP.
                 sfp_pads        = platform.request("sfp", wr_sfp),
@@ -1022,14 +1042,11 @@ class BaseSoC(SoCMini):
                 with_ext_clk    = False,
 
                 # Serial.
-                serial_pads     = self.shared_pads,
+                serial_pads     = self.uart.shared_pads,
 
                 # Wishbone Slave.
-                wb_slave_origin = 0x0004_0000,
-                wb_slave_size   = 0x0004_0000
+                wb_slave_region = SoCRegion(origin=0x0004_0000, size=0x0004_0000, cached=False),
             )
-
-            LiteXWRNICSoC.add_sources(self)
 
             # Clk10M Generator.
             # -----------------
@@ -1040,34 +1057,37 @@ class BaseSoC(SoCMini):
 
             # RefClk MMCM Phase Shift.
             # ------------------------
-            self.refclk_mmcm_ps_gen = PSGen(
-                 cd_psclk    = "clk200",
-                 cd_sys      = "wr",
-                 ctrl_size   = wr_dac_bits,
-                 )
+            self.refclk_mmcm_ps_gen = WRMMCMBackend(
+                cd_psclk   = "clk200",
+                cd_command = "wr_sys",
+                width      = wr_dac_bits,
+            )
             self.comb += [
-                self.refclk_mmcm_ps_gen.ctrl_data.eq(self.dac_refclk_data),
-                self.refclk_mmcm_ps_gen.ctrl_load.eq(self.dac_refclk_load),
-                self.crg.refclk_mmcm.psen.eq(self.refclk_mmcm_ps_gen.psen),
-                self.crg.refclk_mmcm.psincdec.eq(self.refclk_mmcm_ps_gen.psincdec),
+                wr.refclk_tuning.connect(self.refclk_mmcm_ps_gen.command),
+                self.crg.refclk_mmcm.psen.eq(     self.refclk_mmcm_ps_gen.psen),
+                self.crg.refclk_mmcm.psincdec.eq( self.refclk_mmcm_ps_gen.psincdec),
+                self.refclk_mmcm_ps_gen.psdone.eq(self.crg.refclk_mmcm.psdone),
             ]
 
             # DMTD MMCM Phase Shift.
             # ----------------------
-            self.dmtd_mmcm_ps_gen = PSGen(
-                 cd_psclk    = "clk200",
-                 cd_sys      = "wr",
-                 ctrl_size   = wr_dac_bits,
-                 )
+            self.dmtd_mmcm_ps_gen = WRMMCMBackend(
+                cd_psclk   = "clk200",
+                cd_command = "wr_sys",
+                width      = wr_dac_bits,
+            )
             self.comb += [
-                self.dmtd_mmcm_ps_gen.ctrl_data.eq(self.dac_dmtd_data),
-                self.dmtd_mmcm_ps_gen.ctrl_load.eq(self.dac_dmtd_load),
-                self.crg.dmtd_mmcm.psen.eq(self.dmtd_mmcm_ps_gen.psen),
-                self.crg.dmtd_mmcm.psincdec.eq(self.dmtd_mmcm_ps_gen.psincdec),
+                wr.dmtd_tuning.connect(self.dmtd_mmcm_ps_gen.command),
+                self.crg.dmtd_mmcm.psen.eq(     self.dmtd_mmcm_ps_gen.psen),
+                self.crg.dmtd_mmcm.psincdec.eq( self.dmtd_mmcm_ps_gen.psincdec),
+                self.dmtd_mmcm_ps_gen.psdone.eq(self.crg.dmtd_mmcm.psdone),
             ]
 
             # Timings Constraints.
             # --------------------
+            # Tuning commands cross an asynchronous FIFO into PSCLK. The
+            # disciplined WR clock has no fixed phase relative to PSCLK.
+            platform.add_false_path_constraints(self.crg.cd_clk200.clk, wr.cd_wr_sys.clk)
             platform.add_platform_command("set_property SEVERITY {{Warning}} [get_drc_checks REQP-123]")
             if wr_ext_clk10_port is not None:
                 platform.add_platform_command(
@@ -1078,8 +1098,10 @@ class BaseSoC(SoCMini):
             platform.add_false_path_constraints(
                 "wr_rxoutclk",
                 "wr_txoutclk",
-                "{{*crg_s7mmcm0_clkout}}",
-                "{{*crg_s7mmcm1_clkout}}",
+                # Resolve clocks from their nets rather than generated MMCM
+                # names, which differ for single- and multi-output instances.
+                self.crg.cd_clk_125m_gtp.clk,
+                self.crg.cd_clk_62m5_dmtd.clk,
             )
 
         # Timing Constraints -----------------------------------------------------------------------
@@ -1571,16 +1593,20 @@ def main():
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
 
     # White Rabbit parameters.
-    parser.add_argument("--with-white-rabbit",   action="store_true",                    help="Enable White-Rabbit Support.")
-    parser.add_argument("--wr-sfp",              default=None, type=int,                 help="White Rabbit SFP (default: auto-select first available).", choices=[0, 1])
-    parser.add_argument("--wr-dac-bits",         default=16, type=int,                   help="White Rabbit MMCM phase-shift control word width (in bits).")
+    parser.add_argument("--with-white-rabbit",   action="store_true",                        help="Enable White-Rabbit Support.")
+    parser.add_argument("--wr-sfp",              default=None, type=int,                     help="White Rabbit SFP (default: auto-select first available).", choices=[0, 1])
+    parser.add_argument("--wr-dac-bits",         default=16, type=int,                       help="White Rabbit MMCM phase-shift control word width (in bits).")
     parser.add_argument("--wr-nic-dir",          default=os.environ.get("LITEX_WR_NIC_DIR"), help="Path to litex_wr_nic checkout (or set LITEX_WR_NIC_DIR).")
-    parser.add_argument("--wr-firmware",         default=None,                           help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
-    parser.add_argument("--wr-firmware-target",  default="acorn",                        help="WR firmware build target passed to build.py (when --build).")
-    parser.add_argument("--wr-status",           action="store_true",                    help="Print resolved WR environment status.")
-    parser.add_argument("--wr-ext-clk10-port",   default=None,                           help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
-    parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,              help="External 10MHz clock period in ns for constraint.")
-    parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                 help="External 10MHz clock name for constraint.")
+    parser.add_argument("--wr-firmware",         default=None,                               help="Path to WR firmware BRAM image (e.g. .../firmware/spec_a7_wrc.bram).")
+    parser.add_argument("--wr-firmware-target",  default="acorn",                            help="WR firmware build target passed to build.py (when --build).")
+    parser.add_argument("--wr-cpu-type",         default="urv",                              help="WR CPU implementation.", choices=["urv", "vexriscv"])
+    parser.add_argument("--wr-cpu-variant",      default=None,                               help="LiteX WR CPU variant (VexRiscv only).", choices=["lite"])
+    parser.add_argument("--wr-cpu-memory",       default="private",                          help="WR CPU memory.", choices=["private", "integrated"])
+    parser.add_argument("--wr-cpu-boot",         default="embedded",                         help="WR firmware source (host requires integrated RAM).", choices=["embedded", "host"])
+    parser.add_argument("--wr-status",           action="store_true",                        help="Print resolved WR environment status.")
+    parser.add_argument("--wr-ext-clk10-port",   default=None,                               help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
+    parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,                  help="External 10MHz clock period in ns for constraint.")
+    parser.add_argument("--wr-ext-clk10-name",   default="wr_ext_clk10",                     help="External 10MHz clock name for constraint.")
 
     # Litescope Analyzer Probes.
     probeopts = parser.add_mutually_exclusive_group()
@@ -1606,16 +1632,19 @@ def main():
     if args.with_white_rabbit or args.wr_status:
         prepare_wr_environment = _load_prepare_wr_environment(this_dir, args.wr_nic_dir)
         wr_env = prepare_wr_environment(
-            root_dir          = this_dir,
-            variant           = args.variant,
-            baseboard_io      = _io_baseboard,
-            with_white_rabbit = args.with_white_rabbit,
-            wr_sfp            = args.wr_sfp,
-            wr_nic_dir        = args.wr_nic_dir,
-            wr_firmware       = args.wr_firmware,
-            wr_firmware_target= args.wr_firmware_target,
-            build             = args.build,
-            status            = args.wr_status,
+            root_dir           = this_dir,
+            variant            = args.variant,
+            baseboard_io       = _io_baseboard,
+            with_white_rabbit  = args.with_white_rabbit,
+            wr_sfp             = args.wr_sfp,
+            wr_nic_dir         = args.wr_nic_dir,
+            wr_firmware        = args.wr_firmware,
+            wr_firmware_target = args.wr_firmware_target,
+            wr_cpu_type        = args.wr_cpu_type,
+            wr_cpu_variant     = args.wr_cpu_variant,
+            wr_cpu_memory      = args.wr_cpu_memory,
+            build              = args.build,
+            status             = args.wr_status,
         )
     wr_firmware = wr_env["wr_firmware"]
     wr_sfp      = wr_env["wr_sfp"]
@@ -1667,11 +1696,15 @@ def main():
         with_jtagbone = not args.without_jtagbone,
 
         # White Rabbit.
-        with_white_rabbit = args.with_white_rabbit,
-        wr_sfp            = wr_sfp,
-        wr_dac_bits       = args.wr_dac_bits,
-        wr_firmware       = wr_firmware,
-        wr_nic_dir        = wr_env["wr_nic_dir"],
+        with_white_rabbit  = args.with_white_rabbit,
+        wr_sfp             = wr_sfp,
+        wr_dac_bits        = args.wr_dac_bits,
+        wr_firmware        = wr_firmware,
+        wr_nic_dir         = wr_env["wr_nic_dir"],
+        wr_cpu_type        = args.wr_cpu_type,
+        wr_cpu_variant     = args.wr_cpu_variant,
+        wr_cpu_memory      = args.wr_cpu_memory,
+        wr_cpu_boot        = args.wr_cpu_boot,
         wr_ext_clk10_port   = args.wr_ext_clk10_port,
         wr_ext_clk10_period = args.wr_ext_clk10_period,
         wr_ext_clk10_name   = args.wr_ext_clk10_name,
@@ -1718,6 +1751,14 @@ def main():
             r += f"_sata"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
+            if args.wr_cpu_type != "urv":
+                r += f"_{args.wr_cpu_type}"
+            if args.wr_cpu_variant is not None:
+                r += f"_{args.wr_cpu_variant}"
+            if args.wr_cpu_memory != "private":
+                r += f"_{args.wr_cpu_memory}"
+            if args.wr_cpu_boot != "embedded":
+                r += f"_{args.wr_cpu_boot}"
         if args.with_rfic_oversampling:
             r += "_rfic_oversampling"
         if args.without_jtagbone:
