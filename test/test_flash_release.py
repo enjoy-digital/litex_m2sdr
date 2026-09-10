@@ -17,11 +17,12 @@ import pytest
 
 # Helpers ------------------------------------------------------------------------------------------
 @pytest.fixture
-def flasher():
+def flasher(monkeypatch):
     path   = Path(__file__).resolve().parents[1] / "scripts" / "flash_release.py"
     spec   = importlib.util.spec_from_file_location("flash_release", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: None)
     return module
 
 
@@ -279,6 +280,30 @@ def test_rejects_configuration_and_multiboot_errors(flasher, status, boot):
 
     with pytest.raises(flasher.FlashError):
         flasher.check_boot(run)
+
+
+def test_boot_waits_before_accessing_configuration_registers(flasher, monkeypatch):
+    elapsed     = 0
+    interrupted = False
+
+    def sleep(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+
+    def run(*flags):
+        nonlocal interrupted
+        # Model CFG_IN taking over SPI configuration when accessed during boot.
+        if elapsed < 2:
+            interrupted = True
+        if flags[-1] == "STAT":
+            status = 0x5000190c if interrupted else 0x501079fc
+            return f"Register raw value: 0x{status:x}"
+        return "Register raw value: 0x5"
+
+    monkeypatch.setattr(flasher.time, "sleep", sleep)
+    monkeypatch.setattr(flasher.time, "monotonic", lambda: elapsed)
+    assert flasher.check_boot(run) == {"STAT": "0x501079fc", "BOOTSTS": "0x00000005"}
+    assert not interrupted
 
 
 def test_boot_timeout_is_reported(flasher, monkeypatch):

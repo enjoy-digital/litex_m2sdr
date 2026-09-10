@@ -29,6 +29,7 @@ REPOSITORY  = "enjoy-digital/litex_m2sdr"
 SLOT_SIZE   = 0x00800000
 FPGA_IDCODE = 0x03636093
 FPGA_PART   = "xc7a200tsbg484"
+BOOT_DELAY  = 2.0 # Seconds without JTAG access after reloading from flash.
 
 IMAGES = {
     "m2_pcie_x1" : {
@@ -275,6 +276,10 @@ def register_value(output):
 
 
 def check_boot(run):
+    # CFG_IN register reads take priority over SPI configuration (UG470). Allow
+    # multiboot to finish before the first read, or the check can interrupt boot.
+    print(f"Waiting {BOOT_DELAY:g}s for FPGA flash boot...")
+    time.sleep(BOOT_DELAY)
     deadline = time.monotonic() + 5
     ready    = (1 << 14) | (1 << 4) # DONE and end of startup (UG470 STAT).
     errors   = (1 << 0) | (1 << 15) | (1 << 16) | (1 << 17)
