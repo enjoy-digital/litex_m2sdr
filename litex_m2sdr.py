@@ -332,6 +332,9 @@ class BaseSoC(SoCMini):
         with_gpio              = False,
         with_rfic_oversampling = False,
     ):
+        if with_pcie_ptm and not with_pcie:
+            raise ValueError("PCIe PTM requires PCIe to be enabled")
+
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
@@ -602,8 +605,14 @@ class BaseSoC(SoCMini):
                     raise NotImplementedError("PCIe PTM only supported in PCIe Gen2 X1 for now.")
 
                 # Add PCIe PTM support.
-                from litex_wr_nic.gateware.soc import LiteXWRNICSoC
-                LiteXWRNICSoC.add_pcie_ptm(self)
+                from litepcie.frontend.ptm import PTMCapabilities, PTMRequester
+                self.pcie_ptm_sniffer = self.pcie_phy.create_ptm_sniffer()
+                self.ptm_capabilities = PTMCapabilities(self.pcie_endpoint)
+                self.ptm_requester = PTMRequester(
+                    pcie_endpoint    = self.pcie_endpoint,
+                    pcie_ptm_sniffer = self.pcie_ptm_sniffer,
+                    sys_clk_freq    = self.sys_clk_freq,
+                )
 
                 # Connect Time Gen's Time to PCIe PTM.
                 self.comb += [
