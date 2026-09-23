@@ -57,7 +57,7 @@ from litex_m2sdr.gateware.qpll        import SharedQPLL
 from litex_m2sdr.gateware.time        import TimeGenerator, TimeNsToPS
 from litex_m2sdr.gateware.ptp_discipline import PTPTimeDiscipline, TimeDisciplineCDC
 from litex_m2sdr.gateware.ptp_identity   import PTPIdentityTracker
-from litex_m2sdr.gateware.pps         import PPSGenerator
+from litex_m2sdr.gateware.pps         import PPSGenerator, PPSInput
 from litex_m2sdr.gateware.pcie        import (
     PCIeLinkResetWorkaround,
     LitePCIeWishboneBurstReadSlave,
@@ -473,6 +473,8 @@ class BaseSoC(SoCMini):
         self.time_gen.add_cdc()
 
         # PPS Generator ----------------------------------------------------------------------------
+
+        self.pps_in = PPSInput(platform.request("pps_in"))
 
         self.pps_gen = PPSGenerator(
             clk_freq = sys_clk_freq,
