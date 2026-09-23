@@ -12,6 +12,35 @@ from litex.soc.interconnect.csr import *
 
 from litex.gen.genlib.misc import WaitTimer
 
+# PPS Input ---------------------------------------------------------------------------------------
+
+class PPSInput(LiteXModule):
+    """Synchronize and monitor a 3.3V external PPS input in the sys domain."""
+    def __init__(self, pad):
+        self.pulse = Signal()
+        self.level = Signal()
+        self.count = Signal(32)
+
+        # The M.2 input is asynchronous to sys; synchronize before edge detection.
+        self.specials += MultiReg(pad, self.level)
+        previous = Signal()
+        self.sync += [
+            previous.eq(self.level),
+            self.pulse.eq(self.level & ~previous),
+            If(self.level & ~previous, self.count.eq(self.count + 1)),
+        ]
+
+        self._status = CSRStatus(fields=[
+            CSRField("level", size=1, description="Synchronized PPS input level."),
+            CSRField("pulse", size=1, description="One-cycle pulse on PPS rising edge."),
+        ])
+        self._count = CSRStatus(32, description="Number of detected PPS rising edges.")
+        self.comb += [
+            self._status.fields.level.eq(self.level),
+            self._status.fields.pulse.eq(self.pulse),
+            self._count.status.eq(self.count),
+        ]
+
 # PPS Generator ------------------------------------------------------------------------------------
 
 class PPSGenerator(LiteXModule):

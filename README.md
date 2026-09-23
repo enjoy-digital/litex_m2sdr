@@ -172,6 +172,7 @@ Additional notes:
 | `Synchro_GPIO3` | M.2 pin 32 (`NC32`) | `A21` | 16 | 3.3V | Routed to the FPGA. |
 | `Synchro_GPIO4` | M.2 pin 34 (`NC34`) | `A20` | 16 | 3.3V | Routed to the FPGA. |
 | `Synchro_GPIO5` | M.2 pin 36 (`NC36`) | `B20` | 16 | 3.3V | Routed to the FPGA. |
+
 | `SMB_CLK` | M.2 pin 40 | `A13` | 16 | 3.3V FPGA bank on SDR | Optional path through `R82`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
 | `SMB_DATA` | M.2 pin 42 | `A14` | 16 | 3.3V FPGA bank on SDR | Optional path through `R83`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
 | `ALERT#` / `SMB_ALERT#` | M.2 pin 44 | - | - | Host-defined sideband | Not routed to the FPGA on LiteX-M2SDR r02. |
@@ -181,6 +182,10 @@ Additional notes:
 | `SUSCLK` | M.2 pin 68 | `B17` | 16 | 3.3V | Routed through `R84` (0R). |
 | `PEDET` / `PRESENT` | M.2 pin 69 | `A16` | 16 | 3.3V | Routed through `R85` (0R). |
 | `LED#` | M.2 pin 10 | - | - | Host-defined sideband | Not connected on LiteX-M2SDR. |
+
+### External PPS Input
+
+The gateware exposes M.2 pin 22 (`PPS_IN`) as the `pps_in` resource. The input is synchronized to the system clock and rising edges are reported through the `pps_in` CSRs (`status.level`, `status.pulse`, and `count`). This provides edge detection and monitoring; it does not by itself set UTC time or discipline the board timebase. The signal must be supplied by a carrier or adapter that routes M.2 pin 22 to a connector. Use a ground-referenced 3.3V logic PPS signal compatible with FPGA bank 15; do not apply 5V. Check that the carrier actually connects the otherwise NC pin.
 
 [> PCIe SoC Design
 ------------------

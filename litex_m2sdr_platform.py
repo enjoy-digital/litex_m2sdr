@@ -33,6 +33,7 @@ _io = [
 
     # Ext Sync/ClkIn..
     ("sync_clk_in", 0, Pins("V13"), IOStandard("LVCMOS33")), # SYNCDBG_CLK.
+    ("pps_in", 0, Pins("M2:NC22"), IOStandard("LVCMOS33")), # M.2 pin 22 / PPS_IN.
 
     # SI5351 Clocking.
     ("si5351", 0,
