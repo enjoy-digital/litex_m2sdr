@@ -129,6 +129,8 @@ _io = [
 
     # GPIOs.
     ("gpios", 0, Pins("E22 D22"), IOStandard("LVCMOS33")), # TP1-2 / Bank16 / 3.3V.
+    ("pps_in_tp1", 0, Pins("E22"), IOStandard("LVCMOS33")), # TP1 / Bank16 / 3.3V.
+    ("pps_in_tp2", 0, Pins("D22"), IOStandard("LVCMOS33")), # TP2 / Bank16 / 3.3V.
 ]
 
 _io_baseboard = [ # Note: These IOs are only available when the board is plugged in Acorn Baseboard Mini.

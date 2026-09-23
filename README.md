@@ -185,7 +185,13 @@ Additional notes:
 
 ### External PPS Input
 
-The gateware exposes M.2 pin 22 (`PPS_IN`) as the `pps_in` resource. The input is synchronized to the system clock and rising edges are reported through the `pps_in` CSRs (`status.level`, `status.pulse`, and `count`). This provides edge detection and monitoring; it does not by itself set UTC time or discipline the board timebase. The signal must be supplied by a carrier or adapter that routes M.2 pin 22 to a connector. Use a ground-referenced 3.3V logic PPS signal compatible with FPGA bank 15; do not apply 5V. Check that the carrier actually connects the otherwise NC pin.
+The default PPS input is M.2 pin 22 (`PPS_IN`). For easier wiring, the input can instead be selected from test point TP1 or TP2 with `--pps-input=tp1` or `--pps-input=tp2`; the default is `--pps-input=m2`. For example:
+
+```sh
+./litex_m2sdr.py --pps-input=tp1 --build
+```
+
+TP1 and TP2 are general-purpose test points on FPGA pins E22 and D22. The selected input is synchronized to the system clock, with rising edges reported through the `pps_in` CSRs (`status.level`, `status.pulse`, and `count`). A TP1/TP2 PPS selection uses those pins instead of the regular GPIO feature, so it cannot be combined with `--with-gpio`. All three inputs require a ground-referenced 3.3V logic PPS signal; do not apply 5V. For M.2 pin 22, use a carrier or adapter that actually routes the otherwise NC pin.
 
 [> PCIe SoC Design
 ------------------
