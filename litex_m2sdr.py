@@ -330,8 +330,12 @@ class BaseSoC(SoCMini):
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
+        pps_input              = "m2",
         with_rfic_oversampling = False,
     ):
+        if pps_input in ("tp1", "tp2") and with_gpio:
+            raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
+
         if with_pcie_ptm and not with_pcie:
             raise ValueError("PCIe PTM requires PCIe to be enabled")
 
@@ -474,7 +478,11 @@ class BaseSoC(SoCMini):
 
         # PPS Generator ----------------------------------------------------------------------------
 
-        self.pps_in = PPSInput(platform.request("pps_in"))
+        if pps_input == "m2":
+            pps_pad = platform.request("pps_in")
+        else:
+            pps_pad = platform.request(f"pps_in_{pps_input}")
+        self.pps_in = PPSInput(pps_pad)
 
         self.pps_gen = PPSGenerator(
             clk_freq = sys_clk_freq,
@@ -1602,6 +1610,8 @@ def main():
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
+    parser.add_argument("--pps-input", default="m2", choices=["m2", "tp1", "tp2"],
+        help="PPS input pin (M.2 PPS_IN, TP1, or TP2).")
 
     # White Rabbit parameters.
     parser.add_argument("--with-white-rabbit",   action="store_true",                        help="Enable White-Rabbit Support.")
@@ -1704,6 +1714,7 @@ def main():
 
         # GPIOs.
         with_gpio     = args.with_gpio,
+        pps_input     = args.pps_input,
         with_jtagbone = not args.without_jtagbone,
 
         # White Rabbit.
