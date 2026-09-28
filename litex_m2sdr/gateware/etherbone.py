@@ -47,7 +47,7 @@ class SharedLiteEthEtherbonePacketTX(LiteXModule):
 
         self.packetizer = packetizer = LiteEthEtherbonePacketPacketizer()
         self.comb += [
-            sink.connect(packetizer.sink, keep={"valid", "last", "last_be", "ready", "data"}),
+            sink.connect(packetizer.sink, keep={"valid", "last", "be", "ready", "data"}),
             sink.connect(packetizer.sink, keep={"pf", "pr", "nr"}),
             packetizer.sink.version.eq(etherbone_version),
             packetizer.sink.magic.eq(etherbone_magic),
@@ -77,9 +77,7 @@ class SharedLiteEthEtherbonePacketTX(LiteXModule):
 class SharedLiteEthEtherbonePacket(LiteXModule):
     def __init__(self, udp, udp_port, cd="sys"):
         self.tx = tx = SharedLiteEthEtherbonePacketTX(udp_port)
-        self.rx = rx = LiteEthEtherbonePacketRX(
-            with_last_handler=(udp.crossbar.dw == 64)
-        )
+        self.rx = rx = LiteEthEtherbonePacketRX()
         port = udp.crossbar.get_port(udp_port, dw=32, cd=cd)
         self.comb += [
             tx.source.connect(port.sink),
