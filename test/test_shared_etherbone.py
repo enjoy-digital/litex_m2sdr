@@ -11,12 +11,13 @@ def test_etherbone_reply_uses_request_source_port():
         yield dut.source.ready.eq(1)
         yield dut.sink.valid.eq(1)
         yield dut.sink.last.eq(1)
-        yield dut.sink.last_be.eq(0xf)
+        yield dut.sink.be.eq(0xf)
         yield dut.sink.data.eq(0x11223344)
         yield dut.sink.length.eq(4)
         yield dut.sink.src_port.eq(49152)
         yield dut.sink.ip_address.eq(0xc0a80164)
 
+        yield
         accepted = False
         for _ in range(32):
             if (yield dut.sink.valid) and (yield dut.sink.ready):
@@ -24,6 +25,9 @@ def test_etherbone_reply_uses_request_source_port():
                 yield dut.sink.valid.eq(0)
             if (yield dut.source.valid):
                 observed.append({
+                    "data":     (yield dut.source.data),
+                    "last":     (yield dut.source.last),
+                    "be":       (yield dut.source.be),
                     "src_port": (yield dut.source.src_port),
                     "dst_port": (yield dut.source.dst_port),
                     "ip":       (yield dut.source.ip_address),
@@ -36,3 +40,7 @@ def test_etherbone_reply_uses_request_source_port():
     assert {beat["src_port"] for beat in observed} == {1234}
     assert {beat["dst_port"] for beat in observed} == {49152}
     assert {beat["ip"] for beat in observed} == {0xc0a80164}
+    assert {beat["be"] for beat in observed} == {0xf}, observed
+    assert len(observed) == 3
+    assert [beat["last"] for beat in observed] == [0, 0, 1]
+    assert observed[-1]["data"] == 0x11223344
