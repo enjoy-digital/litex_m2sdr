@@ -1633,10 +1633,9 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
     struct m2sdr_dev *conn = m2sdr_open_dev();
     void *handle = m2sdr_get_handle(conn);
     FILE * f;
-    uint32_t base;
     uint32_t sector_size;
-    uint8_t byte;
-    int i;
+    uint8_t *buf;
+    uint32_t i;
 
     /* Open data destination file. */
     f = fopen(filename, "wb");
@@ -1647,19 +1646,28 @@ static void flash_read(const char *filename, uint32_t size, uint32_t offset)
 
     /* Get flash sector size. */
     sector_size = m2sdr_flash_get_erase_block_size(handle);
-
-    /* Read flash and write to destination file. */
-    base = offset;
-    for (i = 0; i < size; i++) {
-        if ((i % sector_size) == 0) {
-            printf("Reading 0x%08x\r", base + i);
-            fflush(stdout);
-        }
-        byte = m2sdr_flash_read(handle, base + i);
-        fwrite(&byte, 1, 1, f);
+    buf = malloc(sector_size);
+    if (!buf) {
+        fprintf(stderr, "%d: malloc failed\n", __LINE__);
+        exit(1);
     }
 
+    /* Read flash a sector at a time and write to destination file. */
+    for (i = 0; i < size; i += sector_size) {
+        uint32_t n = size - i < sector_size ? size - i : sector_size;
+
+        printf("Reading 0x%08x\r", offset + i);
+        fflush(stdout);
+        if (m2sdr_flash_read_range(handle, offset + i, buf, n) != 0) {
+            fprintf(stderr, "\nflash read failed @0x%08x\n", offset + i);
+            exit(1);
+        }
+        fwrite(buf, 1, n, f);
+    }
+    printf("\n");
+
     /* Close destination file and connection. */
+    free(buf);
     fclose(f);
     m2sdr_close_dev(conn);
 }
