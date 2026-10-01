@@ -60,5 +60,7 @@ int m2sdr_flash_write(void *conn,
                       uint8_t *buf, uint32_t base, uint32_t size,
                       void (*progress_cb)(void *opaque, const char *fmt, ...),
                       void *opaque);
+/* Read a flash range into buf. Returns 0, or -1 when it could not be read. */
+int m2sdr_flash_read_range(void *conn, uint32_t addr, uint8_t *buf, uint32_t size);
 
 #endif /* M2SDR_LIB_FLASH_H */

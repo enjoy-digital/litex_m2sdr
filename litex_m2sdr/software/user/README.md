@@ -154,7 +154,9 @@ m2sdr_util [options] cmd [args...]
 - **ad9361-dump**, **ad9361-read**, **ad9361-write**
   Dump AD9361 register space for debugging.
 - **flash-write** / **flash-read**
-  Write to/read from the on-board SPI Flash.
+  Write to/read from the on-board SPI Flash. Over Ethernet,
+  `M2SDR_FLASH_LEGACY=1` selects the slower register-by-register path and
+  `M2SDR_FLASH_GAP_FRAMES=N` overrides the pacing frames after each SPI start.
 - **flash-reload**
   Reload the FPGA image from SPI Flash.
 

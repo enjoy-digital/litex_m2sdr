@@ -458,6 +458,16 @@ int eb_write32_bulk_checked(struct eb_connection *conn, uint32_t addr, const uin
     return EB_ERR_OK;
 }
 
+int eb_is_direct(struct eb_connection *conn)
+{
+    return conn && conn->is_direct;
+}
+
+void eb_drain(struct eb_connection *conn)
+{
+    eb_drain_direct_rx(conn);
+}
+
 static int eb_recv_read_reply(struct eb_connection *conn, uint8_t raw_pkt[20])
 {
     if (conn->is_direct) {
@@ -527,6 +537,32 @@ static int eb_read32_once(struct eb_connection *conn, uint32_t addr, uint32_t *v
             return err;
     }
 
+    *val = eb_unfill_read32(raw_pkt);
+    conn->last_error = EB_ERR_OK;
+    return EB_ERR_OK;
+}
+
+/* Single read sent without waiting; eb_recv_read32() collects replies in order. */
+int eb_send_read32(struct eb_connection *conn, uint32_t addr)
+{
+    uint8_t raw_pkt[20];
+
+    eb_fill_read32(raw_pkt, addr);
+    if (eb_send(conn, raw_pkt, sizeof(raw_pkt)) < 0)
+        return eb_get_last_error(conn);
+    return EB_ERR_OK;
+}
+
+int eb_recv_read32(struct eb_connection *conn, uint32_t *val)
+{
+    uint8_t raw_pkt[20];
+    int err;
+
+    if (!val)
+        return eb_fail(conn, EB_ERR_IO);
+    err = eb_recv_read_reply(conn, raw_pkt);
+    if (err != EB_ERR_OK)
+        return err;
     *val = eb_unfill_read32(raw_pkt);
     conn->last_error = EB_ERR_OK;
     return EB_ERR_OK;

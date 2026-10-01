@@ -90,6 +90,11 @@ int eb_read32_bulk_checked(struct eb_connection *conn, uint32_t addr, uint32_t *
 int eb_read32_bulk_pipeline_checked(struct eb_connection *conn, uint32_t addr, uint32_t *vals,
                                     size_t count, size_t burst_words, size_t window);
 int eb_write32_bulk_checked(struct eb_connection *conn, uint32_t addr, const uint32_t *vals, size_t count);
+/* Split-phase single read; replies come in order. eb_read32*() drops pending ones. */
+int eb_send_read32(struct eb_connection *conn, uint32_t addr);
+int eb_recv_read32(struct eb_connection *conn, uint32_t *val);
+int eb_is_direct(struct eb_connection *conn);
+void eb_drain(struct eb_connection *conn);
 uint32_t eb_read32(struct eb_connection *conn, uint32_t addr);
 void eb_write32(struct eb_connection *conn, uint32_t val, uint32_t addr);
 
