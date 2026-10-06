@@ -75,13 +75,13 @@ class Capability(LiteXModule):
 
         # Ethernet Config.
         # ----------------
-        eth_speed_map  = {"1000basex": 0, "2500basex": 1}
+        eth_speed_map  = {"1000basex": 0, "2500basex": 1, "5000baser": 2}
         eth_speed_value = eth_speed_map[eth_speed] if eth_enabled else 0
         self._eth_config = CSRStatus(32, fields=[
             CSRField("speed", size=2, offset=0, reset=eth_speed_value, values=[
                 ("``0b00``", "1Gbps"),
                 ("``0b01``", "2.5Gbps"),
-                ("``0b10``", "Reserved"),
+                ("``0b10``", "5Gbps"),
                 ("``0b11``", "Reserved"),
             ], description="Ethernet speed configuration."),
             CSRField("ptp", size=1, offset=2, reset=int(eth_ptp), description="Ethernet PTP time discipline build support."),

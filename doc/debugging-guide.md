@@ -50,6 +50,63 @@ Common Ethernet/Etherbone build on the baseboard:
 ping 192.168.1.50
 ```
 
+### 5GBASE-R PHY Diagnostics
+
+The experimental 5GBASE-R mode requires a module that presents a 5.15625Gbaud
+64b/66b host interface. Build it with the dedicated probe:
+
+```bash
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 \
+    --eth-phy=5000baser --with-eth-phy-probe --build --load
+litex_server --jtag --jtag-config=openocd_xc7_ft4232.cfg
+```
+
+Read the compact status word over JTAGBone:
+
+```bash
+litex_cli --csr-csv=scripts/csr.csv --read=eth_phy_baser_status
+litex_cli --csr-csv=scripts/csr.csv --read=eth_phy_baser_rx_error_count
+```
+
+`eth_phy_baser_status` bits 0 through 7 are QPLL lock, TX reset done, RX reset
+done, RX PMA reset done, 64b/66b block lock, high BER, RX link status, and
+sequence error. A healthy external link normally reads `0x5f`: all reset/lock
+bits set, high BER clear, and no sequence error.
+
+The probe also exposes the raw GTP `LOOPBACK` field for transceiver-specific
+experiments. For example, select near-end PMA loopback and reset the GTP RX
+after entering or leaving the mode:
+
+```bash
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_baser_control 0x8
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_reset 1
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_reset 0
+litex_cli --csr-csv=scripts/csr.csv --read=eth_phy_baser_status
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_baser_control 0x0
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_reset 1
+litex_cli --csr-csv=scripts/csr.csv --write eth_phy_reset 0
+```
+
+On Artix-7 native-gearbox builds, near-end PMA loopback can suppress
+`RXDATAVALID` instead of returning framed gearbox words. In that case, a
+failure to acquire block lock is not by itself evidence of a PCS failure; use
+the LiteEth PCS simulation loopback to validate the 64b/66b logic and use the
+hardware probe to inspect the external receive path.
+
+Capture the native gearbox and decoded receive status when block lock is
+missing:
+
+```bash
+litescope_cli --csv=test/analyzer.csv --csr-csv=scripts/csr.csv --list
+litescope_cli --csv=test/analyzer.csv --csr-csv=scripts/csr.csv \
+    --length=512 --dump=/tmp/m2sdr-5gbaser.vcd
+```
+
+If QPLL and resets are healthy but the external path never achieves block
+lock, verify the module's host-side protocol. A module advertising
+2.5/5/10GBASE-T may still use fixed 10GBASE-R, 5GBASE-X, or a vendor-specific
+rate-adaptation mode toward the FPGA.
+
 Common PCIe build:
 
 ```bash

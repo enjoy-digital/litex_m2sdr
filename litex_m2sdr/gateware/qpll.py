@@ -29,9 +29,9 @@ class SharedQPLL(LiteXModule):
         qpll_eth_settings = QPLLSettings(
             # Match the original Acorn 2.5G topology on GTREFCLK0 while
             # preserving the existing internal reference for 1000BASE-X.
-            refclksel  = {"1000basex": 0b111, "2500basex": 0b001}[eth_phy],
-            fbdiv      = {"1000basex": 4, "2500basex": 5}[eth_phy],
-            fbdiv_45   = {125e6: 5, 156.25e6 : 4}[eth_refclk_freq],
+            refclksel  = {"1000basex": 0b111, "2500basex": 0b001, "5000baser": 0b111}[eth_phy],
+            fbdiv      = {"1000basex": 4, "2500basex": 5, "5000baser": 5}[eth_phy],
+            fbdiv_45   = {103.125e6: 5, 125e6: 5, 156.25e6: 4}[eth_refclk_freq],
             refclk_div = 1,
         )
 
