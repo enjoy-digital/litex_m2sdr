@@ -17,6 +17,10 @@ does not retune the Acorn firmware PI coefficients. The dependency also keeps
 the original `PSGen` implementation for older integrations. M2SDR explicitly
 uses `WRMMCMBackend` with both completion signals connected.
 
+The `litex_wr_nic` checkout is looked up in this order: `--wr-nic-dir`,
+`LITEX_WR_NIC_DIR`, then `./litex_wr_nic` and `../litex_wr_nic` next to this
+repository. `--wr-firmware` overrides the firmware image picked from it.
+
 Run the following commands from the M2SDR repository, with the dependency path
 pointing to the **repository root**:
 

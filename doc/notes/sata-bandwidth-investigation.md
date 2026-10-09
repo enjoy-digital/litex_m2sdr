@@ -1,5 +1,9 @@
 # SATA Bandwidth Investigation And Plan
 
+> [!NOTE]
+> Engineering note kept for reference. For user documentation, see
+> [SATA Workflows](../sata-workflows.md) and [SATA Hardware Validation](../sata-validation.md).
+
 Date: 2026-07-13. Branch: `feature/sata-gqrx-shared-streaming`.
 Bitstream: `build/litex_m2sdr_baseboard_eth_sata` (Ethernet + SATA baseboard,
 Gen2, 125 MHz sys_clk). Transport: Etherbone at `192.168.1.50`, JTAG via
