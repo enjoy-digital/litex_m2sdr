@@ -51,7 +51,7 @@ while the recorded data demand stayed below the drive's sustained rate:
 | SATA -> host | 64 MiB `diag read`, idle endpoint | 26-30 MiB/s | readback matched with `cmp` |
 
 The same gateware with a degraded, never-TRIMmed WDC WDS120G1G0A sustained
-only 10-25 MiB/s on long writes; see `sata-bandwidth-investigation.md` for
+only 10-25 MiB/s on long writes; see [SATA bandwidth investigation](notes/sata-bandwidth-investigation.md) for
 that investigation and the drive benchmarking recipe.
 
 The host-buffer numbers below are from the 2026-05-24 hardware run.

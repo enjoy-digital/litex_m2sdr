@@ -10,19 +10,8 @@ For the optional PTP-disciplined FPGA 10 MHz RFIC reference path, add
 `--with-eth-ptp-rfic-clock` to the same Ethernet/PTP build.
 
 This is the Ethernet PTP path, where the board receives PTP over LiteEth and
-disciplines its own `time_gen`. For PCIe host-time synchronization, use a PTM
-gateware image and the host helper instead:
-
-```sh
-./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=1 --with-pcie-ptm --build --load
-scripts/m2sdr_pcie_time_sync.py --dry-run
-sudo scripts/m2sdr_pcie_time_sync.py --stdout
-```
-
-The PCIe helper auto-detects the M2SDR PHC and runs `phc2sys` with
-`CLOCK_REALTIME` as the source, so the board follows the host clock. If the host
-clock is itself locked by NTP or PTP, that disciplined host time is what the
-board follows over PCIe.
+disciplines its own `time_gen`. For PCIe host-time synchronization, see
+[PCIe PTM Host Time Sync](../pcie-ptm.md) instead.
 
 ## Start ptp4l
 
@@ -67,6 +56,20 @@ Build the runtime utility:
 ```sh
 make -C litex_m2sdr/software/user m2sdr_util
 ```
+
+Check the board status:
+
+```sh
+./litex_m2sdr/software/user/m2sdr_util --ip 192.168.1.50 info
+./litex_m2sdr/software/user/m2sdr_util --ip 192.168.1.50 --watch ptp-status
+```
+
+`m2sdr_util info` reports whether the LiteEth PTP core is locked, whether the board time is locked
+to PTP, and whether the clock is in holdover. `--watch ptp-status` shows the live discipline state,
+learned master identity, and lock/loss counters from the board-time discipline loop.
+`--json ptp-status` and `ptp-smoke` provide machine-readable and pass/fail checks for lab
+automation; use tcpdump when protocol message visibility is needed. `ptp-config` exposes runtime
+servo tuning (see [Tune Time-Lock Stability](#tune-time-lock-stability)).
 
 Run a short smoke test:
 

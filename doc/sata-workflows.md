@@ -84,7 +84,7 @@ shared RX path and took about twice the requested duration), while a Samsung
 (233 MiB/s) in real time. Short writes can be much faster than a drive's
 sustained rate because they are absorbed by its SLC/DRAM cache. Use a rate
 below the measured sustained write speed when GQRX must remain smooth; see
-`sata-bandwidth-investigation.md` for the measurement recipe. If the utility
+[SATA bandwidth investigation](notes/sata-bandwidth-investigation.md) for the measurement recipe. If the utility
 reports that elapsed capture time differs from the requested time, treat that
 capture as backpressured and lower the rate, bit depth, or channel count.
 
@@ -218,3 +218,6 @@ Raw sector and routing tools are under `diag`:
 The catalog is stored at sector `0x800`. Automatic data allocation starts at
 sector `0x100000`, and each named entry reserves a small SigMF metadata region
 next to its sample data.
+It is a small capture index, not a general file system: captures stay in
+contiguous sector ranges for the SATA streamers, SigMF provides interchange
+metadata, and avoiding FAT/ext keeps validation and recovery simple.
