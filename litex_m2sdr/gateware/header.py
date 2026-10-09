@@ -223,18 +223,10 @@ class HeaderInserterExtractor(LiteXModule):
             self.frame_cycles.eq(self._frame_cycles.storage),
         ]
 
-        # Timed-TX gate CSRs (extractor only).
-        if self.mode == "extractor":
-            self._tx_offset      = CSRStorage(64, reset=0, description=
-                "Timed-TX pipeline offset (ns): added to the FPGA time before comparing against the "
-                "header air-time so the signal is on the air at exactly the timestamp (loopback-calibrated).")
-            self._underflow      = CSRStatus(32, description=
-                "TX underflow count: timed frames that missed their air-time (dropped whole; "
-                "the RFIC aired zeros for them).")
-            self.comb += [
-                self.tx_offset.eq(self._tx_offset.storage),
-                self._underflow.status.eq(self.underflow),
-            ]
+        # The timed-TX gate and timestamp-plane CSRs (tx_offset/tx_underflow/rx_offset) are
+        # declared by TXRXHeader AFTER the pre-existing CSRs, so the HEADER CSR map stays
+        # backward-compatible: software built against an older csr.h keeps addressing every
+        # pre-gate register correctly on new gateware and vice versa.
 
 # TX Header Extractor ------------------------------------------------------------------------------
 
@@ -272,6 +264,21 @@ class TXRXHeader(LiteXModule):
             self.last_tx_timestamp = CSRStatus(64, description="Last TX Timestamp.")
             self.last_rx_header    = CSRStatus(64, description="Last RX Header.")
             self.last_rx_timestamp = CSRStatus(64, description="Last RX Timestamp.")
+            # Timed-TX gate / timestamp-plane CSRs. Declared AFTER the pre-existing CSRs on
+            # purpose: they are appended at the end of the HEADER CSR block, so every register
+            # above keeps its pre-gate address and software built against either csr.h vintage
+            # keeps addressing the common registers correctly (presence of the gate is
+            # advertised through the capability features CSR, not probed by address).
+            self._tx_offset    = CSRStorage(64, reset=0, description=
+                "Timed-TX pipeline offset (ns): added to the FPGA time before comparing against the "
+                "header air-time so the signal is on the air at exactly the timestamp (loopback-calibrated).")
+            self._tx_underflow = CSRStatus(32, description=
+                "TX underflow count: timed frames that missed their air-time (dropped whole; "
+                "the RFIC aired zeros for them).")
+            self.comb += [
+                self.tx.tx_offset.eq(self._tx_offset.storage),
+                self._tx_underflow.status.eq(self.tx.underflow),
+            ]
             self.sync += [
                 # Reset.
                 If(self.tx.reset,

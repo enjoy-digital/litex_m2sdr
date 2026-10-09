@@ -27,6 +27,7 @@ def test_capability_builds_with_valid_configuration():
         sata_mode="read+write",
         gpio_enabled=True,
         wr_enabled=False,
+        timed_tx=True,
         variant="m2",
         jtagbone=True,
         eth_sfp=0,

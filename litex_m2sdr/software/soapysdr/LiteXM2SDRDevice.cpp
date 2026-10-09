@@ -769,21 +769,17 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         m2sdr_set_rx_header(_dev, false, false);
 
     /* DMA TX Header: carries the per-buffer air-time the hardware timed-TX gate holds each
-     * buffer to. Probed the same way as the RX header (write a known pattern to the control
-     * CSR and read it back; the register only exists when the header module is in the
-     * bitstream), so hardware timed TX engages on gateware that has the gate and falls back
-     * to the software timeline on gateware that does not (see timed_tx in setupStream()).
-     * Left disabled until setupStream() configures the stream. */
-#ifdef CSR_HEADER_TX_CONTROL_ADDR
+     * buffer to. The gate's presence is advertised through the capability features CSR (the
+     * header control register exists on every bitstream vintage, so probing it would
+     * false-positive on pre-gate gateware), letting hardware timed TX engage on gateware
+     * that has the gate and fall back to the software timeline otherwise (see timed_tx in
+     * setupStream()). Left disabled until setupStream() configures the stream. */
         {
-            const uint32_t probe =
-                (1u << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
-                (1u << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET);
-            litex_m2sdr_writel(_dev, CSR_HEADER_TX_CONTROL_ADDR, probe);
-            _tx_dma_header_supported =
-                litex_m2sdr_readl(_dev, CSR_HEADER_TX_CONTROL_ADDR) == probe;
+            struct m2sdr_capabilities caps;
+            if (m2sdr_get_capabilities(_dev, &caps) == M2SDR_ERR_OK)
+                _tx_dma_header_supported =
+                    (caps.features & M2SDR_FEATURE_TIMED_TX) != 0;
         }
-#endif
         m2sdr_set_tx_header(_dev, false);
 
     /* Disable DMA Loopback. */
@@ -809,6 +805,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
      * scripts/timed_tx_selftest. */
     if (args.count("tx_offset") > 0)
         _tx_offset_ns = std::stoll(args.at("tx_offset"));
+    }
 
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");

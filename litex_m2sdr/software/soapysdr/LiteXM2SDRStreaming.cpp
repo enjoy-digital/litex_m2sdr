@@ -171,7 +171,7 @@ static bool has_kwargs_key(
 /* Timed-TX engagement mode. "hardware" routes each buffer's air-time through the per-buffer
  * DMA header to the FPGA timed-TX gate (deterministic on-air timing, 10 ns grid); "software"
  * keeps the host-side sample timeline; "auto" (default) picks hardware when the gateware has
- * the gate (probed at open) and falls back to software otherwise. */
+ * the gate (advertised by the capability features CSR, read at open) and falls back to software otherwise. */
 enum class TimedTxMode { Off, Software, Hardware, Auto };
 
 static TimedTxMode get_kwargs_timed_tx_mode(
@@ -559,7 +559,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
          * In hardware mode air-times travel in the header and the gate holds/drops each buffer,
          * so the software timeline stays off and timed writes stamp the first buffer of each
          * burst directly (see writeStream()). "auto" falls back to the software timeline when
-         * the gateware has no gate (probed at open) or on the LiteEth transport; an explicit
+         * the gateware has no gate (capability features CSR, read at open) or on the LiteEth transport; an explicit
          * "hardware" there is a configuration error and fails loudly. */
         TimedTxMode timed_tx_mode = get_kwargs_timed_tx_mode(searchArgs, _deviceArgs);
         const bool tx_gate_usable = _tx_dma_header_supported && isLitePCIe();
@@ -568,7 +568,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         } else if (timed_tx_mode == TimedTxMode::Hardware && !tx_gate_usable) {
             throw std::runtime_error(
                 "timed_tx=hardware requested but the timed-TX gate is unavailable "
-                "(TX DMA header module absent from this gateware, or LiteEth transport); "
+                "(gate not advertised by this gateware's capability CSR, or LiteEth transport); "
                 "use timed_tx=software or update the gateware");
         }
         _tx_stream.timed_tx_hardware = (timed_tx_mode == TimedTxMode::Hardware);

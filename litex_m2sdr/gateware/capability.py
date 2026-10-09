@@ -23,6 +23,8 @@ class Capability(LiteXModule):
         gpio_enabled,
         # White Rabbit.
         wr_enabled,
+        # Timed TX.
+        timed_tx,
         # Board.
         variant, jtagbone, eth_sfp, wr_sfp):
 
@@ -46,6 +48,8 @@ class Capability(LiteXModule):
             CSRField("eth_ptp",  size=1, offset=6, reset=int(eth_ptp),      description="Ethernet PTP time discipline is present."),
             CSRField("eth_ptp_rfic_clock", size=1, offset=7, reset=int(eth_ptp_rfic_clock),
                 description="Ethernet PTP can discipline the RFIC reference clock path."),
+            CSRField("timed_tx", size=1, offset=8, reset=int(timed_tx),
+                description="Hardware timed-TX gate (and its timestamp-offset CSRs) is present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 

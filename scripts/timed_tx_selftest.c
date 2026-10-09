@@ -15,7 +15,7 @@
  *     timestamp CSR must equal X.
  *  2. TOO-LATE DROP: a marker tagged in the past is dropped whole (TX underflow++), nothing airs.
  *  3. CALIBRATION: prints tx_offset = D (makes the loopback RX see the marker at exactly X);
- *     --set-offset programs CSR_HEADER_TX_TX_OFFSET and re-measures.
+ *     --set-offset programs CSR_HEADER_TX_OFFSET and re-measures.
  *
  * Requires the loopback cable on the tested channel (default TX2->RX2, --chan 2).
  */
@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 
     printf("timed-TX self-test: %s rate=%.2f MSPS chan=%d lead=%.0f us reps=%d thr=%.0f tx_offset=%llu\n",
            layout2 ? "2T2R" : "1T1R", rate / 1e6, chan, lead_us, reps, thr,
-           (unsigned long long)rd64(CSR_HEADER_TX_TX_OFFSET_ADDR));
+           (unsigned long long)rd64(CSR_HEADER_TX_OFFSET_ADDR));
 
     pthread_t tx; pthread_create(&tx, NULL, tx_main, NULL);
     usleep(200000);   /* let the feeder fill the ring and the reader/RX come alive */

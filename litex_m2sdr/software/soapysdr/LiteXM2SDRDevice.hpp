@@ -418,13 +418,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     size_t _rx_dma_header_bytes = 0;
 
     /* TX DMA headers carry the per-buffer air-time consumed by the hardware timed-TX gate;
-     * support is probed at construction like the RX ones, since older bitstreams lack the
+     * presence is read from the capability features CSR at construction, since older bitstreams lack the
      * header module. _tx_dma_header_bytes is resolved per-stream in setupStream() from the
      * timed_tx mode: non-zero only when the hardware gate is engaged. */
     bool _tx_dma_header_supported = false;
     size_t _tx_dma_header_bytes = 0;
 
-    /* Timed-TX gate pipeline compensation (ns) written to CSR_HEADER_TX_TX_OFFSET so a
+    /* Timed-TX gate pipeline compensation (ns) written to CSR_HEADER_TX_OFFSET so a
      * calibrated "transmit at X" airs at X. -1 = auto (derived from the sample rate in
      * setSampleRate); >= 0 = an explicit value from the tx_offset device arg. Applied only
      * when the TX header module is present (_tx_dma_header_supported), so the gate CSR is

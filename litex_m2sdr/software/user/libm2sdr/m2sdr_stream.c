@@ -1309,7 +1309,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
-/* Set the timed-TX pipeline offset (ns), CSR_HEADER_TX_TX_OFFSET. The hardware timed-TX
+/* Set the timed-TX pipeline offset (ns), CSR_HEADER_TX_OFFSET. The hardware timed-TX
  * gate releases each timed frame the cycle (FPGA time + tx_offset) reaches the frame's
  * air-time, so tx_offset compensates the fixed TX-pipeline latency (packer/CDC/serializer/
  * DAC/analog) between the gate and the antenna: with it calibrated, "transmit at X" puts
@@ -1323,9 +1323,9 @@ int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
     if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
         return M2SDR_ERR_UNSUPPORTED;
     /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
-    if (m2sdr_reg_write(dev, CSR_HEADER_TX_TX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
+    if (m2sdr_reg_write(dev, CSR_HEADER_TX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
         return M2SDR_ERR_IO;
-    if (m2sdr_reg_write(dev, CSR_HEADER_TX_TX_OFFSET_ADDR + 4, (uint32_t)(offset_ns & 0xffffffffu)) != 0)
+    if (m2sdr_reg_write(dev, CSR_HEADER_TX_OFFSET_ADDR + 4, (uint32_t)(offset_ns & 0xffffffffu)) != 0)
         return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }

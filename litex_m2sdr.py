@@ -435,6 +435,9 @@ class BaseSoC(SoCMini):
             # White Rabbit Capabilities.
             wr_enabled      = with_white_rabbit,
 
+            # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
+            timed_tx        = True,
+
             # Board.
             variant        = variant,
             jtagbone       = with_jtagbone,
