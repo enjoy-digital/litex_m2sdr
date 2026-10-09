@@ -87,12 +87,29 @@ Two variants are offered, both in the same **M.2 2280 Key M** form factor:
   software-regulated loops; mostly for advanced users with specialized clock control requirements.
   [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
 
-The board fits directly into an M.2 slot. Mounted on the **LiteX Acorn Baseboard Mini**, it also
-gets 1000BASE-X/2500BASE-X Ethernet (SFP) and SATA to record/play samples directly to/from an SSD:
+The same board scales from a single PC to a distributed setup:
 
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/fb75aeeb-4e99-45b5-9582-0c4dbd079af6" width="100%">
-</div>
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="https://github.com/user-attachments/assets/4b8e1b73-b83c-4fcc-b152-e61c96778739" alt="Four LiteX-M2SDR boards on an ASUS Hyper M.2 card" width="100%">
+    </td>
+    <td width="50%" align="center">
+      <img src="https://github.com/user-attachments/assets/0cd82d1b-0ee8-4429-b4f1-c95fe15a1492" alt="LiteX-M2SDR on the Acorn Baseboard Mini over Ethernet with PoE" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>8T8R in a single PC.</b> Four boards on an ASUS Hyper M.2 card with PCIe bifurcation,
+      each streaming over its own PCIe link.
+    </td>
+    <td valign="top">
+      <b>Distributed over Ethernet.</b> On the LiteX Acorn Baseboard Mini, the board gets
+      1G/2.5G Ethernet (SFP), PoE, <a href="doc/ptp/README.md">PTP</a> time sync and SATA
+      recording. See <a href="doc/ethernet.md">Ethernet</a>.
+    </td>
+  </tr>
+</table>
 
 Pinout, I/O voltages, PPS input and LED behavior: see the [Hardware Reference](doc/hardware.md).
 
