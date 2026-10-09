@@ -768,14 +768,19 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                 "RX timestamps fall back to software accounting");
         m2sdr_set_rx_header(_dev, false, false);
 
-    /* DMA TX Header */
-    #if defined(_TX_DMA_HEADER_TEST)
-        /* Enable */
-        m2sdr_set_tx_header(_dev, true);
-    #else
-        /* Disable */
+    /* DMA TX Header: carries the per-buffer air-time the hardware timed-TX gate holds each
+     * buffer to. The gate's presence is advertised through the capability features CSR (the
+     * header control register exists on every bitstream vintage, so probing it would
+     * false-positive on pre-gate gateware), letting hardware timed TX engage on gateware
+     * that has the gate and fall back to the software timeline otherwise (see timed_tx in
+     * setupStream()). Left disabled until setupStream() configures the stream. */
+        {
+            struct m2sdr_capabilities caps;
+            if (m2sdr_get_capabilities(_dev, &caps) == M2SDR_ERR_OK)
+                _tx_dma_header_supported =
+                    (caps.features & M2SDR_FEATURE_TIMED_TX) != 0;
+        }
         m2sdr_set_tx_header(_dev, false);
-    #endif
 
     /* Disable DMA Loopback. */
         m2sdr_set_dma_loopback(_dev, false);
@@ -794,6 +799,33 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
     if (args.count("auto_bandwidth") > 0)
         _autoBandwidth = parse_bool_arg(args.at("auto_bandwidth"));
+
+    /* Timed-TX gate calibration (ns). Unset -> derived from the sample rate (see
+     * setSampleRate); an explicit value overrides -- obtain the per-board figure from
+     * scripts/timed_tx_selftest. */
+    if (args.count("tx_offset") > 0)
+        _tx_offset_ns = std::stoll(args.at("tx_offset"));
+
+    /* RX timestamp plane calibration (ns), the mirror of tx_offset: subtracted in gateware
+     * from the RX header stamps so they refer to the antenna instead of the DMA plane. No
+     * auto default (a loopback only measures the tx+rx pipeline SUM; splitting it needs an
+     * external reference such as PPS), so it is applied only when given explicitly. */
+    if (args.count("rx_offset") > 0) {
+        long long rx_offset_ns = std::stoll(args.at("rx_offset"));
+        if (rx_offset_ns < 0)
+            throw std::runtime_error("rx_offset must be non-negative");
+        if (!_tx_dma_header_supported) {
+            SoapySDR::log(SOAPY_SDR_WARNING,
+                "rx_offset ignored: this gateware has no RX timestamp offset register");
+        } else {
+            int rc = m2sdr_set_rx_offset(_dev, (uint64_t)rx_offset_ns);
+            if (rc != 0)
+                SoapySDR::logf(SOAPY_SDR_WARNING, "m2sdr_set_rx_offset(%lld ns) failed: %s",
+                    rx_offset_ns, m2sdr_strerror(rc));
+            else
+                SoapySDR::logf(SOAPY_SDR_INFO, "RX timestamp offset = %lld ns", rx_offset_ns);
+        }
+    }
 
     if (args.count("ad9361_fir_profile") > 0) {
         _ad9361_fir_profile = args.at("ad9361_fir_profile");
@@ -1702,6 +1734,18 @@ void SoapyLiteXM2SDR::setSampleMode() {
 #endif
 }
 
+/* Deterministic timed-TX gate+DMA pipeline latency, expressed in RFIC sample-clock cycles so the
+ * default tx_offset tracks the sample rate (offset_ns = cycles x 1e9 / rate). The figure depends on
+ * the channel layout (the 2T2R datapath packs two channels per cycle), measured over a cabled
+ * TX->RX loopback:
+ *     1T1R: 1358 ns @30.72, 694 ns @61.44, 373 ns @122.88  -> ~42-46 cycles
+ *     2T2R: 1215 ns @30.72, 627 ns @61.44                  -> ~37-38 cycles
+ * These are close enough across rates to use one constant per layout; the residual (tens of ns) is
+ * board-specific, so calibrate with scripts/timed_tx_selftest and pass the tx_offset device arg
+ * when exact absolute timing matters. */
+static constexpr double M2SDR_TX_PIPELINE_CYCLES_1T1R = 43.0;
+static constexpr double M2SDR_TX_PIPELINE_CYCLES_2T2R = 38.0;
+
 void SoapyLiteXM2SDR::setSampleRate(
     const int direction,
     const size_t channel,
@@ -1885,6 +1929,27 @@ void SoapyLiteXM2SDR::setSampleRate(
             _sampleRateHwFirProfile = _ad9361_fir_profile;
             sample_rate_applied = true;
         }
+    }
+
+    /* Program the timed-TX gate pipeline offset so a calibrated air-time X puts the signal on air
+     * at X. Gated on the header module being present (probed at construction) so the gate CSR is
+     * never written on a bitstream that lacks it. Auto (_tx_offset_ns < 0) derives the offset from
+     * the deterministic gate+DMA pipeline latency (M2SDR_TX_PIPELINE_CYCLES) scaled to the active
+     * rate; an explicit tx_offset device arg overrides. */
+    if (sample_rate_applied && _tx_dma_header_supported && rate > 0.0) {
+        long long tx_offset_ns = _tx_offset_ns;
+        if (tx_offset_ns < 0) {
+            const double cycles = (_nChannels >= 2) ? M2SDR_TX_PIPELINE_CYCLES_2T2R
+                                                    : M2SDR_TX_PIPELINE_CYCLES_1T1R;
+            tx_offset_ns = (long long)(cycles * 1e9 / rate + 0.5);
+        }
+        int rc = m2sdr_set_tx_offset(_dev, (uint64_t)tx_offset_ns);
+        if (rc != 0)
+            SoapySDR::logf(SOAPY_SDR_WARNING, "m2sdr_set_tx_offset(%lld ns) failed: %s",
+                tx_offset_ns, m2sdr_strerror(rc));
+        else
+            SoapySDR::logf(SOAPY_SDR_INFO, "timed-TX gate offset = %lld ns (%s) at %.3f MSPS",
+                tx_offset_ns, _tx_offset_ns < 0 ? "auto" : "explicit", rate / 1e6);
     }
 #if USE_LITEETH
     timeout.throw_if_timed_out();
