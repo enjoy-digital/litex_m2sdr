@@ -373,6 +373,15 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         const size_t channel,
         const std::string &key) const override;
 
+    /***********************************************************************************************
+    *                                    Settings API
+    ***********************************************************************************************/
+    SoapySDR::ArgInfoList getSettingInfo(void) const override;
+
+    void writeSetting(const std::string &key, const std::string &value) override;
+
+    std::string readSetting(const std::string &key) const override;
+
 
  /**************************************************************************************************
  *                                        PRIVATE
