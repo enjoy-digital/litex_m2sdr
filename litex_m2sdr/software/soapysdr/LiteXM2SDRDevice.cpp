@@ -2121,6 +2121,7 @@ void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
     if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
         config, length))
         throw std::runtime_error("SI5351 " + source + " config failed");
+    m2sdr_si5351_pllb_state_from_config(&_si5351_pllb, config, length);
 
     /* Compensate the measured reference error by trimming the PLL feedback
      * away from the nominal table, correcting the AD9361 reference and all
@@ -2128,7 +2129,7 @@ void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
     if (_refclk_ppm != 0.0) {
         SoapySDR::logf(SOAPY_SDR_INFO, "Trimming SI5351 PLL by %.3f ppm", _refclk_ppm);
         if (!m2sdr_si5351_i2c_trim_pllb_ppm((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-            config, length, _refclk_ppm))
+            config, length, _refclk_ppm, &_si5351_pllb, nullptr))
             throw std::runtime_error("SI5351 PLL ppm trim failed");
     }
 #else

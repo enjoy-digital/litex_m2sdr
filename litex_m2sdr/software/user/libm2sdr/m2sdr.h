@@ -763,6 +763,13 @@ int  m2sdr_set_bandwidth(struct m2sdr_dev *dev, int64_t bw);
  * Requires a prior m2sdr_apply_config() so the active clock topology is
  * known. */
 int  m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm);
+/* Last reference trim applied through the RF config or m2sdr_set_refclk_ppm(). */
+int  m2sdr_get_refclk_ppm(struct m2sdr_dev *dev, double *ppm);
+/* Glitch-free retrim window of the active clock topology in ppm, clamped to
+ * +-M2SDR_REFCLK_PPM_MAX. Retrims inside it move only the PLL fractional
+ * field; outside, the feedback is re-centred and that one update is not
+ * glitch-free. */
+int  m2sdr_get_refclk_ppm_window(struct m2sdr_dev *dev, double *ppm_min, double *ppm_max);
 int  m2sdr_set_gain(struct m2sdr_dev *dev, enum m2sdr_direction direction, int64_t gain);
 /* Switch the 1T1R/2T2R channel layout. Re-initializes the AD9361 from the
  * shared init parameters (the device must have completed RF bring-up once),

@@ -32,6 +32,7 @@
 
 extern "C" {
 #include "liteeth_udp.h"
+#include "m2sdr_si5351_i2c.h"
 }
 
 enum class SoapyLiteXM2SDREthernetMode {
@@ -391,6 +392,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* Measured reference clock error in ppm, compensated through the SI5351
      * PLL feedback multiplier (positive = clock runs fast). */
     double _refclk_ppm = 0.0;
+    /* PLLB feedback block last written to the SI5351, so runtime retrims
+     * only touch the registers that changed. */
+    struct m2sdr_si5351_pllb_state _si5351_pllb = {};
 
     size_t _rx_buf_size = 0;
     size_t _tx_buf_size = 0;
