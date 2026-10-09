@@ -269,6 +269,39 @@ The RX EVM bottoms out with the ADC filled to ~-12 dBFS RMS at the lowest rx-gai
 
 Tuning/diagnostic environment variables (defaults are the measured optimum): `M2SDR_OC_BBF_TUNE` (BBF corner target), `M2SDR_OC_BBF_FORCE` (legacy register force-widening), `M2SDR_OC_RX_FIR_FILE` / `M2SDR_OC_TX_FIR_FILE` (passband flatness EQ FIR taps, max 16; TX taps designed for 245.76 MHz), `M2SDR_QEC_KEXP` (RX quadrature tracking loop gain), `M2SDR_RFPLL_CP_PERCENT` (RX RFPLL charge pump scale), `M2SDR_OC_RX_DELAY`/`M2SDR_OC_TX_DELAY` (interface delay overrides).
 
+[> Low-Latency Streaming
+------------------------
+<a id="low-latency"></a>
+
+Optional, opt-in knobs for real-time transmit/receive loops (e.g. 5G uplink). Defaults are
+unchanged: stock builds keep the full-throughput behavior.
+
+**1. Shallow DMA ring (opt-in at module load).** The default 256-buffer ring is tuned for
+full-throughput streaming; a small ring lowers the TX pipeline-latency floor, which is the ring
+drain time, `dma_buffer_count x 8192 B / (rate x bytes_per_sample)` -- e.g. at 30.72 MSPS 2T2R
+(8 B/sample) that is ~8.5 ms for 256 buffers and ~0.27 ms for 8 (double these for 1T1R, which is
+4 B/sample). A small ring buffers less host jitter, so the consumer must be real-time.
+
+```bash
+sudo insmod m2sdr.ko dma_buffer_count=8 dma_buffer_per_irq=2
+sudo scripts/pin_m2sdr_irq.sh          # keep the DMA IRQ on your radio-loop core (re-run after each insmod)
+```
+
+**2. RX low-latency wake (opt-in).** With `M2SDR_RX_WAIT=mwaitx` on CPUs with MONITORX/MWAITX
+(AMD), the zero-copy RX read sleeps on the next ring slot's cache line and wakes the instant the
+FPGA's DMA write lands (sub-microsecond, no spinning, no CSR traffic). The default is `poll()`
+everywhere. Independently, the RX wait consults the live DMA cursor just before blocking, so a
+freshly captured buffer is delivered without waiting for the next coalesced interrupt.
+
+**3. TX fill lead (opt-in, zero-copy API).** `m2sdr_set_tx_lead_buffers(dev, 3)` holds the host a
+tight lead ahead of the free-running DMA reader instead of filling the whole ring, trimming the TX
+pipeline latency to ~lead x buffer air-time. The lead must stay strictly above the kernel's
+`dma_buffer_per_irq` (see the API doc in `m2sdr.h`); `0` keeps the legacy full-ring fill.
+
+With a shallow ring, run the radio thread on an isolated core (`isolcpus=`, `SCHED_FIFO`,
+`mlockall`) on the same core as the pinned IRQ, and confirm **0 overflow / 0 underflow** under
+load.
+
 [> Getting Started
 ------------------
 <a id="quick-start"></a>
