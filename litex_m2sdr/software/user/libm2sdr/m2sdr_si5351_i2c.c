@@ -81,11 +81,107 @@ void m2sdr_si5351_i2c_reset(void *conn) {
 /* m2sdr_si5351_i2c_write */
 /*------------------------*/
 
+/* Multi-register burst: the SI5351 auto-increments the register address, so
+ * a block of consecutive registers is written in a single I2C transaction.
+ * The LiteI2C master takes up to 4 bytes per FIFO word; a len_tx above 4
+ * announces that another word follows while SCL is held low between them.
+ * Each word is acknowledged with a status entry in the RX FIFO: an
+ * unfinished marker between words, the NACK/error status at the end. */
+static bool m2sdr_si5351_i2c_write_burst(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
+    uint32_t total = len + 1; /* Register address + payload. */
+    uint32_t sent  = 0;
+    int status;
+    int timeout;
+
+    /* Reset I2C. */
+    m2sdr_si5351_i2c_reset(conn);
+
+    /* Set Slave Address. */
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+
+    /* Start Transaction. */
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+
+    while (sent < total) {
+        uint32_t remaining = total - sent;
+        uint32_t chunk     = remaining > 4 ? 4 : remaining;
+        uint32_t word      = 0;
+        uint32_t i;
+        bool     more      = remaining > 4;
+        bool     unfinished;
+
+        /* Chunk length, with a len_tx above 4 announcing a continuation. */
+        m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | (more ? 5 : chunk));
+
+        /* Pack the chunk MSB-first: the first byte on the wire sits in the
+         * highest transmitted byte lane. */
+        for (i = 0; i < chunk; i++) {
+            uint32_t byte = (sent + i == 0) ? addr : data[sent + i - 1];
+            word = (word << 8) | byte;
+        }
+
+        /* Wait TX Ready. */
+        timeout = 100000;
+        do {
+            status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+            if (!m2sdr_si5351_bus_ok(conn)) {
+                return false;
+            }
+            if (timeout-- <= 0) {
+                return false;
+            }
+            usleep(1);
+        } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET)));
+
+        /* Send Chunk. */
+        m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR, word);
+        sent += chunk;
+
+        /* Wait for the word's status entry before pushing more, so a NACK
+         * aborts the burst instead of starting a spurious transaction with
+         * the leftover words. */
+        timeout = 100000;
+        do {
+            status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+            if (!m2sdr_si5351_bus_ok(conn)) {
+                return false;
+            }
+            if (timeout-- <= 0) {
+                return false;
+            }
+            usleep(1);
+        } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)));
+
+        unfinished = status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_UNFINISHED_OFFSET);
+
+        /* Pop the status entry. */
+        m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
+
+        /* Check NACK. */
+        if (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET)) {
+            return false;
+        }
+
+        /* The controller must agree on whether the transaction continues. */
+        if (unfinished != more) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
-    if (len != 1) {
-        /* The current LiteI2C helper is intentionally narrow: the config path
-         * only needs single-register writes. */
+    if (len == 0) {
         return false;
+    }
+    if (len != 1) {
+        /* The config sequencer relies on the single-register path below;
+         * block writes go through the burst helper. */
+        return m2sdr_si5351_i2c_write_burst(conn, slave_addr, addr, data, len);
     }
 
     int status;

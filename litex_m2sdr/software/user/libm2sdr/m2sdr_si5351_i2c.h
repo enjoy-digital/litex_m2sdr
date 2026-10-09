@@ -30,7 +30,9 @@
 
 /* Reset the LiteI2C controller state and drain any pending RX data. */
 void m2sdr_si5351_i2c_reset(void *conn);
-/* Write a single SI5351 register through the LiteI2C master. */
+/* Write len consecutive SI5351 registers starting at addr through the
+ * LiteI2C master. A multi-register block relies on the SI5351 address
+ * auto-increment and goes out as a single I2C write transaction. */
 bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len);
 /* Read a single SI5351 register through the LiteI2C master. */
 bool m2sdr_si5351_i2c_read(void *conn,  uint8_t slave_addr, uint8_t addr, uint8_t *data, uint32_t len, bool send_stop);
