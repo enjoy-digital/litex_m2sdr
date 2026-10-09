@@ -907,6 +907,29 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  * - Endianness: values are encoded/decoded in native little-endian byte order
  *   as used by current host/FPGA flows.
  */
+/* Set the zero-copy TX fill lead, in buffers, ahead of the DMA reader cursor (LitePCIe).
+ *
+ * The zero-copy TX path paces how far ahead of the free-running reader the host fills the ring;
+ * that lead x the per-buffer air-time IS the TX pipeline latency. Because the reader loops with
+ * no backpressure, the host must stay far enough ahead that a submitted frame is not overrun
+ * before the reader reaches it.
+ *
+ *  - lead_buffers == 0: legacy behavior -- fill the whole ring (maximum throughput, and the
+ *    maximum ~ring-depth pipeline latency). Best for continuous streaming.
+ *  - lead_buffers  > 0: hold the host this many buffers ahead of the IRQ-updated reader cursor;
+ *    latency drops to ~lead x buffer air-time. It MUST be strictly greater than the kernel's
+ *    dma_buffer_per_irq (the IRQ-coalescing depth): the fill paces against the IRQ-updated
+ *    cursor, which the free-running reader can run up to dma_buffer_per_irq buffers ahead of,
+ *    so a lead at or below that lets the reader overtake a just-filled slot and air stale
+ *    samples with no error signal. With the low-latency insmod (dma_buffer_per_irq=2) use
+ *    lead >= 3 (nonzero values are floored to 3); with the default coalescing
+ *    (dma_buffer_per_irq=8) such a small lead is not meaningful -- use 0. The consumer must
+ *    also be real-time: a stall longer than the lead underflows the reader.
+ *
+ * Clamped to the ring depth. Takes effect on the next m2sdr_get_buffer(TX). Returns M2SDR_ERR_OK
+ * on a LitePCIe device, M2SDR_ERR_UNSUPPORTED otherwise. */
+int m2sdr_set_tx_lead_buffers(struct m2sdr_dev *dev, unsigned lead_buffers);
+
 int m2sdr_get_buffer(struct m2sdr_dev *dev,
                      enum m2sdr_direction direction,
                      void **buffer,

@@ -12,6 +12,7 @@
 /*----------*/
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config.h"
@@ -961,6 +962,65 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
     dev->tx_configured = 0;
 }
 
+static int64_t pcie_live_cursor(struct m2sdr_dev *dev, uint32_t loop_status_addr,
+                                int64_t stale, int64_t buf_count);
+
+/* The RFIC DMA writes each buffer's header at buffer START, before the completion cursor
+ * increments, so slot (rx_user_count)%count already holds the in-flight header when the host is
+ * caught up -- monitoring it would wait a full ring. Slot (rx_user_count + OFFSET)%count instead
+ * changes exactly when the wanted buffer completes (the device starts the next one). The RFIC's
+ * header pipeline is 2 buffers deep here (measured: offset 2 => monitor fires ~98%, overflow 0,
+ * keeps up; offset 0/1 => ~0-4% fire, overflow). The pipeline depth may differ at other sample
+ * rates/gateware. */
+static const int m2sdr_rx_slot_offset = 2;
+
+/* Low-latency zero-copy RX wait. With M2SDR_RX_WAIT=mwaitx on an MWAITX-capable CPU, sleep on
+ * the next RX ring slot's DMA-header cache line and wake the instant the device DMA-writes that
+ * buffer -- a coherent DMA write wakes MWAITX ~sub-us later with no spin and no CSR/PCIe traffic;
+ * the default everywhere is poll(). OPT-IN because the slot offset above is empirically tuned
+ * and so far validated on one bench. The window between MONITORX and MWAITX MUST stay
+ * syscall-free (a syscall disarms the monitor), so the freshness re-check is a PURE load of the
+ * header timestamp. rx_user_count indexes the slot get_buffer() delivers next, i.e. exactly the
+ * one about to be written, so the monitored line is always correct. Decision is lazy-initialized
+ * once. */
+static void m2sdr_rx_wait_next(struct m2sdr_dev *dev, struct litepcie_dma_ctrl *dma,
+                               int64_t buffer_count, int wait_ms)
+{
+    if (!dev->rx_wait_initialized) {
+        const char *mode = getenv("M2SDR_RX_WAIT");
+        int want_mwaitx = mode && !strcmp(mode, "mwaitx");
+        if (!want_mwaitx || !m2sdr_mwaitx_supported()) {
+            dev->rx_wait_mwaitx = 0;
+        } else {
+            uint64_t hz = m2sdr_tsc_hz();
+            /* Safety-net timeout for a missed monitor wake (rare; the monitor normally fires ~one
+             * buffer period after arming). This is a fixed coarse bound, not derived from the ring,
+             * so on a very small ring at a very high sample rate it can exceed the count/2 overflow
+             * budget; the low-latency path therefore relies on the monitor firing (measured ~100%),
+             * with the timeout only bounding how long a rare miss goes unnoticed. */
+            const double to_us = 100.0;
+            dev->rx_mwaitx_timeout_cycles = hz ? (uint32_t)((double)hz * to_us * 1e-6) : 1000000u;
+            dev->rx_wait_mwaitx = 1;
+        }
+        dev->rx_wait_initialized = 1;
+    }
+
+    /* buffer_count must exceed the slot offset, else (rx_user_count + offset) % buffer_count aliases
+     * the slot get_buffer() delivers next (the in-flight one), so MONITORX would arm the buffer being
+     * written now and never wake on the wanted completion -- fall back to poll() on such tiny rings. */
+    if (dev->rx_wait_mwaitx && buffer_count > m2sdr_rx_slot_offset) {
+        int64_t mon_idx = (dev->rx_user_count + m2sdr_rx_slot_offset) % buffer_count;
+        const char *slot = dma->buf_rd + mon_idx * (int64_t)dma->mmap_dma_info.dma_rx_buf_size;
+        const volatile uint64_t *ts = (const volatile uint64_t *)(const void *)(slot + 8);
+        uint64_t ref = *ts;              /* current header ts of the slot to be written next */
+        m2sdr_monitorx(slot);
+        if (*ts == ref)                  /* nothing raced in after arming -> wait for the write */
+            m2sdr_mwaitx(2, 0, dev->rx_mwaitx_timeout_cycles);
+    } else {
+        (void)poll(&dma->fds, 1, wait_ms);
+    }
+}
+
 /* PCIe sync helpers wait for the next DMA ring entry and enforce the public
  * timeout semantics in milliseconds. */
 static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned timeout_ms)
@@ -977,17 +1037,29 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             if (buffer_count <= 0)
                 return M2SDR_ERR_STATE;
 
-            if ((dma->writer_hw_count - dev->rx_release_count) > (buffer_count / 2)) {
+            int64_t writer = dma->writer_hw_count;
+            if ((writer - dev->rx_user_count) <= 0) {
+                /* Nothing pending per the IRQ-updated count: consult the LIVE writer cursor
+                 * once before blocking, so a buffer the hardware has already written is
+                 * delivered up to dma_buffer_per_irq buffers sooner (no wait for the next DMA
+                 * interrupt). Kept OFF the hot path on purpose: when the stale count already
+                 * shows work, the CSR read (an ioctl + non-posted PCIe read) would otherwise
+                 * cost every delivered buffer. */
+                writer = pcie_live_cursor(dev, CSR_PCIE_DMA0_WRITER_TABLE_LOOP_STATUS_ADDR,
+                                          writer, buffer_count);
+            }
+
+            if ((writer - dev->rx_release_count) > (buffer_count / 2)) {
                 dev->pcie_rx_overflow_events++;
                 dev->pcie_rx_overflow_buffers +=
-                    (uint64_t)(dma->writer_hw_count - dev->rx_release_count);
-                dev->rx_user_count = dma->writer_hw_count;
-                dev->rx_release_count = dma->writer_hw_count;
+                    (uint64_t)(writer - dev->rx_release_count);
+                dev->rx_user_count = writer;
+                dev->rx_release_count = writer;
                 m2sdr_pcie_dma_update_rx_release(dev);
                 return M2SDR_ERR_OVERFLOW;
             }
 
-            if ((dma->writer_hw_count - dev->rx_user_count) > 0) {
+            if ((writer - dev->rx_user_count) > 0) {
                 int buf_offset = dev->rx_user_count % buffer_count;
                 *buf = dma->buf_rd + buf_offset * dma->mmap_dma_info.dma_rx_buf_size;
                 dev->rx_user_count++;
@@ -998,7 +1070,7 @@ static int m2sdr_wait_rx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
                 return M2SDR_ERR_TIMEOUT;
             int wait_ms = timeout_ms ? (int)timeout_ms : 100;
-            (void)poll(&dma->fds, 1, wait_ms);
+            m2sdr_rx_wait_next(dev, dma, buffer_count, wait_ms);
         }
     }
 
@@ -1038,15 +1110,29 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
             if (buffer_count <= 0)
                 return M2SDR_ERR_STATE;
 
-            int64_t buffers_pending = dev->tx_user_count - dma->reader_hw_count;
+            /* Pace the fill against the IRQ-updated reader_hw_count. It MUST be the stale count,
+             * NOT a live cursor: the TX reader free-runs (LOOP mode), so a live cursor is ahead
+             * of tx_user_count before the host has primed the ring -> a false "reader passed us"
+             * underflow the host can never escape (it keeps re-anchoring to a moving target). The
+             * stale count's IRQ granularity gives the host the batch window it needs to fill ahead.
+             * tx_lead_buffers caps how far ahead to fill: 0 = legacy full ring (max throughput/
+             * latency); a small value trims the timed-TX pipeline latency (fill ~lead buffers ahead
+             * of the stale reader, i.e. ~lead-staleness ahead of the live reader) -- keep it above
+             * the ~2-buffer staleness so the reader can't overtake. */
+            int64_t reader = dma->reader_hw_count;
+            int64_t lead = dev->tx_lead_buffers > 0 ? (int64_t)dev->tx_lead_buffers : buffer_count;
+            if (lead > buffer_count)
+                lead = buffer_count;
+
+            int64_t buffers_pending = dev->tx_user_count - reader;
             if (buffers_pending < 0) {
                 dev->pcie_tx_underflow_events++;
                 dev->pcie_tx_underflow_buffers += (uint64_t)(-buffers_pending);
-                dev->tx_user_count = dma->reader_hw_count;
-                dev->tx_submit_count = dma->reader_hw_count;
+                dev->tx_user_count = reader;
+                dev->tx_submit_count = reader;
                 return M2SDR_ERR_UNDERFLOW;
             }
-            if (buffers_pending < buffer_count) {
+            if (buffers_pending < lead) {
                 int buf_offset = dev->tx_user_count % buffer_count;
                 *buf = dma->buf_wr + buf_offset * dma->mmap_dma_info.dma_tx_buf_size;
                 dev->tx_user_count++;
@@ -1080,6 +1166,29 @@ static int m2sdr_wait_tx_buffer(struct m2sdr_dev *dev, char **buf, unsigned time
         if (timeout_ms > 0 && (get_time_ms() - start) > (int64_t)timeout_ms)
             return M2SDR_ERR_TIMEOUT;
     }
+}
+
+int m2sdr_set_tx_lead_buffers(struct m2sdr_dev *dev, unsigned lead_buffers)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    /* A nonzero lead must stay above the DMA IRQ-coalescing depth (dma_buffer_per_irq): the fill
+     * paces against the IRQ-updated reader cursor, which the free-running LOOP-mode reader can run
+     * up to that many buffers ahead of -- so a lead at or below it lets the reader overtake a
+     * just-filled slot and air stale samples with no error. The kernel's runtime dma_buffer_per_irq
+     * is not exposed to user space, so floor a nonzero lead to 3 (the safe minimum for the
+     * low-latency insmod dma_buffer_per_irq=2); callers using a larger coalescing depth must keep
+     * the lead above it -- see the m2sdr_set_tx_lead_buffers() doc in m2sdr.h. */
+    if (lead_buffers > 0 && lead_buffers < 3)
+        lead_buffers = 3;
+    /* Clamp to the ring depth; the TX wait path also re-clamps defensively. */
+    int64_t buffer_count = dev->tx_dma.mmap_dma_info.dma_tx_buf_count;
+    if (buffer_count > 0 && (int64_t)lead_buffers > buffer_count)
+        lead_buffers = (unsigned)buffer_count;
+    dev->tx_lead_buffers = (int)lead_buffers;
+    return M2SDR_ERR_OK;
 }
 
 static int m2sdr_liteeth_wait_rx_buffer(struct m2sdr_dev *dev,
@@ -1460,4 +1569,25 @@ int m2sdr_get_buffer_metadata(struct m2sdr_dev *dev,
         meta->flags |= M2SDR_META_FLAG_HAS_TIME;
     }
     return M2SDR_ERR_OK;
+}
+
+/* Live DMA cursor as a MONOTONIC absolute buffer count (LitePCIe).
+ *
+ * The DMA TABLE_LOOP_STATUS CSR packs [31:16]=loop_count, [15:0]=ring index, so a naive
+ * decode (loop_count*ring_depth + index) wraps every 65536 loops. Instead of trusting the
+ * 16-bit loop_count, anchor to the kernel's IRQ-updated hw_count -- which IS monotonic across
+ * the full int64 range -- and add only the in-ring distance from its index to the live index.
+ * Position staleness is bounded by the IRQ-coalescing depth (< ring depth), so that in-ring
+ * delta is always unambiguous and the loop_count wrap never matters. On a CSR read error the
+ * stale count is returned unchanged (never runs ahead of the hardware). */
+static int64_t pcie_live_cursor(struct m2sdr_dev *dev, uint32_t loop_status_addr,
+                                int64_t stale, int64_t buf_count)
+{
+    uint32_t loop_status = 0;
+    if (buf_count <= 0 || m2sdr_reg_read(dev, loop_status_addr, &loop_status) != 0)
+        return stale;
+    int64_t live_index  = (int64_t)(loop_status & 0xffff);
+    int64_t stale_index = stale % buf_count;
+    int64_t delta       = (live_index - stale_index + buf_count) % buf_count;
+    return stale + delta;
 }
