@@ -2325,6 +2325,135 @@ static void vcxo_test(void)
            ppm_variation_from_nominal_min, ppm_variation_from_nominal_max);
 }
 
+/* SI5351 PPM Trim Test */
+/*----------------------*/
+
+/* Step the SI5351 ppm trim around 0 and verify, with the frequency counter
+ * CSRs also used by vcxo-test, that the AD9361 reference follows the
+ * commanded value while the LOs stay locked. The board must already run the
+ * selected nominal clock table (e.g. through a prior m2sdr_rf). */
+static void si5351_ppm_test(const char *clock_source, double refclk_freq,
+                            double span_ppm, double step_ppm)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    void *handle = m2sdr_get_handle(conn);
+    const uint8_t (*config)[2];
+    size_t length;
+    struct m2sdr_si5351_pllb_state state;
+    struct m2sdr_si5351_pllb_trim_report report;
+    double ppm_min, ppm_max;
+    double f_base;
+    double worst_err_ppm = 0.0;
+    int clk_index = -1;
+    int lock_fails = 0;
+    int i;
+
+    printf("\e[1m[> SI5351 PPM Trim Test:\e[0m\n");
+    printf("------------------------\n");
+
+    if (!m2sdr_si5351_i2c_check_litei2c(handle)) {
+        fprintf(stderr, "Gateware without SI5351 LiteI2C support.\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    /* Nominal table for the topology the board is currently running. */
+    if (strcmp(clock_source, "internal") == 0)
+        config = (refclk_freq == 40e6) ? si5351_xo_40m_config : si5351_xo_38p4m_config;
+    else
+        config = (refclk_freq == 40e6) ? si5351_clkin_10m_40m_config : si5351_clkin_10m_38p4m_config;
+    if (strcmp(clock_source, "internal") == 0)
+        length = (refclk_freq == 40e6) ? sizeof(si5351_xo_40m_config) / sizeof(si5351_xo_40m_config[0])
+                                       : sizeof(si5351_xo_38p4m_config) / sizeof(si5351_xo_38p4m_config[0]);
+    else
+        length = (refclk_freq == 40e6) ? sizeof(si5351_clkin_10m_40m_config) / sizeof(si5351_clkin_10m_40m_config[0])
+                                       : sizeof(si5351_clkin_10m_38p4m_config) / sizeof(si5351_clkin_10m_38p4m_config[0]);
+
+    for (i = 0; i < N_CLKS; i++) {
+        if (strcmp(clk_names[i], "AD9361 Ref Clk") == 0) {
+            clk_index = i;
+            break;
+        }
+    }
+    if (clk_index == -1) {
+        fprintf(stderr, "Error: Clock 'AD9361 Ref Clk' not found in clk_names\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    if (m2sdr_si5351_pllb_trim_window(config, length, &ppm_min, &ppm_max))
+        printf("Clock source %s, refclk %.1f MHz, glitch-free window %+.1f/%+.1f ppm.\n",
+               clock_source, refclk_freq / 1e6, ppm_min, ppm_max);
+
+    m2sdr_ad9361_spi_init(handle, 0);
+    m2sdr_si5351_pllb_state_from_config(&state, config, length);
+
+    /* Baseline at 0 ppm; the first trim may normalize the fractional
+     * encoding of the shipped table once. */
+    if (!m2sdr_si5351_i2c_trim_pllb_ppm(handle, SI5351_I2C_ADDR, config, length,
+                                        0.0, &state, &report)) {
+        fprintf(stderr, "SI5351 trim failed; is the board running this table?\n");
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+    sleep(1);
+    f_base = measure_frequency(conn, clk_index);
+    printf("Baseline: %.3f Hz. Counter resolution over the 1s gate is ~%.3f ppm.\n\n",
+           f_base, 1.0 / (0.1 * f_base) * 1e6 / VCXO_TEST_MEASUREMENT_SAMPLES);
+
+    printf("\e[1m%-12s  %-14s  %-12s  %-6s  %-8s  %-8s\e[0m\n",
+           "Cmd (ppm)", "Meas (Hz)", "Meas (ppm)", "Err", "LO lock", "Update");
+    printf("------------  --------------  ------------  ------  --------  --------\n");
+
+    for (double ppm = -span_ppm; ppm <= span_ppm + step_ppm / 2; ppm += step_ppm) {
+        double f, measured_ppm;
+        uint8_t rx_lock = 0, tx_lock = 0, si5351_status = 0xff;
+        bool locked;
+
+        if (!m2sdr_si5351_i2c_trim_pllb_ppm(handle, SI5351_I2C_ADDR, config, length,
+                                            ppm, &state, &report)) {
+            fprintf(stderr, "SI5351 trim to %.3f ppm failed.\n", ppm);
+            break;
+        }
+        /* 1 Hz update rate: the dwell doubles as loop pacing and PLL
+         * settling; the measurement itself gates for another second. */
+        sleep(1);
+        f = measure_frequency(conn, clk_index);
+        /* Commanding +ppm compensates a fast reference, so the output
+         * frequency moves by -ppm. */
+        measured_ppm = -(f - f_base) / f_base * 1e6;
+        if (fabs(measured_ppm - ppm) > worst_err_ppm)
+            worst_err_ppm = fabs(measured_ppm - ppm);
+
+        /* LO lock must hold through every update; the AD9361 synthesizers
+         * only report meaningfully once the RFIC has been initialized. */
+        locked = m2sdr_ad9361_spi_read_checked(handle, REG_RX_CP_OVERRANGE_VCO_LOCK, &rx_lock) &&
+                 m2sdr_ad9361_spi_read_checked(handle, REG_TX_CP_OVERRANGE_VCO_LOCK, &tx_lock) &&
+                 (rx_lock & VCO_LOCK) && (tx_lock & VCO_LOCK);
+        if (!locked)
+            lock_fails++;
+        (void)m2sdr_si5351_i2c_read(handle, SI5351_I2C_ADDR, 0x00, &si5351_status, 1, true);
+
+        printf("%+12.3f  %14.3f  %+12.3f  %6.3f  %-8s  %-8s\n",
+               ppm, f, measured_ppm, fabs(measured_ppm - ppm),
+               locked ? "yes" : "NO",
+               report.glitch_free ? "p2-only" : "recentre");
+        if (si5351_status & 0x40)
+            printf("              SI5351 PLLB loss-of-lock reported (status 0x%02x).\n", si5351_status);
+    }
+
+    /* Back to nominal. */
+    (void)m2sdr_si5351_i2c_trim_pllb_ppm(handle, SI5351_I2C_ADDR, config, length,
+                                         0.0, &state, &report);
+
+    printf("\n\e[1m[> Report:\e[0m\n");
+    printf("----------\n");
+    printf("Worst commanded vs measured error: %.3f ppm.\n", worst_err_ppm);
+    printf("LO lock failures: %d.\n", lock_fails);
+
+    m2sdr_close_dev(conn);
+}
+
 #endif
 
 #ifdef CSR_LEDS_BASE
@@ -4196,6 +4325,10 @@ static void help(void)
 #ifdef  CSR_SI5351_BASE
            "  vcxo-test\n"
            "      Measure VCXO frequency variation.\n"
+           "  si5351-ppm-test [CLOCK_SOURCE] [REFCLK_HZ] [SPAN_PPM] [STEP_PPM]\n"
+           "      Step the SI5351 ppm trim around 0 (default: internal 38.4e6,\n"
+           "      +-0.05 ppm in 0.01 ppm steps at 1 Hz) and report measured vs\n"
+           "      commanded ppm and LO lock. Run m2sdr_rf first.\n"
 #endif
            "\n"
 #ifdef  CSR_SI5351_BASE
@@ -4573,6 +4706,24 @@ int main(int argc, char **argv)
     /* VCXO test cmd. */
     else if (cmd_is(cmd, "vcxo_test", "vcxo-test")) {
         vcxo_test();
+    }
+    else if (cmd_is(cmd, "si5351_ppm_test", "si5351-ppm-test")) {
+        const char *clock_source = "internal";
+        double refclk_freq = 38.4e6;
+        double span_ppm    = 0.05;
+        double step_ppm    = 0.01;
+
+        if (optind < argc)
+            clock_source = argv[optind++];
+        if (optind < argc)
+            refclk_freq = strtod(argv[optind++], NULL);
+        if (optind < argc)
+            span_ppm = strtod(argv[optind++], NULL);
+        if (optind < argc)
+            step_ppm = strtod(argv[optind++], NULL);
+        if (optind < argc || span_ppm <= 0 || step_ppm <= 0)
+            goto show_help;
+        si5351_ppm_test(clock_source, refclk_freq, span_ppm, step_ppm);
     }
 #endif
 
