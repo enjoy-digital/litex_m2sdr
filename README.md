@@ -98,37 +98,41 @@ Pinout, I/O voltages, PPS input and LED behavior: see the [Hardware Reference](d
 
 ## Capabilities
 
-| Feature                          | Mounted in M.2 Slot         | Mounted in Baseboard         | Parameter(s) to Enable                        |
-|----------------------------------|------------------------------|-----------------------------|-----------------------------------------------|
-| **SDR Functionality**           |                              |                              |                                               |
-| SDR TX (AD9361)                 | ✅                           | ✅                           | (always included)                             |
-| SDR RX (AD9361)                 | ✅                           | ✅                           | (always included)                             |
-| Oversampling (122.88MSPS)       | ✅  (PCIe Gen2 x2/x4 only)   | ❌                           | `--with-pcie --pcie-lanes=2|4`                |
-| C API + Utilities               | ✅                           | ✅                           | (included in software build)                  |
-| SoapySDR Support                | ✅                           | ✅                           | (via optional SoapySDR driver)                |
-|                                 |                              |                              |                                               |
-| **Connectivity**                |                              |                              |                                               |
-| PCIe (up to Gen2 x4)            | ✅                           | ✅ (x1 only)                 | `--with-pcie --pcie-lanes=1|2|4`              |
-| Ethernet (1G/2.5G)              | ❌                           | ✅                           | `--with-eth`                                  |
-| ├─ Ethernet RX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
-| └─ Ethernet TX (LiteEth)        | ❌                           | ✅                           | (included with `--with-eth`)                  |
-|                                 |                              |                              |                                               |
-| **Timing & Sync**               |                              |                              |                                               |
-| PTM (Precision Time Measurement)| ✅ (PCIe Gen2 x1 only)       | ✅ (PCIe Gen2 x1 only)       | `--with-pcie --pcie-lanes=1 --with-pcie-ptm`  |
-| Ethernet PTP Time Discipline    | ❌                           | ✅                           | `--with-eth --with-eth-ptp`                   |
-| Ethernet PTP RFIC Ref Clock     | ❌                           | ✅                           | `--with-eth --with-eth-ptp --with-eth-ptp-rfic-clock` |
-| White Rabbit Support            | ❌                           | ✅                           | `--with-white-rabbit`                         |
-| External Clocking               | ✅ (SI5351C: ext. 10MHz)     | ✅ (SI5351C: ext. 10MHz)     | (SI5351B VCXO mode in dev for PTM regulation) |
-|                                 |                              |                              |                                               |
-| **Storage**                     |                              |                              |                                               |
-| SATA                            | ❌                           | ✅ (source build)            | `--with-sata`                                 |
-|                                 |                              |                              |                                               |
-| **System Features**             |                              |                              |                                               |
-| Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
-| GPIO                            | ✅                           | ✅                           | (always included)                             |
+What is available depending on where the board is mounted, and the `./litex_m2sdr.py` option that
+enables it ("—" = not available in that setup).
 
-Build flags are passed to `./litex_m2sdr.py`; see
-[Building And Loading The Gateware](doc/building-gateware.md). Prebuilt images for the common
+**RF & streaming**
+
+| Feature | M.2 slot | Acorn Baseboard Mini | Build option |
+|---|:---:|:---:|---|
+| 2T2R TX/RX, 12-bit, up to 61.44 MSPS | ✅ | ✅ | always included |
+| 2T2R at 122.88 MSPS ([wide bandwidth](doc/wide-bandwidth.md)) | ✅ ¹ | — | `--with-rfic-oversampling` |
+| PCIe streaming | ✅ Gen2 x1/x2/x4 | ✅ Gen2 x1 | `--with-pcie --pcie-lanes=1\|2\|4` |
+| Ethernet streaming, 1G/2.5G ([details](doc/ethernet.md)) | — | ✅ | `--with-eth [--eth-phy=2500basex]` |
+| [Hardware timed TX](doc/timed-tx.md) | ✅ | ✅ | always included |
+| `libm2sdr` C API, utilities, SoapySDR | ✅ | ✅ | host software |
+
+**Timing & sync**
+
+| Feature | M.2 slot | Acorn Baseboard Mini | Build option |
+|---|:---:|:---:|---|
+| External 10 MHz reference | ✅ ² | ✅ ² | runtime (`--sync` / `clock_source`) |
+| [PCIe PTM](doc/pcie-ptm.md) host time sync | ✅ ³ | ✅ ³ | `--with-pcie-ptm` |
+| [Ethernet PTP](doc/ptp/README.md) time discipline | — | ✅ | `--with-eth --with-eth-ptp` |
+| PTP-disciplined RFIC reference | — | ✅ ² | `--with-eth-ptp-rfic-clock` |
+| [White Rabbit](doc/white-rabbit.md) | — | ✅ | `--with-white-rabbit` |
+
+**Storage & system**
+
+| Feature | M.2 slot | Acorn Baseboard Mini | Build option |
+|---|:---:|:---:|---|
+| [SATA](doc/sata-workflows.md) record/replay | — | ✅ | `--with-sata` |
+| Multiboot / remote update | ✅ | ✅ | always included |
+| GPIO | ✅ | ✅ | `--with-gpio` |
+
+¹ Needs PCIe Gen2 x2/x4 bandwidth. ² SI5351C variant. ³ PCIe Gen2 x1 only.
+
+See [Building And Loading The Gateware](doc/building-gateware.md) for build details. Prebuilt images for the common
 configurations are published on the [Releases](https://github.com/enjoy-digital/litex_m2sdr/releases)
 page and can be flashed with [`scripts/flash_release.py`](doc/flash-release.md).
 
