@@ -435,6 +435,9 @@ class BaseSoC(SoCMini):
             # White Rabbit Capabilities.
             wr_enabled      = with_white_rabbit,
 
+            # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
+            timed_tx        = True,
+
             # Board.
             variant        = variant,
             jtagbone       = with_jtagbone,
@@ -833,6 +836,9 @@ class BaseSoC(SoCMini):
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
         self.header = TXRXHeader(data_width=64)
+        # Timed-TX gate: feed the FPGA time so the TX header extractor holds each frame until
+        # its air-time (header timestamp) and drops too-late frames (see gateware/header.py).
+        self.comb += self.header.tx.time.eq(self.time_gen.time)
         self.comb += [
             self.header.rx.header.eq(0x5aa5_5aa5_5aa5_5aa5), # Unused for now, arbitrary.
             self.header.rx.timestamp.eq(self.time_gen.time),

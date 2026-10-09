@@ -68,6 +68,18 @@ static void m2sdr_write_dma_header(uint8_t *buf, uint64_t timestamp)
 {
     const uint64_t sync_word = M2SDR_DMA_HEADER_SYNC_WORD;
 
+    /* Quantize the TX air-time to the FPGA time grid (M2SDR_TX_TIME_GRID_NS): hardware
+     * releases the frame on a grid tick, so round to the nearest grid point for a
+     * deterministic on-air time (round-to-nearest, ties up). See m2sdr.h. */
+    if (timestamp != 0) {
+        timestamp = ((timestamp + M2SDR_TX_TIME_GRID_NS / 2) / M2SDR_TX_TIME_GRID_NS)
+                  * M2SDR_TX_TIME_GRID_NS;
+        /* timestamp 0 is the reserved "untimed / transmit immediately" sentinel, so a
+         * real (timed) air-time must never quantize down to 0: floor it to one grid tick. */
+        if (timestamp == 0)
+            timestamp = M2SDR_TX_TIME_GRID_NS;
+    }
+
     memcpy(buf, &sync_word, sizeof(sync_word));
     memcpy(buf + 8, &timestamp, sizeof(timestamp));
 }
@@ -1334,6 +1346,20 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     unsigned total_bytes = num_samples * sample_sz;
     unsigned copied = 0;
 
+    /* A timed burst carries its air-time on the FIRST DMA buffer only; the hardware gate
+     * holds that buffer to the air-time and the rest of the burst streams contiguously
+     * behind it (untimed -> immediate). Stamping every buffer with the same air-time X
+     * would drop all but the first: once buffer 1 has aired, X is already in the past for
+     * buffers 2.., so the gate would treat them as too-late and air zeros instead. */
+    int timed_first = (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME)) ? 1 : 0;
+
+    /* Timed TX needs the per-buffer DMA header enabled so the air-time reaches the hardware gate.
+     * libm2sdr has no software timeline, so a HAS_TIME request with the header disabled would
+     * silently transmit immediately; fail loudly instead. Enable it first via m2sdr_set_tx_header()
+     * or m2sdr_sync_config_ex() with params.tx_header_enable = true. */
+    if (timed_first && !dev->tx_header_enable)
+        return M2SDR_ERR_STATE;
+
     while (copied < total_bytes) {
         if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
             char *buf = NULL;
@@ -1348,8 +1374,10 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                 payload_off = M2SDR_DMA_HEADER_SIZE;
                 to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
                 uint64_t ts = 0;
-                if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
+                if (timed_first) {
                     ts = meta->timestamp;
+                    timed_first = 0;
+                }
                 m2sdr_write_dma_header((uint8_t *)buf, ts);
             }
             if (to_copy > total_bytes - copied)
@@ -1370,8 +1398,10 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
                 payload_off = M2SDR_DMA_HEADER_SIZE;
                 to_copy = DMA_BUFFER_SIZE - M2SDR_DMA_HEADER_SIZE;
                 uint64_t ts = 0;
-                if (meta && (meta->flags & M2SDR_META_FLAG_HAS_TIME))
+                if (timed_first) {
                     ts = meta->timestamp;
+                    timed_first = 0;
+                }
                 m2sdr_write_dma_header(buf, ts);
             }
             if (to_copy > total_bytes - copied)
@@ -1385,6 +1415,64 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
         }
     }
 
+    return M2SDR_ERR_OK;
+}
+
+/* Set the timed-TX pipeline offset (ns), CSR_HEADER_TX_OFFSET. The hardware timed-TX
+ * gate releases each timed frame the cycle (FPGA time + tx_offset) reaches the frame's
+ * air-time, so tx_offset compensates the fixed TX-pipeline latency (packer/CDC/serializer/
+ * DAC/analog) between the gate and the antenna: with it calibrated, "transmit at X" puts
+ * the signal on the air at X. Loopback-calibrated (see scripts). LitePCIe only; may be set
+ * before or during streaming. Untimed frames (header timestamp 0) are unaffected -- they
+ * always transmit immediately. */
+int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
+    if (m2sdr_reg_write(dev, CSR_HEADER_TX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_HEADER_TX_OFFSET_ADDR + 4, (uint32_t)(offset_ns & 0xffffffffu)) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
+/* Read the running hardware TX underflow count, CSR_HEADER_TX_UNDERFLOW: timed frames that
+ * missed their air-time. A timed frame whose air-time had already passed when it reached
+ * the gate is dropped whole (the RFIC airs zeros for it) and counted here. A steadily
+ * rising value means the host is submitting timed frames later than their air-times
+ * (submit earlier or check tx_offset). This is the on-air TX underflow measured at the
+ * gate; m2sdr_get_stats() underflow_events/buffers count the separate DMA-ring underflow
+ * (reader starved of any buffer). LitePCIe only. */
+int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow)
+{
+    if (!dev || !underflow)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    if (m2sdr_reg_read(dev, CSR_HEADER_TX_UNDERFLOW_ADDR, underflow) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
+/* Set the RX timestamp offset (ns), CSR_HEADER_RX_OFFSET: the mirror of tx_offset. The RX
+ * header inserter stamps each buffer when it starts forming (DMA plane); rx_offset is
+ * subtracted so the stamp refers to when the first sample was at the ANTENNA. With both
+ * offsets calibrated, TX and RX timestamps share one reference plane. 0 (the default)
+ * keeps the historical DMA-plane stamping. LitePCIe only. */
+int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
+    if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 4, (uint32_t)(offset_ns & 0xffffffffu)) != 0)
+        return M2SDR_ERR_IO;
     return M2SDR_ERR_OK;
 }
 
