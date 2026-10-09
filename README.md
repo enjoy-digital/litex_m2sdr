@@ -7,97 +7,96 @@
 
 [![](https://github.com/enjoy-digital/litex_m2sdr/actions/workflows/ci.yml/badge.svg)](https://github.com/enjoy-digital/litex_m2sdr/actions/workflows/ci.yml) ![License](https://img.shields.io/badge/License-BSD%202--Clause-orange.svg) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/enjoy-digital/litex_m2sdr) [![Buy Hardware](https://img.shields.io/badge/Buy-Hardware-00A6B2)](https://enjoy-digital-shop.myshopify.com/)
 
-[> TL;DR
----------
-- **What?** LiteX‑based M.2 2280 Key M SDR board featuring a Xilinx **Artix‑7 XC7A200T** FPGA and an **ADI AD9361** RFIC.
-- **Why?** Open‑source gateware/software, up to 61.44 MSPS (122.88 MSPS†) over PCIe Gen2 ×4, hack‑friendly clocking & debug.
-- **Who?** SDR tinkerers, FPGA devs, time‑sync enthusiasts, or anyone hitting the limits of other SDRs.
-- **How fast?** `apt install …` → `./build.py` → **stream/record IQ in ≈5 min** with our C API/tools or any SoapySDR compatible software.
-
-## C API (libm2sdr)
-
-- Docs: `litex_m2sdr/doc/libm2sdr/README.md`
-- Examples: `litex_m2sdr/doc/libm2sdr/example_sync_rx.c`, `litex_m2sdr/doc/libm2sdr/example_sync_tx.c`
-- Install metadata: `litex_m2sdr/software/user/libm2sdr/m2sdr.pc`
-- Current public library version: `1.1.0` (ABI `1`)
-- The library is built as a runtime PCIe/Ethernet library; external applications only need to link `libm2sdr`.
-- Recent API additions: backend accessors, stream diagnostics, and finer-grained `parse`/`range`/`state` error classes.
+**LiteX-M2SDR** is an open-source SDR board in the **M.2 2280 Key M** form factor, pairing an
+**ADI AD9361** RFIC (2T2R, 70 MHz – 6 GHz) with a **Xilinx Artix-7 XC7A200T** FPGA. Gateware,
+drivers, C API and tools are all open, built on the [LiteX](https://github.com/enjoy-digital/litex)
+framework. Pop it in an M.2 slot, connect antennas, and stream or record I/Q in about 5 minutes
+with our tools or any SoapySDR-compatible software.
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/c3007b14-0c55-4863-89fa-749082692b4f" alt="LiteX M2 SDR annotated" width="100%">
 </div>
 
-† Oversampling needs PCIe Gen2 ×2/×4 bandwidth.
+## Highlights
 
-[> Intro
---------
-<a id="intro"></a>
+- **2T2R, 12-bit up to 61.44 MSPS** — and up to **122.88 MSPS with ~100 MHz of analog bandwidth**
+  ([Wide Analog Bandwidth](doc/wide-bandwidth.md)).
+- **PCIe Gen2 x4** (~14 Gbps) with [LitePCIe](https://github.com/enjoy-digital/litepcie): MMAP +
+  DMA streaming, Linux driver, [low-latency mode](doc/low-latency.md) and
+  [hardware timed TX](doc/timed-tx.md).
+- **Ethernet 1G/2.5G** ([LiteEth](https://github.com/enjoy-digital/liteeth)) and **SATA** record/replay
+  ([LiteSATA](https://github.com/enjoy-digital/litesata)) on the LiteX Acorn Baseboard Mini
+  ([Ethernet](doc/ethernet.md), [SATA](doc/sata-workflows.md)).
+- **Timing & sync**: external 10 MHz / PPS, [PCIe PTM](doc/pcie-ptm.md),
+  [Ethernet PTP](doc/ptp/README.md), [White Rabbit](doc/white-rabbit.md).
+- **Software**: [`libm2sdr` C API](litex_m2sdr/doc/libm2sdr/README.md),
+  [CLI utilities](litex_m2sdr/software/user/README.md),
+  [SoapySDR driver](litex_m2sdr/software/soapysdr/README.md) (GQRX, GNU Radio, srsRAN, ...).
+- **Room to grow**: the base design uses only a fraction of the XC7A200T, leaving space for your
+  own RF processing; multiboot for safe remote updates; powerful debug through LiteX
+  [host bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC)
+  and [LiteScope](https://github.com/enjoy-digital/litescope).
 
-We know what you'll first ask when discovering this new SDR project: what's the RFIC? 🤔 Let's answer straight away: Another **AD936X**-based SDR! 😄
+## Contents
 
-Why yet another SDR based on this RFIC? Because we've been designing FPGA-based projects for clients with this chip for almost 10 years now and still think this RFIC has incredible capabilities and possibilities that haven't been fully tapped by open-source projects. We believe it can provide a fantastic and simple solution when paired with the [LiteX](https://github.com/enjoy-digital/litex) framework we're developing. 🚀
+1. [Why Another AD936x SDR?](#why-another-ad936x-sdr)
+2. [Hardware & Availability](#hardware--availability)
+3. [Capabilities](#capabilities)
+4. [Quick Start](#quick-start)
+5. [Architecture](#architecture)
+6. [Documentation](#documentation)
+7. [Contact](#contact)
+
+## Why Another AD936x SDR?
+
+We know what you'll first ask when discovering this project: what's the RFIC? 🤔 Yes — another
+**AD936x**-based SDR! 😄
+
+We've been designing FPGA-based projects for clients with this chip for almost 10 years and still
+think it has capabilities that haven't been fully tapped by open-source projects. Paired with the
+[LiteX](https://github.com/enjoy-digital/litex) framework, it makes for a minimalist, flexible SDR:
+a compact M.2 board with a minimal on-board RF frontend that can be specialized externally, a large
+FPGA, and SerDes lanes that can be used for PCIe, Ethernet, SATA or inter-board links
+([LiteICLink](https://github.com/enjoy-digital/liteiclink)), down to coherent multi-board MIMO
+setups on a PCIe M.2 carrier. 🚀
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/dec9bbd6-532d-4596-805b-94078df426a2" width="100%">
 </div>
 
-Imagine a minimalist AD9361-based SDR with:
-- A compact form factor (M.2 2280). 📏
-- Minimal on-board RF frontend that could be specialized externally.
-- 2T2R / 12-bit @ 61.44MSPS (and 2T2R / 12-bit @ 122.88MSPS for those wanting to use/explore Cellwizard/BladeRF [findings](https://www.nuand.com/2023-02-release-122-88mhz-bandwidth/)).
-- PCIe Gen 2 X4 (~14Gbps of TX/RX bandwidth) with [LitePCIe](https://github.com/enjoy-digital/litepcie), providing MMAP and several possible DMAs (for direct I/Q samples transfer or processed I/Q samples). ⚡
-- A large XC7A200T FPGA where the base infrastructure only uses a fraction of the available resources, allowing you to integrate large RF processing blocks. 💪
-- The option to reuse some of the PCIe lanes of the M.2 connector for 1Gbps or 2.5Gbps Ethernet through [LiteEth](https://github.com/enjoy-digital/liteeth). 🌐
-- Or ... for SATA through the [LiteSATA](https://github.com/enjoy-digital/litesata) gateware core. 💾
-- Or ... for inter-board SerDes-based communication through [LiteICLink](https://github.com/enjoy-digital/liteiclink). 🔗
-- Powerful debug capabilities through LiteX [Host <-> FPGA bridges](https://github.com/enjoy-digital/litex/wiki/Use-Host-Bridge-to-control-debug-a-SoC) and [LiteScope](https://github.com/enjoy-digital/litescope) logic analyzer. 🛠️
-- Multiboot support to allow secure remote update over PCIe (or Ethernet).
-- ...and we hope a welcoming/friendly community as we strive to encourage in LiteX! 🤗
+Yes, this project is also a showcase for LiteX capabilities 😅 — rest assured, we'll do our best
+to gather and implement your requests to make this SDR as flexible and versatile as possible, and
+to keep a welcoming, friendly community. 🤗
 
-OK, you probably also realized this project is a showcase for LiteX capabilities, haha. 😅 Rest assured, we'll do our best to gather and implement your requests to make this SDR as flexible and versatile as possible!
+This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/),
+managing the project and gateware/software development, and our partner
+[Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
 
-This board is proudly developed in France 🇫🇷 by [Enjoy-Digital](http://enjoy-digital.fr/), managing the project and litex_m2sdr/gateware/software development, and our partner [Lambdaconcept](https://shop.lambdaconcept.com/) designing the hardware. 🥖🍷
+## Hardware & Availability
 
-Ideal for SDR enthusiasts, this versatile board fits directly into an M.2 slot or can team up with others in a PCIe M.2 carrier for more complex projects, including coherent MIMO SDRs. 🔧
+The LiteX-M2SDR board is available from the
+[Enjoy-Digital Shop](https://enjoy-digital-shop.myshopify.com). It has been tested with several
+SoapySDR-compatible applications as well as with our own C utilities.
 
-For Ethernet support with 1000BaseX/2500BaseX and SATA connectivity to directly record/play samples to/from an SSD, mount it on the LiteX Acorn Mini Baseboard! 💽
+Two variants are offered, both in the same **M.2 2280 Key M** form factor:
+
+- **SI5351C variant** — flexible clocking from the local XO or an external 10 MHz reference (uFL
+  or FPGA-generated). **Recommended for general usage.**
+  [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
+- **SI5351B variant** — clocked from the local XO with an FPGA-controlled VCXO for
+  software-regulated loops; mostly for advanced users with specialized clock control requirements.
+  [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
+
+The board fits directly into an M.2 slot. Mounted on the **LiteX Acorn Baseboard Mini**, it also
+gets 1000BASE-X/2500BASE-X Ethernet (SFP) and SATA to record/play samples directly to/from an SSD:
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/fb75aeeb-4e99-45b5-9582-0c4dbd079af6" width="100%">
 </div>
 
-Unlock new possibilities in your SDR projects with this cutting-edge board—we'll try our best to meet your needs! 🎉
+Pinout, I/O voltages, PPS input and LED behavior: see the [Hardware Reference](doc/hardware.md).
 
-[> Contents
------------
-
-1. [Hardware Availability](#hardware-availability)
-2. [Capabilities Overview](#capabilities-overview)
-3. [M.2 Keying / GPIO Voltage Levels](#m2-keying-gpio-voltage-levels)
-4. [PCIe SoC Design](#pcie-soc-design)
-5. [Ethernet SoC Design](#ethernet-soc-design)
-6. [Release Artifacts](#release-artifacts)
-7. [Quick Start](#quick-start)
-8. [Contact](#contact)
-
-[> Hardware Availability
-------------------------
-<a id="hardware-availability"></a>
-The LiteX-M2SDR board is now fully commercialized and available for purchase from our webshop: [Enjoy-Digital Shop](https://enjoy-digital-shop.myshopify.com).
-
-The hardware has been thoroughly tested with several SDR softwares compatible with SoapySDR as well as with our Bare metal C utilities.
-
-*We offer two variants:*
-- **SI5351C Variant** – Uses the SI5351C clock generator with flexible clocking (local XO or external 10MHz via FPGA/uFL). Host-side selection now exposes the dedicated SI5351C FPGA `10MHz` CLKIN path (`--sync fpga` / `clock_source=fpga`) in addition to the uFL `10MHz` input mode. **Recommended for general usage.** [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
-- **SI5351B Variant** – Uses the SI5351B clock generator, clocked from the local XO with FPGA-controlled VCXO for software-regulated loops. [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
-
-Both variants use the same **M.2 2280 Key M** module form factor.
-
-*Note: The differences between the variants are relevant only for specific use cases. The SI5351B variant is mostly intended for advanced users with specialized clock control requirements.*
-
-[> Capabilities Overview
-------------------------
-<a id="capabilities-overview"></a>
+## Capabilities
 
 | Feature                          | Mounted in M.2 Slot         | Mounted in Baseboard         | Parameter(s) to Enable                        |
 |----------------------------------|------------------------------|-----------------------------|-----------------------------------------------|
@@ -128,232 +127,16 @@ Both variants use the same **M.2 2280 Key M** module form factor.
 | Multiboot / Remote Update       | ✅                           | ✅                           | (always included)                             |
 | GPIO                            | ✅                           | ✅                           | (always included)                             |
 
-### User LED Behavior
+Build flags are passed to `./litex_m2sdr.py`; see
+[Building And Loading The Gateware](doc/building-gateware.md). Prebuilt images for the common
+configurations are published on the [Releases](https://github.com/enjoy-digital/litex_m2sdr/releases)
+page and can be flashed with [`scripts/flash_release.py`](doc/flash-release.md).
 
-The board exposes a single monochrome `user_led`, so the gateware uses it as a layered status indicator rather than a simple on/off flag:
+## Quick Start
 
-- **Not ready yet**: double-heartbeat while time is still invalid or while an enabled PCIe/Ethernet transport is not ready.
-  PCIe becomes ready when the link is up and DMA/PPS synchronization is established; Ethernet becomes ready when the link is up.
-- **Idle / ready state**: gentle low-amplitude breathing.
-- **PPS event**: short bright accent pulse over the base animation.
-- **RF or Ethernet RX/TX activity**: bright accent pulse.
+On a fresh Ubuntu system, with the board in an M.2 slot and antennas connected:
 
-When PCIe is not enabled in the build, the PCIe-specific states are naturally skipped and the LED falls back to the generic timing/activity behavior.
-
-[> M.2 Keying / GPIO Voltage Levels
------------------------------------
-<a id="m2-keying-gpio-voltage-levels"></a>
-<a id="m2-gpio-voltage-levels"></a>
-
-LiteX-M2SDR is an **M.2 2280 Key M** module. Use it with M-keyed PCIe M.2 slots, carriers, or compatible adapters.
-
-LiteX-M2SDR does **not** use a single M.2 I/O voltage:
-- FPGA banks **13/14/15/16** on the SDR are powered at **3.3V**.
-- FPGA banks **34/35** on the SDR are powered at **1.8V**.
-- The general-purpose sideband signals routed directly from the M.2 connector to the FPGA on LiteX-M2SDR (`PPS`, `Synchro_GPIO`, `PERST#`, optional `PEWAKE#`, `SUSCLK`, `PEDET`) sit on **3.3V FPGA banks on the SDR side**.
-- The M.2 `SMB_CLK` / `SMB_DATA` pins are a special case: on LiteX-M2SDR r02 they reach the FPGA bank-16 pins through optional resistors `R82` / `R83`, which are **not mounted by default**.
-- PCIe lanes and the PCIe reference clock are transceiver signals, not single-ended 1.8V/3.3V GPIOs.
-
-Additional notes:
-- M.2 pin **44** (`ALERT#` / `SMB_ALERT#`) is currently **not routed to the FPGA** on LiteX-M2SDR r02.
-- M.2 pin **52** (`CLKREQ#`) is pulled up to `3V3_PCIe` and is **not** routed to the FPGA.
-- M.2 pin **10** (`LED#`) is **not connected** on the FPGA side.
-- The dedicated FPGA JTAG/config pins and the Acorn JTAG header are separate **3.3V** JTAG paths.
-- When discussing M.2 sideband voltages, distinguish the **FPGA bank voltage on the SDR** from the **connector-side voltage expected by a host/baseboard**. For example, the Acorn baseboard implements the M.2 SMBus pins as a **1.8V SMBus domain** with translation to **3.3V** for the SFP modules.
-
-| Signal | Connector Location | FPGA Pin | Bank | Voltage On SDR Side | Notes |
-|--------|--------------------|----------|------|---------------------|-------|
-| `GPIO0` | `TP1` | `E22` | 16 | 3.3V | General-purpose test point (`FPGA_GPIO0`). |
-| `GPIO1` | `TP2` | `D22` | 16 | 3.3V | General-purpose test point (`FPGA_GPIO1`). |
-| `PPS_IN` | M.2 pin 22 (`NC22`) | `K18` | 15 | 3.3V | Routed to the FPGA. |
-| `PPS_OUT` | M.2 pin 24 (`NC24`) | `Y18` | 14 | 3.3V | Routed to the FPGA. |
-| `Synchro_GPIO1` | M.2 pin 28 (`NC28`) | `A19` | 16 | 3.3V | Routed to the FPGA. |
-| `Synchro_GPIO2` | M.2 pin 30 (`NC30`) | `A18` | 16 | 3.3V | Routed to the FPGA. |
-| `Synchro_GPIO3` | M.2 pin 32 (`NC32`) | `A21` | 16 | 3.3V | Routed to the FPGA. |
-| `Synchro_GPIO4` | M.2 pin 34 (`NC34`) | `A20` | 16 | 3.3V | Routed to the FPGA. |
-| `Synchro_GPIO5` | M.2 pin 36 (`NC36`) | `B20` | 16 | 3.3V | Routed to the FPGA. |
-
-| `SMB_CLK` | M.2 pin 40 | `A13` | 16 | 3.3V FPGA bank on SDR | Optional path through `R82`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
-| `SMB_DATA` | M.2 pin 42 | `A14` | 16 | 3.3V FPGA bank on SDR | Optional path through `R83`, not mounted by default; connector-level SMBus compatibility depends on the host/baseboard. |
-| `ALERT#` / `SMB_ALERT#` | M.2 pin 44 | - | - | Host-defined sideband | Not routed to the FPGA on LiteX-M2SDR r02. |
-| `PERST#` | M.2 pin 50 | `A15` | 16 | 3.3V | Routed to the FPGA. |
-| `CLKREQ#` | M.2 pin 52 | - | - | 3.3V | Pulled up to `3V3_PCIe` with `R59`; not routed to the FPGA. |
-| `PEWAKE#` | M.2 pin 54 | `B16` | 16 | 3.3V | Optional path through `R88`, not mounted by default. |
-| `SUSCLK` | M.2 pin 68 | `B17` | 16 | 3.3V | Routed through `R84` (0R). |
-| `PEDET` / `PRESENT` | M.2 pin 69 | `A16` | 16 | 3.3V | Routed through `R85` (0R). |
-| `LED#` | M.2 pin 10 | - | - | Host-defined sideband | Not connected on LiteX-M2SDR. |
-
-### External PPS Input
-
-The default PPS input is M.2 pin 22 (`PPS_IN`). For easier wiring, the input can instead be selected from test point TP1 or TP2 with `--pps-input=tp1` or `--pps-input=tp2`; the default is `--pps-input=m2`. For example:
-
-```sh
-./litex_m2sdr.py --pps-input=tp1 --build
-```
-
-TP1 and TP2 are general-purpose test points on FPGA pins E22 and D22. The selected input is synchronized to the system clock, with rising edges reported through the `pps_in` CSRs (`status.level`, `status.pulse`, and `count`). A TP1/TP2 PPS selection uses those pins instead of the regular GPIO feature, so it cannot be combined with `--with-gpio`. All three inputs require a ground-referenced 3.3V logic PPS signal; do not apply 5V. For M.2 pin 22, use a carrier or adapter that actually routes the otherwise NC pin.
-
-[> PCIe SoC Design
-------------------
-<a id="pcie-soc-design"></a>
-
-The PCIe design is the first variant developed for the board and does not require an additional baseboard. Just pop the M2SDR into a PCIe M.2 slot, connect your antennas, and you're ready to go! 🚀
-
-The SoC has the following architecture:
-
-<div align="center">
-  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/df5eb55e-16b2-4724-b4c1-28e06c45279c" width="100%">
-</div>
-
-- The SoC is built with the LiteX framework, allowing highly efficient HDL coding and integration. 💡
-- You'll also find that most of the complexity is managed by LiteX and LitePCIe. The SoC itself only has an MMAP interface, DMA interface, and integrates the specific SDR/RFIC cores and features. ⚙️
-- It provides debugging over PCIe or JTAG for MMAP peek & poke or LiteScope. 🛠️
-- [LitePCIe](https://github.com/enjoy-digital/litepcie) and its Linux driver (sorry, we only provide Linux support for now 😅) have been battle-tested on several commercial projects. 🏆
-
-The PCIe design has already been validated at the maximum AD9361 specified sample rate: 2T2R @ 61.44MSPS (and also seems to correctly handle the oversampling at 2T2R @ 122.88MSPS with 7.9 Gbps of bandwidth on the PCIe bus; this oversampling feature is already in place and more tests/experiments will be done with it in the future).
-
-[> Ethernet SoC Design (1/2.5Gbps x 1 or 2).
---------------------------------------------
-<a id="ethernet-soc-design"></a>
-
-> [!NOTE]
->
-> Ethernet support is intended for LiteX Acorn Baseboard Mini deployments and
-> is bandwidth-limited by the selected 1000BaseX/2500BaseX link.
-
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/bbcc0c79-4ae8-4e5b-94d8-aa7aff89bae2" width="100%">
-</div>
-
-The Ethernet design variant gives flexibility when deploying the SDR. The PCIe connector has 4 SerDes transceivers that are in most cases used for... PCIe :) But these are 4 classical GTP transceivers of the Artix7 FPGA that are connected to the PCIe hardened PHY in the case of a PCIe application but can be used for any other SerDes-based protocol: Ethernet 1000BaseX/2500BaseX, SATA, etc...
-
-In this design, the PCIe core will then be replaced with [LiteEth](https://github.com/enjoy-digital/liteeth), providing the 1000BaseX or 2500BaseX PHY but also the UDP/IP hardware stack + Streaming/Etherbone front-end cores.
-
-The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path. The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC clock to the selected link speed.
-
-The 2.5GBASE-X mode has been hardware-validated in SFP0/J3 with a LianGuo LG 2.5GE copper SFP, the Acorn Baseboard Mini's JP1 and JP4 fitted, and the board reachable at `192.168.1.50`. Build it explicitly with `--eth-phy=2500basex`; this selects the 125MHz GTP reference, MMCM PHY clocking, Clause-37 timing, and gearbox constraints needed by the copper module. SFP EEPROM I2C is not required for link or packet traffic. On M2SDR r02, fit `R82`/`R83` only when the optional M.2 SMBus path is needed; an absent or NACKing EEPROM must not be treated as a link failure.
-
-Ethernet-only baseboard builds can also enable SATA storage with `--with-sata`, using SATA on PCIe lane 0 and Ethernet on the selected SFP lane. PCIe, Ethernet/White-Rabbit, and SATA cannot all be enabled in one image because the shared QPLL exposes two channels.
-
-When built with `--with-eth --with-eth-ptp`, LiteEth PTP disciplines the existing `time_gen` timebase instead of replacing it. This keeps PPS generation, VRT timestamps, RX/TX headers, and the PCIe PTM/PHC view on the same logical board clock while sourcing that time from Ethernet PTP. Runtime servo tuning, master/sourcePortIdentity reporting, and live status/counter monitoring are available from the host side. Ethernet PTP and White Rabbit are mutually exclusive. For SI5351C boards, `--with-eth-ptp-rfic-clock` adds an optional low-bandwidth PTP-to-FPGA-10MHz discipline loop; software must still select the FPGA clock input with `--sync fpga` / `clock_source=fpga` before the AD9361 reference is derived from that path.
-
-[> Wide Analog Bandwidth (RFIC Overclock)
-------------------------------------------
-
-The AD9361's analog baseband filters are normally limited to ~56 MHz. Requesting a sample rate above 61.44 MSPS (up to 122.88) selects the wide-bandwidth mode automatically:
-
-```bash
-m2sdr_rf --channel-layout 1t1r --sample-rate 122.88e6 ...
-```
-
-Converter half-band stages are bypassed so the data port runs at 2x rate, and the TX/RX baseband filters are re-tuned by the chip's own BBF calibration against a ~54/62 MHz corner target (programming the tune dividers past the driver's bandwidth clamp), opening a true ~100 MHz analog passband at 122.88 MSPS while keeping the calibrated noise behavior. The interface DATA_CLK follows the channel layout: 245.76 MHz in 1T1R (stock gateware) and 491.52 MHz in 2T2R (gateware built with `--with-rfic-oversampling`). The doubled-rate interface framing can come up misaligned, so the configuration PRBS-verifies the interface and retries the clock programming in place until it is aligned (typically 1-2 attempts).
-
-Measured at 3.6 GHz on the internal reference (RX side: clean external transmitter -> M2SDR RX, 50 MHz NR-FR1-TM3.1 64QAM, MATLAB 5G Toolbox EVM; in-band SNR: notch/NPR method):
-
-| Metric (wide mode, 122.88 MSPS)            | Measured                          |
-|--------------------------------------------|-----------------------------------|
-| Usable analog bandwidth                    | ~100 MHz (full quality to +/-40)  |
-| RX EVM, 50 MHz TM3.1 centered              | ~6.0-6.6% RMS                     |
-| RX EVM, 50 MHz TM3.1 shifted +/-25 MHz     | ~8.7-9.2% RMS (touches band edge) |
-| RX in-band SNR (NPR), +/-10..31 MHz        | 26-29.5 dB                        |
-| RX in-band SNR (NPR), +/-41 / +/-45 MHz    | ~21 / ~17 dB                      |
-| RX passband flatness (with EQ FIR)         | +/-1.2 dB to +/-44 MHz            |
-| No-signal RX floor (rx-gain 55)            | -35.6 dBFS integrated             |
-| RX image rejection (quadrature tracking)   | ~40-43 dBc                        |
-| TX EVM, 50 MHz TM3.1 (flat over tx-att 0-18) | ~5.2-6% RMS                     |
-| TX image rejection (tx-att 0)              | ~44 dBc                           |
-| TX passband flatness (chip TX FIR EQ)      | +/-1.3 dB to +/-42 MHz (from -8 dB) |
-
-The RX EVM bottoms out with the ADC filled to ~-12 dBFS RMS at the lowest rx-gain that gets there (the band-edge noise floor is gain-independent). TX EVM is constant-dBc (drive-independent over tx-att 0-18). The remaining limit on both sides is LO phase noise from the reference chain (Si5351 multiplication x94 into the RFPLLs); the RX band-edge limit (beyond ~+/-40 MHz) is the converter's own shaped noise at this oversampling ratio - both are silicon/architecture limits, not configuration. TX passband flatness over the full 100 MHz is achieved in-chip with a 16-tap TX FIR equalizer (`M2SDR_OC_TX_FIR_FILE`; the taps must be designed for the FIR's 245.76 MHz processing rate in this mode), so real-time transmitters need no host-side pre-emphasis; waveform pre-emphasis remains available as an alternative. Best EVM is obtained on the internal clock reference; an external 10 MHz reference costs ~6% EVM through the Si5351's higher multiplication ratio (N=84 vs N=34).
-
-
-Tuning/diagnostic environment variables (defaults are the measured optimum): `M2SDR_OC_BBF_TUNE` (BBF corner target), `M2SDR_OC_BBF_FORCE` (legacy register force-widening), `M2SDR_OC_RX_FIR_FILE` / `M2SDR_OC_TX_FIR_FILE` (passband flatness EQ FIR taps, max 16; TX taps designed for 245.76 MHz), `M2SDR_QEC_KEXP` (RX quadrature tracking loop gain), `M2SDR_RFPLL_CP_PERCENT` (RX RFPLL charge pump scale), `M2SDR_OC_RX_DELAY`/`M2SDR_OC_TX_DELAY` (interface delay overrides).
-
-[> Low-Latency Streaming
-------------------------
-<a id="low-latency"></a>
-
-Optional, opt-in knobs for real-time transmit/receive loops (e.g. 5G uplink). Defaults are
-unchanged: stock builds keep the full-throughput behavior.
-
-**1. Shallow DMA ring (opt-in at module load).** The default 256-buffer ring is tuned for
-full-throughput streaming; a small ring lowers the TX pipeline-latency floor, which is the ring
-drain time, `dma_buffer_count x 8192 B / (rate x bytes_per_sample)` -- e.g. at 30.72 MSPS 2T2R
-(8 B/sample) that is ~8.5 ms for 256 buffers and ~0.27 ms for 8 (double these for 1T1R, which is
-4 B/sample). A small ring buffers less host jitter, so the consumer must be real-time.
-
-```bash
-sudo insmod m2sdr.ko dma_buffer_count=8 dma_buffer_per_irq=2
-sudo scripts/pin_m2sdr_irq.sh          # keep the DMA IRQ on your radio-loop core (re-run after each insmod)
-```
-
-**2. RX low-latency wake (opt-in).** With `M2SDR_RX_WAIT=mwaitx` on CPUs with MONITORX/MWAITX
-(AMD), the zero-copy RX read sleeps on the next ring slot's cache line and wakes the instant the
-FPGA's DMA write lands (sub-microsecond, no spinning, no CSR traffic). The default is `poll()`
-everywhere. Independently, the RX wait consults the live DMA cursor just before blocking, so a
-freshly captured buffer is delivered without waiting for the next coalesced interrupt.
-
-**3. TX fill lead (opt-in, zero-copy API).** `m2sdr_set_tx_lead_buffers(dev, 3)` holds the host a
-tight lead ahead of the free-running DMA reader instead of filling the whole ring, trimming the TX
-pipeline latency to ~lead x buffer air-time. The lead must stay strictly above the kernel's
-`dma_buffer_per_irq` (see the API doc in `m2sdr.h`); `0` keeps the legacy full-ring fill.
-
-With a shallow ring, run the radio thread on an isolated core (`isolcpus=`, `SCHED_FIFO`,
-`mlockall`) on the same core as the pinned IRQ, and confirm **0 overflow / 0 underflow** under
-load.
-[> Hardware Timed TX
---------------------
-<a id="timed-tx"></a>
-
-A hardware gate in the TX datapath gives deterministic on-air transmit timing (e.g. for 5G
-uplink): each TX buffer's DMA header carries an air-time, and the FPGA holds the buffer until
-board time reaches it, so a written timestamp *is* the on-air time (10 ns grid). Untimed buffers
-(timestamp `0`) transmit immediately — continuous streaming is unaffected and both can be mixed
-freely. A buffer that reaches the gate after its air-time is dropped whole (the RFIC airs zeros
-for its duration) and counted as a TX underflow, rather than airing late.
-
-Stamp a timed burst's first buffer with its air-time; the rest of the burst streams contiguously
-behind it. Calibrate the fixed pipeline delay once over a TX→RX loopback — `scripts/timed_tx_selftest`
-prints the `tx_offset` to use. It is on the order of a microsecond and depends on the sample rate
-and channel layout (e.g. 1T1R ≈ 1358 ns at 30.72 MSPS falling to ≈ 373 ns at 122.88; 2T2R ≈ 1215 ns
-at 30.72), so measure it for your config.
-
-*libm2sdr:*
-```c
-m2sdr_set_tx_header(dev, true);          /* REQUIRED: enable per-buffer air-time headers for the gate */
-m2sdr_set_tx_offset(dev, 1212);          /* ns, from timed_tx_selftest */
-struct m2sdr_metadata m = { .timestamp = air_time_ns, .flags = M2SDR_META_FLAG_HAS_TIME };
-m2sdr_sync_tx(dev, buf, n, &m, timeout_ms);   /* returns M2SDR_ERR_STATE if the header is not enabled */
-uint32_t uf; m2sdr_get_tx_underflow(dev, &uf);   /* frames that missed their air-time */
-```
-
-TX and RX timestamps share the same FPGA time counter and header format; `tx_offset` (and its RX
-mirror `m2sdr_set_rx_offset()` / the `rx_offset` Soapy arg) refer both to a common reference
-plane, so "received at T, transmit at T+D" is exact arithmetic on one clock. The gate's CSRs are
-appended at the end of the HEADER block and its presence is advertised through the capability
-features CSR, so all pre-existing register addresses are unchanged and older software keeps
-working against this gateware (and vice versa).
-
-*SoapySDR* — the standard timed-TX contract, no code change:
-
-```
-driver=LiteXM2SDR,tx_offset=1212         # ns; omit to auto-derive from sample rate/layout
-```
-
-then call `writeStream()` with `SOAPY_SDR_HAS_TIME` and `timeNs`. The gate engages automatically on
-gateware that has it (`timed_tx=auto`, the default) and falls back to the software timeline on
-gateware that doesn't; `timed_tx=software` forces the fallback.
-
-[> Getting Started
-------------------
-<a id="quick-start"></a>
-
-### For SDR Enthusiasts
-
-If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, follow these simple steps to get up and running quickly:
-
-1. **Install Prerequisite Packages:**
-   - On a fresh Ubuntu system, install the required development and SDR packages to ensure compatibility with the LiteX-M2SDR software:
+1. **Install the prerequisites:**
    ```bash
    sudo apt install build-essential cmake git \
      pkg-config libsdl2-dev libgl1-mesa-dev \
@@ -361,407 +144,78 @@ If you are an SDR enthusiast looking to get started with the LiteX-M2SDR board, 
      gnuradio gnuradio-dev libgnuradio-soapy3.10.9t64 gqrx-sdr \
      libsndfile1-dev libsamplerate0-dev
    ```
-   - **Note**: For non-Ubuntu Linux distributions (e.g., Fedora, Arch), install the equivalent packages using your distribution's package manager (e.g., `dnf` for Fedora or `pacman` for Arch).
 
-2. **Connect the Board:**
-   - Insert the LiteX-M2SDR board into an available M.2 slot on your Linux computer and connect your antennas.
-
-> [!WARNING]
->
-> If an error related to DKMS appears during installation, run sudo apt remove --purge xtrx-dkms dkms and then re-execute the installation command.
-
-3. **Clone the Repository:**
-   - Clone the LiteX-M2SDR repository using the following command:
-   ```
+2. **Clone, build and install** the kernel driver, utilities, `libm2sdr` and SoapySDR module:
+   ```bash
    git clone https://github.com/enjoy-digital/litex_m2sdr
+   cd litex_m2sdr/litex_m2sdr/software
+   sudo ./build.py
+   sudo modprobe m2sdr   # or reboot
    ```
 
-4. **Build Software:**
-    Software build uses `make` and CMake for the C kernel driver and utilities, but since we also like Python 😅, we created a small script on top of it to simplify development and installation:
-   ```
-   cd litex_m2sdr/software
-   ./build.py
-   ```
-   - This builds the kernel driver, the user-space utilities, `libm2sdr`, and the SoapySDR driver.
-   - The default software build is a runtime PCIe/Ethernet build: the same `libm2sdr`, user tools, and SoapySDR module can open PCIe or Ethernet devices from the device arguments. Use `--interface=litepcie` or `--interface=liteeth` only when you want the legacy shorthand/default transport to favor one side during local testing.
-   - If you also want the optional SDL/OpenGL GUI tools (`m2sdr_check` / `m2sdr_scan`), first populate the pinned `cimgui` submodule:
-   ```
-   git submodule update --init --recursive litex_m2sdr/software/user/cimgui
-   ```
-   - By default, `./build.py` builds incrementally and does not install when run as a normal user.
-   - Use `./build.py --clean` when you want a full rebuild.
-   - Use `sudo ./build.py` when you also want to install the kernel driver, the user-space utilities / `libm2sdr`, and the SoapySDR module under the default prefix.
-   - `m2sdr_check` and `m2sdr_scan` are optional SDL/OpenGL GUI tools. They are built only when SDL2/OpenGL development packages are installed and `litex_m2sdr/software/user/cimgui/` has been populated; `m2sdr_scan` also needs libpng. If these optional GUI dependencies are absent, only the affected GUI tools are skipped; the CLI tools, `libm2sdr`, and the SoapySDR module still build normally.
-
-5. **Install the Built Software:**
-   - Install the kernel driver:
-   ```
-   cd litex_m2sdr/software/kernel
-   sudo make install
-   sudo insmod m2sdr.ko # Optional if you do not want to reboot yet.
-   ```
-   - Install the public C API headers/library for external applications:
-   ```
-   cd litex_m2sdr/software/user
-   make
-   sudo make install_dev PREFIX=/usr/local
-   sudo ldconfig
-   ```
-   - Install the SoapySDR module:
-   ```
-   cd litex_m2sdr/software/soapysdr/build
-   sudo make install
-   ```
-   - If you already used `sudo ./build.py`, the kernel and SoapySDR install steps above are already done. `libm2sdr` still needs `sudo make install_dev ...` if you want to develop external applications against the public C API.
-   - 🚀 Ready for launch!
-
-6. **Run Your SDR Software:**
-   - Now, you can launch your preferred SDR software (like GQRX or GNU Radio) and select the LiteX-M2SDR board through SoapySDR. 📡
-
-### Host Requirements & Expectations
-
-- **IOMMU / DMA**: For PCIe streaming, set IOMMU to passthrough mode. If you don't see I/Q data streams in your SDR app, this is the first thing to check.
-- **CPU Governor**: For sustained high sample rates, set the CPU frequency governor to `performance`; on-demand frequency scaling can cause RX overflows/TX underflows.
-- **PCIe Gen & Lanes**: Oversampling (122.88 MSPS) requires PCIe Gen2 x2/x4 bandwidth. Gen2 x1 is enough for standard 61.44 MSPS.
-- **Runtime transport selection**: The installed user tools and SoapySDR module support both transports in one build. Use `--device pcie:/dev/m2sdr0` or `--device eth:192.168.1.50:1234` with the CLI tools, and `driver=LiteXM2SDR,path=/dev/m2sdr0` or `driver=LiteXM2SDR,eth_ip=192.168.1.50` with SoapySDR.
-- **PCIe PTM host-time sync**: PTM uses LitePCIe directly and does not require LiteX-WR-NIC. Use LitePCIe with `S7PCIEPHY.create_ptm_sniffer()` ([#187](https://github.com/enjoy-digital/litepcie/pull/187), merged in `56a97c9`). Build with `--with-pcie --pcie-lanes=1 --with-pcie-ptm` and run `scripts/m2sdr_pcie_time_sync.py` on the host to make the board PHC follow `CLOCK_REALTIME` through `phc2sys`. If the host clock is locked by NTP/PTP, the board follows that disciplined host time over PCIe.
-- **Ethernet VRT (optional RX path)**: Build with `--with-eth --with-eth-vrt` to enable an Ethernet RX VRT UDP streamer in hardware. A simple host receiver utility is available at `litex_m2sdr/software/user/m2sdr_vrt_rx.py`.
-- **Ethernet / SATA**: Ethernet RX/TX streaming is supported on the LiteX Acorn Baseboard Mini. Source builds can combine Ethernet and SATA with `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build`. `m2sdr_sata` supports low-level sector tests and named capture workflows for RF-to-SATA recording, host import/export, SATA-to-RF replay, and SATA replay into the normal PCIe/Ethernet RX path used by SoapySDR/GQRX.
-- **Ethernet RFIC clocking**: Ethernet builds cap the RFIC clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
-- **Ethernet PTP (optional timing path)**: Build with `--with-eth --with-eth-ptp` to discipline the existing board `time_gen` from LiteEth PTP. `m2sdr_util info`, `m2sdr_util --watch ptp-status`, and `m2sdr_util ptp-config` expose the current lock/holdover state, learned port identity, runtime servo controls, and board-side discipline counters. While PTP discipline is active, host-side time writes are rejected to avoid two masters steering the same clock.
-- **Ethernet PTP RFIC reference (optional clock path)**: Add `--with-eth-ptp-rfic-clock` to expose a PTP-referenced FPGA 10MHz monitor/discipline loop. Enable it at runtime with `m2sdr_util ptp-clock10-config enable on`, verify `Reference Locked` and `Clock Locked`, then select the FPGA clock input for RF setup with `m2sdr_rf --sync fpga` or the matching SoapySDR `clock_source=fpga` setting. This gives RFIC reference frequency coherence; deterministic sample/RF phase alignment still needs AD9361 synchronization and timestamped stream start.
-
-[> Release Artifacts
---------------------
-<a id="release-artifacts"></a>
-
-Date-named release archives are generated with:
-
-```
-./release.py
-```
-
-The release script checks the final Vivado timing report before creating each archive, so a bitstream with setup/hold timing failures is not packaged. Release manifests include the parsed timing summary; PCIe images may record the known Xilinx PCIe IP pulse-width warning when setup/hold timing is otherwise clean. Ethernet-enabled builds default to a 100MHz system clock for timing margin; PCIe-only M.2 builds keep the 125MHz system clock. The first release matrix builds the core PCIe/Ethernet images plus the validated Ethernet PTP RFIC-reference image:
-
-| Archive prefix | Build command |
-|----------------|---------------|
-| `litex_m2sdr_baseboard_eth` | `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build` |
-| `litex_m2sdr_baseboard_eth_ptp_rfic_clock` | `./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-eth-ptp --with-eth-ptp-rfic-clock --build` |
-| `litex_m2sdr_baseboard_pcie_x1_eth` | `./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-eth --eth-sfp=0 --build` |
-| `litex_m2sdr_m2_pcie_x1` | `./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=1 --build` |
-| `litex_m2sdr_m2_pcie_x2` | `./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=2 --build` |
-
-Each `build/*_<YYYY_MM_DD>.zip` contains the `.bit`, `.bin`, multiboot fallback/operational images, CSR exports, and a JSON manifest. Generated archives and bitstreams are release artifacts and are not committed to git.
-
-GitHub release publication uses the same date string as the archive suffix, with no `v` prefix on the tag. After generating the archives from the final release commit, validate the upload plan and then publish it with:
-
-```
-scripts/github_release.py --date 2026_05_15 --dry-run
-scripts/github_release.py --date 2026_05_15
-```
-
-The helper requires the GitHub CLI `gh` to be installed and authenticated with release write access. It checks for a clean tracked tree, verifies that the expected `build/*_2026_05_15.zip` files exist, reads each archive manifest, creates and pushes the annotated `2026_05_15` tag on the manifest git revision, extracts the matching `CHANGELOG.md` section as release notes, and uploads the archive set to the GitHub release.
-
-> [!TIP]
-> If you don't see I/Q data streams in your SDR app, make sure IOMMU is set to passthrough mode. Add the following to your GRUB configuration:
->
-> **x86/PC**:
-> ```bash
-> # Add to GRUB config (/etc/default/grub):
-> GRUB_CMDLINE_LINUX="iommu=pt"
-> sudo update-grub && sudo reboot
-> ```
->
-> **ARM (ex NVIDIA Jetson/Orin)**:
-> ```bash
-> # Add to extlinux.conf (/boot/extlinux/extlinux.conf):
-> APPEND ... iommu.passthrough=1
-> sudo reboot
-> ```
-> Keep the Tegra SMMU driver enabled. `iommu.passthrough=1` is the safer first
-> test knob for current L4T kernels; disabling `arm-smmu` globally can break
-> other Jetson devices. See [Jetson Orin host notes](doc/hosts/jetson-orin.md).
-
-> [!WARNING]
-> For intel CPU: if a *kernel panic* occurs with the message **Corrupted page table at address**,
-> add `intel_iommu=off` to `GRUB_CMDLINE_LINUX`. (This has been observed on
-> an *11th Gen Intel(R) Core(TM) i7-11700B @ 3.20GHz*)
-
-> [!TIP]
-> If you get RX overflows/TX underflows at high sample rates, put the CPU in performance mode:
-> ```bash
-> sudo apt install linux-tools-$(uname -r) linux-tools-common
-> sudo cpupower frequency-set -g performance
-> ```
-> The setting resets at reboot; make it persistent with your distribution's
-> preferred mechanism (e.g. a systemd unit or `cpufrequtils`).
-
-### Tutorials for your platform
-
-> [!WARNING]
->
-> **WiP** 🧪 Content below is more our memo as developers than anything useful to read 😅. This will be reworked/integrated differently soon.
-
-For some platforms we created detailed tutorials. For everything else, please follow the earlier *Getting Started* tutorial.
-
-- [Use LiteX-M2SDR on OrangePI 5 Max](doc/hosts/orangepi-5-max.md)
-- [Use LiteX-M2SDR on Raspberry Pi 5](doc/hosts/raspberry-pi-5.md)
-- [Use LiteX-M2SDR on Jetson Orin / NVIDIA L4T](doc/hosts/jetson-orin.md)
-
-### For Software Developers
-
-For those who want to dive deeper into development with the LiteX-M2SDR board, follow these additional steps after completing the SDR enthusiast steps:
-
-For a broader hardware/software debug workflow, see [Debugging Guide](doc/debugging-guide.md).
-
-1. **Test Structure (CI-safe vs hardware scripts):**
-   - Gateware simulation/unit tests live in `test/` and are CI-safe (no hardware needed):
-   ```
-   pytest -v test
-   ```
-   - Board control/debug scripts live in `scripts/` and require a running board/server:
-   ```
-   python3 scripts/test_xadc.py
-   python3 scripts/test_dashboard.py
-   ```
-   - CI runs both software build checks and simulation tests with:
-   ```
-   # Software build checks (kernel/user/SoapySDR) are run in CI.
-   python3 -m pytest -v test
-   ```
-
-2. **Run Software Tests:**
-   - Test the kernel:
-   ```
-   cd litex_m2sdr/software/kernel
-   make clean all
-   sudo make install
-   sudo insmod m2sdr.ko (To avoid having to reboot the machine)
-   ```
-   - Test the user-space utilities:
-   ```
-   cd litex_m2sdr/software/user
-   make clean all
+3. **Check the board** is detected:
+   ```bash
+   cd user
    ./m2sdr_util info
-   ./m2sdr_rf --sample-rate=30720000 --tx-freq=2400000000 --rx-freq=2400000000
-   ./m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1000000 --amplitude 0.5
-   ```
-   - C API (libm2sdr) quick start and examples:
-   ```
-   See litex_m2sdr/doc/libm2sdr/README.md
-   cd litex_m2sdr/software/user
-   make examples
-   ../../doc/libm2sdr/example_sync_rx > /tmp/rx.iq
-   ../../doc/libm2sdr/example_tone_tx
-   ```
-   - `libm2sdr` is the common host interface used by the user utilities and the SoapySDR module, so example code there is the reference starting point for new host applications.
-
-3. **SoapySDR Detection/Probe:**
-   - Detect the LiteX-M2SDR board:
-   ```
    SoapySDRUtil --probe="driver=LiteXM2SDR"
    ```
 
-4. **Run GNU Radio FM Test:**
-   - Open and run the GNU Radio FM test:
-   ```
-   gnuradio-companion litex_m2sdr/software/gnuradio/test_fm_rx.grc
-   ```
+4. **Launch your SDR software** (GQRX, GNU Radio, ...) and select the LiteX-M2SDR device through
+   SoapySDR. 📡
 
-5. **Enable Debugging in Kernel:**
-    - Enable debugging:
-    ```
-    sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
-    ```
+> [!TIP]
+> No I/Q samples in your SDR application? Set the IOMMU to passthrough mode (`iommu=pt` on x86).
+> Overflows/underflows at high sample rates? Switch the CPU governor to `performance`.
+> Details in [Host Setup](doc/host-setup.md).
 
-### For Software & FPGA Developers
+More: [build options and manual install](doc/building-software.md) ·
+[Raspberry Pi 5](doc/hosts/raspberry-pi-5.md) · [Orange Pi 5 Max](doc/hosts/orangepi-5-max.md) ·
+[Jetson Orin](doc/hosts/jetson-orin.md) · [Ethernet setup](doc/ethernet.md) ·
+[C API](litex_m2sdr/doc/libm2sdr/README.md).
 
-For those who want to explore the full potential of the LiteX-M2SDR board, including FPGA development, follow these additional steps after completing the software developer steps:
+## Architecture
 
-1. **Install LiteX:**
-   - Follow the installation instructions from the LiteX Wiki: [LiteX Installation](https://github.com/enjoy-digital/litex/wiki/Installation). 📘
+### PCIe SoC
 
+<div align="center">
+  <img src="https://github.com/enjoy-digital/litex_m2sdr/assets/1450143/df5eb55e-16b2-4724-b4c1-28e06c45279c" width="100%">
+</div>
 
-2. **Ethernet and PCIe Tests:**
-   - For Ethernet tests, if the board is mounted in an Acorn Mini Baseboard:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build --load
-   ping 192.168.1.50
-   ```
-   - For 2.5GBASE-X with the LianGuo LG 2.5GE copper SFP in SFP0/J3:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --eth-phy=2500basex --build --load
-   ping 192.168.1.50
-   ```
-     The validated baseboard configuration has JP1 and JP4 fitted. `R82`/`R83`
-     are needed only for optional SFP EEPROM I2C access, not for Ethernet link.
-   - After loading an Ethernet image, use `m2sdr_util` loopback tests to
-     exercise the stream path before starting Soapy/Gqrx:
-   ```
-   cd litex_m2sdr/software/user
-   make m2sdr_util
-   ./m2sdr_util -i 192.168.1.50 --duration 4 --pace=rx --sample-rate 1920000 --window 32 fpga-phy-loopback-test
-   ./m2sdr_util -i 192.168.1.50 --duration 8 --pace=rx --sample-rate 1920000 --window 32 ad9361-loopback-test
-   ```
-   - The loopback tests reset FPGA stream state at startup/cleanup, so they can
-     be run after Soapy/Gqrx sessions. Add `--verbose` to show detailed RF setup
-     logs and LiteEth counters. See
-     [Debugging Guide](doc/debugging-guide.md#ethernet-loopback-diagnostics)
-     for the full loopback workflow.
-   - For Ethernet + SATA source-build tests:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --with-sata --build --load
-   cd litex_m2sdr/software/user
-   make m2sdr_sata
-   ./m2sdr_sata -i 192.168.1.50 info
-   ./m2sdr_sata -i 192.168.1.50 diag etherbone-bench
-   ./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-write 0x8000 4096
-   ./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-check 0x8000 4096
-   ./m2sdr_sata -i 192.168.1.50 init
-   ./m2sdr_sata -i 192.168.1.50 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
-   ./m2sdr_sata -i 192.168.1.50 list
-   ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
-   ./m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
-   ./m2sdr_sata -i 192.168.1.50 import tx_test /tmp/tx.sc16 --sample-rate 4M --format sc16 --channel-layout 1t1r --tx-freq 2400M --tx-att 20
-   ./m2sdr_sata -i 192.168.1.50 import tx_sigmf /tmp/tx.sigmf-meta
-   ./m2sdr_sata -i 192.168.1.50 play tx_test
-   ./m2sdr_sata -i 192.168.1.50 play tx_sigmf
-   ```
-   To replay a stored capture into an existing SoapySDR/GQRX receive flow, start
-   the RX application normally, then feed the Ethernet RX path from SATA:
-   ```
-   ./m2sdr_sata -i 192.168.1.50 serve fm_test
-   ```
-   The SATA Capture Volume is stored on the SATA disk at sector `0x800`;
-   automatic capture allocation starts at sector `0x100000`, and named
-   captures keep a SigMF metadata region next to the sample data. It is a small
-   capture index, not a general file system: captures stay in contiguous sector
-   ranges for the SATA streamers, SigMF provides interchange metadata, and
-   avoiding FAT/ext keeps validation and recovery simple. `init` refuses to
-   reset a non-empty volume unless `--force` is provided; it does not erase
-   sample data sectors. See
-   [SATA Workflows](doc/sata-workflows.md) for the full `m2sdr_sata` workflow
-   and [SATA Hardware Validation](doc/sata-validation.md) for measured
-   PCIe/Ethernet validity and throughput results.
-   - For PCIe + SATA source-build tests:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-pcie --pcie-lanes=1 --with-sata --build --load
-   cd litex_m2sdr/software/user
-   make m2sdr_util m2sdr_sata
-   ./m2sdr_util -c 0 info
-   ./m2sdr_sata -c 0 info
-   ./m2sdr_sata -c 0 --pattern counter diag pattern-write 0x8000 4096
-   ./m2sdr_sata -c 0 --pattern counter diag pattern-check 0x8000 4096
-   ./m2sdr_sata -c 0 init
-   ./m2sdr_sata -c 0 capture fm_test --seconds 2 --sample-rate 4M --format sc16 --channel-layout 1t1r --rx-freq 100M --rx-gain 20 --bandwidth 5M
-   ./m2sdr_sata -c 0 export fm_test /tmp/fm_test.sc16 --raw
-   ./m2sdr_sata -c 0 export fm_test /tmp/fm_test.sigmf-meta
-   ./m2sdr_sata -c 0 serve fm_test
-   ```
-   - For Ethernet PTP time-discipline tests on the baseboard:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
-   sudo ptp4l -i <host-eth-iface> -4 -E -S -m
-   cd litex_m2sdr/software/user
-   make m2sdr_util
-   ./m2sdr_util -i 192.168.1.50 info
-   ./m2sdr_util -i 192.168.1.50 --watch ptp-status
-   ```
-   - `m2sdr_util info` reports whether the LiteEth PTP core is locked, whether the board time is locked to PTP, and whether the clock is in holdover.
-   - `m2sdr_util --watch ptp-status` shows the live discipline state, learned master identity, and lock/loss counters from the board-time discipline loop. `m2sdr_util --json ptp-status` and `m2sdr_util ptp-smoke` provide machine-readable and pass/fail checks for lab automation; use tcpdump when protocol message visibility is needed. `m2sdr_util ptp-config` exposes runtime servo tuning.
-   - To also discipline the FPGA-generated 10MHz RFIC reference path:
-   ```
-   ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --with-eth-ptp-rfic-clock --eth-sfp=0 --build --load
-   sudo ptp4l -i <host-eth-iface> -4 -E -S -m
-   cd litex_m2sdr/software/user
-   make m2sdr_util
-   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config
-   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config enable on
-   ./m2sdr_util -i 192.168.1.50 ptp-clock10-config align
-   ./m2sdr_util -i 192.168.1.50 --watch ptp-clock10-status
-   cd ../../..
-   scripts/m2sdr_ptp_check.py smoke --ip 192.168.1.50 --iface <host-eth-iface> --with-clock10 --require-clock10-lock
-   ```
-   - After the clk10 loop is stable, use `m2sdr_rf --sync fpga` or SoapySDR `clock_source=fpga` so the SI5351C derives the AD9361 reference from the FPGA 10MHz path.
-   - See [Ethernet PTP Bring-Up](doc/ptp/README.md) for known-good `ptp4l` configs, host timestamping checks, and smoke/soak validation commands.
-   - For PCIe tests, if the board is mounted directly in an M.2 slot:
-   ```
-   ./litex_m2sdr.py --with-pcie --variant=m2 --build --load
-   lspci
-   ```
-   - To have a PCIe/PTM image automatically follow host time, build with PTM and start the host-side sync helper after the kernel driver has created the M2SDR PHC:
-   ```
-   ./litex_m2sdr.py --with-pcie --pcie-lanes=1 --with-pcie-ptm --variant=m2 --build --load
-   scripts/m2sdr_pcie_time_sync.py --dry-run
-   sudo scripts/m2sdr_pcie_time_sync.py --stdout
-   ```
-   - For boot-time use, install a systemd service similar to:
-   ```
-   [Unit]
-   Description=Synchronize M2SDR PCIe board time to host time
-   After=multi-user.target
+The PCIe design is the default: no baseboard required. Most of the complexity is handled by LiteX
+and LitePCIe; the SoC itself exposes an MMAP interface and DMA streams, and integrates the SDR/RFIC
+cores. [LitePCIe](https://github.com/enjoy-digital/litepcie) and its Linux driver have been
+battle-tested on several commercial projects. The design is validated at 2T2R @ 61.44 MSPS and
+handles 2T2R @ 122.88 MSPS oversampling (7.9 Gbps on the PCIe bus). Debug is available over PCIe or
+JTAG (MMAP peek & poke, LiteScope).
 
-   [Service]
-   ExecStart=/path/to/litex_m2sdr/scripts/m2sdr_pcie_time_sync.py --stdout
-   Restart=always
-   RestartSec=2
+### Ethernet SoC
 
-   [Install]
-   WantedBy=multi-user.target
-   ```
-   - The helper auto-detects `/sys/class/ptp/ptp*/clock_name == m2sdr` and runs `phc2sys -s CLOCK_REALTIME -c /dev/ptpN`, so the board is the sink and the host is the source. For multi-board systems, pass `--phc /dev/ptpN`.
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/bbcc0c79-4ae8-4e5b-94d8-aa7aff89bae2" width="100%">
+</div>
 
-   - For PCIe tests, if the board is mounted directly in a LiteX Acorn Baseboard:
-   ```
-   ./litex_m2sdr.py --with-pcie --variant=baseboard --build --load
-   lspci
-   ```
+On the Acorn Baseboard Mini, the M.2 SerDes lanes can be used for Ethernet instead of PCIe:
+[LiteEth](https://github.com/enjoy-digital/liteeth) provides the 1000BASE-X/2500BASE-X PHY, the
+UDP/IP hardware stack and the streaming/Etherbone front-ends, for control and RX/TX sample streaming
+bounded by the link bandwidth. See [Ethernet](doc/ethernet.md).
 
-3. **White Rabbit (Baseboard):**
-   - White Rabbit is supported on the baseboard variant only:
-   ```
-   ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
-   ```
-   - The White Rabbit helper logic is provided by `litex_wr_nic`; install it, set `LITEX_WR_NIC_DIR`, or keep a sibling `../litex_wr_nic` checkout.
-   - Use the reusable-core/MMCM API version documented in the [WR integration guide](doc/wr_integration.md). The default remains uRV with private RAM; VexRiscv, integrated RAM and host loading are selectable. The guide includes dependency setup, build commands and WR console access.
-   - `--wr-sfp` is optional; when omitted, the first available `sfp` index is auto-selected.
-   - Firmware path lookup order:
-     1. `--wr-firmware`
-     2. `--wr-nic-dir`
-     3. `LITEX_WR_NIC_DIR`
-     4. auto-discovery of `../litex_wr_nic` and `../../litex_wr_nic`
-   - If a stale local `wr-cores/` checkout is detected, refresh it:
-   ```
-   mv wr-cores wr-cores.old
-   ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --build
-   ```
+## Documentation
 
-4. **Use JTAGBone/PCIeBone:**
-    - Start the LiteX server for JTAG or PCIe:
-    ```
-    litex_server --jtag --jtag-config=openocd_xc7_ft2232.cfg # JTAGBone
-    sudo litex_server --pcie --pcie-bar=04:00.0              # PCIeBone (Adapt bar)
-    ```
+The full index is in [`doc/README.md`](doc/README.md).
 
-5. **Flash the Board Over PCIe:**
-    - Flash the board:
-    ```
-    cd litex_m2sdr/software
-    ./flash.py ../build/litex_m2sdr_platform/litex_m2sdr/gateware/litex_m2sdr_platform.bin
-    ```
+| Getting started | Using the board | Features | Timing & sync | Development |
+|---|---|---|---|---|
+| [Building the software](doc/building-software.md) | [User utilities](litex_m2sdr/software/user/README.md) | [Ethernet](doc/ethernet.md) | [PCIe PTM](doc/pcie-ptm.md) | [Building the gateware](doc/building-gateware.md) |
+| [Host setup](doc/host-setup.md) | [SoapySDR driver](litex_m2sdr/software/soapysdr/README.md) | [SATA](doc/sata-workflows.md) | [Ethernet PTP](doc/ptp/README.md) | [Debugging guide](doc/debugging-guide.md) |
+| [Flashing releases](doc/flash-release.md) | [GNU Radio](litex_m2sdr/software/gnuradio/README.md) | [Wide bandwidth](doc/wide-bandwidth.md) | [White Rabbit](doc/white-rabbit.md) | [Hardware reference](doc/hardware.md) |
+| [Platform guides](doc/host-setup.md) | [libm2sdr C API](litex_m2sdr/doc/libm2sdr/README.md) | [Low latency](doc/low-latency.md) | | [Changelog](CHANGELOG.md) |
+| | [Kernel driver](litex_m2sdr/software/kernel/README.md) | [Timed TX](doc/timed-tx.md) | | |
 
-6. **Reboot or Rescan PCIe Bus:**
-    - Rescan the PCIe bus:
-    ```
-    echo 1 | sudo tee /sys/bus/pci/devices/0000\:0X\:00.0/remove # Replace X with actual value
-    echo 1 | sudo tee /sys/bus/pci/rescan
-    ```
+## Contact
 
-[> Contact
-----------
-<a id="contact"></a>
-
-Got a unique idea or need a tweak? Whether it's custom FPGA/software development or hardware adjustments (like adapter boards) for your LiteX M2 SDR, we're here to help! Feel free to drop us a line or visit our website. We'd love to hear from you!
+Got a unique idea or need a tweak? Whether it's custom FPGA/software development or hardware
+adjustments (like adapter boards) for your LiteX-M2SDR, we're here to help! Feel free to drop us a
+line or visit our website. We'd love to hear from you!
 
 E-mail: florent@enjoy-digital.fr
 Website: http://enjoy-digital.fr/
