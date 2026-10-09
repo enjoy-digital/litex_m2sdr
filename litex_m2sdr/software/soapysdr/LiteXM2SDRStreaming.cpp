@@ -168,24 +168,35 @@ static bool has_kwargs_key(
            device_args.find(key) != device_args.end();
 }
 
-static bool get_kwargs_timed_tx_enabled(
+/* Timed-TX engagement mode. "hardware" routes each buffer's air-time through the per-buffer
+ * DMA header to the FPGA timed-TX gate (deterministic on-air timing, 10 ns grid); "software"
+ * keeps the host-side sample timeline; "auto" (default) picks hardware when the gateware has
+ * the gate (probed at open) and falls back to software otherwise. */
+enum class TimedTxMode { Off, Software, Hardware, Auto };
+
+static TimedTxMode get_kwargs_timed_tx_mode(
     const SoapySDR::Kwargs &stream_args,
     const SoapySDR::Kwargs &device_args)
 {
-    std::string value = get_kwargs_string(stream_args, device_args, "timed_tx", "software");
+    std::string value = get_kwargs_string(stream_args, device_args, "timed_tx", "auto");
     std::transform(value.begin(), value.end(), value.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
+    if (value == "auto")
+        return TimedTxMode::Auto;
+    if (value == "hardware" || value == "hw")
+        return TimedTxMode::Hardware;
     if (value == "software" || value == "sw" || value == "on" ||
         value == "true" || value == "1") {
-        return true;
+        return TimedTxMode::Software;
     }
     if (value == "off" || value == "none" || value == "false" ||
         value == "0") {
-        return false;
+        return TimedTxMode::Off;
     }
 
-    throw std::runtime_error("Invalid timed_tx: " + value + " (supported: software, off)");
+    throw std::runtime_error("Invalid timed_tx: " + value +
+        " (supported: auto, hardware, software, off)");
 }
 
 #if USE_LITEETH
@@ -361,12 +372,8 @@ std::recursive_mutex &SoapyLiteXM2SDR::streamAccessMutex(SoapySDR::Stream *strea
 /* RX DMA headers are enabled at runtime when the gateware supports them
  * (see _rx_dma_header_bytes); they carry the hardware RX timestamps. */
 
-/* TX DMA Header */
-#if USE_LITEPCIE && defined(_TX_DMA_HEADER_TEST)
-static constexpr size_t TX_DMA_HEADER_SIZE = 16;
-#else
-static constexpr size_t TX_DMA_HEADER_SIZE = 0;
-#endif
+/* TX DMA headers are enabled at runtime when the hardware timed-TX gate is engaged (see
+ * _tx_dma_header_bytes); they carry the per-buffer air-time the gate holds each buffer to. */
 
 /* Setup and configure a stream for RX or TX. */
 SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
@@ -547,6 +554,27 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("RX/TX channel count mismatch; close RX or use matching channels");
         }
 
+        /* Resolve the timed-TX mode before configuring the stream: hardware mode engages the
+         * FPGA timed-TX gate, whose per-buffer DMA header changes the TX payload layout below.
+         * In hardware mode air-times travel in the header and the gate holds/drops each buffer,
+         * so the software timeline stays off and timed writes stamp the first buffer of each
+         * burst directly (see writeStream()). "auto" falls back to the software timeline when
+         * the gateware has no gate (probed at open) or on the LiteEth transport; an explicit
+         * "hardware" there is a configuration error and fails loudly. */
+        TimedTxMode timed_tx_mode = get_kwargs_timed_tx_mode(searchArgs, _deviceArgs);
+        const bool tx_gate_usable = _tx_dma_header_supported && isLitePCIe();
+        if (timed_tx_mode == TimedTxMode::Auto) {
+            timed_tx_mode = tx_gate_usable ? TimedTxMode::Hardware : TimedTxMode::Software;
+        } else if (timed_tx_mode == TimedTxMode::Hardware && !tx_gate_usable) {
+            throw std::runtime_error(
+                "timed_tx=hardware requested but the timed-TX gate is unavailable "
+                "(TX DMA header module absent from this gateware, or LiteEth transport); "
+                "use timed_tx=software or update the gateware");
+        }
+        _tx_stream.timed_tx_hardware = (timed_tx_mode == TimedTxMode::Hardware);
+        _tx_stream.timed_tx_enabled  = (timed_tx_mode == TimedTxMode::Software);
+        _tx_dma_header_bytes = _tx_stream.timed_tx_hardware ? M2SDR_DMA_HEADER_SIZE : 0;
+
         if (isLitePCIe()) {
             if (format == SOAPY_SDR_CS8) {
                 _bitMode = 8;
@@ -562,8 +590,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             config.direction = M2SDR_TX;
             config.format = m2fmt;
             config.zero_copy = true;
-            config.tx_header_enable = TX_DMA_HEADER_SIZE != 0;
-            config.buffer_size = m2sdr_bytes_to_samples(m2fmt, M2SDR_BUFFER_BYTES - TX_DMA_HEADER_SIZE);
+            config.tx_header_enable = _tx_dma_header_bytes != 0;
+            config.buffer_size = m2sdr_bytes_to_samples(m2fmt, M2SDR_BUFFER_BYTES - _tx_dma_header_bytes);
             int rc = m2sdr_stream_configure(_dev, &config);
             if (rc != M2SDR_ERR_OK)
                 throw std::runtime_error("m2sdr_stream_configure(TX) failed: " + std::string(m2sdr_strerror(rc)));
@@ -577,6 +605,11 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             _tx_buf_size   = info.buffer_bytes;
             _tx_buf_count  = info.buffer_count;
             _tx_buf_stride = info.buffer_stride;
+
+            /* Anchor the hardware gate underflow counter so readStreamStatus() only reports
+             * drops that happen during this stream's lifetime. */
+            if (_tx_stream.timed_tx_hardware)
+                (void)m2sdr_get_tx_underflow(_dev, &_tx_gate_underflow_last);
         } else if (isLiteEth()) {
             if (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT) {
                 throw std::runtime_error("Soapy TX streaming is not supported in eth_mode=vrt");
@@ -632,7 +665,6 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.channels = selected_channels;
         _nChannels = _tx_stream.channels.size();
 
-        _tx_stream.timed_tx_enabled = get_kwargs_timed_tx_enabled(searchArgs, _deviceArgs);
         /* The hardware emits samples as soon as DMA delivers them, so any lead
          * shifts the actual emission that far ahead of the requested timestamps.
          * Applications that schedule writes in advance (srsRAN: ~4 subframes)
@@ -655,7 +687,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
 
         SoapySDR_logf(SOAPY_SDR_INFO,
             "TX timed mode: %s lead_buffers=%zu latency_ns=%lld late_margin_ns=%lld",
-            _tx_stream.timed_tx_enabled ? "software" : "off",
+            _tx_stream.timed_tx_hardware ? "hardware" :
+            (_tx_stream.timed_tx_enabled ? "software" : "off"),
             _tx_stream.timed_tx_lead_buffers,
             (long long)_tx_stream.timed_tx_latency_ns,
             (long long)_tx_stream.timed_tx_late_margin_ns);
@@ -1028,7 +1061,7 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
             buffs[0] = (char *)_rx_stream.buf + handle * _rx_buf_size;
     } else if (stream == TX_STREAM) {
         if (isLitePCIe())
-            buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + TX_DMA_HEADER_SIZE;
+            buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + _tx_dma_header_bytes;
         else
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_size;
     }
@@ -2049,7 +2082,10 @@ int SoapyLiteXM2SDR::writeStream(
         refreshTimedTxDefaults();
         if (!_tx_stream.tx_timeline_valid)
             initTimedTxTimeline();
-    } else if (_tx_stream.timed_tx_enabled && (flags & SOAPY_SDR_HAS_TIME)) {
+    } else if ((_tx_stream.timed_tx_enabled || _tx_stream.timed_tx_hardware) &&
+               _tx_stream.samplerate <= 0.0 && (flags & SOAPY_SDR_HAS_TIME)) {
+        /* Hardware mode needs the rate too: the buffer stamp is rescaled by the write's
+         * sample offset within the buffer (markTxRemainderTime). */
         SoapySDR::log(SOAPY_SDR_ERROR,
             "TX timed write requested before the TX sample rate was configured");
         return SOAPY_SDR_STREAM_ERROR;
@@ -2185,6 +2221,18 @@ int SoapyLiteXM2SDR::readStreamStatus(
                 _tx_stream.underflow = false;
                 SoapySDR::log(SOAPY_SDR_SSI, "U");
                 return SOAPY_SDR_UNDERFLOW;
+            }
+            /* Hardware timed-TX gate: report timed frames that missed their air-time (the
+             * gate drops them whole and counts them in the underflow CSR). One register
+             * read per status poll, off the streaming hot path. */
+            if (_tx_stream.timed_tx_hardware) {
+                uint32_t gate_underflow = 0;
+                if (m2sdr_get_tx_underflow(_dev, &gate_underflow) == M2SDR_ERR_OK &&
+                    gate_underflow != _tx_gate_underflow_last) {
+                    _tx_gate_underflow_last = gate_underflow;
+                    SoapySDR::log(SOAPY_SDR_SSI, "U");
+                    return SOAPY_SDR_UNDERFLOW;
+                }
             }
         }
 
