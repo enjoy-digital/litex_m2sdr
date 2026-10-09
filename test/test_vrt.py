@@ -197,15 +197,13 @@ def test_vrt_packet_size_matches_data_words_field():
                 yield dut.sink.first.eq(i == 0)
                 yield dut.sink.last.eq(i == nwords - 1)
                 yield dut.sink.data.eq(0x40000000 | (pkt << 8) | i)
-                while True:
-                    if (yield dut.sink.ready):
-                        break
+                yield
+                while not (yield dut.sink.ready):
                     yield
-                yield
-                yield dut.sink.valid.eq(0)
-                yield dut.sink.first.eq(0)
-                yield dut.sink.last.eq(0)
-                yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
         for _ in range(16):
             yield
 
@@ -364,13 +362,13 @@ def test_vrt_packet_structural_invariants_under_stalls():
                 yield dut.sink.first.eq(i == 0)
                 yield dut.sink.last.eq(i == len(payload) - 1)
                 yield dut.sink.data.eq(word)
+                yield
                 while not (yield dut.sink.ready):
                     yield
-                yield
-                yield dut.sink.valid.eq(0)
-                yield dut.sink.first.eq(0)
-                yield dut.sink.last.eq(0)
-                yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
         done_sending[0] = True
         for _ in range(64):
             yield
