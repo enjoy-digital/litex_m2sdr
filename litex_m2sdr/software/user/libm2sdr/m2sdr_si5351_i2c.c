@@ -10,7 +10,9 @@
 /* Includes */
 /*----------*/
 
+#include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdint.h>
 
@@ -29,10 +31,9 @@
 #define SI5351_STATUS_LOL_B    0x40
 #define SI5351_CONFIG_TIMEOUT_MS 100
 
-/* PLLB feedback Multisynth register block (AN619 registers 34..41) and the
- * valid a + b/c feedback multiplier range. */
+/* PLLB feedback Multisynth register block base (AN619 registers 34..41) and
+ * the valid a + b/c feedback multiplier range. */
 #define SI5351_PLLB_FB_BASE_REG  0x22
-#define SI5351_PLLB_FB_NUM_REGS  8
 #define SI5351_PLL_FB_MULT_MIN   15.0
 #define SI5351_PLL_FB_MULT_MAX   90.0
 #define SI5351_PLL_FB_TRIM_DENOM 1000000
@@ -81,11 +82,107 @@ void m2sdr_si5351_i2c_reset(void *conn) {
 /* m2sdr_si5351_i2c_write */
 /*------------------------*/
 
+/* Multi-register burst: the SI5351 auto-increments the register address, so
+ * a block of consecutive registers is written in a single I2C transaction.
+ * The LiteI2C master takes up to 4 bytes per FIFO word; a len_tx above 4
+ * announces that another word follows while SCL is held low between them.
+ * Each word is acknowledged with a status entry in the RX FIFO: an
+ * unfinished marker between words, the NACK/error status at the end. */
+static bool m2sdr_si5351_i2c_write_burst(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
+    uint32_t total = len + 1; /* Register address + payload. */
+    uint32_t sent  = 0;
+    int status;
+    int timeout;
+
+    /* Reset I2C. */
+    m2sdr_si5351_i2c_reset(conn);
+
+    /* Set Slave Address. */
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ADDR_ADDR, slave_addr);
+
+    /* Start Transaction. */
+    m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_ACTIVE_ADDR, 1);
+
+    while (sent < total) {
+        uint32_t remaining = total - sent;
+        uint32_t chunk     = remaining > 4 ? 4 : remaining;
+        uint32_t word      = 0;
+        uint32_t i;
+        bool     more      = remaining > 4;
+        bool     unfinished;
+
+        /* Chunk length, with a len_tx above 4 announcing a continuation. */
+        m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_SETTINGS_ADDR, (0 << 8) | (more ? 5 : chunk));
+
+        /* Pack the chunk MSB-first: the first byte on the wire sits in the
+         * highest transmitted byte lane. */
+        for (i = 0; i < chunk; i++) {
+            uint32_t byte = (sent + i == 0) ? addr : data[sent + i - 1];
+            word = (word << 8) | byte;
+        }
+
+        /* Wait TX Ready. */
+        timeout = 100000;
+        do {
+            status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+            if (!m2sdr_si5351_bus_ok(conn)) {
+                return false;
+            }
+            if (timeout-- <= 0) {
+                return false;
+            }
+            usleep(1);
+        } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_READY_OFFSET)));
+
+        /* Send Chunk. */
+        m2sdr_writel(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR, word);
+        sent += chunk;
+
+        /* Wait for the word's status entry before pushing more, so a NACK
+         * aborts the burst instead of starting a spurious transaction with
+         * the leftover words. */
+        timeout = 100000;
+        do {
+            status = m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_STATUS_ADDR);
+            if (!m2sdr_si5351_bus_ok(conn)) {
+                return false;
+            }
+            if (timeout-- <= 0) {
+                return false;
+            }
+            usleep(1);
+        } while (!(status & (1 << CSR_SI5351_I2C_MASTER_STATUS_RX_READY_OFFSET)));
+
+        unfinished = status & (1 << CSR_SI5351_I2C_MASTER_STATUS_TX_UNFINISHED_OFFSET);
+
+        /* Pop the status entry. */
+        m2sdr_readl(conn, CSR_SI5351_I2C_MASTER_RXTX_ADDR);
+        if (!m2sdr_si5351_bus_ok(conn)) {
+            return false;
+        }
+
+        /* Check NACK. */
+        if (status & (1 << CSR_SI5351_I2C_MASTER_STATUS_NACK_OFFSET)) {
+            return false;
+        }
+
+        /* The controller must agree on whether the transaction continues. */
+        if (unfinished != more) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool m2sdr_si5351_i2c_write(void *conn, uint8_t slave_addr, uint8_t addr, const uint8_t *data, uint32_t len) {
-    if (len != 1) {
-        /* The current LiteI2C helper is intentionally narrow: the config path
-         * only needs single-register writes. */
+    if (len == 0) {
         return false;
+    }
+    if (len != 1) {
+        /* The config sequencer relies on the single-register path below;
+         * block writes go through the burst helper. */
+        return m2sdr_si5351_i2c_write_burst(conn, slave_addr, addr, data, len);
     }
 
     int status;
@@ -359,18 +456,11 @@ void m2sdr_si5351_i2c_config(void *conn, uint8_t i2c_addr, const uint8_t i2c_con
 /* m2sdr_si5351_i2c_trim_pllb_ppm */
 /*--------------------------------*/
 
-bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length, double ppm) {
-    uint8_t  regs[SI5351_PLLB_FB_NUM_REGS];
-    size_t   found = 0;
-    uint32_t p1, p2, p3;
-    uint32_t fb_int;
-    uint64_t fb_frac;
-    double   multiplier;
-    size_t   i;
+/* Recover the PLLB feedback register block from a config table. */
+static bool si5351_pllb_regs_from_config(const uint8_t i2c_config[][2], size_t i2c_length, uint8_t regs[SI5351_PLLB_FB_NUM_REGS]) {
+    size_t found = 0;
+    size_t i;
 
-    /* Recover the nominal PLLB feedback registers from the config table so
-     * the correction is always relative to the shipped clock tree, never to a
-     * previously trimmed state. */
     for (i = 0; i < i2c_length; i++) {
         uint8_t reg = i2c_config[i][0];
         if (reg >= SI5351_PLLB_FB_BASE_REG &&
@@ -379,39 +469,18 @@ bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t 
             found++;
         }
     }
-    if (found != SI5351_PLLB_FB_NUM_REGS)
-        return false;
+    return found == SI5351_PLLB_FB_NUM_REGS;
+}
 
-    /* Decode the P1/P2/P3 encoding back to the a + b/c feedback multiplier
-     * (AN619: P1 = 128*a + floor(128*b/c) - 512, P2 = 128*b - c*floor(128*b/c),
-     * P3 = c). */
-    p3 = ((uint32_t)(regs[5] & 0xF0) << 12) | ((uint32_t)regs[0] << 8) | regs[1];
-    p1 = ((uint32_t)(regs[2] & 0x03) << 16) | ((uint32_t)regs[3] << 8) | regs[4];
-    p2 = ((uint32_t)(regs[5] & 0x0F) << 16) | ((uint32_t)regs[6] << 8) | regs[7];
-    if (p3 == 0)
-        return false;
-    multiplier  = (double)((p1 + 512) >> 7);
-    multiplier += (double)(((uint64_t)((p1 + 512) & 0x7F) * p3) + p2) / (128.0 * (double)p3);
+/* Decode the P1/P2/P3 encoding of a feedback register block (AN619:
+ * P1 = 128*a + floor(128*b/c) - 512, P2 = 128*b - c*floor(128*b/c), P3 = c). */
+static void si5351_pllb_decode(const uint8_t regs[SI5351_PLLB_FB_NUM_REGS], uint32_t *p1, uint32_t *p2, uint32_t *p3) {
+    *p3 = ((uint32_t)(regs[5] & 0xF0) << 12) | ((uint32_t)regs[0] << 8) | regs[1];
+    *p1 = ((uint32_t)(regs[2] & 0x03) << 16) | ((uint32_t)regs[3] << 8) | regs[4];
+    *p2 = ((uint32_t)(regs[5] & 0x0F) << 16) | ((uint32_t)regs[6] << 8) | regs[7];
+}
 
-    /* Scale the multiplier so all outputs land back on their nominal
-     * frequencies: a reference running fast by +ppm needs the feedback
-     * reduced by the same ratio. */
-    multiplier /= 1.0 + ppm * 1e-6;
-    if (multiplier < SI5351_PLL_FB_MULT_MIN || multiplier > SI5351_PLL_FB_MULT_MAX)
-        return false;
-
-    /* Re-encode with a fixed 1e6 denominator, giving a ~0.03 ppm trim
-     * resolution on the shipped clock trees. */
-    fb_int  = (uint32_t)multiplier;
-    fb_frac = (uint64_t)((multiplier - (double)fb_int) * SI5351_PLL_FB_TRIM_DENOM + 0.5);
-    if (fb_frac >= SI5351_PLL_FB_TRIM_DENOM) {
-        fb_int += 1;
-        fb_frac = 0;
-    }
-    p1 = 128 * fb_int + (uint32_t)((128 * fb_frac) / SI5351_PLL_FB_TRIM_DENOM) - 512;
-    p2 = (uint32_t)(128 * fb_frac - SI5351_PLL_FB_TRIM_DENOM * ((128 * fb_frac) / SI5351_PLL_FB_TRIM_DENOM));
-    p3 = SI5351_PLL_FB_TRIM_DENOM;
-
+static void si5351_pllb_encode(uint32_t p1, uint32_t p2, uint32_t p3, uint8_t regs[SI5351_PLLB_FB_NUM_REGS]) {
     regs[0] = (p3 >> 8)  & 0xFF;
     regs[1] = (p3 >> 0)  & 0xFF;
     regs[2] = (p1 >> 16) & 0x03;
@@ -420,13 +489,127 @@ bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t 
     regs[5] = ((p3 >> 12) & 0xF0) | ((p2 >> 16) & 0x0F);
     regs[6] = (p2 >> 8)  & 0xFF;
     regs[7] = (p2 >> 0)  & 0xFF;
+}
 
-    /* Fractional feedback updates take effect without a PLL soft reset, so
-     * the trim pulls the running clock tree smoothly. */
+/* 128x the nominal feedback multiplier of a config table, the unit the
+ * P1/P2/P3 encoding works in. */
+static bool si5351_pllb_scaled_mult_from_config(const uint8_t i2c_config[][2], size_t i2c_length, double *scaled) {
+    uint8_t  regs[SI5351_PLLB_FB_NUM_REGS];
+    uint32_t p1, p2, p3;
+
+    if (!si5351_pllb_regs_from_config(i2c_config, i2c_length, regs))
+        return false;
+    si5351_pllb_decode(regs, &p1, &p2, &p3);
+    if (p3 == 0)
+        return false;
+    *scaled = (double)(p1 + 512) + (double)p2 / (double)p3;
+    return true;
+}
+
+bool m2sdr_si5351_pllb_state_from_config(struct m2sdr_si5351_pllb_state *state, const uint8_t i2c_config[][2], size_t i2c_length) {
+    if (!si5351_pllb_regs_from_config(i2c_config, i2c_length, state->regs)) {
+        state->valid = false;
+        return false;
+    }
+    state->valid = true;
+    return true;
+}
+
+bool m2sdr_si5351_pllb_trim_window(const uint8_t i2c_config[][2], size_t i2c_length, double *ppm_min, double *ppm_max) {
+    double scaled_nom;
+    double k;
+    double scaled_hi;
+
+    if (!si5351_pllb_scaled_mult_from_config(i2c_config, i2c_length, &scaled_nom))
+        return false;
+
+    /* With P1 fixed at floor(128*m_nom) - 512 and P3 at 1e6, P2 covers
+     * multipliers in [k/128, (k + (P3-1)/P3)/128]. frac(128*m_nom) fixes
+     * where the nominal sits inside it, so the window is asymmetric, and
+     * positive ppm lowers the multiplier. */
+    k         = floor(scaled_nom);
+    scaled_hi = k + (double)(SI5351_PLL_FB_TRIM_DENOM - 1) / (double)SI5351_PLL_FB_TRIM_DENOM;
+    *ppm_max  = (scaled_nom / k - 1.0) * 1e6;
+    *ppm_min  = (scaled_nom / scaled_hi - 1.0) * 1e6;
+    return true;
+}
+
+bool m2sdr_si5351_i2c_trim_pllb_ppm(void *conn, uint8_t i2c_addr, const uint8_t i2c_config[][2], size_t i2c_length, double ppm,
+                                    struct m2sdr_si5351_pllb_state *state, struct m2sdr_si5351_pllb_trim_report *report) {
+    uint8_t  target[SI5351_PLLB_FB_NUM_REGS];
+    uint32_t p1_cur = 0, p2_cur = 0, p3_cur = 0;
+    uint32_t p1;
+    int64_t  p2;
+    double   scaled_nom, scaled;
+    bool     have_current;
+    int      first = -1, last = -1;
+    size_t   i;
+    struct m2sdr_si5351_pllb_trim_report rpt = { false, false, 0 };
+
+    /* The correction is always relative to the nominal config table, never
+     * to a previously trimmed state. */
+    if (!si5351_pllb_scaled_mult_from_config(i2c_config, i2c_length, &scaled_nom))
+        return false;
+
+    /* Scale the multiplier so all outputs land back on their nominal
+     * frequencies: a reference running fast by +ppm needs the feedback
+     * reduced by the same ratio. */
+    scaled = scaled_nom / (1.0 + ppm * 1e-6);
+    if (scaled < 128.0 * SI5351_PLL_FB_MULT_MIN || scaled > 128.0 * SI5351_PLL_FB_MULT_MAX)
+        return false;
+
+    have_current = (state != NULL) && state->valid;
+    if (have_current)
+        si5351_pllb_decode(state->regs, &p1_cur, &p2_cur, &p3_cur);
+
+    /* Glitch-free candidate: keep the P1/P3 on the device and move only P2,
+     * with a resolution of 1/(128*P3) on the multiplier (~2e-4 ppm). */
+    p2 = -1;
+    p1 = p1_cur;
+    if (have_current && p3_cur == SI5351_PLL_FB_TRIM_DENOM)
+        p2 = llround((scaled - (double)(p1 + 512)) * (double)SI5351_PLL_FB_TRIM_DENOM);
+    if (p2 < 0 || p2 >= SI5351_PLL_FB_TRIM_DENOM) {
+        /* Outside the P2 window (or no usable device state): re-centre P1 on
+         * the target. The P1 rewrite makes this one update not glitch-free. */
+        double k = floor(scaled);
+        p1 = (uint32_t)k - 512;
+        p2 = llround((scaled - k) * (double)SI5351_PLL_FB_TRIM_DENOM);
+        if (p2 >= SI5351_PLL_FB_TRIM_DENOM) {
+            p1 += 1;
+            p2  = 0;
+        }
+        rpt.recentred = true;
+    }
+    si5351_pllb_encode(p1, (uint32_t)p2, SI5351_PLL_FB_TRIM_DENOM, target);
+    rpt.glitch_free = have_current && p1 == p1_cur && p3_cur == SI5351_PLL_FB_TRIM_DENOM;
+
+    /* Write only the span of bytes that changed, MSB to LSB: in the
+     * glitch-free case that is at most 0x27 (keeping the P3 high nibble),
+     * 0x28 and 0x29. Fractional feedback updates take effect without a PLL
+     * soft reset, so the trim pulls the running clock tree smoothly. */
     for (i = 0; i < SI5351_PLLB_FB_NUM_REGS; i++) {
-        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, SI5351_PLLB_FB_BASE_REG + i, &regs[i], 1))
+        if (!have_current || target[i] != state->regs[i]) {
+            if (first < 0)
+                first = i;
+            last = i;
+        }
+    }
+    if (first >= 0) {
+        if (!m2sdr_si5351_i2c_write(conn, i2c_addr, SI5351_PLLB_FB_BASE_REG + first,
+                                    &target[first], last - first + 1)) {
+            /* The device block state is unknown after a failed burst. */
+            if (state != NULL)
+                state->valid = false;
             return false;
+        }
+        rpt.bytes_written = last - first + 1;
     }
 
+    if (state != NULL) {
+        memcpy(state->regs, target, SI5351_PLLB_FB_NUM_REGS);
+        state->valid = true;
+    }
+    if (report != NULL)
+        *report = rpt;
     return true;
 }

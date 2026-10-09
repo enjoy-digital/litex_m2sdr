@@ -578,6 +578,8 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
     if (!m2sdr_si5351_i2c_config_checked(conn, SI5351_I2C_ADDR,
         si5351_config, si5351_length))
         return m2sdr_transport_error(dev);
+    (void)m2sdr_si5351_pllb_state_from_config(&dev->si5351_pllb,
+        si5351_config, si5351_length);
 
     /* Compensate the measured reference error by trimming the PLL feedback
      * away from the nominal table, correcting the AD9361 reference and all
@@ -585,7 +587,8 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
     if (cfg->refclk_ppm != 0) {
         M2SDR_LOGF("Trimming SI5351 PLL by %.3f ppm.\n", cfg->refclk_ppm);
         if (!m2sdr_si5351_i2c_trim_pllb_ppm(conn, SI5351_I2C_ADDR,
-            si5351_config, si5351_length, cfg->refclk_ppm))
+            si5351_config, si5351_length, cfg->refclk_ppm,
+            &dev->si5351_pllb, NULL))
             return m2sdr_transport_error(dev);
     }
 
@@ -1720,6 +1723,7 @@ int m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm)
 #ifdef CSR_SI5351_BASE
     const uint8_t (*si5351_config)[2];
     size_t si5351_length;
+    struct m2sdr_si5351_pllb_trim_report report;
     void *conn;
 
     if (!dev)
@@ -1739,16 +1743,62 @@ int m2sdr_set_refclk_ppm(struct m2sdr_dev *dev, double ppm)
     m2sdr_si5351_select_config(dev->rf_last_config.clock_source,
                                dev->rf_last_config.refclk_freq,
                                &si5351_config, &si5351_length);
-    M2SDR_LOGF("Trimming SI5351 PLL by %.3f ppm.\n", ppm);
     if (!m2sdr_si5351_i2c_trim_pllb_ppm(conn, SI5351_I2C_ADDR,
-        si5351_config, si5351_length, ppm))
+        si5351_config, si5351_length, ppm, &dev->si5351_pllb, &report))
         return m2sdr_transport_error(dev);
+    if (report.recentred)
+        M2SDR_LOGF("SI5351 PLL trim to %.3f ppm re-centred the feedback (not glitch-free).\n", ppm);
 
     dev->rf_last_config.refclk_ppm = ppm;
     return M2SDR_ERR_OK;
 #else
     (void)dev;
     (void)ppm;
+    return M2SDR_ERR_UNSUPPORTED;
+#endif
+}
+
+/* Last reference trim applied through the RF config or a runtime retrim. */
+int m2sdr_get_refclk_ppm(struct m2sdr_dev *dev, double *ppm)
+{
+    if (!dev || !ppm)
+        return M2SDR_ERR_INVAL;
+    if (!dev->rf_last_config_valid)
+        return M2SDR_ERR_STATE;
+    *ppm = dev->rf_last_config.refclk_ppm;
+    return M2SDR_ERR_OK;
+}
+
+/* Glitch-free trim window of the active clock topology, clamped to the
+ * accepted +-M2SDR_REFCLK_PPM_MAX range. Retrims inside [*ppm_min, *ppm_max]
+ * move only the PLLB fractional field; outside, the feedback is re-centred
+ * and that one update is not glitch-free. */
+int m2sdr_get_refclk_ppm_window(struct m2sdr_dev *dev, double *ppm_min, double *ppm_max)
+{
+#ifdef CSR_SI5351_BASE
+    const uint8_t (*si5351_config)[2];
+    size_t si5351_length;
+
+    if (!dev || !ppm_min || !ppm_max)
+        return M2SDR_ERR_INVAL;
+    if (!dev->rf_last_config_valid)
+        return M2SDR_ERR_STATE;
+
+    m2sdr_si5351_select_config(dev->rf_last_config.clock_source,
+                               dev->rf_last_config.refclk_freq,
+                               &si5351_config, &si5351_length);
+    if (!m2sdr_si5351_pllb_trim_window(si5351_config, si5351_length,
+                                       ppm_min, ppm_max))
+        return M2SDR_ERR_IO;
+    if (*ppm_min < -M2SDR_REFCLK_PPM_MAX)
+        *ppm_min = -M2SDR_REFCLK_PPM_MAX;
+    if (*ppm_max > M2SDR_REFCLK_PPM_MAX)
+        *ppm_max = M2SDR_REFCLK_PPM_MAX;
+    return M2SDR_ERR_OK;
+#else
+    (void)dev;
+    (void)ppm_min;
+    (void)ppm_max;
     return M2SDR_ERR_UNSUPPORTED;
 #endif
 }

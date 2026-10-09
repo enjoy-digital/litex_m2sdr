@@ -97,7 +97,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
 CLI_OBJS = m2sdr_cli.o
 TOOL_OBJS = m2sdr_tool.o
 HOST_QUEUE_OBJS = m2sdr_host_queue.o
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -141,6 +141,7 @@ examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
 	LD_LIBRARY_PATH=libm2sdr:$${LD_LIBRARY_PATH} ./tests/test_libm2sdr
 	./tests/test_m2sdr_flash
+	./tests/test_si5351_trim
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
@@ -181,6 +182,10 @@ tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o
 # The test provides the eb_*() functions.
 tests/test_m2sdr_flash: tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o
+
+# The test provides the eb_*() functions.
+tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o -lm
 
 tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) $(PTHREAD_LIBS)

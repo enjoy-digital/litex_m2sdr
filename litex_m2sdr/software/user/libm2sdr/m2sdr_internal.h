@@ -21,6 +21,7 @@
 #include "liblitepcie.h"
 #include "etherbone.h"
 #include "liteeth_udp.h"
+#include "m2sdr_si5351_i2c.h"
 
 struct ad9361_rf_phy;
 
@@ -84,6 +85,9 @@ struct m2sdr_dev {
     void *rf_init_param;
     struct m2sdr_config rf_last_config;
     int rf_last_config_valid;
+    /* PLLB feedback block last written to the SI5351, so retrims only touch
+     * the registers that changed. */
+    struct m2sdr_si5351_pllb_state si5351_pllb;
     enum m2sdr_channel_layout rf_channel_layout;
     int rf_channel_layout_valid;
     int rf_oversample_enabled;

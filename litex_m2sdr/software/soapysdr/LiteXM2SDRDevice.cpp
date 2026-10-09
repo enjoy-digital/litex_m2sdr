@@ -2121,6 +2121,7 @@ void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
     if (!m2sdr_si5351_i2c_config_checked((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
         config, length))
         throw std::runtime_error("SI5351 " + source + " config failed");
+    m2sdr_si5351_pllb_state_from_config(&_si5351_pllb, config, length);
 
     /* Compensate the measured reference error by trimming the PLL feedback
      * away from the nominal table, correcting the AD9361 reference and all
@@ -2128,7 +2129,7 @@ void SoapyLiteXM2SDR::applyClockSource(const std::string &source)
     if (_refclk_ppm != 0.0) {
         SoapySDR::logf(SOAPY_SDR_INFO, "Trimming SI5351 PLL by %.3f ppm", _refclk_ppm);
         if (!m2sdr_si5351_i2c_trim_pllb_ppm((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
-            config, length, _refclk_ppm))
+            config, length, _refclk_ppm, &_si5351_pllb, nullptr))
             throw std::runtime_error("SI5351 PLL ppm trim failed");
     }
 #else
@@ -2669,4 +2670,72 @@ std::string SoapyLiteXM2SDR::readSensor(
         throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown device");
     }
     throw std::runtime_error("SoapyLiteXM2SDR::getSensorInfo(" + key + ") unknown key");
+}
+
+/***************************************************************************************************
+ *                                    Settings API
+ **************************************************************************************************/
+
+SoapySDR::ArgInfoList SoapyLiteXM2SDR::getSettingInfo(void) const {
+    SoapySDR::ArgInfoList infos;
+#ifdef CSR_SI5351_BASE
+    SoapySDR::ArgInfo info;
+    info.key   = "refclk_ppm";
+    info.value = std::to_string(_refclk_ppm);
+    info.name  = "RefClk trim (ppm)";
+    info.type  = SoapySDR::ArgInfo::FLOAT;
+    info.units = "ppm";
+    info.range = SoapySDR::Range(-M2SDR_REFCLK_PPM_MAX, M2SDR_REFCLK_PPM_MAX);
+
+    /* The glitch-free window is table-dependent and asymmetric; report it
+     * for the active clock topology so a tracking loop can plan around it. */
+    const uint8_t (*config)[2];
+    size_t length;
+    double window_min = 0.0, window_max = 0.0;
+    select_si5351_config(_clock_source, _refclk_hz, &config, &length);
+    std::string window;
+    if (m2sdr_si5351_pllb_trim_window(config, length, &window_min, &window_max)) {
+        window_min = std::max(window_min, -M2SDR_REFCLK_PPM_MAX);
+        window_max = std::min(window_max,  M2SDR_REFCLK_PPM_MAX);
+        window = " Glitch-free within [" + std::to_string(window_min) + ", " +
+                 std::to_string(window_max) + "] ppm of the nominal table; outside, the PLL "
+                 "feedback is re-centred and that one update is not glitch-free.";
+    }
+    info.description =
+        "Compensate a measured reference clock error (positive = reference runs fast), "
+        "retrimming the SI5351 PLL at runtime without a PLL reset." + window;
+    infos.push_back(info);
+#endif
+    return infos;
+}
+
+void SoapyLiteXM2SDR::writeSetting(const std::string &key, const std::string &value) {
+#ifdef CSR_SI5351_BASE
+    if (key == "refclk_ppm") {
+        double ppm = std::stod(value);
+        if (!(ppm >= -M2SDR_REFCLK_PPM_MAX && ppm <= M2SDR_REFCLK_PPM_MAX))
+            throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
+
+        std::lock_guard<std::mutex> lock(_mutex);
+        const uint8_t (*config)[2];
+        size_t length;
+        struct m2sdr_si5351_pllb_trim_report report;
+        select_si5351_config(_clock_source, _refclk_hz, &config, &length);
+        if (!m2sdr_si5351_i2c_trim_pllb_ppm((void *)(intptr_t)_fd, SI5351_I2C_ADDR,
+            config, length, ppm, &_si5351_pllb, &report))
+            throw std::runtime_error("SI5351 PLL ppm trim failed");
+        if (report.recentred)
+            SoapySDR::logf(SOAPY_SDR_INFO,
+                "SI5351 PLL trim to %.3f ppm re-centred the feedback (not glitch-free)", ppm);
+        _refclk_ppm = ppm;
+        return;
+    }
+#endif
+    SoapySDR::Device::writeSetting(key, value);
+}
+
+std::string SoapyLiteXM2SDR::readSetting(const std::string &key) const {
+    if (key == "refclk_ppm")
+        return std::to_string(_refclk_ppm);
+    return SoapySDR::Device::readSetting(key);
 }
