@@ -44,6 +44,14 @@ class HeaderInserterExtractor(LiteXModule):
         self.underflow      = Signal(32) # o  TX underflow count: timed frames that missed
                                          #    their air-time (dropped -> RFIC aired zeros).
 
+        # RX timestamp plane correction (inserter only), the mirror of tx_offset: the inserted
+        # timestamp marks the cycle the buffer starts forming (DMA plane), so rx_offset is
+        # subtracted to refer it back to when the first sample was at the ANTENNA (fixed RX
+        # pipeline latency: antenna -> ADC -> deserializer -> unpacker -> DMA). With both
+        # calibrated, TX and RX timestamps share one reference plane. Reset 0 keeps the
+        # current stamping bit-exact.
+        self.rx_offset      = Signal(64) # i  CSR: RX pipeline offset (ns).
+
         if with_csr:
             self.add_csr()
 
@@ -65,6 +73,15 @@ class HeaderInserterExtractor(LiteXModule):
         # release latency is a fixed constant, absorbed by the tx_offset calibration.
         gate_now = Signal(64)
         self.sync += gate_now.eq(self.time + self.tx_offset)
+
+        # Inserted stamp: timestamp input (the live FPGA time) referred back to the antenna
+        # plane. Registered on the sys clock for the same timing reason as gate_now; the one
+        # added cycle is a fixed constant absorbed by the rx_offset calibration. Clamped at 0
+        # so a boot-time stamp (time still below rx_offset) cannot wrap to a huge bogus value.
+        stamp_time = Signal(64)
+        self.sync += stamp_time.eq(
+            Mux(self.timestamp >= self.rx_offset, self.timestamp - self.rx_offset, 0))
+        self.stamp_time = stamp_time
 
         # FSM.
         # ----
@@ -105,10 +122,10 @@ class HeaderInserterExtractor(LiteXModule):
                     NextState("TIMESTAMP"),
                 )
             )
-            # Timestamp.
+            # Timestamp (antenna-plane corrected, see stamp_time above).
             fsm.act("TIMESTAMP",
                 source.valid.eq(1),
-                source.data[0:64].eq(self.timestamp),
+                source.data[0:64].eq(stamp_time),
                 If(source.valid & source.ready,
                     NextValue(self.update, 1),
                     NextState("FRAME"),
@@ -275,9 +292,13 @@ class TXRXHeader(LiteXModule):
             self._tx_underflow = CSRStatus(32, description=
                 "TX underflow count: timed frames that missed their air-time (dropped whole; "
                 "the RFIC aired zeros for them).")
+            self._rx_offset    = CSRStorage(64, reset=0, description=
+                "RX timestamp offset (ns): subtracted from the FPGA time before insertion into the "
+                "RX header, referring the stamp back to the antenna plane (the mirror of tx_offset).")
             self.comb += [
                 self.tx.tx_offset.eq(self._tx_offset.storage),
                 self._tx_underflow.status.eq(self.tx.underflow),
+                self.rx.rx_offset.eq(self._rx_offset.storage),
             ]
             self.sync += [
                 # Reset.
@@ -294,9 +315,9 @@ class TXRXHeader(LiteXModule):
                     self.last_tx_header.status.eq(self.tx.header),
                     self.last_tx_timestamp.status.eq(self.tx.timestamp),
                 ),
-                # RX Update.
+                # RX Update (stamp_time: the antenna-plane value actually inserted).
                 If(self.rx.update,
                     self.last_rx_header.status.eq(self.rx.header),
-                    self.last_rx_timestamp.status.eq(self.rx.timestamp),
+                    self.last_rx_timestamp.status.eq(self.rx.stamp_time),
                 )
             ]

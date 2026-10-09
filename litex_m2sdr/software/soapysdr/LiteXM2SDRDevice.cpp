@@ -805,6 +805,26 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
      * scripts/timed_tx_selftest. */
     if (args.count("tx_offset") > 0)
         _tx_offset_ns = std::stoll(args.at("tx_offset"));
+
+    /* RX timestamp plane calibration (ns), the mirror of tx_offset: subtracted in gateware
+     * from the RX header stamps so they refer to the antenna instead of the DMA plane. No
+     * auto default (a loopback only measures the tx+rx pipeline SUM; splitting it needs an
+     * external reference such as PPS), so it is applied only when given explicitly. */
+    if (args.count("rx_offset") > 0) {
+        long long rx_offset_ns = std::stoll(args.at("rx_offset"));
+        if (rx_offset_ns < 0)
+            throw std::runtime_error("rx_offset must be non-negative");
+        if (!_tx_dma_header_supported) {
+            SoapySDR::log(SOAPY_SDR_WARNING,
+                "rx_offset ignored: this gateware has no RX timestamp offset register");
+        } else {
+            int rc = m2sdr_set_rx_offset(_dev, (uint64_t)rx_offset_ns);
+            if (rc != 0)
+                SoapySDR::logf(SOAPY_SDR_WARNING, "m2sdr_set_rx_offset(%lld ns) failed: %s",
+                    rx_offset_ns, m2sdr_strerror(rc));
+            else
+                SoapySDR::logf(SOAPY_SDR_INFO, "RX timestamp offset = %lld ns", rx_offset_ns);
+        }
     }
 
     if (args.count("ad9361_fir_profile") > 0) {

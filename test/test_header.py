@@ -570,3 +570,71 @@ def test_gate_drop_frame_cycles_gt3_reanchors():
     out, underflow = _run_gate_frames(frames, time_start=9000, frame_cycles=5)
     assert out == [0]*5 + [0x400, 0x401, 0x402, 0x403, 0x404], out
     assert underflow == 1, underflow
+
+
+# RX Timestamp Plane (inserter rx_offset) Tests ----------------------------------------------------
+#
+# The inserter stamps each buffer with its time input referred back to the antenna plane:
+# stamp = time - rx_offset (clamped at 0), the mirror of the extractor's tx_offset. With both
+# offsets calibrated, TX and RX timestamps share one reference plane.
+
+def _run_inserter_stamp(timestamp, rx_offset):
+    """Push one framed buffer through the inserter and return the captured stamp word."""
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+    payload  = [0x100, 0x101, 0x102]
+    header   = 0x1122334455667788
+    captured = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(len(payload))
+        yield dut.header.eq(header)
+        yield dut.timestamp.eq(timestamp)
+        yield dut.rx_offset.eq(rx_offset)
+        yield dut.source.ready.eq(1)
+
+        for i, word in enumerate(payload):
+            while not (yield dut.sink.ready):
+                yield
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.first.eq(i == 0)
+            yield dut.sink.last.eq(i == len(payload) - 1)
+            yield dut.sink.data.eq(word)
+            yield
+            yield dut.sink.valid.eq(0)
+            yield dut.sink.first.eq(0)
+            yield dut.sink.last.eq(0)
+            yield
+
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert captured[0] == header, captured
+    return captured[1]
+
+
+def test_header_inserter_rx_offset_zero_is_bitexact():
+    """rx_offset = 0 (the reset value) stamps the time input unchanged -- pre-rx_offset
+    behavior is preserved bit-exactly."""
+    assert _run_inserter_stamp(timestamp=0x0123456789ABCDEF, rx_offset=0) == 0x0123456789ABCDEF
+
+
+def test_header_inserter_rx_offset_shifts_timestamp():
+    """rx_offset is subtracted from the time input before insertion, referring the stamp
+    back to the antenna plane."""
+    assert _run_inserter_stamp(timestamp=1_000_000, rx_offset=1_500) == 998_500
+
+
+def test_header_inserter_rx_offset_clamps_at_zero():
+    """A boot-time stamp (time still below rx_offset) clamps to 0 instead of wrapping to a
+    huge bogus value."""
+    assert _run_inserter_stamp(timestamp=1_000, rx_offset=1_500) == 0

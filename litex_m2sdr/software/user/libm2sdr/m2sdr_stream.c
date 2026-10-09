@@ -1348,6 +1348,25 @@ int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow)
     return M2SDR_ERR_OK;
 }
 
+/* Set the RX timestamp offset (ns), CSR_HEADER_RX_OFFSET: the mirror of tx_offset. The RX
+ * header inserter stamps each buffer when it starts forming (DMA plane); rx_offset is
+ * subtracted so the stamp refers to when the first sample was at the ANTENNA. With both
+ * offsets calibrated, TX and RX timestamps share one reference plane. 0 (the default)
+ * keeps the historical DMA-plane stamping. LitePCIe only. */
+int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+    /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
+    if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 4, (uint32_t)(offset_ns & 0xffffffffu)) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
 static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
                                    enum m2sdr_direction direction,
                                    void **buffer,

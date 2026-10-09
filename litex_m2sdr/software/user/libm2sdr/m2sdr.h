@@ -925,6 +925,15 @@ int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
  * fields count the separate DMA-ring underflow (reader starved of any buffer). LitePCIe. */
 int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
 
+/* Set the RX timestamp offset (ns): the mirror of tx_offset. The RX header inserter stamps
+ * each buffer when it starts forming (DMA plane); rx_offset is subtracted so the stamp
+ * refers to when the first sample was at the ANTENNA. With both offsets calibrated, TX and
+ * RX timestamps share one reference plane (needed for absolute/multi-board timing; TX<->RX
+ * self-consistency alone is already given by the loopback-calibrated tx_offset, which
+ * absorbs the sum of both pipelines). 0 (default) keeps the historical DMA-plane stamping.
+ * LitePCIe only. */
+int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
+
 /* Zero-copy buffer API.
  *
  * These helpers expose backend-owned buffers directly. RX buffers must be

@@ -295,6 +295,13 @@ m2sdr_sync_tx(dev, buf, n, &m, timeout_ms);   /* returns M2SDR_ERR_STATE if the 
 uint32_t uf; m2sdr_get_tx_underflow(dev, &uf);   /* frames that missed their air-time */
 ```
 
+TX and RX timestamps share the same FPGA time counter and header format; `tx_offset` (and its RX
+mirror `m2sdr_set_rx_offset()` / the `rx_offset` Soapy arg) refer both to a common reference
+plane, so "received at T, transmit at T+D" is exact arithmetic on one clock. The gate's CSRs are
+appended at the end of the HEADER block and its presence is advertised through the capability
+features CSR, so all pre-existing register addresses are unchanged and older software keeps
+working against this gateware (and vice versa).
+
 *SoapySDR* — the standard timed-TX contract, no code change:
 
 ```
