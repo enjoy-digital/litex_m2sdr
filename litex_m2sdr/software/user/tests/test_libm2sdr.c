@@ -430,9 +430,14 @@ static int test_stream_config_size_validation(void)
     if (m2sdr_sync_config(&dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
                           0, 0, 0, 1000) != M2SDR_ERR_INVAL)
         goto out;
+    /* On LitePCIe the exact sample-count check runs against the ring geometry
+     * the kernel reports, i.e. after the device opens; exercise the mismatch
+     * path through the LiteEth transport, whose payload size is static. */
+    dev.transport = M2SDR_TRANSPORT_LITEETH;
     if (m2sdr_sync_config(&dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11,
                           0, sc16_samples - 1, 0, 1000) != M2SDR_ERR_RANGE)
         goto out;
+    dev.transport = M2SDR_TRANSPORT_LITEPCIE;
     if (m2sdr_sync_config(&dev, M2SDR_RX, (enum m2sdr_format)99,
                           0, sc16_samples, 0, 1000) != M2SDR_ERR_UNSUPPORTED)
         goto out;
