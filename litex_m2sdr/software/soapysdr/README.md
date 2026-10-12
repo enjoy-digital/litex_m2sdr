@@ -119,6 +119,9 @@ You can pass device arguments to configure the driver. These are most useful whe
   - The mirror of `tx_offset`: subtracted in gateware from the RX header stamps so they refer to the antenna instead of the DMA plane. Only needed for *absolute* antenna-plane timing (TDOA, multi-board alignment against PPS/White Rabbit); TX↔RX self-consistency is already given by the loopback-calibrated `tx_offset`. Splitting the loopback sum into its TX and RX parts needs an external time reference. Default `0` keeps the historical stamping.
 - **RX DMA headers** (PCIe): `rx_dma_header=1|0`
   - `1` (default) uses the FPGA per-buffer hardware timestamps for RX time reporting when the gateware supports them (probed at open; falls back to software accounting otherwise).
+- **Interface delay calibration**: `calibrate_delay=1|0`
+  - `0` (default) keeps the AD9361 digital-interface clock/data delays from the driver defaults, which suit most boards.
+  - `1` runs the PRBS delay scan (same procedure as `m2sdr_rf --calibrate-delay`, a few seconds at open) for boards whose timing eye sits at the edge of the defaults and RX/TX capture zeros or noise otherwise. The calibrated delays are persisted in the stored AD9361 init parameters, so later RFIC re-initializations (e.g. channel-mode changes) program them again. Ignored with `bypass_init=1`.
 
 Example:
 ```bash

@@ -2095,3 +2095,15 @@ int m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced)
 {
     return m2sdr_read_prbs_synced(dev, synced);
 }
+
+int m2sdr_rf_calibrate_interface_delay(struct m2sdr_dev *dev)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    return m2sdr_calibrate_interface_delay(dev, phy);
+}

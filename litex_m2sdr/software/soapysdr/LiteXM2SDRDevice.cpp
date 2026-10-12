@@ -977,6 +977,29 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 1);
     }
 
+    /* FPGA <-> AD9361 interface delay calibration (opt-in via
+     * calibrate_delay=1): runs the PRBS clock/data delay scan, like
+     * `m2sdr_rf --calibrate-delay`, for boards where the init-table defaults
+     * sit at the edge of the timing eye (~5s at open). Runs here because the
+     * RFIC is still in its bring-up 2T2R layout (gateware without a
+     * 1R1T-aware PRBS checker cannot converge in 1T1R) and no stream is
+     * active yet; libm2sdr persists the result in the stored AD9361 init
+     * parameters, so later RFIC re-initializations (channel-mode changes)
+     * program it again. */
+    bool calibrate_delay = false;
+    if (args.count("calibrate_delay") > 0)
+        calibrate_delay = args.at("calibrate_delay") != "0";
+    if (calibrate_delay && do_init) {
+        int rc = m2sdr_rf_calibrate_interface_delay(_dev);
+        if (rc != M2SDR_ERR_OK)
+            SoapySDR::logf(SOAPY_SDR_WARNING,
+                "Interface delay calibration failed (%s); keeping default delays",
+                m2sdr_strerror(rc));
+    } else if (calibrate_delay) {
+        SoapySDR::log(SOAPY_SDR_WARNING,
+            "calibrate_delay=1 ignored with bypass_init=1 (the PRBS scan would disturb the external RF configuration)");
+    }
+
     if (args.count("rx_antenna0") > 0)
         _rx_stream.antenna[0] = args.at("rx_antenna0");
     if (args.count("rx_antenna1") > 0)
