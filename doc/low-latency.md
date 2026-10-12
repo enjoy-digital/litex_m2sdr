@@ -16,6 +16,12 @@ sudo insmod m2sdr.ko dma_buffer_count=8 dma_buffer_per_irq=2
 sudo scripts/pin_m2sdr_irq.sh          # keep the DMA IRQ on your radio-loop core (re-run after each insmod)
 ```
 
+The buffer size and MSI divisor are also settable **per DMA channel** (`dma_buffer_size=8192,512
+dma_buffer_per_irq=8,1`), so on a multi-DMA build a low-rate side channel can run small buffers
+with an MSI per buffer — its records become visible in `buffer_size / byte_rate` — while the bulk
+I/Q channel keeps the full-throughput geometry. See the
+[kernel driver README](../litex_m2sdr/software/kernel/README.md) for the constraints.
+
 ## 2. RX Low-Latency Wake (opt-in)
 
 With `M2SDR_RX_WAIT=mwaitx` on CPUs with MONITORX/MWAITX

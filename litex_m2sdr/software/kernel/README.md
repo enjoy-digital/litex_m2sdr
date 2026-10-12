@@ -66,6 +66,43 @@ This removes:
 - **SATA**
   SATA host access is exposed through the M2SDR userspace utilities, such as
   `m2sdr_sata`.
+- **DMA ring geometry (module parameters)**
+  The active ring depth is global (`dma_buffer_count`, power of two, 2..256, default 256 —
+  see the [low-latency guide](../../../doc/low-latency.md)). The buffer size and the MSI divisor
+  are **per DMA channel** (`dma_buffer_size` / `dma_buffer_per_irq`, one value per channel, comma
+  separated, defaulting to 8192 bytes and 8 buffers/MSI): a bulk I/Q channel and a low-rate side
+  channel no longer have to share one ring geometry — buffer completion (and therefore the latency
+  the host sees) scales with `buffer_size / byte_rate`, and an MSI is only raised every
+  `dma_buffer_per_irq` buffers.
+```
+# DMA0: 8 KiB buffers, one MSI every 8 buffers (throughput, deep ring)
+# DMA1: 512 B buffers, one MSI per buffer      (a record is visible in ~buffer time)
+sudo insmod m2sdr.ko dma_buffer_size=8192,512 dma_buffer_per_irq=8,1
+
+# ... or persistently:
+echo "options m2sdr dma_buffer_size=8192,512 dma_buffer_per_irq=8,1" | \
+    sudo tee /etc/modprobe.d/m2sdr.conf
+```
+  The chosen geometry is reported at probe time (`dmesg | grep DMA`) and, per channel, through
+  `LITEPCIE_IOCTL_MMAP_DMA_INFO` and `LITEPCIE_IOCTL_DMA_STATS` — `liblitepcie`/`libm2sdr` and the
+  `m2sdr_*` tools read it from there at runtime, so no userspace rebuild is needed.
+
+  Constraints, enforced when the module loads:
+  - `dma_buffer_size`: a multiple of 64 bytes, up to 16 MiB (the descriptor length field is
+    24-bit); either a multiple of the page size, or an exact divisor of it (sub-page buffers are
+    packed several per page so the ring stays dense, both for `read()`/`write()` and for the
+    `mmap()` layout);
+  - `dma_buffer_per_irq`: must divide `dma_buffer_count` and stay strictly below it.
+
+  Size a buffer for the rate its channel carries: a buffer completes in
+  `buffer_size / byte_rate`, and with `dma_buffer_per_irq=1` the channel raises
+  `byte_rate / buffer_size` interrupts per second. Very small buffers on a high-rate channel are
+  therefore an interrupt storm (a 64-byte buffer on an 8 MB/s stream is 125k IRQ/s), and the ring
+  also gets shallower: `dma_buffer_count x buffer_size` is the headroom against a host stall.
+
+  Note that the DMA header/timestamp framing (`CSR_HEADER_*_FRAME_CYCLES`) is sized for 8192-byte
+  buffers by default. When enabling header mode on a channel with a different buffer size, program
+  `frame_cycles = buf_size / 8 - 2`.
 - **Debug Logging**
   To enable detailed logs:
 ```
