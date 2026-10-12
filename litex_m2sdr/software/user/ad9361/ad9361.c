@@ -4762,11 +4762,25 @@ int32_t ad9361_calculate_rf_clock_chain(struct ad9361_rf_phy *phy,
 		__func__, tx_sample_rate, tx_intdec, rx_intdec,
 		rate_gov ? "Nominal" : "Highest OSR");
 
-	if (tx_sample_rate > 61440000UL)
+	/* The 61.44 MSPS ceiling is the AD9361 datasheet spec, not a hard VCO/PLL
+	 * limit: with a div=4 chain a 122.88 MSPS request lands at ADC 491.52 /
+	 * DAC 245.76 / BBPLL 983.04 - all within MAX_ADC_CLK/MAX_DAC_CLK. Allow
+	 * the overclocked native rates so 2R2T can run wide (the 1R1T 2x-port
+	 * trick does not work in 2R2T timing). */
+	if (tx_sample_rate > 130000000UL)
 		return -EINVAL;
 
 	clktf = tx_sample_rate * tx_intdec;
 	clkrf = tx_sample_rate * rx_intdec * (phy->rx_eq_2tx ? 2 : 1);
+
+	/* MAX_DAC_CLK (=MAX_ADC_CLK/2=320MHz) forces DAC=ADC/2 when ADC>320, i.e.
+	 * DATA_CLK=2*DAC at the overclocked 2R2T rate (491.52/245.76) - the chip's
+	 * TX port then cannot bridge the 2:1 interface->DAC crossing and the TX AC
+	 * is lost (only DC survives). Raising it (M2SDR_MAX_DAC_CLK) lets the chain
+	 * take the matched branch (DAC=ADC=491.52, DATA_CLK=DAC) so TX mirrors RX. */
+	uint32_t max_dac_clk = MAX_DAC_CLK;
+	if (getenv("M2SDR_MAX_DAC_CLK"))
+		max_dac_clk = (uint32_t)strtoul(getenv("M2SDR_MAX_DAC_CLK"), NULL, 0);
 
 	for (i = rate_gov; i < 7; i++) {
 		adc_rate = clkrf * clk_dividers[i][0];
@@ -4780,7 +4794,7 @@ int32_t ad9361_calculate_rf_clock_chain(struct ad9361_rf_phy *phy,
 			else
 				tmp = adc_rate / dac_rate;
 
-			if (adc_rate <= MAX_DAC_CLK) {
+			if (adc_rate <= max_dac_clk) {
 				index_rx = i;
 				index_tx = i - ((tmp == 1) ? 0 : tmp);
 				dac_rate = adc_rate; /* ADC_CLK */
@@ -4834,6 +4848,17 @@ int32_t ad9361_calculate_rf_clock_chain(struct ad9361_rf_phy *phy,
 	tx_path_clks[T1_FREQ] = tx_path_clks[T2_FREQ] / clk_dividers[index_tx][2];
 	tx_path_clks[CLKTF_FREQ] = tx_path_clks[T1_FREQ] / clk_dividers[index_tx][3];
 	tx_path_clks[TX_SAMPL_FREQ] = tx_path_clks[CLKTF_FREQ] / tx_intdec;
+
+	if (getenv("M2SDR_DUMP_CLKS")) {
+		fprintf(stderr, "[CLKCHAIN] req=%u idx_rx=%d idx_tx=%d txint=%u rxdec=%u rx_eq_2tx=%d\n",
+			tx_sample_rate, index_rx, index_tx, tx_intdec, rx_intdec, phy->rx_eq_2tx);
+		fprintf(stderr, "[CLKCHAIN] RX: BBPLL=%u ADC=%u R2=%u R1=%u CLKRF=%u RX_SAMPL=%u\n",
+			rx_path_clks[BBPLL_FREQ], rx_path_clks[ADC_FREQ], rx_path_clks[R2_FREQ],
+			rx_path_clks[R1_FREQ], rx_path_clks[CLKRF_FREQ], rx_path_clks[RX_SAMPL_FREQ]);
+		fprintf(stderr, "[CLKCHAIN] TX: BBPLL=%u DAC=%u T2=%u T1=%u CLKTF=%u TX_SAMPL=%u\n",
+			tx_path_clks[BBPLL_FREQ], tx_path_clks[DAC_FREQ], tx_path_clks[T2_FREQ],
+			tx_path_clks[T1_FREQ], tx_path_clks[CLKTF_FREQ], tx_path_clks[TX_SAMPL_FREQ]);
+	}
 
 	return 0;
 }
@@ -7504,7 +7529,7 @@ int32_t ad9361_rssi_gain_step_calib(struct ad9361_rf_phy *phy)
  * tune wider). bbbw is half the complex bandwidth: 39 MHz gives an RX corner
  * of 1.4x = ~54 MHz and a TX corner of 1.6x = ~62 MHz with BBPLL at
  * 983.04 MHz. Returns true when both calibrations complete. */
-static bool ad9361_wide_bbf_tune(struct ad9361_rf_phy *phy, uint32_t bbbw)
+bool ad9361_wide_bbf_tune(struct ad9361_rf_phy *phy, uint32_t bbbw)
 {
     uint32_t bbpll = clk_get_rate(phy, phy->ref_clk_scale[BBPLL_CLK]);
     uint32_t khz   = ((bbbw % 1000000u) * 128u + 500000u) / 1000000u;
