@@ -438,6 +438,9 @@ class BaseSoC(SoCMini):
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
 
+            # RFIC.
+            rfic_oversampling = with_rfic_oversampling,
+
             # Board.
             variant        = variant,
             jtagbone       = with_jtagbone,
@@ -580,7 +583,8 @@ class BaseSoC(SoCMini):
 
             # Core.
             # -----
-            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas, data_width=64,
+            self.add_pcie(phy=self.pcie_phy, address_width=64, ndmas=pcie_dmas,
+                data_width=128 if with_rfic_oversampling else 64,
                 with_dma_buffering    = True, dma_buffering_depth=8192,
                 with_dma_loopback     = True,
                 with_dma_synchronizer = True,
@@ -832,13 +836,17 @@ class BaseSoC(SoCMini):
             tx_fifo_depth  = 8192,
             with_rx_fifo   = with_rfic_stream_fifos,
             rx_fifo_depth  = 8192,
+            # Full-duplex 2T2R @ 122.88 MSPS: selects the oversampling PHY (OSERDESE2 TX +
+            # per-lane RX deskew, see gateware/ad9361/phy_oversampling.py) and the 128-bit
+            # datapath; the default build keeps the standard PHY and 64-bit datapath unchanged.
+            oversampling   = with_rfic_oversampling,
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
-        self.header = TXRXHeader(data_width=64)
+        self.header = TXRXHeader(data_width=128 if with_rfic_oversampling else 64)
         # Timed-TX gate: feed the FPGA time so the TX header extractor holds each frame until
         # its air-time (header timestamp) and drops too-late frames (see gateware/header.py).
         self.comb += self.header.tx.time.eq(self.time_gen.time)
@@ -852,7 +860,7 @@ class BaseSoC(SoCMini):
 
         # AD9361 <-> [User Processing] <-> Loopback <-> Header.
         # ------------------------------------------------------
-        self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
+        self.txrx_loopback = TXRXLoopback(data_width=128 if with_rfic_oversampling else 64, with_csr=True)
 
         # Header TX -> Loopback.
         self.comb += self.header.tx.source.connect(self.txrx_loopback.tx_sink)
@@ -875,7 +883,7 @@ class BaseSoC(SoCMini):
         # Port indices match the host-side TXSRC_*/RXDST_* enums in
         # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA.
         crossbar_sata_port = 2
-        self.crossbar = stream.Crossbar(layout=dma_layout(64), n=3, with_csr=True)
+        self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=3, with_csr=True)
 
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
@@ -1243,13 +1251,17 @@ class BaseSoC(SoCMini):
         # RFIC clock domain.
         platform.add_period_constraint(self.ad9361.cd_rfic.clk, 1e9/platform.rfic_clk_freq)
 
+        # Oversampling (491.52 MHz rfic_clk) timing exceptions, owned by the RFIC core/PHY;
+        # a no-op on the standard build.
+        self.ad9361.add_timing_constraints(platform)
+
         # Clk Measurements -------------------------------------------------------------------------
 
         self.clk_measurement = MultiClkMeasurement(clks={
             "clk0" : ClockSignal("sys"),
             "clk1" : 0 if not with_pcie else ClockSignal("pcie"),
             "clk2" : si5351_clk0,
-            "clk3" : ClockSignal("rfic"),
+            "clk3" : self.ad9361.rfic_meas_clk,
             "clk4" : si5351_clk1,
             "clk5" : ClockSignal("clk10"),
         })
@@ -1259,7 +1271,8 @@ class BaseSoC(SoCMini):
     def add_rfic_datapath(self, rfic_sink, rfic_source, tx_source, rx_sink):
         """User extension hook for on-FPGA processing at the RFIC sample plane.
 
-        Called once during ``__init__`` with the four stream Endpoints (64-bit ``dma_layout``,
+        Called once during ``__init__`` with the four stream Endpoints (``dma_layout`` at the
+        build datapath width: 64-bit, or 128-bit with --with-rfic-oversampling,
         sys clock domain) surrounding the RFIC: the stream here carries raw I/Q sample words,
         with no DMA headers (RX timestamping/header insertion happens downstream in
         ``header.rx``, so processed samples are timestamped normally). Override in a subclass to
