@@ -930,6 +930,26 @@ static bool m2sdr_pick_delay_midpoint(const unsigned valid[M2SDR_DELAY_TAPS][M2S
     return true;
 }
 
+/* Persist a calibrated clock/data delay pair into the stored AD9361 init
+ * parameters: RFIC re-initializations (channel-mode changes, bring-up
+ * replays) program the delay registers from the init parameters, so without
+ * this the calibrated values silently revert to the init-table defaults. */
+static void m2sdr_persist_interface_delay(struct m2sdr_dev *dev, bool tx,
+                                          unsigned clk_delay, unsigned data_delay)
+{
+    AD9361_InitParam *init_param = m2sdr_dev_init_param(dev);
+
+    if (!init_param)
+        return;
+    if (tx) {
+        init_param->tx_fb_clock_delay = clk_delay;
+        init_param->tx_data_delay     = data_delay;
+    } else {
+        init_param->rx_data_clock_delay = clk_delay;
+        init_param->rx_data_delay       = data_delay;
+    }
+}
+
 static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_rf_phy *phy)
 {
     unsigned rx_valid[M2SDR_DELAY_TAPS][M2SDR_DELAY_TAPS] = {{0}};
@@ -978,6 +998,7 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     rc = m2sdr_program_delay_reg(phy, false, best_rx_clk, best_rx_data, true);
     if (rc != M2SDR_ERR_OK)
         goto restore;
+    m2sdr_persist_interface_delay(dev, false, best_rx_clk, best_rx_data);
     printf("Selected RX Clk Delay: %u, RX Dat Delay: %u (window: %u)\n",
         best_rx_clk, best_rx_data, best_rx_run);
 
@@ -1009,6 +1030,7 @@ static int m2sdr_calibrate_interface_delay(struct m2sdr_dev *dev, struct ad9361_
     rc = m2sdr_program_delay_reg(phy, true, best_tx_clk, best_tx_data, true);
     if (rc != M2SDR_ERR_OK)
         goto restore;
+    m2sdr_persist_interface_delay(dev, true, best_tx_clk, best_tx_data);
     printf("Selected TX Clk Delay: %u, TX Dat Delay: %u (window: %u)\n",
         best_tx_clk, best_tx_data, best_tx_run);
 
@@ -2072,4 +2094,16 @@ int m2sdr_set_fpga_prbs_tx(struct m2sdr_dev *dev, bool enable)
 int m2sdr_get_fpga_prbs_rx_synced(struct m2sdr_dev *dev, bool *synced)
 {
     return m2sdr_read_prbs_synced(dev, synced);
+}
+
+int m2sdr_rf_calibrate_interface_delay(struct m2sdr_dev *dev)
+{
+    struct ad9361_rf_phy *phy;
+    int rc;
+
+    rc = m2sdr_require_phy(dev, &phy);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+
+    return m2sdr_calibrate_interface_delay(dev, phy);
 }
