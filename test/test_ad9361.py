@@ -427,3 +427,112 @@ def test_ad9361_prbs_checker_stays_unsynced_after_error_burst():
     assert any(synced[1100:1200])  # initially locked
     assert synced[1210] == 0        # lost lock after error burst
     assert not any(synced[-200:])   # remains out-of-lock with free-running source
+
+# AD9361 BitMode (128-bit) Tests ----------------------------------------------------------------------
+
+
+def test_ad9361_tx_bitmode_128b_16bit_passthrough():
+    """Verify the 128-bit TX bitmode forwards 128-bit words (two sample groups) unchanged in
+    16-bit mode."""
+    dut = AD9361TXBitMode(data_width=128)
+    out = []
+    word = (0x99AABBCCDDEEFF00 << 64) | 0x1122334455667788
+
+    def gen():
+        yield dut.mode.eq(0)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(word)
+        yield
+        yield dut.sink.valid.eq(0)
+        yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert out == [word]
+
+
+def test_ad9361_tx_bitmode_128b_8bit_sign_extension():
+    """Verify the 128-bit TX bitmode splits a 128-bit word of sc8 samples into two 128-bit words
+    of sign-extended 16-bit samples (sc8 value v -> v << 4, sign-extended)."""
+    dut = AD9361TXBitMode(data_width=128)
+    out = []
+    # 16 sc8 bytes; low 8 bytes become the first output word, high 8 the second.
+    sc8 = [0x01, 0xFF, 0x7F, 0x80, 0x10, 0xF0, 0x00, 0x55,
+           0x02, 0xFE, 0x40, 0xC0, 0x20, 0xE0, 0x7E, 0xAA]
+    word = 0
+    for i, b in enumerate(sc8):
+        word |= b << (8 * i)
+
+    def expand(b):
+        v = (b << 4) & 0xFFF           # sc8 -> 12-bit left-aligned.
+        if v & 0x800:                  # sign-extend 12 -> 16.
+            v |= 0xF000
+        return v
+
+    def gen():
+        yield dut.mode.eq(1)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(word)
+        yield
+        # The 128->64 converter acks the input on its LAST chunk: hold valid until then.
+        while not (yield dut.sink.ready):
+            yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    expected = []
+    for half in (sc8[0:8], sc8[8:16]):
+        w = 0
+        for i, b in enumerate(half):
+            w |= expand(b) << (16 * i)
+        expected.append(w)
+    assert out == expected, [hex(w) for w in out]
+
+
+def test_ad9361_rx_bitmode_128b_16bit_passthrough():
+    """Verify the 128-bit RX bitmode forwards 128-bit words unchanged in 16-bit mode."""
+    dut = AD9361RXBitMode(data_width=128)
+    out = []
+    word = (0x1122334455667788 << 64) | 0x99AABBCCDDEEFF00
+
+    def gen():
+        yield dut.mode.eq(0)
+        yield dut.source.ready.eq(1)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.first.eq(1)
+        yield dut.sink.last.eq(1)
+        yield dut.sink.data.eq(word)
+        yield
+        yield dut.sink.valid.eq(0)
+        yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    assert out == [word]

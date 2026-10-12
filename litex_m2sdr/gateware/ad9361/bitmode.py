@@ -20,8 +20,6 @@ _BFP8_MODE   = 2
 
 BFP8_HEADER_MAGIC    = 0x38504642 # "BFP8" as a little-endian 32-bit word.
 BFP8_PAYLOAD_WORDS   = 127
-BFP8_BLOCK_WORDS     = 1 + BFP8_PAYLOAD_WORDS
-BFP8_SAMPLES_PER_CH  = BFP8_PAYLOAD_WORDS * 2
 
 def _sign_extend(data, nbits=16):
     return Cat(data, Replicate(data[-1], nbits - len(data)))
@@ -119,9 +117,9 @@ def _unpack_bfp8_payload(module, data, exponent, half):
         fields.append(Cat(scaled, Constant(0, 4)))
     return Cat(*fields)
 
-# AD9361 TX BitMode --------------------------------------------------------------------------------
+# AD9361 TX BitMode (64-bit) -----------------------------------------------------------------------
 
-class AD9361TXBitMode(LiteXModule):
+class AD9361TXBitMode64b(LiteXModule):
     def __init__(self, bfp8_payload_words=BFP8_PAYLOAD_WORDS):
         self.sink   = sink   = stream.Endpoint(dma_layout(64))
         self.source = source = stream.Endpoint(dma_layout(64))
@@ -203,9 +201,9 @@ class AD9361TXBitMode(LiteXModule):
             )
         )
 
-# AD9361 RX BitMode --------------------------------------------------------------------------------
+# AD9361 RX BitMode (64-bit) -----------------------------------------------------------------------
 
-class AD9361RXBitMode(LiteXModule):
+class AD9361RXBitMode64b(LiteXModule):
     def __init__(self, bfp8_payload_words=BFP8_PAYLOAD_WORDS):
         self.sink   = sink   = stream.Endpoint(dma_layout(64))
         self.source = source = stream.Endpoint(dma_layout(64))
@@ -258,24 +256,26 @@ class AD9361RXBitMode(LiteXModule):
                 sink.ready.eq(bfp8_fifo.sink.ready),
                 bfp8_fifo.sink.valid.eq(sink.valid),
                 bfp8_fifo.sink.data.eq(sink.data),
-                NextValue(bfp8_max_abs,
-                    Mux(sink.valid & sink.ready, next_max_abs, bfp8_max_abs)),
                 If(sink.valid & sink.ready,
+                    NextValue(bfp8_max_abs, next_max_abs),
                     If(bfp8_collect_count == (bfp8_input_words - 1),
                         NextValue(bfp8_collect_count, 0),
-                        NextState("BFP8_EXPONENT"),
+                        NextState("BFP8_EXP"),
                     ).Else(
                         NextValue(bfp8_collect_count, bfp8_collect_count + 1),
                     )
                 )
             )
         )
-        bfp8_fsm.act("BFP8_EXPONENT",
+        # Derive the block exponent from the REGISTERED max in its own cycle.
+        # Folding it into the last collect beat placed sample-abs -> max4 ->
+        # running-max -> the 4-deep exponent mux chain in one combinational cone off
+        # the RX CDC output, which is timing-marginal at 125MHz sys_clk; splitting it
+        # into two register-to-register hops closes it (one extra cycle per block).
+        bfp8_fsm.act("BFP8_EXP",
             If(mode != _BFP8_MODE,
-                NextValue(bfp8_max_abs, 0),
                 NextState("BFP8_COLLECT"),
             ).Else(
-                # Keep the block max and exponent decode out of the same cycle.
                 NextValue(bfp8_exponent, _bfp8_exponent(bfp8_max_abs)),
                 NextValue(bfp8_max_abs, 0),
                 NextState("BFP8_HEADER"),
@@ -324,3 +324,100 @@ class AD9361RXBitMode(LiteXModule):
                 )
             )
         )
+
+# AD9361 TX BitMode (128-bit) ----------------------------------------------------------------------
+
+class AD9361TXBitMode128b(LiteXModule):
+    """TX bit-mode conversion for the 128-bit (oversampling) datapath.
+
+    The wide datapath carries two (ia, qa, ib, qb) sample groups per 128-bit word, halving the
+    sys-domain word rate so 2T2R @ 122.88 MSPS fits the 125 MHz fabric; the rfic side scatters
+    128 -> 64 into the serializer (see AD9361RFIC). Both formats are normalized to two expanded
+    16-bit groups per word; BFP8 is not supported on the wide datapath.
+    """
+    def __init__(self):
+        self.sink   = sink   = stream.Endpoint(dma_layout(128))
+        self.source = source = stream.Endpoint(dma_layout(128))
+        self.mode   = mode   = Signal(2)
+
+        # # #
+
+        # 16-bit: a 128-bit word already holds two 16-bit groups -> passthrough.
+        self.comb += If(mode == _16_BIT_MODE, sink.connect(source))
+
+        # 8-bit: a 128-bit word holds four sc8 groups (16 bytes). Split to two 64-bit halves
+        # (two sc8 groups each), then sign-extend the 8 bytes to 8x16 = one 128-bit word.
+        self.conv = conv = stream.Converter(128, 64)
+        ext = [source.data[i*16+4:(i+1)*16].eq(_sign_extend(conv.source.data[i*8:(i+1)*8], 12))
+               for i in range(8)]
+        self.comb += If(mode == _8_BIT_MODE,
+            sink.connect(conv.sink),
+            conv.source.connect(source, omit={"data"}),
+            *ext,
+        )
+
+# AD9361 RX BitMode (128-bit) ----------------------------------------------------------------------
+
+class AD9361RXBitMode128b(LiteXModule):
+    """RX bit-mode conversion for the 128-bit (oversampling) datapath.
+
+    The rfic side gathers 64 -> 128 (two sample groups per word, see AD9361RFIC). 16-bit passes
+    through; 8-bit rounds the 8 lanes to 8 bytes (two sc8 groups), then packs two such words
+    into one 128-bit DMA word (four sc8 groups). BFP8 is not supported on the wide datapath.
+    """
+    def __init__(self):
+        self.sink   = sink   = stream.Endpoint(dma_layout(128))
+        self.source = source = stream.Endpoint(dma_layout(128))
+        self.mode   = mode   = Signal(2)
+
+        # # #
+
+        # 16-bit: passthrough.
+        self.comb += If(mode == _16_BIT_MODE, sink.connect(source))
+
+        # 8-bit: round/pack each 128-bit word to 8 sc8 bytes, then pair two words.
+        self.conv = conv = stream.Converter(64, 128)
+        rnd = [conv.sink.data[i*8:(i+1)*8].eq(_round_shift_12_to_8(self, sink.data[i*16:i*16+12]))
+               for i in range(8)]
+        self.comb += If(mode == _8_BIT_MODE,
+            sink.connect(conv.sink, omit={"data"}),
+            *rnd,
+            conv.source.connect(source),
+        )
+
+# AD9361 TX/RX BitMode -----------------------------------------------------------------------------
+
+class AD9361TXBitMode(LiteXModule):
+    """TX bit-mode conversion, selecting the implementation from the datapath width.
+
+    Generic front-end (same idiom as stream.Converter): instantiates AD9361TXBitMode64b
+    (standard datapath) or AD9361TXBitMode128b (oversampling datapath) and exposes its
+    sink/source/mode directly.
+    """
+    def __init__(self, data_width=64, bfp8_payload_words=BFP8_PAYLOAD_WORDS):
+        assert data_width in [64, 128]
+        if data_width == 128:
+            self.core = core = AD9361TXBitMode128b()
+        else:
+            self.core = core = AD9361TXBitMode64b(bfp8_payload_words)
+        self.sink   = core.sink
+        self.source = core.source
+        self.mode   = core.mode
+
+
+class AD9361RXBitMode(LiteXModule):
+    """RX bit-mode conversion, selecting the implementation from the datapath width.
+
+    Generic front-end (same idiom as stream.Converter): instantiates AD9361RXBitMode64b
+    (standard datapath) or AD9361RXBitMode128b (oversampling datapath) and exposes its
+    sink/source/mode directly.
+    """
+    def __init__(self, data_width=64, bfp8_payload_words=BFP8_PAYLOAD_WORDS):
+        assert data_width in [64, 128]
+        if data_width == 128:
+            self.core = core = AD9361RXBitMode128b()
+        else:
+            self.core = core = AD9361RXBitMode64b(bfp8_payload_words)
+        self.sink   = core.sink
+        self.source = core.source
+        self.mode   = core.mode
