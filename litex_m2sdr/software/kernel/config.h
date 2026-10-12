@@ -30,13 +30,25 @@
 
 #define DMA_CHANNEL_COUNT      DMA_CHANNELS
 
-/* DMA_BUFFER_COUNT / DMA_BUFFER_PER_IRQ below are COMPILE-TIME MAXIMA: they size the static DMA
- * descriptor arrays and the DMA mmap region, and they are the DEFAULTS for the runtime module
- * parameters of the same name (main.c). The ACTIVE host-RAM ring depth and IRQ-coalescing used at
- * run time are `dma_buffer_count` and `dma_buffer_per_irq`, set at insmod and validated in
- * litepcie_dma_init() (power of two, 1..DMA_BUFFER_COUNT, and dma_buffer_per_irq divides
- * dma_buffer_count). The defaults 256/8 give stock high-throughput streaming; low-latency timed TX
- * opts into a small ring at load time, e.g.:
+/* DMA_BUFFER_SIZE is only the default: the buffer size is per channel and can be overridden with
+ * the dma_buffer_size module parameter (see software/kernel/README.md).
+ *
+ * Constraints on a per-channel buffer size:
+ * - the descriptor length field is 24-bit;
+ * - PCIe requests are dword granular and the DMA datapath is up to 256-bit wide, so keep buffers
+ *   64-byte aligned to stay word-aligned in every configuration.
+ */
+#define DMA_BUFFER_SIZE_ALIGN  64
+#define DMA_BUFFER_SIZE_MAX    (0x1000000 - DMA_BUFFER_SIZE_ALIGN)
+
+/* DMA_BUFFER_COUNT / DMA_BUFFER_PER_IRQ below are COMPILE-TIME MAXIMA/DEFAULTS: they size the
+ * static DMA descriptor arrays and the DMA mmap region, and they are the DEFAULTS for the runtime
+ * module parameters of the same name (main.c). The ACTIVE host-RAM ring depth is
+ * `dma_buffer_count` (global), and the IRQ-coalescing is `dma_buffer_per_irq` (per DMA channel,
+ * like `dma_buffer_size`), set at insmod and validated at module load in
+ * litepcie_dma_check_params() (count: power of two, 2..DMA_BUFFER_COUNT; per_irq: divides
+ * dma_buffer_count, strictly below it). The defaults 256/8 give stock high-throughput streaming;
+ * low-latency timed TX opts into a small ring at load time, e.g.:
  *     insmod m2sdr.ko dma_buffer_count=8 dma_buffer_per_irq=2
  *
  * Why the ring depth matters: the active ring depth sets the timed-TX pipeline-latency floor -- a
