@@ -47,9 +47,6 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
 #include <linux/cc_platform.h>
 #endif
-#if defined(__arm__) || defined(__aarch64__)
-#include <linux/dma-direct.h>
-#endif
 #include <linux/ptp_clock_kernel.h>
 
 /* LiteX Includes */
@@ -1200,11 +1197,7 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 	struct litepcie_chan_priv *chan_priv = file->private_data;
 	struct litepcie_chan *chan = chan_priv->chan;
 	struct litepcie_device *s = chan->litepcie_dev;
-#if defined(__arm__) || defined(__aarch64__)
-	unsigned long pfn;
-#else
 	int ret;
-#endif
 	int is_tx, i;
 
 	if (vma->vm_end - vma->vm_start != DMA_BUFFER_TOTAL_SIZE)
@@ -1221,36 +1214,18 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 		return -ENODEV;
 
 	for (i = 0; i < DMA_BUFFER_COUNT; i++) {
-#if defined(__arm__) || defined(__aarch64__)
-		void *va;
-		if (i == 0)
-			dev_info(&s->dev->dev, "Using ARM/AArch64 DMA buffer handling");
-		if (is_tx)
-			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.reader_handle[i]));
-		else
-			va = phys_to_virt(dma_to_phys(&s->dev->dev, chan->dma.writer_handle[i]));
-		pfn = page_to_pfn(virt_to_page(va));
-		/*
-		 * Note: the memory is cached, so the user must explicitly
-		 * flush the CPU caches on architectures which require it.
-		 */
-		if (remap_pfn_range(vma, vma->vm_start + i * DMA_BUFFER_SIZE, pfn,
-					DMA_BUFFER_SIZE, vma->vm_page_prot)) {
-			dev_err(&s->dev->dev, "mmap remap_pfn_range failed\n");
-			litepcie_exit(s);
-			return -EAGAIN;
-		}
-#else
 		void *cpu_addr;
-
-		if (i == 0)
-			dev_info(&s->dev->dev, "Using non-ARM DMA buffer handling");
 
 		if (is_tx)
 			cpu_addr = chan->dma.reader_addr[i];
 		else
 			cpu_addr = chan->dma.writer_addr[i];
 
+		/* Map through the coherent cpu_addr on every architecture: the
+		 * dma_addr_t handle is an IOVA when the device sits behind an
+		 * IOMMU/SMMU (e.g. PCIe on Jetson Orin), so deriving pages via
+		 * phys_to_virt(dma_to_phys(handle)) maps unrelated memory and
+		 * zero-copy readers see stale/empty buffers. */
 		ret = litepcie_dma_buffer_mmap(&s->dev->dev, vma,
 					       vma->vm_start + i * DMA_BUFFER_SIZE,
 					       cpu_addr);
@@ -1260,7 +1235,6 @@ static int litepcie_mmap(struct file *file, struct vm_area_struct *vma)
 			litepcie_exit(s);
 			return ret;
 		}
-#endif
 	}
 
 	litepcie_exit(s);

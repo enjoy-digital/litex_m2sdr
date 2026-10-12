@@ -185,7 +185,8 @@ On a fresh Ubuntu system, with the board in an M.2 slot and antennas connected:
    SoapySDR. 📡
 
 > [!TIP]
-> No I/Q samples in your SDR application? Set the IOMMU to passthrough mode (`iommu=pt` on x86).
+> No I/Q samples in your SDR application? Make sure the `m2sdr.ko` kernel module matches this
+> source tree (older builds needed IOMMU passthrough, `iommu=pt` on x86).
 > Overflows/underflows at high sample rates? Switch the CPU governor to `performance`.
 > Details in [Host Setup](doc/host-setup.md).
 
