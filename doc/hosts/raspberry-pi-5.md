@@ -77,10 +77,13 @@ Please append the line with `pci=noaer pcie_aspm=off`:
 - `pci=noaer`: disables PCIe advanced error reporting (`AER: Corrected error received`).
 - `pcie_aspm=off`: ignores PCIe Active State Power Management. Leaves any configuration done by firmware unchanged.
 
-If the board enumerates but DMA streaming does not produce samples, add
-`iommu.passthrough=1` as a first debug step and reboot. Avoid
-`arm-smmu.disable=1` as a default setting; it disables the SMMU globally and
-should only be used for controlled bring-up if passthrough mode is not enough.
+If the board enumerates but DMA streaming does not produce samples, first make
+sure the `m2sdr.ko` build matches this source tree (older builds mapped the
+wrong pages for zero-copy DMA behind an active IOMMU/SMMU); with an older
+driver, adding `iommu.passthrough=1` and rebooting is the legacy workaround.
+Avoid `arm-smmu.disable=1` as a default setting; it disables the SMMU globally
+and should only be used for controlled bring-up if passthrough mode is not
+enough.
 
 ### Wiring Up and Running Your Raspberry Pi Board
 

@@ -10,8 +10,14 @@ rates. Platform-specific guides:
 
 ## IOMMU Passthrough
 
-For PCIe streaming, set the IOMMU to passthrough mode. If you don't see I/Q data streams in your
-SDR application, this is the first thing to check.
+PCIe streaming works with the IOMMU enabled on current `m2sdr.ko` builds: older builds mapped the
+wrong pages for zero-copy DMA behind an active IOMMU/SMMU, which made SoapySDR RX return
+mostly/all-zero buffers while the copy-mode tools streamed correctly, and made IOMMU passthrough
+look like a requirement. If you don't see I/Q data streams in your SDR application, first make
+sure the kernel module matches this source tree.
+
+When running an older driver build, setting the IOMMU to passthrough mode remains the legacy
+workaround:
 
 **x86/PC**:
 
@@ -29,9 +35,8 @@ APPEND ... iommu.passthrough=1
 sudo reboot
 ```
 
-Keep the Tegra SMMU driver enabled. `iommu.passthrough=1` is the safer first test knob for current
-L4T kernels; disabling `arm-smmu` globally can break other Jetson devices. See
-[Jetson Orin host notes](hosts/jetson-orin.md).
+Keep the Tegra SMMU driver enabled; disabling `arm-smmu` globally can break other Jetson devices.
+See [Jetson Orin host notes](hosts/jetson-orin.md).
 
 > [!WARNING]
 > For Intel CPUs: if a *kernel panic* occurs with the message **Corrupted page table at address**,
