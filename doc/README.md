@@ -29,6 +29,7 @@ Back to the [project README](../README.md).
 | [SATA Workflows](sata-workflows.md) | Record/replay I/Q to/from an SSD with `m2sdr_sata`. |
 | [SATA Hardware Validation](sata-validation.md) | Measured SATA throughput and validity results. |
 | [Wide Analog Bandwidth](wide-bandwidth.md) | 122.88 MSPS RFIC overclock with ~100 MHz analog bandwidth. |
+| [Full-Duplex 2T2R @ 122.88 MSPS](2t2r-122mhz-tx.md) | OSERDES TX, per-lane RX deskew and bring-up on the `--with-rfic-oversampling` image. |
 | [Low-Latency Streaming](low-latency.md) | Shallow DMA ring, RX wake, TX fill lead for real-time loops. |
 | [Hardware Timed TX](timed-tx.md) | Deterministic on-air transmit timing from buffer timestamps. |
 | [RFIC Transport Formats](rfic-transport-formats.md) | SC16/SC8 sample packing trade-offs. |
