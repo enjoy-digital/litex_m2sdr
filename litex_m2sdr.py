@@ -318,7 +318,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
+        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, pcie_dmas=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_igmp=True, eth_ptp_igmp_interval=2,
         with_eth_ptp_rfic_clock = False,
@@ -532,7 +532,10 @@ class BaseSoC(SoCMini):
             # ----
             if variant == "baseboard":
                 assert pcie_lanes == 1
-            pcie_dmas = 1
+            # Number of LitePCIe DMA channels. Defaults to 1 (DMA0 = RFIC I/Q stream, unchanged).
+            # Downstream subclasses may request extra channels to stream side-band results of
+            # custom RFIC-plane processing (see add_rfic_datapath()); DMA0 keeps its role.
+            assert pcie_dmas >= 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width                = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size                 = 0x10_0000,
@@ -1594,6 +1597,7 @@ def main():
     parser.add_argument("--with-pcie-reset-workaround", action="store_true", help="Toggle PCIe reset periodically until link-up.")
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+    parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -1698,6 +1702,7 @@ def main():
         with_pcie_reset_workaround = args.with_pcie_reset_workaround,
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
+        pcie_dmas     = args.pcie_dmas,
 
         # Ethernet.
         with_eth      = args.with_eth,
