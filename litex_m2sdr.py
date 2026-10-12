@@ -318,7 +318,7 @@ class BaseSoC(SoCMini):
     }
 
     def __init__(self, variant="m2", sys_clk_freq=int(125e6),
-        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, with_pcie_reset_workaround=False,
+        with_pcie              = True,  with_pcie_ptm=False, pcie_gen=2, pcie_lanes=1, pcie_dmas=1, with_pcie_reset_workaround=False,
         with_eth               = False, eth_sfp=0, eth_phy="1000basex", eth_local_ip="192.168.1.50", eth_udp_port=2345,
         with_eth_ptp           = False, eth_ptp_p2p=False, eth_ptp_igmp=True, eth_ptp_igmp_interval=2,
         with_eth_ptp_rfic_clock = False,
@@ -532,7 +532,10 @@ class BaseSoC(SoCMini):
             # ----
             if variant == "baseboard":
                 assert pcie_lanes == 1
-            pcie_dmas = 1
+            # Number of LitePCIe DMA channels. Defaults to 1 (DMA0 = RFIC I/Q stream, unchanged).
+            # Downstream subclasses may request extra channels to stream side-band results of
+            # custom RFIC-plane processing (see add_rfic_datapath()); DMA0 keeps its role.
+            assert pcie_dmas >= 1
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width                = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size                 = 0x10_0000,
@@ -847,21 +850,25 @@ class BaseSoC(SoCMini):
         # TX/RX Datapath ---------------------------------------------------------------------------
 
 
-        # AD9361 <-> Loopback <-> Header.
-        # -------------------------------
+        # AD9361 <-> [User Processing] <-> Loopback <-> Header.
+        # ------------------------------------------------------
         self.txrx_loopback = TXRXLoopback(data_width=64, with_csr=True)
 
-        # Header TX -> Loopback -> RFIC TX.
-        self.comb += [
-            self.header.tx.source.connect(self.txrx_loopback.tx_sink),
-            self.txrx_loopback.tx_source.connect(self.ad9361.sink),
-        ]
+        # Header TX -> Loopback.
+        self.comb += self.header.tx.source.connect(self.txrx_loopback.tx_sink)
 
-        # RFIC RX -> Loopback -> Header RX.
-        self.comb += [
-            self.ad9361.source.connect(self.txrx_loopback.rx_sink),
-            self.txrx_loopback.rx_source.connect(self.header.rx.sink),
-        ]
+        # Loopback -> Header RX.
+        self.comb += self.txrx_loopback.rx_source.connect(self.header.rx.sink)
+
+        # Loopback <-> RFIC, through the user extension hook (transparent by default, see
+        # add_rfic_datapath()): downstream subclasses insert on-FPGA processing here, at the raw
+        # RFIC sample plane.
+        self.add_rfic_datapath(
+            rfic_sink   = self.ad9361.sink,              # Processed TX samples -> RFIC.
+            rfic_source = self.ad9361.source,            # RFIC RX samples -> processing.
+            tx_source   = self.txrx_loopback.tx_source,  # Host TX samples (post Header/Gate/Loopback).
+            rx_sink     = self.txrx_loopback.rx_sink,    # -> Host RX (pre Loopback/Header timestamping).
+        )
 
         # Crossbar.
         # ---------
@@ -1247,6 +1254,37 @@ class BaseSoC(SoCMini):
             "clk5" : ClockSignal("clk10"),
         })
 
+    # RFIC Datapath Hook -----------------------------------------------------------------------------
+
+    def add_rfic_datapath(self, rfic_sink, rfic_source, tx_source, rx_sink):
+        """User extension hook for on-FPGA processing at the RFIC sample plane.
+
+        Called once during ``__init__`` with the four stream Endpoints (64-bit ``dma_layout``,
+        sys clock domain) surrounding the RFIC: the stream here carries raw I/Q sample words,
+        with no DMA headers (RX timestamping/header insertion happens downstream in
+        ``header.rx``, so processed samples are timestamped normally). Override in a subclass to
+        insert custom processing without forking this file:
+
+        - RX processing or lossless taps (channelizers, GNSS correlation, DSP offload):
+          route ``rfic_source`` through the processing and connect its output to ``rx_sink``.
+        - TX injection or full RX -> TX repeating: connect the processing output to
+          ``rfic_sink`` instead of (or mixed with) ``tx_source``.
+        - Side-band results to the host: the hook runs after the comms sections, so extra DMA
+          channels (``pcie_dmas > 1`` / ``--pcie-dmas``) are available here as
+          ``self.pcie_dma1``, ...
+
+        Generic DSP building blocks (DDS/NCO, mixers, CIC, FIR, ...) for use here are being
+        gathered in LiteDSP: https://github.com/enjoy-digital/litedsp.
+
+        The default implementation is a transparent passthrough, so the stock design is
+        unchanged. The host digital loopback (``txrx_loopback``) sits on the host side of this
+        hook and keeps working on the unprocessed path.
+        """
+        self.comb += [
+            tx_source.connect(rfic_sink),
+            rfic_source.connect(rx_sink),
+        ]
+
     # SATA -----------------------------------------------------------------------------------------
 
     def _sata_dma_wishbone_bus(self, mode):
@@ -1594,6 +1632,7 @@ def main():
     parser.add_argument("--with-pcie-reset-workaround", action="store_true", help="Toggle PCIe reset periodically until link-up.")
     parser.add_argument("--pcie-gen",        default=2, type=int, help="PCIe Generation.", choices=[1, 2])
     parser.add_argument("--pcie-lanes",      default=1, type=int, help="PCIe Lanes.", choices=[1, 2, 4])
+    parser.add_argument("--pcie-dmas",       default=1, type=int, help="Number of PCIe DMA channels (subclasses may use >1 for side-band streams).")
 
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
@@ -1698,6 +1737,7 @@ def main():
         with_pcie_reset_workaround = args.with_pcie_reset_workaround,
         pcie_gen      = args.pcie_gen,
         pcie_lanes    = args.pcie_lanes,
+        pcie_dmas     = args.pcie_dmas,
 
         # Ethernet.
         with_eth      = args.with_eth,

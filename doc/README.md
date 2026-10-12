@@ -46,6 +46,7 @@ Back to the [project README](../README.md).
 | Page | Description |
 |------|-------------|
 | [Building And Loading The Gateware](building-gateware.md) | Build variants, host bridges, flashing over PCIe, release archives. |
+| [Extending The Gateware](extending-gateware.md) | On-FPGA processing via the `add_rfic_datapath()` subclass hook, side-band DMA channels, LiteDSP. |
 | [Debugging Guide](debugging-guide.md) | Hardware/software debug workflow, LiteScope, regression tests. |
 | [Changelog](../CHANGELOG.md) | Release history. |
 
