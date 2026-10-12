@@ -204,13 +204,25 @@ static void litepcie_chan_device_release(struct device *dev)
 	kref_put(&chan->litepcie_dev->ref, litepcie_dev_free);
 }
 
+/* True once the device can no longer be used: removal has disconnected it, or
+ * the PCI core considers the link unusable (from error_detected() during
+ * AER/DPC handling, and after a surprise removal). MMIO is not allowed while
+ * offline - every read would return 0xffffffff after burning a full PCIe
+ * completion timeout - so the gate below fails instead of touching the device.
+ * Safe in atomic context; also used in the read()/write() wait conditions so
+ * sleepers re-test it when woken. */
+static bool litepcie_dev_gone(struct litepcie_device *s)
+{
+	return READ_ONCE(s->disconnected) || pci_channel_offline(s->dev);
+}
+
 /* Returns false with no lock held if the device is gone; the caller must then
  * fail with -ENODEV without touching anything device related.
  */
 static bool litepcie_enter(struct litepcie_device *s)
 {
 	down_read(&s->hw_lock);
-	if (s->disconnected) {
+	if (litepcie_dev_gone(s)) {
 		up_read(&s->hw_lock);
 		return false;
 	}
@@ -963,6 +975,13 @@ static void litepcie_stop_dma(struct litepcie_device *s)
 	struct litepcie_dma_chan *dmachan;
 	int i;
 
+	/* On an offline link every MMIO access burns a completion timeout and
+	 * changes nothing; bus mastering is already fenced at the PCIe level. */
+	if (pci_channel_offline(s->dev)) {
+		dev_warn(&s->dev->dev, "Link offline, skipping DMA stop\n");
+		return;
+	}
+
 	for (i = 0; i < s->channels; i++) {
 		dmachan = &s->chan[i].dma;
 		litepcie_writel(s, dmachan->base + PCIE_DMA_WRITER_ENABLE_OFFSET, 0b0);
@@ -991,6 +1010,12 @@ static irqreturn_t litepcie_interrupt(int irq, void *data)
 	uint32_t loop_status;
 	uint32_t clear_mask, irq_vector, irq_enable;
 	int i;
+
+	/* An offline link answers every register read with 0xffffffff, which would
+	 * look like "every interrupt fired" and feed garbage loop status into the
+	 * DMA counters. */
+	if (pci_channel_offline(s->dev))
+		return IRQ_NONE;
 
 	/* Determine IRQ vector */
 #ifdef CSR_PCIE_MSI_CLEAR_ADDR
@@ -1172,12 +1197,13 @@ static ssize_t litepcie_read(struct file *file, char __user *data, size_t size, 
 			ret = 0;
 	} else {
 		/* Sleeps outside the gate: holding it across an unbounded wait would
-		 * block removal. The condition tests disconnected so that the wake_up
-		 * from litepcie_pci_remove() reliably ends the wait.
+		 * block removal. The condition tests the device-gone state so that the
+		 * wake_up from litepcie_pci_remove() or from the PCIe error handler
+		 * reliably ends the wait.
 		 */
 		ret = wait_event_interruptible(chan->wait_rd,
 						   (chan->dma.writer_hw_count - chan->dma.writer_sw_count) > 0 ||
-						   READ_ONCE(s->disconnected));
+						   litepcie_dev_gone(s));
 	}
 
 	if (ret < 0)
@@ -1252,7 +1278,7 @@ static ssize_t litepcie_write(struct file *file, const char __user *data, size_t
 		/* Sleeps outside the gate, as in litepcie_read(). */
 		ret = wait_event_interruptible(chan->wait_wr,
 						   (chan->dma.reader_sw_count - chan->dma.reader_hw_count) < dma_buffer_count/2 ||
-						   READ_ONCE(s->disconnected));
+						   litepcie_dev_gone(s));
 	}
 
 	if (ret < 0)
@@ -2011,6 +2037,11 @@ static int litepcie_ptp_gettimex64(struct ptp_clock_info *ptp,
 							   ptp_caps);
 	unsigned long flags;
 
+	/* The PTP core calls in outside the file-operation gate; do not touch CSRs
+	 * while the link is offline (AER recovery or surprise removal). */
+	if (pci_channel_offline(dev->dev))
+		return -EIO;
+
 	/* Acquire lock to ensure consistent time reading */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
 
@@ -2031,6 +2062,11 @@ static int litepcie_ptp_settime(struct ptp_clock_info *ptp, const struct timespe
 	struct litepcie_device *dev = container_of(ptp, struct litepcie_device,
 							   ptp_caps);
 	unsigned long flags;
+
+	/* The PTP core calls in outside the file-operation gate; do not touch CSRs
+	 * while the link is offline (AER recovery or surprise removal). */
+	if (pci_channel_offline(dev->dev))
+		return -EIO;
 
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
@@ -2055,6 +2091,11 @@ static int litepcie_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
 	struct litepcie_device *dev = container_of(ptp, struct litepcie_device,
 							   ptp_caps);
 	unsigned long flags;
+
+	/* The PTP core calls in outside the file-operation gate; do not touch CSRs
+	 * while the link is offline (AER recovery or surprise removal). */
+	if (pci_channel_offline(dev->dev))
+		return -EIO;
 
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
@@ -2090,6 +2131,11 @@ static int litepcie_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 	struct timespec64 now, then = ns_to_timespec64(delta);
 	unsigned long flags;
 
+	/* The PTP core calls in outside the file-operation gate; do not touch CSRs
+	 * while the link is offline (AER recovery or surprise removal). */
+	if (pci_channel_offline(dev->dev))
+		return -EIO;
+
 	/* Acquire lock to prevent concurrent access */
 	spin_lock_irqsave(&dev->tmreg_lock, flags);
 
@@ -2122,6 +2168,11 @@ static int litepcie_phc_get_syncdevicetime(ktime_t *device,
 	u64 t1_curr;
 	ktime_t t1, t2_curr;
 	int count = 100;
+
+	/* The PTP core calls in outside the file-operation gate; do not touch CSRs
+	 * while the link is offline (AER recovery or surprise removal). */
+	if (pci_channel_offline(dev->dev))
+		return -EIO;
 
 	/* Get a snapshot of system clocks to use as historic value */
 	ktime_get_snapshot(&dev->snapshot);
@@ -2592,20 +2643,25 @@ static void litepcie_pci_remove(struct pci_dev *dev)
 	/* Stop the DMAs */
 	litepcie_stop_dma(litepcie_dev);
 
+	/* The interrupt disables below are MMIO: on an offline link each access
+	 * burns a completion timeout and changes nothing, so skip straight to
+	 * releasing the host-side resources. */
+	if (!pci_channel_offline(dev)) {
 #ifdef CSR_SATA_PHY_BASE
-if (litepcie_soc_has_sata(litepcie_dev)) {
-	/* Disable SATA interrupts */
+		if (litepcie_soc_has_sata(litepcie_dev)) {
+			/* Disable SATA interrupts */
 #ifdef SATA_SECTOR2MEM_INTERRUPT
-    litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
+			litepcie_disable_interrupt(litepcie_dev, SATA_SECTOR2MEM_INTERRUPT);
 #endif
 #ifdef SATA_MEM2SECTOR_INTERRUPT
-    litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
+			litepcie_disable_interrupt(litepcie_dev, SATA_MEM2SECTOR_INTERRUPT);
 #endif
-}
+		}
 #endif
 
-	/* Disable all interrupts */
-	litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
+		/* Disable all interrupts */
+		litepcie_writel(litepcie_dev, CSR_PCIE_MSI_ENABLE_ADDR, 0);
+	}
 
     /* Unregister PTP */
 #ifdef CSR_PTM_REQUESTER_BASE
@@ -2646,11 +2702,61 @@ static const struct pci_device_id litepcie_pci_ids[] = {
 MODULE_DEVICE_TABLE(pci, litepcie_pci_ids);
 
 /* PCI driver structure */
+/* ----------------------------------------------------------------------------------------------- */
+/*                                    PCIe Error Handling                                          */
+/* ----------------------------------------------------------------------------------------------- */
+
+/* Called by the PCI core when the port above us reports an error (AER/DPC).
+ *
+ * Without this callback the kernel gives up on a fatal error with "can't
+ * recover (no error_detected callback)" and the whole machine is typically
+ * rebooted to get the board back. The policy here is deliberately to fail
+ * fast rather than attempt an in-place recovery: on the events observed so
+ * far (#156), a slot reset does not restore BAR0 access, and even a
+ * remove + rescan restores MMIO but not endpoint-initiated DMA - only a full
+ * FPGA re-initialization does. So the handler fences the device off (the PCI
+ * core has already marked the channel offline, which litepcie_dev_gone()
+ * reports to every file operation), wakes the DMA waiters so they return
+ * instead of sleeping on counters that can never advance, and asks the core
+ * to disconnect. The device then detaches through the normal remove path -
+ * fast, since the offline guards skip the doomed MMIO - and comes back with
+ * a rescan once the board has been re-initialized. */
+static pci_ers_result_t litepcie_pci_error_detected(struct pci_dev *dev,
+						    pci_channel_state_t state)
+{
+	struct litepcie_device *litepcie_dev = pci_get_drvdata(dev);
+	int i;
+
+	dev_err(&dev->dev, "PCIe error detected (channel state %u)\n", (unsigned int)state);
+
+	if (state == pci_channel_io_normal) {
+		/* Non-fatal: the link still works, nothing to tear down. */
+		return PCI_ERS_RESULT_CAN_RECOVER;
+	}
+
+	/* read()/write() sleep outside the gate; their wait conditions test
+	 * litepcie_dev_gone(), which reports the offline channel state the PCI
+	 * core set before calling us. */
+	if (litepcie_dev) {
+		for (i = 0; i < litepcie_dev->channels; i++) {
+			wake_up_interruptible(&litepcie_dev->chan[i].wait_rd);
+			wake_up_interruptible(&litepcie_dev->chan[i].wait_wr);
+		}
+	}
+
+	return PCI_ERS_RESULT_DISCONNECT;
+}
+
+static const struct pci_error_handlers litepcie_pci_err_handlers = {
+	.error_detected = litepcie_pci_error_detected,
+};
+
 static struct pci_driver litepcie_pci_driver = {
-	.name     = LITEPCIE_NAME,
-	.id_table = litepcie_pci_ids,
-	.probe    = litepcie_pci_probe,
-	.remove   = litepcie_pci_remove,
+	.name        = LITEPCIE_NAME,
+	.id_table    = litepcie_pci_ids,
+	.probe       = litepcie_pci_probe,
+	.remove      = litepcie_pci_remove,
+	.err_handler = &litepcie_pci_err_handlers,
 };
 
 /* Module initialization function */
