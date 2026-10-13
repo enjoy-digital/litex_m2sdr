@@ -50,6 +50,30 @@ Common Ethernet/Etherbone build on the baseboard:
 ping 192.168.1.50
 ```
 
+### 5GBASE-R PHY Diagnostics
+
+The experimental 5GBASE-R mode requires a module presenting a 5.15625Gbaud 64b/66b host
+interface (see [Ethernet](ethernet.md#experimental-5gbase-r---eth-phy5000baser)). The PHY's
+standard LiteEth BASE-R diagnostics are readable over JTAGBone:
+
+```bash
+litex_server --jtag --jtag-config=openocd_xc7_ft4232.cfg
+litex_cli --csr-csv=scripts/csr.csv --read=eth_phy_status
+litex_cli --csr-csv=scripts/csr.csv --read=eth_phy_rx_prbs_errors
+```
+
+`eth_phy_status` reports 64b/66b block lock, high BER, and qualified link up. A healthy external
+link has block lock set and high BER clear; `link_up` is qualified receive PCS status, not proof
+of a working bidirectional peer. `eth_phy_control` provides the transceiver loopback selection
+(UG482 encoding) and PRBS31 generator/checker controls; after changing loopback, pulse
+`eth_phy_reset`. Note that on Artix-7, near-end PMA loopback can suppress the native gearbox's
+`RXDATAVALID`, so a failed block lock in that mode is not by itself evidence of a PCS failure.
+
+If the resets and QPLL are healthy but the external path never achieves block lock, verify the
+module's host-side protocol: a module advertising 2.5/5/10GBASE-T may still use a fixed
+10.3125Gbaud host or a vendor rate-adaptation mode toward the FPGA until its host mode is
+explicitly configured.
+
 Common PCIe build:
 
 ```bash

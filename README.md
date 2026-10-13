@@ -24,7 +24,7 @@ with our tools or any SoapySDR-compatible software.
 - **PCIe Gen2 x4** (~14 Gbps) with [LitePCIe](https://github.com/enjoy-digital/litepcie): MMAP +
   DMA streaming, Linux driver, [low-latency mode](doc/low-latency.md) and
   [hardware timed TX](doc/timed-tx.md).
-- **Ethernet 1G/2.5G** ([LiteEth](https://github.com/enjoy-digital/liteeth)) and **SATA** record/replay
+- **Ethernet 1G/2.5G (+ experimental 5GBASE-R)** ([LiteEth](https://github.com/enjoy-digital/liteeth)) and **SATA** record/replay
   ([LiteSATA](https://github.com/enjoy-digital/litesata)) on the LiteX Acorn Baseboard Mini
   ([Ethernet](doc/ethernet.md), [SATA](doc/sata-workflows.md)).
 - **Timing & sync**: external 10 MHz / PPS, [PCIe PTM](doc/pcie-ptm.md),
@@ -105,7 +105,7 @@ The same board scales from a single PC to a distributed setup:
     </td>
     <td valign="top">
       <b>Distributed over Ethernet.</b> On the LiteX Acorn Baseboard Mini, the board gets
-      1G/2.5G Ethernet (SFP), PoE, <a href="doc/ptp/README.md">PTP</a> time sync and SATA
+      1G/2.5G (+ experimental 5G) Ethernet (SFP), PoE, <a href="doc/ptp/README.md">PTP</a> time sync and SATA
       recording. See <a href="doc/ethernet.md">Ethernet</a>.
     </td>
   </tr>
@@ -125,7 +125,7 @@ enables it ("—" = not available in that setup).
 | 2T2R TX/RX, 12-bit, up to 61.44 MSPS | ✅ | ✅ | always included |
 | 2T2R at 122.88 MSPS ([wide bandwidth](doc/wide-bandwidth.md)) | ✅ ¹ | — | `--with-rfic-oversampling` |
 | PCIe streaming | ✅ Gen2 x1/x2/x4 | ✅ Gen2 x1 | `--with-pcie --pcie-lanes=1\|2\|4` |
-| Ethernet streaming, 1G/2.5G ([details](doc/ethernet.md)) | — | ✅ | `--with-eth [--eth-phy=2500basex]` |
+| Ethernet streaming, 1G/2.5G/experimental 5G ([details](doc/ethernet.md)) | — | ✅ | `--with-eth [--eth-phy=2500basex|5000baser]` |
 | [Hardware timed TX](doc/timed-tx.md) | ✅ | ✅ | always included |
 | `libm2sdr` C API, utilities, SoapySDR | ✅ | ✅ | host software |
 

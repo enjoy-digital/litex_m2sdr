@@ -343,6 +343,10 @@ static int flash_eb_open(void *conn, struct flash_eb *fe)
     case 1:
         fe->gap = FLASH_EB_GAP_2G5;
         break;
+    case 2:
+        /* 5GBASE-R: at least the 2.5G budget; keep the conservative pacing. */
+        fe->gap = FLASH_EB_GAP_2G5;
+        break;
     default:
         return 0;
     }
