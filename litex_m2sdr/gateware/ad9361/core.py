@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 from migen import *
-from migen.genlib.cdc import MultiReg
+from migen.genlib.cdc import MultiReg, PulseSynchronizer
 
 from litex.gen import *
 
@@ -16,7 +16,10 @@ from litepcie.common import *
 
 from litex_m2sdr.gateware.gpio import GPIORXPacker, GPIOTXUnpacker
 
-from litex_m2sdr.gateware.ad9361.phy     import AD9361PHY
+from litex_m2sdr.gateware.cdc import ClockDomainCrossingRegistered
+
+from litex_m2sdr.gateware.ad9361.phy              import AD9361PHY
+from litex_m2sdr.gateware.ad9361.phy_oversampling import AD9361OversamplingPHY
 from litex_m2sdr.gateware.ad9361.spi     import AD9361SPIMaster
 from litex_m2sdr.gateware.ad9361.bitmode import AD9361TXBitMode, AD9361RXBitMode
 from litex_m2sdr.gateware.ad9361.bitmode import _sign_extend
@@ -87,9 +90,9 @@ from litex_m2sdr.gateware.ad9361.agc     import (
 # AD9361 RFIC --------------------------------------------------------------------------------------
 
 class AD9361RFICStreamBypass(LiteXModule):
-    def __init__(self):
-        self.sink   = stream.Endpoint(dma_layout(64))
-        self.source = stream.Endpoint(dma_layout(64))
+    def __init__(self, data_width=64):
+        self.sink   = stream.Endpoint(dma_layout(data_width))
+        self.source = stream.Endpoint(dma_layout(data_width))
 
         # # #
 
@@ -99,10 +102,20 @@ class AD9361RFICStreamBypass(LiteXModule):
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
         with_tx_fifo = False, tx_fifo_depth = 8192,
-        with_rx_fifo = False, rx_fifo_depth = 8192):
+        with_rx_fifo = False, rx_fifo_depth = 8192,
+        oversampling = False):
+        # oversampling=True selects the 2T2R @ 122.88 MSPS PHY (phy_oversampling.py: OSERDESE2 TX,
+        # per-lane RX deskew, no internal loopback) and runs the DMA-facing datapath (sink/source,
+        # buffers, bitmode, CDC) at 128-bit = two (ia,qa,ib,qb) groups per word, halving the
+        # sys-domain word rate so 2T2R @ 122.88 MSPS fits the 64-bit @ 125MHz fabric. The PHY
+        # serializer stays 64-bit (one group); a 128->64 scatter (TX) and 64->128 gather (RX) sit
+        # at the PHY boundary in the rfic domain (which has 4x headroom at 491.52MHz). The default
+        # keeps the standard PHY (phy.py) and the 64-bit datapath unchanged.
+        self.oversampling = oversampling
+        dw = 128 if oversampling else 64
         # Stream Endpoints -------------------------------------------------------------------------
-        self.sink   = stream.Endpoint(dma_layout(64))
-        self.source = stream.Endpoint(dma_layout(64))
+        self.sink   = stream.Endpoint(dma_layout(dw))
+        self.source = stream.Endpoint(dma_layout(dw))
 
         # Config/Control/Status registers ----------------------------------------------------------
         self._config = CSRStorage(fields=[
@@ -174,7 +187,16 @@ class AD9361RFIC(LiteXModule):
         ]
 
         # PHY --------------------------------------------------------------------------------------
-        self.phy = AD9361PHY(rfic_pads)
+        # Standard PHY (phy.py) for all rates up to 61.44 MSPS 2T2R / 122.88 MSPS 1T1R; the
+        # oversampling PHY (phy_oversampling.py) for 2T2R @ 122.88 MSPS (491.52 MHz DATA_CLK).
+        if oversampling:
+            self.phy = AD9361OversamplingPHY(rfic_pads)
+        else:
+            self.phy = AD9361PHY(rfic_pads)
+        # rfic clock for MultiClkMeasurement: the oversampling PHY provides a /4 divided
+        # (clock, increment) pair since a free-running 64-bit counter does not close timing at
+        # 491.52 MHz; the standard PHY's rfic clock is counted directly.
+        self.rfic_meas_clk = getattr(self.phy, "meas_clk", ClockSignal("rfic"))
 
         # TX/RX UnPacker/Packer (GPIOs) ------------------------------------------------------------
 
@@ -182,26 +204,49 @@ class AD9361RFIC(LiteXModule):
         self.gpio_rx_packer   = gpio_rx_packer   = GPIORXPacker()
 
         # Cross domain crossing --------------------------------------------------------------------
-        self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
-            layout  = dma_layout(64),
-            cd_from = "sys",
-            cd_to   = "rfic",
-            with_common_rst = True
-        )
-        self.rx_cdc = rx_cdc = stream.ClockDomainCrossing(
-            layout  = dma_layout(64),
-            cd_from = "rfic",
-            cd_to   = "sys",
-            with_common_rst = True
-        )
+        if oversampling:
+            # Registered-flags CDC FIFOs: keep the pointer synchronizers out of the memory port
+            # address/enable cones so the rfic side closes timing at 491.52MHz (see gateware/cdc.py).
+            self.tx_cdc = tx_cdc = ClockDomainCrossingRegistered(
+                layout  = dma_layout(dw),
+                cd_from = "sys",
+                cd_to   = "rfic",
+                # Read in the rfic domain at 491.52MHz: registered_read selects the 128-bit mux
+                # with the REGISTERED read pointer (reg -> mux -> reg) so the read closes
+                # single-cycle at this rate; the one-cycle bubble it introduces is harmless since
+                # the scatter pulls only ~1-in-8. register_storage uses an FF array (LUTRAM's
+                # write clock would violate the RAMD32 min low-pulse-width at 491.52MHz).
+                register_storage = True,
+                registered_read  = True,
+            )
+            self.rx_cdc = rx_cdc = ClockDomainCrossingRegistered(
+                layout  = dma_layout(dw),
+                cd_from = "rfic",
+                cd_to   = "sys",
+                # rfic_clk-clocked LUTRAM writes violate the RAMD32 min low-pulse-width at 491.52MHz.
+                register_storage = True,
+            )
+        else:
+            self.tx_cdc = tx_cdc = stream.ClockDomainCrossing(
+                layout  = dma_layout(dw),
+                cd_from = "sys",
+                cd_to   = "rfic",
+                with_common_rst = True
+            )
+            self.rx_cdc = rx_cdc = stream.ClockDomainCrossing(
+                layout  = dma_layout(dw),
+                cd_from = "rfic",
+                cd_to   = "sys",
+                with_common_rst = True
+            )
 
         # Buffers (For Timings) --------------------------------------------------------------------
-        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(64))
-        self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(64))
+        self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(dw))
+        self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(dw))
         self.tx_rfic_fifo_started = tx_rfic_fifo_started = Signal()
         if with_tx_fifo:
             self.tx_rfic_fifo = tx_rfic_fifo = ClockDomainsRenamer("rfic")(
-                stream.SyncFIFO(dma_layout(64), depth=tx_fifo_depth, buffered=True)
+                stream.SyncFIFO(dma_layout(dw), depth=tx_fifo_depth, buffered=True)
             )
             tx_fifo_start_level = max(1, tx_fifo_depth//2)
             tx_rfic_fifo_primed = Signal()
@@ -214,19 +259,19 @@ class AD9361RFIC(LiteXModule):
                 )
             ]
         else:
-            self.tx_rfic_fifo = tx_rfic_fifo = AD9361RFICStreamBypass()
+            self.tx_rfic_fifo = tx_rfic_fifo = AD9361RFICStreamBypass(dw)
             self.comb += tx_rfic_fifo_started.eq(1)
 
         if with_rx_fifo:
             self.rx_rfic_fifo = rx_rfic_fifo = ClockDomainsRenamer("rfic")(
-                stream.SyncFIFO(dma_layout(64), depth=rx_fifo_depth, buffered=True)
+                stream.SyncFIFO(dma_layout(dw), depth=rx_fifo_depth, buffered=True)
             )
         else:
-            self.rx_rfic_fifo = rx_rfic_fifo = AD9361RFICStreamBypass()
+            self.rx_rfic_fifo = rx_rfic_fifo = AD9361RFICStreamBypass(dw)
 
         # BitMode ----------------------------------------------------------------------------------
-        self.tx_bitmode = tx_bitmode = AD9361TXBitMode()
-        self.rx_bitmode = rx_bitmode = AD9361RXBitMode()
+        self.tx_bitmode = tx_bitmode = AD9361TXBitMode(data_width=dw)
+        self.rx_bitmode = rx_bitmode = AD9361RXBitMode(data_width=dw)
         self.comb += tx_bitmode.mode.eq(self._bitmode.fields.mode)
         self.comb += rx_bitmode.mode.eq(self._bitmode.fields.mode)
 
@@ -234,15 +279,16 @@ class AD9361RFIC(LiteXModule):
 
         # TX.
         # ---
-        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> optional TX RFIC FIFO -> GPIOTXUnpacker -> PHY.
-        self.tx_pipeline = stream.Pipeline(
-            self.sink,
-            tx_buffer,
-            tx_bitmode,
-            tx_cdc,
-            tx_rfic_fifo,
-            gpio_tx_unpacker,
-        )
+        # Sink -> TX Buffer -> TX BitMode -> TX CDC -> optional TX RFIC FIFO -> [oversampling:
+        # 128->64 scatter] -> GPIOTXUnpacker -> PHY. The PHY serializer is always 64-bit (one
+        # group); with oversampling the scatter splits each 128-bit (two-group) word into two
+        # 64-bit words in the rfic domain (which has 4x headroom at 491.52MHz).
+        tx_stages = [self.sink, tx_buffer, tx_bitmode, tx_cdc, tx_rfic_fifo]
+        if oversampling:
+            self.tx_scatter = tx_scatter = ClockDomainsRenamer("rfic")(stream.Converter(128, 64))
+            tx_stages.append(tx_scatter)
+        tx_stages.append(gpio_tx_unpacker)
+        self.tx_pipeline = stream.Pipeline(*tx_stages)
         self.comb += [
             self.phy.sink.valid.eq(gpio_tx_unpacker.source.valid & tx_rfic_fifo_started),
             gpio_tx_unpacker.source.ready.eq(self.phy.sink.ready & tx_rfic_fifo_started),
@@ -254,7 +300,9 @@ class AD9361RFIC(LiteXModule):
 
         # RX.
         # ---
-        # PHY -> GPIORXUnpacker -> optional RX RFIC FIFO -> RX CDC -> RX BitMode -> RX Buffer -> Source.
+        # PHY -> GPIORXPacker -> [oversampling: 64->128 gather] -> optional RX RFIC FIFO ->
+        # RX CDC -> RX BitMode -> RX Buffer -> Source. The gather pairs two 64-bit (one-group)
+        # words into a 128-bit (two-group) word in the rfic domain.
         self.comb += [
             self.phy.source.connect(gpio_rx_packer.sink, keep={"valid", "ready"}),
             gpio_rx_packer.sink.data[0*16:1*16].eq(_sign_extend(self.phy.source.ia, 16)),
@@ -262,14 +310,64 @@ class AD9361RFIC(LiteXModule):
             gpio_rx_packer.sink.data[2*16:3*16].eq(_sign_extend(self.phy.source.ib, 16)),
             gpio_rx_packer.sink.data[3*16:4*16].eq(_sign_extend(self.phy.source.qb, 16)),
         ]
-        self.rx_pipeline = stream.Pipeline(
-            gpio_rx_packer,
-            rx_rfic_fifo,
-            rx_cdc,
-            rx_bitmode,
-            rx_buffer,
-            self.source,
-        )
+        rx_stages = [gpio_rx_packer]
+        if oversampling:
+            # Register the rfic-domain RX stream BEFORE the gather. rx_valid (phy.source.valid)
+            # is a PHY-domain FF that the placer clusters near the LVDS IOBs; it fans out to the
+            # 64->128 gather's 128-bit output-register clears (source_payload_data[*].R), and that
+            # long IOB->fabric route is the rfic_clk WNS limiter at 491.52MHz. A local Buffer
+            # (same "for timings" pattern as tx_buffer/rx_buffer) lets the gather be driven by a
+            # fabric FF placed next to it.
+            self.rx_gather_ibuf = rx_gather_ibuf = ClockDomainsRenamer("rfic")(stream.Buffer(dma_layout(64)))
+            rx_stages.append(rx_gather_ibuf)
+            self.rx_gather = rx_gather = ClockDomainsRenamer("rfic")(stream.Converter(64, 128))
+            rx_stages.append(rx_gather)
+        rx_stages += [rx_rfic_fifo, rx_cdc, rx_bitmode, rx_buffer, self.source]
+        self.rx_pipeline = stream.Pipeline(*rx_stages)
+
+    def add_timing_constraints(self, platform):
+        """Vivado timing exceptions for the oversampling (491.52 MHz rfic_clk) datapath.
+
+        A no-op on the standard build. The exceptions cover the registered-flags CDC FIFOs and
+        the retimed PRBS checkers of this core; the PHY adds its own (serializer clock groups,
+        reset synchronizer) through its add_timing_constraints().
+
+        - TX CDC FIFO output register read in the rfic domain: its read-address cone is re-read
+          every cycle, but the read pointer only advances when the consumer handshakes - the PHY
+          takes one group every 4 rfic_clk cycles, and the 128->64 scatter pulls a CDC word only
+          every ~8 cycles - so dout is stable for many cycles before use. Relax its setup to 2
+          cycles (hold 0). Scoped -from rfic_clk so the sys-side RX CDC output register (read
+          back-to-back) is NOT relaxed.
+        - The PRBS checkers' compare/re-seed recurrence captures on a ce the PHY asserts at most
+          once per 4 rfic_clk cycles, retimed so both compare operands are stable two cycles
+          before every capture by construction: the recurrence paths into the state registers
+          are exact 2-cycle paths (error_r's gating flop forces the cone low on every other
+          cycle). The 1R1T checker's reference pair gets the same exception (it additionally
+          never carries meaningful data at 491.52 MHz: 1R1T caps DATA_CLK at 245.76 MHz).
+        """
+        if not self.oversampling:
+            return
+        platform.toolchain.pre_placement_commands += [
+            "set_multicycle_path 2 -setup -from [get_clocks rfic_clk] "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+            "NAME =~ *tx_cdc*dout*_reg*}}]",
+            "set_multicycle_path 1 -hold  -from [get_clocks rfic_clk] "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *storage_*_dat1_reg* || "
+            "NAME =~ *tx_cdc*dout*_reg*}}]",
+            "set_multicycle_path 2 -setup "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+            "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+            "set_multicycle_path 1 -hold "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *ad9361prbschecker*state_reg* || "
+            "NAME =~ *ad9361prbschecker*error_r_reg*}}]",
+            "set_multicycle_path 2 -setup "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+            "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+            "set_multicycle_path 1 -hold "
+            "-to [get_cells -hierarchical -filter {{NAME =~ *prbs_checker_1r1t_state* || "
+            "NAME =~ *prbs_checker_1r1t_error_r*}}]",
+        ]
+        self.phy.add_timing_constraints(platform)
 
     def add_prbs(self):
         self.prbs_tx = CSRStorage(fields=[
@@ -331,8 +429,8 @@ class AD9361RFIC(LiteXModule):
         # samples of ONE stream (each lane sees every other PRBS value), so a
         # dedicated interleaved checker is required. Select by PHY mode.
 
-        synced_2r2t = Signal(reset=1)
-        self.comb += synced_2r2t.eq(1)
+        synced_2r2t = Signal()
+        self.comb += synced_2r2t.eq(1)  # default; cleared below when a lane checker is unsynced
         for data in [phy.source.ia, phy.source.ib]:
             prbs_checker = AD9361PRBSChecker()
             prbs_checker = ClockDomainsRenamer("rfic")(prbs_checker)

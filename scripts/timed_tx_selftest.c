@@ -162,6 +162,14 @@ int main(int argc, char **argv)
     g_marker = malloc((size_t)g_mpairs * 2 * sizeof(int16_t));
     fill_marker(g_marker, g_mpairs, g_nch, g_mchan);
     int16_t *rxb = malloc((size_t)g_pairs * 2 * sizeof(int16_t));
+    /* Offline-search capture window: at 2T2R@122.88 the RX stream is ~983 MB/s and the per-sample
+     * edge scan cannot run inline between reads -- the ring overflows and the sync_rx recovery
+     * SKIPS buffers, often exactly the marker's. So each rep drains in real time until just before
+     * X, captures a contiguous window of buffers (copy only, which keeps up), and scans the copies. */
+    enum { CAP_BUFS = 1024 };
+    int16_t  *cap    = malloc((size_t)CAP_BUFS * g_pairs * 2 * sizeof(int16_t));
+    uint64_t *cap_ts = malloc((size_t)CAP_BUFS * sizeof(uint64_t));
+    if (!rxb || !cap || !cap_ts) { fprintf(stderr, "alloc failed\n"); return 1; }
 
     printf("timed-TX self-test: %s rate=%.2f MSPS chan=%d lead=%.0f us reps=%d thr=%.0f tx_offset=%llu\n",
            layout2 ? "2T2R" : "1T1R", rate / 1e6, chan, lead_us, reps, thr,
@@ -210,14 +218,30 @@ int main(int argc, char **argv)
         if (last_ts != X) hdr_mismatch++;
 
         uint64_t deadline = X + 8000000ull; long edge = -1; uint64_t R = 0; double pk = 0;
+        double buf_ns = (double)g_pairs / fs * 1e9;
+        /* Drain (no analysis) until the stream reaches a few buffers before X. */
         for (;;) {
             int rc = m2sdr_sync_rx(dev, rxb, g_pairs, &m, 50);
+            if (rc == M2SDR_ERR_OK && (m.flags & M2SDR_META_FLAG_HAS_TIME) &&
+                (double)m.timestamp + 4.0 * buf_ns >= (double)X) break;
+            m2sdr_get_time(dev, &nt); if (nt > deadline) break;
+        }
+        /* Capture the window that must contain the marker (copy only), then scan offline. */
+        int ncap = 0;
+        while (ncap < CAP_BUFS) {
+            int rc = m2sdr_sync_rx(dev, cap + (size_t)ncap * g_pairs * 2, g_pairs, &m, 50);
             if (rc == M2SDR_ERR_OK && (m.flags & M2SDR_META_FLAG_HAS_TIME)) {
-                double p = peak(rxb, g_pairs, g_nch, g_mchan); if (p > pk) pk = p;
-                long e = find_edge(rxb, g_pairs, g_nch, g_mchan, thr);
-                if (e >= 0) { edge = e; R = m.timestamp + (uint64_t)llround(e / fs * 1e9); break; }
+                cap_ts[ncap] = m.timestamp;
+                ncap++;
+                if (m.timestamp > deadline) break;
             }
             m2sdr_get_time(dev, &nt); if (nt > deadline) break;
+        }
+        for (int b = 0; b < ncap && edge < 0; b++) {
+            const int16_t *pb = cap + (size_t)b * g_pairs * 2;
+            double p = peak(pb, g_pairs, g_nch, g_mchan); if (p > pk) pk = p;
+            long e = find_edge(pb, g_pairs, g_nch, g_mchan, thr);
+            if (e >= 0) { edge = e; R = cap_ts[b] + (uint64_t)llround(e / fs * 1e9); }
         }
         if (edge < 0) { printf("  rep %2d: MARKER NOT FOUND (peak %.0f thr %.0f last_tx_ts=%llu X=%llu)\n",
                                r, pk, thr, (unsigned long long)last_ts, (unsigned long long)X); fails++; continue; }

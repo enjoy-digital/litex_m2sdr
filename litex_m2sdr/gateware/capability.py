@@ -26,7 +26,9 @@ class Capability(LiteXModule):
         # Timed TX.
         timed_tx,
         # Board.
-        variant, jtagbone, eth_sfp, wr_sfp):
+        variant, jtagbone, eth_sfp, wr_sfp,
+        # RFIC.
+        rfic_oversampling=0):
 
         # API Version.
         # ------------
@@ -50,6 +52,8 @@ class Capability(LiteXModule):
                 description="Ethernet PTP can discipline the RFIC reference clock path."),
             CSRField("timed_tx", size=1, offset=8, reset=int(timed_tx),
                 description="Hardware timed-TX gate (and its timestamp-offset CSRs) is present."),
+            CSRField("rfic_oversampling", size=1, offset=9, reset=int(rfic_oversampling),
+                description="RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 
