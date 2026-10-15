@@ -131,10 +131,11 @@ def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
 def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversampling=False):
     if with_eth:
         # Ethernet builds are limited by streaming bandwidth. Size the RFIC clock for 2T2R SC8:
-        # 1000BaseX -> 30.72MSPS, 2500BaseX -> 61.44MSPS.
+        # 1000BASE-X -> 30.72MSPS, 2500BASE-X/5GBASE-R -> 61.44MSPS.
         return {
             "1000basex" : 122.88e6,
             "2500basex" : 245.76e6,
+            "5000baser" : 245.76e6,
         }[eth_phy]
     return {
         False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
@@ -382,9 +383,14 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
-        # Match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
-        # divider configuration. 1000BASE-X already uses 125MHz here.
-        eth_refclk_freq = 125e6
+        # 1000BASE-X/2500BASE-X match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
+        # divider configuration; 5GBASE-R uses a 103.125MHz reference for the 5.15625Gbaud
+        # line rate (x25 QPLL -> 2.578125GHz VCO).
+        eth_refclk_freq = {
+            "1000basex" : 125e6,
+            "2500basex" : 125e6,
+            "5000baser" : 103.125e6,
+        }[eth_phy] if with_eth else 125e6
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
@@ -646,19 +652,35 @@ class BaseSoC(SoCMini):
         if with_eth:
             # PHY.
             # ----
-            eth_phy_cls = {
-                "1000basex" : A7_1000BASEX,
-                "2500basex" : A7_2500BASEX,
-            }[eth_phy]
-            self.eth_phy = eth_phy_cls(
-                qpll_channel = self.qpll.get_channel("eth"),
-                data_pads    = self.platform.request("sfp", eth_sfp),
-                sys_clk_freq = sys_clk_freq,
-                rx_polarity  = 1, # Inverted on M2SDR.
-                tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
-                **get_eth_phy_kwargs(eth_phy),
-            )
-            self.eth_phy.pcs.add_csr()
+            if eth_phy == "5000baser":
+                # IEEE-style 5GBASE-R (64b/66b @ 5.15625Gbaud) through LiteEth's native BASE-R
+                # PCS/PMA stack. Imported here so builds with an older LiteEth keep working for
+                # the other PHYs (requires LiteEth master with the serial BASE-R tree).
+                from liteeth.phy.serial.baser.wrappers.a7_gtp import A7_GTP_5G_BASER
+                self.eth_phy = A7_GTP_5G_BASER(
+                    qpll_channel = self.qpll.get_channel("eth"),
+                    data_pads    = self.platform.request("sfp", eth_sfp),
+                    sys_clk_freq = sys_clk_freq,
+                    refclk_freq  = eth_refclk_freq,
+                    rx_polarity  = 1, # Inverted on M2SDR.
+                    tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
+                )
+                # Standard BASE-R diagnostics CSRs (reset, loopback, block lock/BER status, PRBS).
+                self.eth_phy.add_csr()
+            else:
+                eth_phy_cls = {
+                    "1000basex" : A7_1000BASEX,
+                    "2500basex" : A7_2500BASEX,
+                }[eth_phy]
+                self.eth_phy = eth_phy_cls(
+                    qpll_channel = self.qpll.get_channel("eth"),
+                    data_pads    = self.platform.request("sfp", eth_sfp),
+                    sys_clk_freq = sys_clk_freq,
+                    rx_polarity  = 1, # Inverted on M2SDR.
+                    tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
+                    **get_eth_phy_kwargs(eth_phy),
+                )
+                self.eth_phy.pcs.add_csr()
 
             # Core + MMAP (Etherbone).
             # ------------------------
@@ -1230,8 +1252,12 @@ class BaseSoC(SoCMini):
 
         # Ethernet transceiver clocks.
         if with_eth:
-            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            if eth_phy == "5000baser":
+                # The BASE-R wrapper owns its transceiver clock constraints.
+                self.eth_phy.add_timing_constraints(platform)
+            else:
+                platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+                platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
             if eth_phy == "2500basex":
                 # The two halves of the RX gearbox exchange state/data on each
@@ -1650,7 +1676,7 @@ def main():
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
-    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
+    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex", "5000baser"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")

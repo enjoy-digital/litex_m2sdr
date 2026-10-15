@@ -1316,8 +1316,8 @@ static void info(void)
 
     if (eth_enabled) {
         int eth_speed = (caps.eth_config >> CSR_CAPABILITY_ETH_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_ETH_CONFIG_SPEED_SIZE) - 1);
-        const char *eth_speed_str[] = {"1Gbps", "2.5Gbps"};
-        printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed]);
+        const char *eth_speed_str[] = {"1Gbps", "2.5Gbps", "5Gbps", "Reserved"};
+        printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed & 0x3]);
         {
             int eth_sfp  = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
             printf("  Ethernet SFP   : %d\n", eth_sfp);

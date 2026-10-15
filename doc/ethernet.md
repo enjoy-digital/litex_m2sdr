@@ -17,7 +17,8 @@ front-end cores.
 The Ethernet SoC design supports control plus RX/TX sample streaming over the LiteEth UDP path.
 The achievable 2T2R sample rate is capped by link bandwidth, so Ethernet builds also cap the RFIC
 clock to the link-speed streaming budget for 2T2R SC8: 122.88MHz with `1000basex` and 245.76MHz
-with `2500basex`. PCIe builds keep the full 245.76MHz/491.52MHz non-oversample/oversample options.
+with `2500basex` or `5000baser`. PCIe builds keep the full 245.76MHz/491.52MHz
+non-oversample/oversample options.
 See [RFIC Transport Formats](rfic-transport-formats.md) for the SC16/SC8 trade-offs.
 
 ## Build And Bring-Up
@@ -38,6 +39,28 @@ ping 192.168.1.50
 
 The 2.5GBASE-X mode has been hardware-validated in SFP0/J3 with a LianGuo LG 2.5GE copper SFP, the
 Acorn Baseboard Mini's JP1 and JP4 fitted, and the board reachable at `192.168.1.50`.
+### Experimental 5GBASE-R (`--eth-phy=5000baser`)
+
+```bash
+./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --eth-phy=5000baser --build --load
+```
+
+The experimental 5GBASE-R mode uses LiteEth's native BASE-R PCS/PMA stack (64b/66b through the
+Artix-7 GTP gearbox at 5.15625Gbaud, 103.125MHz GTP reference). The PHY exposes the standard
+LiteEth BASE-R diagnostics CSRs (`eth_phy_reset`, `eth_phy_control` with transceiver loopback and
+PRBS31 controls, `eth_phy_status` with block lock/high BER/link up, `eth_phy_rx_prbs_errors`),
+readable over JTAGBone; see the [Debugging Guide](debugging-guide.md#5gbase-r-phy-diagnostics).
+
+The SFP/SFP+ module must present a **5GBASE-R host interface** at 5.15625Gbaud - supporting
+5GBASE-T on the copper side does not by itself guarantee it, and the factory default of multirate
+copper modules is usually a fixed 10.3125Gbaud host with rate adaptation. Modules based on the
+manageable multigig PHY families (Broadcom BCM84891L, e.g. H!Fiber ASF-10G-T80 - validated with
+this LiteEth stack on the Acorn Baseboard Mini; Marvell Alaska 88X3310/88E2110; Marvell/Aquantia
+AQR113C) can be switched to the 5GBASE-R host mode through their I2C/RollBall management path,
+e.g. with LiteX's SFP support (`sfp 0 5GBASER` in a LiteX BIOS system). The M2SDR SoC has no
+softcore BIOS, so configure the module beforehand (it retains the setting while powered) or from
+a host-side tool.
+
 `--eth-phy=2500basex` selects the 125MHz GTP reference, MMCM PHY clocking, Clause-37 timing, and
 gearbox constraints needed by the copper module. SFP EEPROM I2C is not required for link or packet
 traffic. On M2SDR r02, fit `R82`/`R83` only when the optional M.2 SMBus path is needed; an absent
