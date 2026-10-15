@@ -74,18 +74,27 @@ managing the project and gateware/software development, and our partner
 
 ## Hardware & Availability
 
-The LiteX-M2SDR board is available from the
+The LiteX-M2SDR board is sold through the
 [Enjoy-Digital Shop](https://enjoy-digital-shop.myshopify.com). It has been tested with several
 SoapySDR-compatible applications as well as with our own C utilities.
 
-Two variants are offered, both in the same **M.2 2280 Key M** form factor:
+> [!NOTE]
+> **Availability.** The project has been a great success, with more than 500 boards already
+> shipped to happy users! 🎉 Demand is strong and the current stock is sold out: with AD9361 and
+> XC7A200T component prices rising, we are working with our hardware partner on the next
+> production batch at the current price, and we're confident it will be available again soon. 🚀
+>
+> Need a board sooner? We're taking **pre-orders at a slightly higher price** and launch a
+> small production batch as soon as enough orders are collected (e.g. 50+ boards).
+> [Contact us](mailto:florent@enjoy-digital.fr) to discuss your requirements!
 
-- **SI5351C variant** — flexible clocking from the local XO or an external 10 MHz reference (uFL
-  or FPGA-generated). **Recommended for general usage.**
-  [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
-- **SI5351B variant** — clocked from the local XO with an FPGA-controlled VCXO for
-  software-regulated loops; mostly for advanced users with specialized clock control requirements.
-  [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351b)
+The board is offered in the **M.2 2280 Key M** form factor with the **SI5351C** clock generator,
+providing flexible clocking from the local XO or an external 10 MHz reference (uFL or
+FPGA-generated). [More details](https://enjoy-digital-shop.myshopify.com/products/litex-m2-sdr-si5351c)
+
+*Note: The SI5351C variant now also covers the features of the former SI5351B variant
+(FPGA-regulated clocking for software-controlled loops) and advantageously replaces it. Existing
+SI5351B boards remain supported by the gateware and software.*
 
 The same board scales from a single PC to a distributed setup:
 
