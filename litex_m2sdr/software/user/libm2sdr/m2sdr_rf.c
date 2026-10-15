@@ -609,8 +609,39 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
-/* Configure the AD9361 sampling clocks and, for very low rates, the x4 FIR
- * interpolation/decimation mode expected by the original utilities. */
+/* Select the AD9361 RX/TX FIRs for an AD9361 sample rate. Must run before the
+ * sampling clocks are programmed: the clock chain is derived from the FIR
+ * decimation/interpolation, and programming it applies the FIR enables.
+ *
+ * Below 2.5 MSPS the half-band chain alone cannot keep the ADC above its 25 MHz
+ * minimum, so the FIRs decimate/interpolate by 4 with the dedicated dec4/int4
+ * tables (FIR passbands are normalized to the FIR input rate: the x1 tables
+ * would leave the /4 decimation unfiltered). Above, the x1 tables are loaded
+ * and the FIRs bypassed.
+ *
+ * The bypass flags are set directly rather than through ad9361_set_*_fir_en_dis(),
+ * which would re-validate the clock chain at the previous rate (impossible when
+ * leaving the x4 mode). */
+static int m2sdr_configure_fir(struct ad9361_rf_phy *phy, uint32_t samplerate)
+{
+    int low_rate = samplerate < 2500000;
+
+    if (low_rate)
+        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
+
+    phy->bypass_rx_fir = !low_rate;
+    phy->bypass_tx_fir = !low_rate;
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy,
+            low_rate ? rx_fir_config_dec4 : rx_fir_config)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy,
+            low_rate ? tx_fir_config_int4 : tx_fir_config)) != M2SDR_ERR_OK)
+        return M2SDR_ERR_IO;
+
+    return M2SDR_ERR_OK;
+}
+
+/* Configure the AD9361 FIRs and sampling clocks. */
 static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
                                       const struct m2sdr_config *cfg,
                                       enum m2sdr_channel_layout channel_layout)
@@ -642,29 +673,9 @@ static int m2sdr_configure_samplerate(struct ad9361_rf_phy *phy,
         return M2SDR_ERR_INVAL;
     }
 
-    /* Match the historical utility behavior: for the lowest rates, switch the
-     * AD9361 FIRs to x4 interpolation/decimation before programming clocks. */
-    if (actual_samplerate < 2500000) {
-        AD9361_RXFIRConfig rx_fir_cfg = rx_fir_config;
-        AD9361_TXFIRConfig tx_fir_cfg = tx_fir_config;
-
-        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
-        phy->rx_fir_dec    = 4;
-        phy->tx_fir_int    = 4;
-        phy->bypass_rx_fir = 0;
-        phy->bypass_tx_fir = 0;
-        rx_fir_cfg.rx_dec         = 4;
-        tx_fir_cfg.tx_int         = 4;
-
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_cfg)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_cfg)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-        if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_en_dis(phy, 1)) != M2SDR_ERR_OK)
-            return M2SDR_ERR_IO;
-    }
+    rc = m2sdr_configure_fir(phy, actual_samplerate);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
 
     if (m2sdr_from_ad9361_rc(ad9361_set_tx_sampling_freq(phy, actual_samplerate)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
@@ -1983,14 +1994,6 @@ static int m2sdr_configure_datapath(struct m2sdr_dev *dev, struct ad9361_rf_phy 
     rc = m2sdr_configure_frequencies(phy, cfg);
     if (rc != M2SDR_ERR_OK)
         return rc;
-
-    /* Re-apply the default FIR tables after the sample-rate step so the
-     * AD9361 state stays aligned with the shipped utility behavior. */
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_fir_config)) != M2SDR_ERR_OK)
-        return M2SDR_ERR_IO;
-
     rc = m2sdr_configure_gains(phy, cfg, channel_layout);
     if (rc != M2SDR_ERR_OK)
         return rc;
@@ -2338,6 +2341,9 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
         bool wide = rate > 61440000;
 
         rc = m2sdr_stream_to_ad9361_sample_rate(rate, wide, &actual_rate);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        rc = m2sdr_configure_fir(phy, actual_rate);
         if (rc != M2SDR_ERR_OK)
             return rc;
 
