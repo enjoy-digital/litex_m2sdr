@@ -720,6 +720,10 @@ int m2sdr_flash_read_range(void *conn, uint32_t addr, uint8_t *buf, uint32_t siz
     }
 #endif
 
+    /* After the FPGA (re)configures, STARTUPE2 ignores the first USRCCLKO cycles, so the first SPI transaction is lost
+     * (here: the first page read back wrong). Spend it on a dummy one, as m2sdr_flash_write does. */
+    flash_read_id(conn, 0);
+
     for (uint32_t off = 0; off < size; off += FLASH_PAGE_SIZE) {
         uint32_t n = size - off < FLASH_PAGE_SIZE ? size - off : FLASH_PAGE_SIZE;
 
