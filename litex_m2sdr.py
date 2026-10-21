@@ -159,7 +159,7 @@ def get_eth_phy_kwargs(eth_phy):
 
 class CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_eth=False, eth_refclk_freq=125e6,
-        eth_refclk_direct=False, with_sata=False, with_white_rabbit=False):
+        eth_refclk_direct=False, with_sata=False, with_white_rabbit=False, with_idelayctrl=False):
         self.rst              = Signal()
         self.cd_sys           = ClockDomain()
         self.cd_clk10         = ClockDomain()
@@ -204,9 +204,12 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
-        # No IDELAY/ODELAY primitives are used by this target. An unused
-        # IDELAYCTRL can remain unplaced in Vivado; keep only its 200 MHz
-        # clock, which also supplies the MMCM phase-shift interfaces.
+        # IDelayCtrl: only when IDELAY/ODELAY primitives are used (the oversampling PHY's per-lane
+        # RX deskew IDELAYE2s, which need it calibrated by the 200 MHz reference; without it Vivado's
+        # DRC PLIDC-10 stops placement). An unused IDELAYCTRL can remain unplaced in Vivado, so other
+        # targets keep only its 200 MHz clock, which also supplies the MMCM phase-shift interfaces.
+        if with_idelayctrl:
+            self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
         # Ethernet PLL.
         # -------------
@@ -399,6 +402,7 @@ class BaseSoC(SoCMini):
             eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata         = with_sata,
             with_white_rabbit = with_white_rabbit,
+            with_idelayctrl   = with_rfic_oversampling,
         )
 
         # Shared QPLL.
