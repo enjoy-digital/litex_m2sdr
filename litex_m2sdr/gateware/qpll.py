@@ -14,8 +14,8 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 
 class SharedQPLL(LiteXModule):
     def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6,
-        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False):
-        assert not (with_pcie and with_eth and with_sata) # QPLL only has 2 PLLs :(
+        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False, with_usb3=False):
+        assert (with_pcie + with_eth + with_sata + with_usb3) <= 2 # QPLL only has 2 PLLs :(
 
         # PCIe QPLL Settings.
         qpll_pcie_settings = QPLLSettings(
@@ -43,6 +43,14 @@ class SharedQPLL(LiteXModule):
             refclk_div = 1,
         )
 
+        # USB3 QPLL Settings (100MHz fabric reference on GTGREFCLK, 2.5GHz VCO for 5Gbps).
+        qpll_usb3_settings = QPLLSettings(
+            refclksel  = 0b111,
+            fbdiv      = 5,
+            fbdiv_45   = 5,
+            refclk_div = 1,
+        )
+
         # QPLL Configs.
         class QPLLConfig:
             def __init__(self, refclk, settings):
@@ -64,6 +72,12 @@ class SharedQPLL(LiteXModule):
             configs["sata"] = QPLLConfig(
                 refclk   = ClockSignal("refclk_sata"),
                 settings = qpll_sata_settings,
+            )
+
+        if with_usb3:
+            configs["usb3"] = QPLLConfig(
+                refclk   = ClockSignal("refclk_usb3"),
+                settings = qpll_usb3_settings,
             )
 
         # Shared QPLL.
