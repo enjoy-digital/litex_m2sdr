@@ -21,6 +21,9 @@
 #include "liblitepcie.h"
 #include "etherbone.h"
 #include "liteeth_udp.h"
+#ifdef USE_LITEUSB
+#include "liteusb.h"
+#endif
 #include "m2sdr_si5351_i2c.h"
 
 struct ad9361_rf_phy;
@@ -28,6 +31,7 @@ struct ad9361_rf_phy;
 enum m2sdr_transport {
     M2SDR_TRANSPORT_LITEPCIE = 0,
     M2SDR_TRANSPORT_LITEETH  = 1,
+    M2SDR_TRANSPORT_LITEUSB  = 2,
 };
 
 struct m2sdr_backend_ops {
@@ -56,6 +60,12 @@ struct m2sdr_dev {
     int liteeth_rx_config_valid;
     int liteeth_rx_timeout_recovery_armed;
     int liteeth_rx_timeout_recovery_disabled;
+
+#ifdef USE_LITEUSB
+    struct liteusb_connection *usb;
+    struct liteusb_stream *usb_rx;
+    struct liteusb_stream *usb_tx;
+#endif
 
     int rx_configured;
     int tx_configured;
@@ -118,6 +128,9 @@ struct m2sdr_dev {
 
 extern const struct m2sdr_backend_ops m2sdr_litepcie_backend_ops;
 extern const struct m2sdr_backend_ops m2sdr_liteeth_backend_ops;
+#ifdef USE_LITEUSB
+extern const struct m2sdr_backend_ops m2sdr_liteusb_backend_ops;
+#endif
 
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev);
 

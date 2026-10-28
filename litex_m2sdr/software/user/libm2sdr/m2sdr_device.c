@@ -86,19 +86,68 @@ static bool m2sdr_identifier_char_is_valid(uint32_t value)
  * not specify a target. */
 static void m2sdr_default_device(char *out, size_t out_len)
 {
-#ifdef M2SDR_DEFAULT_TRANSPORT_LITEETH
+#if defined(M2SDR_DEFAULT_TRANSPORT_LITEETH)
     snprintf(out, out_len, "eth:192.168.1.50:1234");
+#elif defined(M2SDR_DEFAULT_TRANSPORT_LITEUSB)
+    snprintf(out, out_len, "usb:");
 #else
     snprintf(out, out_len, "/dev/m2sdr0");
 #endif
 }
 
-/* Accept either explicit transport identifiers ("pcie:", "eth:") or the
- * historical shorthand forms (/dev/m2sdrN and ip[:port]). */
+/* LiteUSB device selector (after "usb:"):
+ * - ""               : first device with the default VID:PID.
+ * - "VVVV:PPPP"      : first device with this VID:PID (hex).
+ * - "serial=<serial>": device with this USB serial string.
+ * - "path=<b-p.p>"   : device on this bus/port path (as sysfs, ex: "2-1.3").
+ * vid/pid are left untouched (0 = default) when not selected. */
+static int m2sdr_liteusb_parse_selector(const char *sel,
+                                        uint16_t *vid, uint16_t *pid,
+                                        char *serial, size_t serial_len,
+                                        char *path, size_t path_len)
+{
+    serial[0] = '\0';
+    path[0]   = '\0';
+
+    if (!sel[0])
+        return 0;
+    if (!strncmp(sel, "serial=", 7)) {
+        if (!sel[7] || strnlen(sel + 7, serial_len) >= serial_len)
+            return -1;
+        snprintf(serial, serial_len, "%s", sel + 7);
+        return 0;
+    }
+    if (!strncmp(sel, "path=", 5)) {
+        if (!sel[5] || strnlen(sel + 5, path_len) >= path_len)
+            return -1;
+        snprintf(path, path_len, "%s", sel + 5);
+        return 0;
+    }
+
+    char *endptr = NULL;
+    unsigned long v, p;
+    errno = 0;
+    v = strtoul(sel, &endptr, 16);
+    if (errno != 0 || endptr == sel || *endptr != ':' || v == 0 || v > 0xffff)
+        return -1;
+    sel = endptr + 1;
+    p = strtoul(sel, &endptr, 16);
+    if (errno != 0 || endptr == sel || *endptr != '\0' || p == 0 || p > 0xffff)
+        return -1;
+    *vid = (uint16_t)v;
+    *pid = (uint16_t)p;
+    return 0;
+}
+
+/* Accept either explicit transport identifiers ("pcie:", "eth:", "usb:") or
+ * the historical shorthand forms (/dev/m2sdrN and ip[:port]). For "usb:", the
+ * device selector (see m2sdr_liteusb_parse_selector) goes to path_out and
+ * *usb_out is set. */
 static int m2sdr_parse_identifier(const char *id,
                                   char *path_out, size_t path_len,
                                   char *ip_out, size_t ip_len,
-                                  uint16_t *port_out)
+                                  uint16_t *port_out,
+                                  int *usb_out)
 {
     char tmp[M2SDR_DEVICE_STR_MAX];
     char *colon;
@@ -108,6 +157,21 @@ static int m2sdr_parse_identifier(const char *id,
     if (!id || !id[0]) {
         m2sdr_default_device(tmp, sizeof(tmp));
         id = tmp;
+    }
+
+    *usb_out = 0;
+    if (!strncmp(id, "usb:", 4) || !strcmp(id, "usb")) {
+        const char *sel = id[3] == ':' ? id + 4 : "";
+        char serial[M2SDR_DEVICE_STR_MAX], path[M2SDR_DEVICE_STR_MAX];
+        uint16_t vid = 0, pid = 0;
+        if (strnlen(sel, path_len) >= path_len)
+            return -1;
+        if (m2sdr_liteusb_parse_selector(sel, &vid, &pid, serial, sizeof(serial),
+                                         path, sizeof(path)) != 0)
+            return -1;
+        snprintf(path_out, path_len, "%s", sel);
+        *usb_out = 1;
+        return 0;
     }
 
     if (!strncmp(id, "pcie:", 5)) {
@@ -156,9 +220,10 @@ int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out)
     char path[M2SDR_DEVICE_STR_MAX] = {0};
     char ip[M2SDR_DEVICE_STR_MAX] = {0};
     uint16_t port = 1234;
+    int usb = 0;
     int rc;
 
-    rc = m2sdr_parse_identifier(id, path, sizeof(path), ip, sizeof(ip), &port);
+    rc = m2sdr_parse_identifier(id, path, sizeof(path), ip, sizeof(ip), &port, &usb);
     if (port_out)
         *port_out = port;
     return rc;
@@ -167,6 +232,8 @@ int m2sdr_test_parse_identifier(const char *id, uint16_t *port_out)
 int m2sdr_resolve_device_identifier(const char *device_identifier,
                                     struct m2sdr_device_addr *addr)
 {
+    int usb = 0;
+
     if (!addr)
         return M2SDR_ERR_INVAL;
 
@@ -176,11 +243,16 @@ int m2sdr_resolve_device_identifier(const char *device_identifier,
     if (m2sdr_parse_identifier(device_identifier,
                                addr->path, sizeof(addr->path),
                                addr->ip, sizeof(addr->ip),
-                               &addr->port) != 0) {
+                               &addr->port, &usb) != 0) {
         return M2SDR_ERR_PARSE;
     }
 
-    if (addr->path[0] != '\0') {
+    if (usb) {
+        addr->transport = M2SDR_TRANSPORT_KIND_LITEUSB;
+        if (strlen(addr->path) + strlen("usb:") >= sizeof(addr->identifier))
+            return M2SDR_ERR_PARSE;
+        snprintf(addr->identifier, sizeof(addr->identifier), "usb:%s", addr->path);
+    } else if (addr->path[0] != '\0') {
         addr->transport = M2SDR_TRANSPORT_KIND_LITEPCIE;
         if (strlen(addr->path) + strlen("pcie:") >= sizeof(addr->identifier))
             return M2SDR_ERR_PARSE;
@@ -562,6 +634,14 @@ static void m2sdr_fill_transport_info(struct m2sdr_dev *dev, struct m2sdr_devinf
         snprintf(info->transport, sizeof(info->transport), "liteeth");
         snprintf(info->path, sizeof(info->path), "%s:%u", dev->eth_ip, (unsigned)dev->eth_port);
     }
+#ifdef USE_LITEUSB
+    else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        struct liteusb_device_info usb_info;
+        snprintf(info->transport, sizeof(info->transport), "liteusb");
+        if (liteusb_get_info(dev->usb, &usb_info) == 0)
+            snprintf(info->path, sizeof(info->path), "%s", usb_info.path);
+    }
+#endif
 }
 
 /* Probe one candidate identifier and return its public metadata. */
@@ -762,6 +842,29 @@ int m2sdr_open(struct m2sdr_dev **dev_out, const char *device_identifier)
         }
 
         snprintf(dev->device_path, sizeof(dev->device_path), "%s", addr.path);
+    } else if (addr.transport == M2SDR_TRANSPORT_KIND_LITEUSB) {
+#ifdef USE_LITEUSB
+        char serial[M2SDR_DEVICE_STR_MAX], path[M2SDR_DEVICE_STR_MAX];
+        uint16_t vid = 0, pid = 0;
+
+        dev->transport = M2SDR_TRANSPORT_LITEUSB;
+        dev->ops = &m2sdr_liteusb_backend_ops;
+
+        if (m2sdr_liteusb_parse_selector(addr.path, &vid, &pid, serial, sizeof(serial),
+                                         path, sizeof(path)) != 0) {
+            free(dev);
+            return M2SDR_ERR_PARSE;
+        }
+        dev->usb = liteusb_connect(vid, pid, serial, path);
+        if (!dev->usb) {
+            free(dev);
+            return M2SDR_ERR_IO;
+        }
+        snprintf(dev->device_path, sizeof(dev->device_path), "%s", addr.identifier);
+#else
+        free(dev);
+        return M2SDR_ERR_UNSUPPORTED;
+#endif
     } else {
         char port_str[16];
 
@@ -816,6 +919,12 @@ void m2sdr_close(struct m2sdr_dev *dev)
         eb_disconnect(&dev->eb);
         dev->eb = NULL;
     }
+#ifdef USE_LITEUSB
+    if (dev->usb) {
+        liteusb_disconnect(dev->usb);
+        dev->usb = NULL;
+    }
+#endif
 
     dev->ad9361_phy = NULL;
     free(dev->rf_init_param);
@@ -959,6 +1068,9 @@ int m2sdr_get_transport(struct m2sdr_dev *dev, enum m2sdr_transport_kind *transp
     case M2SDR_TRANSPORT_LITEETH:
         *transport = M2SDR_TRANSPORT_KIND_LITEETH;
         return M2SDR_ERR_OK;
+    case M2SDR_TRANSPORT_LITEUSB:
+        *transport = M2SDR_TRANSPORT_KIND_LITEUSB;
+        return M2SDR_ERR_OK;
     default:
         *transport = M2SDR_TRANSPORT_KIND_UNKNOWN;
         return M2SDR_ERR_STATE;
@@ -977,6 +1089,11 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev)
         return (void *)(intptr_t)dev->fd;
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         return dev->eb;
+#ifdef USE_LITEUSB
+    /* LiteUSB connection, recognized by the legacy m2sdr_readl/writel helpers. */
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB)
+        return dev->usb;
+#endif
     return NULL;
 }
 
@@ -1060,6 +1177,23 @@ int m2sdr_get_discovery_targets(const struct m2sdr_discovery_config *config,
         if (rc != M2SDR_ERR_OK)
             return rc;
     }
+
+#ifdef USE_LITEUSB
+    /* USB devices are enumerated locally (no probing cost): listed by the default discovery
+     * policy (no config), explicit configs keep their PCIe/Ethernet target set. */
+    if (!config) {
+        struct liteusb_device_info usb_infos[8];
+        int n = liteusb_list(0, 0, usb_infos, sizeof(usb_infos) / sizeof(usb_infos[0]));
+        for (int i = 0; i < n; i++) {
+            char dev_id[M2SDR_DEVICE_STR_MAX];
+            if (snprintf(dev_id, sizeof(dev_id), "usb:path=%s", usb_infos[i].path) >= (int)sizeof(dev_id))
+                return M2SDR_ERR_PARSE;
+            rc = m2sdr_discovery_add_target(targets, max, &found, dev_id);
+            if (rc != M2SDR_ERR_OK)
+                return rc;
+        }
+    }
+#endif
 
     *count = found;
     return M2SDR_ERR_OK;
@@ -2210,6 +2344,17 @@ int m2sdr_reset_datapath(struct m2sdr_dev *dev)
         if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
             m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
 #endif
+        break;
+
+    case M2SDR_TRANSPORT_LITEUSB:
+#ifdef CSR_USB3_CONTROL_ADDR
+        if (m2sdr_reg_write(dev, CSR_USB3_CONTROL_ADDR, 0) != 0)
+            m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+#endif
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0)
+            m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
+            m2sdr_reset_keep_error(M2SDR_ERR_IO, &status);
         break;
     }
 

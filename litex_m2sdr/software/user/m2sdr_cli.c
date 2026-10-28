@@ -18,8 +18,10 @@ void m2sdr_cli_device_init(struct m2sdr_cli_device *dev)
         return;
 
     memset(dev, 0, sizeof(*dev));
-#ifdef M2SDR_DEFAULT_TRANSPORT_LITEETH
+#if defined(M2SDR_DEFAULT_TRANSPORT_LITEETH)
     dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
+#elif defined(M2SDR_DEFAULT_TRANSPORT_LITEUSB)
+    dev->transport = M2SDR_CLI_TRANSPORT_LITEUSB;
 #else
     dev->transport = M2SDR_CLI_TRANSPORT_DEFAULT;
 #endif
@@ -86,6 +88,9 @@ int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id)
             return -1;
         }
         dev->transport = M2SDR_CLI_TRANSPORT_LITEPCIE;
+    } else if (strncmp(device_id, "usb:", 4) == 0 || strcmp(device_id, "usb") == 0) {
+        dev->pcie_path[0] = '\0';
+        dev->transport = M2SDR_CLI_TRANSPORT_LITEUSB;
     } else {
         dev->pcie_path[0] = '\0';
         dev->transport = M2SDR_CLI_TRANSPORT_LITEETH;
@@ -106,6 +111,8 @@ bool m2sdr_cli_finalize_device(struct m2sdr_cli_device *dev)
             fprintf(stderr, "Device address too long\n");
             return false;
         }
+    } else if (dev->transport == M2SDR_CLI_TRANSPORT_LITEUSB) {
+        snprintf(dev->device_id, sizeof(dev->device_id), "usb:");
     } else {
         snprintf(dev->pcie_path, sizeof(dev->pcie_path), "/dev/m2sdr%d", dev->device_num);
         if (snprintf(dev->device_id, sizeof(dev->device_id), "pcie:%s", dev->pcie_path) >= (int)sizeof(dev->device_id)) {
@@ -129,7 +136,8 @@ const char *m2sdr_cli_pcie_path(const struct m2sdr_cli_device *dev)
 void m2sdr_cli_print_device_help(void)
 {
     fputs("Device options:\n", stdout);
-    fputs("  -d, --device DEV      Use explicit device id.\n", stdout);
+    fputs("  -d, --device DEV      Use explicit device id (pcie:/dev/m2sdrN, eth:IP[:PORT],\n", stdout);
+    fputs("                        usb:[VID:PID|serial=S|path=B-P.P]).\n", stdout);
     fputs("  -c, --device-num N    Use /dev/m2sdrN (default: 0).\n", stdout);
     fputs("  -i, --ip ADDR         Target IP address (default: 192.168.1.50).\n", stdout);
     fputs("  -p, --port PORT       Target port (default: 1234).\n", stdout);

@@ -63,6 +63,30 @@ static int test_parse_identifier_forms(void)
     if (addr.port != 3456)
         return -1;
 
+    /* LiteUSB selectors: any, VID:PID, serial, bus/port path (parsed with or without libusb). */
+    if (m2sdr_resolve_device_identifier("usb:", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (addr.transport != M2SDR_TRANSPORT_KIND_LITEUSB || strcmp(addr.identifier, "usb:") != 0)
+        return -1;
+    if (m2sdr_resolve_device_identifier("usb", &addr) != M2SDR_ERR_OK || addr.transport != M2SDR_TRANSPORT_KIND_LITEUSB)
+        return -1;
+    if (m2sdr_resolve_device_identifier("usb:1d50:605a", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (strcmp(addr.identifier, "usb:1d50:605a") != 0 || strcmp(addr.path, "1d50:605a") != 0)
+        return -1;
+    if (m2sdr_resolve_device_identifier("usb:serial=0001", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_resolve_device_identifier("usb:path=2-1.3", &addr) != M2SDR_ERR_OK)
+        return -1;
+    if (m2sdr_test_parse_identifier("usb:1d50", &port) == 0)
+        return -1;
+    if (m2sdr_test_parse_identifier("usb:1d50:zz", &port) == 0)
+        return -1;
+    if (m2sdr_test_parse_identifier("usb:serial=", &port) == 0)
+        return -1;
+    if (m2sdr_test_parse_identifier("usb:path=", &port) == 0)
+        return -1;
+
     return 0;
 }
 
@@ -99,6 +123,14 @@ static int test_cli_device_selection(void)
     if (!m2sdr_cli_finalize_device(&dev))
         return -1;
     if (strcmp(m2sdr_cli_device_id(&dev), "pcie:/dev/m2sdr2") != 0)
+        return -1;
+
+    m2sdr_cli_device_init(&dev);
+    if (m2sdr_cli_set_device_id(&dev, "usb:serial=0001") != 0)
+        return -1;
+    if (dev.transport != M2SDR_CLI_TRANSPORT_LITEUSB || !m2sdr_cli_finalize_device(&dev))
+        return -1;
+    if (strcmp(m2sdr_cli_device_id(&dev), "usb:serial=0001") != 0)
         return -1;
 
     m2sdr_cli_device_init(&dev);
