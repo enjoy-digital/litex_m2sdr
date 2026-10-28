@@ -49,6 +49,7 @@ enum class SoapyLiteXM2SDREthernetMode {
 /* Thresholds relevant to 8-bit sample-packing policy. */
 #define LITEPCIE_8BIT_THRESHOLD  61.44e6
 #define LITEETH_8BIT_THRESHOLD   20.0e6
+#define LITEUSB_8BIT_THRESHOLD   40.0e6 /* 2T2R 16-bit above ~50MSPS exceeds USB3 Bulk bandwidth. */
 
 #define DLL_EXPORT __attribute__ ((visibility ("default")))
 
@@ -601,6 +602,14 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     }
     bool isLiteEth() const {
         return _transport == M2SDR_TRANSPORT_KIND_LITEETH;
+    }
+    bool isLiteUSB() const {
+        return _transport == M2SDR_TRANSPORT_KIND_LITEUSB;
+    }
+    /* Streams through the libm2sdr stream/buffer API (LitePCIe DMA rings, LiteUSB Bulk rings);
+     * LiteEth streams through its own UDP helper. */
+    bool usesLibm2sdrStream() const {
+        return isLitePCIe() || isLiteUSB();
     }
 
     void interleaveCF32(
