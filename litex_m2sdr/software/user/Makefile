@@ -3,9 +3,16 @@ SCAN_UI_DIR := scan_ui
 SCAN_CIMGUI_DIR := cimgui
 M2SDR_VERSION := 1.1.0
 
-# Backend selection: USE_RUNTIME (default), USE_LITEPCIE, or USE_LITEETH.
-# USE_RUNTIME builds one binary set that can open either pcie: or eth: devices.
+# Backend selection: USE_RUNTIME (default), USE_LITEPCIE, USE_LITEETH, or USE_LITEUSB.
+# USE_RUNTIME builds one binary set that can open pcie:, eth: (and usb:) devices.
 INTERFACE ?= USE_RUNTIME
+
+# LiteUSB (USB3 through an SFP-to-USB3 adapter): built when libusb-1.0 is available
+# (required with INTERFACE=USE_LITEUSB), LITEUSB=0 disables it.
+LIBUSB_CFLAGS := $(shell pkg-config --cflags libusb-1.0 2>/dev/null)
+LIBUSB_LIBS   := $(shell pkg-config --libs libusb-1.0 2>/dev/null)
+HAVE_LIBUSB   := $(shell pkg-config --exists libusb-1.0 2>/dev/null && echo 1 || echo 0)
+LITEUSB       ?= $(HAVE_LIBUSB)
 
 ifeq ($(INTERFACE),USE_RUNTIME)
   TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEPCIE
@@ -13,11 +20,24 @@ else ifeq ($(INTERFACE),USE_LITEPCIE)
   TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEPCIE
 else ifeq ($(INTERFACE),USE_LITEETH)
   TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEETH
+else ifeq ($(INTERFACE),USE_LITEUSB)
+  TRANSPORT_CFLAGS := -DUSE_LITEPCIE -DUSE_LITEETH -DM2SDR_DEFAULT_TRANSPORT_LITEUSB
+  ifneq ($(HAVE_LIBUSB),1)
+    $(error INTERFACE=USE_LITEUSB requires libusb-1.0 (pkg-config libusb-1.0))
+  endif
+  LITEUSB := 1
 else
-  $(error INTERFACE must be USE_RUNTIME, USE_LITEPCIE, or USE_LITEETH)
+  $(error INTERFACE must be USE_RUNTIME, USE_LITEPCIE, USE_LITEETH, or USE_LITEUSB)
 endif
 
-CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
+ifeq ($(LITEUSB),1)
+  TRANSPORT_CFLAGS += -DUSE_LITEUSB $(LIBUSB_CFLAGS)
+  TRANSPORT_LIBS   := $(LIBUSB_LIBS)
+else
+  TRANSPORT_LIBS   :=
+endif
+
+CFLAGS  = -O3 -Wall -g -I../kernel -Ilibliteeth -Iliblitepcie -Ilibliteusb -Ilibm2sdr -Iad9361 -I$(SCAN_UI_DIR) -MMD -fPIC
 CFLAGS += $(TRANSPORT_CFLAGS)
 CFLAGS += $(EXTRA_CFLAGS)
 CXXFLAGS = $(CFLAGS) -I. -I$(SCAN_CIMGUI_DIR) -I$(SCAN_CIMGUI_DIR)/imgui -I$(SCAN_CIMGUI_DIR)/imgui/backends -DCIMGUI_USE_SDL2 -DCIMGUI_USE_OPENGL3
@@ -41,7 +61,7 @@ LDFLAGS += $(SANITIZER_FLAGS)
 LINK_CFLAGS := $(filter-out -MMD,$(CFLAGS))
 LINK_CXXFLAGS := $(filter-out -MMD,$(CXXFLAGS))
 BUILD_FLAGS_FILE := .build-flags
-BUILD_FLAGS_CONTENT := BUILD_FLAGS_SCHEMA=2\nINTERFACE=$(INTERFACE)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXFLAGS)\nLDFLAGS=$(LDFLAGS)
+BUILD_FLAGS_CONTENT := BUILD_FLAGS_SCHEMA=2\nINTERFACE=$(INTERFACE)\nLITEUSB=$(LITEUSB)\nCFLAGS=$(CFLAGS)\nCXXFLAGS=$(CXXFLAGS)\nLDFLAGS=$(LDFLAGS)
 CC      = $(CROSS_COMPILE)gcc
 CXX     = $(CROSS_COMPILE)g++
 AR      = ar
@@ -53,7 +73,7 @@ ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sig
                 m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan
 
 # Which core binaries to build per interface.
-ifeq ($(INTERFACE),USE_LITEETH)
+ifneq ($(filter $(INTERFACE),USE_LITEETH USE_LITEUSB),)
   CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata
 else ifneq ($(filter $(INTERFACE),USE_RUNTIME USE_LITEPCIE),)
   CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_sata
@@ -122,6 +142,13 @@ LIBM2SDR_OBJS = \
 	ad9361/ad9361_conv.o \
 	ad9361/util.o
 
+ifeq ($(LITEUSB),1)
+LITEUSB_OBJS = \
+	libliteusb/liteusb.o \
+	libliteusb/liteusb_stream.o
+LIBM2SDR_OBJS += libm2sdr/m2sdr_hal_liteusb.o $(LITEUSB_OBJS)
+endif
+
 M2SDR_IMGUI_SRCS := \
 	$(SCAN_CIMGUI_DIR)/cimgui.cpp \
 	$(SCAN_CIMGUI_DIR)/imgui/imgui.cpp \
@@ -163,13 +190,13 @@ test-host-queue: tests/test_m2sdr_host_queue
 	./tests/test_m2sdr_host_queue
 
 tests/test_libm2sdr: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_m2sdr_sigmf: $(LIBM2SDR_STATIC) tests/test_m2sdr_sigmf.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sigmf.o $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sigmf.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_sigmf_capture_smoke: $(LIBM2SDR_STATIC) tests/test_sigmf_capture_smoke.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_capture_smoke.o $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_capture_smoke.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 tests/test_sigmf_cli: tests/test_sigmf_cli.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_sigmf_cli.o -lm
@@ -181,12 +208,12 @@ tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o -lm
 
 # The test provides the eb_*() functions.
-tests/test_m2sdr_flash: tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o
+tests/test_m2sdr_flash: tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o $(LITEUSB_OBJS) | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o $(LITEUSB_OBJS) $(TRANSPORT_LIBS)
 
 # The test provides the eb_*() functions.
-tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o -lm
+tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o $(LITEUSB_OBJS) | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o -lm $(LITEUSB_OBJS) $(TRANSPORT_LIBS)
 
 tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) $(PTHREAD_LIBS)
@@ -203,16 +230,16 @@ analyze-libm2sdr:
 		libm2sdr
 
 ../../doc/libm2sdr/example_sync_rx: ../../doc/libm2sdr/example_sync_rx.c $(LIBM2SDR_STATIC) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 ../../doc/libm2sdr/example_sync_tx: ../../doc/libm2sdr/example_sync_tx.c $(LIBM2SDR_STATIC) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 ../../doc/libm2sdr/example_tone_tx: ../../doc/libm2sdr/example_tone_tx.c $(LIBM2SDR_STATIC) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 ../../doc/libm2sdr/example_rx_n: ../../doc/libm2sdr/example_rx_n.c $(LIBM2SDR_STATIC) | $(BUILD_FLAGS_FILE)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $< -I../kernel -Ilibm2sdr $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
 # --- Libraries ---
 
@@ -230,7 +257,7 @@ libm2sdr/libm2sdr.a: $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
 	ranlib $@
 
 libm2sdr/$(LIBM2SDR_SONAME): $(BUILD_FLAGS_FILE) $(LIBM2SDR_OBJS)
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $(LIBM2SDR_OBJS)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIBM2SDR_SONAME) -Wl,-Bsymbolic -o $@ $(LIBM2SDR_OBJS) $(TRANSPORT_LIBS)
 
 libm2sdr/libm2sdr.so: libm2sdr/$(LIBM2SDR_SONAME)
 	ln -sf $(LIBM2SDR_SONAME) $@
@@ -241,7 +268,7 @@ ad9361/libad9361_m2sdr.a: $(BUILD_FLAGS_FILE) ad9361/ad9361_api.o ad9361/ad9361_
 
 # --- Binaries ---
 
-M2SDR_LINK_LIBS := $(LIBM2SDR_STATIC) -lm
+M2SDR_LINK_LIBS := $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 PTHREAD_LIBS := -pthread
 
 m2sdr_util: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_util.o
@@ -300,6 +327,7 @@ clean:
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f tests/*.o tests/*.d $(TEST_PROGS)
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
+	rm -f libliteusb/*.o libliteusb/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
 	rm -f kissfft/*.o kissfft/*.d
 	rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d
@@ -318,6 +346,7 @@ $(BUILD_FLAGS_FILE): FORCE
 		rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d; \
 		rm -f tests/*.o tests/*.d $(TEST_PROGS); \
 		rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d; \
+		rm -f libliteusb/*.o libliteusb/*.d; \
 		rm -f ad9361/*.o ad9361/*.d; \
 		rm -f kissfft/*.o kissfft/*.d; \
 		rm -f $(SCAN_UI_DIR)/*.o $(SCAN_UI_DIR)/*.d; \
@@ -336,6 +365,9 @@ liblitepcie/%.o: liblitepcie/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 tests/%.o: tests/%.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
+
+libliteusb/%.o: libliteusb/%.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<
 
 libm2sdr/%.o: libm2sdr/%.c $(BUILD_FLAGS_FILE)
@@ -387,4 +419,4 @@ check:
 	cmake -S ../soapysdr -B ../soapysdr/build
 	cmake --build ../soapysdr/build
 
--include $(wildcard *.d tests/*.d libm2sdr/*.d)
+-include $(wildcard *.d tests/*.d libm2sdr/*.d libliteusb/*.d)

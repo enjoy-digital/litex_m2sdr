@@ -12,6 +12,9 @@
 
 #include "liblitepcie.h"
 #include "etherbone.h"
+#ifdef USE_LITEUSB
+#include "liteusb.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +32,9 @@ extern "C" {
 #define ICAP_BOOTSTS_VALID    (1 << 0)
 #define ICAP_BOOTSTS_FALLBACK (1 << 1)
 
-/* Legacy raw-handle helpers. */
+/* Legacy raw-handle helpers: PCIe fd (cast to a pointer), Etherbone connection or LiteUSB
+ * connection (m2sdr_get_handle()). LiteUSB connections start with a negative magic, Etherbone
+ * connections with their socket fd (>= 0). */
 
 static inline int m2sdr_legacy_handle_is_fd(void *conn)
 {
@@ -42,6 +47,10 @@ static inline void m2sdr_writel(void *conn, uint32_t addr, uint32_t val)
 {
     if (m2sdr_legacy_handle_is_fd(conn))
         litepcie_writel((int)(intptr_t)conn, addr, val);
+#ifdef USE_LITEUSB
+    else if (liteusb_is_connection(conn))
+        liteusb_write32((struct liteusb_connection *)conn, addr, val);
+#endif
     else
         eb_write32((struct eb_connection *)conn, val, addr);
 }
@@ -50,6 +59,13 @@ static inline uint32_t m2sdr_readl(void *conn, uint32_t addr)
 {
     if (m2sdr_legacy_handle_is_fd(conn))
         return litepcie_readl((int)(intptr_t)conn, addr);
+#ifdef USE_LITEUSB
+    if (liteusb_is_connection(conn)) {
+        uint32_t val = 0xffffffff;
+        liteusb_read32((struct liteusb_connection *)conn, addr, &val);
+        return val;
+    }
+#endif
     return eb_read32((struct eb_connection *)conn, addr);
 }
 

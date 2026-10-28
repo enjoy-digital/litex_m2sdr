@@ -397,7 +397,8 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     printf("  Device: %s\n", device_id);
     printf("  Transport: %s\n",
            transport == M2SDR_TRANSPORT_KIND_LITEPCIE ? "LitePCIe" :
-           transport == M2SDR_TRANSPORT_KIND_LITEETH ? "LiteEth" : "unknown");
+           transport == M2SDR_TRANSPORT_KIND_LITEETH ? "LiteEth" :
+           transport == M2SDR_TRANSPORT_KIND_LITEUSB ? "LiteUSB" : "unknown");
     printf("  Sample Rate: %.0f Hz\n", sample_rate);
     printf("  Signal Type: %s\n", signal_type);
     if (strcmp(signal_type, "tone") == 0) {

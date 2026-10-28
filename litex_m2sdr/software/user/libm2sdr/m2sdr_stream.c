@@ -33,6 +33,18 @@
 #define M2SDR_TIMEOUT_NOWAIT ((unsigned)-1)
 #define M2SDR_LITEETH_TX_DRAIN_DELAY_US 1000
 
+/* LiteUSB rings (usbfs memory, Linux default limit: 16MB): RX 4MB in 64KB transfers (one 8KB
+ * buffer resubmitted per 8 read), TX 2MB in 32KB transfers (partial transfers flushed at the end
+ * of each sync TX call). */
+#define M2SDR_LITEUSB_RX_BUFFER_COUNT    512
+#define M2SDR_LITEUSB_RX_BUFS_PER_XFER   8
+#define M2SDR_LITEUSB_TX_BUFFER_COUNT    256
+#define M2SDR_LITEUSB_TX_BUFS_PER_XFER   4
+#define M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS 1000
+
+/* Crossbar ports (litex_m2sdr.py: 0=PCIe, 1=Eth, 2=SATA, 3=USB3). */
+#define TXRX_PORT_LITEUSB 3
+
 /* Helpers */
 /*---------*/
 
@@ -460,6 +472,148 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
     return M2SDR_ERR_OK;
 }
 
+#ifdef USE_LITEUSB
+/* LiteUSB streams */
+/*-----------------*/
+
+/* Gateware USB3 control (rx_enable/tx_enable): read-modify-write of one bit. */
+static int m2sdr_liteusb_set_enable(struct m2sdr_dev *dev, unsigned offset, int enable)
+{
+    uint32_t control = 0;
+
+    if (m2sdr_reg_read(dev, CSR_USB3_CONTROL_ADDR, &control) != 0)
+        return M2SDR_ERR_IO;
+    control &= ~(1u << offset);
+    control |= (enable ? 1u : 0u) << offset;
+    if (m2sdr_reg_write(dev, CSR_USB3_CONTROL_ADDR, control) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_liteusb_stream_open(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (direction == M2SDR_RX && !dev->usb_rx)
+        dev->usb_rx = liteusb_stream_open(dev->usb, LITEUSB_RX_EP, DMA_BUFFER_SIZE,
+                                          M2SDR_LITEUSB_RX_BUFFER_COUNT, M2SDR_LITEUSB_RX_BUFS_PER_XFER);
+    if (direction == M2SDR_TX && !dev->usb_tx)
+        dev->usb_tx = liteusb_stream_open(dev->usb, LITEUSB_TX_EP, DMA_BUFFER_SIZE,
+                                          M2SDR_LITEUSB_TX_BUFFER_COUNT, M2SDR_LITEUSB_TX_BUFS_PER_XFER);
+    if ((direction == M2SDR_RX && !dev->usb_rx) || (direction == M2SDR_TX && !dev->usb_tx))
+        return M2SDR_ERR_NO_MEM;
+    return M2SDR_ERR_OK;
+}
+
+static int m2sdr_liteusb_rx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    int status = M2SDR_ERR_OK;
+
+    if (dev->usb_rx && liteusb_stream_stop(dev->usb_rx) != 0)
+        status = M2SDR_ERR_IO;
+    if (m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_RX_ENABLE_OFFSET, 0) != M2SDR_ERR_OK)
+        status = M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0) != 0)
+        status = M2SDR_ERR_IO;
+    return status;
+}
+
+/* RX (re)start: the gateware RX enable flushes the device buffered packets and aligns the RX
+ * header on the stream start, the endpoint halt clear (liteusb_stream_start) drops the packets
+ * sent before and resets the Sequence Numbers: the first received buffer starts a frame. */
+static int m2sdr_liteusb_rx_stream_activate(struct m2sdr_dev *dev)
+{
+    int rc;
+
+    rc = m2sdr_liteusb_rx_stream_deactivate(dev);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, TXRX_PORT_LITEUSB) != 0)
+        return M2SDR_ERR_IO;
+    rc = m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_RX_ENABLE_OFFSET, 1);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (liteusb_stream_start(dev->usb_rx) != 0)
+        return M2SDR_ERR_IO;
+    return M2SDR_ERR_OK;
+}
+
+/* TX stop: submitted buffers sent, then played out (gateware FIFO empty) before disabling. */
+static int m2sdr_liteusb_tx_stream_deactivate(struct m2sdr_dev *dev)
+{
+    int status = M2SDR_ERR_OK;
+
+    if (dev->usb_tx) {
+        (void)liteusb_stream_drain(dev->usb_tx, M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS);
+        for (int i = 0; i < M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS; i++) {
+            uint32_t status_reg = 0;
+            if (m2sdr_reg_read(dev, CSR_USB3_STATUS_ADDR, &status_reg) != 0 ||
+                !(status_reg & (1u << CSR_USB3_STATUS_TX_STARTED_OFFSET)))
+                break;
+            usleep(1000);
+        }
+        if (liteusb_stream_stop(dev->usb_tx) != 0)
+            status = M2SDR_ERR_IO;
+    }
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0)
+        status = M2SDR_ERR_IO;
+    if (m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_TX_ENABLE_OFFSET, 0) != M2SDR_ERR_OK)
+        status = M2SDR_ERR_IO;
+    return status;
+}
+
+static int m2sdr_liteusb_tx_stream_activate(struct m2sdr_dev *dev)
+{
+    int rc;
+
+    if (dev->usb_tx)
+        (void)liteusb_stream_stop(dev->usb_tx);
+    rc = m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_TX_ENABLE_OFFSET, 0);
+    if (rc != M2SDR_ERR_OK)
+        return rc;
+    if (liteusb_stream_start(dev->usb_tx) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, TXRX_PORT_LITEUSB) != 0)
+        return M2SDR_ERR_IO;
+    return m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_TX_ENABLE_OFFSET, 1);
+}
+
+static void m2sdr_liteusb_stream_close(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (direction == M2SDR_RX && dev->usb_rx) {
+        liteusb_stream_close(dev->usb_rx);
+        dev->usb_rx = NULL;
+    }
+    if (direction == M2SDR_TX && dev->usb_tx) {
+        liteusb_stream_close(dev->usb_tx);
+        dev->usb_tx = NULL;
+    }
+}
+
+static int m2sdr_liteusb_stream_stats(struct m2sdr_dev *dev,
+                                      enum m2sdr_direction direction,
+                                      struct m2sdr_stream_stats *stats)
+{
+    struct liteusb_stream *s = direction == M2SDR_RX ? dev->usb_rx : dev->usb_tx;
+    struct liteusb_stream_stats usb;
+
+    if (!s)
+        return M2SDR_ERR_STATE;
+    liteusb_stream_get_stats(s, &usb);
+
+    stats->transport    = M2SDR_TRANSPORT_KIND_LITEUSB;
+    stats->direction    = direction;
+    stats->buffer_size  = liteusb_stream_buffer_size(s);
+    stats->buffer_count = liteusb_stream_buffer_count(s);
+    if (direction == M2SDR_RX) {
+        stats->rx_buffers     = usb.buffers;
+        stats->rx_recv_errors = usb.errors;
+    } else {
+        stats->tx_buffers     = usb.buffers;
+        stats->tx_send_errors = usb.errors;
+    }
+    return M2SDR_ERR_OK;
+}
+#endif
+
 /* Public API */
 /*------------*/
 
@@ -607,6 +761,26 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
                 return rc;
             m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
         }
+#ifdef USE_LITEUSB
+    } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        rc = m2sdr_liteusb_stream_open(dev, direction);
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+        m2sdr_store_stream_config(dev, direction, format, buffer_size, timeout_ms);
+        if (direction == M2SDR_RX) {
+            if (!dev->rx_header_enable) {
+                if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
+                    (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
+                    (0 << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
+                    return M2SDR_ERR_IO;
+            }
+            rc = m2sdr_liteusb_rx_stream_activate(dev);
+        } else {
+            rc = m2sdr_liteusb_tx_stream_activate(dev);
+        }
+        if (rc != M2SDR_ERR_OK)
+            return rc;
+#endif
     } else {
         return M2SDR_ERR_UNSUPPORTED;
     }
@@ -713,6 +887,17 @@ int m2sdr_stream_get_info(struct m2sdr_dev *dev,
         }
         return M2SDR_ERR_OK;
     }
+
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        struct liteusb_stream *s = direction == M2SDR_RX ? dev->usb_rx : dev->usb_tx;
+        info->buffer_bytes  = payload_bytes;
+        info->buffer_count  = liteusb_stream_buffer_count(s);
+        info->buffer_stride = liteusb_stream_buffer_size(s);
+        info->buffer_base   = liteusb_stream_buffer_base(s);
+        return M2SDR_ERR_OK;
+    }
+#endif
 
     return M2SDR_ERR_UNSUPPORTED;
 }
@@ -832,6 +1017,10 @@ int m2sdr_get_stream_stats(struct m2sdr_dev *dev,
         return m2sdr_pcie_stream_stats(dev, direction, false, stats);
     if (dev->transport == M2SDR_TRANSPORT_LITEETH)
         return m2sdr_liteeth_stream_stats(dev, direction, stats);
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB)
+        return m2sdr_liteusb_stream_stats(dev, direction, stats);
+#endif
 
     return M2SDR_ERR_UNSUPPORTED;
 }
@@ -895,6 +1084,14 @@ int m2sdr_stream_deactivate(struct m2sdr_dev *dev, enum m2sdr_direction directio
         return m2sdr_liteeth_tx_stream_deactivate(dev);
     }
 
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        if (direction == M2SDR_RX)
+            return dev->rx_configured ? m2sdr_liteusb_rx_stream_deactivate(dev) : M2SDR_ERR_OK;
+        return dev->tx_configured ? m2sdr_liteusb_tx_stream_deactivate(dev) : M2SDR_ERR_OK;
+    }
+#endif
+
     return M2SDR_ERR_UNSUPPORTED;
 }
 
@@ -944,6 +1141,14 @@ int m2sdr_stream_activate(struct m2sdr_dev *dev, enum m2sdr_direction direction)
         return m2sdr_liteeth_tx_stream_activate(dev);
     }
 
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        if (direction == M2SDR_RX)
+            return dev->rx_configured ? m2sdr_liteusb_rx_stream_activate(dev) : M2SDR_ERR_STATE;
+        return dev->tx_configured ? m2sdr_liteusb_tx_stream_activate(dev) : M2SDR_ERR_STATE;
+    }
+#endif
+
     return M2SDR_ERR_UNSUPPORTED;
 }
 
@@ -982,6 +1187,20 @@ int m2sdr_stream_release(struct m2sdr_dev *dev, enum m2sdr_direction direction)
         return M2SDR_ERR_OK;
     }
 
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        if (direction == M2SDR_RX && dev->rx_configured) {
+            (void)m2sdr_liteusb_rx_stream_deactivate(dev);
+            dev->rx_configured = 0;
+        } else if (direction == M2SDR_TX && dev->tx_configured) {
+            (void)m2sdr_liteusb_tx_stream_deactivate(dev);
+            dev->tx_configured = 0;
+        }
+        m2sdr_liteusb_stream_close(dev, direction);
+        return M2SDR_ERR_OK;
+    }
+#endif
+
     return M2SDR_ERR_UNSUPPORTED;
 }
 
@@ -1003,6 +1222,16 @@ void m2sdr_stream_cleanup(struct m2sdr_dev *dev)
         dev->liteeth_rx_config_valid = 0;
         dev->liteeth_rx_timeout_recovery_armed = 0;
     }
+#ifdef USE_LITEUSB
+    else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        if (dev->rx_configured)
+            (void)m2sdr_liteusb_rx_stream_deactivate(dev);
+        if (dev->tx_configured)
+            (void)m2sdr_liteusb_tx_stream_deactivate(dev);
+        m2sdr_liteusb_stream_close(dev, M2SDR_RX);
+        m2sdr_liteusb_stream_close(dev, M2SDR_TX);
+    }
+#endif
 
     dev->rx_configured = 0;
     dev->tx_configured = 0;
@@ -1355,6 +1584,29 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
             }
             memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
             copied += to_copy;
+#ifdef USE_LITEUSB
+        } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+            unsigned wait_ms = timeout_ms ? timeout_ms : dev->rx_timeout_ms;
+            uint8_t *buf = liteusb_stream_next_read_buffer(dev->usb_rx, (int)wait_ms);
+            if (!buf)
+                return M2SDR_ERR_TIMEOUT;
+            unsigned to_copy = m2sdr_stream_payload_bytes(dev, M2SDR_RX, dev->rx_format);
+            unsigned payload_off = 0;
+            if (dev->rx_header_enable && dev->rx_strip_header)
+                payload_off = M2SDR_DMA_HEADER_SIZE;
+            if (to_copy > total_bytes - copied)
+                to_copy = total_bytes - copied;
+            if (dev->rx_header_enable) {
+                uint64_t ts = 0;
+                if (meta && !(meta->flags & M2SDR_META_FLAG_HAS_TIME) &&
+                    m2sdr_parse_dma_header(buf, &ts)) {
+                    meta->timestamp = ts;
+                    meta->flags |= M2SDR_META_FLAG_HAS_TIME;
+                }
+            }
+            memcpy((uint8_t *)samples + copied, buf + payload_off, to_copy);
+            copied += to_copy;
+#endif
         } else {
             return M2SDR_ERR_UNSUPPORTED;
         }
@@ -1441,10 +1693,43 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
             copied += to_copy;
             if (liteeth_udp_write_submit(&dev->udp) < 0)
                 return M2SDR_ERR_IO;
+#ifdef USE_LITEUSB
+        } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+            unsigned wait_ms = timeout_ms ? timeout_ms : dev->tx_timeout_ms;
+            uint8_t *buf = liteusb_stream_next_write_buffer(dev->usb_tx, (int)wait_ms);
+            if (!buf)
+                return M2SDR_ERR_TIMEOUT;
+            unsigned to_copy = m2sdr_stream_payload_bytes(dev, M2SDR_TX, dev->tx_format);
+            unsigned payload_off = 0;
+            if (dev->tx_header_enable) {
+                payload_off = M2SDR_DMA_HEADER_SIZE;
+                uint64_t ts = 0;
+                if (timed_first) {
+                    ts = meta->timestamp;
+                    timed_first = 0;
+                }
+                m2sdr_write_dma_header(buf, ts);
+            }
+            if (to_copy > total_bytes - copied) {
+                /* Whole buffers are sent: zero the tail of a partial last buffer. */
+                memset(buf + payload_off + (total_bytes - copied), 0, to_copy - (total_bytes - copied));
+                to_copy = total_bytes - copied;
+            }
+            memcpy(buf + payload_off, (const uint8_t *)samples + copied, to_copy);
+            copied += to_copy;
+            if (liteusb_stream_write_submit(dev->usb_tx) != 0)
+                return M2SDR_ERR_IO;
+#endif
         } else {
             return M2SDR_ERR_UNSUPPORTED;
         }
     }
+
+#ifdef USE_LITEUSB
+    /* Send the partially filled transfer: no samples left waiting for the next call. */
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB && liteusb_stream_flush(dev->usb_tx) != 0)
+        return M2SDR_ERR_IO;
+#endif
 
     return M2SDR_ERR_OK;
 }
@@ -1573,6 +1858,20 @@ static int m2sdr_get_buffer_common(struct m2sdr_dev *dev,
                 return M2SDR_ERR_TIMEOUT;
             *buffer = buf + payload_off;
         }
+#ifdef USE_LITEUSB
+    } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        uint8_t *buf;
+        if (direction == M2SDR_RX) {
+            int wait_ms = nowait ? 0 : (int)(timeout_ms ? timeout_ms : dev->rx_timeout_ms);
+            buf = liteusb_stream_next_read_buffer(dev->usb_rx, wait_ms);
+        } else {
+            int wait_ms = nowait ? 0 : (int)(timeout_ms ? timeout_ms : dev->tx_timeout_ms);
+            buf = liteusb_stream_next_write_buffer(dev->usb_tx, wait_ms);
+        }
+        if (!buf)
+            return M2SDR_ERR_TIMEOUT;
+        *buffer = buf + payload_off;
+#endif
     } else {
         return M2SDR_ERR_UNSUPPORTED;
     }
@@ -1640,6 +1939,13 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
             return M2SDR_ERR_IO;
         return M2SDR_ERR_OK;
     }
+#ifdef USE_LITEUSB
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        if (liteusb_stream_write_submit(dev->usb_tx) != 0 || liteusb_stream_flush(dev->usb_tx) != 0)
+            return M2SDR_ERR_IO;
+        return M2SDR_ERR_OK;
+    }
+#endif
     return M2SDR_ERR_UNSUPPORTED;
 }
 

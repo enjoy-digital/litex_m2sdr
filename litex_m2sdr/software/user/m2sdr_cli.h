@@ -14,6 +14,7 @@ enum m2sdr_cli_transport {
     M2SDR_CLI_TRANSPORT_DEFAULT = 0,
     M2SDR_CLI_TRANSPORT_LITEPCIE,
     M2SDR_CLI_TRANSPORT_LITEETH,
+    M2SDR_CLI_TRANSPORT_LITEUSB,
 };
 
 struct m2sdr_cli_device {
