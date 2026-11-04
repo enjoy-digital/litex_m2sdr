@@ -24,6 +24,7 @@ from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder  import *
 from litex.soc.integration.soc      import SoCBusHandler
 from litex.soc.integration.soc      import SoCRegion
+from litex.soc.integration.common   import get_mem_data
 
 from litex.soc.cores.clock     import *
 from litex.soc.cores.icap      import ICAP
@@ -330,7 +331,7 @@ class BaseSoC(SoCMini):
         with_sata              = False, sata_gen=2,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
         wr_nic_dir             = None,
-        wr_cpu_type            = "urv", wr_cpu_variant=None, wr_cpu_memory="private", wr_cpu_boot="embedded",
+        wr_cpu_type            = "urv", wr_cpu_variant=None, wr_cpu_memory="private",
         wr_ext_clk10_port      = None,  wr_ext_clk10_period=100.0, wr_ext_clk10_name="wr_ext_clk10",
         with_jtagbone          = True,
         with_gpio              = False,
@@ -1039,14 +1040,15 @@ class BaseSoC(SoCMini):
             from litex_wr_nic.gateware.uart import (
                 UARTPads, UARTShared, WR_UART_CROSSOVER_MODE, WR_UART_MANUAL_MODE,
             )
-            from litex_wr_nic.gateware.wr_core   import add_white_rabbit
-            from litex_wr_nic.gateware.wr_clock  import WRMMCMBackend
-            from litex_wr_nic.gateware.wr_memory import add_wr_cpu_memory
+            from litex_wr_nic.gateware.wr_core  import add_white_rabbit
+            from litex_wr_nic.gateware.wr_clock import WRMMCMBackend
+            from litex_wr_nic.gateware.wr_cpu   import (
+                WR_CPU_MEMORY_ORIGIN, WR_CPU_MEMORY_SIZE, validate_wr_cpu_config,
+            )
 
             if wr_cpu_memory not in ("private", "integrated"):
                 raise ValueError("M2SDR WR CPU memory must be private or integrated.")
-            if wr_cpu_boot not in ("embedded", "host"):
-                raise ValueError("M2SDR WR CPU boot must be embedded or host.")
+            wr_cpu_variant = validate_wr_cpu_config(wr_cpu_type, wr_cpu_variant, wr_cpu_memory)
 
             # IOs.
             # ----
@@ -1072,24 +1074,31 @@ class BaseSoC(SoCMini):
                 default_mode = WR_UART_MANUAL_MODE,
             )
 
-            # CPU Memory / Boot.
-            # ------------------
-            wr_memory = add_wr_cpu_memory(self,
-                cpu_type = wr_cpu_type,
-                memory   = wr_cpu_memory,
-                boot     = wr_cpu_boot,
-                firmware = os.path.splitext(wr_firmware)[0] + ".bin",
-            )
+            # CPU Memory.
+            # -----------
+            wr_cpu_region = None
+            if wr_cpu_memory == "integrated":
+                wr_cpu_binary = os.path.splitext(wr_firmware)[0] + ".bin"
+                if not os.path.isfile(wr_cpu_binary):
+                    raise FileNotFoundError(f"WR CPU binary not found: {wr_cpu_binary}")
+                self.add_ram("wr_cpu_mem", WR_CPU_MEMORY_ORIGIN, WR_CPU_MEMORY_SIZE,
+                    contents = get_mem_data(wr_cpu_binary,
+                        data_width = 32,
+                        endianness = "little",
+                        mem_size   = WR_CPU_MEMORY_SIZE,
+                    ),
+                )
+                wr_cpu_region = SoCRegion(origin=WR_CPU_MEMORY_ORIGIN, size=WR_CPU_MEMORY_SIZE, mode="rwx")
 
             # Core Instance.
             # --------------
             sfp_i2c_pads = platform.request("sfp_i2c")
             wr = add_white_rabbit(self,
                 # CPU.
-                cpu_firmware    = wr_firmware,
-                cpu_type        = wr_cpu_type,
-                cpu_variant     = wr_cpu_variant,
-                **wr_memory,
+                cpu_firmware      = wr_firmware,
+                cpu_type          = wr_cpu_type,
+                cpu_variant       = wr_cpu_variant,
+                cpu_memory_region = wr_cpu_region,
 
                 # Board name.
                 board_name      = "SAWR",
@@ -1129,7 +1138,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.refclk_tuning.connect(self.refclk_mmcm_ps_gen.command),
+                self.refclk_mmcm_ps_gen.command.data.eq(wr.dac_refclk_data),
+                self.refclk_mmcm_ps_gen.command.load.eq(wr.dac_refclk_load),
                 self.crg.refclk_mmcm.psen.eq(     self.refclk_mmcm_ps_gen.psen),
                 self.crg.refclk_mmcm.psincdec.eq( self.refclk_mmcm_ps_gen.psincdec),
                 self.refclk_mmcm_ps_gen.psdone.eq(self.crg.refclk_mmcm.psdone),
@@ -1143,7 +1153,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.dmtd_tuning.connect(self.dmtd_mmcm_ps_gen.command),
+                self.dmtd_mmcm_ps_gen.command.data.eq(wr.dac_dmtd_data),
+                self.dmtd_mmcm_ps_gen.command.load.eq(wr.dac_dmtd_load),
                 self.crg.dmtd_mmcm.psen.eq(     self.dmtd_mmcm_ps_gen.psen),
                 self.crg.dmtd_mmcm.psincdec.eq( self.dmtd_mmcm_ps_gen.psincdec),
                 self.dmtd_mmcm_ps_gen.psdone.eq(self.crg.dmtd_mmcm.psdone),
@@ -1711,7 +1722,6 @@ def main():
     parser.add_argument("--wr-cpu-type",         default="urv",                              help="WR CPU implementation.", choices=["urv", "vexriscv"])
     parser.add_argument("--wr-cpu-variant",      default=None,                               help="LiteX WR CPU variant (VexRiscv only).", choices=["lite"])
     parser.add_argument("--wr-cpu-memory",       default="private",                          help="WR CPU memory.", choices=["private", "integrated"])
-    parser.add_argument("--wr-cpu-boot",         default="embedded",                         help="WR firmware source (host requires integrated RAM).", choices=["embedded", "host"])
     parser.add_argument("--wr-status",           action="store_true",                        help="Print resolved WR environment status.")
     parser.add_argument("--wr-ext-clk10-port",   default=None,                               help="Vivado port for external 10MHz clock constraint (e.g. clk10m_in).")
     parser.add_argument("--wr-ext-clk10-period", default=100.0, type=float,                  help="External 10MHz clock period in ns for constraint.")
@@ -1815,7 +1825,6 @@ def main():
         wr_cpu_type        = args.wr_cpu_type,
         wr_cpu_variant     = args.wr_cpu_variant,
         wr_cpu_memory      = args.wr_cpu_memory,
-        wr_cpu_boot        = args.wr_cpu_boot,
         wr_ext_clk10_port   = args.wr_ext_clk10_port,
         wr_ext_clk10_period = args.wr_ext_clk10_period,
         wr_ext_clk10_name   = args.wr_ext_clk10_name,
@@ -1868,8 +1877,6 @@ def main():
                 r += f"_{args.wr_cpu_variant}"
             if args.wr_cpu_memory != "private":
                 r += f"_{args.wr_cpu_memory}"
-            if args.wr_cpu_boot != "embedded":
-                r += f"_{args.wr_cpu_boot}"
         if args.with_rfic_oversampling:
             r += "_rfic_oversampling"
         if args.without_jtagbone:
