@@ -263,14 +263,14 @@ def test_main_wr_status_uses_lazy_wr_integration(monkeypatch):
     assert captured["prepare_kwargs"]["with_white_rabbit"] is False
 
 
-@pytest.mark.parametrize("options,cpu,memory,boot,suffix", [
-    ([], "urv", "private", "embedded", ""),
+@pytest.mark.parametrize("options,cpu,memory,suffix", [
+    ([], "urv", "private", ""),
     (["--wr-cpu-type=vexriscv", "--wr-cpu-memory=integrated"],
-        "vexriscv", "integrated", "embedded", "_vexriscv_integrated"),
-    (["--wr-cpu-type=vexriscv", "--wr-cpu-variant=lite", "--wr-cpu-memory=integrated", "--wr-cpu-boot=host"],
-        "vexriscv", "integrated", "host", "_vexriscv_lite_integrated_host"),
+        "vexriscv", "integrated", "_vexriscv_integrated"),
+    (["--wr-cpu-type=vexriscv", "--wr-cpu-variant=lite", "--wr-cpu-memory=integrated"],
+        "vexriscv", "integrated", "_vexriscv_lite_integrated"),
 ])
-def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options, cpu, memory, boot, suffix):
+def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options, cpu, memory, suffix):
     soc_mod  = _load_soc_module()
     captured = {}
 
@@ -300,7 +300,6 @@ def test_main_wr_cpu_configuration_and_distinct_build_names(monkeypatch, options
     for name in ("soc", "prepare"):
         assert captured[name]["wr_cpu_type"] == cpu
         assert captured[name]["wr_cpu_memory"] == memory
-    assert captured["soc"]["wr_cpu_boot"] == boot
     assert captured["soc"]["wr_cpu_variant"] == captured["prepare"]["wr_cpu_variant"]
     assert captured["build_name"] == "litex_m2sdr_baseboard_white_rabbit" + suffix
 
