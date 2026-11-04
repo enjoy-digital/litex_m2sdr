@@ -125,7 +125,8 @@ jobs:
       - name: Checkout LiteX-WR-NIC (for WR smoke tests)
         run: |
           git clone --depth=1 https://github.com/enjoy-digital/litex_wr_nic.git /tmp/litex_wr_nic
-          git -C /tmp/litex_wr_nic fetch --depth=1 origin 141f08787d579cd2bbca52453fcddbdca602f368
+          # CPU memory/boot, management and application time APIs.
+          git -C /tmp/litex_wr_nic fetch --depth=1 origin 31cfa02e80814f93084de652cfe42a975b14c164
           git -C /tmp/litex_wr_nic checkout --detach FETCH_HEAD
 
       - name: Run White Rabbit integration smoke tests
@@ -150,8 +151,9 @@ jobs:
           rm -rf wr-cores
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-sfp=1
 
-          # LiteX CPU and integrated RAM.
+          # LiteX CPU and host-loaded integrated RAM.
           ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-cpu-type=vexriscv --wr-cpu-memory=integrated
+          ./litex_m2sdr.py --with-pcie --with-white-rabbit --variant=baseboard --wr-cpu-type=vexriscv --wr-cpu-memory=integrated --wr-cpu-boot=host
 
           # WR stale local wr-cores checkout smoke test.
           rm -rf wr-cores

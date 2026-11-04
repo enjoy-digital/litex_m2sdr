@@ -48,26 +48,29 @@ def wr_soc(monkeypatch, tmp_path):
 
 # WR Integration Tests -----------------------------------------------------------------------------
 
-@pytest.mark.parametrize("sfp,cpu,memory", [
-    (0, "urv",      "private"),
-    (1, "urv",      "private"),
-    (0, "urv",      "integrated"),
-    (0, "vexriscv", "integrated"),
-    (1, "vexriscv", "integrated"),
+@pytest.mark.parametrize("sfp,cpu,memory,boot", [
+    (0, "urv",      "private",    "embedded"),
+    (1, "urv",      "private",    "embedded"),
+    (0, "urv",      "integrated", "host"),
+    (0, "vexriscv", "integrated", "embedded"),
+    (1, "vexriscv", "integrated", "host"),
 ])
-def test_wr_cpu_memory_console_and_automatic_sources(wr_soc, tmp_path, sfp, cpu, memory):
+def test_wr_cpu_memory_console_and_automatic_sources(wr_soc, tmp_path, sfp, cpu, memory, boot):
     create, registered = wr_soc
-    soc = create(wr_sfp=sfp, wr_cpu_type=cpu, wr_cpu_memory=memory)
+    soc = create(wr_sfp=sfp, wr_cpu_type=cpu, wr_cpu_memory=memory, wr_cpu_boot=boot)
     assert registered == []
     region = soc.bus.regions["wr_wb_slave"]
     assert (region.origin, region.size, region.cached) == (0x40000, 0x40000, False)
     assert not hasattr(soc.crg, "eth_pll") # The tunable MMCM owns refclk_eth.
-    assert hasattr(soc.wr_core, "wr_cpu") == (cpu == "vexriscv")
+    assert soc.wr_core.wr_info.cpu_type.status.reset.value == int(cpu == "vexriscv")
+    assert soc.uart.xover.rx_fifo.depth == 4096
     if memory == "integrated":
         assert soc.bus.regions["wr_cpu_mem"].size == 128*1024
         assert "wr_cpu" in soc.bus.masters
     else:
         assert soc.wr_core.cpu_bus is None
+    if boot == "host":
+        assert soc.wr_cpu_boot._host_ready.storage.reset.value == 0
 
     Builder(soc,
         output_dir       = tmp_path / "build",
@@ -76,8 +79,11 @@ def test_wr_cpu_memory_console_and_automatic_sources(wr_soc, tmp_path, sfp, cpu,
     ).build(run=False)
     assert registered == [soc.platform]
     csr_csv = (tmp_path / "csr.csv").read_text(encoding="utf-8")
-    for name in ("uart_xover_rxtx", "refclk_mmcm_ps_gen_status", "dmtd_mmcm_ps_gen_status"):
+    for name in ("uart_xover_rxtx", "uart_rxlevel", "uart_rxoverflow", "wr_info_magic",
+        "wr_time_capture", "refclk_mmcm_ps_gen_status", "dmtd_mmcm_ps_gen_status"):
         assert f"csr_register,{name}," in csr_csv
+    if boot == "host":
+        assert "csr_register,wr_cpu_boot_host_ready," in csr_csv
 
 
 def test_wr_mmcm_configuration_supports_fine_phase_shifting(wr_soc):
@@ -159,11 +165,13 @@ def test_wr_tuning_uses_system_clock_and_waits_for_both_mmcm_completions(wr_soc)
     assert all(count > 2 for count in completed)
 
 
-@pytest.mark.parametrize("cpu,memory", [
-    ("vexriscv", "private"),
-    ("urv",      "hyperram"),
+@pytest.mark.parametrize("cpu,memory,boot", [
+    ("vexriscv", "private",    "embedded"),
+    ("urv",      "private",    "host"),
+    ("urv",      "hyperram",   "host"),
+    ("urv",      "integrated", "spi"),
 ])
-def test_wr_rejects_unsupported_memory(wr_soc, cpu, memory):
+def test_wr_rejects_unsupported_memory_and_boot(wr_soc, cpu, memory, boot):
     create, _ = wr_soc
     with pytest.raises(ValueError):
-        create(wr_sfp=0, wr_cpu_type=cpu, wr_cpu_memory=memory)
+        create(wr_sfp=0, wr_cpu_type=cpu, wr_cpu_memory=memory, wr_cpu_boot=boot)
