@@ -5,7 +5,8 @@ import subprocess
 
 def get_pcie_device_ids(vendor, device):
     try:
-        lspci_output = subprocess.check_output(["lspci", "-d", f"{vendor}:{device}"]).decode()
+        # -D always prints the PCI domain, which lspci omits on single-domain hosts only.
+        lspci_output = subprocess.check_output(["lspci", "-D", "-d", f"{vendor}:{device}"]).decode()
         # Split output into lines and extract device IDs (first field of each line)
         device_ids = [line.split()[0] for line in lspci_output.strip().split('\n') if line]
         return device_ids
@@ -15,7 +16,7 @@ def get_pcie_device_ids(vendor, device):
 def remove_pcie_device(device_id, driver="litepcie"):
     if not device_id:
         return
-    subprocess.run(f"echo 1 | sudo tee /sys/bus/pci/devices/0000:{device_id}/remove > /dev/null", shell=True)
+    subprocess.run(f"echo 1 | sudo tee /sys/bus/pci/devices/{device_id}/remove > /dev/null", shell=True)
 
 def rescan_pcie_bus():
     subprocess.run("echo 1 | sudo tee /sys/bus/pci/rescan > /dev/null", shell=True)
