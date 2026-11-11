@@ -11,6 +11,19 @@
 #include <stdint.h>
 
 #include "m2sdr_cli.h"
+#include "m2sdr_revision.h"
+
+void m2sdr_cli_handle_version(int argc, char **argv)
+{
+    const char *tool;
+
+    /* Only a lone --version, so an option value spelled "--version" never matches. */
+    if (argc != 2 || strcmp(argv[1], "--version") != 0)
+        return;
+    tool = strrchr(argv[0], '/');
+    printf("%s %s (git %s)\n", tool ? tool + 1 : argv[0], M2SDR_VERSION, M2SDR_GIT_REVISION);
+    exit(0);
+}
 
 void m2sdr_cli_device_init(struct m2sdr_cli_device *dev)
 {

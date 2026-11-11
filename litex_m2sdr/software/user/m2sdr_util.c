@@ -4394,6 +4394,7 @@ static bool cmd_is(const char *cmd, const char *name, const char *alias)
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     enum {
         OPTION_WATCH = 256,
         OPTION_WATCH_INTERVAL,
