@@ -199,6 +199,10 @@ _connectors = [
     })
 ]
 
+# GTP channel of each M.2 PCIe lane: PERp0-3 (D9, D11, B10, B8) are quad 216 channels 3, 1, 2, 0.
+# Lanes 1 and 2 are swapped against the PCIe IP's default order, so targets must LOC them.
+M2_PCIE_GT_LOCS = ["GTPE2_CHANNEL_X0Y7", "GTPE2_CHANNEL_X0Y5", "GTPE2_CHANNEL_X0Y6", "GTPE2_CHANNEL_X0Y4"]
+
 # Platform -----------------------------------------------------------------------------------------
 
 class Platform(Xilinx7SeriesPlatform):
