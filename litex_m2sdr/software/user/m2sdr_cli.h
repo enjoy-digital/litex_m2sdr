@@ -26,6 +26,7 @@ struct m2sdr_cli_device {
     char port[16];
 };
 
+void m2sdr_cli_handle_version(int argc, char **argv);
 void m2sdr_cli_device_init(struct m2sdr_cli_device *dev);
 int m2sdr_cli_handle_device_option(struct m2sdr_cli_device *dev, int opt, const char *optarg);
 int m2sdr_cli_set_device_id(struct m2sdr_cli_device *dev, const char *device_id);
