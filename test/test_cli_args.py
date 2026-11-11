@@ -345,3 +345,18 @@ def test_base_soc_rejects_pcie_eth_sata_triple_use():
             with_sata=True,
             with_jtagbone=False,
         )
+
+
+@pytest.mark.parametrize("lanes", [2, 4])
+def test_m2_pcie_lanes_are_placed_on_their_m2_pins(lanes):
+    # M.2 lane 1 is GTP channel X0Y5 (D11) and lane 2 X0Y6 (B10); the PCIe IP's default puts
+    # lane 1 on X0Y6, which in x2 builds leaves the link stuck at x1.
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(variant="m2", with_pcie=True, pcie_lanes=lanes)
+    locs = {}
+    for command in soc.platform.toolchain.pre_placement_commands:
+        if command.startswith("set_property LOC GTPE2_CHANNEL"):
+            lane = int(command.split("pipe_lane[")[1].split("]")[0])
+            locs[lane] = command.split()[2]
+    expected = ["GTPE2_CHANNEL_X0Y7", "GTPE2_CHANNEL_X0Y5", "GTPE2_CHANNEL_X0Y6", "GTPE2_CHANNEL_X0Y4"]
+    assert [locs[lane] for lane in range(lanes)] == expected[:lanes]
