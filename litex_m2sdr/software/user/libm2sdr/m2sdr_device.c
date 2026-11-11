@@ -2223,16 +2223,52 @@ int m2sdr_reset_datapath(struct m2sdr_dev *dev)
     return status;
 }
 
+/* The gateware resets frame_cycles to one 8192-byte DMA buffer, but the kernel buffer size is a
+ * per-channel module parameter (dma_buffer_size). Size the frame to this channel's actual buffer so
+ * each buffer carries exactly one header at its start; otherwise larger buffers get headers
+ * in the middle of their payload. */
+static int m2sdr_set_header_frame_cycles(struct m2sdr_dev *dev, uint32_t addr, bool rx)
+{
+    struct litepcie_ioctl_mmap_dma_info info;
+    uint32_t word_bytes   = 8; /* 64-bit stream words, 2 header words. */
+    uint32_t header_words = 2;
+    uint64_t buf_size;
+
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE || dev->fd < 0)
+        return M2SDR_ERR_OK;
+    if (ioctl(dev->fd, LITEPCIE_IOCTL_MMAP_DMA_INFO, &info) < 0)
+        return M2SDR_ERR_IO;
+    buf_size = rx ? info.dma_rx_buf_size : info.dma_tx_buf_size;
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    {
+        struct m2sdr_capabilities caps;
+        if (m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+            (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING)) {
+            word_bytes   = 16; /* 128-bit stream words, 1 header word. */
+            header_words = 1;
+        }
+    }
+#endif
+    if (buf_size / word_bytes <= header_words)
+        return M2SDR_ERR_RANGE;
+    return m2sdr_reg_write(dev, addr, (uint32_t)(buf_size / word_bytes - header_words)) != 0 ?
+        M2SDR_ERR_IO : M2SDR_ERR_OK;
+}
+
 /* Enable or disable RX-side DMA headers and remember whether the sync API
  * should strip them before returning samples to the caller. */
 int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
 {
+    int rc;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
 
     dev->rx_header_enable = enable ? 1 : 0;
     dev->rx_strip_header  = strip_header ? 1 : 0;
 
+    if (enable && (rc = m2sdr_set_header_frame_cycles(dev, CSR_HEADER_RX_FRAME_CYCLES_ADDR, true)) != M2SDR_ERR_OK)
+        return rc;
     if (m2sdr_reg_write(dev, CSR_HEADER_RX_CONTROL_ADDR,
         (1 << CSR_HEADER_RX_CONTROL_ENABLE_OFFSET) |
         ((enable ? 1 : 0) << CSR_HEADER_RX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
@@ -2243,11 +2279,15 @@ int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
 /* Enable or disable TX-side insertion of the FPGA DMA header. */
 int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
 {
+    int rc;
+
     if (!dev)
         return M2SDR_ERR_INVAL;
 
     dev->tx_header_enable = enable ? 1 : 0;
 
+    if (enable && (rc = m2sdr_set_header_frame_cycles(dev, CSR_HEADER_TX_FRAME_CYCLES_ADDR, false)) != M2SDR_ERR_OK)
+        return rc;
     if (m2sdr_reg_write(dev, CSR_HEADER_TX_CONTROL_ADDR,
         (1 << CSR_HEADER_TX_CONTROL_ENABLE_OFFSET) |
         ((enable ? 1 : 0) << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET)) != 0)
