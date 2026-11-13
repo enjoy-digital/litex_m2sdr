@@ -287,7 +287,7 @@ Bank `si5351`.
 
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
-| `i2c_phy_speed_` `mode` | `0x0000` | 2 | rw | I2C speed: 0: 100 kHz, 1: 400 kHz, 2: 1 MHz. Reset `0x0`. |
+| `i2c_phy_speed_` `mode` | `0x0000` | 2 | rw | I2C speed mode (0: 100 kHz Standard-mode, 1: 400 kHz Fast-mode, 2: 1 MHz Fast-mode Plus, 3: reserved, 100 kHz), applied while ``active`` is 0. Reset `0x0`. |
 | `i2c_master_` `active` | `0x0004` | 1 | rw | Write 1 to enable the I2C master. Reset `0x0`. |
 | `i2c_master_` `settings` | `0x0008` | 17 | rw | I2C transfer settings Reset `0x0`. |
 | `i2c_master_addr` | `0x000c` | 7 | rw | I2C address of the next transfer. Reset `0x0`. |
@@ -303,8 +303,8 @@ Fields of `i2c_master_settings`:
 
 | Field | Bits | Description |
 |------------------------|---------|------------------------------------------------------|
-| `len_tx` | 2:0 | I2C tx Xfer length (in bytes). Set to a value greater then 4 to anounce more data has to be transmitted. |
-| `len_rx` | 10:8 | I2C rx Xfer length (in bytes). Set to a value greater then 4 to anounce more data has to be received. |
+| `len_tx` | 2:0 | I2C tx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be transmitted. |
+| `len_rx` | 10:8 | I2C rx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be received. |
 | `recover` | 16 | I2C recover bus. If set, the I2C bus will be recovered. |
 
 Fields of `i2c_master_status`:
@@ -313,7 +313,7 @@ Fields of `i2c_master_status`:
 |------------------------|---------|------------------------------------------------------|
 | `tx_ready` | 0 | TX FIFO is not full. |
 | `rx_ready` | 1 | RX FIFO is not empty. |
-| `nack` | 8 | Error on transfer. |
+| `nack` | 8 | Transfer not acknowledged (address or data NACK), also set with bus_error. |
 | `bus_error` | 9 | I2C bus error on transfer. |
 | `tx_unfinished` | 16 | Another tx transfer is expected. |
 | `rx_unfinished` | 17 | Another rx transfer is expected. |

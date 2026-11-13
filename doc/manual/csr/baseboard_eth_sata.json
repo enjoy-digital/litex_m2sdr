@@ -3195,7 +3195,7 @@
   "si5351": [
    {
     "access": "rw",
-    "description": "I2C speed: 0: 100 kHz, 1: 400 kHz, 2: 1 MHz.",
+    "description": "I2C speed mode (0: 100 kHz Standard-mode, 1: 400 kHz Fast-mode, 2: 1 MHz Fast-mode Plus, 3: reserved, 100 kHz), applied while ``active`` is 0.",
     "fields": [],
     "name": "i2c_phy_speed_mode",
     "offset": 0,
@@ -3216,7 +3216,7 @@
     "description": "I2C transfer settings",
     "fields": [
      {
-      "description": "I2C tx Xfer length (in bytes). Set to a value greater then 4 to anounce more data has to be transmitted.",
+      "description": "I2C tx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be transmitted.",
       "name": "len_tx",
       "offset": 0,
       "reset": 0,
@@ -3224,7 +3224,7 @@
       "values": []
      },
      {
-      "description": "I2C rx Xfer length (in bytes). Set to a value greater then 4 to anounce more data has to be received.",
+      "description": "I2C rx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be received.",
       "name": "len_rx",
       "offset": 8,
       "reset": 0,
@@ -3284,7 +3284,7 @@
       "values": []
      },
      {
-      "description": "Error on transfer.",
+      "description": "Transfer not acknowledged (address or data NACK), also set with bus_error.",
       "name": "nack",
       "offset": 8,
       "reset": 0,
