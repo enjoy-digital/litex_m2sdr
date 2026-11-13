@@ -873,6 +873,7 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
+        self.ad9361.add_active_settings()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
