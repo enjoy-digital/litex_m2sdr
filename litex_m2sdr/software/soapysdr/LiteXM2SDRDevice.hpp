@@ -438,6 +438,8 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
 
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
+    /* RF (SI5351/AD9361) initialized at open: false with bypass_init=1, the RFIC is then left as found on close. */
+    bool _rfInitDone = false;
     SoapyLiteXM2SDREthernetMode _eth_mode = SoapyLiteXM2SDREthernetMode::UDP;
     std::string _eth_ip;
     uint16_t _liteeth_rx_port = 2345;
