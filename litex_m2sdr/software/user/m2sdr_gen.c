@@ -619,6 +619,7 @@ static void help(void) {
 /*------*/
 
 int main(int argc, char **argv) {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     int option_index = 0;
     static uint8_t m2sdr_device_zero_copy = 0;

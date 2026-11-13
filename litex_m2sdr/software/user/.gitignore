@@ -11,3 +11,4 @@
 /m2sdr_sigmf_info
 /.build-flags
 /.build-flags-*
+/m2sdr_revision.h

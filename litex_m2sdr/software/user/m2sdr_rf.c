@@ -90,6 +90,7 @@ static int parse_i64_option(const char *name, const char *value, int64_t *out)
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     struct m2sdr_config cfg;
     struct m2sdr_cli_device cli_dev;

@@ -1,13 +1,28 @@
 # LiteX-M2SDR Debugging Guide
 
-This document is a practical starting point for developers or agents debugging
-LiteX-M2SDR gateware, software, and hardware behavior. Keep it current as new
-features and debug flows are added.
+This page is the LiteX-M2SDR-specific part of debugging: builds, transports, LiteEth/Etherbone,
+loopback diagnostics, probes and regression tests. The generic method (reproduce, check the link,
+registers before traces, narrow LiteScope captures, read the generated Verilog, turn the finding into
+a test, write it up) is on the LiteX wiki: [Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware).
+Follow it, and use this page for the M2SDR commands. Keep this page current as features and debug
+flows are added.
 
-The goal is to avoid rediscovering the same workflow each time: inspect the
-design, reproduce the issue on hardware, use CSR access over Etherbone or PCIe,
-add small observability points, inspect generated Verilog, and turn the finding
-into a focused regression test whenever possible.
+## Drive The Board From An Agent Or A Script
+
+The LiteX host tools give structured access to the board through the same bridges (Etherbone,
+PCIe, JTAGBone):
+
+```bash
+litex_server --udp --udp-ip=192.168.1.50 --udp-port=1234   # or: sudo litex_server --pcie --pcie-bar=04:00.0
+litex_mcp --csr-csv=scripts/csr.csv --port=1234            # MCP server for AI agents (pip3 install mcp)
+litex_cli --csr-csv=scripts/csr.csv --ident --regs --filter=crossbar --json
+litescope_cli --csv test/analyzer.csv --csr-csv scripts/csr.csv -r <signal> --timeout 10 --json
+```
+
+`litex_mcp` exposes the SoC as typed tools (`litex_check` first: link and SoC identity, then CSRs
+by name, memory, LiteScope captures returned as data, the console, builds with parsed timing and
+simulations); writes and `--load`/`--flash` need `--allow-write`. See
+[LiteX for AI agents](https://github.com/enjoy-digital/litex/wiki/LiteX-for-AI-Agents#drive-a-soc-through-mcp).
 
 ## First Pass
 
@@ -393,16 +408,10 @@ it is not the full SoC bus address.
 
 ## LiteScope
 
-Use LiteScope after narrowing the question with CSRs and generated Verilog.
-Keep captures small. As a rule, stay below 128 captured signal bits; up to 256
-bits can work, but larger captures often fail or make builds hard to close.
-
-Prefer:
-
-- one bus channel rather than every bus in the design;
-- address/control/FSM bits before wide data paths;
-- a short depth with a precise trigger before a deep blind capture;
-- one clock domain per analyzer.
+Use LiteScope after narrowing the question with CSRs and generated Verilog, with the rules of
+[Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware#litescope-narrowly) (below 128 captured
+bits, one clock domain, a precise trigger). On M2SDR, larger captures often fail or make builds hard
+to close.
 
 List the available probe switches from the target script, then enable only the
 probe that matches the current question:
@@ -455,44 +464,11 @@ rg -n "mem|sram|csr|wishbone|ack|cyc|stb|adr" build/<build_name>/gateware/<build
 rg -n "WNS|WHS|VIOLATED|Timing" build/<build_name>/gateware/vivado.log build/<build_name>/gateware/*timing*.rpt
 ```
 
-For bus issues, check these explicitly:
-
-- byte-addressed versus word-addressed Wishbone interfaces;
-- address bits dropped by adapters, usually `adr[31:2]` for 32-bit word buses;
-- region decoder boundaries when sizes cross powers of two;
-- generated constants assigned to bus addresses;
-- whether a master uses a CSR-local offset where a full main-bus address is
-  required.
-
-Positive timing is necessary but not proof of functional correctness. If timing
-is suspected, compare:
-
-- default `sys_clk_freq` versus a lower one, such as 100 MHz;
-- timing directives and WNS/WHS;
-- a minimal SoC versus the full SoC;
-- another CPU only when the failure could plausibly be CPU-specific.
-
-## Investigation Loop
-
-Use this loop for difficult issues:
-
-1. Reproduce the failure and write down the exact build command, bitstream,
-   board transport, host command, and observed behavior.
-2. Establish a known-good build and one minimal failing change.
-3. Verify the host path with a simple CSR read/write or `m2sdr_util info`.
-4. Inspect generated maps: `scripts/csr.csv`, `csr.h`, `mem.h`, and generated
-   Verilog.
-5. Add a CSR counter/status if polling can answer the next question.
-6. Add a narrow LiteScope probe if the issue is temporal or bus-handshake
-   related.
-7. Rebuild, load, capture, and record the hardware result.
-8. Fix the root cause in the smallest appropriate layer.
-9. Add a regression test or host-side check that would have caught it.
-10. Commit the fix separately from exploratory instrumentation unless the
-    instrumentation is intentionally reusable.
-
-Avoid jumping directly to broad instrumentation. The fastest path is often:
-hardware symptom, generated Verilog, one narrow trace, then fix.
+The bus checks (byte/word addressing, dropped address bits, decoder boundaries, CSR-local
+offsets) and how to separate timing from logic are on
+[Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware#read-the-generated-design). On M2SDR, start
+the timing comparison by rebuilding at `--sys-clk-freq=100e6` (default 125 MHz); `litex_build_report`
+(through `litex_mcp`) returns the Vivado WNS/WHS, failing paths and utilization as data.
 
 ## Regression Tests
 
@@ -524,54 +500,7 @@ When a bug is discovered only on hardware, still try to capture a software or
 unit-level invariant from it: parser behavior, address computation, CSR map
 stability, generated constant, or host command behavior.
 
-## Common Debug Patterns
-
-The same few patterns explain many gateware/software mismatches. Before adding
-large traces, check whether the failure fits one of these categories.
-
-### Addressing And Decode
-
-Symptoms:
-
-- a host bridge still answers, but one internal master or slave appears stuck;
-- changing a memory or CSR region size changes unrelated behavior;
-- a bus transaction reaches the wrong slave;
-- generated RTL contains an unexpected address constant.
-
-Checks:
-
-- confirm whether each bus interface is byte-addressed or word-addressed;
-- inspect adapters for dropped low address bits;
-- compare generated decoder masks against the intended region map;
-- verify that any gateware bus master uses full SoC bus addresses, not local
-  offsets from a sub-bus;
-- read back a harmless register through the same transport before testing the
-  failing path.
-
-If a gateware master reaches a CSR through the main bus, use
-`self.get_csr_address("name")` for the base address. Keep
-`self.csr.address_map("name", origin=True)` for CSR-local reasoning only.
-
-### Timing Versus Logic
-
-Symptoms:
-
-- the same bitstream behaves differently across builds or tool directives;
-- timing reports are close to zero slack;
-- lowering `sys_clk_freq` changes the symptom.
-
-Checks:
-
-- compare WNS/WHS for working and failing builds;
-- retry with a lower `sys_clk_freq`;
-- inspect clock-domain crossings and reset release paths;
-- use LiteScope only after deciding which handshake or FSM should be observed.
-
-Positive timing does not prove the logic is correct. Treat timing experiments as
-a way to separate marginal implementation behavior from deterministic design
-bugs.
-
-### Host API And Software State
+## Host API And Software State
 
 Symptoms:
 
@@ -589,25 +518,12 @@ Checks:
 - add a unit test around parsing, validation, state transition, or register
   sequence logic once the hardware behavior is understood.
 
-### Capture Only What Answers The Question
-
-A good capture has a narrow question: "does this master issue a read?", "does
-the slave acknowledge?", "which FSM state holds?", or "which endpoint receives
-the packet?" Capture the minimum signals needed to answer that question, then
-iterate.
+The other recurring patterns (addressing and decode, timing versus logic, captures that answer
+one question) are described on [Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware).
 
 ## Capturing Results
 
-A useful debug commit or note should include:
-
-- exact build command;
-- transport used: PCIe, Etherbone, JTAGBone, or crossover UART;
-- bitstream timing summary when relevant;
-- host commands used to reproduce or validate;
-- register values, LiteScope signal names, or Verilog snippets that prove the
-  conclusion;
-- tests run afterward.
-
-Keep exploratory artifacts out of commits unless they are intentionally part of
-the project. Keep reusable probes, scripts, and tests in the tree so the next
-person can start one level higher.
+Write up results as described on [Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware#close-the-loop),
+with the M2SDR specifics: the exact `./litex_m2sdr.py` build command and variant, the transport
+(PCIe, Etherbone, JTAGBone or crossover UART), the bitstream timing summary, and the `m2sdr_util`
+or script commands used. Keep reusable probes, scripts and tests in the tree.

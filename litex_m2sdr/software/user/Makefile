@@ -2,6 +2,9 @@ PREFIX ?= /usr/local
 SCAN_UI_DIR := scan_ui
 SCAN_CIMGUI_DIR := cimgui
 M2SDR_VERSION := 1.1.0
+# Commit the tools are built from, printed by `<tool> --version` (-dirty: tracked local edits).
+M2SDR_GIT_REVISION := $(shell r=$$(git rev-parse HEAD 2>/dev/null) && \
+	{ git diff --quiet HEAD -- || r=$$r-dirty; echo $$r; } || echo unknown)
 
 # Backend selection: USE_RUNTIME (default), USE_LITEPCIE, USE_LITEETH, or USE_LITEUSB.
 # USE_RUNTIME builds one binary set that can open pcie:, eth: (and usb:) devices.
@@ -283,8 +286,8 @@ m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr
 m2sdr_record: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_record.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
-m2sdr_sigmf: $(LIBM2SDR_STATIC) m2sdr_sigmf.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
+m2sdr_sigmf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_sigmf.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_sigmf.o $(M2SDR_LINK_LIBS)
 
 m2sdr_gpio: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_gpio.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_gpio.o $(M2SDR_LINK_LIBS)
@@ -322,7 +325,7 @@ m2sdr_scan: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(M2SDR_SCAN_OBJS) $(M2SDR_IMGUI_OBJS
 clean:
 	rm -f $(PROGS) $(ALL_BINARIES) *.o *.a *.d *~
 	rm -f $(EXAMPLES)
-	rm -f .build-flags .build-flags-*
+	rm -f .build-flags .build-flags-* m2sdr_revision.h
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
 	rm -f tests/*.o tests/*.d $(TEST_PROGS)
@@ -357,6 +360,13 @@ $(BUILD_FLAGS_FILE): FORCE
 	else \
 		rm -f $@.tmp; \
 	fi
+
+# Rewritten only when the revision changes, so unchanged builds stay incremental.
+m2sdr_revision.h: FORCE
+	@printf '#define M2SDR_VERSION "%s"\n#define M2SDR_GIT_REVISION "%s"\n' '$(M2SDR_VERSION)' '$(M2SDR_GIT_REVISION)' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; fi
+
+m2sdr_cli.o: m2sdr_revision.h
 
 %.o: %.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(PNG_CFLAGS) -o $@ $<

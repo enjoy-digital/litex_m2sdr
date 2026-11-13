@@ -107,7 +107,10 @@ def test_wr_tuning_uses_system_clock_and_waits_for_both_mmcm_completions(wr_soc)
     dut.cd_clk200 = ClockDomain("clk200")
     backends = [soc.refclk_mmcm_ps_gen, soc.dmtd_mmcm_ps_gen]
     mmcms    = [soc.crg.refclk_mmcm, soc.crg.dmtd_mmcm]
-    commands = [soc.wr_core.refclk_tuning, soc.wr_core.dmtd_tuning]
+    commands = [
+        (soc.wr_core.dac_refclk_data, soc.wr_core.dac_refclk_load),
+        (soc.wr_core.dac_dmtd_data,   soc.wr_core.dac_dmtd_load),
+    ]
     dut.submodules += backends
 
     # Simulate the actual board connections around the two real backends.
@@ -125,12 +128,12 @@ def test_wr_tuning_uses_system_clock_and_waits_for_both_mmcm_completions(wr_soc)
     def send_commands():
         for _ in range(10):
             yield
-        for command in commands:
-            yield command.data.eq(0)
-            yield command.load.eq(1)
+        for data, load in commands:
+            yield data.eq(0)
+            yield load.eq(1)
         yield
-        for command in commands:
-            yield command.load.eq(0)
+        for _, load in commands:
+            yield load.eq(0)
 
     def mmcm_model(index, delay):
         mmcm      = mmcms[index]
