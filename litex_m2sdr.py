@@ -608,8 +608,11 @@ class BaseSoC(SoCMini):
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             # The DMA synchronizer (when not bypassed by software) waits for
             # this PPS pulse before declaring synced; PCIe streaming liveness
-            # therefore depends on the time generator staying enabled.
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
+            # therefore depends on the time generator staying enabled. Each
+            # DMA channel has its own synchronizer and needs the pulse.
+            for n in range(pcie_dmas):
+                pcie_dma = getattr(self, f"pcie_dma{n}")
+                self.comb += pcie_dma.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # Host <-> SoC DMA Bus.
             # ---------------------
