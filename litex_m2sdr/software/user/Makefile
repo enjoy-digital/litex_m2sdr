@@ -384,8 +384,8 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr_sigmf.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
-		if [ -f ../doc/libm2sdr/$$ex.c ]; then \
-			install -m 644 ../doc/libm2sdr/$$ex.c $(PREFIX)/share/litex_m2sdr/examples; \
+		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \
+			install -m 644 ../../doc/libm2sdr/$$ex.c $(PREFIX)/share/litex_m2sdr/examples; \
 		else \
 			echo "Skipping missing example: $$ex.c"; \
 		fi; \
