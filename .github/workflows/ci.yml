@@ -111,6 +111,12 @@ jobs:
             python3 litex_setup.py --config=standard --init --install --user
           popd
 
+      # Register appendix of the manual (CSR snapshots and A_registers.md match the gateware).
+      - name: Check Register Appendix
+        run: |
+          python3 doc/manual/tools/csr_doc.py dump --check
+          python3 doc/manual/tools/csr_doc.py generate --check
+
       - name: Tag build with version information
         run: |
           rm -rf build
