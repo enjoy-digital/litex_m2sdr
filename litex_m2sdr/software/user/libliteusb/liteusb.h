@@ -23,7 +23,6 @@ extern "C" {
 
 #define LITEUSB_DEFAULT_VID      0x1d50
 #define LITEUSB_DEFAULT_PID      0x605a
-#define LITEUSB_INTERFACE        0
 #define LITEUSB_RX_EP            0x81 /* Bulk IN  (EP1): RFIC RX samples. */
 #define LITEUSB_TX_EP            0x02 /* Bulk OUT (EP2): RFIC TX samples. */
 
@@ -32,6 +31,8 @@ extern "C" {
 #define LITEUSB_WB_WRITE         0x43 /* bmRequestType: Host-to-Device, Vendor, Other. */
 #define LITEUSB_WB_REQUEST       0x00
 #define LITEUSB_WB_MAX_WORDS     128  /* Words per Control transfer. */
+#define LITEUSB_ERROR_BUSY       (-6) /* LIBUSB_ERROR_BUSY. */
+#define LITEUSB_ERROR_TIMEOUT    (-7) /* LIBUSB_ERROR_TIMEOUT. */
 
 #define LITEUSB_PATH_MAX         32
 #define LITEUSB_SERIAL_MAX       64

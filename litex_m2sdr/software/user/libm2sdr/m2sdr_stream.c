@@ -498,8 +498,12 @@ static int m2sdr_liteusb_stream_open(struct m2sdr_dev *dev, enum m2sdr_direction
     if (direction == M2SDR_TX && !dev->usb_tx)
         dev->usb_tx = liteusb_stream_open(dev->usb, LITEUSB_TX_EP, DMA_BUFFER_SIZE,
                                           M2SDR_LITEUSB_TX_BUFFER_COUNT, M2SDR_LITEUSB_TX_BUFS_PER_XFER);
-    if ((direction == M2SDR_RX && !dev->usb_rx) || (direction == M2SDR_TX && !dev->usb_tx))
+    if ((direction == M2SDR_RX && !dev->usb_rx) || (direction == M2SDR_TX && !dev->usb_tx)) {
+        /* RX/TX interface already claimed (stream used by another process). */
+        if (liteusb_last_error(dev->usb) == LITEUSB_ERROR_BUSY)
+            return M2SDR_ERR_STATE;
         return M2SDR_ERR_NO_MEM;
+    }
     return M2SDR_ERR_OK;
 }
 

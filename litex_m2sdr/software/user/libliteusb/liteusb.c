@@ -146,9 +146,6 @@ struct liteusb_connection *liteusb_connect(uint16_t vid, uint16_t pid,
     if (!conn->handle)
         goto fail;
     (void)libusb_set_auto_detach_kernel_driver(conn->handle, 1);
-    if (libusb_claim_interface(conn->handle, LITEUSB_INTERFACE) != 0)
-        goto fail;
-    conn->claimed = 1;
     return conn;
 
 fail:
@@ -160,8 +157,9 @@ void liteusb_disconnect(struct liteusb_connection *conn)
 {
     if (!conn)
         return;
-    if (conn->claimed)
-        libusb_release_interface(conn->handle, LITEUSB_INTERFACE);
+    for (int i = 0; i < 32; i++)
+        if (conn->claimed & (1u << i))
+            liteusb_release_interface(conn, i);
     if (conn->handle)
         libusb_close(conn->handle);
     if (conn->ctx)
@@ -183,8 +181,8 @@ int liteusb_last_error(struct liteusb_connection *conn)
     return conn ? conn->last_error : LIBUSB_ERROR_INVALID_PARAM;
 }
 
-/* SoC bus/CSR accesses */
-/*----------------------*/
+/* Interfaces */
+/*------------*/
 
 static int liteusb_fail(struct liteusb_connection *conn, int err)
 {
@@ -192,12 +190,52 @@ static int liteusb_fail(struct liteusb_connection *conn, int err)
     return err;
 }
 
+int liteusb_claim_endpoint(struct liteusb_connection *conn, unsigned char ep)
+{
+    struct libusb_config_descriptor *config;
+    int interface = LIBUSB_ERROR_NOT_FOUND;
+    int rc;
+
+    if (!conn)
+        return LIBUSB_ERROR_INVALID_PARAM;
+    rc = libusb_get_active_config_descriptor(libusb_get_device(conn->handle), &config);
+    if (rc != 0)
+        return rc;
+    for (int i = 0; i < config->bNumInterfaces && interface < 0; i++) {
+        const struct libusb_interface_descriptor *alt = &config->interface[i].altsetting[0];
+        for (int j = 0; j < alt->bNumEndpoints; j++)
+            if (alt->endpoint[j].bEndpointAddress == ep)
+                interface = alt->bInterfaceNumber;
+    }
+    libusb_free_config_descriptor(config);
+    if (interface < 0 || interface >= 32)
+        return LIBUSB_ERROR_NOT_FOUND;
+
+    rc = libusb_claim_interface(conn->handle, interface);
+    if (rc != 0)
+        return liteusb_fail(conn, rc);
+    conn->claimed |= 1u << interface;
+    return interface;
+}
+
+void liteusb_release_interface(struct liteusb_connection *conn, int interface)
+{
+    if (!conn || interface < 0 || interface >= 32 || !(conn->claimed & (1u << interface)))
+        return;
+    libusb_release_interface(conn->handle, interface);
+    conn->claimed &= ~(1u << interface);
+}
+
+/* SoC bus/CSR accesses */
+/*----------------------*/
+
 int liteusb_read_burst(struct liteusb_connection *conn, uint32_t addr, uint32_t *vals, size_t count)
 {
     uint8_t data[4*LITEUSB_WB_MAX_WORDS];
 
     if (!conn || (!vals && count))
         return LIBUSB_ERROR_INVALID_PARAM;
+    conn->last_error = 0;
 
     while (count) {
         size_t words = count > LITEUSB_WB_MAX_WORDS ? LITEUSB_WB_MAX_WORDS : count;
@@ -226,6 +264,7 @@ int liteusb_write_burst(struct liteusb_connection *conn, uint32_t addr, const ui
 
     if (!conn || (!vals && count))
         return LIBUSB_ERROR_INVALID_PARAM;
+    conn->last_error = 0;
 
     while (count) {
         size_t words = count > LITEUSB_WB_MAX_WORDS ? LITEUSB_WB_MAX_WORDS : count;

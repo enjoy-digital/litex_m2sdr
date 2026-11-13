@@ -36,6 +36,7 @@ struct liteusb_slot {
 struct liteusb_stream {
     struct liteusb_connection *conn;
     unsigned char ep;
+    int interface; /* Claimed interface of ep (-1: none). */
     int is_rx;
     int started;
 
@@ -159,11 +160,17 @@ struct liteusb_stream *liteusb_stream_open(struct liteusb_connection *conn, unsi
         return NULL;
     s->conn          = conn;
     s->ep            = ep;
+    s->interface     = -1;
     s->is_rx         = (ep & LIBUSB_ENDPOINT_IN) ? 1 : 0;
     s->buf_size      = buf_size;
     s->buf_count     = buf_count;
     s->bufs_per_xfer = bufs_per_xfer;
     s->slot_count    = buf_count/bufs_per_xfer;
+
+    /* Claim the interface of the endpoint (fails if used by another process). */
+    s->interface = liteusb_claim_endpoint(conn, ep);
+    if (s->interface < 0)
+        goto fail;
 
     /* DMA-able buffers from usbfs when available (zero-copy), heap otherwise. */
     s->ring = libusb_dev_mem_alloc(conn->handle, buf_size*buf_count);
@@ -201,6 +208,7 @@ void liteusb_stream_close(struct liteusb_stream *s)
         libusb_dev_mem_free(s->conn->handle, s->ring, s->buf_size*s->buf_count);
     else
         free(s->ring);
+    liteusb_release_interface(s->conn, s->interface);
     free(s);
 }
 

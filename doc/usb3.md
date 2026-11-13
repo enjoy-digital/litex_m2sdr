@@ -24,6 +24,11 @@ The USB3 device (vendor class, `1d50:605a` by default) provides:
 | EP1 Bulk IN | RFIC RX samples (crossbar port 3), 8KB frames (optional 16-byte header + samples), as with PCIe. |
 | EP2 Bulk OUT | RFIC TX samples (crossbar port 3), 256KB FIFO primed (half full) before feeding the RFIC. |
 
+RX (EP1, interface 0) and TX (EP2, interface 1) are claimed by the host per stream: RX and TX can be
+used by separate processes (ex: `m2sdr_record` and `m2sdr_play`), and CSR tools (`m2sdr_util`,
+`m2sdr_rf`, `litex_server --usb`) can be used while streaming (EP0 requests need no claimed
+interface).
+
 The USB3 PLL is the second PLL of the shared GTP QPLL (100MHz oscillator through a BUFG on
 GTGREFCLK, 2.5GHz VCO), so USB3 can be combined with PCIe Gen2 X1 (baseboard M.2 lane 3), but not
 with Ethernet, SATA or White Rabbit (yet).
@@ -58,8 +63,9 @@ lsusb -t       # 5000M link.
 lsusb -d 1d50:605a
 ```
 
-`--with-usb3-debug` adds the USB3-PIPE PHY debug CSRs (LTSSM state/history, SerDes counters),
-readable over PCIe, JTAGBone or USB itself. `--usb3-vid/--usb3-pid` change the USB IDs.
+`--with-usb3-debug` adds the USB3-PIPE PHY, SerDes and device core debug CSRs (LTSSM state/history,
+RX error statistics, clock meters, DRP, Recovery causes), readable over PCIe, JTAGBone or USB itself
+with USB3-PIPE's `bench/usb3_debug.py`. `--usb3-vid/--usb3-pid` change the USB IDs.
 
 User access to the device (udev):
 

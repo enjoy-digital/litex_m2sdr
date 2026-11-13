@@ -69,6 +69,18 @@ static inline uint32_t m2sdr_readl(void *conn, uint32_t addr)
     return eb_read32((struct eb_connection *)conn, addr);
 }
 
+/* Last access status of a legacy raw handle (PCIe accesses do not fail). */
+static inline int m2sdr_legacy_handle_ok(void *conn)
+{
+    if (m2sdr_legacy_handle_is_fd(conn))
+        return 1;
+#ifdef USE_LITEUSB
+    if (liteusb_is_connection(conn))
+        return liteusb_last_error((struct liteusb_connection *)conn) == 0;
+#endif
+    return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
+}
+
 /* Libs */
 
 #include "m2sdr_si5351_i2c.h"
