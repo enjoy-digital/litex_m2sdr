@@ -725,6 +725,8 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
+/* The TX header (and timed TX) is supported on the PCIe link only: enabling it
+ * on another link returns M2SDR_ERR_UNSUPPORTED. */
 int  m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable);
 
 /* GPIO helper (4-bit) */

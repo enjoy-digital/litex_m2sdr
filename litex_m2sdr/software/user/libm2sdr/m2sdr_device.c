@@ -2447,6 +2447,12 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
     if (!dev)
         return M2SDR_ERR_INVAL;
 
+    /* The gateware finds the TX header with the first-word marker of each DMA
+     * buffer, which only the PCIe DMA provides: on the other links the TX
+     * stream would be discarded with the header enabled. */
+    if (enable && dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+        return M2SDR_ERR_UNSUPPORTED;
+
     dev->tx_header_enable = enable ? 1 : 0;
 
     if (enable && (rc = m2sdr_set_header_frame_cycles(dev, CSR_HEADER_TX_FRAME_CYCLES_ADDR, false)) != M2SDR_ERR_OK)
