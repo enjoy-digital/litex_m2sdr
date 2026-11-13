@@ -100,6 +100,9 @@ static int test_cli_device_selection(void)
 #ifdef M2SDR_DEFAULT_TRANSPORT_LITEETH
     if (strcmp(m2sdr_cli_device_id(&dev), "eth:192.168.1.50:1234") != 0)
         return -1;
+#elif defined(M2SDR_DEFAULT_TRANSPORT_LITEUSB)
+    if (strcmp(m2sdr_cli_device_id(&dev), "usb:") != 0)
+        return -1;
 #else
     if (strcmp(m2sdr_cli_device_id(&dev), "pcie:/dev/m2sdr0") != 0)
         return -1;
