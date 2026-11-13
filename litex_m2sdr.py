@@ -343,6 +343,15 @@ class BaseSoC(SoCMini):
         if with_pcie_ptm and not with_pcie:
             raise ValueError("PCIe PTM requires PCIe to be enabled")
 
+        if with_pcie and (variant == "baseboard") and (pcie_lanes != 1):
+            raise ValueError("The baseboard variant has one PCIe lane: use --pcie-lanes=1.")
+
+        if with_rfic_oversampling and (with_eth or with_sata):
+            msg  = "The RFIC oversampling datapath is 128-bit and supports PCIe only: "
+            msg += "the Ethernet and SATA streamers are 64-bit. "
+            msg += "Use --with-rfic-oversampling without --with-eth and --with-sata."
+            raise ValueError(msg)
+
         # Platform ---------------------------------------------------------------------------------
 
         platform = Platform(build_multiboot=True)
@@ -375,6 +384,10 @@ class BaseSoC(SoCMini):
             raise ValueError("PTP RFIC clock discipline requires --with-eth-ptp.")
         if with_eth_ptp_rfic_clock and with_white_rabbit:
             raise ValueError("PTP RFIC clock discipline uses the non-White-Rabbit clk10 MMCM path.")
+        if with_eth and with_white_rabbit:
+            msg  = "Ethernet and White Rabbit cannot be enabled together: "
+            msg += "both use the Ethernet channel of the shared QPLL and drive its reset."
+            raise ValueError(msg)
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -543,8 +556,6 @@ class BaseSoC(SoCMini):
         if with_pcie:
             # PHY.
             # ----
-            if variant == "baseboard":
-                assert pcie_lanes == 1
             # Number of LitePCIe DMA channels. Defaults to 1 (DMA0 = RFIC I/Q stream, unchanged).
             # Downstream subclasses may request extra channels to stream side-band results of
             # custom RFIC-plane processing (see add_rfic_datapath()); DMA0 keeps its role.
@@ -1700,7 +1711,7 @@ def main():
 
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
-    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation.", choices=[1, 2, 3])
+    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation (Gen3 requires --sys-clk-freq >= 150e6).", choices=[1, 2, 3])
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
