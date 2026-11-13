@@ -458,23 +458,30 @@ class AD9361RFIC(LiteXModule):
 
     def add_agc(self):
         rx_cdc = self.rx_cdc
+        # One (ia, qa, ib, qb) group per 64 bits: the 128-bit (oversampling) datapath carries two
+        # groups per word and both are observed (still one event per accepted word).
+        def iqs(channel):
+            data = rx_cdc.source.data
+            return [data[64*g + 16*n:64*g + 16*(n + 1)]
+                for g in range(len(data)//64)
+                for n in [2*channel, 2*channel + 1]]
         self.agc_count_rx1_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            iqs = iqs(channel=0),
             threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx1_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            iqs = iqs(channel=0),
             threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
         self.agc_count_rx2_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            iqs = iqs(channel=1),
             threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx2_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            iqs = iqs(channel=1),
             threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
