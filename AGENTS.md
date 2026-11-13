@@ -9,7 +9,7 @@ Acorn/PoE baseboards.
 - `litex_m2sdr.py` (SoC/target: `--variant=m2|baseboard`, `--with-pcie`, `--with-eth`, probe switches), `litex_m2sdr_platform.py`.
 - `litex_m2sdr/gateware/`: board gateware (AD9361 PHY/SPI, clocking, time, headers, loopbacks...).
 - `litex_m2sdr/software/`: kernel driver, `user/` (libm2sdr, `m2sdr_util`, `m2sdr_rf`, `m2sdr_record`...), SoapySDR; `./build.py`.
-- `scripts/` (RemoteClient scripts), `test/` (CI-safe tests), `doc/` (`debugging-guide.md`, building, ethernet, hardware...).
+- `scripts/` (RemoteClient scripts), `test/` (CI-safe tests), `doc/manual/` (the manual: Markdown chapters, `build.py`).
 
 ## Verify a change
 
@@ -20,7 +20,7 @@ python3 -m pytest -v test                                           # what CI ru
 make -C litex_m2sdr/software/user all                               # user-space tools
 ```
 
-- Read `doc/debugging-guide.md` before hardware work: transports, loopback diagnostics, probes.
+- Read the Debugging chapter of the manual (`doc/manual/17_debugging.md`) before hardware work: transports, loopback diagnostics, probes.
 - Keep the CSR map and `csr.h` a superset of the previous ones: the host software depends on them.
 - AD9361: sample-rate/filter changes need a check at several rates (FIR bypassed between 2.5 and 61.44 MSPS).
 - The full test suite needs a LiteX-WR-NIC checkout at the pinned commit.

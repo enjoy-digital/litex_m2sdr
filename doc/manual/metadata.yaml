@@ -1,0 +1,16 @@
+---
+# Project metadata of the manual (title page, headers, document properties). The theme (colours,
+# fonts, LaTeX options) is in theme.yaml; build.py merges both and replaces @DATE@.
+title: "M.2 SDR Board"
+project: "LiteX-M2SDR"
+subtitle: "AD9361 2T2R SDR on Artix-7: gateware, software and board reference"
+author: [Enjoy-Digital]
+date: "@DATE@"
+license: "Copyright © 2024-2026 Enjoy-Digital. Licensed under the BSD-2-Clause license."
+license-short: "BSD-2-Clause"
+contact: "hello@enjoy-digital.fr"
+website: "enjoy-digital.fr"
+subject: "LiteX-M2SDR"
+lang: en-US
+header-right: "M.2 SDR Board · BSD-2-Clause · \\href{mailto:hello@enjoy-digital.fr}{hello@enjoy-digital.fr}"
+---

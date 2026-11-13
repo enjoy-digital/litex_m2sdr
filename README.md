@@ -19,16 +19,12 @@ with our tools or any SoapySDR-compatible software.
 
 ## Highlights
 
-- **2T2R, 12-bit up to 61.44 MSPS** — and up to **122.88 MSPS with ~100 MHz of analog bandwidth**
-  ([Wide Analog Bandwidth](doc/wide-bandwidth.md)).
+- **2T2R, 12-bit up to 61.44 MSPS** (an experimental oversampling mode goes up to 122.88 MSPS).
 - **PCIe Gen2 x4** (~14 Gbps) with [LitePCIe](https://github.com/enjoy-digital/litepcie): MMAP +
-  DMA streaming, Linux driver, [low-latency mode](doc/low-latency.md) and
-  [hardware timed TX](doc/timed-tx.md).
+  DMA streaming, Linux driver, low-latency mode and hardware timed TX.
 - **Ethernet 1G/2.5G (+ experimental 5GBASE-R)** ([LiteEth](https://github.com/enjoy-digital/liteeth)) and **SATA** record/replay
-  ([LiteSATA](https://github.com/enjoy-digital/litesata)) on the LiteX Acorn Baseboard Mini
-  ([Ethernet](doc/ethernet.md), [SATA](doc/sata-workflows.md)).
-- **Timing & sync**: external 10 MHz / PPS, [PCIe PTM](doc/pcie-ptm.md),
-  [Ethernet PTP](doc/ptp/README.md), [White Rabbit](doc/white-rabbit.md).
+  ([LiteSATA](https://github.com/enjoy-digital/litesata)) on the LiteX Acorn Baseboard Mini.
+- **Timing & sync**: external 10 MHz reference, PCIe PTM, Ethernet PTP, White Rabbit.
 - **Software**: [`libm2sdr` C API](litex_m2sdr/doc/libm2sdr/README.md),
   [CLI utilities](litex_m2sdr/software/user/README.md),
   [SoapySDR driver](litex_m2sdr/software/soapysdr/README.md) (GQRX, GNU Radio, srsRAN, ...).
@@ -114,13 +110,13 @@ The same board scales from a single PC to a distributed setup:
     </td>
     <td valign="top">
       <b>Distributed over Ethernet.</b> On the LiteX Acorn Baseboard Mini, the board gets
-      1G/2.5G (+ experimental 5G) Ethernet (SFP), PoE, <a href="doc/ptp/README.md">PTP</a> time sync and SATA
-      recording. See <a href="doc/ethernet.md">Ethernet</a>.
+      1G/2.5G (+ experimental 5G) Ethernet (SFP), PoE, PTP time sync and SATA
+      recording.
     </td>
   </tr>
 </table>
 
-Pinout, I/O voltages, PPS input and LED behavior: see the [Hardware Reference](doc/hardware.md).
+Pinout, I/O voltages, PPS input and LED behavior: see the Hardware chapter of the [manual](#documentation).
 
 ## Capabilities
 
@@ -132,11 +128,11 @@ enables it ("—" = not available in that setup).
 | Feature | M.2 slot | Acorn Baseboard Mini | Build option |
 |---|:---:|:---:|---|
 | 2T2R TX/RX, 12-bit, up to 61.44 MSPS | ✅ | ✅ | always included |
-| 2T2R at 122.88 MSPS ([wide bandwidth](doc/wide-bandwidth.md)) | ✅ ¹ | — | `--with-rfic-oversampling` |
+| 2T2R at 122.88 MSPS (wide bandwidth, experimental) | ✅ ¹ | — | `--with-rfic-oversampling` |
 | PCIe streaming | ✅ Gen2 x1/x2/x4 | ✅ Gen2 x1 | `--with-pcie --pcie-lanes=1\|2\|4` |
-| Ethernet streaming, 1G/2.5G/experimental 5G ([details](doc/ethernet.md)) | — | ✅ | `--with-eth [--eth-phy=2500basex|5000baser]` |
-| USB3 streaming, experimental, SFP-to-USB3 adapter ([details](doc/usb3.md)) | — | ✅ | `--with-usb3 [--usb3-sfp=0\|1]` |
-| [Hardware timed TX](doc/timed-tx.md) | ✅ | ✅ | always included |
+| Ethernet streaming, 1G/2.5G/experimental 5G | — | ✅ | `--with-eth [--eth-phy=2500basex|5000baser]` |
+| USB3 streaming, experimental, SFP-to-USB3 adapter | — | ✅ | `--with-usb3 [--usb3-sfp=0\|1]` |
+| Hardware timed TX | ✅ | ✅ | always included |
 | `libm2sdr` C API, utilities, SoapySDR | ✅ | ✅ | host software |
 
 **Timing & sync**
@@ -144,24 +140,24 @@ enables it ("—" = not available in that setup).
 | Feature | M.2 slot | Acorn Baseboard Mini | Build option |
 |---|:---:|:---:|---|
 | External 10 MHz reference | ✅ ² | ✅ ² | runtime (`--sync` / `clock_source`) |
-| [PCIe PTM](doc/pcie-ptm.md) host time sync | ✅ ³ | ✅ ³ | `--with-pcie-ptm` |
-| [Ethernet PTP](doc/ptp/README.md) time discipline | — | ✅ | `--with-eth --with-eth-ptp` |
+| PCIe PTM host time sync | ✅ ³ | ✅ ³ | `--with-pcie-ptm` |
+| Ethernet PTP time discipline | — | ✅ | `--with-eth --with-eth-ptp` |
 | PTP-disciplined RFIC reference | — | ✅ ² | `--with-eth-ptp-rfic-clock` |
-| [White Rabbit](doc/white-rabbit.md) | — | ✅ | `--with-white-rabbit` |
+| White Rabbit | — | ✅ | `--with-white-rabbit` |
 
 **Storage & system**
 
 | Feature | M.2 slot | Acorn Baseboard Mini | Build option |
 |---|:---:|:---:|---|
-| [SATA](doc/sata-workflows.md) record/replay | — | ✅ | `--with-sata` |
+| SATA record/replay | — | ✅ | `--with-sata` |
 | Multiboot / remote update | ✅ | ✅ | always included |
 | GPIO | ✅ | ✅ | `--with-gpio` |
 
 ¹ Needs PCIe Gen2 x2/x4 bandwidth. ² SI5351C variant. ³ PCIe Gen2 x1 only.
 
-See [Building And Loading The Gateware](doc/building-gateware.md) for build details. Prebuilt images for the common
-configurations are published on the [Releases](https://github.com/enjoy-digital/litex_m2sdr/releases)
-page and can be flashed with [`scripts/flash_release.py`](doc/flash-release.md).
+Prebuilt images for the common configurations are published on the
+[Releases](https://github.com/enjoy-digital/litex_m2sdr/releases) page and can be flashed with
+`scripts/flash_release.py`. Build details are in the [manual](#documentation).
 
 ## Quick Start
 
@@ -198,12 +194,10 @@ On a fresh Ubuntu system, with the board in an M.2 slot and antennas connected:
 > No I/Q samples in your SDR application? Make sure the `m2sdr.ko` kernel module matches this
 > source tree (older builds needed IOMMU passthrough, `iommu=pt` on x86).
 > Overflows/underflows at high sample rates? Switch the CPU governor to `performance`.
-> Details in [Host Setup](doc/host-setup.md).
+> Details in the Getting started chapter of the [manual](#documentation).
 
-More: [build options and manual install](doc/building-software.md) ·
-[Raspberry Pi 5](doc/hosts/raspberry-pi-5.md) · [Orange Pi 5 Max](doc/hosts/orangepi-5-max.md) ·
-[Jetson Orin](doc/hosts/jetson-orin.md) · [Ethernet setup](doc/ethernet.md) ·
-[C API](litex_m2sdr/doc/libm2sdr/README.md).
+The manual also covers the build options, the Raspberry Pi 5, Orange Pi 5 Max and Jetson Orin
+hosts and the Ethernet setup.
 
 ## Architecture
 
@@ -229,19 +223,21 @@ JTAG (MMAP peek & poke, LiteScope).
 On the Acorn Baseboard Mini, the M.2 SerDes lanes can be used for Ethernet instead of PCIe:
 [LiteEth](https://github.com/enjoy-digital/liteeth) provides the 1000BASE-X/2500BASE-X PHY, the
 UDP/IP hardware stack and the streaming/Etherbone front-ends, for control and RX/TX sample streaming
-bounded by the link bandwidth. See [Ethernet](doc/ethernet.md).
+bounded by the link bandwidth.
 
 ## Documentation
 
-The full index is in [`doc/README.md`](doc/README.md).
+The **LiteX-M2SDR manual** is the reference of the project: the approach, the board, the gateware,
+the software, the workflows, debugging and the registers.
 
-| Getting started | Using the board | Features | Timing & sync | Development |
-|---|---|---|---|---|
-| [Building the software](doc/building-software.md) | [User utilities](litex_m2sdr/software/user/README.md) | [Ethernet](doc/ethernet.md) | [PCIe PTM](doc/pcie-ptm.md) | [Building the gateware](doc/building-gateware.md) |
-| [Host setup](doc/host-setup.md) | [SoapySDR driver](litex_m2sdr/software/soapysdr/README.md) | [SATA](doc/sata-workflows.md) | [Ethernet PTP](doc/ptp/README.md) | [Debugging guide](doc/debugging-guide.md) |
-| [Flashing releases](doc/flash-release.md) | [GNU Radio](litex_m2sdr/software/gnuradio/README.md) | [Wide bandwidth](doc/wide-bandwidth.md) | [White Rabbit](doc/white-rabbit.md) | [Hardware reference](doc/hardware.md) |
-| [Platform guides](doc/host-setup.md) | [libm2sdr C API](litex_m2sdr/doc/libm2sdr/README.md) | [Low latency](doc/low-latency.md) | | [Changelog](CHANGELOG.md) |
-| | [Kernel driver](litex_m2sdr/software/kernel/README.md) | [Timed TX](doc/timed-tx.md) | | |
+- Read it: [PDF](https://github.com/enjoy-digital/litex_m2sdr/releases/download/manual-nightly/litex_m2sdr_manual.pdf) or
+  [HTML](https://github.com/enjoy-digital/litex_m2sdr/releases/download/manual-nightly/litex_m2sdr_manual.html) (rebuilt nightly).
+- Sources and local build: [doc/manual](doc/manual/README.md).
+- Software references: [utilities](litex_m2sdr/software/user/README.md),
+  [SoapySDR driver](litex_m2sdr/software/soapysdr/README.md),
+  [GNU Radio examples](litex_m2sdr/software/gnuradio/README.md),
+  [`libm2sdr` C API](litex_m2sdr/doc/libm2sdr/README.md),
+  [kernel driver](litex_m2sdr/software/kernel/README.md), [changelog](CHANGELOG.md).
 
 ## Contact
 
