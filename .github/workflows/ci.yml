@@ -125,8 +125,8 @@ jobs:
       - name: Checkout LiteX-WR-NIC (for WR smoke tests)
         run: |
           git clone --depth=1 https://github.com/enjoy-digital/litex_wr_nic.git /tmp/litex_wr_nic
-          # Reusable core, CPU memory/boot, management and MMCM APIs (#72-#77).
-          git -C /tmp/litex_wr_nic fetch --depth=1 origin bac7b7a7af1215f741bbeeb095cac5a01a732b8a
+          # CPU memory/boot, management and application time APIs.
+          git -C /tmp/litex_wr_nic fetch --depth=1 origin 31cfa02e80814f93084de652cfe42a975b14c164
           git -C /tmp/litex_wr_nic checkout --detach FETCH_HEAD
 
       - name: Run White Rabbit integration smoke tests

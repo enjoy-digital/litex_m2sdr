@@ -4987,6 +4987,7 @@ static void draw_stats_panel(struct scan_state *s)
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     int option_index = 0;
     struct scan_state s;

@@ -47,7 +47,7 @@ from litesata.frontend.arbitration import LiteSATACrossbar
 from litesata.frontend.identify    import LiteSATAIdentify, LiteSATAIdentifyCSR
 from litescope import LiteScopeAnalyzer
 
-from litex_m2sdr import Platform, _io_baseboard
+from litex_m2sdr import Platform, _io_baseboard, M2_PCIE_GT_LOCS
 
 from litex_m2sdr.gateware.capability       import Capability
 from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock10Discipline
@@ -590,7 +590,11 @@ class BaseSoC(SoCMini):
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
-                self.pcie_phy.add_gt_loc_constraints(["GTPE2_CHANNEL_X0Y4"], by_pipe_lane=False)
+                self.pcie_phy.add_gt_loc_constraints([M2_PCIE_GT_LOCS[3]], by_pipe_lane=False) # PERp3.
+            if variant == "m2" and pcie_lanes > 1:
+                # The PCIe IP's default lane-1 LOC silently wins in x2 builds, putting lane 1 on
+                # M.2 lane 2 (B10/B6): the link can then only train x1.
+                self.pcie_phy.add_gt_loc_constraints(M2_PCIE_GT_LOCS[:pcie_lanes])
             self.pcie_phy.update_config({
                 "PCIe_Blk_Locn"            : "X0Y0",
                 "Base_Class_Menu"          : "Wireless_controller",
@@ -1193,7 +1197,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.refclk_tuning.connect(self.refclk_mmcm_ps_gen.command),
+                self.refclk_mmcm_ps_gen.command.data.eq(wr.dac_refclk_data),
+                self.refclk_mmcm_ps_gen.command.load.eq(wr.dac_refclk_load),
                 self.crg.refclk_mmcm.psen.eq(     self.refclk_mmcm_ps_gen.psen),
                 self.crg.refclk_mmcm.psincdec.eq( self.refclk_mmcm_ps_gen.psincdec),
                 self.refclk_mmcm_ps_gen.psdone.eq(self.crg.refclk_mmcm.psdone),
@@ -1207,7 +1212,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.dmtd_tuning.connect(self.dmtd_mmcm_ps_gen.command),
+                self.dmtd_mmcm_ps_gen.command.data.eq(wr.dac_dmtd_data),
+                self.dmtd_mmcm_ps_gen.command.load.eq(wr.dac_dmtd_load),
                 self.crg.dmtd_mmcm.psen.eq(     self.dmtd_mmcm_ps_gen.psen),
                 self.crg.dmtd_mmcm.psincdec.eq( self.dmtd_mmcm_ps_gen.psincdec),
                 self.dmtd_mmcm_ps_gen.psdone.eq(self.crg.dmtd_mmcm.psdone),

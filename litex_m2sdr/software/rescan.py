@@ -7,6 +7,7 @@
 
 import argparse
 import subprocess
+import time
 
 from __init__ import get_pcie_device_ids, remove_pcie_device, rescan_pcie_bus
 
@@ -48,6 +49,8 @@ def main():
     device_ids = get_device_ids()
     remove_board_from_pcie_bus(device_ids)
     rescan_bus()
+    # A probe right after the rescan can read BAR0 as all-ones before the link settles (seen on RK3588).
+    time.sleep(2)
     load_driver()
 
 if __name__ == '__main__':

@@ -6,16 +6,10 @@ The default is uRV with 128 KiB of private RAM and embedded firmware.
 
 ## Dependency
 
-This integration requires the core, memory/boot, management and clock APIs from
-[LiteX-WR-NIC #72–#77](https://github.com/enjoy-digital/litex_wr_nic/pull/77).
-CI pins commit `bac7b7a7af1215f741bbeeb095cac5a01a732b8a` while that series is
-pending merge. Select a checkout containing that commit or the merged APIs.
-The MMCM backend has passed physical phase-request and output-frequency tests
-on SPEC-A7. M2SDR WR servo lock, jitter and PPS accuracy still need measurement.
-It preserves the previous nominal MMCM tuning rate and polarity; this update
-does not retune the Acorn firmware PI coefficients. The dependency also keeps
-the original `PSGen` implementation for older integrations. M2SDR explicitly
-uses `WRMMCMBackend` with both completion signals connected.
+This integration requires the host management, CPU memory/boot and application
+time APIs of [LiteX-WR-NIC](https://github.com/enjoy-digital/litex_wr_nic). CI pins
+commit `31cfa02e80814f93084de652cfe42a975b14c164`; use that commit or a later `main`.
+M2SDR WR servo lock, jitter and PPS accuracy still need measurement.
 
 The `litex_wr_nic` checkout is looked up in this order: `--wr-nic-dir`,
 `LITEX_WR_NIC_DIR`, then `./litex_wr_nic` and `../litex_wr_nic` next to this
@@ -109,21 +103,9 @@ previous fractional DMTD configuration used a 1.59375 GHz VCO and an output
 divider of 25.5, which is incompatible with fine phase shifting. Correcting it
 changes the DMTD phase-step size by 6.25%; firmware PI coefficients are unchanged.
 
-The dependency's XSim tests exercise the real Xilinx MMCM models for both
-M2SDR clock configurations, including phase wraparound, completion timing and
-reset/relock. Full-width RTL tests also cover frequent small corrections,
-completion faults and stopped-clock resets. Same-direction command updates
-retain fractional phase, and the FIFO waits for both clocks after reset to
-prevent old commands from replaying. To run these checks in the dependency:
-
-```sh
-cd "$LITEX_WR_NIC_DIR"
-pytest -q test/test_wr_clock.py test/test_wr_mmcm.py
-```
-
-Vivado's `xvlog`, `xelab` and `xsim` must be on `PATH` for the MMCM model tests;
-otherwise pytest reports them as skipped. These digital simulations do not
-measure physical clock jitter or closed-loop WR performance.
+The dependency's `test/test_wr_clock.py` covers the backends in simulation. These
+digital simulations do not measure physical clock jitter or closed-loop WR
+performance.
 
 `read-time` snapshots WR's native time. The existing SDR `time_gen` is a separate
 timebase; this update does not connect WR timecode to SDR sample timestamps.
