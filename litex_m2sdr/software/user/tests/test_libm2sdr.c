@@ -402,6 +402,70 @@ static int test_format_size_helpers(void)
     return 0;
 }
 
+/* Register backend of the sample format test: the capability features are
+ * read back from a variable and the last bit mode write is recorded. */
+static uint32_t format_test_features;
+static uint32_t format_test_bitmode;
+static int      format_test_bitmode_writes;
+
+static int format_test_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+{
+    (void)dev;
+    *val = (addr == CSR_CAPABILITY_FEATURES_ADDR) ? format_test_features : 0;
+    return 0;
+}
+
+static int format_test_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    (void)dev;
+    if (addr == CSR_AD9361_BITMODE_ADDR) {
+        format_test_bitmode = val;
+        format_test_bitmode_writes++;
+    }
+    return 0;
+}
+
+static int test_sample_format_oversampling_validation(void)
+{
+    static const struct m2sdr_backend_ops ops = {
+        .readl  = format_test_readl,
+        .writel = format_test_writel,
+    };
+    struct m2sdr_dev dev;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd  = -1;
+    dev.ops = &ops;
+
+    /* 64-bit datapath: the three formats are written to the bit mode register. */
+    format_test_features       = 0;
+    format_test_bitmode_writes = 0;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_BFP8_Q11) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 1 || format_test_bitmode != 2)
+        return -1;
+
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    /* 128-bit (oversampling) datapath: BFP8 is refused and nothing is written. */
+    format_test_features       = M2SDR_FEATURE_RFIC_OVERSAMPLING;
+    format_test_bitmode_writes = 0;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_BFP8_Q11) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (format_test_bitmode_writes != 0)
+        return -1;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_SC8_Q7) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 1 || format_test_bitmode != 1)
+        return -1;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_SC16_Q11) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 2 || format_test_bitmode != 0)
+        return -1;
+#endif
+
+    return 0;
+}
+
 static int test_dma_header_helper(void)
 {
     uint8_t header[16];
@@ -706,6 +770,10 @@ int main(void)
     }
     if (test_format_size_helpers() != 0) {
         fprintf(stderr, "test_format_size_helpers failed\n");
+        return 1;
+    }
+    if (test_sample_format_oversampling_validation() != 0) {
+        fprintf(stderr, "test_sample_format_oversampling_validation failed\n");
         return 1;
     }
     if (test_dma_header_helper() != 0) {

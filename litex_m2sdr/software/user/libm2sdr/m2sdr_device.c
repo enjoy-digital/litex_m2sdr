@@ -2222,6 +2222,17 @@ int m2sdr_set_sample_format(struct m2sdr_dev *dev, enum m2sdr_format format)
         return M2SDR_ERR_UNSUPPORTED;
     }
 
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    /* BFP8 exists on the 64-bit datapath only: the 128-bit (oversampling)
+     * datapath implements SC16 and SC8. */
+    if (format == M2SDR_FORMAT_BFP8_Q11) {
+        struct m2sdr_capabilities caps;
+        if (m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+            (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING))
+            return M2SDR_ERR_UNSUPPORTED;
+    }
+#endif
+
 #ifdef CSR_AD9361_BITMODE_ADDR
     if (m2sdr_reg_write(dev, CSR_AD9361_BITMODE_ADDR, mode) != 0)
         return M2SDR_ERR_IO;
