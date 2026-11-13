@@ -71,6 +71,16 @@ PCIE_LTSSM = {
 
 # PCIe LTSSM Tracer --------------------------------------------------------------------------------
 
+# Name of the LTSSM tracer history register: "pcie_phy_ltssm_tracer_history" with the current
+# LitePCIe, "pcie_phy_phy_ltssm_tracer_history" on older bitstreams.
+LTSSM_TRACER_HISTORY_NAMES = ["pcie_phy_ltssm_tracer_history", "pcie_phy_phy_ltssm_tracer_history"]
+
+def get_ltssm_tracer_history(regs):
+    for name in LTSSM_TRACER_HISTORY_NAMES:
+        if hasattr(regs, name):
+            return getattr(regs, name)
+    raise ValueError("LTSSM tracer register not found in the CSR file: build with --with-pcie-probe.")
+
 def main():
     default_csr_csv = os.path.join(os.path.dirname(__file__), "csr.csv")
     parser = argparse.ArgumentParser(description="LitePCIe LTSSM tracer.")
@@ -85,8 +95,9 @@ def main():
     bus.open()
 
     # Read history
+    history = get_ltssm_tracer_history(bus.regs)
     while True:
-        v = bus.regs.pcie_phy_phy_ltssm_tracer_history.read()
+        v = history.read()
 
         ltssm_new = (v >>  0) & 0x3f
         ltssm_old = (v >>  6) & 0x3f

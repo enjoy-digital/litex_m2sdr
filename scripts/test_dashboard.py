@@ -111,7 +111,10 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
     with_clks       = hasattr(bus.regs, "clk_measurement_clk0_value")
     with_header_reg = hasattr(bus.regs, "header_last_tx_header")
     with_time       = hasattr(bus.regs, "time_gen_read_time")
-    with_ltssm      = hasattr(bus.regs, "pcie_phy_phy_ltssm_tracer_history")
+    ltssm_history   = None
+    for name in ["pcie_phy_ltssm_tracer_history", "pcie_phy_phy_ltssm_tracer_history"]: # Current, older LitePCIe.
+        ltssm_history = getattr(bus.regs, name, ltssm_history)
+    with_ltssm      = ltssm_history is not None
 
     # Initialize ClkDriver if available.
     if with_clks:
@@ -669,7 +672,7 @@ def run_gui(host="localhost", csr_csv="csr.csv", port=1234):
                     }
 
                 if with_ltssm:
-                    ltssm = bus.regs.pcie_phy_phy_ltssm_tracer_history.read()
+                    ltssm = ltssm_history.read()
                     ltssm_new = (ltssm >> 0) & 0x3F
                     ltssm_old = (ltssm >> 6) & 0x3F
                     overflow = (ltssm >> 30) & 0x1
