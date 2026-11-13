@@ -878,6 +878,13 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
               _refclk_ppm <=  M2SDR_REFCLK_PPM_MAX))
             throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
     }
+    /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
+    double init_samplerate = 30.72e6;
+    if (args.count("init_samplerate") > 0) {
+        init_samplerate = std::stod(args.at("init_samplerate"));
+        if (!(init_samplerate > 0.0))
+            throw std::runtime_error("init_samplerate must be positive");
+    }
     if (args.count("clock_source") > 0) {
         _clock_source = canonical_clock_source(args.at("clock_source"));
     }
@@ -968,12 +975,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
         /* Common for TX1/TX2 and RX1/RX2 */
-        _rx_stream.samplerate   = 30.72e6;
-        _tx_stream.samplerate   = 30.72e6;
+        _rx_stream.samplerate   = init_samplerate;
+        _tx_stream.samplerate   = init_samplerate;
         _rx_stream.frequency    = 1e6;
         _tx_stream.frequency    = 1e6;
-        _rx_stream.bandwidth    = 30.72e6;
-        _tx_stream.bandwidth    = 30.72e6;
+        _rx_stream.bandwidth    = init_samplerate;
+        _tx_stream.bandwidth    = init_samplerate;
 
         /* TX1/RX1. */
         _rx_stream.gainMode[0]  = true;
