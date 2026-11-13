@@ -787,10 +787,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     }
 
     bool do_init = true;
-    if (args.count("bypass_init") > 0) {
-        std::cout << args.at("bypass_init")[0] << std::endl;
+    if (args.count("bypass_init") > 0)
         do_init = args.at("bypass_init")[0] == '0';
-    }
     bool rx_agc_pin_requested = false;
     bool rx_agc_pin = false;
     if (args.count("rx_agc_pin") > 0) {
@@ -883,6 +881,9 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
     if (args.count("clock_source") > 0) {
         _clock_source = canonical_clock_source(args.at("clock_source"));
     }
+    if (!do_init && !(litex_m2sdr_readl(_dev, CSR_AD9361_CONFIG_ADDR) & 0b01))
+        throw std::runtime_error("bypass_init=1: the AD9361 is held in reset (not initialized, e.g. by m2sdr_rf)");
+    _rfInitDone = do_init;
     if (do_init) {
 
         /* Initialize SI5351 Clocking */
@@ -935,6 +936,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         }
     }
 
+    /* Default antennas (also with bypass_init=1, where the RF configuration is left untouched). */
+    for (size_t i = 0; i < 2; i++) {
+        _rx_stream.antenna[i] = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+        _tx_stream.antenna[i] = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    }
+
+    if (!do_init) {
+        /* bypass_init=1: start from the rates and LOs the RFIC is already configured with. */
+        uint32_t rx_rate = 0, tx_rate = 0;
+        uint64_t rx_lo = 0, tx_lo = 0;
+        ad9361_get_rx_sampling_freq(ad9361_phy, &rx_rate);
+        ad9361_get_tx_sampling_freq(ad9361_phy, &tx_rate);
+        ad9361_get_rx_lo_freq(ad9361_phy, &rx_lo);
+        ad9361_get_tx_lo_freq(ad9361_phy, &tx_lo);
+        _rx_stream.samplerate = rx_rate;
+        _tx_stream.samplerate = tx_rate;
+        _rx_stream.frequency  = (double)rx_lo;
+        _tx_stream.frequency  = (double)tx_lo;
+        SoapySDR::logf(SOAPY_SDR_INFO, "bypass_init: RX %.6f MSPS @ %.6f MHz, TX %.6f MSPS @ %.6f MHz",
+            rx_rate/1e6, rx_lo/1e6, tx_rate/1e6, tx_lo/1e6);
+    }
+
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
@@ -953,8 +976,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         _tx_stream.bandwidth    = 30.72e6;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[0]  = true;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -965,8 +986,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[1]  = true;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
@@ -1068,8 +1087,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-        /* Power-Down AD9361 */
-        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+        /* Power-Down AD9361 (left running when attached with bypass_init=1). */
+        if (_rfInitDone)
+            litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
     }
 
     if (_udp_inited) {

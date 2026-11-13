@@ -122,6 +122,8 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Interface delay calibration**: `calibrate_delay=1|0`
   - `0` (default) keeps the AD9361 digital-interface clock/data delays from the driver defaults, which suit most boards.
   - `1` runs the PRBS delay scan (same procedure as `m2sdr_rf --calibrate-delay`, a few seconds at open) for boards whose timing eye sits at the edge of the defaults and RX/TX capture zeros or noise otherwise. The calibrated delays are persisted in the stored AD9361 init parameters, so later RFIC re-initializations (e.g. channel-mode changes) program them again. Ignored with `bypass_init=1`.
+- **Attach without RF init**: `bypass_init=1`
+  - Opens the device without initializing the SI5351 and the AD9361, for example after `m2sdr_rf` configured them. The driver starts from the sample rates and LO frequencies read back from the AD9361, and later `setSampleRate()`/`setFrequency()` calls reconfigure it as usual. The AD9361 must already be out of reset (opening fails otherwise), and it is left running on close.
 
 Example:
 ```bash
