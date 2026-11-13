@@ -29,9 +29,11 @@ used by separate processes (ex: `m2sdr_record` and `m2sdr_play`), and CSR tools 
 `m2sdr_rf`, `litex_server --usb`) can be used while streaming (EP0 requests need no claimed
 interface).
 
-The USB3 PLL is the second PLL of the shared GTP QPLL (100MHz oscillator through a BUFG on
-GTGREFCLK, 2.5GHz VCO), so USB3 can be combined with PCIe Gen2 X1 (baseboard M.2 lane 3), but not
-with Ethernet, SATA or White Rabbit (yet).
+The USB3 PLL is the second PLL of the shared GTP QPLL (125MHz sys clock on GTGREFCLK, 2.5GHz VCO,
+so USB3 requires `sys_clk_freq` = 125MHz), so USB3 can be combined with PCIe Gen2 X1 (baseboard M.2
+lane 3), but not with Ethernet, SATA or White Rabbit (yet). The 100MHz oscillator through a BUFG
+(the reference used on other USB3-PIPE targets) gave USB3 link errors and Recoveries on the
+baseboard as soon as the AD9361 ran at 30.72MSPS.
 
 ## Bandwidth
 
