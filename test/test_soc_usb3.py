@@ -48,6 +48,9 @@ def test_usb3_soc_build_exposes_usb3_csrs(tmp_path):
     assert soc.qpll.channel_map == {"usb3": 0}
     assert "usb3" in soc.bus.masters
     assert len(soc.crossbar.mux.sink3.data) == 64
+    # RX (Bulk IN EP1) and TX (Bulk OUT EP2) on separate interfaces: claimable by separate processes.
+    assert [(i.number, [(e.ept, e.direction) for e in i.endpoints])
+        for i in soc.usb3.descriptors.interfaces] == [(0, [(1, 1)]), (1, [(2, 0)])]
 
     csr_csv = _build_csr_csv(soc, tmp_path)
     assert "csr_base,usb3,0x0000b000" in csr_csv

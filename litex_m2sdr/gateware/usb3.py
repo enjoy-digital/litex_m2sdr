@@ -12,6 +12,8 @@ Xillybus SFP2USB), the USB3 Device Core is implemented in the fabric:
   litex_server --usb).
 - EP1 Bulk IN : RFIC RX samples (Crossbar -> Host), 8KB frames (header + samples) as with PCIe.
 - EP2 Bulk OUT: RFIC TX samples (Host -> Crossbar), primed FIFO before the RFIC.
+RX (EP1) and TX (EP2) are on separate interfaces (0 and 1) so that RX and TX can be claimed by
+separate host processes (ex: m2sdr_record + m2sdr_play); EP0 accesses do not claim an interface.
 
 https://github.com/enjoy-digital/usb3_pipe
 """
@@ -27,11 +29,13 @@ from litepcie.common import dma_layout
 
 # Constants ----------------------------------------------------------------------------------------
 
-USB3_VID       = 0x1d50
-USB3_PID       = 0x605a
-USB3_RX_EPT    = 1 # Bulk IN  (RFIC RX -> Host).
-USB3_TX_EPT    = 2 # Bulk OUT (Host -> RFIC TX).
-USB3_MAX_BURST = 16
+USB3_VID          = 0x1d50
+USB3_PID          = 0x605a
+USB3_RX_INTERFACE = 0
+USB3_TX_INTERFACE = 1
+USB3_RX_EPT       = 1 # Bulk IN  (RFIC RX -> Host).
+USB3_TX_EPT       = 2 # Bulk OUT (Host -> RFIC TX).
+USB3_MAX_BURST    = 16
 
 # QPLL Channel Adapter -----------------------------------------------------------------------------
 
@@ -172,7 +176,7 @@ class USB3(LiteXModule):
         from usb3_pipe             import A7USB3SerDes, USB3PHY
         from usb3_core.device      import USB3DeviceCore
         from usb3_core.bulk        import USB3BulkIN, USB3BulkOUT
-        from usb3_core.descriptors import bulk_descriptors
+        from usb3_core.descriptors import USB3Descriptors, USB3InterfaceDescriptor, USB3EndpointDescriptor
         from usb3_core.wishbone    import USB3EP0Wishbone
 
         assert sys_clk_freq >= 125e6, "USB3 requires sys_clk_freq >= 125MHz."
@@ -209,24 +213,34 @@ class USB3(LiteXModule):
         # PHY --------------------------------------------------------------------------------------
         self.phy = phy = USB3PHY(serdes, sys_clk_freq, role="device")
         if with_debug:
-            from usb3_pipe.debug import USB3PHYDebug
-            self.debug = USB3PHYDebug(phy, serdes, sys_clk_freq)
+            from usb3_pipe.debug import USB3PHYDebug, USB3SerDesDebug
+            self.debug        = USB3PHYDebug(phy, serdes, sys_clk_freq)
+            self.serdes_debug = USB3SerDesDebug(serdes, sys_clk_freq, ltssm_state=phy.ltssm_state)
 
         # Device Core ------------------------------------------------------------------------------
-        descriptors = bulk_descriptors(
-            in_ept       = USB3_RX_EPT,
-            out_ept      = USB3_TX_EPT,
-            max_burst    = USB3_MAX_BURST,
+        self.descriptors = descriptors = USB3Descriptors(
             vid          = vid,
             pid          = pid,
             manufacturer = "Enjoy-Digital",
             product      = "LiteX-M2SDR",
             serial       = serial,
+            interfaces   = [
+                # Interface 0: RX (Bulk IN).
+                USB3InterfaceDescriptor(USB3_RX_INTERFACE, endpoints=[
+                    USB3EndpointDescriptor(USB3_RX_EPT, direction=1, max_burst=USB3_MAX_BURST),
+                ]),
+                # Interface 1: TX (Bulk OUT).
+                USB3InterfaceDescriptor(USB3_TX_INTERFACE, endpoints=[
+                    USB3EndpointDescriptor(USB3_TX_EPT, direction=0, max_burst=USB3_MAX_BURST),
+                ]),
+            ],
         )
         self.bulk_in  = bulk_in  = USB3BulkIN( ept=USB3_RX_EPT, max_burst=USB3_MAX_BURST)
         self.bulk_out = bulk_out = USB3BulkOUT(ept=USB3_TX_EPT, max_burst=USB3_MAX_BURST)
         self.core = core = USB3DeviceCore(phy, sys_clk_freq, descriptors, [bulk_in, bulk_out],
             with_ep0_handler = True)
+        if with_debug:
+            core.add_csr()
 
         # EP0 Wishbone Bridge ----------------------------------------------------------------------
         self.wishbone = USB3EP0Wishbone(core.ep0)
@@ -235,7 +249,7 @@ class USB3(LiteXModule):
         # RX: Crossbar -> Bulk IN ------------------------------------------------------------------
         self.rx_streamer = rx_streamer = USB3RXStreamer(data_width=data_width)
         self.comb += [
-            rx_streamer.enable.eq(self._control.fields.rx_enable & phy.u0),
+            rx_streamer.enable.eq(self._control.fields.rx_enable),
             self.sink.connect(rx_streamer.sink),
             rx_streamer.source.connect(bulk_in.sink),
             bulk_in.flush.eq(rx_streamer.flush),
