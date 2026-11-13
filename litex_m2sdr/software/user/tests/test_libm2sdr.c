@@ -639,6 +639,82 @@ static int test_transport_helpers(void)
     return 0;
 }
 
+/* Register backend of the TX header test: the last write to the TX header
+ * control register is recorded. */
+static uint32_t tx_header_test_control;
+static int      tx_header_test_control_writes;
+
+static int tx_header_test_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+{
+    (void)dev;
+    (void)addr;
+    *val = 0;
+    return 0;
+}
+
+static int tx_header_test_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    (void)dev;
+    if (addr == CSR_HEADER_TX_CONTROL_ADDR) {
+        tx_header_test_control = val;
+        tx_header_test_control_writes++;
+    }
+    return 0;
+}
+
+static int test_tx_header_transport_validation(void)
+{
+    static const struct m2sdr_backend_ops ops = {
+        .readl  = tx_header_test_readl,
+        .writel = tx_header_test_writel,
+    };
+    const uint32_t header_enable = 1u << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET;
+    struct m2sdr_sync_params params;
+    struct m2sdr_dev dev;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd  = -1;
+    dev.ops = &ops;
+
+    /* PCIe: the TX header can be enabled and disabled. */
+    dev.transport = M2SDR_TRANSPORT_LITEPCIE;
+    tx_header_test_control_writes = 0;
+    if (m2sdr_set_tx_header(&dev, true) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 1 || !(tx_header_test_control & header_enable))
+        return -1;
+    if (dev.tx_header_enable != 1)
+        return -1;
+    if (m2sdr_set_tx_header(&dev, false) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 2 || (tx_header_test_control & header_enable))
+        return -1;
+    if (dev.tx_header_enable != 0)
+        return -1;
+
+    /* Ethernet: enabling the TX header is refused and nothing is written;
+     * disabling it is still allowed. */
+    dev.transport = M2SDR_TRANSPORT_LITEETH;
+    tx_header_test_control_writes = 0;
+    if (m2sdr_set_tx_header(&dev, true) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (tx_header_test_control_writes != 0 || dev.tx_header_enable != 0)
+        return -1;
+    m2sdr_sync_params_init(&params);
+    params.direction        = M2SDR_TX;
+    params.tx_header_enable = true;
+    if (m2sdr_sync_config_ex(&dev, &params) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (tx_header_test_control_writes != 0 || dev.tx_header_enable != 0)
+        return -1;
+    if (m2sdr_set_tx_header(&dev, false) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 1 || (tx_header_test_control & header_enable))
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -699,6 +775,10 @@ int main(void)
     }
     if (test_transport_helpers() != 0) {
         fprintf(stderr, "test_transport_helpers failed\n");
+        return 1;
+    }
+    if (test_tx_header_transport_validation() != 0) {
+        fprintf(stderr, "test_tx_header_transport_validation failed\n");
         return 1;
     }
 
