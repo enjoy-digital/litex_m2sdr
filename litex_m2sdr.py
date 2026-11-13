@@ -173,7 +173,6 @@ class CRG(LiteXModule):
         self.cd_refclk_pcie   = ClockDomain()
         self.cd_refclk_eth    = ClockDomain()
         self.cd_refclk_sata   = ClockDomain()
-        self.cd_refclk_usb3   = ClockDomain(reset_less=True)
         self.cd_oob           = ClockDomain()
 
         self.cd_clk_125m_gtp  = ClockDomain()
@@ -232,10 +231,10 @@ class CRG(LiteXModule):
 
         # USB3 Clocks.
         # ------------
-        # 100MHz oscillator through a BUFG (no PLL) as the QPLL GTGREFCLK reference (validated
-        # USB3-PIPE topology), OOB clock (LFPS detection) at sys_clk_freq/8.
+        # OOB clock (LFPS detection) at sys_clk_freq/8. The QPLL GTGREFCLK reference is the 125MHz
+        # sys clock: the 100MHz oscillator through a BUFG gave USB3 link errors/Recoveries as soon
+        # as the AD9361 ran at 30.72MSPS (clean with the sys clock).
         if with_usb3:
-            self.specials += Instance("BUFG", i_I=clk100, o_O=self.cd_refclk_usb3.clk)
             pll.create_clkout(self.cd_oob, sys_clk_freq/8, margin=0)
 
         # SATA PLL.
@@ -386,8 +385,8 @@ class BaseSoC(SoCMini):
                 raise ValueError("USB3 cannot be combined with Ethernet, SATA or White Rabbit (yet).")
             if with_rfic_oversampling:
                 raise ValueError("USB3 bandwidth (~440MB/s) does not allow the RFIC oversampling datapath.")
-            if sys_clk_freq < 125e6:
-                raise ValueError("USB3 requires sys_clk_freq >= 125MHz.")
+            if sys_clk_freq != 125e6:
+                raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
 
         if with_white_rabbit and (variant != "baseboard"):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
@@ -917,6 +916,7 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
+        self.ad9361.add_active_settings()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -1462,7 +1462,7 @@ class BaseSoC(SoCMini):
         self.usb3 = USB3(platform,
             sfp_pads     = platform.request("sfp", sfp),
             qpll_channel = self.qpll.get_channel("usb3"),
-            refclk_freq  = 100e6,
+            refclk_freq  = sys_clk_freq,
             sys_clk      = self.crg.cd_sys.clk,
             sys_clk_freq = sys_clk_freq,
             data_width   = 64,
@@ -1471,7 +1471,6 @@ class BaseSoC(SoCMini):
             with_debug   = with_debug,
         )
         self.bus.add_master(name="usb3", master=self.usb3.bus)
-        self.platform.add_period_constraint(self.crg.cd_refclk_usb3.clk, 1e9/100e6)
 
     def add_sata(self, platform, sys_clk_freq, sata_gen=2, with_pcie=False, pcie_msis=None):
         if with_pcie and pcie_msis is None:

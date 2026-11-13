@@ -72,7 +72,7 @@ def test_pcie_usb3_soc_shares_qpll():
 
     assert soc.qpll.channel_map == {"pcie": 0, "usb3": 1}
     assert soc.usb3.serdes.pll.channel == 1
-    assert soc.usb3.serdes.pll.config == {"linerate": 5e9, "d": 1, "clkin": 100e6}
+    assert soc.usb3.serdes.pll.config == {"linerate": 5e9, "d": 1, "clkin": 125e6}
     assert hasattr(soc, "pcie_dma0")
 
 

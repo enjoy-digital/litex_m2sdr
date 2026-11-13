@@ -43,10 +43,10 @@ class SharedQPLL(LiteXModule):
             refclk_div = 1,
         )
 
-        # USB3 QPLL Settings (100MHz fabric reference on GTGREFCLK, 2.5GHz VCO for 5Gbps).
+        # USB3 QPLL Settings (125MHz sys clock on GTGREFCLK, 2.5GHz VCO for 5Gbps).
         qpll_usb3_settings = QPLLSettings(
             refclksel  = 0b111,
-            fbdiv      = 5,
+            fbdiv      = 4,
             fbdiv_45   = 5,
             refclk_div = 1,
         )
@@ -76,7 +76,7 @@ class SharedQPLL(LiteXModule):
 
         if with_usb3:
             configs["usb3"] = QPLLConfig(
-                refclk   = ClockSignal("refclk_usb3"),
+                refclk   = ClockSignal("sys"),
                 settings = qpll_usb3_settings,
             )
 

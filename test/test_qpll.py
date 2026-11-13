@@ -134,8 +134,8 @@ def test_shared_qpll_rejects_unsupported_triple_use(monkeypatch):
         SharedQPLL(platform, with_pcie=True, with_eth=True, with_sata=True)
 
 
-def test_shared_qpll_usb3_uses_fabric_refclk_at_5gbps(monkeypatch):
-    """Verify USB3 gets a GTGREFCLK (fabric) PLL with a 2.5GHz VCO (5Gbps, D=1) next to PCIe."""
+def test_shared_qpll_usb3_uses_sys_refclk_at_5gbps(monkeypatch):
+    """Verify USB3 gets a GTGREFCLK PLL fed by the 125MHz sys clock with a 2.5GHz VCO (5Gbps, D=1) next to PCIe."""
     monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
     platform = _DummyPlatform()
 
@@ -145,7 +145,7 @@ def test_shared_qpll_usb3_uses_fabric_refclk_at_5gbps(monkeypatch):
     settings = dut.qpll.kwargs["qpllsettings1"]
     assert settings.refclksel == 0b111
     assert dut.qpll.kwargs["gtrefclk1"] is None
-    assert _qpll_linerate(100e6, settings, out_div=1) == 5e9
+    assert _qpll_linerate(125e6, settings, out_div=1) == 5e9
 
 
 def test_shared_qpll_rejects_three_configurations(monkeypatch):
