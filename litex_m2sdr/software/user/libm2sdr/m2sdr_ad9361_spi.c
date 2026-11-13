@@ -53,10 +53,7 @@ static int m2sdr_ad9361_spi_timeout_us(void *conn)
 
 static bool m2sdr_ad9361_bus_ok(void *conn)
 {
-    if (m2sdr_legacy_handle_is_fd(conn))
-        return true;
-
-    return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
+    return m2sdr_legacy_handle_ok(conn);
 }
 
 /* m2sdr_ad9361_spi_init */

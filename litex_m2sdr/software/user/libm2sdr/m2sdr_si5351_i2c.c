@@ -46,10 +46,7 @@
 
 static bool m2sdr_si5351_bus_ok(void *conn)
 {
-    if (m2sdr_legacy_handle_is_fd(conn))
-        return true;
-
-    return eb_get_last_error((struct eb_connection *)conn) == EB_ERR_OK;
+    return m2sdr_legacy_handle_ok(conn);
 }
 
 /* m2sdr_si5351_i2c_reset */

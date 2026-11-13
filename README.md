@@ -135,6 +135,7 @@ enables it ("—" = not available in that setup).
 | 2T2R at 122.88 MSPS ([wide bandwidth](doc/wide-bandwidth.md)) | ✅ ¹ | — | `--with-rfic-oversampling` |
 | PCIe streaming | ✅ Gen2 x1/x2/x4 | ✅ Gen2 x1 | `--with-pcie --pcie-lanes=1\|2\|4` |
 | Ethernet streaming, 1G/2.5G/experimental 5G ([details](doc/ethernet.md)) | — | ✅ | `--with-eth [--eth-phy=2500basex|5000baser]` |
+| USB3 streaming, experimental, SFP-to-USB3 adapter ([details](doc/usb3.md)) | — | ✅ | `--with-usb3 [--usb3-sfp=0\|1]` |
 | [Hardware timed TX](doc/timed-tx.md) | ✅ | ✅ | always included |
 | `libm2sdr` C API, utilities, SoapySDR | ✅ | ✅ | host software |
 

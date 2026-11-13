@@ -86,6 +86,7 @@ enum m2sdr_transport_kind {
     M2SDR_TRANSPORT_KIND_UNKNOWN = 0,
     M2SDR_TRANSPORT_KIND_LITEPCIE = 1,
     M2SDR_TRANSPORT_KIND_LITEETH = 2,
+    M2SDR_TRANSPORT_KIND_LITEUSB = 3,
 };
 
 enum m2sdr_sata_dma_direction {
@@ -236,7 +237,7 @@ struct m2sdr_devinfo {
     char identification[M2SDR_IDENT_MAX];
     /* Device path or transport address. */
     char path[M2SDR_DEVICE_STR_MAX];
-    /* "litepcie" or "liteeth". */
+    /* "litepcie", "liteeth" or "liteusb". */
     char transport[16];
 };
 
@@ -244,6 +245,7 @@ struct m2sdr_device_addr {
     enum m2sdr_transport_kind transport;
     /* Canonical identifier accepted by m2sdr_open(), eg pcie:/dev/m2sdr0. */
     char identifier[M2SDR_DEVICE_STR_MAX];
+    /* PCIe device path, or LiteUSB device selector (after "usb:"). */
     char path[M2SDR_DEVICE_STR_MAX];
     char ip[64];
     uint16_t port;
@@ -479,6 +481,11 @@ enum m2sdr_feature_flag {
 #else
     M2SDR_FEATURE_RFIC_OVERSAMPLING = 0,
 #endif
+#ifdef CSR_CAPABILITY_FEATURES_USB3_OFFSET
+    M2SDR_FEATURE_USB3 = 1u << CSR_CAPABILITY_FEATURES_USB3_OFFSET,
+#else
+    M2SDR_FEATURE_USB3 = 0,
+#endif
 };
 
 enum m2sdr_feature_mask {
@@ -704,8 +711,9 @@ int  m2sdr_sata_pcie_dma_copy(struct m2sdr_dev *dev,
  * `m2sdr_get_fd()` returns a valid descriptor only for LitePCIe devices.
  * `m2sdr_get_eb_handle()` returns a valid handle only for LiteEth devices.
  * `m2sdr_get_transport()` is the preferred way to branch on active backend.
- * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`
- * or the Etherbone connection handle, depending on the active backend. On
+ * `m2sdr_get_handle()` returns either the PCIe file descriptor cast to `void *`,
+ * the Etherbone connection handle or the LiteUSB connection handle, depending
+ * on the active backend (all accepted by m2sdr_readl/m2sdr_writel). On
  * LitePCIe devices this value is an integer fd reinterpreted as a pointer; it
  * is only for passing through opaque APIs and must not be dereferenced. Prefer
  * backend-specific accessors in new code.
