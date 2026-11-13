@@ -86,8 +86,9 @@ gateware does not use their values.
 | `ad9361_active_rx_frequency_khz` | RX frequency                     |
 | `ad9361_active_bandwidth`        | Bandwidth                        |
 
-These three registers sit before the SPI registers in the block, which moved the SPI registers:
-see [Locations that move](#soc-csr-moving).
+These three registers are the last of the block, after the PRBS and saturation counter
+registers, so the registers before them keep their addresses: see
+[Locations that move](#soc-csr-moving).
 
 ## LVDS data port {#rfic-lvds}
 
@@ -234,8 +235,9 @@ BFP8 as encoded blocks and leaves the decoding to the application.
 
 BFP8 exists on the 64-bit datapath only. The oversampling build accepts SC16 and SC8.
 
-> Do not select BFP8 on an oversampling build. With `mode` at 2 the 128-bit bit mode stage stops
-> both streams, and neither the gateware nor the library rejects the setting.
+The library refuses BFP8 on an oversampling bitstream, with an unsupported error. The gateware
+handles every mode other than SC8 as SC16 on the 128-bit datapath, so a `mode` of 2 written
+directly gives SC16 words and never stops the streams (`test/test_ad9361.py`).
 
 ### Comparison {#rfic-format-loss}
 
@@ -412,20 +414,16 @@ The build command is in [Building the gateware](#building-gateware).
 
 ### Limits of the build {#rfic-oversampling-limits}
 
-The oversampling build supports PCIe only. The script does not reject it with `--with-eth` or
-`--with-sata`, but the result does not work.
+The oversampling build supports PCIe only. The script refuses `--with-rfic-oversampling` with
+`--with-eth` or `--with-sata`: the Ethernet and SATA streamers and the SATA RX tap are 64 bits
+wide and cannot carry the 128-bit words. It refuses it with `--with-usb3` too, whose rate is
+too low.
 
-- The Ethernet and SATA streamers and the SATA RX tap are 64 bits wide, so the second group of
-  each word, half of the samples, is lost. With SATA the tap is on the RX path to every
-  destination, so the PCIe RX stream loses them too.
-- The RFIC clock constraint of the Ethernet builds ignores the option.
-
-Three more limits apply on a PCIe oversampling build.
+Two more limits apply on a PCIe oversampling build.
 
 | Limit                        | Effect                                                            |
 |-----------------------------------------------|----------------------------------------------------------------------------|
-| BFP8                         | Stops both streams, see [BFP8](#rfic-bfp8)                        |
-| Saturation counters          | Observe one group out of two, see [Saturation counters](#rfic-agc) |
+| BFP8                         | Not available, see [BFP8](#rfic-bfp8)                             |
 | Register offsets             | Shifted in the `ad9361` block, see [Locations that move](#soc-csr-moving) |
 
 ### Bring-up by the host {#rfic-oversampling-bringup}
@@ -577,8 +575,9 @@ The counters observe the stream after the clock domain crossing, before the bit 
 they see the 12-bit samples in every transport format. In 1T1R the two slots are successive
 samples of the single channel, and the RX1 and RX2 counters then watch the same channel.
 
-In the oversampling build the counters only observe the first group of each 128-bit word. Half of
-the samples are not watched, so a short saturation can be missed.
+In the oversampling build a 128-bit word carries two groups, and the counters observe both. The
+count stays one event per word, whichever group reaches the threshold
+(`test/test_agc.py`).
 
 ## PHY loopback {#rfic-loopback}
 

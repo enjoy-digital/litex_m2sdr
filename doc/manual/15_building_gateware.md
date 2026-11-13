@@ -101,6 +101,7 @@ describes each of them.
 | Ethernet 5GBASE-R | `--with-eth` `--eth-phy=5000baser` | [Host links](#host-links) |
 | VRT streaming | `--with-eth` `--with-eth-vrt` | [Host links](#host-links) |
 | SATA storage | `--with-sata` | [Host links](#host-links) |
+| USB3 host link | `--with-usb3` | [Host links](#host-links) |
 | Oversampling mode | `--with-rfic-oversampling` | [The RFIC interface](#rfic) |
 | PCIe PTM | `--with-pcie` `--with-pcie-ptm` | [Time synchronisation](#timing) |
 | Ethernet PTP | `--with-eth` `--with-eth-ptp` | [Time synchronisation](#timing) |
@@ -113,14 +114,14 @@ describes each of them.
 The status of each feature is in the [status table](#intro-status). The oversampling mode and
 White Rabbit are Experimental.
 
-Three combinations are not rejected with a clear message.
+The script refuses the combinations that cannot work, with a message that names the options.
+Three of them are worth knowing before choosing a configuration.
 
-- The baseboard has one PCIe lane. `--variant=baseboard` with `--pcie-lanes=2` or `4` stops on
-  an assertion without a message.
-- The oversampling mode is for PCIe alone. The script accepts it with Ethernet or SATA, but these
-  paths are 64 bits wide and lose half of each word: do not combine them.
-- Ethernet and White Rabbit would share one PLL channel and its reset. The script accepts the
-  pair: do not enable them together.
+- The baseboard has one PCIe lane: `--variant=baseboard` takes `--pcie-lanes=1` only.
+- The oversampling mode is for PCIe alone: not with Ethernet, SATA or USB3.
+- Ethernet and White Rabbit would share one PLL channel and its reset: not together.
+
+[Option rules](#soc-rules) gives the complete list.
 
 ### Elaborating without Vivado {#build-elaborate}
 
@@ -273,13 +274,16 @@ sudo litex_server --pcie --pcie-bar=04:00.0
 
 # Etherbone, on an Ethernet build.
 litex_server --udp --udp-ip=192.168.1.50 --udp-port=1234
+
+# USB bridge, on a USB3 build.
+litex_server --usb --usb-vid 0x1d50 --usb-pid 0x605a
 ```
 
 JTAGBone is part of every build unless `--without-jtagbone` is given. It works when no host
 link does, which makes it the bridge of last resort. The OpenOCD configuration file follows the
 FTDI chip of the cable: `openocd_xc7_ft2232.cfg` or `openocd_xc7_ft4232.cfg`.
 
-The PCIe and Ethernet bridges exist only in the builds that have the host link.
+The PCIe, Ethernet and USB bridges exist only in the builds that have the host link.
 
 ## Release archives {#build-release}
 
@@ -476,9 +480,8 @@ For the side channel, `--pcie-dmas` (or the `pcie_dmas` argument) sets the numbe
 channels. Channel 0 keeps the samples. The hook runs after the host links are created, so the
 extra channels exist when it is called, as `self.pcie_dma1` and the next ones.
 
-> The extra channels have a start synchroniser whose PPS input is not connected, and the kernel
-> driver arms it on every channel. A design that uses an extra channel connects the PPS pulse to
-> the synchroniser of this channel, as the SoC does for channel 0.
+Each extra channel has a start synchroniser, which the kernel driver arms. The SoC connects the
+PPS pulse to the synchroniser of every channel, so an extra channel starts like channel 0.
 
 The kernel driver sets the buffer size and the interrupt rate per channel, so a low-rate side
 channel can use small buffers ([Host software](#software)).

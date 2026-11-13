@@ -8,7 +8,7 @@ application to the board, or to write one with the SoapySDR API in C++ or Python
 
 | Item | Value |
 |----------------|-------------------------------------------------------------------------------|
-| SoapySDR driver | `driver=LiteXM2SDR`, one module for PCIe and Ethernet |
+| SoapySDR driver | `driver=LiteXM2SDR`, one module for PCIe, Ethernet and USB3 |
 | Source | `litex_m2sdr/software/soapysdr/` |
 | Channels | 2 RX, 2 TX |
 | Stream formats | `CF32`, `CS16`, `CS8` |
@@ -32,7 +32,8 @@ srsRAN and any other SoapySDR application use the board without specific code.
 
 The module is built on the library, as the figure below shows. The device arguments select the
 board and the host link. Settings go to the RFIC and to the registers; samples go through the
-DMA of the kernel driver over PCIe, or through UDP over Ethernet.
+DMA of the kernel driver over PCIe, through UDP over Ethernet, or through the Bulk endpoints
+over USB3.
 
 ![The SoapySDR module. Applications configure the board and exchange samples through the
 SoapySDR API. Follow the cyan arrow for the samples: the module converts them to the format of
@@ -54,7 +55,8 @@ SoapySDRUtil --probe="driver=LiteXM2SDR"
 
 Discovery lists the PCIe boards, then probes the default Ethernet address, `192.168.1.50` port
 1234. It does not scan the network. Other Ethernet addresses are given as a list, in the device
-arguments or in an environment variable.
+arguments or in an environment variable. A module built with the USB3 backend also lists the
+USB3 boards, each by its bus and port path.
 
 ```sh
 SoapySDRUtil --find="driver=LiteXM2SDR,eth_ips=192.168.1.50;192.168.1.51:1234"
@@ -70,11 +72,22 @@ LITEXM2SDR_ETH_IPS=192.168.1.50,192.168.1.51 SoapySDRUtil --find="driver=LiteXM2
 | `dev_id=pcie:/dev/m2sdr0` | A board by its device identifier |
 | `dev_id=eth:192.168.1.50:1234` | The same, for an Ethernet board |
 | `eth_discovery=0` | No Ethernet probe during discovery |
+| `usb=` | The first USB3 board with the default identifiers |
+| `usb=1d50:605a` | The first USB3 board with this vendor and product |
+| `usb=serial=0001` | The USB3 board with this serial string |
+| `usb=path=2-1.3` | The USB3 board on this bus and port path |
+| `dev_id=usb:path=2-1.3` | The same, as a device identifier |
+| `usb_discovery=0` | No USB3 boards in the discovery |
 
 ```sh
 SoapySDRUtil --probe="driver=LiteXM2SDR,path=/dev/m2sdr1"
 SoapySDRUtil --probe="driver=LiteXM2SDR,eth_ip=192.168.1.50"
+SoapySDRUtil --probe="driver=LiteXM2SDR,usb="
 ```
+
+The value of `usb` is what follows `usb:` in a device identifier
+([Device identifiers](#sw-device)). On a USB3 board the hardware key that the driver reports
+ends with `-usb`.
 
 ### Device arguments {#fw-args}
 
@@ -92,6 +105,8 @@ optional.
 | `auto_bandwidth` | `on`, `off` | Follow the sample rate with the bandwidth |
 | `ad9361_fir_profile` | `legacy`, `bypass`, `match`, `wide` | FIR profile used above 61.44 MSPS |
 | `calibrate_delay` | `0`, `1` | Scan the data port delays at open |
+| `init_samplerate` | samples per second | Sample rate and bandwidth set at open, `30.72e6` by default |
+| `bypass_init` | `0`, `1` | `1`: open without initialising the clock generator and the RFIC |
 | `eth_mode` | `udp`, `vrt` | Ethernet RX stream: raw UDP, or VRT (refused, see below) |
 | `vrt_port` | port | UDP port of the VRT stream, 4991 by default |
 | `tx_pacing` | `rate`, `none` | Ethernet TX pacing by the sample rate |
@@ -107,9 +122,18 @@ timed TX mode.
 Some arguments deserve a comment.
 
 - `bitmode`: above 61.44 MSPS, a PCIe x1 board uses the 8-bit format by default to halve the
-  DMA rate, while x2 and x4 boards keep 16 bits. An explicit `bitmode`, or a `CS8` stream,
-  overrides the default. The formats are compared in
+  DMA rate, while x2 and x4 boards keep 16 bits. A USB3 board uses the 8-bit format above
+  40 MSPS and the 16-bit format below, because 2T2R at 61.44 MSPS in SC16 exceeds the link. An
+  explicit `bitmode`, or a `CS8` stream, overrides the default. The formats are compared in
   [The RFIC interface](#rfic).
+- `init_samplerate`: the driver initialises the RFIC at open, before the application sets its
+  own rate. A lower value avoids running the RFIC at 30.72 MSPS on a link or a host that cannot
+  sustain it. It must be positive, and it is ignored with `bypass_init=1`.
+- `bypass_init=1`: the driver attaches to a board that another program configured, such as
+  `m2sdr_rf`. It reads the sample rates and the local oscillator frequencies back from the
+  RFIC and starts from them; later settings reconfigure the RFIC as usual. The open fails when
+  the RFIC is held in reset, and the RFIC is left running when the device is closed.
+  `calibrate_delay` is ignored.
 - `clock_source`: the same three sources are available through the standard clock API of
   SoapySDR. Changing the source is refused while a stream is open. The reference selection is
   described in [Time synchronisation](#timing).
@@ -147,8 +171,8 @@ The board time is the hardware time of the SoapySDR device, in nanoseconds. An a
 reads it with `getHardwareTime()` and sets it with `setHardwareTime()`. The time sources are
 `internal` and, on a bitstream with Ethernet PTP, `ptp`.
 
-RX buffers come with the board time of their first sample. Over PCIe the driver reads it from
-the header of each DMA buffer. Over Ethernet it needs `eth_mode=vrt`, which the shipped software
+RX buffers come with the board time of their first sample. Over PCIe and USB3 the driver reads
+it from the header of each buffer. Over Ethernet it needs `eth_mode=vrt`, which the shipped software
 does not select, so Ethernet RX has no hardware timestamps. Without hardware
 timestamps the driver counts samples from the time read when the stream starts.
 

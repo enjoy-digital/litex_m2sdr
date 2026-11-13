@@ -13,6 +13,7 @@ installed or the board has never been checked.
 | [Record and replay](#flow-record) | any | nothing specific |
 | [FM broadcast in a pipe](#flow-fm) | any | nothing specific |
 | [Ethernet streaming](#flow-ethernet) | Ethernet | `--with-eth` |
+| [USB3 streaming](#flow-usb3) | USB3 | `--with-usb3` |
 | [SATA recording](#flow-sata) | PCIe, Ethernet | `--with-sata` |
 | [Wide bandwidth](#flow-wide-bandwidth) | PCIe | Experimental; see the recipe |
 | [Timed TX](#flow-timed-tx) | PCIe | nothing specific |
@@ -28,8 +29,8 @@ The commands assume that the utilities are installed and in the path. From a sou
 without installation, run them from `litex_m2sdr/software/user` with a `./` prefix. Commands
 that start with `./litex_m2sdr.py` or `scripts/` run from the top of the repository.
 
-A recipe written for one host link works on the other by changing the device option: `-c 0`
-for a PCIe board, `-i 192.168.1.50` for an Ethernet board. See
+A recipe written for one host link works on another by changing the device option: `-c 0`
+for a PCIe board, `-i 192.168.1.50` for an Ethernet board, `-d usb:` for a USB3 board. See
 [Device identifiers](#sw-device).
 
 ## First loopback {#flow-first}
@@ -300,6 +301,95 @@ fields of each packet. VRT is Simulation-tested ([Status](#intro-status)).
 PCIe, Ethernet and SATA cannot all be in one bitstream, and Ethernet PTP excludes White Rabbit.
 The reason is in [Host links](#host-links).
 
+## USB3 streaming {#flow-usb3}
+
+Over USB3, the board is controlled and streams samples through an SFP to USB3 adapter in an SFP
+cage of the LiteX Acorn Baseboard Mini, with no kernel driver on the host. The link and its
+limits are described in [USB3 host link](#links-usb3), and the adapter in
+[SFP to USB3 adapter](#carriers-usb3).
+
+### Build and reach the board {#flow-usb3-build}
+
+Build and load a bitstream for the baseboard. The first command below builds USB3 alone, on SFP
+cage 0. The second keeps PCIe x1 next to it and adds the debug registers of the link, which is
+convenient for a bring-up.
+
+```sh
+./litex_m2sdr.py --variant=baseboard --with-usb3 --usb3-sfp=0 --build --load
+./litex_m2sdr.py --variant=baseboard --with-pcie --with-usb3 --with-usb3-debug \
+    --build --load
+```
+
+The build needs USB3-PIPE with its register bridge on endpoint 0 and its external PLL option,
+installed next to the other LiteX cores, and the LiteICLink version that USB3-PIPE requires. Plug the adapter in the cage, connect it to a USB3
+port of the host, then check that the host sees the device.
+
+```sh
+lsusb -d 1d50:605a
+lsusb -t
+```
+
+The first command must list the device; the second must show it on a 5000M port. `--usb3-vid`
+and `--usb3-pid` change the identifiers at build time.
+
+### Set up the host {#flow-usb3-host}
+
+The software needs libusb and two settings: the udev rule that gives users access to the
+device, and more memory for the USB transfers. [USB3 helper](#sw-liteusb) explains both.
+
+```sh
+sudo apt install libusb-1.0-0-dev
+cd litex_m2sdr/software/user
+make
+sudo cp ../99-litex-m2sdr-usb3.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+echo 64 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb
+```
+
+`make` builds the USB3 backend when it finds libusb. Then read the board.
+
+```sh
+m2sdr_util -d usb: info
+```
+
+`info` must print the identifier of the SoC and, in its feature list, the line `USB3` with the
+value `Yes`.
+
+### Stream {#flow-usb3-stream}
+
+All the utilities take the board with `-d usb:`. RX and TX can run in two programs at the same
+time, and the register utilities work while they stream.
+
+```sh
+m2sdr_rf -d usb: --sample-rate 30.72e6
+m2sdr_record -d usb: capture.bin 100000000
+```
+
+At 2T2R, SC16 fits up to 30.72 MSPS and SC8 up to 61.44 MSPS
+([Sample rates](#links-usb3-rates)).
+
+With SoapySDR, select the board with the `usb` argument. The driver then chooses SC8 above
+40 MSPS, and `init_samplerate` lowers the rate that it programs at open.
+
+```sh
+SoapySDRUtil --find="driver=LiteXM2SDR"
+SoapySDRUtil --probe="driver=LiteXM2SDR,usb="
+SoapySDRUtil --probe="driver=LiteXM2SDR,usb=,init_samplerate=5e6"
+```
+
+### Registers with the LiteX tools {#flow-usb3-litex}
+
+The LiteX host tools reach the registers through the same endpoint, with the USB bridge of
+`litex_server`, which uses pyusb.
+
+```sh
+litex_server --usb --usb-vid 0x1d50 --usb-pid 0x605a
+litex_cli --regs
+```
+
+Timed TX is not available on this link; see [Limits](#links-usb3-limits).
+
 ## SATA recording {#flow-sata}
 
 With SATA, the board records the RX stream to an SSD and replays it without the host in the
@@ -565,8 +655,8 @@ on the wrong phase, without any action from the application. An application only
 
 Three limits apply to the oversampling build.
 
-- It is for PCIe alone. The script accepts the option with Ethernet or SATA, but these paths
-  lose half of each word: do not combine them. The BFP8 format does not exist on this build.
+- It is for PCIe alone: the script refuses the option with Ethernet, SATA or USB3. The BFP8
+  format does not exist on this build, and the library refuses it there.
 
 - TX works only in 2T2R at 122.88 MSPS. RX works at all rates. Use a standard bitstream to
   transmit at lower rates.
@@ -600,7 +690,8 @@ With timed TX, a buffer is transmitted when the board time reaches its timestamp
 holds the buffer in a gate until then, so the timestamp is the time on air, on a 10 ns step.
 The gate is described in [Streaming](#streaming).
 
-The gate is part of every bitstream, but timed TX and the TX header work over PCIe only. A
+The gate is part of every bitstream, but timed TX and the TX header work over PCIe only: on
+another host link the library refuses to enable the TX header. A
 program checks the presence of the gate with the feature bit `M2SDR_FEATURE_TIMED_TX` of
 `m2sdr_get_capabilities()`; `m2sdr_util info` does not print it.
 
@@ -998,8 +1089,8 @@ field `invert` of `ptp-clock10-config`. The fields of the loop are described in
 
 White Rabbit needs the baseboard, an SFP port and the LiteX-WR-NIC repository next to this one.
 The build, the console of the White Rabbit core and its limits are described in
-[Time synchronisation](#timing). Do not enable Ethernet in the same bitstream: the script
-accepts the pair, but the two cores would share one PLL channel and its reset.
+[Time synchronisation](#timing). Ethernet cannot be in the same bitstream: the two cores would
+share one PLL channel and its reset, and the script refuses the pair.
 
 The first command below checks that the dependency is found; the second builds a bitstream with
 PCIe and White Rabbit.

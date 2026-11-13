@@ -1,8 +1,7 @@
 # Host links {#host-links}
 
 This chapter describes how the gateware connects the board to the outside through the four
-transceivers of the FPGA: the PCIe and Ethernet host links, the SATA storage and the USB3 host
-link, which is in development.
+transceivers of the FPGA: the PCIe, Ethernet and USB3 host links, and the SATA storage.
 
 It is for the reader who builds a variant, combines links or
 changes one of them. The cores are described in their own manuals; this chapter covers what
@@ -16,7 +15,7 @@ LiteX-M2SDR adds around them.
 | Ethernet | LiteEth | Registers, sample streams, PTP | `--with-eth` |
 | SATA | LiteSATA | Record and replay on an SSD | `--with-sata` |
 | White Rabbit | LiteX-WR-NIC | Time synchronisation only | `--with-white-rabbit` |
-| USB3 | USB3-PIPE | In development | Not in the gateware |
+| USB3 | USB3-PIPE | Registers, sample streams | `--with-usb3` |
 
 PCIe exists on both variants; the other links need the `baseboard` variant. The status of each
 link is in the [status table](#intro-status). The options are listed in
@@ -29,9 +28,12 @@ FPGA. In the M.2 slot of a host they are PCIe lanes. On the LiteX Acorn Baseboar
 lanes reach two SFP cages, a SATA connector and one PCIe lane, so each lane can run another
 protocol.
 
-The figure below shows the three links of the gateware. Each link core ends on one port of the
+The figure below shows three links of the gateware. Each link core ends on one port of the
 stream crossbar, which selects where the TX stream comes from and where the RX stream goes. The
 crossbar and the streams behind it are described in [Streaming](#streaming).
+
+The USB3 host link is the fourth one. It takes an SFP cage in place of Ethernet and ends on
+port 3 of the crossbar; [USB3 host link](#links-usb3) has its own figure.
 
 ![The links of the gateware. Look at the crossbar ports: port 0 is PCIe, port 1 is Ethernet and
 port 2 is SATA; the cyan arrow is the stream path to the RFIC.](link_overview.svg)
@@ -46,7 +48,8 @@ The lane of each link is fixed by the pin tables of the platform file.
 | 3 | PCIe lane 3 (x4) | PCIe x1 |
 
 Ethernet and SATA need the baseboard: the build stops with an error when `--with-eth` or
-`--with-sata` is used with the `m2` variant. White Rabbit has the same rule. The carriers are
+`--with-sata` is used with the `m2` variant. White Rabbit and USB3 have the same rule. The
+carriers are
 described in [Carriers](#carriers).
 
 On the way to an SFP cage one pair of each lane is inverted once and the other twice, between
@@ -59,12 +62,13 @@ A GTP quad has one common block with two PLLs, and every transceiver of the quad
 clock from one of them. The gateware instantiates this block once and gives one PLL to each
 enabled protocol (`SharedQPLL`). Two protocols at most can therefore run in one bitstream.
 
-![The shared QPLL. The selection gives a PLL to two of the three protocol configurations at
-most; the cyan arrows are the two clock channels the transceivers take.](link_qpll.svg)
+![The shared QPLL, drawn for PCIe, Ethernet and SATA. The selection gives a PLL to two of the
+protocol configurations at most; the cyan arrows are the two clock channels the transceivers
+take.](link_qpll.svg)
 
-The channels are given in a fixed order: PCIe first, then Ethernet, then SATA. With one protocol
-the map has one entry on channel 0. A link gets its channel by name (`pcie`, `eth` or `sata`)
-with `get_channel()`; an unknown name raises an error.
+The channels are given in a fixed order: PCIe first, then Ethernet, then SATA, then USB3. With
+one protocol the map has one entry on channel 0. A link gets its channel by name (`pcie`, `eth`,
+`sata` or `usb3`) with `get_channel()`; an unknown name raises an error.
 
 | Protocol | Reference clock | Reference input | `fbdiv` | `fbdiv_45` |
 |-------------------|----------------------------|-----------------------|--------------|-------------------|
@@ -74,11 +78,13 @@ with `get_channel()`; an unknown name raises an error.
 | 5GBASE-R | `refclk_eth`, 103.125 MHz | `GTGREFCLK0` | 5 | 5 |
 | White Rabbit | `refclk_eth`, 125 MHz | `GTGREFCLK0` | 4 | 5 |
 | SATA | `refclk_sata`, 150 MHz | `GTGREFCLK0` | 5 | 4 |
+| USB3 | System clock, 125 MHz | `GTGREFCLK0` | 4 | 5 |
 
 The Ethernet settings give line rates of 1.25 Gbps, 3.125 Gbps and 5.15625 Gbps, which
 `test/test_qpll.py` checks. The 125 MHz and 103.125 MHz references come from a PLL fed by the
 system clock, and the 150 MHz reference from a second one. With White Rabbit the 125 MHz
-reference comes from the tunable MMCM instead.
+reference comes from the tunable MMCM instead. The USB3 setting gives a PLL frequency of
+2.5 GHz for the 5 Gbps line rate, which the same test checks.
 
 White Rabbit uses the Ethernet channel, with the 1000BASE-X settings: for the QPLL,
 `--with-white-rabbit` counts as Ethernet. The table below lists what can share a bitstream.
@@ -90,16 +96,15 @@ White Rabbit uses the Ethernet channel, with the 1000BASE-X settings: for the QP
 | PCIe and SATA | PCIe on channel 0, SATA on channel 1 |
 | Ethernet and SATA | Ethernet on channel 0, SATA on channel 1 |
 | PCIe and White Rabbit | PCIe on channel 0, White Rabbit on channel 1 |
-| Ethernet and White Rabbit | Not supported, and not rejected by the build |
+| Ethernet and White Rabbit | Rejected with an error |
 | PCIe, Ethernet or White Rabbit, SATA | Rejected with an error |
+| USB3 alone | Channel 0 |
+| PCIe and USB3 | PCIe on channel 0, USB3 on channel 1 |
+| USB3 with Ethernet, SATA or White Rabbit | Rejected with an error |
 
-> Do not enable Ethernet and White Rabbit together. Both use the `eth` channel: the two cores
-> would drive the reset of the same PLL, and 2500BASE-X or 5GBASE-R set a line rate that White
-> Rabbit cannot use. The build does not reject the pair.
-
-Both also default to SFP cage 0. With the default cages the elaboration fails when the second
-core requests the pins of the cage; with two different cages it completes, and the design is
-wrong for the reason above.
+Ethernet and White Rabbit cannot be enabled together. Both use the `eth` channel: the two cores
+would drive the reset of the same PLL, and 2500BASE-X or 5GBASE-R set a line rate that White
+Rabbit cannot use. The script refuses the pair, whatever the SFP cages.
 
 In the code: the shared PLL is in `litex_m2sdr/gateware/qpll.py`, and the reference clocks are
 created by `CRG` in `litex_m2sdr.py`.
@@ -313,9 +318,8 @@ is sized for 2T2R in the SC8 format, described in [RFIC](#rfic).
 | No Ethernet, oversampling mode | 491.52 MHz | 122.88 MSPS |
 
 The Ethernet streamers and the SATA streamers are 64 bits wide. The 128-bit datapath of the
-oversampling mode is made for PCIe: do not combine `--with-rfic-oversampling` with `--with-eth`
-or `--with-sata`. The build does not reject these combinations: it elaborates, keeps the RFIC
-clock of the Ethernet build and drops the upper half of each 128-bit word.
+oversampling mode is made for PCIe: the script refuses `--with-rfic-oversampling` with
+`--with-eth` or `--with-sata`.
 
 ### VRT streamer {#links-eth-vrt}
 
@@ -509,11 +513,11 @@ The register `main_sata_streamer_control` resets the frontend of each streamer w
 It does not abort a command either. On a bitstream without the `stop` registers, an interrupted
 `m2sdr_sata` lets the whole programmed transfer finish.
 
-> The location of this register depends on the build. With Ethernet, VRT and SATA in one
-> bitstream, `main_eth_rx_mode` takes the address `0xb000` and this register moves to
-> `0xb004`. The header of the shipped software has `0xb000`: on such a build a streamer reset
-> from `m2sdr_sata` writes the RX route instead, and resets nothing. Do not combine
-> `--with-eth-vrt` and `--with-sata`.
+> The location of this register depends on the build: `0x15000` in a SATA build, and `0x15004`
+> when `--with-eth-vrt` puts `main_eth_rx_mode` before it. The header committed with the
+> software has `0xb000`, where a SATA build has no register. A streamer reset from an
+> `m2sdr_sata` built against that header resets nothing: build the software against the
+> `csr.h` of the bitstream ([The committed register header](#soc-csr-header)).
 
 With PCIe, each of the four engines raises an interrupt at the end of a transfer, successful or
 not.
@@ -525,7 +529,7 @@ with `m2sdr_sata` and its catalog are in [Workflows](#workflows); the measured r
 
 ## Stream crossbar ports {#links-crossbar}
 
-The crossbar has three ports and two selection registers, `crossbar_mux_sel` for the source of
+The crossbar has four ports and two selection registers, `crossbar_mux_sel` for the source of
 the TX stream and `crossbar_demux_sel` for the destination of the RX stream. The port numbers
 are the same as the constants of the software.
 
@@ -534,54 +538,183 @@ are the same as the constants of the software.
 | 0 | PCIe | DMA channel 0 | DMA channel 0 |
 | 1 | Ethernet | UDP streamer | UDP or VRT streamer |
 | 2 | SATA | Player | Recorder |
+| 3 | USB3 | Bulk OUT streamer | Bulk IN streamer |
 
 A port whose link is not in the bitstream is left unconnected. The player is on the TX side of
 the crossbar; to show a recording to the host, the software selects the player as TX source and
 enables the loopback described in [Streaming](#streaming).
 
-## USB3 host link (in development) {#links-usb3}
+## USB3 host link {#links-usb3}
 
-> This section describes work that is not part of the released gateware. The USB3 host link is
-> in development (see the [status table](#intro-status)): the gateware and the software are
-> proposed changes of the repository, and the link is not validated on hardware. Names and
-> numbers below can change.
+USB3 is the third host link, for the `baseboard` variant, enabled with `--with-usb3`. One SFP
+cage becomes a USB 3.2 Gen 1 port (5 Gbps) through an SFP to USB3 adapter such as the Xillybus
+SFP2USB. The USB device is implemented in the FPGA with USB3-PIPE, with no USB chip. The core is
+described in the
+[USB3-PIPE manual](https://github.com/enjoy-digital/usb3_pipe/releases/tag/manual-nightly), and
+the adapter in [SFP to USB3 adapter](#carriers-usb3).
 
-The intent is a third host link for the baseboard: one SFP cage becomes a USB 3.2 Gen 1 port
-(5 Gbps) through an SFP to USB3 adapter such as the Xillybus SFP2USB. The USB device is
-implemented in the FPGA with USB3-PIPE, with no USB chip. The core is described in the
-[USB3-PIPE manual](https://github.com/enjoy-digital/usb3_pipe/releases/tag/manual-nightly).
+| Item | Value |
+|--------------------------|--------------------------------------------------------------------------|
+| SFP cage | 0 by default, 1 with `--usb3-sfp=1` |
+| USB identifiers | `1d50:605a` by default (`--usb3-vid`, `--usb3-pid`) |
+| Device strings | Manufacturer "Enjoy-Digital", product "LiteX-M2SDR", serial "0001" |
+| Device class | Vendor class, two interfaces |
+| Endpoint 0 | Control: access to the SoC bus |
+| Endpoint 1, interface 0 | Bulk IN: the RX stream |
+| Endpoint 2, interface 1 | Bulk OUT: the TX stream |
+| Burst of the Bulk endpoints | 16 packets |
+| Crossbar port | 3 |
+| Line clock | Channel `usb3` of the shared QPLL |
+| System clock | 125 MHz, required |
 
-![The USB3 host link as proposed. The device core has three endpoints: EP0 gives access to the
-SoC bus, and the two Bulk endpoints (cyan) carry the sample streams.](link_usb3.svg)
+The figure below shows the link. The transceiver and the PHY train the link, the device core
+answers the host, and three blocks connect the endpoints to the SoC.
 
-The proposed module (`USB3`, in a new file `litex_m2sdr/gateware/usb3.py`) assembles four parts.
+![The USB3 host link. The device core has three endpoints: EP0 gives access to the SoC bus, and
+the two Bulk endpoints (cyan) carry the sample streams.](link_usb3.svg)
+
+The module of the link assembles the parts of the table below (`USB3`).
 
 | Part | Role |
 |-----------------------------|-----------------------------------------------------------------------|
-| Transceiver and PHY | `A7USB3SerDes` and `USB3PHY` in device role |
-| Device core | `USB3DeviceCore` with a vendor class and two interfaces |
-| EP0 bridge | `USB3EP0Wishbone`: vendor requests to the SoC bus |
-| Streamers | Bulk IN for the RX stream, Bulk OUT for the TX stream |
+| `A7USB3SerDes` | Transceiver of USB3-PIPE on the lane of the SFP cage |
+| `USB3PHY` | Physical layer and link training, in device role |
+| `USB3DeviceCore` | Link and protocol layers, descriptors, endpoint 0 |
+| `USB3EP0Wishbone` | Vendor requests of endpoint 0 to the SoC bus |
+| `USB3RXStreamer` | RX stream of the crossbar to the Bulk IN endpoint |
+| `USB3TXStreamer` | Bulk OUT endpoint to the TX stream of the crossbar |
 
-- **Clocking.** The link takes a channel of the shared QPLL, with the 100 MHz oscillator of the
-  board as reference, so the QPLL rule becomes "two protocols among four". A small adapter
-  presents the channel as the PLL that the USB3-PIPE transceiver expects. The system clock must
-  be at least 125 MHz.
-- **Registers.** EP0 is a host bridge: it carries the protocol of the LiteX USB bridge, so
-  `litex_server --usb` works. EP0 needs no claimed interface, so register tools run while
-  streaming.
-- **Streams.** The crossbar gets a fourth port, port 3. Bulk IN (endpoint 1, interface 0) sends
-  the RX stream and Bulk OUT (endpoint 2, interface 1) receives the TX stream. Two interfaces
-  let two programs claim RX and TX separately.
-- **Start of a run.** Enabling RX flushes the packets of the previous run and aligns the header
-  logic, so the first buffer starts a frame. The TX FIFO of 256 KiB is primed to half before
-  data goes to the RFIC, as on Ethernet.
+The transmit pair needs no inversion, as for Ethernet. The link training detects an inverted
+receive pair and corrects it, so the gateware sets no receive polarity for USB3.
 
-Limits of the proposal: USB3 cannot be combined with Ethernet, SATA or White Rabbit, nor with
-the oversampling mode, whose rate exceeds the link. It can share a bitstream with PCIe x1.
+### Clocking {#links-usb3-clock}
 
-A new library (`libliteusb`, on libusb) and a `usb:` device identifier bring the link to the
-library, the utilities and the SoapySDR driver.
+The transceiver takes its line clock from a channel of the shared QPLL, like the other links. A
+small adapter presents this channel as the PLL object that the USB3-PIPE transceiver expects
+(`USB3QPLLChannel`).
+
+The reference of this PLL is the system clock, which must therefore be 125 MHz: the script
+refuses another value with `--with-usb3`. The source records why the 100 MHz oscillator is not
+used: through a clock buffer it gave link errors and recoveries as soon as the RFIC ran at
+30.72 MSPS.
+
+The clock generator of the SoC also makes a clock at one eighth of the system clock for the
+transceiver (`cd_oob`). USB3-PIPE uses it to detect the low-frequency signalling that starts
+and wakes a USB3 link.
+
+### Registers through endpoint 0 {#links-usb3-ep0}
+
+Endpoint 0 is a host bridge. Its vendor requests are turned into accesses of the SoC bus by a
+Wishbone master, which the SoC adds to its bus next to the other bridges
+([Host bridges](#litex-bridges)).
+
+The requests follow the protocol of the LiteX USB bridge, so `litex_server --usb` works with the
+board. An extension reads or writes up to 128 words in one request, which the library uses for
+its block accesses.
+
+A control request needs no claimed interface. The register tools therefore run while another
+program streams samples, and two programs can use the registers at the same time.
+
+### Sample streams {#links-usb3-streams}
+
+The two Bulk endpoints carry 32-bit words, and the crossbar carries 64-bit words. Each streamer
+holds a width converter and a FIFO; the low half of a 64-bit word travels first, which gives
+the host the byte order of the PCIe DMA buffers.
+
+| Streamer | FIFO | When disabled | When enabled |
+|-------------------|----------------|-------------------------------|---------------------------------------------|
+| RX, Bulk IN | 32 KiB | Drains the RX stream | Flushes the endpoint, then sends |
+| TX, Bulk OUT | 256 KiB | Drains the endpoint | Waits until the FIFO is half full, then forwards |
+
+- **RX.** While `rx_enable` is 0 the streamer accepts and drops the RX stream, so the RFIC
+  datapath is never blocked. A rising `rx_enable` flushes the packets that the endpoint still
+  holds from a previous run.
+- **TX.** The FIFO is primed: nothing goes to the RFIC before it is half full, as for the
+  Ethernet TX path. When the FIFO runs empty the streamer stops forwarding and waits for half a
+  FIFO again. The bit `tx_started` tells whether it forwards.
+- **RFIC FIFOs.** When PCIe is not in the bitstream, the RFIC core gets the same FIFO of depth
+  8192 on each stream as in an Ethernet-only build.
+
+The buffers have the format of the PCIe DMA: 8192 bytes, with the 16-byte header first when the
+RX header is enabled ([Header](#streaming-header)). The SoC keeps the header logic in step with
+the streams of this link. With port 3 selected on the RX side, the header inserter is held in
+reset until `rx_enable` is set, so the first buffer sent to the host starts a frame.
+
+The TX side works the same way with `tx_enable`, but the TX header itself is not usable on this
+link: see [Limits](#links-usb3-limits).
+
+Two interfaces separate the two directions. A host program claims interface 0 to receive and
+interface 1 to transmit, so one program can record while another one plays.
+
+### Registers of the link {#links-usb3-regs}
+
+The block has two registers, at location 22 of the register map (`0xb000`).
+
+| Register | Field | Bit | Meaning |
+|------------------------|--------------------|-----|-------------------------------------------------|
+| `usb3_control` | `rx_enable` | 0 | Enable the RX stream; its rising edge flushes the endpoint |
+| | `tx_enable` | 1 | Enable the TX stream |
+| `usb3_status` | `ready` | 0 | Transceiver ready |
+| | `link_up` | 1 | Link in the U0 state, the active state of USB3 |
+| | `tx_started` | 2 | TX FIFO primed and forwarding to the RFIC |
+
+The capability registers report the link: bit 10 of `capability_features` is set, and bit 5 of
+`capability_board_info` gives the SFP cage ([Capability registers](#soc-capability)).
+
+The library starts and stops a stream with these registers and the crossbar.
+
+| Step | RX start | TX start |
+|--------|--------------------------------------------|----------------------------------------------|
+| 1 | Stop the transfers, clear `rx_enable` | Stop the transfers, clear `tx_enable` |
+| 2 | Select port 3 in `crossbar_demux_sel` | Clear the halt of the endpoint |
+| 3 | Set `rx_enable` | Select port 3 in `crossbar_mux_sel` |
+| 4 | Clear the halt of the endpoint, submit the transfers | Set `tx_enable` |
+
+Clearing the halt of an endpoint resets its sequence numbers and drops the packets sent before.
+With the flush of `rx_enable`, the first buffer that the host receives starts a frame. At a TX
+stop, the library waits for the submitted transfers and for `tx_started` to fall, for one
+second at most each, before it clears `tx_enable`.
+
+### Sample rates {#links-usb3-rates}
+
+The script takes about 440 MB/s as the capacity of the link. The table gives the rate of the samples in each direction for
+the 2T2R configurations.
+
+| Configuration | Samples | On USB3 |
+|-------------------------------------------|------------------|---------------------------------|
+| 30.72 MSPS, SC16 | 245.76 MB/s | Fits, in both directions |
+| 61.44 MSPS, SC8 | 245.76 MB/s | Fits, in both directions |
+| 61.44 MSPS, SC16 | 491.52 MB/s | Above the capacity of the link |
+
+The SoapySDR driver follows this limit: on USB3 it selects SC8 above 40 MSPS unless the
+application sets the format ([Device arguments](#fw-args)). The transport formats are compared
+in [The RFIC interface](#rfic).
+
+### Limits {#links-usb3-limits}
+
+- **Combinations.** USB3 shares a bitstream with PCIe x1 only. The script refuses it with
+  Ethernet, SATA or White Rabbit, on the `m2` variant and with the oversampling mode.
+- **Timed TX.** The TX header and hardware timed TX work over PCIe only. The library refuses
+  the TX header on this link, and the SoapySDR driver uses its software timeline.
+- **Overflow and underflow.** The link reports no RX overflow and no TX underflow. The FIFOs
+  absorb the jitter of the host; a host that stalls for longer loses samples without a count.
+- **LED.** The state of the USB3 link is not part of the "ready" condition of the status LED
+  ([Status LED](#soc-led)).
+
+### Debug registers {#links-usb3-debug}
+
+`--with-usb3-debug` adds the debug registers of USB3-PIPE to the `usb3` block: the state and the
+history of the link training, the error counters of the receiver, the frequency meters and the
+DRP port of the transceiver, and the recovery causes of the device core.
+
+These registers follow the two registers of the link, so those keep their addresses. They are
+not in the committed `csr.h`: read them by name with the register file of the build, over PCIe,
+JTAGBone or the USB bridge itself. The script `bench/usb3_debug.py` of the USB3-PIPE repository
+decodes them, and the USB3-PIPE manual describes them.
+
+In the code: `litex_m2sdr/gateware/usb3.py`, and `add_usb3()` with the crossbar connections in
+`litex_m2sdr.py`. The host side is `libliteusb` and the USB backend of the library, described
+in [Host software](#software); the commands are in [USB3 streaming](#flow-usb3).
 
 ## Checking the links without hardware {#links-tests}
 
@@ -597,6 +730,8 @@ They need no FPGA tool and no board.
 | `test_vrt.py` | VRT header fields, packet count and framing |
 | `test_sata_streamers.py` | Recorder and player: bursts, refill, pacing, stop |
 | `test_sata_stream_tap.py` | Duplication of the stream with the tap |
+| `test_usb3_streamers.py` | USB3 streamers: word order, drain when disabled, priming |
+| `test_soc_usb3.py` | Elaboration with USB3, alone and with PCIe; rejected cases |
 | `test_soc_eth_sata.py` | Elaboration of the SATA SoC with Ethernet and with PCIe |
 | `test_soc_white_rabbit.py` | Elaboration with White Rabbit (needs LiteX-WR-NIC) |
 
@@ -610,12 +745,13 @@ $ PYTHONPATH=/path/to/litex_wr_nic python3 -m pytest -q -n 8 \
     test/test_clock_discipline.py test/test_ptp_discipline.py \
     test/test_ptp_identity.py \
     test/test_sata_streamers.py test/test_sata_stream_tap.py test/test_shared_etherbone.py \
+    test/test_usb3_streamers.py \
     test/test_pcie_workaround.py test/test_pcie_time_sync_script.py \
     test/test_ptp_check_script.py test/test_soc_eth_ptp.py test/test_soc_ptm.py \
-    test/test_soc_eth_sata.py test/test_soc_clk10_discipline.py \
+    test/test_soc_eth_sata.py test/test_soc_usb3.py test/test_soc_clk10_discipline.py \
     test/test_soc_white_rabbit.py test/test_time_core.py
 [...]
-103 passed in 10.30s
+119 passed in 16.66s
 ```
 
 ## Where to go next {#links-next}

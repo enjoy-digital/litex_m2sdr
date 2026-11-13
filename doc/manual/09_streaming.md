@@ -109,9 +109,9 @@ The width of the DMA stream is 64 bits, or 128 bits in the oversampling build. `
 adds DMA channels: channel 0 always carries the samples, and the other channels are free for
 the [user hook](#streaming-hook).
 
-> The extra DMA channels do not start by themselves. The script connects the PPS pulse to the
-> synchronizer of channel 0 only, and the driver arms every channel: a subclass must connect
-> the pulse of the channels it uses, see [Topologies](#streaming-hook-topologies).
+Every DMA channel has its own start synchronizer, and the script connects the PPS pulse to all
+of them (`test/test_soc_pcie_dmas.py`). An extra channel therefore starts on the pulse like
+channel 0.
 
 ## Header {#streaming-header}
 
@@ -174,9 +174,11 @@ On TX the block removes the header of each frame and keeps its two fields
 described in [Hardware timed TX](#streaming-timed-tx).
 
 > The TX header only works on PCIe. The extractor recognises a header by the first-word marker
-> of the DMA reader, which the Ethernet and SATA streamers do not provide. With the TX header
-> enabled on these links, the extractor consumes every word and the TX stream is discarded.
-> Neither the gateware nor `m2sdr_set_tx_header()` rejects the setting.
+> of the DMA reader, which the Ethernet, SATA and USB3 streamers do not provide. With the TX
+> header enabled on these links, the extractor would consume every word and discard the TX
+> stream. The library therefore refuses it: `m2sdr_set_tx_header()` returns
+> `M2SDR_ERR_UNSUPPORTED` when it is enabled on another link than PCIe. The gateware has no
+> such check: software that bypasses the library must not set the bit there.
 
 ### Registers {#streaming-header-regs}
 
@@ -352,8 +354,8 @@ This counter is not the underflow of the DMA. The DMA statistics count the buffe
 did not provide in time; the gate counts the timed frames that were provided, but too late.
 
 The gate is built in every bitstream and the `timed_tx` capability bit is always set, but timed
-TX only works on PCIe. It needs the TX header, which the Ethernet and SATA streamers cannot
-carry: see [TX: extracting the header](#streaming-header-tx).
+TX only works on PCIe. It needs the TX header, which the Ethernet, SATA and USB3 streamers
+cannot carry: see [TX: extracting the header](#streaming-header-tx).
 
 The software follows the same limit. The offset and underflow functions of the library return an
 unsupported error on another host link, and the SoapySDR driver selects the hardware gate on
@@ -597,10 +599,9 @@ The hook is called after the host links are built, so the extra DMA channels req
 `--pcie-dmas` or `pcie_dmas` exist when it runs. They let a block send correlation results or
 measurements to the host without touching the sample stream of channel 0.
 
-Two points need care with an extra channel. Every DMA channel has a synchronizer, and the script
-connects the PPS pulse to channel 0 only. The driver arms the synchronizer of every channel, so
-an extra channel never starts unless the subclass connects the pulse, as the script does with
-`self.pcie_dma0.synchronizer.pps`.
+Every DMA channel has a synchronizer, which the driver arms. The script connects the PPS pulse
+to the synchronizer of every channel, so an extra channel starts like channel 0 and the subclass
+has nothing to connect.
 
 The RX side of the RFIC core cannot be paused, so a block that stops accepting samples loses
 them.

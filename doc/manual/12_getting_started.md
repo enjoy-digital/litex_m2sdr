@@ -21,7 +21,8 @@ project.](start_path.svg)
 
 The steps assume the default setup: a board in the M.2 slot of the host, with a PCIe image in its
 flash. [Carriers and hosts](#carriers) describes the
-other setups, and [Ethernet](#gs-ethernet) below the differences for a board on the baseboard.
+other setups, and two sections below give the differences for a board on the baseboard, over
+[Ethernet](#gs-ethernet) and over [USB3](#gs-usb3).
 
 ## Prerequisites {#gs-prerequisites}
 
@@ -47,6 +48,7 @@ Not every package is needed for every use. The table below tells what each group
 | `libsndfile1-dev`, `libsamplerate0-dev` | `m2sdr_fm_tx` and `m2sdr_fm_rx` |
 | `libsdl2-dev`, `libgl1-mesa-dev` | GUI tools `m2sdr_check` and `m2sdr_scan` |
 | `libpng-dev` | `m2sdr_scan` |
+| `libusb-1.0-0-dev`, not in the command above | USB3 host link |
 
 The kernel driver builds against the headers of the running kernel, which it expects in
 `/lib/modules/<version>/build`.
@@ -99,9 +101,9 @@ bus: check `lspci`, the seating of the board and the image in its flash.
 | `--clean` | off | Run the clean targets first, for a full rebuild |
 
 The default build opens PCIe and Ethernet boards with the same binaries: the device argument
-chooses the host link at run time. The values `litepcie` and `liteeth` only change which link the
-tools use when no device is given; keep `runtime` unless you test that behaviour. Builds are
-incremental.
+chooses the host link at run time. USB3 boards are added when libusb-1.0 is installed. The
+values `litepcie`, `liteeth` and `liteusb` only change which link the tools use when no device
+is given; keep `runtime` unless you test that behaviour. Builds are incremental.
 
 ### Optional GUI tools {#gs-gui-tools}
 
@@ -359,7 +361,8 @@ first:
 SoapySDRUtil --find="driver=LiteXM2SDR"
 ```
 
-The command lists the PCIe boards and probes the default Ethernet address `192.168.1.50`.
+The command lists the PCIe boards, probes the default Ethernet address `192.168.1.50` and, with
+the USB3 backend, lists the USB3 boards.
 
 The repository has GNU Radio flowgraphs in `litex_m2sdr/software/gnuradio/`. The FM receiver is a
 good end-to-end test: it tunes, demodulates and plays the audio.
@@ -417,6 +420,19 @@ ping 192.168.1.50
 The steps 4 and 5 then apply with the Ethernet device arguments. The sample rate is bounded by
 the rate of the Ethernet link. [Workflows](#workflows) gives the network setup and the streaming
 recipe, and [Host links](#host-links) the Ethernet PHYs.
+
+## A board on the baseboard over USB3 {#gs-usb3}
+
+A board on the baseboard with a USB3 image reaches the host through an SFP to USB3 adapter and
+a USB3 port. It needs no kernel driver either, but it needs libusb, a udev rule and a USB
+memory setting, which [USB3 streaming](#flow-usb3) gives. The first checks are:
+
+```sh
+lsusb -d 1d50:605a
+./m2sdr_util --device usb: info
+```
+
+The steps 4 and 5 then apply with the USB3 device arguments.
 
 ## Platform guides {#gs-platforms}
 

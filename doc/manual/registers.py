@@ -15,13 +15,15 @@ import tempfile
 
 # Configurations: name -> command line of litex_m2sdr.py (no --build: the SoC is elaborated, no
 # toolchain runs). PCIe, Ethernet and SATA cannot be enabled together (the shared QPLL has two
-# channels) and the Ethernet PHYs have different registers, so three configurations are needed to
-# elaborate the register banks of the target:
+# channels), USB3 only goes with PCIe and the Ethernet PHYs have different registers, so four
+# configurations are needed to elaborate the register banks of the target:
 # - m2_pcie: PCIe with PTM, the oversampling RFIC PHY, the GPIO core and the PCIe LiteScope probe
 #   (analyzer bank, LTSSM tracer of the PCIe PHY).
 # - baseboard_eth_sata: Ethernet (1000BASE-X) with PTP, the PTP-disciplined RFIC reference and the
 #   VRT streamer, with SATA.
 # - baseboard_eth_5g: Ethernet with the 5GBASE-R PHY, for its diagnostics registers.
+# - baseboard_usb3: the USB3 host link (needs the usb3_pipe package), without its debug registers,
+#   which the USB3-PIPE manual documents.
 # White Rabbit is not elaborated: it needs the external litex_wr_nic package and its sources.
 CONFIGS = {
     "m2_pcie"            : ["--variant=m2", "--with-pcie", "--with-pcie-ptm",
@@ -29,6 +31,7 @@ CONFIGS = {
     "baseboard_eth_sata" : ["--variant=baseboard", "--with-eth", "--with-eth-ptp",
         "--with-eth-ptp-rfic-clock", "--with-eth-vrt", "--with-sata"],
     "baseboard_eth_5g"   : ["--variant=baseboard", "--with-eth", "--eth-phy=5000baser"],
+    "baseboard_usb3"     : ["--variant=baseboard", "--with-usb3"],
 }
 
 # Banks shown under a label in one configuration: (configuration, bank) -> label. The same bank name
@@ -86,6 +89,8 @@ BANKS = [
     ("sata_rx_streamer",     "SATA RX streamer",                  "M2SDRLiteSATAStream2Sectors", "litex_m2sdr/gateware/sata.py"),
     ("sata_tx_streamer",     "SATA TX streamer",                  "M2SDRLiteSATASectors2Stream", "litex_m2sdr/gateware/sata.py"),
     ("sata_streamer_control", "SATA streamer control",            "BaseSoC",               "litex_m2sdr.py"),
+    # USB3.
+    ("usb3",                 "USB3 host link",                    "USB3",                  "litex_m2sdr/gateware/usb3.py"),
     # Debug.
     ("analyzer",             "LiteScope analyzer (LiteScope)",    "LiteScopeAnalyzer",     "litescope/core.py"),
 ]
@@ -210,8 +215,8 @@ NOTES = {
     "pcie_dma0": [
         "Registers of the LitePCIe DMA channel 0, which carries the samples; the kernel driver",
         "owns them. A build with `--pcie-dmas` above 1 has one such bank per channel",
-        "(`pcie_dma1` and the next ones). The PPS input of the start synchroniser is connected",
-        "on channel 0 only.",
+        "(`pcie_dma1` and the next ones). The PPS input of the start synchroniser of every",
+        "channel is connected.",
     ],
     "ptm_requester": [
         "Present with `--with-pcie-ptm`.",
@@ -247,6 +252,10 @@ NOTES = {
     "sata_phy": [
         "The SATA banks are present with `--with-sata`.",
     ],
+    "usb3": [
+        "Present with `--with-usb3` ([USB3 host link](#links-usb3)). `--with-usb3-debug` adds the",
+        "debug registers of USB3-PIPE after these two; the USB3-PIPE manual lists them.",
+    ],
     "analyzer": [
         "Present with one of the probe options ([Build options](#build-options)). `litescope_cli`",
         "drives these registers; the LiteScope manual describes them.",
@@ -260,10 +269,11 @@ INTRO = ["This appendix lists the registers of the LiteX-M2SDR gateware, bank by
          "running Vivado.",
          "",
          "One build cannot hold every bank, because PCIe, Ethernet and SATA cannot be enabled",
-         "together and the Ethernet PHYs have different registers. The three configurations are",
-         "chosen to elaborate every bank once, not as builds to use. White Rabbit builds add the",
-         "registers of the White Rabbit core, which this appendix does not list: they need the",
-         "external `litex_wr_nic` package.",
+         "together, USB3 excludes Ethernet and SATA, and the Ethernet PHYs have different",
+         "registers. The four configurations are chosen to elaborate every bank once, not as",
+         "builds to use. The USB3 configuration needs the USB3-PIPE package. White Rabbit builds",
+         "add the registers of the White Rabbit core, which this appendix does not list: they",
+         "need the external `litex_wr_nic` package.",
          "",
          "Offsets are in bytes from the base of the bank. The banks named in `BaseSoC.csr_map`",
          "(`litex_m2sdr.py`) keep the same base address in every build ([The SoC](#soc)); LiteX",

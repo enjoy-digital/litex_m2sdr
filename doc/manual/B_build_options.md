@@ -41,8 +41,7 @@ has no automatic value in `BaseSoC`.
 
 The oversampling mode is Experimental ([Status](#intro-status)). It is meant for the `m2`
 variant with PCIe on two or four lanes ([Oversampling mode](#rfic-oversampling)). The script
-does not refuse it with Ethernet or SATA, but those paths are 64 bits wide and lose half of each
-word: do not combine them. The BFP8 format does not exist on this build.
+refuses it with Ethernet, SATA or USB3. The BFP8 format does not exist on this build.
 
 ## PCIe {#opt-pcie}
 
@@ -56,12 +55,11 @@ word: do not combine them. The BFP8 format does not exist on this build.
 | `--with-pcie-reset-workaround` | off | Toggle the PCIe reset until the link is up |
 
 `--pcie-dmas` above 1 serves the designs that extend the gateware
-([Extending the gateware](#build-extend)). The PPS input of the start synchroniser is connected
-on channel 0 only: a design that uses an extra channel connects it. PCIe is off by default on
+([Extending the gateware](#build-extend)). The PPS input of the start synchroniser of every
+channel is connected. PCIe is off by default on
 the command line, but `BaseSoC` has `with_pcie=True` as its default.
 
-On the `baseboard` variant, `--pcie-lanes=2` or `4` stops the script on an assertion without a
-message.
+On the `baseboard` variant, `--pcie-lanes=2` or `4` is refused with an error.
 
 ## Ethernet {#opt-eth}
 
@@ -92,11 +90,26 @@ Ethernet needs the `baseboard` variant. `--eth-ptp-no-igmp` is `eth_ptp_igmp=Fal
 | Option | Default | Effect |
 |---------------------------------|------------------|-------------------------------------------------|
 | `--with-sata` | off | SATA storage on the baseboard |
-| `--sata-gen` | `2` | SATA generation: `1`, `2` or `3` |
+| `--sata-gen` | `2` | SATA generation: `1`, `2` or `3`; `3` needs `--sys-clk-freq` of 150e6 or more |
 
 SATA needs the `baseboard` variant and cannot be built with both PCIe and Ethernet. Generation 3
 needs a system clock of at least 150 MHz, above the defaults: `--sata-gen=3` alone is always
 refused, and also needs `--sys-clk-freq` ([System clock](#build-sysclk)).
+
+## USB3 {#opt-usb3}
+
+| Option | Default | Effect |
+|---------------------------------|------------------|-------------------------------------------------|
+| `--with-usb3` | off | USB3 host link through an SFP to USB3 adapter on the baseboard |
+| `--usb3-sfp` | `0` | SFP cage of the adapter: `0` or `1` |
+| `--usb3-vid` | `0x1d50` | USB vendor identifier |
+| `--usb3-pid` | `0x605a` | USB product identifier |
+| `--with-usb3-debug` | off | Debug registers of the USB3 PHY, transceiver and device core |
+
+USB3 needs the `baseboard` variant and a system clock of 125 MHz, the default without Ethernet.
+It can be built alone or with PCIe; the script refuses it with Ethernet, SATA, White Rabbit and
+the oversampling mode. The build needs the USB3-PIPE package. The link is described in
+[USB3 host link](#links-usb3).
 
 ## GPIO and PPS {#opt-gpio}
 
@@ -133,9 +146,8 @@ looks for a `litex_wr_nic` directory in the repository, then next to it. `--wr-s
 prints the environment and exits without elaborating the SoC.
 
 White Rabbit is Experimental ([Status](#intro-status)). It needs the `baseboard` variant and
-excludes `--with-eth-ptp` ([Time synchronisation](#timing)). The script accepts it with
-`--with-eth`, but the two cores would share one PLL channel and its reset: do not enable them
-together.
+excludes `--with-eth` and `--with-eth-ptp` ([Time synchronisation](#timing)): Ethernet and White
+Rabbit would share one PLL channel and its reset.
 
 ## LiteScope probes {#opt-probes}
 

@@ -72,9 +72,9 @@ against the headers of another build reads the wrong registers
 ## Access to a running board {#debug-access}
 
 There are two ways to reach the registers of a running board, shown in the figure below. The
-utilities of the project go through the library, over PCIe or Ethernet. The LiteX host tools go
-through `litex_server`, which opens one of the three host bridges
-([Host bridges](#build-bridges)).
+utilities of the project go through the library, over PCIe, Ethernet or USB3. The LiteX host
+tools go through `litex_server`, which opens one of the host bridges: the three of the figure,
+or the USB bridge of a USB3 build ([Host bridges](#build-bridges)).
 
 ![Debug access: the utilities use the library; the LiteX tools use litex_server over PCIe, Etherbone or JTAGBone.](debug_access.svg)
 
@@ -101,8 +101,8 @@ Shifted strings, an API version `0.0`, an impossible temperature, a reserved var
 missing feature on a known-good bitstream point to corrupted register reads or a wedged board.
 Fix that before looking at the RF state.
 
-The software builds both host links by default, and the link is selected at run time with the
-device identifier. For a fast rebuild of the utilities only:
+The software builds the PCIe and Ethernet host links by default, and USB3 when libusb is
+installed. The link is selected at run time with the device identifier. For a fast rebuild of the utilities only:
 
 ```sh
 make -C litex_m2sdr/software/user all
@@ -207,10 +207,10 @@ state machine, and `scripts/test_pcie_ltssm.py` prints them with the names of th
 python3 scripts/test_pcie_ltssm.py --csr-csv scripts/csr.csv
 ```
 
-> On a build of the repository as it is, the script stops with an `AttributeError`: it reads the
-> register under the name `pcie_phy_phy_ltssm_tracer_history`, while the build exports
-> `pcie_phy_ltssm_tracer_history`. Read this register with `litex_cli` instead. The dashboard
-> `test_dashboard.py` hides its link training panel for the same reason.
+The script and the dashboard `test_dashboard.py` find the register of the tracer under its
+name, `pcie_phy_ltssm_tracer_history`, and under the name that older bitstreams gave it. On a
+build without the probe the script stops and names the missing option. `litex_cli` reads the
+raw register.
 
 ```sh
 litex_cli --csr-csv=scripts/csr.csv --read=pcie_phy_ltssm_tracer_history
@@ -609,9 +609,10 @@ python3 -m py_compile litex_m2sdr.py
 # Library unit tests, with both host links.
 make -C litex_m2sdr/software/user test-libm2sdr
 
-# The same with one host link compiled in.
+# The same with another default host link.
 make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEPCIE
 make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEETH
+make -C litex_m2sdr/software/user test-libm2sdr INTERFACE=USE_LITEUSB
 
 # Kernel driver build.
 make -C litex_m2sdr/software/kernel clean all
@@ -625,12 +626,15 @@ simulator other than the Migen one and no toolchain. The tests fall into four gr
 | Group | Files in `test/` | What they check |
 |----------------|-------------------------------------------------------------|-----------------------|
 | Gateware blocks | `test_ad9361.py`, `test_agc.py`, `test_spi.py`, `test_rfic.py`, `test_header.py`, `test_loopback.py`, `test_time_core.py`, `test_pps.py`, `test_cdc.py`, `test_gpio.py`, `test_led.py`, `test_measurement.py`, `test_capability.py`, `test_si5351.py`, `test_vrt.py` | Each block in simulation, with stalls and corner cases |
-| Clocking and links | `test_qpll.py`, `test_clock_discipline.py`, `test_ptp_discipline.py`, `test_ptp_identity.py`, `test_pcie_workaround.py`, `test_shared_etherbone.py`, `test_sata_streamers.py`, `test_sata_stream_tap.py` | QPLL channel allocation, discipline loops, Etherbone sharing, SATA streamers |
-| SoC elaboration | `test_cli_args.py`, `test_soc_eth_ptp.py`, `test_soc_eth_sata.py`, `test_soc_ptm.py`, `test_soc_clk10_discipline.py`, `test_soc_white_rabbit.py` | Option rules, defaults, build names, registers of whole configurations |
-| Scripts | `test_release.py`, `test_github_release.py`, `test_flash_release.py`, `test_ptp_check_script.py`, `test_pcie_time_sync_script.py`, `test_sample_format_loss.py` | Release, flash and check scripts, without hardware |
+| Clocking and links | `test_qpll.py`, `test_clock_discipline.py`, `test_ptp_discipline.py`, `test_ptp_identity.py`, `test_pcie_workaround.py`, `test_shared_etherbone.py`, `test_sata_streamers.py`, `test_sata_stream_tap.py`, `test_usb3_streamers.py` | QPLL channel allocation, discipline loops, Etherbone sharing, SATA and USB3 streamers |
+| SoC elaboration | `test_cli_args.py`, `test_soc_eth_ptp.py`, `test_soc_eth_sata.py`, `test_soc_ptm.py`, `test_soc_clk10_discipline.py`, `test_soc_white_rabbit.py`, `test_soc_usb3.py`, `test_soc_pcie_dmas.py`, `test_csr_map.py` | Option rules, defaults, build names, registers of whole configurations, agreement with the committed `csr.h` |
+| Scripts | `test_release.py`, `test_github_release.py`, `test_flash_release.py`, `test_ptp_check_script.py`, `test_pcie_time_sync_script.py`, `test_pcie_ltssm_script.py`, `test_sample_format_loss.py` | Release, flash and check scripts, without hardware |
 
 The SoC elaboration tests build `BaseSoC` with a set of options and export its register map,
 without Vivado. They are the tests to extend when an option or a register is added.
+`test_csr_map.py` compares two of these maps with the header of the software
+([The committed register header](#soc-csr-header)). The USB3 tests are skipped when USB3-PIPE
+is not installed.
 
 The White Rabbit tests need the `litex_wr_nic` package. They are skipped when it is absent, and
 they expect the revision the continuous integration pins in `.github/workflows/ci.yml`. The run
@@ -641,7 +645,7 @@ $ PYTHONPATH=<litex_wr_nic> python3 -m pytest -v test
 [...]
 test/test_vrt.py::test_vrt_packet_structural_invariants_under_stalls PASSED [100%]
 
-============================= 239 passed in 52.04s =============================
+======================= 273 passed in 105.69s (0:01:45) ========================
 ```
 
 ### What the continuous integration runs {#debug-tests-ci}
@@ -650,8 +654,11 @@ test/test_vrt.py::test_vrt_packet_structural_invariants_under_stalls PASSED [100
 |----------------------------|------------------------------------------------------------------------|
 | `ci.yml`, `build` | LiteX install, `./release.py --nobuild`, White Rabbit elaborations, `python3 -m pytest -v test` |
 | `ci.yml`, `software-build` | Kernel driver, utilities and SoapySDR driver builds, with a check of their shared libraries |
-| `build.yml`, `build` | Utilities and SoapySDR driver for both host links, library unit tests, the same under the address and undefined behaviour sanitizers, `cppcheck` on the library, examples |
+| `build.yml`, `build` | Utilities and SoapySDR driver with each default host link and without the USB3 backend, library unit tests, the same under the address and undefined behaviour sanitizers, `cppcheck` on the library, examples |
 | `doc.yml`, `check` | Figures and sources of this manual |
+
+The `build` job of `ci.yml` also checks that the register appendix of this manual matches the
+gateware.
 
 The White Rabbit step of `ci.yml` also checks the error paths: White Rabbit refused on the `m2`
 variant, a stale local `wr-cores` tree, and a `wr-cores` tree at the wrong revision.

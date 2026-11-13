@@ -18,6 +18,7 @@ All the software lives in `litex_m2sdr/software/`. Building and installing it is
 | Kernel driver | `kernel/` | PCIe: registers, DMA, interrupts, clock device |
 | Host link helpers | `user/liblitepcie/` | DMA helpers on top of the kernel driver |
 | | `user/libliteeth/` | Etherbone register access, UDP streaming |
+| | `user/libliteusb/` | USB3: register access, Bulk streaming, on libusb |
 | RFIC driver | `user/ad9361/` | AD9361 configuration code |
 | Library | `user/libm2sdr/` | Public C API: device, RF, streaming, time |
 | Utilities | `user/` | Command-line tools named `m2sdr_*` |
@@ -32,18 +33,22 @@ the board (`libm2sdr`). The utilities and the SoapySDR driver are built on it, a
 application. A feature added to the library is therefore available to the utilities and to
 SoapySDR applications at the same time.
 
-![Host software layers. Everything goes through the library, which selects the PCIe or the
-Ethernet backend when the device is opened. Follow the cyan arrows: registers and DMA through the
-kernel driver over PCIe, UDP over Ethernet.](sw_stack.svg)
+![Host software layers, drawn for PCIe and Ethernet. Everything goes through the library, which
+selects the backend when the device is opened. Follow the cyan arrows: registers and DMA through
+the kernel driver over PCIe, UDP over Ethernet.](sw_stack.svg)
 
-The library is built once with both backends. The host link is selected at run time by the
+The library is built once with its backends. The host link is selected at run time by the
 device identifier given to the utility or to the application: no rebuild is needed to move a
-program from PCIe to Ethernet.
+program from PCIe to Ethernet or to USB3.
 
 Over PCIe, the library reaches the board through the kernel driver: registers by MMAP, samples
 by DMA. Over Ethernet, no kernel driver is involved. Registers are read and written with
-Etherbone and samples travel in UDP datagrams, both on ordinary sockets. The gateware side of
-both paths is described in [Host links](#host-links).
+Etherbone and samples travel in UDP datagrams, both on ordinary sockets.
+
+Over USB3, no kernel driver is involved either. A third helper sits next to the two of the
+figure (`libliteusb`): it uses libusb, with control transfers for the registers and Bulk
+transfers for the samples. The gateware side of the three paths is described in
+[Host links](#host-links).
 
 ## Device identifiers {#sw-device}
 
@@ -58,12 +63,20 @@ address of the board. The short options cover the common cases.
 | `--device eth:192.168.1.50:1234` | Ethernet board, explicit form |
 | `--device 192.168.1.50` | Ethernet board, short form, port 1234 |
 | `-i 192.168.1.50`, `--ip` | Ethernet board; `-p`, `--port` sets the port |
+| `--device usb:` | USB3 board, the first one with the default identifiers |
+| `--device usb:1d50:605a` | USB3 board, the first one with this vendor and product |
+| `--device usb:serial=0001` | USB3 board with this serial string |
+| `--device usb:path=2-1.3` | USB3 board on this bus and port path, as sysfs names it |
 
 Without any device option, the default build opens `/dev/m2sdr0`. Scripts should always pass an
 explicit device, so that they behave the same on every host.
 
-The command below lists the boards the host can reach: the PCIe boards and the default Ethernet
-address.
+The `usb:` forms need a library built with the USB3 backend ([USB3 helper](#sw-liteusb)). The
+vendor and product of the second form are in hexadecimal; `1d50:605a` are the defaults of the
+gateware.
+
+The command below lists the boards the host can reach: the PCIe boards, the default Ethernet
+address and the USB3 boards, each with the identifier that opens it.
 
 ```sh
 m2sdr_util list
@@ -131,12 +144,65 @@ module parameters needs no rebuild. The low latency recipe of
 
 ## Host link helpers {#sw-transports}
 
-Two small libraries sit under the main library. Applications do not call them directly.
+Three small libraries sit under the main library. Applications do not call them directly.
 
 - `liblitepcie` comes from LitePCIe. It opens the DMA rings of the kernel driver and provides
   the read, write and zero-copy buffer functions (`litepcie_dma.c`, `litepcie_helpers.c`).
 - `libliteeth` talks to the Ethernet gateware. It reads and writes registers with Etherbone
   (`etherbone.c`) and sends and receives the sample stream over UDP (`liteeth_udp.c`).
+- `libliteusb` talks to the USB3 gateware through libusb. It reads and writes registers with
+  control transfers (`liteusb.c`) and exchanges the sample streams over the two Bulk endpoints
+  (`liteusb_stream.c`).
+
+### USB3 helper {#sw-liteusb}
+
+The USB3 backend is optional. The `Makefile` of the utilities builds it when pkg-config finds
+libusb-1.0, and `make LITEUSB=0` leaves it out. The SoapySDR driver follows the same rule
+(`ENABLE_LITEUSB`), and must be built the same way as the library it links.
+
+```sh
+sudo apt install libusb-1.0-0-dev
+```
+
+Without the backend, a `usb:` identifier is refused with an unsupported error. The gateware
+side is described in [USB3 host link](#links-usb3).
+
+| Item | Value |
+|--------------------------|-------------------------------------------------------------------|
+| Registers | One control transfer per access, or per block of up to 128 words |
+| RX ring | 512 buffers of 8192 bytes, in transfers of 8 buffers |
+| TX ring | 256 buffers of 8192 bytes, in transfers of 4 buffers |
+| Events | Processed in the read and write calls: the helper has no thread |
+| Interfaces | Claimed per stream: 0 for RX, 1 for TX |
+
+Each direction claims its interface when its stream is opened. RX and TX can therefore belong
+to two programs, such as `m2sdr_record` and `m2sdr_play`, and a second program that asks for a
+stream already in use gets a state error. The register accesses claim nothing, so `m2sdr_util`
+and `m2sdr_rf` work while another program streams.
+
+A synchronous transmit call sends its last, partly filled transfer before it returns, so no
+sample waits for the next call. `m2sdr_record` prints the count of received buffers and of
+failed transfers at the end of a USB3 capture.
+
+Two settings of the host are needed. The first gives users access to the device, with the udev
+rule of the repository, which matches the default identifiers `1d50:605a`.
+
+```sh
+sudo cp litex_m2sdr/software/99-litex-m2sdr-usb3.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+The second raises the memory that Linux gives to the USB transfers of user programs, 16 MB by
+default. The two rings take about 6 MiB, so the default is short when RX and TX run together
+with other USB devices.
+
+```sh
+echo 64 | sudo tee /sys/module/usbcore/parameters/usbfs_memory_mb
+```
+
+The older functions that take a raw handle, `m2sdr_readl()` and `m2sdr_writel()`, accept the
+handle of a USB3 device as they accept a PCIe or an Ethernet one.
 
 The AD9361 configuration code in `user/ad9361/` is adapted from the Analog Devices driver. It
 is linked inside the library, with its symbols bound locally, so that it does not collide with
@@ -160,9 +226,8 @@ sudo ldconfig
 The install target copies the headers, the static and the shared library, and the metadata for
 pkg-config and CMake.
 
-> The target does not install the example programs: it looks for them in a directory that does
-> not exist and prints "Skipping missing example" for each. Read and build the examples from
-> `litex_m2sdr/doc/libm2sdr/` in the repository.
+The target also installs the sources of the four example programs, in
+`share/litex_m2sdr/examples` under the prefix ([Examples](#sw-lib-examples)).
 
 ```sh
 pkg-config --modversion m2sdr
@@ -243,7 +308,8 @@ block of 1024 bytes (`M2SDR_BFP8_BLOCK_BYTES`), which holds 254 samples per chan
 has no decoder: a program that wants plain samples decodes the blocks itself.
 
 > BFP8 is Experimental ([Status](#intro-status)). It does not exist on an oversampling build:
-> selecting it there stalls the stream. Raw BFP8 blocks do not combine with the timestamp header.
+> the library refuses it there with `M2SDR_ERR_UNSUPPORTED`. Raw BFP8 blocks do not combine with
+> the timestamp header.
 
 The backend exchanges fixed buffers of 8192 bytes (`M2SDR_BUFFER_BYTES`). The buffer size given
 to `m2sdr_sync_config()` is in samples and must match this size. A program that wants larger
@@ -260,6 +326,9 @@ metadata returned by `m2sdr_sync_rx()` gives the board time of the first sample 
 On TX, a timestamp in the metadata asks the gateware to hold the buffer until the board time
 reaches it. The mechanism is described in [Streaming](#streaming) and used in
 [Timed TX](#flow-timed-tx).
+
+The TX header exists on PCIe only: on another host link `m2sdr_set_tx_header()` returns
+`M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission.
 
 TX timestamps are rounded to the 10 ns step of the board time (`M2SDR_TX_TIME_GRID_NS`).
 Setting the board time from the host is refused, with `M2SDR_ERR_STATE`, when Ethernet PTP
@@ -450,7 +519,7 @@ not help when the destination is slower than the stream all the time.
 `m2sdr_gen` computes a signal and transmits it: `--signal tone`, `white`, `prbs` or `ofdm`,
 with `--tone-freq` and `--amplitude`. With `--pps-freq` and `--gpio-pin` it also toggles a GPIO
 pin at the given frequency, which needs a bitstream with the GPIO block. The option accepts
-pins 0 to 3, but only pins 0 and 1 reach the board (TP1 and TP2).
+pins 0 to 3, and its help says which ones exist: pin 0 is TP1 and pin 1 is TP2.
 
 ```sh
 m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1e6 --amplitude 0.5
@@ -499,7 +568,8 @@ the gateware read and write. The gateware side is described in [Host links](#hos
 
 `m2sdr_gpio` controls the GPIO core of a bitstream built with `--with-gpio`. The core is 4 bits
 wide; bits 0 and 1 reach the test points TP1 and TP2 of the board ([Hardware](#hardware)). Bits 2
-and 3 reach no pin, although the utility accepts 4-bit values. The pins are driven either by the
+and 3 reach no pin; the utility accepts 4-bit values and says so in its help. The pins are
+driven either by the
 registers (`--source csr`) or by the sample stream (`--source dma`).
 
 ```sh
@@ -576,11 +646,14 @@ Three things carry a version, and they must agree for a setup to work.
 
 The library reads the feature bits of the bitstream when it opens a device and adapts to them.
 A function that the bitstream does not have, such as the timed TX or the oversampling mode,
-returns an error or falls back to software instead of misconfiguring the board. `info` does not
-list the timed TX bit; a program reads it with `m2sdr_get_capabilities()`.
+returns an error or falls back to software instead of misconfiguring the board. `info` prints
+the USB3 bit on its line `USB3`. It does not list the timed TX bit; a program reads it with
+`m2sdr_get_capabilities()`.
 
 The addresses of the registers are compiled in the software. They come from the generated
-header `litex_m2sdr/software/kernel/csr.h`, which a gateware build rewrites.
+header `litex_m2sdr/software/kernel/csr.h`, which a gateware build rewrites. The copy of the
+repository matches the PCIe, Ethernet and USB3 builds, not the SATA and oversampling builds
+([The committed register header](#soc-csr-header)).
 
 > After building a bitstream with different options, rebuild the kernel driver, the utilities
 > and the SoapySDR driver, so that the software and the bitstream use the same register map.

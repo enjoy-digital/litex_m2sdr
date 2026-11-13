@@ -112,6 +112,12 @@ jobs:
             python3 litex_setup.py --config=standard --init --install --user
           popd
 
+      # USB3-PIPE is not part of the LiteX setup: the USB3 tests and the USB3 configuration of
+      # the register appendix need it.
+      - name: Install USB3-PIPE
+        run: |
+          pip install --user git+https://github.com/enjoy-digital/usb3_pipe.git
+
       # Register appendix of the manual (CSR snapshots and A_registers.md match the gateware).
       - name: Check Register Appendix
         run: |

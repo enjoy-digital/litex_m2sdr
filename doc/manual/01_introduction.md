@@ -20,6 +20,13 @@ pairs an Analog Devices AD9361 RFIC with an AMD/Xilinx Artix-7 XC7A200T FPGA. Pl
 slot with antennas connected, it streams and records radio samples with the tools of the project
 or with any SoapySDR application.
 
+The photograph below shows the board next to a coin, with the heatsinks that
+[Power and thermal](#hw-thermal) recommends.
+
+![The LiteX-M2SDR board, revision R01, next to a 2 euro coin. The gold edge is the M.2
+connector. The larger copper heatsink sits on the FPGA and the smaller one on the RFIC, between
+the RF connectors.](m2sdr_board_heatsinks.jpg){width=60%}
+
 | Item | Value |
 |--------------------|------------------------------------------------------------------------|
 | Form factor | M.2 2280, Key M |
@@ -27,7 +34,7 @@ or with any SoapySDR application.
 | Sample rate | Up to 61.44 MSPS in 2T2R |
 | FPGA | Artix-7 XC7A200T, four transceivers on the M.2 connector |
 | Clock generator | SI5351, from its crystal or from an external 10 MHz reference |
-| Host links | PCIe Gen2 x1, x2 or x4; Ethernet 1000BASE-X or 2500BASE-X; USB3 (in development) |
+| Host links | PCIe Gen2 x1, x2 or x4; Ethernet 1000BASE-X or 2500BASE-X; USB3 |
 | Storage | SATA record and replay on an SSD |
 | Time synchronisation | 10 MHz reference, PCIe PTM, Ethernet PTP; White Rabbit (Experimental) |
 | Host software | Linux kernel driver, `libm2sdr` C library, utilities, SoapySDR driver |
@@ -74,7 +81,7 @@ nutshell](#litex-primer) explains each one.
 | PCIe host link, DMA, Linux driver | LitePCIe |
 | Ethernet host link, UDP, PTP | LiteEth |
 | SATA storage | LiteSATA |
-| USB3 host link (in development) | USB3-PIPE |
+| USB3 host link | USB3-PIPE |
 | I2C to the clock generator | LiteI2C |
 | On-chip logic analyser | LiteScope |
 | Access to the registers from the host | Host bridges of LiteX, over PCIe, Ethernet and JTAG |
@@ -98,20 +105,22 @@ link carries them: PCIe in the M.2 slot of a host, Ethernet through an SFP modul
 an adapter in an SFP cage, and SATA to an SSD.
 
 ![The same board over its links. The SDR datapath is common; a stream crossbar connects it to
-one LiteX core per link. Ethernet, USB3 and SATA need the baseboard; USB3 is in
-development.](intro_links.svg)
+one LiteX core per link. Ethernet, USB3 and SATA need the
+baseboard.](intro_links.svg)
 
 The host software follows the same idea. The library hides the host link behind one device
-identifier, so an application written for PCIe runs over Ethernet with a different `<device>`.
+identifier, so an application written for PCIe runs over Ethernet or USB3 with a different
+`<device>`.
 
 | Link | Carrier | Use |
 |-----------|-----------------------------|-------------------------------------------------------|
 | PCIe | M.2 slot, or the baseboard | Highest sample rates, lowest latency, several boards in one PC |
 | Ethernet | Baseboard, SFP cage | Remote radio head, distributed receivers, PTP |
-| USB3 | Baseboard, SFP to USB3 adapter | A host reached through a USB port (in development) |
+| USB3 | Baseboard, SFP to USB3 adapter | A host reached through a USB port, without a kernel driver |
 | SATA | Baseboard, SATA connector | Recording and replaying samples without a host in the path |
 
-The transceivers share two PLLs, so a bitstream holds at most two of these protocols at once.
+The transceivers share two PLLs, so a bitstream holds at most two of these protocols at once,
+and USB3 shares a bitstream with PCIe only.
 [Host links](#host-links) gives the combinations, and [Carriers and hosts](#carriers) says what
 each carrier provides.
 
@@ -189,7 +198,7 @@ Acorn Baseboard Mini (BB).
 | Ethernet streaming, 2500BASE-X | no | yes | Validated on hardware |
 | Ethernet streaming, 5GBASE-R | no | yes | Experimental |
 | VRT packets over Ethernet (RX) | no | yes | Simulation-tested |
-| USB3 streaming | no | yes | In development |
+| USB3 streaming | no | yes | Validated on hardware |
 | Hardware timed TX | yes | yes | Validated on hardware |
 | SC16 and SC8 transport formats | yes | yes | Validated on hardware |
 | BFP8 transport format | yes | yes | Experimental |
@@ -215,6 +224,7 @@ lists every option.
 | Ethernet streaming, 2500BASE-X | `--eth-phy=2500basex` |
 | Ethernet streaming, 5GBASE-R | `--eth-phy=5000baser` |
 | VRT packets over Ethernet (RX) | `--with-eth-vrt` |
+| USB3 streaming | `--with-usb3` |
 | PCIe PTM time synchronisation | `--with-pcie-ptm` |
 | Ethernet PTP time discipline | `--with-eth-ptp` |
 | PTP-disciplined RFIC reference | `--with-eth-ptp-rfic-clock` |
@@ -226,19 +236,21 @@ The Ethernet options other than `--with-eth` are given in addition to it.
 
 Notes on the tables:
 
-- The oversampling mode at 2T2R needs the bandwidth of PCIe Gen2 x2 or x4. It must not be
-  combined with Ethernet or SATA (see [The RFIC interface](#rfic)).
+- The oversampling mode at 2T2R needs the bandwidth of PCIe Gen2 x2 or x4. The build refuses it
+  with Ethernet, SATA or USB3 (see [The RFIC interface](#rfic)).
 - The 10 MHz reference and the PTP-disciplined RFIC reference need the SI5351C version of the
   board.
 - PCIe PTM is used with PCIe Gen2 x1: the build rejects more than one lane. The repository
   records no measurement of the resulting offset.
 - Hardware timed TX works over PCIe only.
+- USB3 streaming shares a bitstream with PCIe only, and the oversampling mode excludes it. The
+  sample rates that the link carries are in [Host links](#host-links).
 - The PPS input is not a row of the table: the gateware only monitors it and reports its edges
   in registers. The board time is not aligned on it, and the board has no PPS output (see
   [Time synchronisation](#timing)).
 - White Rabbit is integrated and its core runs on the board. The lock of its servo, its jitter
   and the accuracy of its PPS are not measured on this board, and its time is not connected to
-  the timestamps of the samples. Do not enable it together with Ethernet.
+  the timestamps of the samples. The build refuses it together with Ethernet.
 - VRT packets are covered by simulation only, and the software of the repository does not
   select them (see [Host links](#host-links)).
 - The BFP8 format is not available in the oversampling mode.
@@ -251,7 +263,7 @@ The status words have one meaning throughout the manual:
 |------------------------|------------------------------------------------------------------|
 | Validated on hardware | Used on boards in normal operation. A number is given only where the repository holds a public record of the measurement |
 | Experimental | Runs on hardware in a restricted setup; behaviour and interfaces may change |
-| In development | Not merged in the main branch, or not tested on hardware; described to show the intent |
+| In development | Not merged in the repository, or not tested on hardware; described to show the intent |
 | Build-tested | Builds, with no record of a run on hardware |
 | Simulation-tested | Covered by the simulation tests of `test/`, with no record of a run on hardware |
 

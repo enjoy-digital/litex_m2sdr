@@ -46,7 +46,7 @@ RFIC: every sample crosses it, and every host link is built in it from the four 
 of the connector.
 
 ![Block diagram of the board. The cyan path is the M.2 connector and its four transceiver
-lanes, which the gateware turns into PCIe, Ethernet or SATA.](hw_block.svg)
+lanes, which the gateware turns into PCIe, Ethernet, SATA or USB3.](hw_block.svg)
 
 The RFIC exchanges samples with the FPGA over an LVDS data port and is configured over SPI.
 [SDR in a nutshell](#sdr-primer) explains its signal chain, and
@@ -280,12 +280,12 @@ no other.
 | RX or TX stream activity | Bright pulses over the base state |
 
 The pulse of each second comes from the internal PPS, made from the board time. The LED does not
-show the external PPS input. The activity is that of the sample streams of PCIe, Ethernet and
-SATA.
+show the external PPS input. The activity is that of the sample streams of PCIe, Ethernet, SATA
+and USB3.
 
 "Not ready" means that the board time is stopped or not set, or that the build has a host link
-and none is up. Only PCIe and Ethernet count as host links here. A build without them shows the
-state of the board time alone.
+and none is up. Only PCIe and Ethernet count as host links here: the state of the USB3 link is
+not part of it. A build without them shows the state of the board time alone.
 
 The software can read the LED state and override it with the `led-status`, `led-control`,
 `led-pulse` and `led-release` commands of `m2sdr_util`. The LED core is `StatusLed` in
@@ -330,8 +330,9 @@ to use it.
 The M.2 connector supplies the board; an M.2 Key M socket provides 3.3 V only.
 
 The FPGA and the RFIC are on the same side of the board and both dissipate heat in a small area.
-A heatsink on each of them and some air flow are recommended; the photographs of
-[Carriers and hosts](#carriers) show boards fitted this way.
+A heatsink on each of them and some air flow are recommended. The photograph of
+[What the board is](#intro-what) shows a board with its two heatsinks, and the photographs of
+[Carriers and hosts](#carriers) show boards fitted this way on their carriers.
 
 The public issue tracker of the
 repository records that a PCIe Gen2 x1 link runs cooler than a Gen2 x4 link.

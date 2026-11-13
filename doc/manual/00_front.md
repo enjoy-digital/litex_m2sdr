@@ -59,8 +59,7 @@ manual has a bug.
   `eth:192.168.1.50:1234`.
 - `<release>` stands for a release tag of the repository and `<image>` for the name of a release
   image.
-- A feature flagged *in development* is not part of a release, and a feature flagged
-  *Experimental* runs in a restricted setup; the [status table](#intro-status) defines each
-  status word.
+- A feature flagged *Experimental* runs in a restricted setup; the
+  [status table](#intro-status) defines each status word.
 - Paths are relative to the repository root. Shell commands are given for a Linux host.
 - When the text names a source file, it is the file to open to check or extend the fact.

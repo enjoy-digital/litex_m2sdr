@@ -9,10 +9,11 @@ from the register definitions of the gateware: the tool runs `litex_m2sdr.py` wi
 running Vivado.
 
 One build cannot hold every bank, because PCIe, Ethernet and SATA cannot be enabled
-together and the Ethernet PHYs have different registers. The three configurations are
-chosen to elaborate every bank once, not as builds to use. White Rabbit builds add the
-registers of the White Rabbit core, which this appendix does not list: they need the
-external `litex_wr_nic` package.
+together, USB3 excludes Ethernet and SATA, and the Ethernet PHYs have different
+registers. The four configurations are chosen to elaborate every bank once, not as
+builds to use. The USB3 configuration needs the USB3-PIPE package. White Rabbit builds
+add the registers of the White Rabbit core, which this appendix does not list: they
+need the external `litex_wr_nic` package.
 
 Offsets are in bytes from the base of the bank. The banks named in `BaseSoC.csr_map`
 (`litex_m2sdr.py`) keep the same base address in every build ([The SoC](#soc)); LiteX
@@ -23,6 +24,7 @@ places the others. The addresses are in the `csr.csv` and `csr.h` of a build.
 | `m2_pcie` | `litex_m2sdr.py` `--variant=m2` `--with-pcie` `--with-pcie-ptm` `--with-rfic-oversampling` `--with-gpio` `--with-pcie-probe` |
 | `baseboard_eth_sata` | `litex_m2sdr.py` `--variant=baseboard` `--with-eth` `--with-eth-ptp` `--with-eth-ptp-rfic-clock` `--with-eth-vrt` `--with-sata` |
 | `baseboard_eth_5g` | `litex_m2sdr.py` `--variant=baseboard` `--with-eth` `--eth-phy=5000baser` |
+| `baseboard_usb3` | `litex_m2sdr.py` `--variant=baseboard` `--with-usb3` |
 
 Access is `rw` for a register written by software (`CSRStorage`, or a `CSRStatus` that
 software also writes, such as event pending bits cleared by writing 1), `ro` for a status
@@ -44,11 +46,11 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 10 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 11 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
-| `board_info` | `0x0014` | 5 | ro | Board-level configuration. |
+| `board_info` | `0x0014` | 6 | ro | Board-level configuration. |
 
 Fields of `features`:
 
@@ -64,6 +66,7 @@ Fields of `features`:
 | `eth_ptp_rfic_` `clock` | 7 | Ethernet PTP can discipline the RFIC reference clock path. |
 | `timed_tx` | 8 | Hardware timed-TX gate (and its timestamp-offset CSRs) is present. |
 | `rfic_` `oversampling` | 9 | RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present. |
+| `usb3` | 10 | USB3 (SFP-to-USB3 adapter) is present. |
 
 Fields of `pcie_config`:
 
@@ -96,6 +99,7 @@ Fields of `board_info`:
 | `jtagbone` | 2 | JTAGBone enabled. |
 | `eth_sfp` | 3 | Ethernet SFP index. |
 | `wr_sfp` | 4 | White Rabbit SFP index. |
+| `usb3_sfp` | 5 | USB3 SFP index. |
 
 ## SoC controller (LiteX) {#reg-ctrl}
 
@@ -452,32 +456,32 @@ Bank `ad9361`.
 | `ctrl` | `0x0004` | 4 | rw | AD9361's control pins. Reset `0x0`. |
 | `stat` | `0x0008` | 8 | ro | AD9361's status pins. |
 | `bitmode` | `0x000c` | 2 | rw | Sample format. Reset `0x0`. |
-| `active_sample_` `rate` | `0x0010` | 32 | rw | Active host stream sample rate in samples/s. Reset `0x0`. |
-| `active_rx_` `frequency_khz` | `0x0014` | 32 | rw | Active RX center frequency in kHz. Reset `0x0`. |
-| `active_` `bandwidth` | `0x0018` | 32 | rw | Active RX bandwidth in Hz. Reset `0x0`. |
-| `spi_control` | `0x001c` | 16 | rw | See the fields below. Reset `0x0`. |
-| `spi_status` | `0x0020` | 1 | ro | Transfer status. |
-| `spi_mosi` | `0x0024` | 24 | rw | SPI data to send to the AD9361. Reset `0x0`. |
-| `spi_miso` | `0x0028` | 24 | ro | SPI data received from the AD9361. |
-| `phy_control` | `0x002c` | 6 | rw | See the fields below. Reset `0x0`. |
-| `phy_rx_deskew_` `idelay` | `0x0030` | 11 | rw | Load an IDELAYE2 tap value on an RX data lane (applies on write). Reset `0x0`. |
-| `phy_rx_deskew_` `ctrl` | `0x0034` | 1 | rw | Latch the per-lane error counters and clear them. Reset `0x0`. |
-| `phy_rx_deskew_` `err0` | `0x0038` | 24 | ro | Latched lane 0 error count. |
-| `phy_rx_deskew_` `err1` | `0x003c` | 24 | ro | Latched lane 1 error count. |
-| `phy_rx_deskew_` `err2` | `0x0040` | 24 | ro | Latched lane 2 error count. |
-| `phy_rx_deskew_` `err3` | `0x0044` | 24 | ro | Latched lane 3 error count. |
-| `phy_rx_deskew_` `err4` | `0x0048` | 24 | ro | Latched lane 4 error count. |
-| `phy_rx_deskew_` `err5` | `0x004c` | 24 | ro | Latched lane 5 error count. |
-| `prbs_tx` | `0x0050` | 1 | rw | `0b0`: Disable PRBS TX. `0b1`: Enable PRBS TX. Reset `0x0`. |
-| `prbs_rx` | `0x0054` | 1 | ro | `0b0`: PRBS RX Out-of-Sync. `0b1`: PRBS_RX Synchronized. |
-| `agc_count_rx1_` `low_control` | `0x0058` | 32 | rw | See the fields below. Reset `0x6000000`. |
-| `agc_count_rx1_` `low_status` | `0x005c` | 32 | ro | Saturation event count (one event per accepted beat). |
-| `agc_count_rx1_` `high_control` | `0x0060` | 32 | rw | See the fields below. Reset `0x7e00000`. |
-| `agc_count_rx1_` `high_status` | `0x0064` | 32 | ro | Saturation event count (one event per accepted beat). |
-| `agc_count_rx2_` `low_control` | `0x0068` | 32 | rw | See the fields below. Reset `0x6000000`. |
-| `agc_count_rx2_` `low_status` | `0x006c` | 32 | ro | Saturation event count (one event per accepted beat). |
-| `agc_count_rx2_` `high_control` | `0x0070` | 32 | rw | See the fields below. Reset `0x7e00000`. |
-| `agc_count_rx2_` `high_status` | `0x0074` | 32 | ro | Saturation event count (one event per accepted beat). |
+| `spi_control` | `0x0010` | 16 | rw | See the fields below. Reset `0x0`. |
+| `spi_status` | `0x0014` | 1 | ro | Transfer status. |
+| `spi_mosi` | `0x0018` | 24 | rw | SPI data to send to the AD9361. Reset `0x0`. |
+| `spi_miso` | `0x001c` | 24 | ro | SPI data received from the AD9361. |
+| `phy_control` | `0x0020` | 6 | rw | See the fields below. Reset `0x0`. |
+| `phy_rx_deskew_` `idelay` | `0x0024` | 11 | rw | Load an IDELAYE2 tap value on an RX data lane (applies on write). Reset `0x0`. |
+| `phy_rx_deskew_` `ctrl` | `0x0028` | 1 | rw | Latch the per-lane error counters and clear them. Reset `0x0`. |
+| `phy_rx_deskew_` `err0` | `0x002c` | 24 | ro | Latched lane 0 error count. |
+| `phy_rx_deskew_` `err1` | `0x0030` | 24 | ro | Latched lane 1 error count. |
+| `phy_rx_deskew_` `err2` | `0x0034` | 24 | ro | Latched lane 2 error count. |
+| `phy_rx_deskew_` `err3` | `0x0038` | 24 | ro | Latched lane 3 error count. |
+| `phy_rx_deskew_` `err4` | `0x003c` | 24 | ro | Latched lane 4 error count. |
+| `phy_rx_deskew_` `err5` | `0x0040` | 24 | ro | Latched lane 5 error count. |
+| `prbs_tx` | `0x0044` | 1 | rw | `0b0`: Disable PRBS TX. `0b1`: Enable PRBS TX. Reset `0x0`. |
+| `prbs_rx` | `0x0048` | 1 | ro | `0b0`: PRBS RX Out-of-Sync. `0b1`: PRBS_RX Synchronized. |
+| `agc_count_rx1_` `low_control` | `0x004c` | 32 | rw | See the fields below. Reset `0x6000000`. |
+| `agc_count_rx1_` `low_status` | `0x0050` | 32 | ro | Saturation event count (one event per accepted beat). |
+| `agc_count_rx1_` `high_control` | `0x0054` | 32 | rw | See the fields below. Reset `0x7e00000`. |
+| `agc_count_rx1_` `high_status` | `0x0058` | 32 | ro | Saturation event count (one event per accepted beat). |
+| `agc_count_rx2_` `low_control` | `0x005c` | 32 | rw | See the fields below. Reset `0x6000000`. |
+| `agc_count_rx2_` `low_status` | `0x0060` | 32 | ro | Saturation event count (one event per accepted beat). |
+| `agc_count_rx2_` `high_control` | `0x0064` | 32 | rw | See the fields below. Reset `0x7e00000`. |
+| `agc_count_rx2_` `high_status` | `0x0068` | 32 | ro | Saturation event count (one event per accepted beat). |
+| `active_sample_` `rate` | `0x006c` | 32 | rw | Active host stream sample rate in samples/s. Reset `0x0`. |
+| `active_rx_` `frequency_khz` | `0x0070` | 32 | rw | Active RX center frequency in kHz. Reset `0x0`. |
+| `active_` `bandwidth` | `0x0074` | 32 | rw | Active RX bandwidth in Hz. Reset `0x0`. |
 
 Fields of `config`:
 
@@ -653,8 +657,8 @@ Defined by `LitePCIeDMA` (`litepcie/frontend/dma.py`).
 
 Registers of the LitePCIe DMA channel 0, which carries the samples; the kernel driver
 owns them. A build with `--pcie-dmas` above 1 has one such bank per channel
-(`pcie_dma1` and the next ones). The PPS input of the start synchroniser is connected
-on channel 0 only.
+(`pcie_dma1` and the next ones). The PPS input of the start synchroniser of every
+channel is connected.
 
 Bank `pcie_dma0`.
 
@@ -1129,6 +1133,35 @@ Fields of `sata_streamer_control`:
 |------------------------|---------|------------------------------------------------------|
 | `rx_reset` | 0 | Pulse reset on the SATA Stream2Sectors streamer. |
 | `tx_reset` | 1 | Pulse reset on the SATA Sectors2Stream streamer. |
+
+## USB3 host link {#reg-usb3}
+
+Defined by `USB3` (`litex_m2sdr/gateware/usb3.py`).
+
+Present with `--with-usb3` ([USB3 host link](#links-usb3)). `--with-usb3-debug` adds the
+debug registers of USB3-PIPE after these two; the USB3-PIPE manual lists them.
+
+Bank `usb3`.
+
+| Register | Offset | Bits | Access | Description |
+|----------------------------|-------------|--------|---------|----------------------------------------|
+| `control` | `0x0000` | 2 | rw | USB3 streams control. Reset `0x0`. |
+| `status` | `0x0004` | 3 | ro | USB3 status. |
+
+Fields of `control`:
+
+| Field | Bits | Description |
+|------------------------|---------|------------------------------------------------------|
+| `rx_enable` | 0 | Enable RX stream (RFIC -\> Host, Bulk IN), flushes previous data. |
+| `tx_enable` | 1 | Enable TX stream (Host -\> RFIC, Bulk OUT). |
+
+Fields of `status`:
+
+| Field | Bits | Description |
+|------------------------|---------|------------------------------------------------------|
+| `ready` | 0 | SerDes ready. |
+| `link_up` | 1 | Link in U0. |
+| `tx_started` | 2 | TX FIFO primed, forwarding to the RFIC. |
 
 ## LiteScope analyzer (LiteScope) {#reg-analyzer}
 

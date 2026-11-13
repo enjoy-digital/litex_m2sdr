@@ -30,7 +30,8 @@ Project-specific writing rules, completing the generic `STYLE.md` of the manual 
 - *bitstream* is the FPGA file; *release image* is a prebuilt bitstream published on the
   Releases page.
 - *host bridge* is a LiteX bridge that gives the host access to the registers of the SoC: over
-  PCIe (the kernel driver), over Ethernet (Etherbone) or over JTAG (JTAGBone).
+  PCIe (the kernel driver), over Ethernet (Etherbone), over USB3 (endpoint 0) or over JTAG
+  (JTAGBone).
 - *register* in prose (never "CSR", except for "CSR bus" and the file `csr.h`).
 - *stream* is a LiteX stream (valid, ready, data); *the RX stream* goes from the RFIC to the
   host, *the TX stream* from the host to the RFIC. RX and TX are always seen from the antenna:
@@ -65,8 +66,9 @@ Exactly five, defined once under the status table of the introduction (`#intro-s
 chapters link to it and never restate a status:
 
 - *Validated on hardware*, *Experimental*, *In development*, *Build-tested*, *Simulation-tested*.
-- The USB3 host link is always flagged "in development" with a link to the status table. The
-  oversampling mode and White Rabbit are flagged "Experimental" in the same way.
+- The oversampling mode and White Rabbit are always flagged "Experimental" with a link to the
+  status table. The USB3 host link is Validated on hardware: no flag, and no measured rate
+  without a record in the repository.
 - Link texts are the titles of the chapters: "The SoC", "The RFIC interface", "Host software",
   "Time synchronisation", "Carriers and hosts".
 
@@ -80,7 +82,8 @@ chapters link to it and never restate a status:
 - *PTP* is IEEE 1588 as LiteEth and linuxptp implement it; *White Rabbit* in two words,
   capitalised, "WR" only in identifiers.
 - *USB3* (no space) for the host link and its options; *USB3-PIPE* for the LiteX core; cite the
-  standard as "USB 3.2".
+  standard as "USB 3.2". *the USB3 helper* is `libliteusb`; "LiteUSB" only in identifiers.
+  Endpoints as "endpoint 0", "Bulk IN", "Bulk OUT"; "EP0" only in identifiers and figures.
 - *SATA*, *SFP*, *M.2* (with the dot), "M.2 2280 Key M".
 - Sample formats: *SC16* and *SC8* (transport formats), *VRT* for VITA 49 packets, *SigMF* for
   the recording format.
@@ -91,8 +94,8 @@ chapters link to it and never restate a status:
 ## Placeholders
 
 - `<variant>` is `m2` or `baseboard`.
-- `<device>` is a device identifier of the utilities, such as `pcie:/dev/m2sdr0` or
-  `eth:192.168.1.50:1234`.
+- `<device>` is a device identifier of the utilities, such as `pcie:/dev/m2sdr0`,
+  `eth:192.168.1.50:1234` or `usb:`.
 - `<release>` is a release tag of the repository; `<image>` is a release image name.
 - All are defined once in the Conventions of the front matter.
 

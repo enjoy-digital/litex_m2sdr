@@ -174,33 +174,6 @@
    },
    {
     "access": "rw",
-    "description": "Active host stream sample rate in samples/s.",
-    "fields": [],
-    "name": "active_sample_rate",
-    "offset": 16,
-    "reset": 0,
-    "size": 32
-   },
-   {
-    "access": "rw",
-    "description": "Active RX center frequency in kHz.",
-    "fields": [],
-    "name": "active_rx_frequency_khz",
-    "offset": 20,
-    "reset": 0,
-    "size": 32
-   },
-   {
-    "access": "rw",
-    "description": "Active RX bandwidth in Hz.",
-    "fields": [],
-    "name": "active_bandwidth",
-    "offset": 24,
-    "reset": 0,
-    "size": 32
-   },
-   {
-    "access": "rw",
     "description": "",
     "fields": [
      {
@@ -243,7 +216,7 @@
      }
     ],
     "name": "spi_control",
-    "offset": 28,
+    "offset": 16,
     "reset": 0,
     "size": 16
    },
@@ -270,7 +243,7 @@
      }
     ],
     "name": "spi_status",
-    "offset": 32,
+    "offset": 20,
     "reset": null,
     "size": 1
    },
@@ -279,7 +252,7 @@
     "description": "SPI data to send to the AD9361.",
     "fields": [],
     "name": "spi_mosi",
-    "offset": 36,
+    "offset": 24,
     "reset": 0,
     "size": 24
    },
@@ -288,7 +261,7 @@
     "description": "SPI data received from the AD9361.",
     "fields": [],
     "name": "spi_miso",
-    "offset": 40,
+    "offset": 28,
     "reset": null,
     "size": 24
    },
@@ -331,7 +304,7 @@
      }
     ],
     "name": "phy_control",
-    "offset": 44,
+    "offset": 32,
     "reset": 0,
     "size": 6
    },
@@ -357,7 +330,7 @@
      }
     ],
     "name": "phy_rx_deskew_idelay",
-    "offset": 48,
+    "offset": 36,
     "reset": 0,
     "size": 11
    },
@@ -375,7 +348,7 @@
      }
     ],
     "name": "phy_rx_deskew_ctrl",
-    "offset": 52,
+    "offset": 40,
     "reset": 0,
     "size": 1
    },
@@ -384,7 +357,7 @@
     "description": "Latched lane 0 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err0",
-    "offset": 56,
+    "offset": 44,
     "reset": null,
     "size": 24
    },
@@ -393,7 +366,7 @@
     "description": "Latched lane 1 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err1",
-    "offset": 60,
+    "offset": 48,
     "reset": null,
     "size": 24
    },
@@ -402,7 +375,7 @@
     "description": "Latched lane 2 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err2",
-    "offset": 64,
+    "offset": 52,
     "reset": null,
     "size": 24
    },
@@ -411,7 +384,7 @@
     "description": "Latched lane 3 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err3",
-    "offset": 68,
+    "offset": 56,
     "reset": null,
     "size": 24
    },
@@ -420,7 +393,7 @@
     "description": "Latched lane 4 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err4",
-    "offset": 72,
+    "offset": 60,
     "reset": null,
     "size": 24
    },
@@ -429,7 +402,7 @@
     "description": "Latched lane 5 error count.",
     "fields": [],
     "name": "phy_rx_deskew_err5",
-    "offset": 76,
+    "offset": 64,
     "reset": null,
     "size": 24
    },
@@ -456,7 +429,7 @@
      }
     ],
     "name": "prbs_tx",
-    "offset": 80,
+    "offset": 68,
     "reset": 0,
     "size": 1
    },
@@ -483,7 +456,7 @@
      }
     ],
     "name": "prbs_rx",
-    "offset": 84,
+    "offset": 72,
     "reset": null,
     "size": 1
    },
@@ -526,7 +499,7 @@
      }
     ],
     "name": "agc_count_rx1_low_control",
-    "offset": 88,
+    "offset": 76,
     "reset": 100663296,
     "size": 32
    },
@@ -544,7 +517,7 @@
      }
     ],
     "name": "agc_count_rx1_low_status",
-    "offset": 92,
+    "offset": 80,
     "reset": null,
     "size": 32
    },
@@ -587,7 +560,7 @@
      }
     ],
     "name": "agc_count_rx1_high_control",
-    "offset": 96,
+    "offset": 84,
     "reset": 132120576,
     "size": 32
    },
@@ -605,7 +578,7 @@
      }
     ],
     "name": "agc_count_rx1_high_status",
-    "offset": 100,
+    "offset": 88,
     "reset": null,
     "size": 32
    },
@@ -648,7 +621,7 @@
      }
     ],
     "name": "agc_count_rx2_low_control",
-    "offset": 104,
+    "offset": 92,
     "reset": 100663296,
     "size": 32
    },
@@ -666,7 +639,7 @@
      }
     ],
     "name": "agc_count_rx2_low_status",
-    "offset": 108,
+    "offset": 96,
     "reset": null,
     "size": 32
    },
@@ -709,7 +682,7 @@
      }
     ],
     "name": "agc_count_rx2_high_control",
-    "offset": 112,
+    "offset": 100,
     "reset": 132120576,
     "size": 32
    },
@@ -727,8 +700,35 @@
      }
     ],
     "name": "agc_count_rx2_high_status",
-    "offset": 116,
+    "offset": 104,
     "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active host stream sample rate in samples/s.",
+    "fields": [],
+    "name": "active_sample_rate",
+    "offset": 108,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active RX center frequency in kHz.",
+    "fields": [],
+    "name": "active_rx_frequency_khz",
+    "offset": 112,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active RX bandwidth in Hz.",
+    "fields": [],
+    "name": "active_bandwidth",
+    "offset": 116,
+    "reset": 0,
     "size": 32
    }
   ],
@@ -953,12 +953,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "USB3 (SFP-to-USB3 adapter) is present.",
+      "name": "usb3",
+      "offset": 10,
+      "reset": 0,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 10
+    "size": 11
    },
    {
     "access": "ro",
@@ -1192,12 +1200,20 @@
       "reset": 0,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "USB3 SFP index.",
+      "name": "usb3_sfp",
+      "offset": 5,
+      "reset": 0,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "board_info",
     "offset": 20,
     "reset": null,
-    "size": 5
+    "size": 6
    }
   ],
   "clk10_discipline": [

@@ -4,7 +4,7 @@
 # Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 #
-# USB3 host link (in development): USB3-PIPE PHY and device core, EP0 bridge and Bulk streams.
+# USB3 host link: USB3-PIPE PHY and device core, EP0 bridge and Bulk streams.
 
 from svgdiag import *
 

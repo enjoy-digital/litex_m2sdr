@@ -179,8 +179,9 @@ No software of the repository reads the two registers. Aligning the board time o
 PPS needs a derived design.
 
 In a White Rabbit build the two registers of the PPS input are not present. In the other builds
-their bank has no fixed location: it is at `0xb000` in a PCIe build and at `0x15000` in an
-Ethernet build with SATA, for example. Read the addresses in the register file of the build.
+their bank has no fixed location: it is at `0x15000` in a PCIe build and at `0x15800` in a
+build with SATA, for example. Read the addresses in the register file of the build
+([Locations that move](#soc-csr-moving)).
 
 In the code: `litex_m2sdr/gateware/pps.py`; `test/test_pps.py`.
 
@@ -790,8 +791,8 @@ python3 -m litex_wr_nic.wr --csr-csv scripts/csr.csv load-firmware \
 - A working processor, console and time snapshot do not prove that the servo is locked. The lock,
   the jitter and the accuracy of the PPS on this board have not been measured.
 - White Rabbit and Ethernet PTP cannot be in the same bitstream.
-- White Rabbit and Ethernet must not be enabled together, although the build does not reject the
-  pair: see [Shared QPLL](#links-qpll).
+- White Rabbit and Ethernet cannot be in the same bitstream either: the script refuses the
+  pair, see [Shared QPLL](#links-qpll).
 - The registers of the PPS input are absent, as described in [PPS input](#timing-pps-in).
 - The simulations of LiteX-WR-NIC (`test/test_wr_clock.py` of that repository) cover the phase
   step backends. They do not measure the jitter of a real clock or the closed loop.
@@ -811,7 +812,7 @@ combinations and simulates the two phase step backends with the connections of t
 | Ethernet PTP and White Rabbit | Rejected |
 | PTP RFIC clock and White Rabbit | Rejected |
 | White Rabbit on the `m2` variant | Rejected |
-| White Rabbit and Ethernet | Not supported, not rejected |
+| White Rabbit and Ethernet | Rejected |
 | PCIe PTM and Ethernet PTP | Accepted; PTP owns the time while active |
 | PPS input on TP1 or TP2 with GPIO | Rejected |
 

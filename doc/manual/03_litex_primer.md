@@ -13,7 +13,7 @@ already builds LiteX designs can skip to [The SoC](#soc).
 | LitePCIe | PCIe host link: registers, DMA, driver, PTM | [Host links](#host-links) |
 | LiteEth | Ethernet host link: PHY, UDP, Etherbone, PTP | [Host links](#host-links) |
 | LiteSATA | SATA storage | [Host links](#host-links) |
-| USB3-PIPE | USB3 host link (in development) | [Host links](#host-links) |
+| USB3-PIPE | USB3 host link | [Host links](#host-links) |
 | LiteI2C | I2C master of the clock generator | [Time synchronisation](#timing) |
 | LiteScope | Logic analyser inside the FPGA | [Debugging](#debugging) |
 | LiteX-WR-NIC | White Rabbit core and its support | [Time synchronisation](#timing) |
@@ -79,7 +79,7 @@ host link, and one over JTAG that needs no host link at all.
 | PCIe | PCIe | Kernel driver, or `litex_server --pcie` |
 | Etherbone | Ethernet, UDP | The library, or `litex_server --udp` |
 | JTAGBone | JTAG cable | `litex_server --jtag` |
-| USB | USB3 (in development) | Vendor requests on endpoint 0 |
+| USB | USB3 | The library, or `litex_server --usb` |
 
 The LiteX host tools sit on top of these bridges. `litex_server` opens a bridge and the other
 tools connect to it: `litex_cli` reads and writes registers by name, and `litescope_cli` drives
@@ -168,7 +168,8 @@ resource. The PLLs are therefore created once, by the SoC, and each core receive
 channel it needs (`SharedQPLL`).
 
 Two PLLs mean two protocols at once. A bitstream can hold PCIe and Ethernet, PCIe and SATA, or
-Ethernet and SATA, but not the three of them. [Host links](#host-links) gives the valid combinations.
+Ethernet and SATA, but not the three of them. USB3 shares a bitstream with PCIe only.
+[Host links](#host-links) gives the valid combinations.
 
 LiteICLink is the LiteX core for the transceivers themselves and for raw links between FPGAs.
 The design of the repository does not instantiate it; it is the natural tool for a derived
@@ -179,9 +180,9 @@ design that links several boards through their spare lanes.
 USB3-PIPE is a USB 3 device implemented in the FPGA, with no USB chip. Its PHY trains the link
 on a transceiver, and its device core provides the endpoints.
 
-The USB3 host link of the board is in development (see [Status](#intro-status)). It reaches a
-USB connector through an adapter plugged in an SFP cage of the baseboard. Bulk endpoints carry
-the receive and transmit samples, and the control endpoint gives access to the registers.
+The USB3 host link of the board reaches a USB connector through an adapter plugged in an SFP
+cage of the baseboard. Bulk endpoints carry the receive and transmit samples, and the control
+endpoint gives access to the registers. [USB3 host link](#links-usb3) describes it.
 
 ## LiteI2C, LiteScope and the others {#litex-others}
 

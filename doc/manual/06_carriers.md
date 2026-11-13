@@ -11,7 +11,7 @@ used with. Read it to choose a setup; the commands are in [Getting started](#get
 | M.2 slot of a host | `m2` | PCIe Gen2 x1, x2, x4 | None |
 | M.2 carrier card, several boards | `m2` | One PCIe link per board | None |
 | LiteX Acorn Baseboard Mini | `baseboard` | PCIe Gen2 x1, Ethernet | SATA, 2 SFP cages, USB JTAG |
-| SFP to USB3 adapter on the baseboard | `baseboard` | USB3, in development | See the baseboard |
+| SFP to USB3 adapter on the baseboard | `baseboard` | USB3, PCIe Gen2 x1 | See the baseboard |
 
 A carrier fixes the build variant, and the variant fixes the pins of the lanes. A bitstream built
 for one variant does not work on the other carrier: flash the image that matches the carrier
@@ -56,12 +56,17 @@ lanes.
 
 Two limits come with a plain M.2 slot:
 
-- The transceivers are all taken by PCIe: no Ethernet, no SATA.
+- The transceivers are all taken by PCIe: no Ethernet, no SATA, no USB3.
 - The PPS pin is M.2 pin 22, which a standard slot leaves unconnected. Use a test point for the
   PPS input, as [Test points and PPS input](#hw-pps) explains.
 
 A slot of 80 mm takes the board directly. Secure it with the screw of the slot: the RF cables pull
 on the module.
+
+The photograph below shows such a setup, a mini PC with the board in its M.2 slot.
+
+![A mini PC with the board in its M.2 slot. Look at the back of the case: it carries SMA
+connectors, two of them with an antenna.](m2sdr_mini_pc.jpg){width=55%}
 
 The public issue tracker of the repository also reports first tests in an external NVMe
 enclosure with a Thunderbolt port. This setup is not part of the [status table](#intro-status).
@@ -102,8 +107,8 @@ pigtail.](m2sdr_baseboard_ethernet.png){width=80%}
 |-----------|------------------------------|-------------------------------------------------------|
 | J2 | M.2 Key M socket | The board |
 | J1 | PCIe x1 card edge | PCIe Gen2 x1 to a host, power from the slot |
-| J3 | SFP0 cage | Ethernet, White Rabbit, `--eth-sfp=0` |
-| J8 | SFP1 cage | Ethernet, White Rabbit, `--eth-sfp=1` |
+| J3 | SFP0 cage | Ethernet, White Rabbit or USB3, `--eth-sfp=0` |
+| J8 | SFP1 cage | Ethernet, White Rabbit or USB3, `--eth-sfp=1` |
 | J5 | SATA connector | SATA storage, `--with-sata` |
 | J7 | USB-C | JTAG and UART, FTDI FT2232H or FT4232H |
 | J9 | USB-C | Power input with USB Power Delivery |
@@ -140,9 +145,9 @@ available with the board. Use JTAGBone or Etherbone instead, as [Debugging](#deb
 ### SFP modules and their I2C bus {#carriers-baseboard-sfp}
 
 The data pairs of a cage go straight to one transceiver lane. The gateware selects the cage with
-`--eth-sfp` for Ethernet and `--wr-sfp` for White Rabbit. Do not enable Ethernet and White Rabbit
-together, even on two different cages: the two cores would share one PLL channel, and the build
-does not reject the pair.
+`--eth-sfp` for Ethernet, `--wr-sfp` for White Rabbit and `--usb3-sfp` for USB3. Ethernet and
+White Rabbit cannot be enabled together, even on two different cages: the two cores would share
+one PLL channel, and the build refuses the pair.
 
 Two SFP modules were used for the validation. [Host links](#host-links) gives the Ethernet PHYs
 and their rates, and [Workflows](#workflows) the setup of each module.
@@ -173,17 +178,33 @@ R75 for SFP0 and R7 for SFP1.
 
 On the baseboard, PCIe is limited to one lane, the lane of the card edge. The other lanes are free
 for Ethernet and SATA. The transceivers share the two PLLs of the quad, so the build refuses
-PCIe, Ethernet or White Rabbit, and SATA all at once. [Host links](#host-links) explains the
-combinations that work.
+PCIe, Ethernet or White Rabbit, and SATA all at once. USB3 is the most restricted: it shares a
+bitstream with PCIe only. [Host links](#host-links) explains the combinations that work.
 
 ## SFP to USB3 adapter {#carriers-usb3}
 
-The USB3 host link is in development; see the [status table](#intro-status). It uses the
-baseboard: an SFP to USB3 adapter, such as the Xillybus SFP2USB, plugs in one SFP cage and
-brings one transceiver lane to a USB connector.
+The USB3 host link uses the baseboard: an SFP to USB3 adapter, such as the
+[Xillybus SFP2USB](http://xillybus.com/sfp2usb-module), plugs in one SFP cage and brings one transceiver lane to a USB connector. A USB3 cable then
+links the adapter to a USB3 port of the host.
 
-The FPGA then implements the USB 3.2 physical layer and a device with USB3-PIPE,
-without any USB chip. [Host links](#host-links) describes the intended architecture.
+The FPGA implements the USB 3.2 physical layer and the device with USB3-PIPE, without any USB
+chip. The link runs at 5 Gbps, the rate of USB 3.2 Gen 1.
+
+| Item | Value |
+|-----------------------|--------------------------------------------------------------------|
+| Cage | SFP0 by default, or SFP1 with `--usb3-sfp=1` |
+| Transceiver lane | Lane 2 for SFP0, lane 1 for SFP1 |
+| Host side | A USB3 port; no kernel driver, the library uses libusb |
+| With PCIe | PCIe Gen2 x1 on the card edge stays available in the same bitstream |
+| Excluded | Ethernet, SATA and White Rabbit in the same bitstream |
+
+The adapter uses only the data pairs of the cage: the gateware does not use the I2C bus or the
+control pins of the cage for USB3. As for Ethernet, the transmit pair needs no inversion, and
+the link training of USB3-PIPE detects the polarity of the receive pair.
+
+USB3-PIPE is also used with this adapter on the Acorn CLE-215+, an Artix-7 module with the same
+GTP transceivers, as its manual records. [USB3 host link](#links-usb3) describes the gateware,
+and [USB3 streaming](#flow-usb3) gives the commands.
 
 ## Upcoming carrier {#carriers-upcoming}
 
