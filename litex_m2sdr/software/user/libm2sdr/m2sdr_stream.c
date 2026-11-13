@@ -33,6 +33,16 @@
 #define M2SDR_TIMEOUT_NOWAIT ((unsigned)-1)
 #define M2SDR_LITEETH_TX_DRAIN_DELAY_US 1000
 
+/* Ethernet RX mode register (VRT builds). The SoC declares it at its top level
+ * and the CSR generator prefixes such registers with the name of the top-level
+ * bank ("main"); the name without prefix is accepted too, as for the SATA
+ * streamer control register. */
+#if defined(CSR_MAIN_ETH_RX_MODE_ADDR)
+#define M2SDR_CSR_ETH_RX_MODE_ADDR CSR_MAIN_ETH_RX_MODE_ADDR
+#elif defined(CSR_ETH_RX_MODE_ADDR)
+#define M2SDR_CSR_ETH_RX_MODE_ADDR CSR_ETH_RX_MODE_ADDR
+#endif
+
 /* Helpers */
 /*---------*/
 
@@ -316,15 +326,15 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 #else
         return M2SDR_ERR_UNSUPPORTED;
 #endif
-#ifdef CSR_ETH_RX_MODE_ADDR
-        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 1) != 0)
+#ifdef M2SDR_CSR_ETH_RX_MODE_ADDR
+        if (m2sdr_reg_write(dev, M2SDR_CSR_ETH_RX_MODE_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
 #endif
         break;
 
     case M2SDR_LITEETH_RX_MODE_VRT:
-#ifdef CSR_ETH_RX_MODE_ADDR
-        if (m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 2) != 0)
+#ifdef M2SDR_CSR_ETH_RX_MODE_ADDR
+        if (m2sdr_reg_write(dev, M2SDR_CSR_ETH_RX_MODE_ADDR, 2) != 0)
             return M2SDR_ERR_IO;
 #else
         return M2SDR_ERR_UNSUPPORTED;
@@ -357,10 +367,10 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
-#ifdef CSR_ETH_RX_MODE_ADDR
+#ifdef M2SDR_CSR_ETH_RX_MODE_ADDR
     /* Raw streamer enable is not a safe stop on all bitstreams. Use the
      * Ethernet RX mode flush branch when present, then route RX away. */
-    (void)m2sdr_reg_write(dev, CSR_ETH_RX_MODE_ADDR, 0);
+    (void)m2sdr_reg_write(dev, M2SDR_CSR_ETH_RX_MODE_ADDR, 0);
 #endif
 #ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
     (void)m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0);
