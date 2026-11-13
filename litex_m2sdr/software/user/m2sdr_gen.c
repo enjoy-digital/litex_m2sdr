@@ -606,6 +606,7 @@ static void help(void) {
            "      --amplitude A              Set amplitude (0.0 to 1.0, default: 1.0).\n"
            "      --pps-freq HZ              Enable PPS/toggle on GPIO.\n"
            "      --gpio-pin N               Select GPIO pin for PPS (0-3, default: 0).\n"
+           "                                 The board has two GPIO pins: 0 (TP1) and 1 (TP2).\n"
            "      --enable-header            Enable TX DMA header.\n"
            "      --format FMT               Sample format: sc16 or sc8 (default: sc16).\n"
            "      --zero-copy                Request zero-copy DMA mode.\n"

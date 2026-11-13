@@ -8,7 +8,7 @@
 ## Overview
 
 The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating with:
-- **`litepcie`** kernel driver for DMA-based streaming over PCIe.
+- **`m2sdr`** kernel driver (built on LitePCIe) for DMA-based streaming over PCIe.
 - **Etherbone/LiteEth UDP** routines for remote control and UDP/VRT streaming over Ethernet.
 - M2SDR board-specific controls (sample rate, frequency, gains, etc.).
 
