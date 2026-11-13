@@ -428,7 +428,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             throw std::runtime_error("RX/TX channel count mismatch; close TX or use matching channels");
         }
 
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             if (format == SOAPY_SDR_CS8) {
                 _bitMode = 8;
                 _bitModeExplicit = true;
@@ -575,7 +575,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         _tx_stream.timed_tx_enabled  = (timed_tx_mode == TimedTxMode::Software);
         _tx_dma_header_bytes = _tx_stream.timed_tx_hardware ? M2SDR_DMA_HEADER_SIZE : 0;
 
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             if (format == SOAPY_SDR_CS8) {
                 _bitMode = 8;
                 _bitModeExplicit = true;
@@ -736,7 +736,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         Stream &fail_stream = (direction == SOAPY_SDR_RX)
             ? static_cast<Stream &>(_rx_stream)
             : static_cast<Stream &>(_tx_stream);
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev,
                 direction == SOAPY_SDR_RX ? M2SDR_RX : M2SDR_TX);
         } else if (isLiteEth()) {
@@ -783,7 +783,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
 
     if (stream == RX_STREAM) {
         stopRxStreamUnlocked();
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev, M2SDR_RX);
         } else if (isLiteEth()) {
             std::free(_rx_stream.buf);
@@ -792,7 +792,7 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
         _rx_stream.opened = false;
     } else if (stream == TX_STREAM) {
         stopTxStreamUnlocked();
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev, M2SDR_TX);
         } else if (isLiteEth()) {
             std::free(_tx_stream.buf);
@@ -818,18 +818,20 @@ int SoapyLiteXM2SDR::activateStream(
     /* RX */
     if (stream == RX_STREAM) {
         _rx_stream.stop_requested.store(false);
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             for (size_t i = 0; i < _rx_stream.channels.size(); i++)
                 channel_configure(SOAPY_SDR_RX, _rx_stream.channels[i]);
-            /* Crossbar Demux: Select PCIe streaming */
-            litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
+            /* Crossbar Demux: Select PCIe streaming (LiteUSB: selected by the activation). */
+            if (isLitePCIe())
+                litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
             /* Re-enable the DMA and resync ring counters (the kernel clears
              * them across a deactivate/activate cycle); drop any buffer still
              * held from before the restart. */
             int rc = m2sdr_stream_activate(_dev, M2SDR_RX);
             if (rc != M2SDR_ERR_OK) {
                 SoapySDR::logf(SOAPY_SDR_ERROR,
-                    "PCIe RX stream activation failed: %s", m2sdr_strerror(rc));
+                    "%s RX stream activation failed: %s",
+                    isLitePCIe() ? "PCIe" : "USB", m2sdr_strerror(rc));
                 return SOAPY_SDR_STREAM_ERROR;
             }
             _rx_stream.remainderHandle = -1;
@@ -878,15 +880,17 @@ int SoapyLiteXM2SDR::activateStream(
     /* TX */
     } else if (stream == TX_STREAM) {
         _tx_stream.stop_requested.store(false);
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             for (size_t i = 0; i < _tx_stream.channels.size(); i++)
                 channel_configure(SOAPY_SDR_TX, _tx_stream.channels[i]);
-            /* Crossbar Mux: Select PCIe streaming */
-            litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
+            /* Crossbar Mux: Select PCIe streaming (LiteUSB: selected by the activation). */
+            if (isLitePCIe())
+                litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
             int rc = m2sdr_stream_activate(_dev, M2SDR_TX);
             if (rc != M2SDR_ERR_OK) {
                 SoapySDR::logf(SOAPY_SDR_ERROR,
-                    "PCIe TX stream activation failed: %s", m2sdr_strerror(rc));
+                    "%s TX stream activation failed: %s",
+                    isLitePCIe() ? "PCIe" : "USB", m2sdr_strerror(rc));
                 return SOAPY_SDR_STREAM_ERROR;
             }
             _tx_stream.user_count = 0;
@@ -967,7 +971,7 @@ int SoapyLiteXM2SDR::deactivateStream(
 
 void SoapyLiteXM2SDR::stopRxStreamUnlocked()
 {
-    if (isLitePCIe()) {
+    if (usesLibm2sdrStream()) {
         /* Disable the DMA engine for RX. */
         int rc = m2sdr_stream_deactivate(_dev, M2SDR_RX);
         if (rc != M2SDR_ERR_OK) {
@@ -986,7 +990,7 @@ void SoapyLiteXM2SDR::stopRxStreamUnlocked()
 
 void SoapyLiteXM2SDR::stopTxStreamUnlocked()
 {
-    if (isLitePCIe()) {
+    if (usesLibm2sdrStream()) {
         /* Disable the DMA engine for TX. */
         int rc = m2sdr_stream_deactivate(_dev, M2SDR_TX);
         if (rc != M2SDR_ERR_OK) {
@@ -1055,12 +1059,12 @@ int SoapyLiteXM2SDR::getDirectAccessBufferAddrs(
     std::lock_guard<std::recursive_mutex> stream_lock(streamAccessMutex(stream));
 
     if (stream == RX_STREAM) {
-        if (isLitePCIe())
+        if (usesLibm2sdrStream())
             buffs[0] = (char *)_rx_stream.buf + handle * _rx_buf_stride + _rx_dma_header_bytes;
         else
             buffs[0] = (char *)_rx_stream.buf + handle * _rx_buf_size;
     } else if (stream == TX_STREAM) {
-        if (isLitePCIe())
+        if (usesLibm2sdrStream())
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_stride + _tx_dma_header_bytes;
         else
             buffs[0] = (char *)_tx_stream.buf + handle * _tx_buf_size;
@@ -1440,7 +1444,7 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
                 _rx_stream.last_time_ns = timeNs;
         }
         return getStreamMTU(stream);
-    } else if (isLitePCIe()) {
+    } else if (usesLibm2sdrStream()) {
         void *buffer = nullptr;
         unsigned total_samples = 0;
         int rc;
@@ -1522,7 +1526,7 @@ void SoapyLiteXM2SDR::releaseReadBuffer(
 
     assert(handle != (size_t)-1 && "Attempt to release an invalid buffer (e.g., from an overflow).");
 
-    if (isLitePCIe()) {
+    if (usesLibm2sdrStream()) {
         auto it = _rx_stream.pendingReadBufs.find(handle);
         if (it != _rx_stream.pendingReadBufs.end()) {
             int rc = m2sdr_release_buffer(_dev, M2SDR_RX, it->second);
@@ -1552,7 +1556,7 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
     if (!_tx_stream.opened || _tx_stream.stop_requested.load())
         return SOAPY_SDR_STREAM_ERROR;
 
-    if (isLitePCIe()) {
+    if (usesLibm2sdrStream()) {
         void *buffer = nullptr;
         unsigned total_samples = 0;
         int rc;
@@ -1611,7 +1615,7 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
     const size_t mtu = this->getStreamMTU(stream);
     if (numElems < mtu) {
         uint8_t *buf = nullptr;
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             auto it = _tx_stream.pendingWriteBufs.find(handle);
             if (it != _tx_stream.pendingWriteBufs.end())
                 buf = it->second;
@@ -1633,7 +1637,7 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
         }
     }
 
-    if (isLitePCIe()) {
+    if (usesLibm2sdrStream()) {
         auto it = _tx_stream.pendingWriteBufs.find(handle);
         if (it != _tx_stream.pendingWriteBufs.end()) {
             struct m2sdr_metadata meta;

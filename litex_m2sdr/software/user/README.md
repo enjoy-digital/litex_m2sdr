@@ -113,6 +113,8 @@ m2sdr_util [options] cmd [args...]
 ~~~~
 
 **Commands** include:
+- **list** / **devices**
+  Discover reachable PCIe and configured Ethernet boards.
 - **info** / **show-info**
   Get board information (FPGA version, gateware build, etc.).
 - **reg-read** / **reg-write**
@@ -144,6 +146,10 @@ m2sdr_util [options] cmd [args...]
   Test host TX -> FPGA AD9361 PHY data loopback -> host RX.
 - **ad9361-loopback-test**
   Test host TX -> AD9361 internal digital loopback -> host RX.
+- **eth-rx-rate-sweep**
+  Sweep RFIC sample rates and measure LiteEth RX throughput.
+- **ad9361-prbs-test**
+  Test FPGA PRBS TX -> AD9361 internal loopback -> FPGA/host RX.
 - **led-status**, **led-control**, **led-pulse**, **led-release**
   Inspect or override the user LED CSR block from the host side.
   `led-control` and `led-pulse` take raw bitmasks from `software/kernel/csr.h`.
@@ -151,8 +157,12 @@ m2sdr_util [options] cmd [args...]
   Test/characterize the VCXO output frequency.
 - **si5351-init**, **si5351-dump**, **si5351-read**, **si5351-write**
   Initialize, dump, read, or write the SI5351 clock generator.
+- **si5351-ppm-test `[CLOCK_SOURCE] [REFCLK_HZ] [SPAN_PPM] [STEP_PPM]`**
+  Step the SI5351 ppm trim around 0 and report measured vs commanded ppm and LO lock. Run `m2sdr_rf` first.
 - **ad9361-dump**, **ad9361-read**, **ad9361-write**
   Dump AD9361 register space for debugging.
+- **ad9361-port-dump**, **ad9361-ensm-dump**
+  Dump the AD9361 port configuration or ENSM state.
 - **flash-write** / **flash-read**
   Write to/read from the on-board SPI Flash. Over Ethernet,
   `M2SDR_FLASH_LEGACY=1` selects the slower register-by-register path and
@@ -251,7 +261,7 @@ Tool to initialize or configure the AD936x-based RF front-end.
 
 **Usage**:
 ~~~~
-m2sdr_rf [options] cmd [args...]
+m2sdr_rf [options]
 ~~~~
 
 **Relevant options**:
@@ -262,7 +272,8 @@ m2sdr_rf [options] cmd [args...]
   The SI5351 PLL feedback multiplier is trimmed by the given ratio, so the AD9361 RefClk and all derived clocks (LOs and sample clocks) are corrected together with ~`2e-4ppm` resolution. Useful on the internal XO to remove the CFO caused by the crystal tolerance without switching to an external reference: measure the offset on a known-good signal (`ppm = -offset_hz / carrier_hz * 1e6`) and pass it here as a calibration constant.
   Runtime retrims (`m2sdr_set_refclk_ppm()`) move only the fractional field of the PLL feedback in a single I2C burst, so a periodic loop can track a drifting reference glitch-free, without a PLL reset and without phase hits in the samples. The glitch-free window around the nominal table depends on the clock source: about `+87/-144ppm` with the internal XO at `38.4MHz`, about `+41/-52ppm` on an external/FPGA `10MHz` CLKIN, while the integer `40MHz` tables sit on the window's positive edge (any positive trim re-centres first). Outside the window the PLL feedback is re-centred on the target: the trim still lands exactly and opens a fresh window around the new operating point, but that one update is not glitch-free (it is logged). `m2sdr_get_refclk_ppm()` and `m2sdr_get_refclk_ppm_window()` let a tracking loop read back the applied trim and plan around the window. Each trim stays relative to the nominal table, never cumulative.
 - `--sample-rate sps` (default=`30720000`, accepts `30.72e6` or `20M`)
-- `--oversample` halves the AD9361 programmed rate; use it for an effective `122.88e6` FPGA-side rate while keeping the AD9361 at `61.44e6`
+  Rates above `61.44e6` (up to `122.88e6`) select the wide-bandwidth mode; 2T2R at `122.88e6` needs gateware built with `--with-rfic-oversampling`.
+- `--channel-layout mode` (`1t1r` or `2t2r`, default=`2t2r`)
 - `--bandwidth bw` (default=`56000000`)
 - `--tx-freq freq` (default=`2400000000`)
 - `--rx-freq freq` (default=`2400000000`)
@@ -270,12 +281,14 @@ m2sdr_rf [options] cmd [args...]
 - `--rx-gain-mode mode` set both RX gain-control modes (`manual`, `slow`, `fast`, or `hybrid`)
 - `--rx-gain-mode1 mode`, `--rx-gain-mode2 mode` set per-channel RX gain-control modes
 - `--rx-gain gain` force manual RX gain mode and apply the requested gain
+- `--rx-gain1 gain`, `--rx-gain2 gain` same, per RX channel
 - `--rx-agc-pin bool` drive the FPGA-connected AD9361 `RF_EN_AGC` pin
 - `--loopback enable` (enables internal loopback path)
 - `--bist-tx-tone`, `--bist-rx-tone`, `--bist-prbs` (built-in self-tests)
+- `--bist-tone-freq hz` frequency of the BIST tone
 - `--calibrate-delay` scan and program the FPGA<->AD9361 RX clock-data delay using PRBS, then attempt the TX delay scan
   If no valid TX window is found, the calibrated RX delay is kept and the previous TX delay is left unchanged.
-- `--format sc16|sc8`
+- `--format sc16|sc8|bfp8` (default=`sc16`; `--8bit` is a legacy alias for `--format sc8`)
 
 Example usage:
 ~~~~
@@ -329,7 +342,7 @@ m2sdr_gen [options]
 - `--amplitude`
 - `--zero-copy`
 - `--pps-freq`
-- `--gpio-pin`
+- `--gpio-pin` (0 to 3 accepted; the board has two GPIO pins, 0 = TP1 and 1 = TP2)
 - `--format sc16|sc8`
 - `--enable-header`
 
@@ -539,6 +552,8 @@ m2sdr_sata [options] cmd [args...]
   Check capture volume names and sector overlaps.
 - **capture `NAME --seconds SEC|--size BYTES [RF options]`**
   Configure RF, record RX to SATA, and add a named SATA Capture Volume entry.
+- **capture-current `NAME --seconds SEC|--size BYTES [metadata overrides]`**
+  Tap the active GQRX/host RX stream to SATA without retuning or interrupting it.
 - **capture-start `NAME --seconds SEC|--size BYTES [RF options]`**
   Start a named RX-to-SATA capture and return immediately.
 - **import `NAME FILE|SIGMF [metadata options]`**
@@ -587,7 +602,7 @@ workflow. Known-good PCIe/Ethernet SATA validation results are in its Performanc
 ---
 
 ### m2sdr_gpio
-Provides GPIO control for the M2SDR board, including configuration, loopback mode, and CSR/DMA mode selection. This tool allows for setting output data, output enable bits, and reading back the 4-bit GPIO input.
+Provides GPIO control for the M2SDR board, including configuration, loopback mode, and CSR/DMA mode selection. This tool allows for setting output data, output enable bits, and reading back the 4-bit GPIO input. The GPIO core is 4 bits wide; only bits 0 and 1 reach a pin of the board (test points TP1 and TP2).
 
 **Usage**:
 ~~~~
@@ -604,7 +619,7 @@ m2sdr_gpio [options]
 
 Example usage:
 ~~~~
-./m2sdr_gpio --device-num 0 --enable --source csr --output-data 0xA --output-enable 0xA
+./m2sdr_gpio --device-num 0 --enable --source csr --output-data 0x2 --output-enable 0x3
 ~~~~
 
 ---
@@ -620,9 +635,10 @@ m2sdr_fm_tx [options] input output
 - **output**: I/Q bin file or `-` for stdout.
 
 **Options**:
-- `--sample-rate` (short: `-s`, default=1000000)
+- `--sample-rate` (short: `-s`, default=500000)
 - `--deviation` (short: `-d`, default=75000)
 - `--bits` (short: `-b`, default=12)
+- `--format` (values: `sc16|sc8`, default=sc16; `-8`/`--sc8` selects 8-bit I/Q samples)
 - `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
 - `--input-channels` (short: `-i`, for stdin)
@@ -674,9 +690,10 @@ m2sdr_fm_rx [options] input output
 - **output**: WAV file or `-` for stdout (pipe to ffplay/ffmpeg for playback).
 
 **Options**:
-- `--sample-rate` (short: `-s`, default=1000000)
+- `--sample-rate` (short: `-s`, default=500000)
 - `--deviation` (short: `-d`, default=75000)
 - `--bits` (short: `-b`, default=12)
+- `--format` (values: `sc16|sc8`, default=sc16; `-8`/`--sc8` selects 8-bit I/Q samples)
 - `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
 
@@ -759,7 +776,7 @@ Below is a quick guide to **generate** a tone, **initialize** the RF, **record**
    ~~~~
    ./m2sdr_record rx_file.bin 20000
    ~~~~
-   *(Starts capturing 20K samples while `m2sdr_gen` is active.)*
+   *(Starts capturing 20000 bytes while `m2sdr_gen` is active.)*
 
 4. **Analyze the captured data**
    ~~~~

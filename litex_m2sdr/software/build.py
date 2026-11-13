@@ -48,7 +48,7 @@ def install_user_software(base_dir, prefix, interface):
 
 def main():
     parser = argparse.ArgumentParser(description="LiteX-M2SDR Software build.", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--interface",   default="runtime",   help="Control/Data path interface", choices=["runtime", "litepcie", "liteeth"])
+    parser.add_argument("--interface",   default="runtime",   help="Control/Data path interface", choices=["runtime", "litepcie", "liteeth", "liteusb"])
     parser.add_argument("--prefix",      default="/usr",      help="Install prefix for SoapySDR driver.")
     parser.add_argument("--no-sudo",     action="store_true", help="Skip install steps even when running as root.")
     parser.add_argument("--no-install",  action="store_true", help="Build only; do not run install steps.")
@@ -64,6 +64,8 @@ def main():
         interface = "USE_RUNTIME"
     elif args.interface == "litepcie":
         interface = "USE_LITEPCIE"
+    elif args.interface == "liteusb":
+        interface = "USE_LITEUSB"
     else:
         interface = "USE_LITEETH"
 

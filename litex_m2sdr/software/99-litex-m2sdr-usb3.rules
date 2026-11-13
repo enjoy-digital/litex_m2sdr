@@ -1,0 +1,2 @@
+# LiteX-M2SDR USB3 (USB3-PIPE vendor class device): user access for libm2sdr/SoapySDR/litex_server.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1d50", ATTR{idProduct}=="605a", MODE="0660", GROUP="plugdev", TAG+="uaccess"
