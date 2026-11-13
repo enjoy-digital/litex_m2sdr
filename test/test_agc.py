@@ -9,10 +9,19 @@ from migen import *
 
 from litex.gen.sim import run_simulation
 
+from types import SimpleNamespace
+
+from litex.gen import LiteXModule
+
+from litex.soc.interconnect import stream
+
+from litepcie.common import dma_layout
+
 from litex_m2sdr.gateware.ad9361.agc import (
     AGC_DEFAULT_HIGH_THRESHOLD,
     AGCSaturationCount,
 )
+from litex_m2sdr.gateware.ad9361.core import AD9361RFIC
 
 # AGC Tests ---------------------------------------------------------------------------------------
 
@@ -139,3 +148,76 @@ def test_agc_threshold_default_is_near_clip():
 
     run_simulation(dut, gen())
     assert observed["threshold"] == AGC_DEFAULT_HIGH_THRESHOLD
+
+
+class _AGCHarness(LiteXModule):
+    """RX stream of the RFIC core (after its CDC) with the AGC counters of AD9361RFIC.add_agc()."""
+    def __init__(self, data_width):
+        self.rx_cdc = SimpleNamespace(source=stream.Endpoint(dma_layout(data_width)))
+        AD9361RFIC.add_agc(self)
+
+
+def _run_agc_harness(data_width, words, threshold=1000):
+    dut      = _AGCHarness(data_width)
+    counters = {
+        "rx1_low"  : dut.agc_count_rx1_low,
+        "rx1_high" : dut.agc_count_rx1_high,
+        "rx2_low"  : dut.agc_count_rx2_low,
+        "rx2_high" : dut.agc_count_rx2_high,
+    }
+    counts = {}
+
+    def gen():
+        for counter in counters.values():
+            yield counter.control.fields.enable.eq(1)
+            yield counter.control.fields.threshold.eq(threshold)
+        yield
+        yield dut.rx_cdc.source.ready.eq(1)
+        for word in words:
+            yield dut.rx_cdc.source.valid.eq(1)
+            yield dut.rx_cdc.source.data.eq(word)
+            yield
+        yield dut.rx_cdc.source.valid.eq(0)
+        yield
+        yield
+        for name, counter in counters.items():
+            counts[name] = (yield counter.status.fields.count)
+
+    run_simulation(dut, gen())
+    return counts
+
+
+def _agc_word(samples):
+    word = 0
+    for n, sample in enumerate(samples):
+        word |= (sample & 0xffff) << (16*n)
+    return word
+
+
+def test_agc_counters_64b_datapath_observe_each_channel():
+    """Verify the AGC counters of the 64-bit datapath: one event per word, per channel."""
+    words = [
+        _agc_word([   0,     0,    0,     0]),
+        _agc_word([1500,     0,    0,     0]), # RX1 I.
+        _agc_word([   0, -1500,    0,     0]), # RX1 Q.
+        _agc_word([   0,     0, 1500,     0]), # RX2 I.
+        _agc_word([1500,  1500,    0, -1500]), # RX1 I/Q and RX2 Q.
+    ]
+    counts = _run_agc_harness(64, words)
+    assert counts == {"rx1_low": 3, "rx1_high": 3, "rx2_low": 2, "rx2_high": 2}
+
+
+def test_agc_counters_128b_datapath_observe_both_sample_groups():
+    """Verify the AGC counters of the 128-bit (oversampling) datapath observe the two sample
+    groups of each word: a saturation in the second group alone is counted."""
+    words = [
+        _agc_word([   0,     0,    0,     0,    0,     0,    0,     0]),
+        _agc_word([1500,     0,    0,     0,    0,     0,    0,     0]), # RX1 I, first group.
+        _agc_word([   0,     0,    0,     0, 1500,     0,    0,     0]), # RX1 I, second group.
+        _agc_word([   0,     0,    0,     0,    0, -1500,    0,     0]), # RX1 Q, second group.
+        _agc_word([   0,     0,    0,     0,    0,     0, 1500,     0]), # RX2 I, second group.
+        _agc_word([   0,     0,    0,     0,    0,     0,    0, -1500]), # RX2 Q, second group.
+        _agc_word([   0,     0, 1500,     0,    0,     0, 1500,     0]), # RX2 I, both groups.
+    ]
+    counts = _run_agc_harness(128, words)
+    assert counts == {"rx1_low": 3, "rx1_high": 3, "rx2_low": 3, "rx2_high": 3}

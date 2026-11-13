@@ -536,3 +536,52 @@ def test_ad9361_rx_bitmode_128b_16bit_passthrough():
 
     run_simulation(dut, [gen(), mon()])
     assert out == [word]
+
+
+def _run_bitmode_128b_words(dut, mode, words, cycles=64):
+    out = []
+
+    def gen():
+        yield dut.mode.eq(mode)
+        yield dut.source.ready.eq(1)
+        for word in words:
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.data.eq(word)
+            yield
+            timeout = 0
+            while not (yield dut.sink.ready):
+                timeout += 1
+                if timeout > cycles:
+                    return
+                yield
+        yield dut.sink.valid.eq(0)
+        for _ in range(8):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                out.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+    return out
+
+
+def test_ad9361_tx_bitmode_128b_unsupported_modes_do_not_stall():
+    """Verify the 128-bit TX bitmode keeps the stream running in the modes it does not
+    implement (BFP8, reserved): the words are forwarded as in 16-bit mode."""
+    words = [(0x99AABBCCDDEEFF00 << 64) | 0x1122334455667788, (0x0123456789ABCDEF << 64) | 0x5A5A]
+    for mode in [2, 3]:
+        dut = AD9361TXBitMode(data_width=128)
+        assert _run_bitmode_128b_words(dut, mode, words) == words
+
+
+def test_ad9361_rx_bitmode_128b_unsupported_modes_do_not_stall():
+    """Verify the 128-bit RX bitmode keeps the stream running in the modes it does not
+    implement (BFP8, reserved): the words are forwarded as in 16-bit mode."""
+    words = [(0x1122334455667788 << 64) | 0x99AABBCCDDEEFF00, (0x5A5A << 64) | 0x0123456789ABCDEF]
+    for mode in [2, 3]:
+        dut = AD9361RXBitMode(data_width=128)
+        assert _run_bitmode_128b_words(dut, mode, words) == words

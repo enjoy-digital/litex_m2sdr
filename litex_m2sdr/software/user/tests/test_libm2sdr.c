@@ -402,6 +402,70 @@ static int test_format_size_helpers(void)
     return 0;
 }
 
+/* Register backend of the sample format test: the capability features are
+ * read back from a variable and the last bit mode write is recorded. */
+static uint32_t format_test_features;
+static uint32_t format_test_bitmode;
+static int      format_test_bitmode_writes;
+
+static int format_test_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+{
+    (void)dev;
+    *val = (addr == CSR_CAPABILITY_FEATURES_ADDR) ? format_test_features : 0;
+    return 0;
+}
+
+static int format_test_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    (void)dev;
+    if (addr == CSR_AD9361_BITMODE_ADDR) {
+        format_test_bitmode = val;
+        format_test_bitmode_writes++;
+    }
+    return 0;
+}
+
+static int test_sample_format_oversampling_validation(void)
+{
+    static const struct m2sdr_backend_ops ops = {
+        .readl  = format_test_readl,
+        .writel = format_test_writel,
+    };
+    struct m2sdr_dev dev;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd  = -1;
+    dev.ops = &ops;
+
+    /* 64-bit datapath: the three formats are written to the bit mode register. */
+    format_test_features       = 0;
+    format_test_bitmode_writes = 0;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_BFP8_Q11) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 1 || format_test_bitmode != 2)
+        return -1;
+
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+    /* 128-bit (oversampling) datapath: BFP8 is refused and nothing is written. */
+    format_test_features       = M2SDR_FEATURE_RFIC_OVERSAMPLING;
+    format_test_bitmode_writes = 0;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_BFP8_Q11) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (format_test_bitmode_writes != 0)
+        return -1;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_SC8_Q7) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 1 || format_test_bitmode != 1)
+        return -1;
+    if (m2sdr_set_sample_format(&dev, M2SDR_FORMAT_SC16_Q11) != M2SDR_ERR_OK)
+        return -1;
+    if (format_test_bitmode_writes != 2 || format_test_bitmode != 0)
+        return -1;
+#endif
+
+    return 0;
+}
+
 static int test_dma_header_helper(void)
 {
     uint8_t header[16];
@@ -674,6 +738,82 @@ static int test_transport_helpers(void)
     return 0;
 }
 
+/* Register backend of the TX header test: the last write to the TX header
+ * control register is recorded. */
+static uint32_t tx_header_test_control;
+static int      tx_header_test_control_writes;
+
+static int tx_header_test_readl(struct m2sdr_dev *dev, uint32_t addr, uint32_t *val)
+{
+    (void)dev;
+    (void)addr;
+    *val = 0;
+    return 0;
+}
+
+static int tx_header_test_writel(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
+{
+    (void)dev;
+    if (addr == CSR_HEADER_TX_CONTROL_ADDR) {
+        tx_header_test_control = val;
+        tx_header_test_control_writes++;
+    }
+    return 0;
+}
+
+static int test_tx_header_transport_validation(void)
+{
+    static const struct m2sdr_backend_ops ops = {
+        .readl  = tx_header_test_readl,
+        .writel = tx_header_test_writel,
+    };
+    const uint32_t header_enable = 1u << CSR_HEADER_TX_CONTROL_HEADER_ENABLE_OFFSET;
+    struct m2sdr_sync_params params;
+    struct m2sdr_dev dev;
+
+    memset(&dev, 0, sizeof(dev));
+    dev.fd  = -1;
+    dev.ops = &ops;
+
+    /* PCIe: the TX header can be enabled and disabled. */
+    dev.transport = M2SDR_TRANSPORT_LITEPCIE;
+    tx_header_test_control_writes = 0;
+    if (m2sdr_set_tx_header(&dev, true) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 1 || !(tx_header_test_control & header_enable))
+        return -1;
+    if (dev.tx_header_enable != 1)
+        return -1;
+    if (m2sdr_set_tx_header(&dev, false) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 2 || (tx_header_test_control & header_enable))
+        return -1;
+    if (dev.tx_header_enable != 0)
+        return -1;
+
+    /* Ethernet: enabling the TX header is refused and nothing is written;
+     * disabling it is still allowed. */
+    dev.transport = M2SDR_TRANSPORT_LITEETH;
+    tx_header_test_control_writes = 0;
+    if (m2sdr_set_tx_header(&dev, true) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (tx_header_test_control_writes != 0 || dev.tx_header_enable != 0)
+        return -1;
+    m2sdr_sync_params_init(&params);
+    params.direction        = M2SDR_TX;
+    params.tx_header_enable = true;
+    if (m2sdr_sync_config_ex(&dev, &params) != M2SDR_ERR_UNSUPPORTED)
+        return -1;
+    if (tx_header_test_control_writes != 0 || dev.tx_header_enable != 0)
+        return -1;
+    if (m2sdr_set_tx_header(&dev, false) != M2SDR_ERR_OK)
+        return -1;
+    if (tx_header_test_control_writes != 1 || (tx_header_test_control & header_enable))
+        return -1;
+
+    return 0;
+}
+
 int main(void)
 {
     if (test_parse_identifier_invalid_ports() != 0) {
@@ -708,6 +848,10 @@ int main(void)
         fprintf(stderr, "test_format_size_helpers failed\n");
         return 1;
     }
+    if (test_sample_format_oversampling_validation() != 0) {
+        fprintf(stderr, "test_sample_format_oversampling_validation failed\n");
+        return 1;
+    }
     if (test_dma_header_helper() != 0) {
         fprintf(stderr, "test_dma_header_helper failed\n");
         return 1;
@@ -734,6 +878,10 @@ int main(void)
     }
     if (test_transport_helpers() != 0) {
         fprintf(stderr, "test_transport_helpers failed\n");
+        return 1;
+    }
+    if (test_tx_header_transport_validation() != 0) {
+        fprintf(stderr, "test_tx_header_transport_validation failed\n");
         return 1;
     }
 
