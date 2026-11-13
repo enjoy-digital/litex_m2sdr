@@ -189,8 +189,8 @@ make m2sdr_util
 
 Use `scripts/m2sdr_ptp_check.py smoke --with-clock10` or the longer `soak`
 mode from the repository root when you need tcpdump-backed validation and
-JSON/CSV logs. See `../../../doc/ptp/README.md` for the full direct-cable PTP
-workflow and known-good `ptp4l` configurations.
+JSON/CSV logs. See the Timing chapter of the manual (`doc/manual/11_timing.md`) for the full direct-cable PTP
+workflow; known-good `ptp4l` configurations are in `doc/ptp/`.
 
 Loopback diagnostics use compact progress by default and accept `--verbose` for
 the detailed RF setup logs and counter table. They reset the FPGA streaming
@@ -242,7 +242,7 @@ test:
 ~~~~
 
 For a broader Ethernet debug flow and interpretation of LiteEth UDP counters,
-see `../../../doc/debugging-guide.md`.
+see the Debugging chapter of the manual (`doc/manual/17_debugging.md`).
 
 ---
 
@@ -580,9 +580,9 @@ cd litex_m2sdr/software/user
 ./m2sdr_sata -i 192.168.1.50 --pattern counter diag pattern-check 0x260000 8192
 ~~~~
 
-See [`doc/sata-workflows.md`](../../../doc/sata-workflows.md) for the complete
-workflow. Known-good PCIe/Ethernet SATA validation results are logged in
-[`doc/sata-validation.md`](../../../doc/sata-validation.md).
+See the Workflows chapter of the manual (`doc/manual/16_workflows.md`) for the complete
+workflow. Known-good PCIe/Ethernet SATA validation results are in its Performance appendix
+(`doc/manual/D_performance.md`).
 
 ---
 
