@@ -1591,7 +1591,7 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
 #ifdef USE_LITEUSB
         } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
             unsigned wait_ms = timeout_ms ? timeout_ms : dev->rx_timeout_ms;
-            uint8_t *buf = liteusb_stream_next_read_buffer(dev->usb_rx, (int)wait_ms);
+            const uint8_t *buf = liteusb_stream_next_read_buffer(dev->usb_rx, (int)wait_ms);
             if (!buf)
                 return M2SDR_ERR_TIMEOUT;
             unsigned to_copy = m2sdr_stream_payload_bytes(dev, M2SDR_RX, dev->rx_format);
