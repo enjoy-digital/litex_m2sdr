@@ -197,16 +197,31 @@ class TimeGenerator(LiteXModule):
             cd_from         = "time",
             cd_to           = "sys",
         )
+        # The crossing is written on every time cycle and drops the words it cannot accept (sys
+        # clock slower than the time clock): the one-cycle change flag is held until a word is
+        # accepted, so that a time change is never lost.
+        change_pending = Signal()
+        self.sync.time += [
+            If(cdc.sink.ready,
+                change_pending.eq(0)
+            ).Elif(self.time_change,
+                change_pending.eq(1)
+            )
+        ]
         self.comb += [
             cdc.sink.valid.eq(1),
             cdc.sink.time.eq(self.time),
-            cdc.sink.change.eq(self.time_change),
+            cdc.sink.change.eq(self.time_change | change_pending),
             cdc.source.ready.eq(1),
         ]
-        self.sync += If(cdc.source.valid,
-            time.eq(       cdc.source.time),
-            time_change.eq(cdc.source.change),
-        )
+        # The crossing has no word on some sys cycles (sys clock faster than the time clock): the
+        # time is held and the change flag is a one-cycle pulse.
+        self.sync += [
+            If(cdc.source.valid,
+                time.eq(cdc.source.time),
+            ),
+            time_change.eq(cdc.source.valid & cdc.source.change),
+        ]
         self.time        = time
         self.time_change = time_change
 
