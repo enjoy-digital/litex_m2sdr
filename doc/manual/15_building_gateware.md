@@ -113,7 +113,7 @@ The status of each feature is in the [status table](#intro-status). The oversamp
 White Rabbit are Experimental.
 
 The script refuses the combinations that cannot work, with a message that names the options.
-Know these three before choosing a configuration:
+Know these rules before choosing a configuration:
 
 - The baseboard has one PCIe lane: `--variant=baseboard` takes `--pcie-lanes=1` only.
 - The oversampling mode is for PCIe alone: not with Ethernet, SATA or USB3.
@@ -238,7 +238,7 @@ Flashing a release image over JTAG, with its checks and its backups, is the job 
 
 ## Generated software headers {#build-headers}
 
-The kernel driver and the library are compiled against three headers that describe the SoC. Each
+The kernel driver and the library are compiled against the headers that describe the SoC. Each
 run of the script, with or without `--build`, writes them again from the elaborated SoC.
 
 | File | Content |
@@ -294,7 +294,7 @@ bitstreams of the configuration, its register exports and a manifest.
 ./release.py
 ```
 
-`release.py` builds the five configurations of the table one after the other and writes
+`release.py` builds the configurations of the table one after the other and writes
 `build/<build>_<YYYY_MM_DD>.zip` for each, with the date of the day.
 
 | Build name | Options after `./litex_m2sdr.py` |
@@ -305,8 +305,8 @@ bitstreams of the configuration, its register exports and a manifest.
 | `litex_m2sdr_` `m2_pcie_x1` | `--variant=m2` `--with-pcie` `--pcie-lanes=1` |
 | `litex_m2sdr_` `m2_pcie_x2` | `--variant=m2` `--with-pcie` `--pcie-lanes=2` |
 
-The build names are split at an underscore to fit the column. The other configurations are
-built from the sources: SATA, VRT, 2500BASE-X, 5GBASE-R, PCIe on four lanes, the oversampling
+The build names are split at an underscore to fit the column. Other configurations are built
+from the sources, such as SATA, VRT, 2500BASE-X, 5GBASE-R, PCIe on four lanes, the oversampling
 mode and White Rabbit.
 
 ### Timing gate {#build-release-timing}
@@ -334,7 +334,7 @@ The manifest records the project, the release date, the generation time, the bui
 build command, the configuration, the git revision, whether the tree had uncommitted changes,
 and the parsed timing summary. The archives and the bitstreams are never committed.
 
-The script saves the three generated software headers before the first build and restores them
+The script saves the generated software headers before the first build and restores them
 at the end, so a release run leaves the tree as it found it.
 
 `./release.py --nobuild` runs the same flow without Vivado. It elaborates each configuration
@@ -354,9 +354,10 @@ scripts/github_release.py --date <YYYY_MM_DD> --dry-run
 scripts/github_release.py --date <YYYY_MM_DD>
 ```
 
-The script checks that the tracked files are clean and that the five archives of the date
-exist. It then reads each manifest: all must carry this date, a clean tree and the same git
-revision. It creates an annotated tag on that revision, pushes it and creates the release.
+The script checks that the tracked files are clean and that the archive of each release
+configuration exists for the date. It then reads each manifest: all must carry this date, a
+clean tree and the same git revision. It creates an annotated tag on that revision, pushes it
+and creates the release.
 
 The release notes are the section of `CHANGELOG.md` whose title starts with the date in the
 `YYYY-MM-DD` form. Without such a section, the notes are one line with the date.

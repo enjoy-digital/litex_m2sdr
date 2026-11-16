@@ -60,6 +60,23 @@ Project-specific writing rules, completing the generic `STYLE.md` of the manual 
 - *discipline* (verb and noun) is the slow correction of a clock or of the board time by a
   reference: "the PTP discipline", "the board time is disciplined by PTP".
 
+## Open-ended statements
+
+The project keeps growing: new hosts, carriers, host links, modes and tools are added over time.
+Write so that an addition does not make a sentence false.
+
+- No counts of things that grow: "used on single-board computers such as the Raspberry Pi 5",
+  not "used on three single-board computers". Counts that are facts of the hardware or of a
+  specification stay ("two RX channels", "four PCIe lanes").
+- No closed lists of open sets: "for example", "such as" or "the tested ones are", and a table
+  that a new row extends, rather than "the X are A, B and C".
+- No absolutes about the project's reach or limits: "is not supported yet" or "is not available
+  over USB3 yet", not "is never possible"; "the reference host" rather than "the only host".
+  Keep the absolutes that are real constraints (bandwidth, a missing transceiver, a timing
+  limit), and say why.
+- State what was tested as tested ("tested on", "measured with"), not as the full extent of what
+  works.
+
 ## Status words
 
 Exactly five, defined once under the status table of the introduction (`#intro-status`); other

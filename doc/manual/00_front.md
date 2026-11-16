@@ -50,11 +50,11 @@ manual has a bug.
 - *The board* is the LiteX-M2SDR module; *the project* is the repository. *The RFIC* is the
   AD9361; *the FPGA* is the XC7A200T; *the clock generator* is the SI5351.
 - *The host* is the computer that controls the board. A *host link* carries the control and the
-  samples between the board and the host: PCIe, Ethernet or USB3.
+  samples between the board and the host, such as PCIe, Ethernet or USB3.
 - A *carrier* is what the board is plugged into. *The baseboard* is the LiteX Acorn Baseboard
   Mini.
 - RX and TX are seen from the antenna: RX is what the board receives from the air.
-- `<variant>` stands for a value of the `--variant` build option: `m2` or `baseboard`.
+- `<variant>` stands for a value of the `--variant` build option, such as `m2` or `baseboard`.
 - `<device>` stands for a device identifier of the utilities, such as `pcie:/dev/m2sdr0` or
   `eth:192.168.1.50:1234`.
 - `<release>` stands for a release tag of the repository and `<image>` for the name of a release

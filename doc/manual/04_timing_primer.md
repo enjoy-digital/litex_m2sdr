@@ -65,9 +65,9 @@ PPS says where a second starts, not which second it is. The time of day comes fr
 channel, usually the host, which only needs to be right within a fraction of a second. The pulse
 then gives the precise instant.
 
-On the board, the SI5351C version accepts a 10 MHz reference. A PPS input is available, but
-the gateware only monitors it: it detects the edges and reports them in registers. The board
-time is not aligned on this input, and the board has no PPS output.
+On the board, the SI5351C version accepts a 10 MHz reference. A PPS input is available, and
+the gateware monitors it: it detects the edges and reports them in registers. The board
+time is not aligned on this input yet, and no PPS output is available yet.
 
 [Hardware](#hardware) gives the pins and their levels, and
 [PPS input](#timing-pps-in) the registers.
@@ -191,7 +191,7 @@ SFP modules.
 
 On the board, it runs as a complete White Rabbit core with its own soft CPU and
 firmware, on an SFP cage of the baseboard. This integration is Experimental, and its time is
-kept apart from the board time that stamps the samples (see [Time synchronisation](#timing)).
+not connected yet to the board time that stamps the samples (see [Time synchronisation](#timing)).
 
 ## The mechanisms compared {#timingp-compare}
 

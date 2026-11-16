@@ -36,7 +36,8 @@ over PCIe, through UDP over Ethernet, or through the Bulk endpoints over USB3.
 
 ![The SoapySDR module. Applications configure the board and exchange samples through the
 SoapySDR API. Follow the cyan arrow for the samples: the module converts them to the format of
-the application and hands them to the library, which uses PCIe DMA or Ethernet UDP.](fw_soapy.svg)
+the application and hands them to the library, which uses the host link, such as PCIe DMA or
+Ethernet UDP.](fw_soapy.svg)
 
 The module is built and installed by `build.py` with the rest of the software; see
 [Getting started](#getting-started). Its reference page, with every device argument, is
@@ -131,15 +132,15 @@ timed TX mode.
   RFIC and starts from them; later settings reconfigure the RFIC as usual. The open fails when
   the RFIC is held in reset, and the RFIC is left running when the device is closed.
   `calibrate_delay` is ignored.
-- `clock_source`: the same three sources are available through the standard clock API of
+- `clock_source`: the same sources are available through the standard clock API of
   SoapySDR. Changing the source is refused while a stream is open. The reference selection is
   described in [Time synchronisation](#timing).
 - `refclk_ppm`: also a run-time setting. An application writes the setting `refclk_ppm` to trim
   the reference while streaming, in a range of 100 ppm on each side.
 - `eth_mode=vrt`: the RX stream is meant to come in VRT packets, which carry timestamps, while
-  the TX stream stays raw UDP. With the shipped software the driver refuses this mode as
-  unsupported: the library has no definition of the register that selects the VRT route. See
-  [VRT streaming](#flow-eth-vrt).
+  the TX stream stays raw UDP. The driver selects the VRT route when the library is built
+  against the `csr.h` of the VRT build; built against the committed `csr.h`, it refuses this mode
+  as unsupported. See [VRT streaming](#flow-eth-vrt).
 - Antennas: the driver exposes only the ports that the board connects. Passing another antenna
   name makes the driver fail at open.
 
@@ -169,8 +170,8 @@ reads it with `getHardwareTime()` and sets it with `setHardwareTime()`. The time
 `internal` and, on a bitstream with Ethernet PTP, `ptp`.
 
 RX buffers come with the board time of their first sample. Over PCIe and USB3 the driver reads
-it from the header of each buffer. Over Ethernet it needs `eth_mode=vrt`, which the shipped software
-does not select, so Ethernet RX has no hardware timestamps. Without hardware
+it from the header of each buffer. Over Ethernet it needs `eth_mode=vrt`, and so software built
+against the `csr.h` of the VRT build; otherwise Ethernet RX has no hardware timestamps. Without hardware
 timestamps the driver counts samples from the time read when the stream starts.
 
 ### Timed TX {#fw-timed-tx}
@@ -201,7 +202,7 @@ described in [Streaming](#streaming); the calibration is the recipe [Timed TX](#
 
 ### Test scripts {#fw-tests}
 
-Three Python scripts in `litex_m2sdr/software/soapysdr/` exercise the driver through the
+The Python scripts in `litex_m2sdr/software/soapysdr/` exercise the driver through the
 SoapySDR Python API. They are short and make good starting points for an application.
 
 ```sh
@@ -277,7 +278,8 @@ tx_gain = 60
 rx_gain = 40
 ```
 
-- PCIe is the host link for LTE: over Ethernet the RX stream has no hardware timestamps.
+- PCIe is the reference host link for LTE: over Ethernet the RX stream has no hardware
+  timestamps yet.
 - All the LTE sample rates, from 1.92 to 23.04 MSPS, are in the supported range.
 - Do not pass antenna arguments such as `rxant=` or `txant=`: unknown antenna names make the
   driver fail at open.

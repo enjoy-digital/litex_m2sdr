@@ -69,9 +69,9 @@ against the headers of another build reads the wrong registers
 ## Access to a running board {#debug-access}
 
 There are two ways to reach the registers of a running board. The utilities of the project go
-through the library, over PCIe, Ethernet or USB3. The LiteX host tools go through
-`litex_server`, which opens one of the host bridges: the three of the figure, or the USB bridge
-of a USB3 build ([Host bridges](#build-bridges)).
+through the library, over the host link of the board. The LiteX host tools go through
+`litex_server`, which opens one of the host bridges, such as the ones of the figure or the USB
+bridge of a USB3 build ([Host bridges](#build-bridges)).
 
 ![Debug access: the utilities use the library; the LiteX tools use litex_server over PCIe, Etherbone or JTAGBone.](debug_access.svg)
 
@@ -580,8 +580,8 @@ The other tools of `scripts/` test complete functions on hardware.
 | `m2sdr_sata_transport_check.py` | SATA access over the selected host link | [Workflows](#workflows) |
 | `evaluate_sample_formats.py` | Model of the loss of the transport formats, no board needed | [The RFIC interface](#rfic) |
 
-`loopback_selftest_all_images.sh` runs the same sweep on two images. It exists because one
-bitstream cannot cover every TX mode: the oversampling image transmits only at 122.88 MSPS in
+`loopback_selftest_all_images.sh` runs the same sweep on two images. It exists because no
+single bitstream covers every TX mode yet: the oversampling image transmits only at 122.88 MSPS in
 2T2R ([Oversampling mode](#rfic-oversampling)). The script flashes each of the two images in
 turn, rebuilds the software against its headers and runs the sweep for the configurations the
 image supports. Both images must be built first.
@@ -592,7 +592,7 @@ loopback and RFIC loopback. Each step can be disabled with a `--disable-*` optio
 
 ## Tests {#debug-tests}
 
-The repository has three levels of tests that need no board. Match the test to the layer that
+The repository has several levels of tests that need no board. Match the test to the layer that
 changed.
 
 ```sh
@@ -674,7 +674,7 @@ map, a generated constant or the behaviour of a host command.
 A result is useful to others when it can be reproduced. Record:
 
 - the exact `./litex_m2sdr.py` command and the variant;
-- the access path: PCIe, Etherbone, JTAGBone or crossover UART;
+- the access path, such as PCIe, Etherbone, JTAGBone or crossover UART;
 - the timing summary of the bitstream;
 - the `m2sdr_util` or script commands, with their complete output.
 

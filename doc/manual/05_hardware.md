@@ -40,7 +40,7 @@ RFIC: every sample crosses it, and every host link is built in it from the four 
 of the connector.
 
 ![Block diagram of the board. The cyan path is the M.2 connector and its four transceiver
-lanes, which the gateware turns into PCIe, Ethernet, SATA or USB3.](hw_block.svg)
+lanes, which the gateware turns into host links such as PCIe, Ethernet, SATA or USB3.](hw_block.svg)
 
 The RFIC exchanges samples with the FPGA over an LVDS data port and is configured over SPI.
 [SDR in a nutshell](#sdr-primer) explains its signal chain, and
@@ -56,7 +56,7 @@ The FPGA is an XC7A200T in the SBG484 package. The platform file builds for the 
 
 Its four GTP transceivers are wired to the four lanes of the M.2 connector. They are plain
 serial transceivers: connected to the hardened PCIe block of the FPGA they make a PCIe link, and
-connected to other LiteX cores they make an Ethernet or a SATA link. [Host links](#host-links)
+connected to other LiteX cores they make other links, such as Ethernet, SATA or USB3. [Host links](#host-links)
 describes each use and the shared transceiver PLL.
 
 The base design uses a fraction of the logic of the FPGA and leaves room for user processing.
@@ -89,7 +89,7 @@ same file gives 1.8 V as the supply of their banks, 34 and 35.
 
 ## M.2 connector {#hw-m2}
 
-The board is an M.2 2280 Key M module. It fits M-keyed M.2 sockets that carry PCIe, carrier cards
+The board is an M.2 2280 Key M module. It fits carriers such as M-keyed M.2 sockets that carry PCIe, carrier cards
 for such modules and the baseboard described in [Carriers and hosts](#carriers).
 
 ### Transceiver lanes {#hw-m2-lanes}
@@ -142,8 +142,8 @@ gateware uses `PPS_IN`, `PERST#` and, in a White Rabbit build, the two SMBus pin
 of the SFP module.
 
 `PPS_OUT` and the five `Synchro_GPIO` pins are declared in the connector of the platform file;
-no block of the SoC uses them. The gateware therefore has no PPS output: its internal PPS
-reaches no pin.
+no block of the SoC uses them yet. The gateware therefore has no PPS output yet: its internal
+PPS reaches no pin.
 
 `CLKREQ#` is pulled up with a 4.7 kΩ resistor (R59) and never driven by the FPGA.
 
@@ -158,7 +158,7 @@ The board does not use a single I/O voltage.
 
 These voltages are those of the comment at the top of the platform file. Two more outputs of the
 clock generator, `si5351_clk2` and `si5351_clk3`, are declared on the RFIC banks; the SoC does
-not use them.
+not use them yet.
 
 Every sideband signal of the M.2 connector is therefore a 3.3 V signal on the board side. The lanes
 and the reference clock are transceiver signals, not single-ended I/Os. The JTAG and
@@ -180,7 +180,7 @@ Two test points reach the FPGA, and the annotated view shows a ground test point
 | TP1 | `FPGA_GPIO0` | E22 | 16 |
 | TP2 | `FPGA_GPIO1` | D22 | 16 |
 
-The gateware gives them one of two roles. With `--with-gpio` they are the two pins of the GPIO
+The gateware can give them a role. With `--with-gpio` they are the two pins of the GPIO
 core. With `--pps-input=tp1` or `--pps-input=tp2` one of them is the PPS input. The two options
 exclude each other: the build stops when both are given.
 
@@ -195,7 +195,7 @@ wiring on a bench:
 The selected input is resynchronised to the system clock. Software reads its level, its rising
 edges and an edge counter in the `pps_in` registers.
 
-The gateware only monitors this input: the board time is not aligned on it.
+The gateware monitors this input: the board time is not aligned on it yet.
 [PPS input](#timing-pps-in) gives the registers and what is left to the software.
 
 ## Clocking {#hw-clocking}
@@ -276,7 +276,7 @@ and USB3.
 
 "Not ready" means that the board time is stopped or not set, or that the build has a host link
 and none is up. Only PCIe and Ethernet count as host links here: the state of the USB3 link is
-not part of it. A build without them shows the state of the board time alone.
+not part of it yet. A build without them shows the state of the board time alone.
 
 The software can read the LED state and override it with the `led-status`, `led-control`,
 `led-pulse` and `led-release` commands of `m2sdr_util`. The LED core is `StatusLed` in
@@ -327,7 +327,7 @@ A heatsink on each of them and some air flow are recommended, as on the boards p
 The public issue tracker of the
 repository records that a PCIe Gen2 x1 link runs cooler than a Gen2 x4 link.
 
-Three mechanisms help to watch the temperature:
+Several mechanisms help to watch the temperature:
 
 - The FPGA measures its die temperature and its supply voltages (`S7SystemMonitor`).
 - The RFIC has its own temperature sensor.

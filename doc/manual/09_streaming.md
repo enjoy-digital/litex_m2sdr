@@ -10,11 +10,11 @@ what a buffer of samples contains and when it is transmitted.
 | Item                 | Value                                                                    |
 |-------------------------------|-----------------------------------------------------------------------------------------------------------------------|
 | Stream               | LiteX stream, 64-bit words, `sys` clock domain; 128-bit in the oversampling build |
-| Sources and sinks    | PCIe DMA (port 0), Ethernet UDP (port 1), SATA (port 2)                  |
+| Sources and sinks    | PCIe DMA (port 0), Ethernet UDP (port 1), SATA (port 2), USB3 (port 3)   |
 | Buffer               | 8192 bytes by default                                                    |
 | Header               | Optional, 16 bytes: sync word and 64-bit timestamp in nanoseconds        |
 | Board time           | 64-bit nanosecond counter on a 100 MHz clock, 10 ns step                 |
-| Timed TX             | PCIe only: a buffer with a timestamp is held until the board time reaches it |
+| Timed TX             | On PCIe: a buffer with a timestamp is held until the board time reaches it |
 | Late buffer          | Dropped whole, replaced by zeros, counted                                |
 | User processing      | `BaseSoC.add_rfic_datapath()`, between the loopback and the RFIC core    |
 
@@ -42,7 +42,7 @@ cycles of the RFIC clock. The content of a word is defined in
 
 ## Crossbar {#streaming-crossbar}
 
-One RFIC serves up to three sources and destinations, so two registers select which one is
+One RFIC serves several sources and destinations, so two registers select which one is
 connected. The crossbar is a LiteX stream multiplexer for TX and a demultiplexer for RX.
 
 | Register             | Value | TX source or RX destination |
@@ -50,9 +50,11 @@ connected. The crossbar is a LiteX stream multiplexer for TX and a demultiplexer
 | `crossbar_mux_sel`   | 0     | TX from the PCIe DMA        |
 |                      | 1     | TX from Ethernet UDP        |
 |                      | 2     | TX from SATA                |
+|                      | 3     | TX from USB3                |
 | `crossbar_demux_sel` | 0     | RX to the PCIe DMA          |
 |                      | 1     | RX to Ethernet UDP          |
 |                      | 2     | RX to SATA                  |
+|                      | 3     | RX to USB3                  |
 
 Both registers reset to 0. The port numbers are fixed and match the constants of the software;
 a port whose host link is not in the bitstream is left unconnected. The two directions are
@@ -93,8 +95,8 @@ conditions.
   synchronizer again, since this would cut the running stream.
 - A TX stream started first also needs data in the DMA at the pulse. Without data it waits for
   the next pulse, one second later.
-- The synchronizer has a bypass register that removes the wait. No software of the repository
-  enables it.
+- The synchronizer has a bypass register that removes the wait. The software of the repository
+  does not enable it.
 
 > The synchronizer depends on the board time. When the time generator is disabled, no pulse
 > occurs and the PCIe streams never start.
@@ -170,10 +172,10 @@ On TX the block removes the header of each frame and keeps its two fields
 (`TXHeaderExtractor`). The samples that follow go to the RFIC core, after the timed gate
 described in [Hardware timed TX](#streaming-timed-tx).
 
-> The TX header only works on PCIe. The extractor recognises a header by the first-word marker
-> of the DMA reader, which the Ethernet, SATA and USB3 streamers do not provide. With the TX
-> header enabled on these links, the extractor would consume every word and discard the TX
-> stream. The library therefore refuses it: `m2sdr_set_tx_header()` returns
+> The TX header is not supported yet on host links other than PCIe. The extractor recognises a
+> header by the first-word marker of the DMA reader, which the Ethernet, SATA and USB3
+> streamers do not provide. With the TX header enabled on these links, the extractor would
+> consume every word and discard the TX stream. The library therefore refuses it: `m2sdr_set_tx_header()` returns
 > `M2SDR_ERR_UNSUPPORTED` when it is enabled on another link than PCIe. The gateware has no
 > such check: software that bypasses the library must not set the bit there.
 
@@ -245,7 +247,7 @@ The write and the step can come from the registers or from a discipline block. T
 only comes from a discipline block, the PTP discipline in this SoC; it is described in
 [Timing](#timing).
 
-> The second alignment is not available. Its input of the time generator is not connected in
+> The second alignment is not available yet. Its input of the time generator is not connected in
 > this SoC, so the `sync_enable` bit of the control register has no effect.
 
 ### Registers {#streaming-time-regs}
@@ -350,8 +352,8 @@ This counter is not the underflow of the DMA. The DMA statistics count the buffe
 did not provide in time; the gate counts the timed frames that were provided, but too late.
 
 The gate is built in every bitstream and the `timed_tx` capability bit is always set, but timed
-TX only works on PCIe. It needs the TX header, which the Ethernet, SATA and USB3 streamers
-cannot carry: see [TX: extracting the header](#streaming-header-tx).
+TX is not supported yet outside PCIe. It needs the TX header, which the Ethernet, SATA and USB3
+streamers do not carry yet: see [TX: extracting the header](#streaming-header-tx).
 
 The software follows the same limit. The offset and underflow functions of the library return an
 unsupported error on another host link, and the SoapySDR driver selects the hardware gate on
@@ -393,7 +395,7 @@ SoapySDR arguments are in [Workflows](#workflows) and [SDR frameworks](#framewor
 
 The default settings favour throughput: large buffers, many of them, few interrupts. A
 real-time loop, which answers to what it receives within a few hundred microseconds, wants the
-opposite. Three settings of the software trade throughput for latency. None changes the
+opposite. Settings of the software trade throughput for latency. None of them changes the
 gateware, and the defaults are unchanged for those who do not use them.
 
 ### Where the latency comes from {#streaming-latency-source}
@@ -413,7 +415,7 @@ At 30.72 MSPS in 2T2R and SC16, a sample of both channels takes 8 bytes. The def
 256 buffers of 8192 bytes then holds about 8.5 ms of signal, and a ring of 8 buffers about
 0.27 ms. In 1T1R, with 4 bytes per sample, these times double.
 
-### The three settings {#streaming-latency-settings}
+### The settings {#streaming-latency-settings}
 
 | Setting           | Where                                  | Effect                                           |
 |----------------------|---------------------------------------------------------------------------------|-----------------------------------------------|
@@ -421,8 +423,8 @@ At 30.72 MSPS in 2T2R and SC16, a sample of both channels takes 8 bytes. The def
 | RX wake           | `M2SDR_RX_WAIT=mwaitx`                 | The application wakes when a buffer is written   |
 | TX fill lead      | `m2sdr_set_tx_lead_buffers()`          | The application stays a few buffers ahead of the reader |
 
-**Short ring.** The kernel module has three parameters. `dma_buffer_count` is the depth of the
-ring, a power of two from 2 to 256. `dma_buffer_size` is the size of a buffer and
+**Short ring.** Three parameters of the kernel module set the ring. `dma_buffer_count` is the
+depth of the ring, a power of two from 2 to 256. `dma_buffer_size` is the size of a buffer and
 `dma_buffer_per_irq` the number of buffers per interrupt; both are given per DMA channel.
 
 The number of buffers per interrupt must divide the depth of the ring and be smaller than it. A
@@ -489,7 +491,7 @@ All these pairs of clocks are declared asynchronous in the timing constraints, s
 
 A loopback returns the TX samples to the RX path at a chosen point. Looping at successive
 points, from the host towards the antenna, shows which part of the chain fails. The board
-has four loopbacks.
+has loopbacks at several points.
 
 ![Loopback points, in cyan, from the host to the AD9361. Each one tests everything on its
 left.](stream_loopbacks.svg)
@@ -501,7 +503,7 @@ left.](stream_loopbacks.svg)
 | PHY        | Pin side of the RFIC core         | `ad9361_phy_control`, bit `loopback`            | The above, formats and clock crossings   |
 | RFIC       | Inside the AD9361                 | Register of the AD9361, written over SPI        | The above and the LVDS interface         |
 
-A cable from a TX connector to an RX connector, with an attenuator, is the fifth loopback and
+A cable from a TX connector to an RX connector, with an attenuator, is one more loopback and
 the only one that includes the RF path.
 
 When the stream loopback is enabled (`TXRXLoopback`), the TX stream
@@ -511,7 +513,7 @@ and the RX samples of the RFIC are discarded so that the RFIC core is not blocke
 Since it sits on the host side of the user hook, it tests the path without the user processing. It
 works with every host link, including Ethernet, where the DMA loopback does not exist.
 
-The [PHY loopback](#rfic-loopback) does not exist in the oversampling build. The library has
+The [PHY loopback](#rfic-loopback) is not available yet in the oversampling build. The library has
 one function per loopback, and `m2sdr_reset_datapath()`
 disables them all together with the headers and the PRBS, and returns to SC16. The test procedures are in
 [Debugging](#debugging).
@@ -602,7 +604,7 @@ has nothing to connect.
 The RX side of the RFIC core cannot be paused, so a block that stops accepting samples loses
 them.
 
-The generic processing blocks, oscillators, mixers and filters, are gathered in LiteDSP
+Generic processing blocks, such as oscillators, mixers and filters, are gathered in LiteDSP
 (<https://github.com/enjoy-digital/litedsp>), which this hook is meant to host.
 [Building the gateware](#building-gateware) shows how to build a subclass.
 

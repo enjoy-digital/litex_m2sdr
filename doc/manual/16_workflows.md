@@ -183,7 +183,7 @@ the limits they set are described in [Host links](#host-links).
 ### Build and reach the board {#flow-eth-build}
 
 Build and load a bitstream for the baseboard. The PHY is 1000BASE-X by default; `--eth-phy`
-selects 2500BASE-X or the experimental 5GBASE-R.
+selects another PHY, such as 2500BASE-X or the experimental 5GBASE-R.
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-eth --eth-sfp=0 --build --load
@@ -213,7 +213,7 @@ Notes on the SFP modules:
 - 5GBASE-R needs a module whose host side runs 5GBASE-R at 5.15625 Gbaud. Many multi-rate
   copper modules default to a fixed 10 Gbps host side. Such a module must be switched to the
   5GBASE-R host mode through its management interface before use; it keeps the setting while
-  powered. The module tested on the baseboard is the H!Fiber ASF-10G-T80; see
+  powered. A module tested on the baseboard is the H!Fiber ASF-10G-T80; see
   [Host links](#host-links).
 
 ### Check the stream path {#flow-eth-check}
@@ -271,11 +271,11 @@ to the address and port set by `--vrt-dst-ip` and `--vrt-dst-port`. The default 
 the multicast group `239.168.1.100`, port 4991. The mechanism is in
 [VRT streamer](#links-eth-vrt).
 
-> After load the bitstream sends raw UDP, not VRT, and the shipped software cannot select the VRT
-> route: the library has no definition of the register that selects it. The SoapySDR argument
-> `eth_mode=vrt` is refused as unsupported for the same reason.
+> After load the bitstream sends raw UDP, not VRT. The library and the SoapySDR argument
+> `eth_mode=vrt` select the VRT route only when the software is built against the `csr.h` of
+> the VRT build; built against the committed `csr.h`, they refuse it as unsupported.
 
-Until the software selects it, write the route by hand: the value 2 in the register
+Without such a build of the software, write the route by hand: the value 2 in the register
 `main_eth_rx_mode`, through the Etherbone bridge and with the register file of the build.
 
 ```sh
@@ -388,7 +388,7 @@ litex_server --usb --usb-vid 0x1d50 --usb-pid 0x605a
 litex_cli --regs
 ```
 
-Timed TX is not available on this link; see [Limits](#links-usb3-limits).
+Timed TX is not available on this link yet; see [Limits](#links-usb3-limits).
 
 ## SATA recording {#flow-sata}
 
@@ -686,8 +686,8 @@ With timed TX, a buffer is transmitted when the board time reaches its timestamp
 holds the buffer in a gate until then, so the timestamp is the time on air, on a 10 ns step.
 The gate is described in [Streaming](#streaming).
 
-The gate is part of every bitstream, but timed TX and the TX header work over PCIe only: on
-another host link the library refuses to enable the TX header. A
+The gate is part of every bitstream, but timed TX and the TX header are not available yet on
+the other host links: there the library refuses to enable the TX header. A
 program checks the presence of the gate with the feature bit `M2SDR_FEATURE_TIMED_TX` of
 `m2sdr_get_capabilities()`; `m2sdr_util info` does not print it.
 
@@ -772,7 +772,7 @@ The driver uses the gate when the bitstream has it and its software timeline oth
 
 The defaults favour throughput: large DMA rings that absorb the pauses of the host. A real-time
 loop that transmits in answer to what it receives wants the opposite: a short path, even if the
-host must then never stall. Three settings shorten the path. All are optional and leave the
+host must then never stall. These settings shorten the path. All are optional and leave the
 defaults unchanged for other uses.
 
 ### Shallow DMA ring {#flow-ll-ring}
@@ -897,7 +897,7 @@ timestamps.
 - Common time over Ethernet: every board follows the same PTP master.
 
 The reference inputs of the board are described in [Time synchronisation](#timing). The PPS
-input is only monitored: it does not set the board time, and the board has no PPS output.
+input is only monitored: it does not set the board time yet, and the board has no PPS output.
 
 ## Time synchronisation {#flow-time-sync}
 
@@ -1081,7 +1081,7 @@ field `invert` of `ptp-clock10-config`. The fields of the loop are described in
 ### White Rabbit {#flow-sync-wr}
 
 > Experimental ([Status](#intro-status)). The lock, the jitter and the PPS accuracy of the
-> White Rabbit build are not measured.
+> White Rabbit build are not measured yet.
 
 White Rabbit needs the baseboard, an SFP port and the LiteX-WR-NIC repository next to this one.
 The build, the console of the White Rabbit core and its limits are described in

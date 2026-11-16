@@ -63,8 +63,8 @@ The handshake gives back-pressure for free: a slow sink holds the source without
 Every LiteX core speaks this convention, so the output of one core connects to the input of
 another with one statement.
 
-LiteX provides the usual stream tools: FIFOs, clock domain crossings, width converters,
-multiplexers. The board uses a stream crossbar to connect its SDR datapath to the host link
+LiteX provides the usual stream tools, such as FIFOs, clock domain crossings, width converters
+and multiplexers. The board uses a stream crossbar to connect its SDR datapath to the host link
 selected by the software (see [Streaming](#streaming)).
 
 ## Host bridges {#litex-bridges}
@@ -167,11 +167,11 @@ resource. The PLLs are therefore created once, by the SoC, and each core receive
 channel it needs (`SharedQPLL`).
 
 Two PLLs mean two protocols at once. A bitstream can hold PCIe and Ethernet, PCIe and SATA, or
-Ethernet and SATA, but not the three of them. USB3 shares a bitstream with PCIe only.
+Ethernet and SATA, but not the three of them. USB3 is combined with PCIe so far; its other combinations are not supported yet.
 [Host links](#host-links) gives the valid combinations.
 
 LiteICLink is the LiteX core for the transceivers themselves and for raw links between FPGAs.
-The design of the repository does not instantiate it; it is the natural tool for a derived
+The design of the repository does not instantiate it yet; it is the natural tool for a derived
 design that links several boards through their spare lanes.
 
 ## USB3-PIPE {#litex-usb3}

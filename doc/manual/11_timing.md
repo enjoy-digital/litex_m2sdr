@@ -1,7 +1,7 @@
 # Time synchronisation {#timing}
 
 This chapter describes the gateware that keeps the board in step with the outside: the reference
-clock of the RFIC, the PPS, and the three ways to synchronise the board over a link, PCIe PTM,
+clock of the RFIC, the PPS, and the ways to synchronise the board over a link, such as PCIe PTM,
 Ethernet PTP and White Rabbit.
 
 The concepts are explained in [Timing primer](#timing-primer);
@@ -32,7 +32,8 @@ each cycle. The increment is a fixed-point value with 24 fractional bits, 10 ns 
 ![The board time. Look at the left: three sources can set or steer the same counter, and the
 fourth input is its clock; on the right, the three users of the time.](timing_overview.svg)
 
-Three sources act on this counter, and all pass through the same update logic (`TimeGenerator`).
+The sources of the table act on this counter, and all pass through the same update logic
+(`TimeGenerator`).
 
 | Source | Action | Path |
 |--------------------|------------------------------------------|--------------------------------------|
@@ -80,8 +81,8 @@ selected 10 MHz clock.
 
 ### Reference selection {#timing-si5351-reference}
 
-The software selects the reference with one of three clock sources. It writes `si5351_control`
-and then loads the matching configuration of the clock generator.
+The software selects the reference with one of the clock sources of the table. It writes
+`si5351_control` and then loads the matching configuration of the clock generator.
 
 | Clock source | `version` | `clkin_src` | Reference of the SI5351 |
 |-------------------|-----------------|--------------------|----------------------------------------------|
@@ -133,10 +134,10 @@ LiteScope probe uses this level.
 | Pulse counter | 32 bits, cleared when the time is written |
 | Start | When the board time is not zero |
 
-The internal PPS has four users: the DMA synchronizer of PCIe, the seconds field of the VRT
+The internal PPS is used by the DMA synchronizer of PCIe, the seconds field of the VRT
 timestamps, the reference of the PTP RFIC clock loop, and the status LED.
 
-> The gateware has no PPS output: the internal PPS is not connected to a pin of the board.
+> The gateware has no PPS output yet: the internal PPS is not connected to a pin of the board.
 
 The generator restarts when the board time is written or offset. The marks are counted from
 zero: after a write of a large time, the generator produces one pulse per system clock cycle
@@ -175,8 +176,8 @@ The time generator has a sync input that loads the next second on a pulse, enabl
 `sync_enable`. The SoC connects neither the pulse nor the second number: the field has no
 effect.
 
-No software of the repository reads the two registers. Aligning the board time on an external
-PPS needs a derived design.
+No software of the repository reads the two registers yet. Aligning the board time on an
+external PPS is not supported yet and needs a derived design.
 
 In a White Rabbit build the two registers of the PPS input are not present. In the other builds
 their bank has no fixed location: it is at `0x15000` in a PCIe build and at `0x15800` in a
@@ -452,7 +453,7 @@ many consecutive large errors: use it only when the board must follow a master t
 steps its time.
 
 The status registers of `ptp_discipline` report the state, the last error, the last pair of
-sampled times, the increment in use and seven counters.
+sampled times, the increment in use and the counters of the table.
 
 | Counter | Counts |
 |------------------------------------------|----------------------------------------------------------|
@@ -485,7 +486,7 @@ while no master is selected.
 ### Host side {#timing-ptp-host}
 
 The host, or another device of the network, is the PTP master. With linuxptp, `ptp4l` is started
-on the interface that reaches the board. Two configuration files are provided, for a direct
+on the interface that reaches the board. Configuration files are provided for a direct
 cable between the host and the board.
 
 | File in `doc/ptp/` | Timestamps of the host | Equivalent options |
@@ -493,8 +494,8 @@ cable between the host and the board.
 | `ptp4l-m2sdr-software.cfg` | Software | `-4 -E -S` |
 | `ptp4l-m2sdr-hardware.cfg` | Hardware | `-4 -E -H` |
 
-Both select UDP over IPv4 and the end to end delay mechanism, with one Sync and one delay
-request per second, and an Announce and a summary every two seconds.
+The provided files select UDP over IPv4 and the end to end delay mechanism, with one Sync and
+one delay request per second, and an Announce and a summary every two seconds.
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
@@ -545,7 +546,7 @@ described in [States](#timing-ptp-states): compare the counter `time_lock_misses
 
 Without an external reference, the board can only report the residual error of its servo
 against the master. `calibrate` collects it. For an absolute offset an external reference is
-needed, and the gateware has no PPS output: a derived design must first bring the internal PPS
+needed, and the gateware has no PPS output yet: a derived design must first bring the internal PPS
 to a pin. The measured offset is then given with `--reference-offset-ns`.
 
 ```sh
@@ -697,7 +698,7 @@ follows White Rabbit.
 
 ### Processor and firmware {#timing-wr-cpu}
 
-The White Rabbit core runs its protocol in firmware on a small processor inside the FPGA. Four
+The White Rabbit core runs its protocol in firmware on a small processor inside the FPGA. Build
 options select the processor, its memory and the way the firmware is loaded.
 
 | Option | Values | Default |
@@ -712,7 +713,7 @@ bitstream. The private memory requires uRV and embedded boot.
 
 With the integrated memory, a RAM of 128 KiB is on the SoC bus, and with host boot the
 processor is held until the host has loaded the firmware. uRV can also use the integrated
-memory, with either boot. There is no external RAM and no boot from flash.
+memory, with either boot. External RAM and boot from flash are not supported yet.
 
 The build helper selects the firmware of the processor and builds it with the `acorn` firmware
 target when it is missing. `--wr-firmware` gives another image; for an embedded boot in
@@ -784,7 +785,7 @@ python3 -m litex_wr_nic.wr --csr-csv scripts/csr.csv load-firmware \
 ### Limits {#timing-wr-limits}
 
 - `read-time` returns the White Rabbit time. The board time is a separate counter: the gateware
-  does not connect the White Rabbit time to the timestamps of the samples.
+  does not connect the White Rabbit time to the timestamps of the samples yet.
 - A working processor, console and time snapshot do not prove that the servo is locked. The lock,
   the jitter and the accuracy of the PPS on this board have not been measured.
 - White Rabbit and Ethernet PTP cannot be in the same bitstream.

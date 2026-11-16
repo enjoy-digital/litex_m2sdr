@@ -232,7 +232,8 @@ Since the blocks have their own alignment, BFP8 is not combined with the 16-byte
 [streaming](#streaming-header) path, and the host handles a block as one unit: the library exposes
 BFP8 as encoded blocks and leaves the decoding to the application.
 
-BFP8 exists on the 64-bit datapath only. The oversampling build accepts SC16 and SC8.
+BFP8 exists on the 64-bit datapath. The oversampling build does not support it yet and accepts
+SC16 and SC8.
 
 The library refuses BFP8 on an oversampling bitstream, with an unsupported error. The gateware
 handles every mode other than SC8 as SC16 on the 128-bit datapath, so a `mode` of 2 written
@@ -240,7 +241,7 @@ directly gives SC16 words and never stops the streams (`test/test_ad9361.py`).
 
 ### Comparison {#rfic-format-loss}
 
-The script `scripts/evaluate_sample_formats.py` models the three formats on a sine wave and
+The script `scripts/evaluate_sample_formats.py` models the transport formats on a sine wave and
 reports the signal to noise ratio of the quantised signal at several amplitudes. Its output is
 reproduced below with the header abridged: the four last columns are the loss against SC16 at 0,
 -6, -20 and -40 dBFS, and the separator row is removed.
@@ -413,12 +414,12 @@ The build command is in [Building the gateware](#building-gateware).
 
 ### Limits of the build {#rfic-oversampling-limits}
 
-The oversampling build supports PCIe only. The script refuses `--with-rfic-oversampling` with
+The oversampling build is supported over PCIe. The script refuses `--with-rfic-oversampling` with
 `--with-eth` or `--with-sata`: the Ethernet and SATA streamers and the SATA RX tap are 64 bits
-wide and cannot carry the 128-bit words. It refuses it with `--with-usb3` too, whose rate is
+wide and do not carry the 128-bit words yet. It refuses it with `--with-usb3` too, whose rate is
 too low.
 
-Two more limits apply on a PCIe oversampling build.
+More limits apply on a PCIe oversampling build.
 
 | Limit                        | Effect                                                            |
 |-----------------------------------------------|----------------------------------------------------------------------------|

@@ -139,7 +139,7 @@ The data pairs of a cage go straight to one transceiver lane. The gateware selec
 White Rabbit cannot be enabled together, even on two different cages: the two cores would share
 one PLL channel, and the build refuses the pair.
 
-Two SFP modules were used for the validation. [Host links](#host-links) gives the Ethernet PHYs
+The validation used the SFP modules of this table. [Host links](#host-links) gives the Ethernet PHYs
 and their rates, and [Workflows](#workflows) the setup of each module.
 
 | Ethernet PHY | SFP module | Setup |
@@ -157,7 +157,8 @@ a level shifter, behind four jumpers.
 
 Every SFP module answers at the same I2C addresses: close the jumpers of one cage at a time. On
 the board side, the SMBus pins reach the FPGA through two resistors that are not mounted by
-default, as [Sideband signals](#hw-m2-sideband) shows. Only the White Rabbit build uses this bus.
+default, as [Sideband signals](#hw-m2-sideband) shows. The White Rabbit build uses this bus; the
+Ethernet and USB3 builds leave it unused.
 
 The public documentation of the baseboard reports one known issue. The pull-down resistors on the
 transmit disable pin of the cages are 4.7 kΩ, which is too weak for some modules, mostly copper
@@ -168,8 +169,8 @@ R75 for SFP0 and R7 for SFP1.
 
 On the baseboard, PCIe is limited to one lane, the lane of the card edge. The other lanes are free
 for Ethernet and SATA. The transceivers share the two PLLs of the quad, so the build refuses
-PCIe, Ethernet or White Rabbit, and SATA all at once. USB3 is the most restricted: it shares a
-bitstream with PCIe only. [Host links](#host-links) explains the combinations that work.
+PCIe, Ethernet or White Rabbit, and SATA all at once. USB3 is combined with PCIe so far; its
+other combinations are not supported yet. [Host links](#host-links) explains the combinations that work.
 
 ## SFP to USB3 adapter {#carriers-usb3}
 
@@ -196,9 +197,9 @@ USB3-PIPE is also used with this adapter on the Acorn CLE-215+, an Artix-7 modul
 GTP transceivers, as its manual records. [USB3 host link](#links-usb3) describes the gateware,
 and [USB3 streaming](#flow-usb3) gives the commands.
 
-## Upcoming carrier {#carriers-upcoming}
+## Upcoming carriers {#carriers-upcoming}
 
-A baseboard with integrated Power over Ethernet is an upcoming carrier.
+More carriers are planned, such as a baseboard with integrated Power over Ethernet.
 
 ## Which feature needs which carrier {#carriers-features}
 
@@ -209,14 +210,14 @@ feature.
 |-----------------------------|-----------------------------------------------------------------|
 | The baseboard | Ethernet host link, Ethernet PTP, PTP-disciplined RFIC reference, White Rabbit, SATA storage, USB3 host link |
 | An M.2 slot | PCIe over two or four lanes, oversampling mode |
-| Either carrier | PCIe over one lane, PCIe PTM, hardware timed TX, 10 MHz reference, multiboot, GPIO |
+| Any carrier | PCIe over one lane, PCIe PTM, hardware timed TX, 10 MHz reference, multiboot, GPIO |
 
 [Build options](#build-options) lists every option.
 
 ## Hosts {#carriers-hosts}
 
-The reference host is a PC with Linux. The project is also used on three single-board computers;
-the software steps of each one are in [Platform guides](#gs-platforms).
+The reference host is a PC with Linux. The project is also used on single-board computers such as
+the Raspberry Pi 5; the software steps of the tested ones are in [Platform guides](#gs-platforms).
 
 | Host | M.2 connection | Notes |
 |------------------------|-------------------------------------|---------------------------------------|

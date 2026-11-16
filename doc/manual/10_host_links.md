@@ -32,7 +32,7 @@ Each link core ends on one port of the
 stream crossbar, which selects where the TX stream comes from and where the RX stream goes. The
 crossbar and the streams behind it are described in [Streaming](#streaming).
 
-The figure has three of the four links. The USB3 host link takes an SFP cage in place of
+The figure shows PCIe, Ethernet and SATA. The USB3 host link takes an SFP cage in place of
 Ethernet and ends on
 port 3 of the crossbar; [USB3 host link](#links-usb3) has its own figure.
 
@@ -195,7 +195,7 @@ in [PCIe PTM](#timing-ptm).
 
 ## Ethernet {#links-ethernet}
 
-Ethernet is the host link of the baseboard. One SFP cage carries the registers, the sample
+Ethernet is a host link of the baseboard. One SFP cage carries the registers, the sample
 streams and, as an option, PTP and VRT packets. The core is LiteEth, described in the
 [LiteEth manual](https://github.com/enjoy-digital/liteeth/releases/tag/manual-nightly).
 
@@ -235,9 +235,10 @@ lock, high bit error rate, link state and PRBS error count. They are used in
 > keep a fixed 10.3125 Gbps host side with rate adaptation.
 
 Modules built on a manageable multi-gigabit PHY can be switched to the 5GBASE-R host mode
-through their I2C management path (RollBall). The PHY families are the Broadcom BCM84891L, the
-Marvell Alaska 88X3310 and 88E2110, and the Marvell AQR113C, formerly Aquantia. The H!Fiber
-ASF-10G-T80, built on the BCM84891L, was validated with this LiteEth stack on the baseboard.
+through their I2C management path (RollBall). Examples of such PHY families are the Broadcom
+BCM84891L, the Marvell Alaska 88X3310 and 88E2110, and the Marvell AQR113C, formerly Aquantia.
+The H!Fiber ASF-10G-T80, built on the BCM84891L, was validated with this LiteEth stack on the
+baseboard.
 
 A LiteX SoC with a BIOS switches the module with the command `sfp 0 5GBASER`, but the SoC of
 LiteX-M2SDR has no CPU. Configure the module beforehand, since it keeps the setting while
@@ -265,7 +266,7 @@ are handled in logic.
 
 The MAC address is a constant of the gateware and the IP address is set at build time. Two
 boards therefore need bitstreams built with different IP addresses, and separate network
-segments, since no option changes the MAC address.
+segments, since no option changes the MAC address yet.
 
 Etherbone is the host bridge of the Ethernet link: it turns UDP packets into reads and writes
 on the bus of the SoC. The utilities use it with a `<device>` of the form
@@ -338,9 +339,9 @@ The reset value is the raw UDP route: a `--with-eth-vrt` bitstream does not send
 after load. To send them the host writes 2 to this register through a host bridge, with the
 register file of the build.
 
-> The shipped software cannot select the VRT route. The library has no definition of this
-> register, so its VRT mode and the `eth_mode=vrt` argument of the SoapySDR driver return an
-> unsupported error.
+> The library selects this route for its VRT mode and for the `eth_mode=vrt` argument of the
+> SoapySDR driver when it is built against the `csr.h` of the VRT build. The committed `csr.h`
+> has no definition of this register: built against it, both return an unsupported error.
 
 On the VRT path the 64-bit words are converted to 32 bits and cut into packets of 256 words
 (`RFICDataPacketizer`). A header of five words is inserted in front of each packet and the
@@ -530,9 +531,9 @@ with `m2sdr_sata` and its catalog are in [Workflows](#workflows); the measured r
 
 ## Stream crossbar ports {#links-crossbar}
 
-The crossbar has four ports and two selection registers, `crossbar_mux_sel` for the source of
-the TX stream and `crossbar_demux_sel` for the destination of the RX stream. The port numbers
-are the same as the constants of the software.
+The crossbar has one port per streaming link and two selection registers,
+`crossbar_mux_sel` for the source of the TX stream and `crossbar_demux_sel` for the destination
+of the RX stream. The port numbers are the same as the constants of the software.
 
 | Port | Link | TX stream source | RX stream destination |
 |----------------|---------------------|----------------------------|----------------------------------|
@@ -547,7 +548,7 @@ enables the loopback described in [Streaming](#streaming).
 
 ## USB3 host link {#links-usb3}
 
-USB3 is the third host link, for the `baseboard` variant, enabled with `--with-usb3`. One SFP
+USB3 is a host link for the `baseboard` variant, enabled with `--with-usb3`. One SFP
 cage becomes a USB 3.2 Gen 1 port (5 Gbps) through an SFP to USB3 adapter such as the Xillybus
 SFP2USB. The USB device is implemented in the FPGA with USB3-PIPE, with no USB chip. The core is
 described in the
@@ -642,7 +643,7 @@ the streams of this link. With port 3 selected on the RX side, the header insert
 reset until `rx_enable` is set, so the first buffer sent to the host starts a frame.
 
 The TX side works the same way with `tx_enable`, but the TX header itself is not usable on this
-link: see [Limits](#links-usb3-limits).
+link yet: see [Limits](#links-usb3-limits).
 
 Two interfaces separate the two directions. A host program claims interface 0 to receive and
 interface 1 to transmit, so one program can record while another one plays.
@@ -693,12 +694,14 @@ in [The RFIC interface](#rfic).
 
 ### Limits {#links-usb3-limits}
 
-- **Combinations.** USB3 shares a bitstream with PCIe x1 only. The script refuses it with
+- **Combinations.** USB3 is combined with PCIe x1 so far. The script refuses it with
   Ethernet, SATA or White Rabbit, on the `m2` variant and with the oversampling mode.
-- **Timed TX.** The TX header and hardware timed TX work over PCIe only. The library refuses
-  the TX header on this link, and the SoapySDR driver uses its software timeline.
-- **Overflow and underflow.** The link reports no RX overflow and no TX underflow. The FIFOs
-  absorb the jitter of the host; a host that stalls for longer loses samples without a count.
+- **Timed TX.** The TX header and hardware timed TX are not available on this link yet; they
+  work over PCIe. The library refuses the TX header on this link, and the SoapySDR driver uses
+  its software timeline.
+- **Overflow and underflow.** The link does not report RX overflows or TX underflows yet. The
+  FIFOs absorb the jitter of the host; a host that stalls for longer loses samples without a
+  count.
 - **LED.** The state of the USB3 link is not part of the "ready" condition of the status LED
   ([Status LED](#soc-led)).
 

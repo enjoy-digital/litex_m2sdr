@@ -1,8 +1,8 @@
 # Host software {#software}
 
-The host software is the kernel driver, the library, the utilities and the helper scripts. This
-chapter says which layer does what and which utility to use for which task, with the main
-options. The SoapySDR driver has its own chapter, [SDR frameworks](#frameworks).
+The host software includes the kernel driver, the library, the utilities and the helper
+scripts. This chapter says which layer does what and which utility to use for which task, with
+the main options. The SoapySDR driver has its own chapter, [SDR frameworks](#frameworks).
 
 Each part keeps a reference page in the repository, with every option and more examples. The
 sections name these files; open them when an option is not described here.
@@ -43,9 +43,9 @@ Over PCIe, the library reaches the board through the kernel driver: registers by
 by DMA. Over Ethernet, no kernel driver is involved. Registers are read and written with
 Etherbone and samples travel in UDP datagrams, both on ordinary sockets.
 
-Over USB3, no kernel driver is involved either. A third helper sits next to the two of the
+Over USB3, no kernel driver is involved either. Another helper sits next to the two of the
 figure (`libliteusb`): it uses libusb, with control transfers for the registers and Bulk
-transfers for the samples. The gateware side of the three paths is described in
+transfers for the samples. The gateware side of these paths is described in
 [Host links](#host-links).
 
 ## Device identifiers {#sw-device}
@@ -142,7 +142,8 @@ module parameters needs no rebuild. The low latency recipe of
 
 ## Host link helpers {#sw-transports}
 
-Three small libraries sit under the main library. Applications do not call them directly.
+Small libraries, one per host link, sit under the main library. Applications do not call them
+directly.
 
 - `liblitepcie` comes from LitePCIe. It opens the DMA rings of the kernel driver and provides
   the read, write and zero-copy buffer functions (`litepcie_dma.c`, `litepcie_helpers.c`).
@@ -208,7 +209,7 @@ the AD9361 code of another SDR driver loaded in the same process.
 
 ## The libm2sdr library {#sw-libm2sdr}
 
-The library is the public C API of the board. It covers four things: opening a device,
+The library is the public C API of the board. It covers opening a device,
 configuring the RFIC, streaming samples, and reading or setting the board time. The header to
 read is `libm2sdr/m2sdr.h`; every function is documented there.
 
@@ -224,7 +225,7 @@ sudo ldconfig
 The install target copies the headers, the static and the shared library, and the metadata for
 pkg-config and CMake.
 
-The target also installs the sources of the four example programs, in
+The target also installs the sources of the example programs, in
 `share/litex_m2sdr/examples` under the prefix ([Examples](#sw-lib-examples)).
 
 ```sh
@@ -302,7 +303,7 @@ gateware, described in [The RFIC interface](#rfic).
 
 BFP8 is an encoded block format, not a sample format. In the library one BFP8 "sample" is one
 block of 1024 bytes (`M2SDR_BFP8_BLOCK_BYTES`), which holds 254 samples per channel. The library
-has no decoder: a program that wants plain samples decodes the blocks itself.
+has no decoder yet: a program that wants plain samples decodes the blocks itself.
 
 > BFP8 is Experimental ([Status](#intro-status)). It does not exist on an oversampling build:
 > the library refuses it there with `M2SDR_ERR_UNSUPPORTED`. Raw BFP8 blocks do not combine with
@@ -324,8 +325,8 @@ On TX, a timestamp in the metadata asks the gateware to hold the buffer until th
 reaches it. The mechanism is described in [Streaming](#streaming) and used in
 [Timed TX](#flow-timed-tx).
 
-The TX header exists on PCIe only: on another host link `m2sdr_set_tx_header()` returns
-`M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission.
+The TX header is not available on the other host links yet: there `m2sdr_set_tx_header()`
+returns `M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission. It works on PCIe.
 
 TX timestamps are rounded to the 10 ns step of the board time (`M2SDR_TX_TIME_GRID_NS`).
 Setting the board time from the host is refused, with `M2SDR_ERR_STATE`, when Ethernet PTP
@@ -349,7 +350,7 @@ disciplines it.
 
 ### Examples {#sw-lib-examples}
 
-Four short programs in `litex_m2sdr/doc/libm2sdr/` show the API. They are built with
+Short programs in `litex_m2sdr/doc/libm2sdr/` show the API. They are built with
 `make examples` in `litex_m2sdr/software/user`. The reference page of the API is
 `litex_m2sdr/doc/libm2sdr/README.md`.
 
@@ -360,7 +361,7 @@ Four short programs in `litex_m2sdr/doc/libm2sdr/` show the API. They are built 
 | `example_tone_tx.c` | Tone transmission in SC16 or SC8 |
 | `example_rx_n.c` | Reception of N buffers with their timestamps |
 
-The utilities `m2sdr_record` and `m2sdr_play` are the complete examples of file-based reception
+The utilities `m2sdr_record` and `m2sdr_play` are complete examples of file-based reception
 and transmission.
 
 ## Utilities {#sw-utilities}
@@ -436,12 +437,12 @@ the bitstream, the FPGA sensors and the state of the chips. Check the feature li
 command reports that a function is missing: the features depend on the build options of the
 bitstream.
 
-The three loopback tests send a known pattern and check what comes back, each one closer to
+The loopback tests send a known pattern and check what comes back, each one closer to
 the antenna: inside the FPGA, through the data port logic of the FPGA, and through the digital
 loopback of the AD9361. They are used in [Ethernet streaming](#flow-ethernet) and explained in
 [Debugging](#debugging).
 
-Two options change the output of the status commands: `--watch` refreshes the command until
+Options change the output of the status commands: `--watch` refreshes the command until
 Ctrl-C, and `--json`, on the PTP status commands, prints one JSON object for scripts.
 
 ### m2sdr_rf: RFIC configuration {#sw-rf}
@@ -575,14 +576,14 @@ m2sdr_gpio --device-num 0 --enable --source csr --output-data 0x2 --output-enabl
 
 ### Python helpers {#sw-python}
 
-Two Python programs complete the utilities in `litex_m2sdr/software/user/`.
+Python programs complete the utilities in `litex_m2sdr/software/user/`.
 
 - `m2sdr_fm_radio.py` is a small FM broadcast receiver with a graphical interface.
 - `m2sdr_vrt_rx.py` receives and decodes the VRT packets of a bitstream built with the VRT
   streamer, without any other software of the project. The bitstream sends VRT packets only once
   its route is selected by hand; see [VRT streaming](#flow-eth-vrt).
 
-Three scripts in `litex_m2sdr/software/` help with a PCIe board: `rescan.py` rescans the PCIe
+Scripts in `litex_m2sdr/software/` help with a PCIe board: `rescan.py` rescans the PCIe
 bus after a bitstream is loaded, `flash.py` writes a bitstream to the flash over PCIe, and
 `autotest.py` runs the main checks of `m2sdr_util` and `m2sdr_rf` in sequence.
 
@@ -632,7 +633,7 @@ configuration, which is Experimental; see [Wide bandwidth](#flow-wide-bandwidth)
 
 ## Versions and compatibility {#sw-versioning}
 
-Three things carry a version, and they must agree for a setup to work.
+Several things carry a version, and they must agree for a setup to work.
 
 | Item | Version | Where to read it |
 |--------------|----------------|-----------------------------------------------------------------|

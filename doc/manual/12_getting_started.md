@@ -16,7 +16,7 @@ project.](start_path.svg)
 
 The steps assume the default setup: a board in the M.2 slot of the host, with a PCIe image in its
 flash. [Carriers and hosts](#carriers) describes the
-other setups, and two sections below give the differences for a board on the baseboard, over
+other setups, and sections below give the differences for a board on the baseboard, over
 [Ethernet](#gs-ethernet) and over [USB3](#gs-usb3).
 
 ## Prerequisites {#gs-prerequisites}
@@ -54,8 +54,8 @@ The kernel driver builds against the headers of the running kernel, which it exp
 
 ## Step 1: build and install the software {#gs-software}
 
-The software has four parts: the kernel driver, the utilities, the library `libm2sdr` and the
-SoapySDR driver. One script builds them all with `make` and CMake.
+The main parts of the software are the kernel driver, the utilities, the library `libm2sdr`
+and the SoapySDR driver. One script builds them all with `make` and CMake.
 
 ```sh
 git clone https://github.com/enjoy-digital/litex_m2sdr
@@ -64,7 +64,7 @@ sudo ./build.py
 ```
 
 Run as root, the script builds and installs. Run as a normal user, it only builds and says that
-the install steps are skipped. The installation does four things:
+the install steps are skipped. The installation does the following:
 
 - It installs the kernel module `m2sdr` and makes it load at boot.
 - It adds a udev rule that gives every user access to the device nodes.
@@ -102,7 +102,7 @@ is given; keep `runtime` unless you test that behaviour. Builds are incremental.
 
 ### Optional GUI tools {#gs-gui-tools}
 
-`m2sdr_check` and `m2sdr_scan` are two optional tools with a graphical interface. They are built
+`m2sdr_check` and `m2sdr_scan` are optional tools with a graphical interface. They are built
 only when the SDL2 and OpenGL development packages are installed and the pinned `cimgui`
 submodule is present:
 
@@ -110,7 +110,7 @@ submodule is present:
 git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 ```
 
-Without these dependencies the build skips the two tools and nothing else. The same rule applies
+Without these dependencies the build skips these tools and nothing else. The same rule applies
 to the FM tools without `libsndfile` and `libsamplerate`.
 
 ### Installing the parts by hand {#gs-manual-install}
@@ -175,7 +175,8 @@ cd user
 ./m2sdr_util info
 ```
 
-**What you should see.** The command prints five blocks. Every value must be plausible.
+**What you should see.** The command prints the blocks of the table. Every value must be
+plausible.
 
 | Block | Content | What to check |
 |--------------|-------------------------------------------|---------------------------------------|
@@ -200,7 +201,7 @@ A boot status of `Fallback` means that the operational
 image did not load: flash the board again. When `m2sdr_util info` works and SoapySDR finds no
 device, the SoapySDR driver is not installed where SoapySDR looks for it.
 
-Three more commands of `m2sdr_util` test the board without any RF signal:
+Other commands of `m2sdr_util` test the board without any RF signal:
 
 ```sh
 ./m2sdr_util scratch-test
@@ -213,8 +214,8 @@ between the host and the FPGA. [Debugging](#debugging) continues from here when 
 
 ## Step 3: set up the host {#gs-host}
 
-Four host settings decide whether streaming is reliable. Read this step when a stream does not
-start, and before running at high sample rates.
+The host settings of this step decide whether streaming is reliable. Read this step when a
+stream does not start, and before running at high sample rates.
 
 ### Kernel driver and IOMMU {#gs-iommu}
 
@@ -267,8 +268,8 @@ Experimental (see [Status](#intro-status)).
 
 ### Selecting the device {#gs-device}
 
-The same binaries open a PCIe or an Ethernet board. Name the device explicitly in scripts, so that
-a command behaves the same on every host.
+The same binaries open a board on any host link, such as PCIe or Ethernet. Name the
+device explicitly in scripts, so that a command behaves the same on every host.
 
 | Tool | Host link | Device argument |
 |------------|-----------|-------------------------------------------------|
@@ -277,8 +278,9 @@ a command behaves the same on every host.
 | SoapySDR | PCIe | `driver=LiteXM2SDR,path=/dev/m2sdr0` |
 | SoapySDR | Ethernet | `driver=LiteXM2SDR,eth_ip=192.168.1.50` |
 
-The utilities also accept two short forms: `-c N` for `/dev/m2sdrN`, and `-i` followed by the IP
-address of an Ethernet board. With several boards in one PC, each board has its own device node.
+The utilities also accept short forms, such as `-c N` for `/dev/m2sdrN`, and `-i` followed by
+the IP address of an Ethernet board. With several boards in one PC, each board has its own
+device node.
 
 ### Driver debug messages {#gs-driver-debug}
 
@@ -430,7 +432,7 @@ The steps 4 and 5 then apply with the USB3 device arguments.
 
 ## Platform guides {#gs-platforms}
 
-The guides give what differs from a PC. The steps 2 to 5 are the same on every host.
+The guides give what differs from a PC. The steps 2 to 5 are the same on the hosts of these guides.
 
 ### Raspberry Pi 5 {#gs-rpi5}
 
@@ -586,7 +588,7 @@ APPEND ... iommu.passthrough=1
 Reboot after the change. Keep a known-good boot entry or a serial console when you change the
 kernel command line.
 
-**High-rate RX.** Five rules keep a sustained RX stream on a Jetson free of overflows:
+**High-rate RX.** These rules keep a sustained RX stream on a Jetson free of overflows:
 
 - Configure the stream once, with `m2sdr_sync_config()`.
 - Ask `m2sdr_sync_rx()` for large blocks, about 2 ms of samples, to spread the cost of the system
@@ -602,7 +604,7 @@ with larger `m2sdr_sync_rx()` requests instead of changing this size.
 
 Prebuilt images of the common configurations are published on the Releases page of the
 repository. `scripts/flash_release.py` downloads one and writes it to the flash of the board over
-JTAG. It needs neither Vivado nor a working PCIe link, which also makes it the way to recover a
+JTAG. It needs neither Vivado nor a working PCIe link, which also makes it a way to recover a
 board.
 
 ### What you need {#gs-flash-needs}

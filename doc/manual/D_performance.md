@@ -214,7 +214,7 @@ measurement noise, sometimes slower, so the two variants were not kept.
 
 ## Resources {#perf-resources}
 
-No utilisation figure is published. The public statement is that the base design uses
+No utilisation figure is published yet. The public statement is that the base design uses
 a fraction of the XC7A200T and leaves room for user processing (`README.md`). The utilisation of
 a build is in the Vivado reports of its build directory
 ([The build flow](#build-flow)).

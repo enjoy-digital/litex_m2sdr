@@ -82,7 +82,7 @@ timestamps, the clock control, and the glue between the streams. This keeps the 
 short enough to be read, and every improvement of a core benefits the board without any porting.
 
 The transceivers can also carry links between boards with LiteICLink, the LiteX core for raw
-serial links. The design of the repository does not instantiate it.
+serial links. The design of the repository does not instantiate it yet.
 
 ### One M.2 board, several links {#intro-approach-links}
 
@@ -109,7 +109,7 @@ identifier, so an application written for PCIe runs over Ethernet or USB3 with a
 | SATA | Baseboard, SATA connector | Recording and replaying samples without a host in the path |
 
 The transceivers share two PLLs, so a bitstream holds at most two of these protocols at once,
-and USB3 shares a bitstream with PCIe only.
+and USB3 is combined with PCIe so far.
 [Host links](#host-links) gives the combinations, and [Carriers and hosts](#carriers) says what
 each carrier provides.
 
@@ -125,11 +125,11 @@ are rare on a board of this size.
 - **Hardware timed TX.** Each transmit buffer can carry the time at which it must be on the air,
   and the FPGA holds it until that time (see [Streaming](#streaming)).
 - **Several boards together.** Boards on a bifurcated M.2 carrier card share one PC, each on its
-  own PCIe link, up to 8T8R with four boards.
+  own PCIe link, for example 8T8R with four boards.
 - **Room for user logic.** The base design uses a fraction of the XC7A200T. A hook in the SoC
   lets a derived design insert its own processing between the RFIC and the host, without a fork.
 
-Two more items are integrated with a narrower scope: a White Rabbit core, which is Experimental,
+Other items are integrated with a narrower scope, such as a White Rabbit core, which is Experimental,
 and a PPS input that the gateware monitors without aligning the board time on it. The
 [status table](#intro-status) gives the state of every feature.
 
@@ -230,19 +230,19 @@ Notes on the tables:
 - The 10 MHz reference and the PTP-disciplined RFIC reference need the SI5351C version of the
   board.
 - PCIe PTM is used with PCIe Gen2 x1: the build rejects more than one lane. The repository
-  records no measurement of the resulting offset.
-- Hardware timed TX works over PCIe only.
-- USB3 streaming shares a bitstream with PCIe only, and the oversampling mode excludes it. The
+  records no measurement of the resulting offset yet.
+- Hardware timed TX is supported over PCIe; the other host links do not support it yet.
+- USB3 streaming is combined with PCIe only so far, and the oversampling mode excludes it. The
   sample rates that the link carries are in [Host links](#host-links).
-- The PPS input is not a row of the table: the gateware only monitors it and reports its edges
-  in registers. The board time is not aligned on it, and the board has no PPS output (see
+- The PPS input is not a row of the table: the gateware monitors it and reports its edges
+  in registers. The board time is not aligned on it yet, and no PPS output is available yet (see
   [Time synchronisation](#timing)).
 - White Rabbit is integrated and its core runs on the board. The lock of its servo, its jitter
-  and the accuracy of its PPS are not measured on this board, and its time is not connected to
-  the timestamps of the samples. The build refuses it together with Ethernet.
-- VRT packets are covered by simulation only, and the software of the repository does not
-  select them (see [Host links](#host-links)).
-- The BFP8 format is not available in the oversampling mode.
+  and the accuracy of its PPS are not measured on this board yet, and its time is not connected
+  to the timestamps of the samples yet. The build refuses it together with Ethernet.
+- VRT packets are covered by simulation only. The software selects them when it is built
+  against the `csr.h` of the VRT build (see [Host links](#host-links)).
+- The BFP8 format is not available in the oversampling mode yet.
 - The Ethernet builds limit the sample rate to what the link can carry (see
   [Host links](#host-links)).
 

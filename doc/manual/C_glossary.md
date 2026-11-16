@@ -1,6 +1,6 @@
 # Glossary {#glossary}
 
-The three primers explain these terms in context:
+The primers explain these terms in context:
 [SDR in a nutshell](#sdr-primer), [LiteX in a nutshell](#litex-primer) and
 [Time in a nutshell](#timing-primer).
 
@@ -17,7 +17,7 @@ The three primers explain these terms in context:
 | BFP8 | Block floating point transport format: 8-bit mantissas and one exponent per block |
 | Bitstream | The configuration file of the FPGA |
 | Board time | The 64-bit nanosecond counter of the gateware that stamps the samples |
-| Carrier | What the board is plugged into: an M.2 slot, a carrier card or the baseboard |
+| Carrier | What the board is plugged into, such as an M.2 slot, a carrier card or the baseboard |
 | Carrier frequency | Centre frequency of a received or transmitted signal |
 | Channel | One RF path of the RFIC: RX1, RX2, TX1 or TX2 |
 | Crossbar | Stream switch that connects the SDR datapath to the selected link |
@@ -36,8 +36,8 @@ The three primers explain these terms in context:
 | Half-band | Low-pass filter built to halve or double a sample rate |
 | Holdover | State of a disciplined clock that has lost its reference |
 | Host | The computer that controls the board |
-| Host bridge | Link that makes the host a master of the SoC bus: PCIe, Etherbone, JTAGBone |
-| Host link | Link that carries control and samples: PCIe, Ethernet or USB3 |
+| Host bridge | Link that makes the host a master of the SoC bus, such as PCIe, Etherbone or JTAGBone |
+| Host link | Link that carries control and samples, such as PCIe, Ethernet or USB3 |
 | I/Q | In-phase and quadrature: the two parts of a complex baseband sample |
 | IOMMU | Unit of the host that translates the memory addresses a device uses for DMA |
 | JTAG | Test and configuration port of the FPGA, also used by a host bridge |

@@ -92,7 +92,7 @@ Every rule stops the script with a `ValueError` and a message that names the opt
 rule is checked later than the others, when the SATA core is added, against the system clock of
 the build, which `--sys-clk-freq` can raise.
 
-Three of these rules protect against a bitstream that would elaborate and not work.
+Some of these rules protect against a bitstream that would elaborate and not work.
 
 | Combination                                   | Reason of the refusal                                   |
 |-----------------------------------------------------------------|-----------------------------------------------------------------------|
@@ -136,7 +136,7 @@ mechanism is described in [Timing](#timing). With White Rabbit, the 10 MHz clock
 the recovered White Rabbit clock by another MMCM.
 
 The 200 MHz clock always exists because the MMCM phase shift interfaces use it. The delay
-calibration block (`IDELAYCTRL`) is only instantiated in the oversampling mode, the one build
+calibration block (`IDELAYCTRL`) is only instantiated in the oversampling mode, the build
 that uses input delays.
 
 The `time` and `rfic` clocks come from outside the FPGA and are asynchronous to `sys`. Every
@@ -313,7 +313,7 @@ read-only registers holds the build configuration as constants (`Capability`).
 | 5   | `jtagbone`           | JTAGBone present                                      |
 | 6   | `eth_ptp`            | `--with-eth-ptp`                                      |
 | 7   | `eth_ptp_rfic_clock` | `--with-eth-ptp-rfic-clock`                           |
-| 8   | `timed_tx`           | Always, although timed TX only works on PCIe          |
+| 8   | `timed_tx`           | Always, although timed TX is not supported yet outside PCIe |
 | 9   | `rfic_oversampling`  | `--with-rfic-oversampling`                            |
 | 10  | `usb3`               | `--with-usb3`                                         |
 
@@ -467,7 +467,7 @@ register map.
 | `--with-ad9361-data-probe` | PHY TX and RX samples, PRBS synchronisation          | `rfic`        | 4096  |
 
 The signal list of a build is written to `test/analyzer.csv`. `BaseSoC` also has a method for a
-probe on the SATA DMA bus, `add_pcie_slave_probe()`, which has no command line option. The use
+probe on the SATA DMA bus, `add_pcie_slave_probe()`, which has no command line option yet. The use
 of the probes is described in [Debugging](#debugging).
 
 ## Build name and timing {#soc-build}

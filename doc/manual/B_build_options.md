@@ -82,8 +82,8 @@ On the `baseboard` variant, `--pcie-lanes=2` or `4` is refused with an error.
 Ethernet needs the `baseboard` variant. `--eth-ptp-no-igmp` is `eth_ptp_igmp=False` in
 `BaseSoC`. The PHYs and the streaming are in [Host links](#host-links), PTP in
 [Time synchronisation](#timing); the `5000baser` PHY is Experimental
-([Status](#intro-status)). The shipped software cannot select the VRT route
-([VRT streaming](#flow-eth-vrt)).
+([Status](#intro-status)). The software selects the VRT route when it is built
+against the `csr.h` of the build ([VRT streaming](#flow-eth-vrt)).
 
 ## SATA {#opt-sata}
 
@@ -120,7 +120,7 @@ the oversampling mode. The build needs the USB3-PIPE package. The link is descri
 
 A PPS input on a test point excludes `--with-gpio`, which uses the same pins
 ([Hardware](#hardware)). The GPIO core is 4 bits wide and only bits 0 and 1 reach a pin. The PPS
-input is only monitored: it does not set the board time.
+input is only monitored: it does not set the board time yet.
 
 ## White Rabbit {#opt-wr}
 
