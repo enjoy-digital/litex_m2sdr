@@ -46,7 +46,7 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 13 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 14 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
@@ -69,6 +69,7 @@ Fields of `features`:
 | `usb3` | 10 | USB3 (SFP-to-USB3 adapter) is present. |
 | `usb3_tx_header` | 11 | USB3 TX stream marks its frames: TX header and hardware timed TX over USB3. |
 | `stream_counters` | 12 | RFIC stream loss counters (RX overflow, TX underflow) are present. |
+| `eth_tx_header` | 13 | Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet. |
 
 Fields of `pcie_config`:
 
