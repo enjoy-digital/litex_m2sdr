@@ -793,6 +793,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                     (caps.features & M2SDR_FEATURE_TIMED_TX) != 0;
                 _tx_gate_link_supported = isLitePCIe() ||
                     (isLiteUSB() && (caps.features & M2SDR_FEATURE_USB3_TX_HEADER) != 0);
+                _rfic_oversampling = (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING) != 0;
             }
         }
         m2sdr_set_tx_header(_dev, false);
@@ -1894,9 +1895,14 @@ void SoapyLiteXM2SDR::setSampleRate(
         }
     } else if (isLiteUSB() && !_bitModeExplicit) {
         const bool streams_open = _rx_stream.opened || _tx_stream.opened;
-        const int bit_mode = (rate > LITEUSB_8BIT_THRESHOLD) ? 8 : 16;
+        /* The threshold is for two channels; one channel carries twice the rate. A standard
+         * image runs the rates above 61.44 MSPS in 1T1R only. */
+        const bool one_channel = (_channelModeHwApplied && _channelModeHw == 1) ||
+                                 (rate > 61.44e6 && !_rfic_oversampling);
+        const int bit_mode = (rate > LITEUSB_8BIT_THRESHOLD * (one_channel ? 2 : 1)) ? 8 : 16;
 
-        if (_bitMode != bit_mode) {
+        /* A deferred rate chose the packing: the rate restored meanwhile must not change it. */
+        if (_bitMode != bit_mode && _deferredSampleRate <= 0.0) {
             if (streams_open) {
                 SoapySDR::logf(SOAPY_SDR_WARNING,
                     "USB sample rate %.2f MSPS would use %d-bit sample packing, but streams are "
@@ -2003,11 +2009,27 @@ void SoapyLiteXM2SDR::setSampleRate(
 #endif
 
     bool sample_rate_applied = false;
-    {
+    /* A standard image runs the rates above 61.44 MSPS in 1T1R only. While the RFIC is in 2T2R
+     * and no stream is open, keep the rate for setupStream(): a single-channel stream switches
+     * the RFIC to 1T1R and applies it. */
+    const bool defer_to_1t1r = rate > 61.44e6 && !_rfic_oversampling &&
+        !(_channelModeHwApplied && _channelModeHw == 1) &&
+        !_rx_stream.opened && !_tx_stream.opened;
+    if (defer_to_1t1r) {
+        /* The streams keep the rate of the hardware until then: setupStream() restores it after
+         * the 1T1R switch, then sets the deferred rate. */
+        _deferredSampleRate = rate;
+        if (_sampleRateHwApplied)
+            _rx_stream.samplerate = _tx_stream.samplerate = static_cast<double>(_sampleRateHw);
+        SoapySDR::logf(SOAPY_SDR_INFO,
+            "Sample rate %.2f MSPS needs 1T1R on this gateware: applied when a single-channel "
+            "stream is set up", rate / 1e6);
+    } else {
         int rc = m2sdr_set_sample_rate(_dev, hw_sample_rate);
         if (rc != 0) {
             SoapySDR::logf(SOAPY_SDR_ERROR, "m2sdr_set_sample_rate failed: %s", m2sdr_strerror(rc));
         } else {
+            _deferredSampleRate = 0.0;
             _sampleRateHwApplied = true;
             _sampleRateHw = hw_sample_rate;
             _sampleRateHwBitMode = _bitMode;
@@ -2066,6 +2088,10 @@ double SoapyLiteXM2SDR::getSampleRate(
      * reports the stream rate. */
     (void)direction;
     int64_t sample_rate = 0;
+
+    /* Requested, applied when a single-channel stream is set up (see setSampleRate()). */
+    if (_deferredSampleRate > 0.0)
+        return _deferredSampleRate;
 
 #if USE_LITEETH
     LiteEthRfOpTimeout timeout("getSampleRate");

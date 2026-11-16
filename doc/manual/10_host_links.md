@@ -60,7 +60,8 @@ Three more rules bound a configuration, whatever the link:
 - An Ethernet build lowers the RFIC clock to what its link carries, see
   [Sample rate over Ethernet](#links-eth-rate).
 - In 1T1R the stream is half of the 2T2R stream at the same sample rate. A link that carries
-  2T2R at 30.72 MSPS in SC16 carries 1T1R at 61.44 MSPS in SC16.
+  2T2R at 30.72 MSPS in SC16 carries 1T1R at 61.44 MSPS in SC16. It also carries 1T1R at
+  122.88 MSPS in SC8, a rate of the oversampling mode that a standard bitstream runs in 1T1R.
 
 ## Transceiver lanes and links {#links-lanes}
 
@@ -739,7 +740,13 @@ are per direction, for the 2T2R configurations.
 In 1T1R the stream is half as large: 61.44 MSPS in SC16 was tested in full duplex. The method
 and the complete results are in [USB3 host link](#perf-usb3).
 
-The SoapySDR driver stays below these limits: on USB3 it selects SC8 above 40 MSPS unless the
+The rates above 61.44 MSPS of the [oversampling mode](#rfic-oversampling) work in 1T1R on a
+standard USB3 bitstream. 122.88 MSPS in SC8 is 245.76 MB/s and was tested in full duplex; in
+SC16 the link carries up to 92.16 MSPS in full duplex and 107.52 MSPS for RX alone. 2T2R above
+61.44 MSPS needs the oversampling build, which is not combined with USB3 yet.
+
+The SoapySDR driver stays below these limits: on USB3 it selects SC8 above 40 MSPS with two
+channels and above 80 MSPS with one, unless the
 application sets the format ([Device arguments](#fw-args)). The transport formats are compared
 in [The RFIC interface](#rfic).
 

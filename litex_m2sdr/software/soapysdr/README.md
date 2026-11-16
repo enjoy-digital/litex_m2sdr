@@ -76,6 +76,9 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Bit mode**: `bitmode=8|16`
 - **AD9361 1x FIR profile**: `ad9361_fir_profile=legacy|bypass|match|wide`
   - Rates above `61.44 MSPS` automatically use the wide-bandwidth data-port mode; these profiles affect the AD9361 `1x` FIR path used by that mode.
+- **USB3 packing and rates above `61.44 MSPS`**
+  - Without `bitmode`, USB3 uses 8-bit packing above `40 MSPS` with two channels and above `80 MSPS` with one channel, so that the stream fits the link.
+  - A standard bitstream runs the rates above `61.44 MSPS` (up to `122.88 MSPS`) with one channel. The rate can be set before or after `setupStream()`: set before, it is applied when the single-channel stream is set up, and `getSampleRate()` returns it meanwhile. Two channels at such a rate are refused.
 - **PCIe high-rate packing**: `bitmode=8|16`
   - Above `61.44 MSPS`, PCIe x1 capability defaults to 8-bit packing to reduce DMA bandwidth, while PCIe x2/x4 capability keeps 16-bit packing by default. Request `bitmode=8`, `bitmode=16`, or a `CS8` stream explicitly to override the default.
 - **Clock source**: `clock_source=internal|external|fpga`

@@ -334,6 +334,11 @@ oversampling build and a host link that carries the samples, PCIe Gen2 with 2 or
 library checks the `rfic_oversampling` capability bit and refuses 2T2R above 61.44 MSPS on a
 standard bitstream, with a message, instead of configuring an interface that cannot align.
 
+In 1T1R these rates also run over USB3, on a standard bitstream: 122.88 MSPS in SC8 is
+245.76 MB/s, see [Sample rates](#links-usb3-rates). In this mode the digital loopback of the
+RFIC returns the 12-bit samples with their lowest bit set, so a loopback test compares SC8
+samples or the 11 upper bits.
+
 ### Oversampling PHY {#rfic-oversampling-phy}
 
 At 983 Mbps per pair, the assumptions of the standard PHY no longer hold. The oversampling PHY

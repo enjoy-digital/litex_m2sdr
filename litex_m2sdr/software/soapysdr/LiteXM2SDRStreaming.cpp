@@ -708,11 +708,19 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         static_cast<unsigned>(_rx_stream.channels[0]) : 0;
     const unsigned tx_channel = (_tx_stream.opened && !_tx_stream.channels.empty()) ?
         static_cast<unsigned>(_tx_stream.channels[0]) : 0;
+    /* Taken before the settings are reapplied below (which clears it). */
+    const double deferred_rate = _deferredSampleRate;
     const bool channel_mode_changed = !_channelModeHwApplied ||
         _channelModeHw != _nChannels ||
         _rxChannelMaskHw != rx_channel_mask ||
         _txChannelMaskHw != tx_channel_mask;
     try {
+        if (_nChannels >= 2 && !_rfic_oversampling &&
+            (std::max(_rx_stream.samplerate, _tx_stream.samplerate) > 61.44e6 ||
+             _deferredSampleRate > 0.0))
+            throw std::runtime_error(
+                "two channels above 61.44 MSPS need the RFIC oversampling gateware; "
+                "use one channel or a lower sample rate");
         if (channel_mode_changed) {
             /* Re-runs the AD9361 bring-up, so active Soapy settings are
              * reapplied below; the phy handle changes across the re-init. */
@@ -764,6 +772,10 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 channel_configure(SOAPY_SDR_TX, chan);
         }
     }
+
+    /* Rate above 61.44 MSPS deferred by setSampleRate(): the RFIC is now in 1T1R. */
+    if (deferred_rate > 0.0 && _nChannels == 1)
+        this->setSampleRate(direction, selected_channels[0], deferred_rate);
 
     return direction == SOAPY_SDR_RX ? RX_STREAM : TX_STREAM;
 }

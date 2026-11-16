@@ -2355,6 +2355,21 @@ int m2sdr_set_sample_rate(struct m2sdr_dev *dev, int64_t rate)
     {
         bool wide = rate > 61440000;
 
+#ifdef CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_OFFSET
+        /* As in m2sdr_apply_config(): 2T2R above 61.44 MSPS needs the RFIC oversampling image.
+         * On a standard image the interface never aligns: refuse instead of trying. */
+        if (wide && phy->pdata->rx2tx2) {
+            struct m2sdr_capabilities caps;
+            if (m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+                !(caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING)) {
+                fprintf(stderr,
+                    "2T2R @ %.3f MSPS needs the RFIC-oversampling gateware image, but a "
+                    "standard image is loaded. Use 1T1R or a rate <= 61.44 MSPS.\n", rate / 1e6);
+                return M2SDR_ERR_INVAL;
+            }
+        }
+#endif
+
         rc = m2sdr_stream_to_ad9361_sample_rate(rate, wide, &actual_rate);
         if (rc != M2SDR_ERR_OK)
             return rc;
