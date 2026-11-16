@@ -1803,14 +1803,14 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  * gate releases each timed frame the cycle (FPGA time + tx_offset) reaches the frame's
  * air-time, so tx_offset compensates the fixed TX-pipeline latency (packer/CDC/serializer/
  * DAC/analog) between the gate and the antenna: with it calibrated, "transmit at X" puts
- * the signal on the air at X. Loopback-calibrated (see scripts). LitePCIe only; may be set
+ * the signal on the air at X. Loopback-calibrated (see scripts). Links with the TX header; may be set
  * before or during streaming. Untimed frames (header timestamp 0) are unaffected -- they
  * always transmit immediately. */
 int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
 {
     if (!dev)
         return M2SDR_ERR_INVAL;
-    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+    if (!m2sdr_tx_header_supported(dev))
         return M2SDR_ERR_UNSUPPORTED;
     /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
     if (m2sdr_reg_write(dev, CSR_HEADER_TX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)
@@ -1826,12 +1826,12 @@ int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
  * rising value means the host is submitting timed frames later than their air-times
  * (submit earlier or check tx_offset). This is the on-air TX underflow measured at the
  * gate; m2sdr_get_stats() underflow_events/buffers count the separate DMA-ring underflow
- * (reader starved of any buffer). LitePCIe only. */
+ * (reader starved of any buffer). Links with the TX header. */
 int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow)
 {
     if (!dev || !underflow)
         return M2SDR_ERR_INVAL;
-    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+    if (!m2sdr_tx_header_supported(dev))
         return M2SDR_ERR_UNSUPPORTED;
     if (m2sdr_reg_read(dev, CSR_HEADER_TX_UNDERFLOW_ADDR, underflow) != 0)
         return M2SDR_ERR_IO;
@@ -1842,12 +1842,12 @@ int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow)
  * header inserter stamps each buffer when it starts forming (DMA plane); rx_offset is
  * subtracted so the stamp refers to when the first sample was at the ANTENNA. With both
  * offsets calibrated, TX and RX timestamps share one reference plane. 0 (the default)
- * keeps the historical DMA-plane stamping. LitePCIe only. */
+ * keeps the historical DMA-plane stamping. LitePCIe and LiteUSB. */
 int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
 {
     if (!dev)
         return M2SDR_ERR_INVAL;
-    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE && dev->transport != M2SDR_TRANSPORT_LITEUSB)
         return M2SDR_ERR_UNSUPPORTED;
     /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
     if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)

@@ -487,6 +487,7 @@ class BaseSoC(SoCMini):
 
             # USB3 Capabilities.
             usb3_enabled    = with_usb3,
+            usb3_tx_header  = with_usb3,
 
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
@@ -1007,7 +1008,11 @@ class BaseSoC(SoCMini):
                 If(self.crossbar.mux.sel == crossbar_usb3_port,
                     # Host writes whole frames from the TX enable: align the TX Header FSM on it.
                     self.header.tx.reset.eq(~self.usb3._control.fields.tx_enable)
-                )
+                ),
+                # TX header enabled: frames wait in the timed-TX gate, no FIFO priming after it.
+                self.usb3.tx_framed.eq(self.header.tx.header_enable),
+                self.ad9361.tx_fifo_no_priming.eq(self.header.tx.header_enable &
+                    (self.crossbar.mux.sel == crossbar_usb3_port)),
             ]
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
 

@@ -732,12 +732,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "USB3 TX stream marks its frames: TX header and hardware timed TX over USB3.",
+      "name": "usb3_tx_header",
+      "offset": 11,
+      "reset": 1,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 11
+    "size": 12
    },
    {
     "access": "ro",

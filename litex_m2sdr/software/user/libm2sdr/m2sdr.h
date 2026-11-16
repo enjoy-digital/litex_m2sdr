@@ -486,6 +486,12 @@ enum m2sdr_feature_flag {
 #else
     M2SDR_FEATURE_USB3 = 0,
 #endif
+    /* The USB3 TX stream carries the TX header: hardware timed TX works over USB3. */
+#ifdef CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET
+    M2SDR_FEATURE_USB3_TX_HEADER = 1u << CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET,
+#else
+    M2SDR_FEATURE_USB3_TX_HEADER = 0,
+#endif
 };
 
 enum m2sdr_feature_mask {
@@ -725,8 +731,9 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
-/* The TX header (and timed TX) is supported on the PCIe link only: enabling it
- * on another link returns M2SDR_ERR_UNSUPPORTED. */
+/* The TX header (and timed TX) is supported on the PCIe link, and on the USB3 link when the
+ * gateware marks its TX frames (M2SDR_FEATURE_USB3_TX_HEADER): enabling it elsewhere returns
+ * M2SDR_ERR_UNSUPPORTED. */
 int  m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable);
 
 /* GPIO helper (4-bit) */
@@ -950,7 +957,8 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
  * compensates the fixed TX-pipeline latency (packer/CDC/serializer/DAC/analog) between the
  * gate and the antenna: calibrated, "transmit at X" puts the signal on the air at X.
  * Untimed frames (header timestamp 0) always transmit immediately, unaffected by this.
- * Loopback-calibrated. LitePCIe only; may be set before or during streaming. */
+ * Loopback-calibrated. Links with the TX header (see m2sdr_set_tx_header()); may be set before
+ * or during streaming. */
 int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
 
 /* Read the running hardware TX underflow count: timed frames that missed their air-time.
@@ -958,7 +966,8 @@ int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
  * whole (the RFIC airs zeros for it) and counted here. A steadily rising value means timed
  * frames are submitted later than their air-times (submit earlier or check tx_offset).
  * This is the on-air TX underflow measured at the gate; the m2sdr_get_stats() underflow
- * fields count the separate DMA-ring underflow (reader starved of any buffer). LitePCIe. */
+ * fields count the separate DMA-ring underflow (reader starved of any buffer). Links with the
+ * TX header (see m2sdr_set_tx_header()). */
 int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
 
 /* Set the RX timestamp offset (ns): the mirror of tx_offset. The RX header inserter stamps
@@ -967,7 +976,7 @@ int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
  * RX timestamps share one reference plane (needed for absolute/multi-board timing; TX<->RX
  * self-consistency alone is already given by the loopback-calibrated tx_offset, which
  * absorbs the sum of both pipelines). 0 (default) keeps the historical DMA-plane stamping.
- * LitePCIe only. */
+ * LitePCIe and LiteUSB. */
 int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
 
 /* Zero-copy buffer API.

@@ -2439,6 +2439,20 @@ int m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header)
     return M2SDR_ERR_OK;
 }
 
+bool m2sdr_tx_header_supported(struct m2sdr_dev *dev)
+{
+    struct m2sdr_capabilities caps;
+
+    if (!dev)
+        return false;
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE)
+        return true;
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB)
+        return m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+               (caps.features & M2SDR_FEATURE_USB3_TX_HEADER);
+    return false;
+}
+
 /* Enable or disable TX-side insertion of the FPGA DMA header. */
 int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
 {
@@ -2447,10 +2461,11 @@ int m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable)
     if (!dev)
         return M2SDR_ERR_INVAL;
 
-    /* The gateware finds the TX header with the first-word marker of each DMA
-     * buffer, which only the PCIe DMA provides: on the other links the TX
-     * stream would be discarded with the header enabled. */
-    if (enable && dev->transport != M2SDR_TRANSPORT_LITEPCIE)
+    /* The gateware finds the TX header with the first-word marker of each
+     * buffer, which the PCIe DMA and the USB3 TX streamer (recent gateware)
+     * provide: on the other links the TX stream would be discarded with the
+     * header enabled. */
+    if (enable && !m2sdr_tx_header_supported(dev))
         return M2SDR_ERR_UNSUPPORTED;
 
     dev->tx_header_enable = enable ? 1 : 0;

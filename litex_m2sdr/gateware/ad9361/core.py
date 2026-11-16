@@ -235,6 +235,7 @@ class AD9361RFIC(LiteXModule):
         self.tx_buffer = tx_buffer = stream.Buffer(dma_layout(dw))
         self.rx_buffer = rx_buffer = stream.Buffer(dma_layout(dw))
         self.tx_rfic_fifo_started = tx_rfic_fifo_started = Signal()
+        self.tx_fifo_no_priming   = Signal() # i (sys).
         if with_tx_fifo:
             self.tx_rfic_fifo = tx_rfic_fifo = ClockDomainsRenamer("rfic")(
                 stream.SyncFIFO(dma_layout(dw), depth=tx_fifo_depth, buffered=True)
@@ -242,8 +243,12 @@ class AD9361RFIC(LiteXModule):
             tx_fifo_start_level = max(1, tx_fifo_depth//2)
             tx_rfic_fifo_primed = Signal()
             self.comb += tx_rfic_fifo_primed.eq(tx_rfic_fifo.level >= tx_fifo_start_level)
+            # With tx_fifo_no_priming (TX header enabled), the FIFO forwards as soon as it holds
+            # data: a frame released by the timed-TX gate must not wait for the start level.
+            tx_fifo_no_priming_rfic = Signal()
+            self.specials += MultiReg(self.tx_fifo_no_priming, tx_fifo_no_priming_rfic, odomain="rfic")
             self.sync.rfic += [
-                If(tx_rfic_fifo_primed,
+                If(tx_rfic_fifo_primed | tx_fifo_no_priming_rfic,
                     tx_rfic_fifo_started.eq(1)
                 ).Elif(tx_rfic_fifo.level == 0,
                     tx_rfic_fifo_started.eq(0)

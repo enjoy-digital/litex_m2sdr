@@ -562,7 +562,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
          * the gateware has no gate (capability features CSR, read at open) or on the LiteEth transport; an explicit
          * "hardware" there is a configuration error and fails loudly. */
         TimedTxMode timed_tx_mode = get_kwargs_timed_tx_mode(searchArgs, _deviceArgs);
-        const bool tx_gate_usable = _tx_dma_header_supported && isLitePCIe();
+        const bool tx_gate_usable = _tx_dma_header_supported && _tx_gate_link_supported;
         if (timed_tx_mode == TimedTxMode::Auto) {
             timed_tx_mode = tx_gate_usable ? TimedTxMode::Hardware : TimedTxMode::Software;
         } else if (timed_tx_mode == TimedTxMode::Hardware && !tx_gate_usable) {

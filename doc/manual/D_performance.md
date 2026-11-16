@@ -95,6 +95,30 @@ Three runs of 120 s at 245.8 MB/s also pass, with 29.5 GB checked in each direct
 - The link does not report overflows and underflows yet: a program has no count of such a
   loss. The figures are those of one board, one adapter and one host.
 
+### Timed TX {#perf-usb3-timed-tx}
+
+Measured by the maintainers, 2026-11-16, on the same setup, with a bitstream that carries the
+TX header over USB3 and a TX offset of 0.
+
+With the digital loopback of the RFIC, a timed burst comes back on the RX stream at a constant
+delay after its transmit time: the spread over 5 to 10 bursts is below 1.5 sample periods at 5,
+10, 30.72 and 46.08 MSPS in 2T2R, for bursts of 1 to 64 buffers. A burst sent with a transmit
+time in the past loses its first buffer, and `header_tx_underflow` counts it.
+
+The delay to the antenna was measured over the air, through the coupling between the TX and RX
+paths of the board: a burst of tone, located in the RX samples by correlation.
+
+| Configuration | Sample rate | Delay, mean | Standard deviation | In sample periods |
+|---------------|-------------|-------------|--------------------|-------------------|
+| 2T2R | 10 MSPS | 3684 ns | 60 ns | 36.8 |
+| 2T2R | 20 MSPS | 1898 ns | 37 ns | 38.0 |
+| 2T2R | 30.72 MSPS | 1287 ns | 17 ns | 39.5 |
+| 2T2R | 46.08 MSPS | 840 ns | 20 ns | 38.7 |
+
+These delays are close to those of PCIe ([One reference plane](#streaming-timed-tx-plane)), which
+measured 1215 ns at 30.72 MSPS over a cable. The SoapySDR driver uses the same TX offset on
+both links. The method locates the edge of a burst to about one sample period.
+
 ## SATA storage {#perf-sata}
 
 This section is the record of the SATA validation on the LiteX Acorn Baseboard Mini with an SSD

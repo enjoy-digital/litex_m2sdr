@@ -675,6 +675,11 @@ the host the byte order of the PCIe DMA buffers.
 - **TX.** The FIFO is primed: nothing goes to the RFIC before it is half full, as for the
   Ethernet TX path. When the FIFO runs empty the streamer stops forwarding and waits for half a
   FIFO again. The bit `tx_started` tells whether it forwards.
+- **TX frames.** The streamer marks the first word of each 8 KiB host buffer, counted from
+  `tx_enable`, as the PCIe DMA does. The TX header extractor finds the header of a buffer
+  with this marker, which makes [hardware timed TX](#streaming-timed-tx) work on this link.
+  While the TX header is enabled the TX FIFOs are not primed: the timed-TX gate holds the
+  frames, and a released frame must leave without a delay that depends on a FIFO level.
 - **RFIC FIFOs.** When PCIe is not in the bitstream, the RFIC core gets the same FIFO of depth
   8192 on each stream as in an Ethernet-only build.
 
@@ -742,9 +747,9 @@ in [The RFIC interface](#rfic).
 
 - **Combinations.** USB3 is combined with PCIe x1 so far. The script refuses it with
   Ethernet, SATA or White Rabbit, on the `m2` variant and with the oversampling mode.
-- **Timed TX.** The TX header and hardware timed TX are not available on this link yet; they
-  work over PCIe. The library refuses the TX header on this link, and the SoapySDR driver uses
-  its software timeline.
+- **Timed TX.** The TX header and hardware timed TX need a bitstream with the `usb3_tx_header`
+  capability bit. On an older bitstream the library refuses the TX header on this link, and
+  the SoapySDR driver uses its software timeline.
 - **Overflow and underflow.** The link does not report RX overflows or TX underflows yet. The
   FIFOs absorb the jitter of the host; a host that stalls for longer loses samples without a
   count.
@@ -783,7 +788,7 @@ They need no FPGA tool and no board.
 | `test_vrt.py` | VRT header fields, packet count and framing |
 | `test_sata_streamers.py` | Recorder and player: bursts, refill, pacing, stop |
 | `test_sata_stream_tap.py` | Duplication of the stream with the tap |
-| `test_usb3_streamers.py` | USB3 streamers: word order, drain when disabled, priming |
+| `test_usb3_streamers.py` | USB3 streamers: word order, drain when disabled, priming, TX frame marker |
 | `test_soc_usb3.py` | Elaboration with USB3, alone and with PCIe; rejected cases |
 | `test_soc_eth_sata.py` | Elaboration of the SATA SoC with Ethernet and with PCIe |
 | `test_soc_white_rabbit.py` | Elaboration with White Rabbit (needs LiteX-WR-NIC) |

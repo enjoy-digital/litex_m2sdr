@@ -105,3 +105,67 @@ def test_usb3_tx_streamer_drains_bulk_out_while_disabled():
 
     run_simulation(dut, [gen(), _collect(dut.source, 1, out, max_cycles=300)])
     assert out == []
+
+
+def _collect_first(ep, n, out, max_cycles=100000):
+    yield ep.ready.eq(1)
+    for _ in range(max_cycles):
+        if len(out) >= n:
+            break
+        yield
+        if (yield ep.valid) and (yield ep.ready):
+            out.append(((yield ep.data), (yield ep.first)))
+    yield ep.ready.eq(0)
+
+
+def test_usb3_tx_streamer_marks_the_first_word_of_each_frame():
+    # 32-byte frames: 4 words of 64 bits, 8 Bulk OUT words of 32 bits.
+    dut = USB3TXStreamer(data_width=64, fifo_depth=16, frame_bytes=32)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield
+        yield from _send(dut.sink, list(range(24)))
+
+    run_simulation(dut, [gen(), _collect_first(dut.source, 12, out)])
+    assert [first for _, first in out] == [1, 0, 0, 0]*3
+    assert out[0][0] == 0x0000000100000000
+    assert out[4][0] == 0x0000000900000008
+
+
+def test_usb3_tx_streamer_realigns_frames_on_enable():
+    dut = USB3TXStreamer(data_width=64, fifo_depth=16, frame_bytes=32)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.framed.eq(1)
+        yield
+        yield from _send(dut.sink, list(range(6)))      # 3 words: stops inside a frame.
+        for _ in range(16):
+            yield
+        yield dut.enable.eq(0)
+        yield
+        yield
+        yield dut.enable.eq(1)
+        yield
+        yield from _send(dut.sink, list(range(100, 116)))
+
+    run_simulation(dut, [gen(), _collect_first(dut.source, 11, out)])
+    assert [first for _, first in out] == [1, 0, 0] + [1, 0, 0, 0]*2
+    assert out[3][0] == 0x0000006500000064
+
+
+def test_usb3_tx_streamer_framed_forwards_without_priming():
+    dut = USB3TXStreamer(data_width=64, fifo_depth=16, frame_bytes=32)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.framed.eq(1)
+        yield
+        yield from _send(dut.sink, [1, 2])              # One word: far below the half-full level.
+
+    run_simulation(dut, [gen(), _collect_first(dut.source, 1, out, max_cycles=64)])
+    assert out == [(0x0000000200000001, 1)]

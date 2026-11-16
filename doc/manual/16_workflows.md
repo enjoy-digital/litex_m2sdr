@@ -16,7 +16,7 @@ installed or the board has never been checked.
 | [USB3 streaming](#flow-usb3) | USB3 | `--with-usb3` |
 | [SATA recording](#flow-sata) | PCIe, Ethernet | `--with-sata` |
 | [Wide bandwidth](#flow-wide-bandwidth) | PCIe | Experimental; see the recipe |
-| [Timed TX](#flow-timed-tx) | PCIe | nothing specific |
+| [Timed TX](#flow-timed-tx) | PCIe, USB3 | nothing specific |
 | [Low latency](#flow-low-latency) | PCIe | nothing specific |
 | [Several boards in one host](#flow-multi-board) | PCIe, Ethernet | nothing specific |
 | [Time synchronisation](#flow-time-sync) | PCIe, Ethernet | depends on the method |
@@ -388,7 +388,7 @@ litex_server --usb --usb-vid 0x1d50 --usb-pid 0x605a
 litex_cli --regs
 ```
 
-Timed TX is not available on this link yet; see [Limits](#links-usb3-limits).
+Timed TX works on this link as on PCIe, see [Timed TX](#flow-timed-tx).
 
 ## SATA recording {#flow-sata}
 
@@ -686,8 +686,8 @@ With timed TX, a buffer is transmitted when the board time reaches its timestamp
 holds the buffer in a gate until then, so the timestamp is the time on air, on a 10 ns step.
 The gate is described in [Streaming](#streaming).
 
-The gate is part of every bitstream, but timed TX and the TX header are not available yet on
-the other host links: there the library refuses to enable the TX header. A
+The gate is part of every bitstream. Timed TX and the TX header work over PCIe and USB3; they
+are not available yet over Ethernet, where the library refuses to enable the TX header. A
 program checks the presence of the gate with the feature bit `M2SDR_FEATURE_TIMED_TX` of
 `m2sdr_get_capabilities()`; `m2sdr_util info` does not print it.
 
