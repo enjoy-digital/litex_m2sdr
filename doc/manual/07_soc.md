@@ -313,9 +313,10 @@ read-only registers holds the build configuration as constants (`Capability`).
 | 5   | `jtagbone`           | JTAGBone present                                      |
 | 6   | `eth_ptp`            | `--with-eth-ptp`                                      |
 | 7   | `eth_ptp_rfic_clock` | `--with-eth-ptp-rfic-clock`                           |
-| 8   | `timed_tx`           | Always, although timed TX is not supported yet outside PCIe |
+| 8   | `timed_tx`           | Always; timed TX also needs a host link with the TX header |
 | 9   | `rfic_oversampling`  | `--with-rfic-oversampling`                            |
 | 10  | `usb3`               | `--with-usb3`                                         |
+| 11  | `usb3_tx_header`     | `--with-usb3`: the USB3 TX stream carries the TX header |
 
 The configuration registers are meaningful only when the matching feature bit is set. The PCIe
 speed field is 0 for Gen1 and 1 for Gen2; the lanes field is 0, 1 or 2 for x1, x2 or x4.

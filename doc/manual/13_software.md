@@ -340,8 +340,10 @@ On TX, a timestamp in the metadata asks the gateware to hold the buffer until th
 reaches it. The mechanism is described in [Streaming](#streaming) and used in
 [Timed TX](#flow-timed-tx).
 
-The TX header is not available on the other host links yet: there `m2sdr_set_tx_header()`
-returns `M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission. It works on PCIe.
+The TX header works on PCIe and on USB3. It is not available over Ethernet yet: there
+`m2sdr_set_tx_header()` returns `M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission. Over
+USB3 a program can check the feature bit `M2SDR_FEATURE_USB3_TX_HEADER` of
+`m2sdr_get_capabilities()`, which an older bitstream does not set.
 
 TX timestamps are rounded to the 10 ns step of the board time (`M2SDR_TX_TIME_GRID_NS`).
 Setting the board time from the host is refused, with `M2SDR_ERR_STATE`, when Ethernet PTP

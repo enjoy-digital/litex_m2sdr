@@ -14,7 +14,7 @@ what a buffer of samples contains and when it is transmitted.
 | Buffer               | 8192 bytes by default                                                    |
 | Header               | Optional, 16 bytes: sync word and 64-bit timestamp in nanoseconds        |
 | Board time           | 64-bit nanosecond counter on a 100 MHz clock, 10 ns step                 |
-| Timed TX             | On PCIe: a buffer with a timestamp is held until the board time reaches it |
+| Timed TX             | On PCIe and USB3: a buffer with a timestamp is held until the board time reaches it |
 | Late buffer          | Dropped whole, replaced by zeros, counted                                |
 | User processing      | `BaseSoC.add_rfic_datapath()`, between the loopback and the RFIC core    |
 
@@ -172,12 +172,13 @@ On TX the block removes the header of each frame and keeps its two fields
 (`TXHeaderExtractor`). The samples that follow go to the RFIC core, after the timed gate
 described in [Hardware timed TX](#streaming-timed-tx).
 
-> The TX header is not supported yet on host links other than PCIe. The extractor recognises a
-> header by the first-word marker of the DMA reader, which the Ethernet, SATA and USB3
-> streamers do not provide. With the TX header enabled on these links, the extractor would
-> consume every word and discard the TX stream. The library therefore refuses it: `m2sdr_set_tx_header()` returns
-> `M2SDR_ERR_UNSUPPORTED` when it is enabled on another link than PCIe. The gateware has no
-> such check: software that bypasses the library must not set the bit there.
+> The TX header needs a host link that marks the first word of each buffer: the extractor
+> recognises a header by this marker. The PCIe DMA and the USB3 TX streamer provide it; the
+> Ethernet and SATA streamers do not provide it yet. With the TX header enabled on these
+> links, the extractor would consume every word and discard the TX stream. The library
+> therefore refuses it: `m2sdr_set_tx_header()` returns `M2SDR_ERR_UNSUPPORTED` there, and on
+> a USB3 bitstream without the `usb3_tx_header` capability bit. The gateware has no such
+> check: software that bypasses the library must not set the bit there.
 
 ### Registers {#streaming-header-regs}
 
@@ -351,13 +352,17 @@ The gate has a simple contract, which the library and the SoapySDR driver implem
 This counter is not the underflow of the DMA. The DMA statistics count the buffers that the host
 did not provide in time; the gate counts the timed frames that were provided, but too late.
 
-The gate is built in every bitstream and the `timed_tx` capability bit is always set, but timed
-TX is not supported yet outside PCIe. It needs the TX header, which the Ethernet, SATA and USB3
-streamers do not carry yet: see [TX: extracting the header](#streaming-header-tx).
+The gate is built in every bitstream and the `timed_tx` capability bit is always set. Timed TX
+also needs the TX header, which PCIe and USB3 carry and which the Ethernet and SATA streamers
+do not carry yet: see [TX: extracting the header](#streaming-header-tx).
 
 The software follows the same limit. The offset and underflow functions of the library return an
 unsupported error on another host link, and the SoapySDR driver selects the hardware gate on
-PCIe and a software timeline otherwise.
+PCIe and USB3, and a software timeline otherwise.
+
+Over USB3 the TX FIFOs are not primed while the TX header is enabled. A frame released by the
+gate then leaves at once, whatever the level of the FIFOs, and a burst of one buffer is
+transmitted like a long one. See [Sample streams](#links-usb3-streams).
 
 ### One reference plane {#streaming-timed-tx-plane}
 
