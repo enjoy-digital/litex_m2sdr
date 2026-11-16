@@ -219,6 +219,13 @@ Use larger `m2sdr_sync_rx()` / `m2sdr_sync_tx()` requests when the application
 wants batching. For example, at 30.72 MS/s, a 2 ms SC16 RX request is about
 61440 samples even though each backend descriptor remains 8192 bytes.
 
+RX buffers are returned oldest first. After a pause in the reads, or a change
+that the next samples must reflect (a retune, a gain change), call
+`m2sdr_sync_rx_flush()`: it drops the samples received before the call, so the
+next `m2sdr_sync_rx()` returns samples captured after it. It takes well under a
+millisecond on every host link; over USB3 it also drops the samples the
+gateware FIFOs held while the host was not reading.
+
 ## Channel layout and stream packing
 
 `M2SDR_CHANNEL_LAYOUT_1T1R` selects the RF/PHY channel layout, but the current
@@ -236,7 +243,7 @@ active channel in software until a true packed 1T1R stream mode is added.
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_apply_config_if_needed`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_rx_gain_mode`, `m2sdr_set_rx_gain_mode_all`, `m2sdr_set_agc_pin`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - AGC monitor: `m2sdr_configure_agc_counter`, `m2sdr_clear_agc_counter`, `m2sdr_get_agc_count`
-- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
+- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_rx_flush`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
 - Stream diagnostics: `m2sdr_get_stream_stats`, `m2sdr_clear_stream_stats`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`, `m2sdr_get_ptp_discipline_config`, `m2sdr_set_ptp_discipline_config`, `m2sdr_clear_ptp_counters`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`

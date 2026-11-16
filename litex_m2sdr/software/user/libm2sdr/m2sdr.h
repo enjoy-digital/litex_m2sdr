@@ -932,6 +932,13 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
                   struct m2sdr_metadata *meta,
                   unsigned timeout_ms);
 
+/* Drop the RX samples received before the call, so that the next m2sdr_sync_rx() returns samples
+ * captured after it (for example after a retune). PCIe: the buffers of the DMA ring. Ethernet:
+ * the queued datagrams. USB3: the buffers of the transfer ring, and the samples the gateware
+ * FIFOs hold when the host had stopped reading; the transfers in flight are kept, so the call
+ * takes well under a millisecond, unlike a stream deactivate/activate. */
+int m2sdr_sync_rx_flush(struct m2sdr_dev *dev);
+
 int m2sdr_sync_tx(struct m2sdr_dev *dev,
                   const void *samples,
                   unsigned num_samples,
