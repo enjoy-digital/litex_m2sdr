@@ -191,6 +191,7 @@ class USB3(LiteXModule):
     """
     def __init__(self, platform, sfp_pads, qpll_channel, refclk_freq, sys_clk, sys_clk_freq,
         data_width = 64,
+        rx_fifo_depth = 4096,
         vid        = USB3_VID,
         pid        = USB3_PID,
         serial     = "0001",
@@ -271,7 +272,7 @@ class USB3(LiteXModule):
         self.bus      = self.wishbone.bus
 
         # RX: Crossbar -> Bulk IN ------------------------------------------------------------------
-        self.rx_streamer = rx_streamer = USB3RXStreamer(data_width=data_width)
+        self.rx_streamer = rx_streamer = USB3RXStreamer(data_width=data_width, fifo_depth=rx_fifo_depth)
         self.comb += [
             rx_streamer.enable.eq(self._control.fields.rx_enable),
             self.sink.connect(rx_streamer.sink),

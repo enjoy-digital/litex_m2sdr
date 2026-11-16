@@ -901,6 +901,8 @@ class BaseSoC(SoCMini):
                 # Oversampling: 128-bit datapath. The link carries 2T2R up to about 92MSPS in SC8
                 # in full duplex (USB3 capacity), not the 122.88MSPS of the PCIe builds.
                 data_width   = 128 if with_rfic_oversampling else 64,
+                # Oversampling: no RFIC stream FIFOs (see below), a deeper RX FIFO instead (128KB).
+                rx_fifo_depth = 8192 if with_rfic_oversampling else 4096,
             )
 
         # SATA -------------------------------------------------------------------------------------
@@ -916,7 +918,9 @@ class BaseSoC(SoCMini):
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
-        with_rfic_stream_fifos = (with_eth or with_usb3) and not with_pcie
+        # No RFIC stream FIFOs with oversampling: they are in the rfic domain, 491.52MHz there,
+        # above what a block RAM is clocked at. The streamer FIFOs (sys domain) do the buffering.
+        with_rfic_stream_fifos = (with_eth or with_usb3) and not with_pcie and not with_rfic_oversampling
         self.ad9361 = AD9361RFIC(
             rfic_pads      = platform.request("ad9361_rfic"),
             spi_pads       = platform.request("ad9361_spi"),
@@ -1476,7 +1480,7 @@ class BaseSoC(SoCMini):
             self.platform.add_false_path_constraints(self.crg.cd_sys.clk, eth_rx_clk)
 
     def add_usb3(self, platform, sys_clk_freq, sfp=0, vid=USB3_VID, pid=USB3_PID, with_debug=False,
-        data_width=64):
+        data_width=64, rx_fifo_depth=4096):
         """USB3 host interface on a baseboard SFP cage (USB3-PIPE, SFP-to-USB3 adapter): EP0
         Wishbone bridge (CSRs, litex_server --usb), Bulk IN/OUT RFIC sample streams (Crossbar
         port 3)."""
@@ -1487,6 +1491,7 @@ class BaseSoC(SoCMini):
             sys_clk      = self.crg.cd_sys.clk,
             sys_clk_freq = sys_clk_freq,
             data_width   = data_width,
+            rx_fifo_depth = rx_fifo_depth,
             vid          = vid,
             pid          = pid,
             with_debug   = with_debug,
