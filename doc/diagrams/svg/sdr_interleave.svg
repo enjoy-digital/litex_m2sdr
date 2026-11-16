@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="190" viewBox="0 0 760 190">
+<defs>
+  <marker id="arrow-ctrl" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+    <path d="M0,0 L8,4 L0,8 Z" fill="#5b5b5b"/></marker>
+  <marker id="arrow-ctrl-rev" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto">
+    <path d="M8,0 L0,4 L8,8 Z" fill="#5b5b5b"/></marker>
+  <marker id="arrow-stream" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="9" refY="4.5" orient="auto">
+    <path d="M0,0 L9,4.5 L0,9 Z" fill="#606060"/></marker>
+  <marker id="arrow-accent" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="9" refY="4.5" orient="auto">
+    <path d="M0,0 L9,4.5 L0,9 Z" fill="#2eaadc"/></marker>
+  <marker id="arrow-accent-rev" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="0" refY="4.5" orient="auto">
+    <path d="M9,0 L0,4.5 L9,9 Z" fill="#2eaadc"/></marker>
+  <marker id="arrow-stream-rev" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" refX="0" refY="4.5" orient="auto">
+    <path d="M9,0 L0,4.5 L9,9 Z" fill="#606060"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<polyline points="115,45 115,25 193,25 193,45 271,45 271,25 349,25 349,45 427,45 427,25 505,25 505,45 583,45 583,25 661,25 661,45 739,45" fill="none" stroke="#5b5b5b" stroke-width="1.0"/>
+<polyline points="115,100 115,80 427,80 427,100 739,100" fill="none" stroke="#2eaadc" stroke-width="1.0"/>
+<g fill="#bfe6f5" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="115" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="154" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="154" dy="0">I1 MSB</tspan></text>
+<g fill="#bfe6f5" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="193" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="232" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="232" dy="0">Q1 MSB</tspan></text>
+<g fill="#bfe6f5" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="271" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="310" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="310" dy="0">I1 LSB</tspan></text>
+<g fill="#bfe6f5" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="349" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="388" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="388" dy="0">Q1 LSB</tspan></text>
+<g fill="#e6f5fb" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="427" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="466" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="466" dy="0">I2 MSB</tspan></text>
+<g fill="#e6f5fb" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="505" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="544" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="544" dy="0">Q2 MSB</tspan></text>
+<g fill="#e6f5fb" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="583" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="622" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="622" dy="0">I2 LSB</tspan></text>
+<g fill="#e6f5fb" stroke="#5b5b5b" stroke-width="0.9" stroke-linejoin="round">
+<rect x="661" y="125" width="78" height="36" rx="0" ry="0"/>
+</g>
+<text x="700" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="13" fill="#000000" text-anchor="middle" dominant-baseline="central"><tspan x="700" dy="0">Q2 LSB</tspan></text>
+<text x="103" y="35" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="12" fill="#000000" text-anchor="end" dominant-baseline="central"><tspan x="103" dy="0">DATA_CLK</tspan></text>
+<text x="103" y="90" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="12" fill="#000000" text-anchor="end" dominant-baseline="central"><tspan x="103" dy="0">RX_FRAME</tspan></text>
+<text x="103" y="143" font-family="Carlito, Calibri, &#x27;Liberation Sans&#x27;, Arial, sans-serif" font-size="12" fill="#000000" text-anchor="end" dominant-baseline="central"><tspan x="103" dy="0">RX_D[5:0]</tspan></text>
+</svg>

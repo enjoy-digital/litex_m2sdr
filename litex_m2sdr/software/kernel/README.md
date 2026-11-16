@@ -68,7 +68,7 @@ This removes:
   `m2sdr_sata`.
 - **DMA ring geometry (module parameters)**
   The active ring depth is global (`dma_buffer_count`, power of two, 2..256, default 256 —
-  see the [low-latency guide](../../../doc/low-latency.md)). The buffer size and the MSI divisor
+  see the Streaming chapter of the manual, `doc/manual/09_streaming.md`). The buffer size and the MSI divisor
   are **per DMA channel** (`dma_buffer_size` / `dma_buffer_per_irq`, one value per channel, comma
   separated, defaulting to 8192 bytes and 8 buffers/MSI): a bulk I/Q channel and a low-rate side
   channel no longer have to share one ring geometry — buffer completion (and therefore the latency

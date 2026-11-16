@@ -1,0 +1,28 @@
+# Manual of this project: output name and chapters, in order (read by build.py; the pandoc defaults
+# files and the theme are generic, from the manual kit).
+name: litex_m2sdr_manual
+chapters:
+  - 00_front.md
+  - 01_introduction.md
+  - 02_sdr_primer.md
+  - 03_litex_primer.md
+  - 04_timing_primer.md
+  - 05_hardware.md
+  - 06_carriers.md
+  - 07_soc.md
+  - 08_rfic.md
+  - 09_streaming.md
+  - 10_host_links.md
+  - 11_timing.md
+  - 12_getting_started.md
+  - 13_software.md
+  - 14_sdr_frameworks.md
+  - 15_building_gateware.md
+  - 16_workflows.md
+  - 17_debugging.md
+  - Z_appendix.md
+  - A_registers.md
+  - B_build_options.md
+  - C_glossary.md
+  - D_performance.md
+  - E_maintenance.md
