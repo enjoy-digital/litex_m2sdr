@@ -322,6 +322,16 @@ the next samples to reflect it first drops the samples already received (`m2sdr_
 The call takes well under a millisecond. Over USB3 it also drops the samples that the gateware
 held while the host was not reading.
 
+#### Writing samples {#sw-lib-tx-size}
+
+`m2sdr_sync_tx()` sends whole buffers of 8 KiB. When a call ends inside a buffer, the library
+sends that buffer at once, with the rest filled: the transmitted signal then holds a gap. Give
+each call a whole number of buffers, which `m2sdr_bytes_to_samples()` converts to samples.
+
+Over USB3, send several buffers per call at the high rates. Each call ends a USB transfer, and
+transfers of one buffer do not keep the gateware supplied at 245 MB/s. With 16 buffers per
+call the link was tested up to 368 MB/s in full duplex ([USB3 host link](#perf-usb3)).
+
 ### Timestamps and timed TX {#sw-lib-time}
 
 Each buffer can carry a 16-byte header with a timestamp (`M2SDR_HEADER_BYTES`). On RX, the

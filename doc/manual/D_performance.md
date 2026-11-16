@@ -14,6 +14,7 @@ The values are given in the units of their measurement.
 | Timed TX offset | About a microsecond, per rate and channel layout | [Streaming](#streaming-timed-tx-plane) |
 | TX latency floor | Drain time of the DMA ring | [Streaming](#streaming-latency-source) |
 | RF to SATA recording | 232.94 MiB/s sustained, in real time | [SATA storage](#perf-sata) |
+| USB3 sample stream | 368.6 MB/s in full duplex, 440 MB/s for RX alone | [USB3 host link](#perf-usb3) |
 
 The sample rate is the statement of `README.md`, and the TX offset is recorded in
 `litex_m2sdr/software/soapysdr/README.md`. The latency floor and the SATA figures were measured
@@ -37,6 +38,62 @@ are in [Measured performance](#rfic-oversampling-performance).
 
 The oversampling mode needs two or four PCIe lanes. The bus load is the statement of
 `README.md`.
+
+## USB3 host link {#perf-usb3}
+
+Measured by the maintainers, 2026-11-16, on a board in the LiteX Acorn Baseboard Mini with a
+Xillybus SFP2USB adapter in the SFP 0 cage, a USB3-only bitstream and a PC with Linux as host.
+[Sample rates per host link](#links-rates) compares the result with the other links.
+
+### Method {#perf-usb3-method}
+
+The RFIC runs at the real sample rate with its digital loopback: what the host transmits comes
+back on the RX stream. The host sends a ramp over the sample values and checks every received
+value, so a sample lost or repeated in either direction is counted. The received samples are
+also counted against the board time of the RX frames. The error counters of the USB3 link are
+read after each run, through JTAG.
+
+A run passes with no ramp error, no sample missing against the board time and no stream error.
+The host sends 16 buffers per call (128 KiB). The RX-only runs have no ramp: they are checked
+against the board time alone.
+
+### Full duplex {#perf-usb3-fdx}
+
+Each run lasts 20 s. The stream rate is per direction.
+
+| Channels | Format | Sample rate | Stream | Result |
+|----------|--------|--------------------|-------------------|------------------------------|
+| 2T2R | SC16 | 10, 20 MSPS | 80, 160 MB/s | Pass |
+| 2T2R | SC16 | 30.72 MSPS | 245.8 MB/s | Pass |
+| 2T2R | SC16 | 35, 40, 43 MSPS | 280 to 344 MB/s | Pass |
+| 2T2R | SC16 | 46.08 MSPS | 368.6 MB/s | Pass |
+| 2T2R | SC16 | 50 MSPS | 400 MB/s | Fail: 366 MB/s received, 379 MB/s sent |
+| 2T2R | SC8 | 30.72, 46.08, 61.44 MSPS | 122.9 to 245.8 MB/s | Pass |
+| 1T1R | SC16 | 30.72, 46.08, 61.44 MSPS | 122.9 to 245.8 MB/s | Pass |
+| 1T1R | SC8 | 61.44 MSPS | 122.9 MB/s | Pass |
+
+Three runs of 120 s at 245.8 MB/s also pass, with 29.5 GB checked in each direction per run:
+2T2R at 30.72 MSPS in SC16, 2T2R at 61.44 MSPS in SC8 and 1T1R at 61.44 MSPS in SC16.
+
+### RX alone {#perf-usb3-rx}
+
+| Channels | Format | Sample rate | Stream | Result |
+|----------|--------|--------------------|-------------------|------------------------------|
+| 2T2R | SC16 | 30.72, 40, 46.08 MSPS | 245.8 to 368.6 MB/s | Pass |
+| 2T2R | SC16 | 50, 52, 55 MSPS | 400 to 440 MB/s | Pass |
+| 2T2R | SC16 | 61.44 MSPS | 491.5 MB/s | Fail: 453 MB/s received |
+
+### Notes on the runs {#perf-usb3-notes}
+
+- The link counted no error and no recovery during the runs of the tables. The FPGA was between
+  66 and 73 °C.
+- The limit in full duplex, about 370 MB/s per direction, is lower than for RX alone.
+- With one 8 KiB buffer per call, the 245.8 MB/s runs lost TX samples in 5 runs of 15 to 20 s
+  out of 22: short bursts of zeros on the TX side, RX intact. One of these runs also counted
+  link errors, without a recovery. With 16 buffers per call, 8 runs out of 8 passed. See
+  [Writing samples](#sw-lib-tx-size).
+- The link does not report overflows and underflows yet: a program has no count of such a
+  loss. The figures are those of one board, one adapter and one host.
 
 ## SATA storage {#perf-sata}
 

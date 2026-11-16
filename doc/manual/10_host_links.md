@@ -21,6 +21,47 @@ PCIe exists on both variants; the other links need the `baseboard` variant. The 
 link is in the [status table](#intro-status). The options are listed in
 [Build options](#build-options) and the SoC around the links is described in [SoC](#soc).
 
+## Sample rates per host link {#links-rates}
+
+A host link must carry the sample stream in real time. The stream rate follows from the RFIC
+configuration: the sample rate, times the number of channels, times the size of a complex
+sample. A complex sample takes 4 bytes in SC16 and 2 bytes in SC8.
+
+| Configuration | Stream, per direction |
+|------------------------------------------------|------------------------|
+| 1T1R at 30.72 MSPS in SC16, 2T2R at 30.72 MSPS in SC8 | 122.9 MB/s |
+| 2T2R at 30.72 MSPS in SC16 | 245.8 MB/s |
+| 1T1R at 61.44 MSPS in SC16, 2T2R at 61.44 MSPS in SC8 | 245.8 MB/s |
+| 2T2R at 61.44 MSPS in SC16 | 491.5 MB/s |
+| 2T2R at 122.88 MSPS in SC16, oversampling mode | 983.0 MB/s |
+
+The capacity of a link sets which of these configurations it carries.
+
+| Host link | Capacity, per direction | Highest 2T2R configuration | Basis |
+|--------------------------|--------------------------|------------------------------------------|----------------------|
+| PCIe Gen2, one lane | 500 MB/s | 61.44 MSPS in SC16, with a small margin | Line rate |
+| PCIe Gen2, two or four lanes | 1000 or 2000 MB/s | 122.88 MSPS in the [oversampling mode](#rfic-oversampling) | Line rate |
+| Ethernet, 1000BASE-X | 125 MB/s | 30.72 MSPS in SC8 at most, to be checked on the setup | Line rate |
+| Ethernet, 2500BASE-X | 312.5 MB/s | 61.44 MSPS in SC8 | Line rate |
+| Ethernet, 5GBASE-R | 625 MB/s | 61.44 MSPS in SC8 | Line rate |
+| USB3 | 440 MB/s for RX alone, 370 MB/s in full duplex | 46.08 MSPS in SC16, 61.44 MSPS in SC8 | Measured |
+
+The PCIe and Ethernet figures are the line rates after the line coding. The protocol headers
+come out of them, so the usable rate is lower: the Ethernet rows also carry the UDP and IP
+headers of each packet. On 1000BASE-X, 2T2R at 30.72 MSPS in SC8 needs 122.9 MB/s for the
+samples alone: measure what the setup carries with the `eth-rx-rate-sweep` command of
+`m2sdr_util`. The USB3 figures were measured on the board with the samples checked, see
+[USB3 host link](#perf-usb3).
+
+Three more rules bound a configuration, whatever the link:
+
+- The RFIC is specified up to 61.44 MSPS. The rates above belong to the oversampling mode,
+  which is Experimental and built for PCIe.
+- An Ethernet build lowers the RFIC clock to what its link carries, see
+  [Sample rate over Ethernet](#links-eth-rate).
+- In 1T1R the stream is half of the 2T2R stream at the same sample rate. A link that carries
+  2T2R at 30.72 MSPS in SC16 carries 1T1R at 61.44 MSPS in SC16.
+
 ## Transceiver lanes and links {#links-lanes}
 
 The M.2 connector carries four differential lanes, wired to the four GTP transceivers of the
@@ -683,12 +724,17 @@ The script takes about 440 MB/s as the capacity of the link. The rates of the sa
 are per direction, for the 2T2R configurations.
 
 | Configuration | Samples | On USB3 |
-|-------------------------------------------|------------------|---------------------------------|
-| 30.72 MSPS, SC16 | 245.76 MB/s | Fits, in both directions |
-| 61.44 MSPS, SC8 | 245.76 MB/s | Fits, in both directions |
+|-------------------------------------------|------------------|-----------------------------------------------|
+| 30.72 MSPS, SC16 | 245.76 MB/s | Tested in full duplex |
+| 46.08 MSPS, SC16 | 368.64 MB/s | Tested in full duplex, the highest rate that passed |
+| 50 to 55 MSPS, SC16 | 400 to 440 MB/s | Tested for RX alone; full duplex loses samples |
+| 61.44 MSPS, SC8 | 245.76 MB/s | Tested in full duplex |
 | 61.44 MSPS, SC16 | 491.52 MB/s | Above the capacity of the link |
 
-The SoapySDR driver follows this limit: on USB3 it selects SC8 above 40 MSPS unless the
+In 1T1R the stream is half as large: 61.44 MSPS in SC16 was tested in full duplex. The method
+and the complete results are in [USB3 host link](#perf-usb3).
+
+The SoapySDR driver stays below these limits: on USB3 it selects SC8 above 40 MSPS unless the
 application sets the format ([Device arguments](#fw-args)). The transport formats are compared
 in [The RFIC interface](#rfic).
 
@@ -702,6 +748,9 @@ in [The RFIC interface](#rfic).
 - **Overflow and underflow.** The link does not report RX overflows or TX underflows yet. The
   FIFOs absorb the jitter of the host; a host that stalls for longer loses samples without a
   count.
+- **TX buffering.** The gateware holds about a millisecond of TX samples at 245 MB/s. The host
+  must keep the transfers queued: a program that sends one 8 KiB buffer per call underflows
+  now and then at this rate, see [Writing samples](#sw-lib-tx-size).
 - **LED.** The state of the USB3 link is not part of the "ready" condition of the status LED
   ([Status LED](#soc-led)).
 
