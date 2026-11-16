@@ -1884,9 +1884,16 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
     }
 
 #ifdef USE_LITEUSB
-    /* Send the partially filled transfer: no samples left waiting for the next call. */
-    if (dev->transport == M2SDR_TRANSPORT_LITEUSB && liteusb_stream_flush(dev->usb_tx) != 0)
-        return M2SDR_ERR_IO;
+    /* With the TX header (timed bursts), send the partially filled transfer: a burst must not
+     * wait for the next call. Without it (continuous stream), send it only when no transfer is
+     * in flight: a transfer per small call does not keep the device supplied at the high rates
+     * (TX underflows measured with one buffer per call at 245 MB/s, none with large transfers). */
+    if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        int rc = dev->tx_header_enable ? liteusb_stream_flush(dev->usb_tx)
+                                       : liteusb_stream_flush_if_idle(dev->usb_tx);
+        if (rc != 0)
+            return M2SDR_ERR_IO;
+    }
 #endif
 
     return M2SDR_ERR_OK;

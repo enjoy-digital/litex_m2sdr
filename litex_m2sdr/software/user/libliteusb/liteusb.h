@@ -81,7 +81,8 @@ int liteusb_write_burst(struct liteusb_connection *conn, uint32_t addr, const ui
 
 /* Buffer ring split in slots of bufs_per_xfer buffers, each slot one libusb Bulk transfer:
  * - RX: all slots submitted; a slot is resubmitted once all its buffers have been read.
- * - TX: buffers written in order; a slot is submitted once full (or flushed).
+ * - TX: buffers written in order; a transfer takes the filled buffers once bufs_per_xfer of them
+ *   are filled, or at a flush. The whole ring is available whatever the size of the writes.
  * Events are processed from the read/write calls (no thread). */
 struct liteusb_stream;
 
@@ -118,6 +119,10 @@ size_t liteusb_stream_discard(struct liteusb_stream *s, int *was_full);
 uint8_t *liteusb_stream_next_write_buffer(struct liteusb_stream *s, int timeout_ms);
 int liteusb_stream_write_submit(struct liteusb_stream *s);
 int liteusb_stream_flush(struct liteusb_stream *s);
+/* TX: flush only when no transfer is in flight (nothing else feeds the device). Otherwise the
+ * filled buffers wait for the next ones: large transfers keep the device supplied at the high
+ * rates, where a transfer per buffer underflows. */
+int liteusb_stream_flush_if_idle(struct liteusb_stream *s);
 int liteusb_stream_drain(struct liteusb_stream *s, int timeout_ms);
 
 size_t liteusb_stream_buffer_size(struct liteusb_stream *s);

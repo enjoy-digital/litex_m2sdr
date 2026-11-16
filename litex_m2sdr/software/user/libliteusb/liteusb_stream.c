@@ -30,7 +30,9 @@ struct liteusb_slot {
     struct libusb_transfer *xfer;
     struct liteusb_stream *s;
     int state;
-    size_t bufs; /* RX: received buffers, TX: filled buffers. */
+    size_t bufs;  /* RX: received buffers, TX: buffers of the transfer. */
+    size_t first; /* TX: first buffer of the transfer in the ring. */
+    size_t count; /* TX: buffers of the transfer, kept after its completion (see tx_reaped). */
 };
 
 struct liteusb_stream {
@@ -52,6 +54,19 @@ struct liteusb_stream {
     size_t cur_slot;
     size_t cur_buf;
     int    cur_held; /* RX: a buffer was returned (consumed on the next call), TX: a buffer is being filled. */
+
+    /* TX: a transfer is a run of 1 to bufs_per_xfer filled buffers, wherever a flush ends it, so
+     * the whole ring is available whatever the size of the writes (one slot per buffer). cur_buf
+     * counts the filled buffers not submitted yet, from tx_first. */
+    size_t tx_first;     /* First filled buffer not submitted yet. */
+    size_t tx_slot_head; /* Next slot to submit. */
+    size_t tx_slot_tail; /* Oldest slot not reaped yet. */
+    /* Buffers submitted, and buffers of the completed transfers reaped from the tail. Both are
+     * only written by the writer: the completion callback can run in another thread that
+     * processes the events of the same libusb context (an RX reader), and only sets the state
+     * of its slot. */
+    size_t tx_submitted;
+    size_t tx_reaped;
 
     struct liteusb_stream_stats stats;
 };
@@ -130,7 +145,7 @@ static int liteusb_slot_submit(struct liteusb_stream *s, size_t index, size_t bu
     int rc;
 
     libusb_fill_bulk_transfer(slot->xfer, s->conn->handle, s->ep,
-                              s->ring + index*s->bufs_per_xfer*s->buf_size,
+                              s->ring + (s->is_rx ? index*s->bufs_per_xfer : slot->first)*s->buf_size,
                               (int)(bufs*s->buf_size), liteusb_xfer_cb, slot, 0);
     slot->bufs  = bufs;
     slot->state = SLOT_SUBMITTED;
@@ -165,7 +180,9 @@ struct liteusb_stream *liteusb_stream_open(struct liteusb_connection *conn, unsi
     s->buf_size      = buf_size;
     s->buf_count     = buf_count;
     s->bufs_per_xfer = bufs_per_xfer;
-    s->slot_count    = buf_count/bufs_per_xfer;
+    /* RX: one slot per transfer of bufs_per_xfer buffers. TX: one slot per buffer (see tx_first),
+     * plus one so that the slot ring is never full (head == tail means empty). */
+    s->slot_count    = s->is_rx ? buf_count/bufs_per_xfer : buf_count + 1;
 
     /* Claim the interface of the endpoint (fails if used by another process). */
     s->interface = liteusb_claim_endpoint(conn, ep);
@@ -232,6 +249,11 @@ int liteusb_stream_start(struct liteusb_stream *s)
     s->cur_slot = 0;
     s->cur_buf  = 0;
     s->cur_held = 0;
+    s->tx_first     = 0;
+    s->tx_slot_head = 0;
+    s->tx_slot_tail = 0;
+    s->tx_submitted = 0;
+    s->tx_reaped    = 0;
     for (size_t i = 0; i < s->slot_count; i++) {
         s->slots[i].state = SLOT_IDLE;
         s->slots[i].bufs  = 0;
@@ -363,23 +385,40 @@ size_t liteusb_stream_discard(struct liteusb_stream *s, int *was_full)
 /* TX */
 /*----*/
 
+/* TX: free the buffers of the completed transfers, oldest first (they complete in order). */
+static void liteusb_tx_reap(struct liteusb_stream *s)
+{
+    while (s->tx_slot_tail != s->tx_slot_head &&
+           s->slots[s->tx_slot_tail].state != SLOT_SUBMITTED) {
+        s->tx_reaped   += s->slots[s->tx_slot_tail].count;
+        s->tx_slot_tail = (s->tx_slot_tail + 1) % s->slot_count;
+    }
+}
+
 uint8_t *liteusb_stream_next_write_buffer(struct liteusb_stream *s, int timeout_ms)
 {
-    struct liteusb_slot *slot;
-
     if (!s || s->is_rx || !s->started)
         return NULL;
 
-    slot = &s->slots[s->cur_slot];
-    if (liteusb_wait_slot(s, slot, timeout_ms) != 0)
-        return NULL;
+    /* Ring full: wait for the oldest transfer in flight. */
+    for (;;) {
+        liteusb_tx_reap(s);
+        if (s->tx_submitted - s->tx_reaped + s->cur_buf < s->buf_count)
+            break;
+        if (s->tx_slot_tail == s->tx_slot_head)
+            return NULL;
+        if (liteusb_wait_slot(s, &s->slots[s->tx_slot_tail], timeout_ms) != 0)
+            return NULL;
+    }
 
     s->cur_held = 1;
-    return s->ring + (s->cur_slot*s->bufs_per_xfer + s->cur_buf)*s->buf_size;
+    return s->ring + (s->tx_first + s->cur_buf)*s->buf_size;
 }
 
 int liteusb_stream_flush(struct liteusb_stream *s)
 {
+    struct liteusb_slot *slot;
+    size_t bufs;
     int rc;
 
     if (!s || s->is_rx || !s->started)
@@ -387,10 +426,36 @@ int liteusb_stream_flush(struct liteusb_stream *s)
     if (s->cur_buf == 0)
         return 0;
 
-    rc = liteusb_slot_submit(s, s->cur_slot, s->cur_buf);
-    s->cur_buf  = 0;
-    s->cur_slot = (s->cur_slot + 1) % s->slot_count;
+    /* A free slot always exists: one per buffer, and fewer buffers in flight than in the ring. */
+    liteusb_tx_reap(s);
+    slot = &s->slots[s->tx_slot_head];
+    if (slot->state == SLOT_SUBMITTED)
+        return LIBUSB_ERROR_BUSY;
+    bufs        = s->cur_buf;
+    slot->first = s->tx_first;
+    slot->count = bufs;
+    rc = liteusb_slot_submit(s, s->tx_slot_head, bufs);
+    s->tx_submitted += bufs;
+    s->tx_slot_head  = (s->tx_slot_head + 1) % s->slot_count;
+    s->tx_first      = (s->tx_first + bufs) % s->buf_count;
+    s->cur_buf       = 0;
     return rc;
+}
+
+int liteusb_stream_flush_if_idle(struct liteusb_stream *s)
+{
+    if (!s || s->is_rx || !s->started)
+        return LIBUSB_ERROR_INVALID_PARAM;
+    if (s->cur_buf == 0)
+        return 0;
+    /* No event processing here (see liteusb_stream_write_submit()): the states of the slots are
+     * those of the last processing, by a reader or by a wait for a free buffer. Without either,
+     * completed transfers still look in flight and the filled buffers wait for a full transfer:
+     * to be settled before this is merged. */
+    liteusb_tx_reap(s);
+    if (s->tx_submitted != s->tx_reaped)
+        return 0; /* Transfers in flight: the filled buffers join the next transfer. */
+    return liteusb_stream_flush(s);
 }
 
 int liteusb_stream_write_submit(struct liteusb_stream *s)
@@ -399,11 +464,9 @@ int liteusb_stream_write_submit(struct liteusb_stream *s)
         return LIBUSB_ERROR_INVALID_PARAM;
 
     s->cur_held = 0;
-    /* No event processing here: the transfers in flight do not need it, and a poll per buffer
-     * costs TX throughput when a reader processes the events of the same context (279 against
-     * 308 MB/s in full duplex with one buffer per write, for a stream of 246 MB/s). The completed transfers
-     * are collected when a slot is needed (liteusb_stream_next_write_buffer()). */
-    if (++s->cur_buf < s->bufs_per_xfer)
+    s->cur_buf++;
+    /* A transfer is contiguous in the ring: end it at bufs_per_xfer buffers or at the ring end. */
+    if (s->cur_buf < s->bufs_per_xfer && s->tx_first + s->cur_buf < s->buf_count)
         return 0;
     return liteusb_stream_flush(s);
 }
