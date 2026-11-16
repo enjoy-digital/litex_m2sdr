@@ -30,12 +30,14 @@ enum {
     TXSRC_PCIE = 0,
     TXSRC_ETH  = 1,
     TXSRC_SATA = 2,
+    TXSRC_USB3 = 3,
 };
 
 enum {
     RXDST_PCIE = 0,
     RXDST_ETH  = 1,
     RXDST_SATA = 2,
+    RXDST_USB3 = 3,
 };
 
 enum sata_wait_result {

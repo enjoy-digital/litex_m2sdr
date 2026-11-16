@@ -16,6 +16,7 @@
 
 #include <getopt.h>
 
+#include "m2sdr_cli.h"
 #include "m2sdr_sigmf.h"
 
 static void help(void)
@@ -152,6 +153,7 @@ static int validate_sigmf(const struct m2sdr_sigmf_meta *meta, bool strict, bool
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     struct m2sdr_sigmf_meta meta;
     bool validate_only = false;
     bool strict = false;

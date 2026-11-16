@@ -592,12 +592,13 @@ int32_t ad9361_init (struct ad9361_rf_phy **ad9361_phy,
 	phy->ad9361_rfpll_ext_round_rate = init_param->ad9361_rfpll_ext_round_rate;
 	phy->ad9361_rfpll_ext_set_rate = init_param->ad9361_rfpll_ext_set_rate;
 
-	if (do_init) {
-		AD9361_INIT_TRACE("%s: register clocks\n", __func__);
-		ret = register_clocks(phy);
-		if (ret < 0)
-			goto out;
-	}
+	/* Also without do_init: the clock tree is then read back from the
+	 * already configured RFIC (register reads only), so later rate changes
+	 * work on an attached device. */
+	AD9361_INIT_TRACE("%s: register clocks\n", __func__);
+	ret = register_clocks(phy);
+	if (ret < 0)
+		goto out;
 
 #ifndef AXI_ADC_NOT_PRESENT
 	axiadc_init(phy);

@@ -1631,11 +1631,27 @@ static void scan_stream_cleanup(struct scan_state *s)
     s->use_pcie_dma = false;
 }
 
+/* Outside PCIe the RX buffers are read oldest first: after a retune (or any pause in the reads)
+ * they hold samples captured before it. Drop them, so the next reads are captured after the
+ * call (the PCIe path skips ahead by itself). */
+static bool flush_rx_stream(void)
+{
+    int rc = m2sdr_sync_rx_flush(g_dev);
+
+    if (rc != 0) {
+        fprintf(stderr, "m2sdr_sync_rx_flush failed: %s\n", m2sdr_strerror(rc));
+        return false;
+    }
+    return true;
+}
+
 static bool capture_iq_block(struct scan_state *s)
 {
     int got = 0;
 
     if (!s->use_pcie_dma) {
+        if (!flush_rx_stream())
+            return false;
         while (g_keep_running && got < s->fft_len) {
             int rc = m2sdr_sync_rx(g_dev, s->rx_buf, s->rx_samples_per_buf, NULL, 0);
             const int16_t *iq = (const int16_t *)s->rx_buf;
@@ -1690,6 +1706,8 @@ static bool discard_iq_samples(struct scan_state *s, int nsamples)
         return true;
 
     if (!s->use_pcie_dma) {
+        if (!flush_rx_stream())
+            return false;
         while (g_keep_running && got < nsamples) {
             int rc = m2sdr_sync_rx(g_dev, s->rx_buf, s->rx_samples_per_buf, NULL, 0);
 
@@ -4987,6 +5005,7 @@ static void draw_stats_panel(struct scan_state *s)
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     int option_index = 0;
     struct scan_state s;

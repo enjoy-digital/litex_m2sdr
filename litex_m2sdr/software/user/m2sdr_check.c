@@ -1402,6 +1402,7 @@ static void draw_spectrum_annotation_overlay(const struct check_data *data, cons
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     const char *filename = NULL;
     char resolved_filename[1024] = {0};
     struct check_data data;

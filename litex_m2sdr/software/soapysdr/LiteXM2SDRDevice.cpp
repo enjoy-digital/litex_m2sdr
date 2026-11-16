@@ -487,6 +487,8 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
             candidate = device;
     } else if (args.count("eth_ip") != 0) {
         candidate = makeEthernetDeviceIdentifier(args);
+    } else if (args.count("usb") != 0) {
+        candidate = "usb:" + args.at("usb");
     } else if (args.count("path") != 0) {
         candidate = "pcie:" + args.at("path");
     }
@@ -496,7 +498,7 @@ std::string makeDeviceIdentifier(const SoapySDR::Kwargs &args,
     if (rc != M2SDR_ERR_OK)
         throw std::runtime_error("Invalid M2SDR device identifier: " + candidate);
 
-    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE)
+    if (addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE || addr.transport == M2SDR_TRANSPORT_KIND_LITEUSB)
         path = addr.path;
     else if (addr.transport == M2SDR_TRANSPORT_KIND_LITEETH) {
         eth_ip = addr.ip;
@@ -662,6 +664,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         }
         if (path.empty())
             path = eth_ip;
+    } else if (isLiteUSB()) {
+        if (_fd == nullptr) {
+            m2sdr_close(_dev);
+            _dev = nullptr;
+            throw std::runtime_error("SoapyLiteXM2SDR(): LiteUSB handle unavailable");
+        }
+        if (path.empty())
+            path = dev_id;
     } else {
         m2sdr_close(_dev);
         _dev = nullptr;
@@ -694,7 +704,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
     SoapySDR::logf(SOAPY_SDR_INFO, "Opened %s via %s, serial %s",
                    path.empty() ? dev_id.c_str() : path.c_str(),
-                   isLitePCIe() ? "LitePCIe" : "LiteEth",
+                   isLitePCIe() ? "LitePCIe" : isLiteUSB() ? "LiteUSB" : "LiteEth",
                    getLiteXM2SDRSerial(_dev).c_str());
 
     if (isLiteEth()) {
@@ -735,14 +745,16 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
-    if (isLitePCIe()) {
-        SoapySDR::log(SOAPY_SDR_INFO, "Configuring PCIe DMA headers");
-    /* Enable Synchronizer */
+    if (usesLibm2sdrStream()) {
+        SoapySDR::log(SOAPY_SDR_INFO, "Configuring DMA headers");
+    /* Enable Synchronizer (PCIe). */
+        if (isLitePCIe()) {
 #ifdef CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR
-        litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
+            litex_m2sdr_writel(_dev, CSR_PCIE_DMA0_SYNCHRONIZER_BYPASS_ADDR, 0);
 #else
-        SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
+            SoapySDR::log(SOAPY_SDR_WARNING, "PCIe DMA synchronizer CSR not present; skipping synchronizer setup");
 #endif
+        }
 
     /* DMA RX Header: carries the per-buffer hardware timestamp used for RX
      * time reporting. Probe gateware support (the control CSR reads back its
@@ -782,15 +794,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         }
         m2sdr_set_tx_header(_dev, false);
 
-    /* Disable DMA Loopback. */
-        m2sdr_set_dma_loopback(_dev, false);
+    /* Disable DMA Loopback (PCIe). */
+        if (isLitePCIe())
+            m2sdr_set_dma_loopback(_dev, false);
     }
 
     bool do_init = true;
-    if (args.count("bypass_init") > 0) {
-        std::cout << args.at("bypass_init")[0] << std::endl;
+    if (args.count("bypass_init") > 0)
         do_init = args.at("bypass_init")[0] == '0';
-    }
     bool rx_agc_pin_requested = false;
     bool rx_agc_pin = false;
     if (args.count("rx_agc_pin") > 0) {
@@ -880,9 +891,19 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
               _refclk_ppm <=  M2SDR_REFCLK_PPM_MAX))
             throw std::runtime_error("refclk_ppm out of range (max +-100 ppm)");
     }
+    /* Sample rate (and bandwidth) applied by the RF init, before the application sets its own. */
+    double init_samplerate = 30.72e6;
+    if (args.count("init_samplerate") > 0) {
+        init_samplerate = std::stod(args.at("init_samplerate"));
+        if (!(init_samplerate > 0.0))
+            throw std::runtime_error("init_samplerate must be positive");
+    }
     if (args.count("clock_source") > 0) {
         _clock_source = canonical_clock_source(args.at("clock_source"));
     }
+    if (!do_init && !(litex_m2sdr_readl(_dev, CSR_AD9361_CONFIG_ADDR) & 0b01))
+        throw std::runtime_error("bypass_init=1: the AD9361 is held in reset (not initialized, e.g. by m2sdr_rf)");
+    _rfInitDone = do_init;
     if (do_init) {
 
         /* Initialize SI5351 Clocking */
@@ -935,6 +956,28 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         }
     }
 
+    /* Default antennas (also with bypass_init=1, where the RF configuration is left untouched). */
+    for (size_t i = 0; i < 2; i++) {
+        _rx_stream.antenna[i] = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
+        _tx_stream.antenna[i] = _tx_antennas.empty() ? "A" : _tx_antennas[0];
+    }
+
+    if (!do_init) {
+        /* bypass_init=1: start from the rates and LOs the RFIC is already configured with. */
+        uint32_t rx_rate = 0, tx_rate = 0;
+        uint64_t rx_lo = 0, tx_lo = 0;
+        ad9361_get_rx_sampling_freq(ad9361_phy, &rx_rate);
+        ad9361_get_tx_sampling_freq(ad9361_phy, &tx_rate);
+        ad9361_get_rx_lo_freq(ad9361_phy, &rx_lo);
+        ad9361_get_tx_lo_freq(ad9361_phy, &tx_lo);
+        _rx_stream.samplerate = rx_rate;
+        _tx_stream.samplerate = tx_rate;
+        _rx_stream.frequency  = (double)rx_lo;
+        _tx_stream.frequency  = (double)tx_lo;
+        SoapySDR::logf(SOAPY_SDR_INFO, "bypass_init: RX %.6f MSPS @ %.6f MHz, TX %.6f MSPS @ %.6f MHz",
+            rx_rate/1e6, rx_lo/1e6, tx_rate/1e6, tx_lo/1e6);
+    }
+
     if (do_init) {
         /* Configure AD9361 TX/RX FIRs. */
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring AD9361 FIRs");
@@ -945,16 +988,14 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         SoapySDR::log(SOAPY_SDR_INFO, "Applying default RF settings");
 
         /* Common for TX1/TX2 and RX1/RX2 */
-        _rx_stream.samplerate   = 30.72e6;
-        _tx_stream.samplerate   = 30.72e6;
+        _rx_stream.samplerate   = init_samplerate;
+        _tx_stream.samplerate   = init_samplerate;
         _rx_stream.frequency    = 1e6;
         _tx_stream.frequency    = 1e6;
-        _rx_stream.bandwidth    = 30.72e6;
-        _tx_stream.bandwidth    = 30.72e6;
+        _rx_stream.bandwidth    = init_samplerate;
+        _tx_stream.bandwidth    = init_samplerate;
 
         /* TX1/RX1. */
-        _rx_stream.antenna[0]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[0]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[0]  = true;
         _rx_stream.gain[0]      = 0;
         _tx_stream.gain[0]      = 20;
@@ -965,8 +1006,6 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
         channel_configure(SOAPY_SDR_TX, 0);
 
         /* TX2/RX2. */
-        _rx_stream.antenna[1]   = _rx_antennas.empty() ? "A_BALANCED" : _rx_antennas[0];
-        _tx_stream.antenna[1]   = _tx_antennas.empty() ? "A" : _tx_antennas[0];
         _rx_stream.gainMode[1]  = true;
         _rx_stream.gain[1]      = 0;
         _tx_stream.gain[1]      = 20;
@@ -1039,7 +1078,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     spi_unregister_fd(_spi_id);
     if (_rx_stream.opened) {
         stopRxStreamUnlocked();
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev, M2SDR_RX);
         } else if (isLiteEth()) {
             std::free(_rx_stream.buf);
@@ -1050,7 +1089,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
 
     if (_tx_stream.opened) {
         stopTxStreamUnlocked();
-        if (isLitePCIe()) {
+        if (usesLibm2sdrStream()) {
             (void)m2sdr_stream_release(_dev, M2SDR_TX);
         } else if (isLiteEth()) {
             std::free(_tx_stream.buf);
@@ -1060,7 +1099,7 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
     }
     cleanupLiteEthUdpIfIdleUnlocked();
 
-    if (isLiteEth())
+    if (isLiteEth() || isLiteUSB())
         resetDatapathUnlocked();
 
     if (_dev) {
@@ -1068,8 +1107,9 @@ SoapyLiteXM2SDR::~SoapyLiteXM2SDR(void) {
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_MUX_SEL_ADDR,   0);
         litex_m2sdr_writel(_dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 0);
 
-        /* Power-Down AD9361 */
-        litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
+        /* Power-Down AD9361 (left running when attached with bypass_init=1). */
+        if (_rfInitDone)
+            litex_m2sdr_writel(_dev, CSR_AD9361_CONFIG_ADDR, 0b00);
     }
 
     if (_udp_inited) {
@@ -1158,6 +1198,8 @@ std::string SoapyLiteXM2SDR::getHardwareKey(void) const {
         key += "-pcie";
     else if (isLiteEth())
         key += "-eth";
+    else if (isLiteUSB())
+        key += "-usb";
 
     return key;
 }
@@ -1846,6 +1888,23 @@ void SoapyLiteXM2SDR::setSampleRate(
                 "use bitmode=8 or a CS8 stream to reduce DMA bandwidth",
                 rate / 1e6,
                 pcie_capability_to_string(pcie_capability).c_str());
+        }
+    } else if (isLiteUSB() && !_bitModeExplicit) {
+        const bool streams_open = _rx_stream.opened || _tx_stream.opened;
+        const int bit_mode = (rate > LITEUSB_8BIT_THRESHOLD) ? 8 : 16;
+
+        if (_bitMode != bit_mode) {
+            if (streams_open) {
+                SoapySDR::logf(SOAPY_SDR_WARNING,
+                    "USB sample rate %.2f MSPS would use %d-bit sample packing, but streams are "
+                    "already open; pass bitmode=%d or use a matching stream format",
+                    rate / 1e6, bit_mode, bit_mode);
+            } else {
+                _bitMode = bit_mode;
+                SoapySDR::logf(SOAPY_SDR_INFO,
+                    "USB sample rate %.2f MSPS defaults to %d-bit sample packing",
+                    rate / 1e6, bit_mode);
+            }
         }
     } else if (isLitePCIe() && !_bitModeExplicit && rate <= LITEPCIE_8BIT_THRESHOLD) {
         const bool streams_open = _rx_stream.opened || _tx_stream.opened;

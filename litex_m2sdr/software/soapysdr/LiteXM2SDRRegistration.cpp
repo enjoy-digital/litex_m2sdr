@@ -14,6 +14,9 @@
 #include <stdexcept>
 
 #include "LiteXM2SDRDevice.hpp"
+#ifdef USE_LITEUSB
+#include "liteusb.h"
+#endif
 
 #include <SoapySDR/Registry.hpp>
 
@@ -66,6 +69,8 @@ static std::string transportName(enum m2sdr_transport_kind transport)
         return "pcie";
     if (transport == M2SDR_TRANSPORT_KIND_LITEETH)
         return "ethernet";
+    if (transport == M2SDR_TRANSPORT_KIND_LITEUSB)
+        return "usb";
     return "unknown";
 }
 
@@ -194,6 +199,9 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
 
     if (args.count("eth_ip") != 0) {
         attemptToAddDevice(makeEthernetIdentifier(eth_ip, eth_port));
+    } else if (args.count("usb") != 0) {
+        /* usb=<selector>: "" (first), VID:PID, serial=S or path=B-P.P (see m2sdr_open()). */
+        attemptToAddDevice("usb:" + args.at("usb"));
     } else if (args.count("path") != 0) {
         attemptToAddDevice(args.at("path"));
     } else {
@@ -215,6 +223,16 @@ std::vector<SoapySDR::Kwargs> findLiteXM2SDR(
             for (size_t i = 0; i < target_count; i++)
                 attemptToAddDevice(targets[i].identifier);
         }
+
+#ifdef USE_LITEUSB
+        /* USB devices: enumerated locally, disabled with usb_discovery=0. */
+        if (args.count("usb_discovery") == 0 || stringFlagEnabled(args.at("usb_discovery"))) {
+            struct liteusb_device_info usb_infos[8];
+            int n = liteusb_list(0, 0, usb_infos, sizeof(usb_infos) / sizeof(usb_infos[0]));
+            for (int i = 0; i < n; i++)
+                attemptToAddDevice(std::string("usb:path=") + usb_infos[i].path);
+        }
+#endif
     }
     return discovered;
 }

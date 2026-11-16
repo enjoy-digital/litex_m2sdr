@@ -28,7 +28,8 @@ jobs:
             libpng-dev \
             libsoapysdr-dev \
             libsndfile1-dev \
-            libsamplerate0-dev
+            libsamplerate0-dev \
+            libusb-1.0-0-dev
 
       - name: Build Kernel Module
         run: |
@@ -111,6 +112,18 @@ jobs:
             python3 litex_setup.py --config=standard --init --install --user
           popd
 
+      # USB3-PIPE is not part of the LiteX setup: the USB3 tests and the USB3 configuration of
+      # the register appendix need it.
+      - name: Install USB3-PIPE
+        run: |
+          pip install --user git+https://github.com/enjoy-digital/usb3_pipe.git
+
+      # Register appendix of the manual (CSR snapshots and A_registers.md match the gateware).
+      - name: Check Register Appendix
+        run: |
+          python3 doc/manual/tools/csr_doc.py dump --check
+          python3 doc/manual/tools/csr_doc.py generate --check
+
       - name: Tag build with version information
         run: |
           rm -rf build
@@ -125,8 +138,8 @@ jobs:
       - name: Checkout LiteX-WR-NIC (for WR smoke tests)
         run: |
           git clone --depth=1 https://github.com/enjoy-digital/litex_wr_nic.git /tmp/litex_wr_nic
-          # Reusable core, CPU memory/boot, management and MMCM APIs (#72-#77).
-          git -C /tmp/litex_wr_nic fetch --depth=1 origin bac7b7a7af1215f741bbeeb095cac5a01a732b8a
+          # CPU memory/boot, management and application time APIs.
+          git -C /tmp/litex_wr_nic fetch --depth=1 origin 31cfa02e80814f93084de652cfe42a975b14c164
           git -C /tmp/litex_wr_nic checkout --detach FETCH_HEAD
 
       - name: Run White Rabbit integration smoke tests

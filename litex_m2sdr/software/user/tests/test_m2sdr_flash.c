@@ -480,12 +480,12 @@ out:
     return rc;
 }
 
-/* Unknown link speed and M2SDR_FLASH_LEGACY take the generic path, the only
- * one sending WRDI. */
+/* Unknown link speed (3 = reserved; 2 is now 5GBASE-R) and M2SDR_FLASH_LEGACY
+ * take the generic path, the only one sending WRDI. */
 static int test_generic_fallback(void)
 {
     const uint32_t base = 11 * SECTOR, size = PAGE;
-    struct eb_connection *f = fake_new(2);
+    struct eb_connection *f = fake_new(3);
     uint8_t *img = malloc(size);
     int rc = -1;
     int err;

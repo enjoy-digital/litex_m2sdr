@@ -1278,6 +1278,13 @@ static void info(void)
 #else
     bool eth_ptp_rfic_clock_enabled = false;
 #endif
+#ifdef CSR_CAPABILITY_FEATURES_USB3_OFFSET
+    bool usb3_enabled =
+        ((caps.features >> CSR_CAPABILITY_FEATURES_USB3_OFFSET) &
+         ((1 << CSR_CAPABILITY_FEATURES_USB3_SIZE) - 1)) != 0;
+#else
+    bool usb3_enabled = false;
+#endif
 
     {
         int variant = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
@@ -1291,6 +1298,7 @@ static void info(void)
     printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
     printf("  Ethernet       : %s\n", eth_enabled  ? "Yes" : "No");
     printf("  SATA           : %s\n", sata_enabled ? "Yes" : "No");
+    printf("  USB3           : %s\n", usb3_enabled ? "Yes" : "No");
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");
@@ -1316,8 +1324,8 @@ static void info(void)
 
     if (eth_enabled) {
         int eth_speed = (caps.eth_config >> CSR_CAPABILITY_ETH_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_ETH_CONFIG_SPEED_SIZE) - 1);
-        const char *eth_speed_str[] = {"1Gbps", "2.5Gbps"};
-        printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed]);
+        const char *eth_speed_str[] = {"1Gbps", "2.5Gbps", "5Gbps", "Reserved"};
+        printf("  Ethernet Speed : %s\n", eth_speed_str[eth_speed & 0x3]);
         {
             int eth_sfp  = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_ETH_SFP_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_ETH_SFP_SIZE) - 1);
             printf("  Ethernet SFP   : %d\n", eth_sfp);
@@ -4394,6 +4402,7 @@ static bool cmd_is(const char *cmd, const char *name, const char *alias)
 
 int main(int argc, char **argv)
 {
+    m2sdr_cli_handle_version(argc, argv);
     enum {
         OPTION_WATCH = 256,
         OPTION_WATCH_INTERVAL,

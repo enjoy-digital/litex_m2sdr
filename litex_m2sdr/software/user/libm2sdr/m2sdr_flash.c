@@ -343,6 +343,10 @@ static int flash_eb_open(void *conn, struct flash_eb *fe)
     case 1:
         fe->gap = FLASH_EB_GAP_2G5;
         break;
+    case 2:
+        /* 5GBASE-R: at least the 2.5G budget; keep the conservative pacing. */
+        fe->gap = FLASH_EB_GAP_2G5;
+        break;
     default:
         return 0;
     }
@@ -715,6 +719,10 @@ int m2sdr_flash_read_range(void *conn, uint32_t addr, uint8_t *buf, uint32_t siz
         return ok ? 0 : -1;
     }
 #endif
+
+    /* After the FPGA (re)configures, STARTUPE2 ignores the first USRCCLKO cycles, so the first SPI transaction is lost
+     * (here: the first page read back wrong). Spend it on a dummy one, as m2sdr_flash_write does. */
+    flash_read_id(conn, 0);
 
     for (uint32_t off = 0; off < size; off += FLASH_PAGE_SIZE) {
         uint32_t n = size - off < FLASH_PAGE_SIZE ? size - off : FLASH_PAGE_SIZE;

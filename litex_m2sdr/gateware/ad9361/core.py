@@ -155,15 +155,6 @@ class AD9361RFIC(LiteXModule):
                 ("``0b10``", "BFP8 block-floating transport mode."),
             ], description="Sample format.")
         ])
-        # Last stream settings programmed by host software.  These scratch
-        # CSRs let an independent SATA control process describe and size the
-        # stream already configured by GQRX without touching the RFIC.
-        self._active_sample_rate = CSRStorage(32,
-            description="Active host stream sample rate in samples/s.")
-        self._active_rx_frequency_khz = CSRStorage(32,
-            description="Active RX center frequency in kHz.")
-        self._active_bandwidth = CSRStorage(32,
-            description="Active RX bandwidth in Hz.")
 
         # # #
 
@@ -458,23 +449,42 @@ class AD9361RFIC(LiteXModule):
 
     def add_agc(self):
         rx_cdc = self.rx_cdc
+        # One (ia, qa, ib, qb) group per 64 bits: the 128-bit (oversampling) datapath carries two
+        # groups per word and both are observed (still one event per accepted word).
+        def iqs(channel):
+            data = rx_cdc.source.data
+            return [data[64*g + 16*n:64*g + 16*(n + 1)]
+                for g in range(len(data)//64)
+                for n in [2*channel, 2*channel + 1]]
         self.agc_count_rx1_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            iqs = iqs(channel=0),
             threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx1_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[0*16:1*16], rx_cdc.source.data[1*16:2*16]],
+            iqs = iqs(channel=0),
             threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
         self.agc_count_rx2_low = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            iqs = iqs(channel=1),
             threshold_reset = AGC_DEFAULT_LOW_THRESHOLD,
         )
         self.agc_count_rx2_high = AGCSaturationCount(
             ce  = rx_cdc.source.valid & rx_cdc.source.ready,
-            iqs = [rx_cdc.source.data[2*16:3*16], rx_cdc.source.data[3*16:4*16]],
+            iqs = iqs(channel=1),
             threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
+
+    def add_active_settings(self):
+        # Last stream settings programmed by host software. These scratch CSRs let an independent
+        # SATA control process describe and size the stream already configured by GQRX without
+        # touching the RFIC. Added after the PRBS/AGC CSRs: keeps the AD9361 CSR map (and csr.h)
+        # of the previous gateware.
+        self._active_sample_rate = CSRStorage(32,
+            description="Active host stream sample rate in samples/s.")
+        self._active_rx_frequency_khz = CSRStorage(32,
+            description="Active RX center frequency in kHz.")
+        self._active_bandwidth = CSRStorage(32,
+            description="Active RX bandwidth in Hz.")
