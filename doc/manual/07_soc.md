@@ -34,10 +34,6 @@ The gateware is a LiteX SoC without a CPU. The host is the processor: it reads a
 registers of the FPGA through a host bridge and exchanges samples through a host link. The
 [LiteX primer](#litex-primer) introduces these two notions.
 
-The figure below shows the blocks. The top row is the sample path between the host and the
-AD9361. The bottom row holds the blocks that only have registers: the board time, the control of
-the SI5351 clock generator and the board utilities.
-
 ![Blocks of the SoC. The top row carries the samples in both directions; the bottom row is
 reached through the CSR bus only, from a host link or from JTAG. The board time feeds the
 timestamps of the header.](soc_blocks.svg)
@@ -71,8 +67,7 @@ The carriers and their connectors are described in [Carriers](#carriers).
 
 ## Option rules {#soc-rules}
 
-`BaseSoC` checks the options before it builds anything. The rules below are the ones the code
-enforces: the script stops with an error.
+`BaseSoC` checks the options before it builds anything.
 
 | Option                       | Rule                                                              |
 |----------------------------------------------------------------------------|--------------------------------------------------------------------------|
@@ -113,8 +108,8 @@ when it is instantiated from Python without arguments; the script enables it onl
 
 ## Clock domains {#soc-clocks}
 
-The design has few clock domains. The table lists the domains created by
-the clock and reset generator (`CRG`) and by the cores of the sample path. The transceiver clocks
+The clock and reset generator (`CRG`) and the cores of the sample path create the clock
+domains of the design. The transceiver clocks
 of the host links are in [Host links](#host-links).
 
 | Domain        | Source                                | Frequency              | Use                                   |
@@ -151,9 +146,8 @@ blocks.
 
 ## Blocks {#soc-blocks}
 
-The table gives every block that `BaseSoC` instantiates, in the order of the script, with the
-option that enables it and the chapter that describes it. The blocks marked SoC are in the
-sections that follow.
+`BaseSoC` instantiates these blocks, in the order of the script. The blocks marked SoC are in
+the sections that follow.
 
 | Attribute            | Class                     | Enabled by             | Chapter                |
 |--------------------------------------------|--------------------------------------------|-------------------|------------------------------------------|
@@ -190,7 +184,7 @@ the quickest way to check which bitstream a board runs.
 
 Most blocks with registers have a fixed location on the CSR bus. The locations are declared in
 one dictionary at the top of `BaseSoC` (`SoCCore.csr_map`), and a location is a slot of `0x800`
-bytes: the block at location 13 starts at `0x6800`. The table gives the dictionary, which fills
+bytes: the block at location 13 starts at `0x6800`. The dictionary fills
 the locations 0 to 41.
 
 | Location | Block              | Location | Block               |
@@ -265,8 +259,8 @@ variant with Ethernet. Every register that both the build and the header define 
 same address, and the SPI registers of the RFIC must be among them. A change that moves a
 register of these two builds therefore fails the tests.
 
-The test does not cover the other builds. The table gives what an elaboration of each one shows
-against the committed header.
+The test does not cover the other builds. An elaboration of each one gives
+this result against the committed header.
 
 | Build                            | Against the committed header                              |
 |-----------------------------------------------|-----------------------------------------------------------------------------|
@@ -307,7 +301,7 @@ read-only registers holds the build configuration as constants (`Capability`).
 | `capability_sata_config` | SATA generation (bits 1:0), mode (bits 3:2)                        |
 | `capability_board_info`  | Variant (bits 1:0), JTAGBone (bit 2), Ethernet SFP (bit 3), White Rabbit SFP (bit 4), USB3 SFP (bit 5) |
 
-The feature bits are the following.
+`capability_features` has these bits.
 
 | Bit | Field                | Set when                                              |
 |-----------|--------------------------------------------------------|-----------------------------------------------------------------------------------|
@@ -371,8 +365,6 @@ except the fallback image which uses the single-wire mode, and pull the unused p
 
 ## Monitoring and identity {#soc-xadc}
 
-Two small blocks of the FPGA are exposed as they are.
-
 The system monitor reads the die temperature and the supply voltages of the FPGA (`xadc`). The
 registers hold raw 12-bit values that the utilities convert.
 
@@ -406,7 +398,7 @@ The brightest layer wins at each instant. The host link condition only applies t
 bitstream contains, PCIe and Ethernet: a build without any of them is ready as soon as the board
 time runs.
 
-The LED can also be driven by hand for tests, with the three registers below. The script
+The LED can also be driven by hand for tests, with three registers. The script
 `scripts/test_led.py` uses them.
 
 | Register        | Role                                                       |

@@ -20,9 +20,8 @@ what a buffer of samples contains and when it is transmitted.
 
 ## Sample path {#streaming-path}
 
-The samples cross five blocks between a host link and the RFIC core. The figure below shows
-them. The TX stream goes from left to right, the RX stream from right to left, and both are
-LiteX streams on the system clock.
+The samples cross five blocks between a host link and the RFIC core. Both directions
+are LiteX streams on the system clock.
 
 ![Sample path. TX in cyan: the crossbar selects a source, the header block removes the header
 and applies the timed gate, then the loopback and the user hook lead to the RFIC core. RX takes
@@ -100,7 +99,7 @@ conditions.
 > The synchronizer depends on the board time. When the time generator is disabled, no pulse
 > occurs and the PCIe streams never start.
 
-The opposite case exists too. After a write of the board time, the PPS generator emits one pulse
+After a write of the board time, the PPS generator emits one pulse
 per cycle of the system clock until it has caught up with the new time. For a UNIX time this
 lasts about 14 s at 125 MHz, and a stream armed during this period starts at once, not on a
 second.
@@ -116,10 +115,8 @@ channel 0.
 ## Header {#streaming-header}
 
 A stream of samples alone does not tell when a sample was received. The header solves this: it
-is a 16-byte record placed at the start of each buffer, optional in each direction.
-
-The figure below shows a buffer with a header and, as a reminder, the two sample word layouts.
-All values are little-endian.
+is a 16-byte record placed at the start of each buffer, optional in each direction. All values
+are little-endian.
 
 ![Layout of a buffer with a header, and of a sample word in SC16 and SC8. The header takes the
 first 16 bytes; the samples follow in the format of the stream.](stream_header.svg)
@@ -233,7 +230,7 @@ faster or slower by a fraction of a part per million, which is how a discipline 
 
 ### Operations {#streaming-time-ops}
 
-On each cycle of its clock, the time generator does one of the following, by decreasing
+On each cycle of its clock, the time generator does one operation, chosen by decreasing
 priority.
 
 | Priority | Condition               | Effect                                                   |
@@ -296,9 +293,8 @@ the buffer early, and the FPGA holds it until the board time reaches that time.
 
 ### The gate {#streaming-gate}
 
-The gate is part of the TX header extractor. The figure below shows its states for the 64-bit
-datapath. With the 128-bit datapath the sync word and the timestamp arrive in one word and the
-`TIMESTAMP` state does not exist.
+The gate is part of the TX header extractor. With the 128-bit datapath the sync word
+and the timestamp arrive in one word, and the `TIMESTAMP` state of the figure does not exist.
 
 ![States of the TX header extractor. After the header, the gate compares the timestamp with the
 board time and sends the frame, waits for its time, or drops it. The `RESET` and `IDLE` states,
@@ -373,8 +369,8 @@ receives. The RX offset is needed in addition when the timestamps are compared w
 time or between boards.
 
 The TX offset is of the order of a microsecond and depends on the sample rate and on the channel
-configuration. The table below gives the delay measured by the maintainers on one board over a
-cabled loopback, as mean and standard deviation. The values are those of
+configuration. The maintainers measured this delay on one board over a cabled loopback. The
+values are those of
 `litex_m2sdr/software/soapysdr/README.md`. The 122.88 MSPS row belongs to the experimental
 [oversampling mode](#rfic-oversampling).
 
@@ -492,8 +488,8 @@ All these pairs of clocks are declared asynchronous in the timing constraints, s
 ## Loopbacks {#streaming-loopbacks}
 
 A loopback returns the TX samples to the RX path at a chosen point. Looping at successive
-points, from the host towards the antenna, shows which part of the chain fails. The figure
-below places the four loopbacks of the board.
+points, from the host towards the antenna, shows which part of the chain fails. The board
+has four loopbacks.
 
 ![Loopback points, in cyan, from the host to the AD9361. Each one tests everything on its
 left.](stream_loopbacks.svg)
@@ -508,15 +504,15 @@ left.](stream_loopbacks.svg)
 A cable from a TX connector to an RX connector, with an attenuator, is the fifth loopback and
 the only one that includes the RF path.
 
-The stream loopback is a block of this chapter (`TXRXLoopback`). When it is enabled, the TX stream
+When the stream loopback is enabled (`TXRXLoopback`), the TX stream
 of the header block feeds the RX stream of the header block. The RFIC core receives no TX samples,
 and the RX samples of the RFIC are discarded so that the RFIC core is not blocked.
 
 Since it sits on the host side of the user hook, it tests the path without the user processing. It
 works with every host link, including Ethernet, where the DMA loopback does not exist.
 
-The PHY loopback is described in [PHY loopback](#rfic-loopback); it does not exist in the
-oversampling build. The library has one function per loopback, and `m2sdr_reset_datapath()`
+The [PHY loopback](#rfic-loopback) does not exist in the oversampling build. The library has
+one function per loopback, and `m2sdr_reset_datapath()`
 disables them all together with the headers and the PRBS, and returns to SC16. The test procedures are in
 [Debugging](#debugging).
 
@@ -555,7 +551,7 @@ The place of the hook has three consequences:
 
 ### Example {#streaming-hook-example}
 
-The example below inserts a block on the RX path and leaves TX untouched. The register stage
+The example inserts a block on the RX path and leaves TX untouched. The register stage
 stands for the processing.
 
 ```python
@@ -612,7 +608,7 @@ The generic processing blocks, oscillators, mixers and filters, are gathered in 
 
 ## Packets for VRT {#streaming-vrt}
 
-One more block of the gateware works on the RX stream. The VRT streamer of the Ethernet builds
+The VRT streamer of the Ethernet builds
 needs packets of a fixed length, while the RX stream is continuous. `RFICDataPacketizer` cuts the
 stream into packets, 256 words of 32 bits in the SoC, and stores each packet in a FIFO before it
 is sent.

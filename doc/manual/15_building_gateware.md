@@ -1,9 +1,9 @@
 # Building the gateware {#building-gateware}
 
 Most users flash a release image and never build the gateware
-([Flashing a release image](#gs-flash)). This chapter is for the others: it builds a bitstream
-from the sources, loads or flashes it, opens the host bridges, produces the release archives and
-shows where to add processing of your own in the FPGA.
+([Flashing a release image](#gs-flash)). This chapter is for the others: those who build a
+bitstream from the sources, produce the release archives or add processing of their own in the
+FPGA.
 
 ## At a glance {#build-glance}
 
@@ -36,7 +36,6 @@ enabled together, are in [Option rules](#soc-rules).
 
 ## The build flow {#build-flow}
 
-The figure below shows what one run of the script produces and how the result reaches the board.
 The script elaborates the SoC, writes the Verilog and the constraints, and runs Vivado when
 `--build` is given. The register exports are written at every run, with or without Vivado.
 
@@ -52,8 +51,8 @@ of the software headers, reset, load, flash, flash of the two multiboot images, 
 Each action is optional, so `--load` alone loads the bitstream of an earlier build of the same
 configuration.
 
-The files of a build are the following. `<build>` is the build name, for example
-`litex_m2sdr_m2_pcie_x1`; [Build name and timing](#soc-build) gives the naming rule.
+In the files of a build, `<build>` is the build name, for example `litex_m2sdr_m2_pcie_x1`;
+[Build name and timing](#soc-build) gives the naming rule.
 
 | File | Content |
 |------------------------------------------------------------------|----------------------------------|
@@ -73,8 +72,8 @@ bitstream. [Flash and multiboot](#soc-flash) explains the role of each image.
 
 ## Common builds {#build-common}
 
-The commands below are the usual starting points. `--build` runs Vivado and `--load` loads the
-result into the FPGA over JTAG; a loaded bitstream is lost at the next power cycle.
+`--build` runs Vivado and `--load` loads the result into the FPGA over JTAG; a loaded bitstream
+is lost at the next power cycle.
 
 ```sh
 # PCIe, board in an M.2 slot.
@@ -91,8 +90,7 @@ ping 192.168.1.50
 ```
 
 `lspci` lists the board once the PCIe link is up, and `ping` checks the Ethernet build at its
-default address. The table gives the options of the other features and the chapter that
-describes each of them.
+default address. The other features have these options:
 
 | Feature | Options | Chapter |
 |--------------------|----------------------------------------------|----------------------------------|
@@ -115,7 +113,7 @@ The status of each feature is in the [status table](#intro-status). The oversamp
 White Rabbit are Experimental.
 
 The script refuses the combinations that cannot work, with a message that names the options.
-Three of them are worth knowing before choosing a configuration.
+Know these three before choosing a configuration:
 
 - The baseboard has one PCIe lane: `--variant=baseboard` takes `--pcie-lanes=1` only.
 - The oversampling mode is for PCIe alone: not with Ethernet, SATA or USB3.
@@ -288,8 +286,7 @@ The PCIe, Ethernet and USB bridges exist only in the builds that have the host l
 ## Release archives {#build-release}
 
 A release is a set of dated archives, one per release configuration. Each archive holds the
-bitstreams of the configuration, its register exports and a manifest. The figure below shows
-the flow from the build to the board of a user.
+bitstreams of the configuration, its register exports and a manifest.
 
 ![Release flow: release.py builds and checks each configuration, github_release.py publishes the archives, flash_release.py installs one on a board.](build_release.svg)
 
@@ -414,9 +411,8 @@ default implementation connects them straight through, so the stock design is un
 | `tx_source` | From the host | TX stream, after the TX header, the timed TX gate and the loopback |
 | `rfic_sink` | To the RFIC | TX samples of the RFIC |
 
-Three properties make the hook simple to use. The streams carry raw I/Q words and no header: the
-RX timestamps are inserted after the hook, so processed samples are timestamped as usual. The
-streams are in the system clock domain.
+The streams carry raw I/Q words and no header: the RX timestamps are inserted after the hook, so
+processed samples are timestamped as usual. The streams are in the system clock domain.
 
 The digital loopback of the host stays on the host side of the hook, so the loopback tests keep
 exercising the unprocessed path.
@@ -426,7 +422,7 @@ The streams are 64 bits wide, and 128 bits wide in a build with `--with-rfic-ove
 
 ### A subclass {#build-extend-example}
 
-The example below inserts a block on the RX path and leaves TX untouched. The buffer stands for
+This example inserts a block on the RX path and leaves TX untouched. The buffer stands for
 the processing. The script is loaded by its path because the repository also holds a Python
 package named `litex_m2sdr`, which hides the script from a plain `import`.
 
@@ -495,8 +491,7 @@ the board.
 
 ### Adding registers {#build-extend-registers}
 
-A new block usually comes with registers. The steps below keep the software and the gateware in
-step.
+A new block usually comes with registers. To keep the software and the gateware in step:
 
 1. Write the block in `litex_m2sdr/gateware/`, or in the project that subclasses `BaseSoC`.
 2. Instantiate it from the SoC: a module with registers becomes a register bank that has the

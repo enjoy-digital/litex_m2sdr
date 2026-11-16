@@ -8,13 +8,10 @@
 
 # Hardware {#hardware}
 
-This chapter describes the board as an FPGA designer and an integrator see it: the main
-components, the M.2 connector and its pins, the I/O voltages, the clocks, the LED, the JTAG access
-and the thermal constraints. Read it before wiring a PPS signal, designing a carrier or changing a
+This chapter describes the board as an FPGA designer and an integrator see it. Read it before wiring a PPS signal, designing a carrier or changing a
 pin of the gateware.
 
-The gateware and the software of the project are open source. The hardware design of the board is
-not published: this chapter uses the facts of the platform file `litex_m2sdr_platform.py`, of the
+The hardware design of the board is not published: this chapter uses the facts of the platform file `litex_m2sdr_platform.py`, of the
 repository and of the vendor documents kept in `doc/ad9361/` and `doc/si5351/`. Pin and resistor
 references are those of the revision R02 of the board.
 
@@ -33,15 +30,12 @@ references are those of the revision R02 of the board.
 | Timing inputs | One uFL connector for a 10 MHz reference, PPS input on the M.2 connector |
 | Debug | JTAG connector, 2 test points, 1 status LED |
 
-The figure below is the annotated view of the board published with the project. It locates the
-components named in this chapter.
-
-![The LiteX-M2SDR board, revision R02, with its main components and connectors
-annotated.](m2sdr_annotated.png){width=95%}
+![Annotated view of the LiteX-M2SDR board, revision R02, published with the project: its main
+components and connectors.](m2sdr_annotated.png){width=95%}
 
 ## Block diagram {#hw-block}
 
-The figure below shows how the components connect. The FPGA sits between the M.2 connector and the
+The FPGA sits between the M.2 connector and the
 RFIC: every sample crosses it, and every host link is built in it from the four transceiver lanes
 of the connector.
 
@@ -53,8 +47,7 @@ The RFIC exchanges samples with the FPGA over an LVDS data port and is configure
 [The RFIC interface](#rfic) the gateware that drives it.
 
 The clock generator produces the reference clock of the RFIC and two clocks for the FPGA. The
-100 MHz oscillator clocks the FPGA logic. The SPI flash holds the bitstreams. Each of these blocks
-has a section below.
+100 MHz oscillator clocks the FPGA logic. The SPI flash holds the bitstreams.
 
 ## FPGA {#hw-fpga}
 
@@ -71,8 +64,8 @@ The base design uses a fraction of the logic of the FPGA and leaves room for use
 
 ## RFIC interface {#hw-rfic}
 
-The table below lists the signals between the FPGA and the AD9361, as the platform file declares
-them in the `ad9361_rfic` and `ad9361_spi` resources.
+The platform file declares the signals between the FPGA and the AD9361 in the `ad9361_rfic` and
+`ad9361_spi` resources.
 
 | Signals | Count | Direction | Role |
 |------------------------|----------|-----------|------------------------------------------------|
@@ -101,9 +94,8 @@ for such modules and the baseboard described in [Carriers and hosts](#carriers).
 
 ### Transceiver lanes {#hw-m2-lanes}
 
-The connector carries four transceiver lanes and one reference clock. The table below gives the
-M.2 pins and the FPGA pins of each lane, with the names of the `M2` connector of the platform
-file. The FPGA drives the PET pairs and receives the PER pairs.
+The connector carries four transceiver lanes and one reference clock. The names are those of the
+`M2` connector of the platform file. The FPGA drives the PET pairs and receives the PER pairs.
 
 | Lane | PET, M.2 | PET, FPGA | PER, M.2 | PER, FPGA | GTP channel |
 |-----|---------|---------|---------|---------|------------------------------|
@@ -157,8 +149,7 @@ reaches no pin.
 
 ## I/O voltages {#hw-io-voltages}
 
-The board does not use a single I/O voltage. The table below gives the supply of each FPGA bank
-and what the bank connects to.
+The board does not use a single I/O voltage.
 
 | Banks | Voltage | Connected to |
 |------------------|---------|---------------------------------------------------------------|
@@ -169,7 +160,7 @@ These voltages are those of the comment at the top of the platform file. Two mor
 clock generator, `si5351_clk2` and `si5351_clk3`, are declared on the RFIC banks; the SoC does
 not use them.
 
-Every sideband signal of the table above is therefore a 3.3 V signal on the board side. The lanes
+Every sideband signal of the M.2 connector is therefore a 3.3 V signal on the board side. The lanes
 and the reference clock are transceiver signals, not single-ended I/Os. The JTAG and
 configuration pins of the FPGA are 3.3 V too.
 
@@ -210,7 +201,7 @@ The gateware only monitors this input: the board time is not aligned on it.
 ## Clocking {#hw-clocking}
 
 The board has two clock sources of its own, the 100 MHz oscillator and the crystal of the clock
-generator, and one external input. The figure below shows the tree for a board with the SI5351C.
+generator, and one external input.
 
 ![Clocking tree with the SI5351C. The cyan path is the reference clock of the RFIC; the 10 MHz
 of the clock generator comes from the FPGA or, through the FPGA, from the uFL
@@ -330,9 +321,8 @@ to use it.
 The M.2 connector supplies the board; an M.2 Key M socket provides 3.3 V only.
 
 The FPGA and the RFIC are on the same side of the board and both dissipate heat in a small area.
-A heatsink on each of them and some air flow are recommended. The photograph of
-[What the board is](#intro-what) shows a board with its two heatsinks, and the photographs of
-[Carriers and hosts](#carriers) show boards fitted this way on their carriers.
+A heatsink on each of them and some air flow are recommended, as on the boards photographed in
+[What the board is](#intro-what) and [Carriers and hosts](#carriers).
 
 The public issue tracker of the
 repository records that a PCIe Gen2 x1 link runs cooler than a Gen2 x4 link.

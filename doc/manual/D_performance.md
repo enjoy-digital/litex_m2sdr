@@ -6,8 +6,7 @@ measured for the manual. The status of each feature is in the [status table](#in
 
 ## Summary {#perf-summary}
 
-The table gives the headline figures and where each is detailed. The values are given in the
-units of their measurement.
+The values are given in the units of their measurement.
 
 | Subject | Figure | Detailed in |
 |----------------------|-------------------------|-----------------------------------------------------|
@@ -27,9 +26,8 @@ One lane of PCIe Gen2 is enough for the standard 61.44 MSPS 2T2R rate.
 
 ### Oversampling mode {#perf-oversampling}
 
-Experimental ([Status](#intro-status)). The figures below are those of the oversampling mode,
-measured by the maintainers on one board; the conditions are in
-[Measured performance](#rfic-oversampling-performance).
+Experimental ([Status](#intro-status)). Measured by the maintainers on one board; the conditions
+are in [Measured performance](#rfic-oversampling-performance).
 
 | Subject | Figure | Detailed in |
 |----------------------|-------------------------|-----------------------------------------------------|
@@ -47,10 +45,9 @@ connected, measured by the maintainers on the dates given with each run. The dat
 `doc/notes/sata-bandwidth-investigation.md` completes it. The speeds are wall-clock measurements
 of the host utility, unless a command reports its own throughput. The unit is MiB/s.
 
-The figure below shows the three measured paths. The RF path records the RX stream straight to
-the sectors of the SSD. The two host paths copy between the host and the SSD: over PCIe by DMA
-to the host memory, over Ethernet through a staging buffer of the FPGA that Etherbone reads and
-writes.
+Three paths were measured. The RF path records the RX stream straight to the sectors of the
+SSD. The two host paths copy between the host and the SSD: over PCIe by DMA to the host memory,
+over Ethernet through a staging buffer of the FPGA that Etherbone reads and writes.
 
 ![SATA measurement paths: the RX stream to the SSD, and the host to the SSD over PCIe DMA or over Etherbone and the staging buffer.](perf_sata_paths.svg)
 

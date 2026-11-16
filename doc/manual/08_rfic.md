@@ -26,8 +26,7 @@ AD9361 itself is introduced in the [SDR primer](#sdr-primer).
 The RFIC core has one stream in each direction on the SoC side and the LVDS pins on the other
 side. Between them, the samples change format, change clock domain and are serialised.
 
-The figure below shows the stages. The TX stream crosses them from left to right, the RX stream
-from right to left. The stages on the left run on the system clock, the stages on the right on
+The stages on the left of the figure run on the system clock, the stages on the right on
 the clock that the AD9361 sends with its data.
 
 ![Stages of the RFIC core. TX samples enter on the left and reach the AD9361 on the right; RX
@@ -109,7 +108,7 @@ A 12-bit sample does not fit on six pairs, so it is sent in two halves, the uppe
 first. The I half travels on the rising edge of the clock and the Q half on the falling edge.
 One I/Q sample therefore takes two clock cycles.
 
-The figure below shows the two layouts that the PHY supports. In 2R2T mode a word of four cycles
+The PHY supports two layouts. In 2R2T mode a word of four cycles
 carries one sample of each channel, and the frame signal is high during the first channel. In
 1R1T mode the same four cycles carry two successive samples of the single channel, and the frame
 signal toggles every cycle.
@@ -129,7 +128,7 @@ ignores the unused slot.
 
 ## Sample rate and RFIC clock {#rfic-rates}
 
-The frequency of `DATA_CLK` follows from the layout above: a word takes four cycles.
+A word takes four cycles, which sets the frequency of `DATA_CLK`.
 
 | Mode  | Samples per word       | `DATA_CLK` for a sample rate *fs* | `DATA_CLK` at 61.44 MSPS        |
 |-----------------|-------------------------------|-----------------------------------------------|------------------------------------------------------|
@@ -195,7 +194,7 @@ ties away from zero, and the result saturates at 127 instead of wrapping. On TX 
 are zero.
 
 Rounding instead of truncating matters: it removes the offset that truncation adds to the signal
-and gains several decibels of signal to noise ratio, as the comparison below shows.
+and gains several decibels of signal to noise ratio ([Comparison](#rfic-format-loss)).
 
 ### BFP8 {#rfic-bfp8}
 
@@ -207,8 +206,8 @@ samples. The gateware measures the largest magnitude of the block and derives a 
 bits, the exponent, shared by the whole block.
 
 A block is 128 words of 64 bits, 1024 bytes: one header word followed by 127 payload words. A
-payload word carries two groups, so a block covers 254 groups. The header word has the layout
-below.
+payload word carries two groups, so a block covers 254 groups. The header word has these
+fields.
 
 | Bits   | Field          | Value                                             |
 |-------------------------------|-----------------------------------------------|------------------------------------------------------------------------|
@@ -255,7 +254,7 @@ $ python3 scripts/evaluate_sample_formats.py
 | BFP8 | 2.016 | 49.1 | 44.1 | 45.4 | 33.7 | 24.7 | 23.9 | 8.6 | 0.0 |
 ```
 
-The figure below plots the same model. It is regenerated with the `--plot` option of the script.
+The `--plot` option of the script draws the same model.
 
 ![Model of the transport formats: signal to noise ratio against the input level, loss against
 SC16, and bytes per sample. BFP8 follows SC8 near full scale and recovers the resolution of SC16
@@ -286,7 +285,7 @@ The margin protects the transmitter against the jitter of the packets.
 
 The AD9361 is specified up to 61.44 MSPS, with baseband filters limited to about 56 MHz. The
 oversampling mode runs it at sample rates between 61.44 and 122.88 MSPS, with a wider
-analog bandwidth. This section explains how, and what the `--with-rfic-oversampling` build adds.
+analog bandwidth.
 
 ### Principle {#rfic-oversampling-principle}
 
@@ -317,7 +316,7 @@ standard bitstream, with a message, instead of configuring an interface that can
 
 At 983 Mbps per pair, the assumptions of the standard PHY no longer hold. The oversampling PHY
 keeps the same stream interface and the same word layout, and changes the cells at the pins
-(`AD9361OversamplingPHY`). The figure below shows the two directions.
+(`AD9361OversamplingPHY`).
 
 ![Oversampling PHY. TX groups cross a small FIFO to the divided clock of the serialisers; each
 RX pair has its own delay element and an error counter used by the host to align
@@ -429,7 +428,7 @@ Two more limits apply on a PCIe oversampling build.
 ### Bring-up by the host {#rfic-oversampling-bringup}
 
 The gateware provides the adjustments; the library runs the alignment each time it applies a
-configuration above 61.44 MSPS (`m2sdr_apply_config()`). The steps below are in
+configuration above 61.44 MSPS (`m2sdr_apply_config()`). The steps are in
 `litex_m2sdr/software/user/libm2sdr/m2sdr_rf.c`.
 
 1. The library programs the sampling clocks of the AD9361 and enables the wide bandwidth
@@ -470,7 +469,7 @@ that were calibrated for this PHY.
 
 ### Measured performance {#rfic-oversampling-performance}
 
-The values below were measured by the maintainers on one board, in the wide bandwidth
+These values were measured by the maintainers on one board, in the wide bandwidth
 configuration at 122.88 MSPS. They are a record of one setup, not a specification.
 
 The measurement was taken at 3.6 GHz on the internal reference. The error vector magnitude uses a

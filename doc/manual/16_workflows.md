@@ -109,8 +109,8 @@ m2sdr_sigmf --validate --strict capture.sigmf-meta
 m2sdr_check capture.sigmf-meta
 ```
 
-The first command prints the metadata, the second checks it, the third opens the recording in
-a window. Look at the clipping count and the RMS level of the summary to judge the RX gain.
+Look at the clipping count and the RMS level in the summary of `m2sdr_check` to judge the RX
+gain.
 
 ### Replay {#flow-record-tx}
 
@@ -310,7 +310,7 @@ limits are described in [USB3 host link](#links-usb3), and the adapter in
 
 ### Build and reach the board {#flow-usb3-build}
 
-Build and load a bitstream for the baseboard. The first command below builds USB3 alone, on SFP
+Build and load a bitstream for the baseboard. The first command builds USB3 alone, on SFP
 cage 0. The second keeps PCIe x1 next to it and adds the debug registers of the link, which is
 convenient for a bring-up.
 
@@ -396,8 +396,6 @@ With SATA, the board records the RX stream to an SSD and replays it without the 
 sample path. The host only starts and stops the transfers, so the recording rate does not
 depend on the host link. The SATA connector is on the baseboard. The gateware side is described
 in [Host links](#host-links).
-
-The figure below shows the paths used by the commands of `m2sdr_sata`.
 
 ![Paths of the SATA commands. `capture` records the RX stream of the RFIC and `play` replays a
 capture to its TX stream. `serve` replays a capture into the RX path of the host, where an
@@ -506,8 +504,7 @@ m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sigmf-meta
 m2sdr_sata -i 192.168.1.50 export fm_test /tmp/fm_test.sc16 --raw
 ```
 
-The first command writes a SigMF recording, metadata and data; the second writes the samples
-only. The exported recording opens in `m2sdr_check` and plays with `m2sdr_play`.
+The exported SigMF recording opens in `m2sdr_check` and plays with `m2sdr_play`.
 
 ### Import and replay {#flow-sata-replay}
 
@@ -653,7 +650,7 @@ The configuration checks the framing of the TX data port and starts again when t
 on the wrong phase, without any action from the application. An application only asks for
 122.88 MSPS with the 2T2R layout.
 
-Three limits apply to the oversampling build.
+Limits of the oversampling build:
 
 - It is for PCIe alone: the script refuses the option with Ethernet, SATA or USB3. The BFP8
   format does not exist on this build, and the library refuses it there.
@@ -665,9 +662,8 @@ Three limits apply to the oversampling build.
 
 ### Tuning {#flow-wide-tuning}
 
-The environment variables below are tuning and diagnostic controls of the wide bandwidth
-configuration.
-The defaults are the values the mode was measured with.
+These environment variables are tuning and diagnostic controls of the wide bandwidth
+configuration. The defaults are the values the mode was measured with.
 
 | Variable | Controls |
 |---------------------------------------------|--------------------------------------------------|
@@ -852,7 +848,7 @@ m2sdr_util -c 0 info
 m2sdr_util -c 1 info
 ```
 
-The second board is selected in the same way in every layer of the software.
+The second board, in each layer of the software:
 
 - Utilities: `-c 1`.
 - Library: `pcie:/dev/m2sdr1`.
@@ -905,8 +901,8 @@ input is only monitored: it does not set the board time, and the board has no PP
 
 ## Time synchronisation {#flow-time-sync}
 
-This section gives the commands of each synchronisation method. The mechanisms, the accuracy to
-expect and the tuning of the loops are described in [Time synchronisation](#timing).
+The mechanisms, the accuracy to expect and the tuning of the loops are described in
+[Time synchronisation](#timing).
 
 | Goal | Method | Needs |
 |---------------------|----------------|----------------------------------------------------------|
@@ -940,8 +936,8 @@ known carrier and removed with `--refclk-ppm`; see
 
 ### Set the board time from the host {#flow-sync-set}
 
-The script below sets the board time to the time of the host, once, then reads it back for a
-few seconds. The board time then runs from the reference clock of the board.
+This script sets the board time to the time of the host, once, then reads it back for a few
+seconds. The board time then runs from the reference clock of the board.
 
 ```sh
 python3 litex_m2sdr/software/soapysdr/test_time.py --set now --interval 0.2 --duration 5
@@ -993,7 +989,7 @@ WantedBy=multi-user.target
 ### Ethernet PTP {#flow-sync-ptp}
 
 With Ethernet PTP, the board is a PTP slave on its Ethernet link and disciplines its board time
-to the master. The recipe below uses the host as the master, on a direct cable.
+to the master. This recipe uses the host as the master, on a direct cable.
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --with-eth --with-eth-ptp --eth-sfp=0 --build --load
@@ -1092,8 +1088,8 @@ The build, the console of the White Rabbit core and its limits are described in
 [Time synchronisation](#timing). Ethernet cannot be in the same bitstream: the two cores would
 share one PLL channel and its reset, and the script refuses the pair.
 
-The first command below checks that the dependency is found; the second builds a bitstream with
-PCIe and White Rabbit.
+The first command checks that the dependency is found; the second builds a bitstream with PCIe
+and White Rabbit.
 
 ```sh
 ./litex_m2sdr.py --variant=baseboard --wr-status

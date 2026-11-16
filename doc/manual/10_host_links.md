@@ -28,11 +28,12 @@ FPGA. In the M.2 slot of a host they are PCIe lanes. On the LiteX Acorn Baseboar
 lanes reach two SFP cages, a SATA connector and one PCIe lane, so each lane can run another
 protocol.
 
-The figure below shows three links of the gateware. Each link core ends on one port of the
+Each link core ends on one port of the
 stream crossbar, which selects where the TX stream comes from and where the RX stream goes. The
 crossbar and the streams behind it are described in [Streaming](#streaming).
 
-The USB3 host link is the fourth one. It takes an SFP cage in place of Ethernet and ends on
+The figure has three of the four links. The USB3 host link takes an SFP cage in place of
+Ethernet and ends on
 port 3 of the crossbar; [USB3 host link](#links-usb3) has its own figure.
 
 ![The links of the gateware. Look at the crossbar ports: port 0 is PCIe, port 1 is Ethernet and
@@ -87,7 +88,7 @@ reference comes from the tunable MMCM instead. The USB3 setting gives a PLL freq
 2.5 GHz for the 5 Gbps line rate, which the same test checks.
 
 White Rabbit uses the Ethernet channel, with the 1000BASE-X settings: for the QPLL,
-`--with-white-rabbit` counts as Ethernet. The table below lists what can share a bitstream.
+`--with-white-rabbit` counts as Ethernet.
 
 | Combination | Result |
 |----------------------------------------------|------------------------------------------------------|
@@ -567,13 +568,13 @@ the adapter in [SFP to USB3 adapter](#carriers-usb3).
 | Line clock | Channel `usb3` of the shared QPLL |
 | System clock | 125 MHz, required |
 
-The figure below shows the link. The transceiver and the PHY train the link, the device core
+The transceiver and the PHY train the link, the device core
 answers the host, and three blocks connect the endpoints to the SoC.
 
 ![The USB3 host link. The device core has three endpoints: EP0 gives access to the SoC bus, and
 the two Bulk endpoints (cyan) carry the sample streams.](link_usb3.svg)
 
-The module of the link assembles the parts of the table below (`USB3`).
+The module of the link assembles these parts (`USB3`).
 
 | Part | Role |
 |-----------------------------|-----------------------------------------------------------------------|
@@ -677,8 +678,8 @@ second at most each, before it clears `tx_enable`.
 
 ### Sample rates {#links-usb3-rates}
 
-The script takes about 440 MB/s as the capacity of the link. The table gives the rate of the samples in each direction for
-the 2T2R configurations.
+The script takes about 440 MB/s as the capacity of the link. The rates of the samples
+are per direction, for the 2T2R configurations.
 
 | Configuration | Samples | On USB3 |
 |-------------------------------------------|------------------|---------------------------------|
@@ -735,7 +736,7 @@ They need no FPGA tool and no board.
 | `test_soc_eth_sata.py` | Elaboration of the SATA SoC with Ethernet and with PCIe |
 | `test_soc_white_rabbit.py` | Elaboration with White Rabbit (needs LiteX-WR-NIC) |
 
-The capture below runs the tests of both chapters. `PYTHONPATH` points to a checkout of
+The capture runs the tests of both chapters. `PYTHONPATH` points to a checkout of
 LiteX-WR-NIC at the commit that the continuous integration of the repository uses; without it
 the White Rabbit tests are skipped, or fail with an older checkout.
 

@@ -167,8 +167,6 @@ The probe options are mutually exclusive: a build holds one LiteScope analyzer a
 
 ## Other tools {#opt-others}
 
-The options of the other scripts are given where the scripts are described.
-
 | Tool | Options in |
 |------------------------------------------------------|----------------------------------------------|
 | `release.py` | [Release archives](#build-release): `--nobuild` |

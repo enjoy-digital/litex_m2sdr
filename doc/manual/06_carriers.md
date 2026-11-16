@@ -1,8 +1,7 @@
 # Carriers and hosts {#carriers}
 
-The board is an M.2 module: what it can do depends on what it is plugged into. This chapter lists
-the carriers, what each one connects to the four transceiver lanes, and the hosts the project is
-used with. Read it to choose a setup; the commands are in [Getting started](#getting-started).
+The board is an M.2 module: what it can do depends on what it is plugged into. Read this
+chapter to choose a setup; the commands are in [Getting started](#getting-started).
 
 ## At a glance {#carriers-glance}
 
@@ -19,9 +18,6 @@ before moving the board. [Flashing a release image](#gs-flash) lists the release
 variant.
 
 ## The four lanes {#carriers-lanes}
-
-The figure below shows where each transceiver lane goes. In an M.2 slot the four lanes face the
-PCIe port of the host. On the baseboard each lane goes to a different connector.
 
 ![Use of the four transceiver lanes. In the M.2 slot of a host they form one PCIe link; on the
 baseboard each lane reaches its own connector.](carrier_lanes.svg)
@@ -63,8 +59,6 @@ Two limits come with a plain M.2 slot:
 A slot of 80 mm takes the board directly. Secure it with the screw of the slot: the RF cables pull
 on the module.
 
-The photograph below shows such a setup, a mini PC with the board in its M.2 slot.
-
 ![A mini PC with the board in its M.2 slot. Look at the back of the case: it carries SMA
 connectors, two of them with an antenna.](m2sdr_mini_pc.jpg){width=55%}
 
@@ -73,9 +67,9 @@ enclosure with a Thunderbolt port. This setup is not part of the [status table](
 
 ## Several boards on an M.2 carrier card {#carriers-multi}
 
-A PCIe card with several M.2 slots takes several boards in one PC. The photograph below shows four
-boards on an ASUS Hyper M.2 x16 Gen 4 card: eight transmit and eight receive channels in one PCIe
-x16 slot.
+A PCIe card with several M.2 slots takes several boards in one PC: four boards on
+an ASUS Hyper M.2 x16 Gen 4 card give eight transmit and eight receive channels in one PCIe x16
+slot.
 
 ![Four LiteX-M2SDR boards on an ASUS Hyper M.2 x16 Gen 4 card. Each board carries a heatsink on
 its FPGA and on its RFIC.](m2sdr_hyper_m2_8t8r.png){width=55%}
@@ -157,8 +151,8 @@ and their rates, and [Workflows](#workflows) the setup of each module.
 | 2500BASE-X | LianGuo LG 2.5GE, copper | SFP0 (J3), JP1 and JP4 fitted |
 | 5GBASE-R | H!Fiber ASF-10G-T80, copper | Switched to a 5GBASE-R host side |
 
-The I2C bus of the SFP modules is a separate matter. The baseboard connects it to the SMBus pins
-of the M.2 socket through a level shifter, behind four jumpers.
+The baseboard connects the I2C bus of the SFP modules to the SMBus pins of the M.2 socket through
+a level shifter, behind four jumpers.
 
 | Jumpers | Effect |
 |------------|------------------------------------------------|
@@ -212,8 +206,8 @@ A baseboard with integrated Power over Ethernet is an upcoming carrier.
 
 ## Which feature needs which carrier {#carriers-features}
 
-The carrier decides three groups of features. The [status table](#intro-status) gives the
-carrier, the build option and the maturity of each feature, one by one.
+The [status table](#intro-status) gives the carrier, the build option and the maturity of each
+feature.
 
 | Needs | Features |
 |-----------------------------|-----------------------------------------------------------------|
@@ -225,9 +219,8 @@ carrier, the build option and the maturity of each feature, one by one.
 
 ## Hosts {#carriers-hosts}
 
-The reference host is a PC with Linux. The project is also used on three single-board computers.
-The table below gives the hardware side; the software steps of each one are in
-[Platform guides](#gs-platforms).
+The reference host is a PC with Linux. The project is also used on three single-board computers;
+the software steps of each one are in [Platform guides](#gs-platforms).
 
 | Host | M.2 connection | Notes |
 |------------------------|-------------------------------------|---------------------------------------|

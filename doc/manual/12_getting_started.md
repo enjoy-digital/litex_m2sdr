@@ -8,13 +8,8 @@
 
 # Getting started {#getting-started}
 
-This chapter takes you from a fresh Linux host to a board that receives and transmits samples. It
-installs the software, checks the board, tunes the host, runs a first capture and opens the board
-from a SoapySDR application. It ends with the guides of three single-board computers and with the
-procedure to flash a release image.
-
-The figure below shows the path. Each step gives the command, what you should see, and what to
-check when you do not.
+This chapter takes you from a fresh Linux host to a board that receives and transmits samples.
+Each step gives the command, what you should see, and what to check when you do not.
 
 ![The getting started path. The three cyan steps use the utilities of the
 project.](start_path.svg)
@@ -38,7 +33,7 @@ sudo apt install build-essential cmake git \
   libsndfile1-dev libsamplerate0-dev libpng-dev
 ```
 
-Not every package is needed for every use. The table below tells what each group is for.
+Not every package is needed for every use:
 
 | Packages | Needed for |
 |-------------------------------------------|---------------------------------------------|
@@ -180,8 +175,7 @@ cd user
 ./m2sdr_util info
 ```
 
-**What you should see.** The command prints five blocks, listed below. Every value must be
-plausible.
+**What you should see.** The command prints five blocks. Every value must be plausible.
 
 | Block | Content | What to check |
 |--------------|-------------------------------------------|---------------------------------------|
@@ -288,7 +282,7 @@ address of an Ethernet board. With several boards in one PC, each board has its 
 
 ### Driver debug messages {#gs-driver-debug}
 
-The kernel driver has dynamic debug messages, off by default. This enables them:
+The kernel driver has dynamic debug messages, off by default. Enable them:
 
 ```sh
 sudo sh -c "echo 'module m2sdr +p' > /sys/kernel/debug/dynamic_debug/control"
@@ -378,8 +372,8 @@ own, use the Soapy source and sink blocks with the device arguments of
 **What you should see.** A spectrum that follows the tuned frequency, and audio on an FM
 broadcast station.
 
-**If not.** Buffers of zeros point to the kernel driver, as [Kernel driver and
-IOMMU](#gs-iommu) explains. Overflows at high sample rates point to the
+**If not.** Buffers of zeros point to the kernel driver ([Kernel driver and
+IOMMU](#gs-iommu)). Overflows at high sample rates point to the
 [CPU frequency governor](#gs-governor). [SDR frameworks](#frameworks) describes the driver, its
 device arguments and the other applications.
 
@@ -436,7 +430,7 @@ The steps 4 and 5 then apply with the USB3 device arguments.
 
 ## Platform guides {#gs-platforms}
 
-The three guides below give what differs from a PC. The steps 2 to 5 are the same on every host.
+The guides give what differs from a PC. The steps 2 to 5 are the same on every host.
 
 ### Raspberry Pi 5 {#gs-rpi5}
 
@@ -524,9 +518,6 @@ user/m2sdr_util info
 user/m2sdr_rf
 ```
 
-The FM receiver flowgraph of [Step 5](#gs-soapy) is a good end-to-end receive test on this host
-too.
-
 When the board enumerates and DMA streaming gives no samples, rebuild the kernel driver from the
 same source tree first, as [Kernel driver and IOMMU](#gs-iommu) explains. With an older driver,
 `iommu.passthrough=1` on the kernel command line is the workaround. Do not use
@@ -535,7 +526,7 @@ same source tree first, as [Kernel driver and IOMMU](#gs-iommu) explains. With a
 ### Orange Pi 5 Max {#gs-opi5max}
 
 The Orange Pi 5 Max has an M.2 slot on board. The guide uses an Ubuntu 24.04 server image for
-this computer, from the community project `ubuntu-rockchip`. The file below is part of its
+this computer, from the community project `ubuntu-rockchip`. The image is part of its
 release v2.3.1; download it from the Releases page of that project.
 
 **Prepare the SD card.** Use a fast card of 64 GB or more. Find its drive with `sudo fdisk -l`,

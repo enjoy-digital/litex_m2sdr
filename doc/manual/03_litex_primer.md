@@ -1,9 +1,8 @@
 # LiteX in a nutshell {#litex-primer}
 
-This chapter introduces the LiteX infrastructure that the gateware reuses. It gives the
-vocabulary of a LiteX design (SoC, registers, streams, host bridges), then presents each core in
-a few paragraphs: what it does, how the board uses it, and where its own manual is. A reader who
-already builds LiteX designs can skip to [The SoC](#soc).
+This chapter introduces the LiteX infrastructure that the gateware reuses: the vocabulary of a
+LiteX design, then each core in a few paragraphs. A reader who already builds LiteX designs can
+skip to [The SoC](#soc).
 
 ## At a glance {#litex-glance}
 
@@ -31,13 +30,13 @@ for the host software, so gateware and software stay aligned.
 
 A LiteX design is organised as a system on chip (SoC): a bus, peripherals with registers, and
 usually a soft CPU. The board uses the variant without CPU (`SoCMini`). The host computer plays
-the role of the CPU, through the host bridges described below.
+the role of the CPU, through host bridges.
 
 ## Bus and registers {#litex-soc}
 
 Each core exposes its controls and its status as registers. LiteX places them on a register bus
 and gives every core a slot in the address map. A main bus, of the Wishbone type, connects the
-bus masters to the register bus and to the memories. The figure below shows the structure.
+bus masters to the register bus and to the memories.
 
 ![A LiteX SoC without CPU. The host reaches the bus through a bridge. The bus gives access to
 the registers of every core.](litex_soc.svg)
@@ -55,7 +54,7 @@ registers.
 
 Data moves between cores on *streams*. A stream is a one-way channel with a handshake: the
 source says that its data is valid, the sink says that it is ready. A word is transferred on
-each clock cycle where both are true. The figure below shows the signals.
+each clock cycle where both are true.
 
 ![A LiteX stream. The source drives valid and the data; the sink drives ready. The last signal
 marks the end of a packet.](litex_stream.svg)
@@ -94,7 +93,7 @@ writes registers. [Debugging](#debugging) shows the bridges in use.
 
 LitePCIe is the PCIe core of LiteX. It wraps the PCIe block of the FPGA and gives a design two
 services: access to the registers, and DMA channels that move streams to and from the memory of
-the host. The figure below shows them.
+the host.
 
 ![LitePCIe. The memory-mapped path (MMAP) serves the registers. The DMA writer sends the receive
 stream to host memory; the DMA reader fetches the transmit stream from it.](litex_pcie.svg)
@@ -157,7 +156,7 @@ and deserialises data at several gigabits per second, and needs a clean high-fre
 from a PLL.
 
 In the Artix-7, transceivers are grouped by four in a *quad*, and the quad has two PLLs for its
-four transceivers. The figure below shows this structure.
+four transceivers.
 
 ![The PLLs of a transceiver quad. Each of the two PLLs has its own reference clock. Each
 transceiver takes its clock from one of the two.](litex_qpll.svg)

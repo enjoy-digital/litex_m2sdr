@@ -1,6 +1,6 @@
 # Glossary {#glossary}
 
-The terms below are used throughout the manual. The three primers explain them in context:
+The three primers explain these terms in context:
 [SDR in a nutshell](#sdr-primer), [LiteX in a nutshell](#litex-primer) and
 [Time in a nutshell](#timing-primer).
 

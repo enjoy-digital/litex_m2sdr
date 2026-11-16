@@ -1,9 +1,7 @@
 # Time in a nutshell {#timing-primer}
 
 This chapter explains why a radio cares about time and frequency, and how a reference reaches a
-board. It introduces the reference clock, the 10 MHz and PPS signals, timestamps, and the three
-network mechanisms the board supports: PCIe PTM, IEEE 1588 PTP and White Rabbit. The
-implementation on the board is in [Time synchronisation](#timing).
+board. The implementation on the board is in [Time synchronisation](#timing).
 
 ## Why time matters {#timingp-why}
 
@@ -34,16 +32,14 @@ radios work together, or a radio follows a network schedule, they need a common 
 
 ## One reference clock {#timingp-reference}
 
-Everything that has a frequency in an SDR derives from one reference clock. The figure below
-shows the three things it feeds.
+Everything that has a frequency in an SDR derives from one reference clock.
 
 ![The reference clock of a radio. The sample clock, the local oscillators and the time counter
 all derive from it. An error of the reference appears in all three.](timingp_reference.svg)
 
-This has a practical consequence. Locking the reference clock of a board to an external source
-corrects the carrier, the sample rate and the pace of the board time at once.
+Locking the reference clock of a board to an external source corrects the carrier, the sample rate and the pace of the board time at once.
 
-Two words describe what can be shared. Two clocks are *syntonised* when they have the same
+Two clocks are *syntonised* when they have the same
 frequency: they tick at the same pace. They are *synchronised* when they also agree on the
 time: they show the same value at the same instant. Frequency alone is enough for some uses;
 others need both.
@@ -82,8 +78,7 @@ A *board time* is a counter in the FPGA that counts time in a fixed unit. On the
 64-bit count of nanoseconds. It advances with the clock of the clock generator, by an increment
 that has a fractional part, so its pace can be adjusted finely.
 
-A *timestamp* is the value of the board time attached to a buffer of samples. The figure below
-shows its two uses.
+A *timestamp* is the value of the board time attached to a buffer of samples.
 
 ![Timestamps. Each receive buffer carries the board time of its first sample. A transmit buffer
 with a timestamp is held by the FPGA and released when the board time reaches
@@ -119,7 +114,7 @@ this is *holdover*.
 
 A pulse on a cable is simple, but it needs a dedicated cable and it ignores the delay of that
 cable. Network mechanisms send the time in messages instead, and measure the delay of the path.
-PTM, PTP and White Rabbit all rely on the same exchange, shown in the figure below.
+PTM, PTP and White Rabbit all rely on the same exchange.
 
 ![Two-way time transfer in PTP terms. The master timestamps the departure of Sync (t1) and the
 arrival of Delay_Req (t4). The slave timestamps the arrival of Sync (t2) and the departure of
@@ -200,9 +195,6 @@ kept apart from the board time that stamps the samples (see [Time synchronisatio
 
 ## The mechanisms compared {#timingp-compare}
 
-The figure below places the four mechanisms side by side, and the table summarises what each of
-them brings.
-
 ![Four ways to bring a reference to the board. PCIe PTM and Ethernet PTP end at the board time.
 The 10 MHz reference, Ethernet PTP as an option and White Rabbit end at the reference clock.
 The PPS input is monitored only and is not drawn.](timingp_sources.svg)
@@ -214,9 +206,7 @@ The PPS input is monitored only and is not drawn.](timingp_sources.svg)
 | Ethernet PTP | The Ethernet link | Time, and frequency as an option | The baseboard; a PTP master on the network |
 | White Rabbit | Optical fibre | Time and frequency | The baseboard; White Rabbit equipment |
 
-The mechanisms differ in build options and in what they are validated for. The
-[status table](#intro-status) gives their state, and [Time synchronisation](#timing) describes
-each of them on the board: its gateware, its registers and its limits.
+The [status table](#intro-status) gives the state of each mechanism.
 
 ## Where to go next {#timingp-next}
 

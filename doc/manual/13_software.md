@@ -1,12 +1,11 @@
 # Host software {#software}
 
-This chapter describes the software that runs on the host: the kernel driver, the library, the
-utilities and the helper scripts. It gives the overall picture: which layer does what, which
-utility to use for which task and the main options. The SoapySDR driver has its own chapter,
-[SDR frameworks](#frameworks).
+The host software is the kernel driver, the library, the utilities and the helper scripts. This
+chapter says which layer does what and which utility to use for which task, with the main
+options. The SoapySDR driver has its own chapter, [SDR frameworks](#frameworks).
 
 Each part keeps a reference page in the repository, with every option and more examples. The
-sections below name these files; open them when an option is not described here.
+sections name these files; open them when an option is not described here.
 
 ## At a glance {#sw-glance}
 
@@ -28,10 +27,9 @@ All the software lives in `litex_m2sdr/software/`. Building and installing it is
 
 ## Layers {#sw-layers}
 
-The software is layered, as the figure below shows. The library is the single entry point to
-the board (`libm2sdr`). The utilities and the SoapySDR driver are built on it, and so is any C
-application. A feature added to the library is therefore available to the utilities and to
-SoapySDR applications at the same time.
+The library is the single entry point to the board (`libm2sdr`). The utilities and the SoapySDR
+driver are built on it, and so is any C application. A feature added to the library is therefore
+available to the utilities and to SoapySDR applications at the same time.
 
 ![Host software layers, drawn for PCIe and Ethernet. Everything goes through the library, which
 selects the backend when the device is opened. Follow the cyan arrows: registers and DMA through
@@ -75,8 +73,8 @@ The `usb:` forms need a library built with the USB3 backend ([USB3 helper](#sw-l
 vendor and product of the second form are in hexadecimal; `1d50:605a` are the defaults of the
 gateware.
 
-The command below lists the boards the host can reach: the PCIe boards, the default Ethernet
-address and the USB3 boards, each with the identifier that opens it.
+List the boards the host can reach, each with the identifier that opens it: the PCIe boards, the
+default Ethernet address and the USB3 boards.
 
 ```sh
 m2sdr_util list
@@ -274,8 +272,7 @@ configured.
 
 ### Functions by group {#sw-lib-groups}
 
-The list below gives the main functions of each group, without the `m2sdr_` prefix that they
-all carry.
+The main functions of each group, without the `m2sdr_` prefix that they all carry:
 
 - Device: `open`, `close`, `get_device_list`, `get_device_info`.
 - Capabilities: `get_capabilities`, `get_transport`.
@@ -414,7 +411,7 @@ git submodule update --init --recursive litex_m2sdr/software/user/cimgui
 ### m2sdr_util: board information and tests {#sw-util}
 
 `m2sdr_util` is the first utility to run on a new setup and the main diagnostic tool. Its
-commands are grouped below.
+commands, by group:
 
 - Device: `list`, `info`, `reg-read`, `reg-write`.
 - Tests: `scratch-test`, `clk-test`, `dma-test`, `vcxo-test`, `si5351-ppm-test`.

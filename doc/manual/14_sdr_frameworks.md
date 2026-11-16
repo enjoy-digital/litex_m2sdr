@@ -1,8 +1,8 @@
 # SDR frameworks {#frameworks}
 
-This chapter describes how the board is used from SDR applications: the SoapySDR driver, the
-GNU Radio examples, GQRX, srsRAN and the SigMF recording format. Read it to connect an existing
-application to the board, or to write one with the SoapySDR API in C++ or Python.
+Read this chapter to connect an existing SDR application to the board, or to write one with the
+SoapySDR API in C++ or Python. It covers the SoapySDR driver, the GNU Radio examples, GQRX,
+srsRAN and the SigMF recording format.
 
 ## At a glance {#fw-glance}
 
@@ -30,10 +30,9 @@ SoapySDR is a vendor-neutral SDR library: an application written for its API wor
 radio that has a driver module. The project provides such a module. With it, GQRX, GNU Radio,
 srsRAN and any other SoapySDR application use the board without specific code.
 
-The module is built on the library, as the figure below shows. The device arguments select the
-board and the host link. Settings go to the RFIC and to the registers; samples go through the
-DMA of the kernel driver over PCIe, through UDP over Ethernet, or through the Bulk endpoints
-over USB3.
+The module is built on the library. The device arguments select the board and the host link.
+Settings go to the RFIC and to the registers; samples go through the DMA of the kernel driver
+over PCIe, through UDP over Ethernet, or through the Bulk endpoints over USB3.
 
 ![The SoapySDR module. Applications configure the board and exchange samples through the
 SoapySDR API. Follow the cyan arrow for the samples: the module converts them to the format of
@@ -45,8 +44,8 @@ The module is built and installed by `build.py` with the rest of the software; s
 
 ### Finding and probing a board {#fw-find}
 
-`SoapySDRUtil` comes with SoapySDR. The first command below lists the boards the module finds;
-the second opens one and prints its channels, ranges, gains, sensors and settings.
+`SoapySDRUtil` comes with SoapySDR. `--find` lists the boards the module finds; `--probe` opens
+one and prints its channels, ranges, gains, sensors and settings.
 
 ```sh
 SoapySDRUtil --find="driver=LiteXM2SDR"
@@ -91,7 +90,7 @@ ends with `-usb`.
 
 ### Device arguments {#fw-args}
 
-The device arguments below set the behaviour of the driver when the board is opened. All are
+These device arguments set the behaviour of the driver when the board is opened. All are
 optional.
 
 | Argument | Values | Effect |
@@ -118,8 +117,6 @@ optional.
 The defaults are the 16-bit format, the internal reference, manual RX gain, no automatic
 bandwidth, raw UDP over Ethernet, paced Ethernet TX, RX timestamp headers on, and the `auto`
 timed TX mode.
-
-Some arguments deserve a comment.
 
 - `bitmode`: above 61.44 MSPS, a PCIe x1 board uses the 8-bit format by default to halve the
   DMA rate, while x2 and x4 boards keep 16 bits. A USB3 board uses the 8-bit format above
@@ -314,11 +311,10 @@ SigMF tools.
 The recordings use the SigMF data types `ci16_le` for SC16 and `ci8` for SC8. A file name given
 to a utility can be the data file, the metadata file or the base name.
 
-Two points are specific to the board. A recording made with the timestamp headers kept in the
-data declares them with the SigMF field `core:header_bytes`, set to 16; `m2sdr_play` then
-restores the timestamps on TX. Recordings exported from the SATA storage carry fields prefixed
-by `m2sdr:` that locate the capture on the drive. The recipe is in
-[Record and replay](#flow-record).
+A recording made with the timestamp headers kept in the data declares them with the SigMF field
+`core:header_bytes`, set to 16; `m2sdr_play` then restores the timestamps on TX. Recordings
+exported from the SATA storage carry fields prefixed by `m2sdr:` that locate the capture on the
+drive. The recipe is in [Record and replay](#flow-record).
 
 ## Where to go next {#fw-next}
 

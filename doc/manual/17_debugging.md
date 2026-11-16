@@ -1,8 +1,7 @@
 # Debugging {#debugging}
 
 This chapter explains how to find why a board does not answer, does not stream or streams wrong
-samples. It gives the method, the access paths to a running board, the checks for each layer,
-then the tests of the repository. Read it before working on hardware.
+samples. Read it before working on hardware.
 
 The generic method for a LiteX design is on the LiteX wiki page
 [Debug a SoC on hardware](https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware).
@@ -25,8 +24,7 @@ This chapter follows it and adds the commands of the LiteX-M2SDR.
 ## Method {#debug-method}
 
 The approach is to observe before capturing. The checks are ordered from the cheapest to the
-most expensive, as the figure below shows, and each step is taken only when the previous one
-gave a coherent answer.
+most expensive, and each step is taken only when the previous one gave a coherent answer.
 
 ![Debug steps, from the cheapest check to the most expensive one.](debug_steps.svg)
 
@@ -41,9 +39,8 @@ gave a coherent answer.
 5. Read the generated Verilog and the timing report when the symptom depends on an address, a
    width, a reset or a clock domain.
 
-Two more rules close the loop. Turn the finding into a test, so that it cannot come back
-([Tests](#debug-tests)). Write the result down with what makes it reproducible
-([Reporting a result](#debug-report)).
+Turn the finding into a test, so that it cannot come back ([Tests](#debug-tests)). Write the
+result down with what makes it reproducible ([Reporting a result](#debug-report)).
 
 Start from the state of the tree, not from assumptions:
 
@@ -71,10 +68,10 @@ against the headers of another build reads the wrong registers
 
 ## Access to a running board {#debug-access}
 
-There are two ways to reach the registers of a running board, shown in the figure below. The
-utilities of the project go through the library, over PCIe, Ethernet or USB3. The LiteX host
-tools go through `litex_server`, which opens one of the host bridges: the three of the figure,
-or the USB bridge of a USB3 build ([Host bridges](#build-bridges)).
+There are two ways to reach the registers of a running board. The utilities of the project go
+through the library, over PCIe, Ethernet or USB3. The LiteX host tools go through
+`litex_server`, which opens one of the host bridges: the three of the figure, or the USB bridge
+of a USB3 build ([Host bridges](#build-bridges)).
 
 ![Debug access: the utilities use the library; the LiteX tools use litex_server over PCIe, Etherbone or JTAGBone.](debug_access.svg)
 
@@ -275,8 +272,8 @@ make m2sdr_util
     ad9361-loopback-test
 ```
 
-A healthy run prints a compact progress line and ends with `PASS`. The output below is a
-reference run, measured by the maintainers.
+A healthy run prints a compact progress line and ends with `PASS`, as in this reference run
+measured by the maintainers.
 
 ```text
 [> FPGA PHY loopback test:
@@ -572,8 +569,7 @@ frequencies in MHz: system clock, PCIe clock, AD9361 reference clock, AD9361 dat
 time reference clock and FPGA 10 MHz clock. A clock at 0 MHz is missing. `test_dashboard.py`
 needs the Dear PyGui Python package.
 
-The other tools of `scripts/` test complete functions on hardware. They are listed here and
-described with the function they test.
+The other tools of `scripts/` test complete functions on hardware.
 
 | Tool | Tests | Described in |
 |--------------------------------------------------|------------------|--------------------------------|
@@ -621,7 +617,7 @@ make -C litex_m2sdr/software/kernel clean all
 ### The pytest suite {#debug-tests-pytest}
 
 `pytest.ini` sets `test/` as the test directory. The suite needs LiteX and its cores, no
-simulator other than the Migen one and no toolchain. The tests fall into four groups.
+simulator other than the Migen one and no toolchain.
 
 | Group | Files in `test/` | What they check |
 |----------------|-------------------------------------------------------------|-----------------------|
@@ -637,8 +633,8 @@ without Vivado. They are the tests to extend when an option or a register is add
 is not installed.
 
 The White Rabbit tests need the `litex_wr_nic` package. They are skipped when it is absent, and
-they expect the revision the continuous integration pins in `.github/workflows/ci.yml`. The run
-below used a checkout of that revision; `<litex_wr_nic>` is its directory.
+they expect the revision the continuous integration pins in `.github/workflows/ci.yml`. This
+run used a checkout of that revision; `<litex_wr_nic>` is its directory.
 
 ```console
 $ PYTHONPATH=<litex_wr_nic> python3 -m pytest -v test

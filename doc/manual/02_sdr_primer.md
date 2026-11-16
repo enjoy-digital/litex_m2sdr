@@ -1,9 +1,8 @@
 # SDR in a nutshell {#sdr-primer}
 
 This chapter explains software-defined radio to an FPGA engineer who has never used one. It
-follows a signal from the antenna to the samples a host receives: the I/Q representation, the
-sample rate, the direct conversion transceiver, the chain of the AD9361 and its data port. It
-ends with the part the FPGA plays.
+follows a signal from the antenna to the samples a host receives, and ends with the part the
+FPGA plays.
 
 The reference documents of the AD9361 are in `doc/ad9361/`: the AD9361 data sheet, the AD9361
 Reference Manual (UG-570) and the AD9361 Register Map Reference Manual (UG-671).
@@ -36,8 +35,7 @@ I and Q are the two coordinates of a point in a plane. The distance of the point
 is the amplitude of the signal; its angle is the phase. Together they form one complex number,
 I + jQ, and a stream of them is the *complex baseband* signal.
 
-This representation has a useful property. A tone above the carrier turns the point one way, a
-tone below turns it the other way. Positive and negative frequencies are distinct, so a stream of
+A tone above the carrier turns the point one way, a tone below turns it the other way. Positive and negative frequencies are distinct, so a stream of
 complex samples at a rate Fs describes a slice of spectrum Fs wide, centred on the carrier.
 
 On the board, each of I and Q is a 12-bit signed number, as the converters of the AD9361
@@ -45,8 +43,6 @@ produce them. The host receives them in 16-bit or 8-bit words; [The RFIC interfa
 describes these transport formats.
 
 ## Sample rate and bandwidth {#sdr-rate}
-
-The sample rate and the bandwidth are two different settings, and both matter.
 
 The sample rate is a property of the numbers: 30.72 MSPS means 30.72 million complex samples per
 second for each channel. It bounds the width of spectrum the samples can represent, and it sets
@@ -60,16 +56,15 @@ A usable setup keeps the bandwidth somewhat below the sample rate, so that the f
 room to fall. The AD9361 supports channel bandwidths from less than 200 kHz to 56 MHz, and
 sample rates up to 61.44 MSPS in its usual operation.
 
-The data rate follows directly. One complex sample of one channel takes 4 bytes in the 16-bit
+One complex sample of one channel takes 4 bytes in the 16-bit
 format. Two channels at 61.44 MSPS therefore produce about 491.5 MB/s in each direction, close
-to 4 Gbps. This number explains the interest of a fast host link.
+to 4 Gbps.
 [Carriers and hosts](#carriers) compares it with what one PCIe lane carries.
 
 ## The direct conversion transceiver {#sdr-zero-if}
 
 The AD9361 is a *direct conversion* transceiver, also called zero-IF. The receiver moves the
 slice of spectrum from the carrier down to baseband in one step, with no intermediate frequency.
-The figure below shows the receive path.
 
 ![A direct conversion receiver. The local oscillator (LO) is tuned to the carrier. Two mixers,
 driven with a 90 degree phase difference, produce the I and Q baseband signals, which are
@@ -122,7 +117,7 @@ runs the data port above the usual sample rate. It is Experimental (see
 ## The digital chain {#sdr-chain}
 
 The converters of the AD9361 run much faster than the sample rate the host asks for. A chain of
-digital filters links the two rates. The figure below shows it for both directions.
+digital filters links the two rates.
 
 ![The digital chain of the AD9361. On receive, each stage filters and divides the rate; on
 transmit, each stage multiplies it. The data port carries the samples at the rate of the
@@ -172,7 +167,7 @@ and two receivers, *1T1R* is one of each. The Analog Devices documents write the
 
 The samples leave and enter the chip through its data port. The project uses the LVDS mode in
 full duplex: each direction has its own clock, its own frame signal and six differential data
-pairs. The figure below shows the signals.
+pairs.
 
 ![The LVDS data port. The AD9361 provides DATA_CLK with the receive data. The FPGA returns it as
 FB_CLK with the transmit data.](sdr_lvds.svg)
@@ -191,7 +186,7 @@ changes on both edges of the clock (double data rate).
 
 A 12-bit value does not fit on six pairs, so it travels as two 6-bit words, the upper half
 first. With I and Q, a complex sample of one channel takes four words. With two channels, a
-frame takes eight words, as the figure below shows.
+frame takes eight words.
 
 ![The 2R2T interleave on the receive side. Each clock edge carries one 6-bit word. RX_FRAME is
 high for the four words of channel 1 and low for the four words of

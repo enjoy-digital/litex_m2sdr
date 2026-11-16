@@ -80,7 +80,7 @@ selected 10 MHz clock.
 
 ### Reference selection {#timing-si5351-reference}
 
-The software selects the reference with one of three clock sources. It writes the register above
+The software selects the reference with one of three clock sources. It writes `si5351_control`
 and then loads the matching configuration of the clock generator.
 
 | Clock source | `version` | `clkin_src` | Reference of the SI5351 |
@@ -291,8 +291,7 @@ sudo scripts/m2sdr_pcie_time_sync.py --stdout
 
 The helper looks for a clock whose name is `m2sdr` under `/sys/class/ptp` and waits up to 60 s
 for it, so it can start before the driver. With several boards it stops and asks for `--phc`.
-`--dry-run` prints the command instead of running it. The capture below shows it for an explicit
-clock.
+`--dry-run` prints the command instead of running it, here for an explicit clock.
 
 ```console
 $ scripts/m2sdr_pcie_time_sync.py --dry-run --phc /dev/ptp0 --phc2sys /bin/true
@@ -384,8 +383,6 @@ a write or a trim is applied in one piece (`TimeDisciplineCDC`).
 
 ### States {#timing-ptp-states}
 
-The figure below shows the four states of the servo and the main transitions between them.
-
 ![States of the board time discipline. The cyan arrow is the normal path; "misses" is the count
 of consecutive samples out of the lock window.](timing_ptp_states.svg)
 
@@ -420,7 +417,7 @@ lock window, and for Acquire otherwise.
 
 ### Parameters {#timing-ptp-parameters}
 
-All the parameters are registers of `ptp_discipline`, with the reset values below. The utility
+All the parameters are registers of `ptp_discipline`. The utility
 `m2sdr_util` reads and writes them with its `ptp-config` command. The fields of the command are
 the register names with hyphens, such as `lock-window`, `unlock-misses` or `coarse-confirm`.
 

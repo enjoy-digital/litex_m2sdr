@@ -10,8 +10,7 @@
 # Introduction {#intro}
 
 []{#introduction}This chapter says what LiteX-M2SDR is, which choices shaped it, what the
-repository contains and what works today. It ends with a map of the manual. Every reader should
-start here.
+repository contains and what works today. Every reader should start here.
 
 ## What the board is {#intro-what}
 
@@ -19,9 +18,6 @@ LiteX-M2SDR is a software-defined radio (SDR) in the size of an M.2 2280 solid-s
 pairs an Analog Devices AD9361 RFIC with an AMD/Xilinx Artix-7 XC7A200T FPGA. Plugged in an M.2
 slot with antennas connected, it streams and records radio samples with the tools of the project
 or with any SoapySDR application.
-
-The photograph below shows the board next to a coin, with the heatsinks that
-[Power and thermal](#hw-thermal) recommends.
 
 ![The LiteX-M2SDR board, revision R01, next to a 2 euro coin. The gold edge is the M.2
 connector. The larger copper heatsink sits on the FPGA and the smaller one on the RFIC, between
@@ -53,9 +49,6 @@ The effort saved goes into features that are rare at this size, such as time syn
 and hardware timed TX. What the board needs and the cores lack is added to the cores, so the
 board also improves LiteX.
 
-The five sections below take these ideas one by one. The rest of the manual shows how each of
-them turns into gateware and software.
-
 ### A well-known RFIC, and innovation around it {#intro-approach-rfic}
 
 The AD9361 is one of the most widely used RFICs of the SDR world. Its behaviour, its limits and
@@ -72,8 +65,7 @@ the application, and they are easier to add outside the board than to remove fro
 ### Maximum reuse of the LiteX infrastructure {#intro-approach-reuse}
 
 The gateware is a LiteX design. Almost everything that is not specific to the radio comes from
-an existing LiteX core, used as it is. The table below lists them; [LiteX in a
-nutshell](#litex-primer) explains each one.
+an existing LiteX core, used as it is. [LiteX in a nutshell](#litex-primer) explains each one.
 
 | Need | LiteX core |
 |----------------------------------|----------------------------------------------------------|
@@ -100,8 +92,7 @@ An M.2 Key M connector carries four high-speed serial lanes. In a computer they 
 on the FPGA side they are four general-purpose transceivers. The same board can therefore speak
 another protocol on the same pins when its carrier routes them elsewhere.
 
-The figure below shows the result. One datapath handles the samples, and one LiteX core per
-link carries them: PCIe in the M.2 slot of a host, Ethernet through an SFP module, USB3 through
+One datapath handles the samples, and one LiteX core per link carries them: PCIe in the M.2 slot of a host, Ethernet through an SFP module, USB3 through
 an adapter in an SFP cage, and SATA to an SSD.
 
 ![The same board over its links. The SDR datapath is common; a stream crossbar connects it to
@@ -150,7 +141,7 @@ The board is also a demanding test bench for the LiteX ecosystem. It runs the co
 limits, on many hosts, in the hands of many users. What is learnt on the board goes back to the
 cores instead of staying in a private copy, so every LiteX user gets it.
 
-The table below gives examples that can be checked in the public repositories.
+These examples can be checked in the public repositories.
 
 | Core | Work that went upstream |
 |-----------|------------------------------------------------------------------------------|
@@ -185,7 +176,7 @@ do together, and a complete example for anyone who builds a comparable design.
 
 ## Status {#intro-status}
 
-The table below is the only statement of status in the manual. The other chapters link to it.
+This section is the only statement of status in the manual. The other chapters link to it.
 The carrier columns say where a feature is available: in an M.2 slot (M.2) or on the LiteX
 Acorn Baseboard Mini (BB).
 
@@ -288,7 +279,7 @@ welcome at the address printed on the title page.
 
 A new user can go straight to [Getting started](#getting-started), the first chapter of
 Part IV, and come back later. A reader who wants to understand the design reads the three
-primers first. The table below sends each question to its chapter, in the order of the manual.
+primers first.
 
 | Question | Chapter |
 |------------------------------------------------|----------------------------------------|
