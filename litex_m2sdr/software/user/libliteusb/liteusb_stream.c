@@ -400,8 +400,8 @@ int liteusb_stream_write_submit(struct liteusb_stream *s)
 
     s->cur_held = 0;
     /* No event processing here: the transfers in flight do not need it, and a poll per buffer
-     * costs a third of the TX throughput when a reader processes the events of the same context
-     * (251 against 377 MB/s in full duplex with one buffer per write). The completed transfers
+     * costs TX throughput when a reader processes the events of the same context (279 against
+     * 308 MB/s in full duplex with one buffer per write, for a stream of 246 MB/s). The completed transfers
      * are collected when a slot is needed (liteusb_stream_next_write_buffer()). */
     if (++s->cur_buf < s->bufs_per_xfer)
         return 0;

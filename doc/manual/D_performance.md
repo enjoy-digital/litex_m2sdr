@@ -107,10 +107,11 @@ delay the lowest bit of each TX sample was read as 1.
 - The limit in full duplex, about 370 MB/s per direction, is lower than for RX alone.
 - The size of the writes changes the TX rate that a program reaches, see
   [Writing samples](#sw-lib-tx-size). With one 8 KiB buffer per call and a reader running, the
-  library reached 251 MB/s, just above the 245.8 MB/s of these configurations, and the stream
-  underflowed, mostly in its first seconds. The library no longer processes the USB events at
-  each buffer, and one buffer per call reaches 308 MB/s: 8 runs of 30 s at 245.8 MB/s gave
-  2 underflow events, in one run where the RX stream overflowed too.
+  library reached 279 MB/s, little above the 245.8 MB/s of these configurations, and the stream
+  underflowed about 200 times per run of 30 s, mostly in its first seconds. The library no
+  longer processes the USB events at each buffer, and one buffer per call reaches 308 MB/s:
+  8 runs of 30 s at 245.8 MB/s gave 2 underflow events, in one run where the RX stream
+  overflowed too.
 - The figures are those of one board, one adapter and one host.
 
 ### Loss counters {#perf-usb3-counters}
