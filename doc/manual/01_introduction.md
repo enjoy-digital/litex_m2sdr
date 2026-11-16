@@ -231,7 +231,8 @@ Notes on the tables:
   board.
 - PCIe PTM is used with PCIe Gen2 x1: the build rejects more than one lane. The repository
   records no measurement of the resulting offset yet.
-- Hardware timed TX is supported over PCIe and USB3; Ethernet does not support it yet.
+- Hardware timed TX is supported over PCIe, USB3 and Ethernet. The SoapySDR driver uses it over
+  PCIe and USB3, and its software timeline over Ethernet.
 - USB3 streaming is combined with PCIe only so far, and the oversampling mode excludes it. The
   sample rates that the link carries are in [Host links](#host-links).
 - The PPS input is not a row of the table: the gateware monitors it and reports its edges
