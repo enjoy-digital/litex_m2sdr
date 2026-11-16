@@ -109,8 +109,8 @@ optional.
 | `bypass_init` | `0`, `1` | `1`: open without initialising the clock generator and the RFIC |
 | `eth_mode` | `udp`, `vrt` | Ethernet RX stream: raw UDP, or VRT (refused, see below) |
 | `vrt_port` | port | UDP port of the VRT stream, 4991 by default |
-| `tx_pacing` | `rate`, `none` | Ethernet TX pacing by the sample rate |
-| `rx_dma_header` | `1`, `0` | Use the RX timestamp headers over PCIe |
+| `tx_pacing` | `rate`, `none` | Ethernet TX pacing: by the sample rate, or by the transmit times in the hardware timed TX mode |
+| `rx_dma_header` | `1`, `0` | Use the RX timestamp headers |
 | `timed_tx` | `auto`, `hardware`, `software`, `off` | Timed TX mode |
 | `tx_offset` | ns | Timed TX latency compensation |
 | `rx_offset` | ns | RX timestamp compensation |
@@ -169,10 +169,12 @@ The board time is the hardware time of the SoapySDR device, in nanoseconds. An a
 reads it with `getHardwareTime()` and sets it with `setHardwareTime()`. The time sources are
 `internal` and, on a bitstream with Ethernet PTP, `ptp`.
 
-RX buffers come with the board time of their first sample. Over PCIe and USB3 the driver reads
-it from the header of each buffer. Over Ethernet it needs `eth_mode=vrt`, and so software built
-against the `csr.h` of the VRT build; otherwise Ethernet RX has no hardware timestamps. Without hardware
-timestamps the driver counts samples from the time read when the stream starts.
+RX buffers come with the board time of their first sample. The driver reads it from the header
+of each buffer, over PCIe, USB3 and the raw UDP stream of Ethernet; with `eth_mode=vrt` it reads
+it from the VRT packets. Over Ethernet the header also frames the stream: the driver aligns its
+buffers on the frames of the FPGA, so the time stays exact through lost datagrams. With
+`rx_dma_header=0` there are no hardware timestamps, and the driver counts samples from the time
+read when the stream starts.
 
 ### Timed TX {#fw-timed-tx}
 
@@ -190,7 +192,15 @@ two ways to honour the time, selected by `timed_tx`.
 In the hardware mode the timestamp is the time on air, on the 10 ns step of the board time. A
 buffer that arrives after its time is dropped whole and reported as `SOAPY_SDR_UNDERFLOW` by
 `readStreamStatus()`. Writes without a time are sent at once, so continuous streaming is
-unchanged. The hardware mode is available over PCIe.
+unchanged. The hardware mode is available over PCIe, and over USB3 and Ethernet (raw UDP) on a
+bitstream with the capability bit of the link (`usb3_tx_header`, `eth_tx_header`).
+
+Over Ethernet the gate holds a buffer in the TX FIFO of the gateware, and UDP has no flow
+control: a buffer sent too early would overflow the FIFO. With `tx_pacing=rate` the driver sends
+a buffer a lead before its transmit time at the earliest, half of the FIFO at the stream rate
+and 5 ms at most. The application may write further ahead; the write then waits. A buffer
+without a time follows the last timed one. The buffers of the driver are the frames of the FPGA
+on this link, 1022 samples in 2T2R and SC16.
 
 In the software mode, a write that is later than the margin `tx_late_margin_ns` returns
 `SOAPY_SDR_TIME_ERROR`. Two more arguments tune this mode: `tx_lead_buffers` schedules the

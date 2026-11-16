@@ -538,6 +538,10 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
         long long pace_board_anchor_ns = 0;
         bool pace_board_valid = false;
         uint64_t paced_buffers = 0;
+        /* Hardware timed TX over LiteEth: the buffers are paced on their transmit time. */
+        bool pace_time_valid = false;
+        long long pace_time_base_ns = 0;
+        uint64_t pace_time_buffers = 0;
 
         bool timed_tx_enabled = true;
         /* Hardware timed-TX gate engaged: air-times travel in the per-buffer DMA header and
@@ -628,6 +632,20 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
      * LiteEth streams through its own UDP helper. */
     bool usesLibm2sdrStream() const {
         return isLitePCIe() || isLiteUSB();
+    }
+
+    /* Links whose buffers can carry the RX/TX headers: the libm2sdr streams and the raw UDP
+     * stream of Ethernet (the VRT packets have their own timestamps). */
+    bool usesStreamHeaders() const {
+        return usesLibm2sdrStream() ||
+               (isLiteEth() && _eth_mode == SoapyLiteXM2SDREthernetMode::UDP);
+    }
+
+    /* Ethernet with a header in use on the gateware side: the UDP buffers are the frames of
+     * the FPGA (M2SDR_BUFFER_BYTES), in both directions since they share the UDP helper. */
+    bool liteEthFramed() const {
+        return isLiteEth() && _eth_mode == SoapyLiteXM2SDREthernetMode::UDP &&
+               (_rx_dma_header_bytes != 0 || (_tx_dma_header_supported && _tx_gate_link_supported));
     }
 
     void interleaveCF32(

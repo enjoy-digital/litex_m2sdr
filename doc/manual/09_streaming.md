@@ -358,8 +358,8 @@ also needs the TX header, which PCIe, USB3 and Ethernet carry and which the SATA
 not carry yet: see [TX: extracting the header](#streaming-header-tx).
 
 The software follows the same limit. The offset and underflow functions of the library return an
-unsupported error on another link. The SoapySDR driver selects the hardware gate on PCIe and
-USB3, and a software timeline over Ethernet, where its stream code does not use the gate yet.
+unsupported error on another link. The SoapySDR driver selects the hardware gate on PCIe, USB3
+and Ethernet, and its software timeline on a bitstream without the TX header on the link.
 
 Over USB3 and Ethernet the TX FIFOs are not primed while the TX header is enabled. A frame
 released by the gate then leaves at once, whatever the level of the FIFOs, and a burst of one

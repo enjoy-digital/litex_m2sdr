@@ -129,6 +129,8 @@ struct m2sdr_metadata {
 /* Size of the optional FPGA DMA header (sync word + ns timestamp); see the
  * layout description above the zero-copy buffer API below. */
 #define M2SDR_DMA_HEADER_SIZE 16
+/* First 64-bit word of the header (little-endian), followed by the 64-bit time in ns. */
+#define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 
 struct m2sdr_sync_params {
     /* RX or TX stream to configure. */
@@ -995,6 +997,10 @@ int m2sdr_set_tx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
  * fields count the separate DMA-ring underflow (reader starved of any buffer). Links with the
  * TX header (see m2sdr_set_tx_header()). */
 int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
+/* Write the TX header of a buffer sent outside the stream API (a caller with its own link, as
+ * SoapySDR over Ethernet): M2SDR_DMA_HEADER_SIZE bytes at `header`, the samples follow.
+ * timestamp_ns is the transmit time, 0 for a buffer sent as soon as it arrives. */
+void m2sdr_write_tx_header(void *header, uint64_t timestamp_ns);
 
 /* Set the RX timestamp offset (ns): the mirror of tx_offset. The RX header inserter stamps
  * each buffer when it starts forming (DMA plane); rx_offset is subtracted so the stamp

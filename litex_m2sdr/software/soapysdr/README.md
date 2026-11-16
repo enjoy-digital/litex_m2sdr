@@ -106,10 +106,11 @@ You can pass device arguments to configure the driver. These are most useful whe
   - TX streaming remains raw-UDP only; `eth_mode=vrt` is RX-focused.
 - **VRT UDP port override** (Etherbone + `eth_mode=vrt`): `vrt_port=4991`
 - **LiteEth TX pacing**: `tx_pacing=rate|none`
+  - In the hardware timed-TX mode, `rate` sends a buffer a lead before its air-time at the earliest (half of the gateware TX FIFO at the stream rate, 5 ms at most): the gate holds timed buffers in that FIFO and UDP has no flow control.
   - `rate` is the default and submits TX UDP buffers according to the configured TX sample rate. Pacing follows the board clock (periodically re-anchored through hardware time reads) so long runs do not drift with the host oscillator.
   - `none` keeps TX submissions unpaced for link stress tests.
 - **Timed TX**: `timed_tx=auto|hardware|software|off`
-  - `auto` (default) engages the **hardware timed-TX gate** when the gateware advertises it (capability features CSR, read at open; PCIe, and USB3 with a gateware that carries the TX header) and falls back to `software` otherwise.
+  - `auto` (default) engages the **hardware timed-TX gate** when the gateware advertises it (capability features CSR, read at open; PCIe, and USB3 or Ethernet raw UDP with a gateware that carries the TX header on that link) and falls back to `software` otherwise.
   - `hardware`: each timed `writeStream()` stamps its air-time into the per-buffer DMA header and the FPGA gate holds the buffer until board time reaches it — the timestamp you pass with `SOAPY_SDR_HAS_TIME` *is* the on-air time, deterministic to the 10 ns grid. A buffer that reaches the gate after its air-time is dropped whole (the RFIC airs zeros for it) and reported as `SOAPY_SDR_UNDERFLOW` via `readStreamStatus()`, rather than airing late. Untimed writes carry air-time `0`, which the gate passes through immediately, so continuous streaming is unaffected. Requesting `hardware` explicitly on gateware without the gate fails at `setupStream()`.
   - `software` honors `SOAPY_SDR_HAS_TIME` on `writeStream()` with a host-side timeline: gaps up to the requested timestamp are zero-filled and writes later than `tx_late_margin_ns` return `SOAPY_SDR_TIME_ERROR`.
   - `tx_lead_buffers=N` (default `0`, software mode): schedules the timeline `N` MTUs ahead of board time at activation. The hardware emits samples as soon as DMA delivers them, so any lead shifts actual emission that far **before** the requested timestamps — keep `0` for applications that need absolute TX timing (srsRAN) and already write ahead of time.
@@ -189,8 +190,9 @@ rx_gain = 40
 ```
 
 For an Ethernet board use `device_args = driver=LiteXM2SDR,eth_ip=192.168.1.50`.
-PCIe is recommended for LTE: raw-UDP RX carries no hardware timestamps
-(`eth_mode=vrt` does, but VRT is RX-only).
+Raw-UDP RX carries hardware timestamps and TX uses the hardware timed-TX gate on a
+gateware with the `eth_tx_header` capability; 1000BASE-X carries about 116 MB/s, so
+PCIe or USB3 stays the choice for the widest LTE bandwidths.
 
 Notes:
 - All LTE sample rates (1.92 / 3.84 / 5.76 / 11.52 / 15.36 / 23.04 MSPS) are

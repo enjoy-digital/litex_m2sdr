@@ -214,8 +214,30 @@ stream at a constant delay after its transmit time.
 | 12.5 MSPS | 8, 16 | 1.0 to 1.1 µs | 0.5 to 0.8 sample period |
 
 Every burst is received at full length. A burst sent with a transmit time in the past loses its
-first buffer, and `header_tx_underflow` counts it. The delay to the antenna was not measured on
-this link.
+first buffer, and `header_tx_underflow` counts it.
+
+The delay to the antenna was measured over the air as for USB3, with a TX offset of 0 and 12
+bursts per rate:
+
+| Configuration | Sample rate | Delay, mean | Standard deviation | In sample periods |
+|---------------|-------------|-------------|--------------------|-------------------|
+| 2T2R | 5 MSPS | 7478 ns | 51 ns | 37.4 |
+| 2T2R | 10 MSPS | 4039 ns | 16 ns | 40.4 |
+| 2T2R | 12.5 MSPS | 3208 ns | 29 ns | 40.1 |
+
+These delays are within a few sample periods of those of USB3, and the SoapySDR driver uses the
+same TX offset on this link. Through the driver, with this offset and the time of the RX
+buffers, a timed burst is received at its transmit time:
+
+| Sample rate (2T2R) | Buffers per burst | First sample after the transmit time, mean | Standard deviation |
+|--------------------|-------------------|--------------------------------------------|--------------------|
+| 5 MSPS | 1, 4 | −91 to 128 ns | 0.5 sample period |
+| 10 MSPS | 8 | 285 ns | 0.5 sample period |
+| 12.5 MSPS | 32 | 297 ns | 0.7 sample period |
+
+A stream of 4 s with a time on every write, as an LTE stack sends it, is transmitted from its
+first sample to its last at 2, 5 and 10 MSPS. Below 2.5 MSPS the FIR filters add a delay that the
+TX offset of the driver does not include: 27 µs at 2 MSPS.
 
 ### Notes on the runs {#perf-eth-notes}
 

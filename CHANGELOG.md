@@ -30,6 +30,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **Ethernet Host Link**
 - Added hardware timed TX over Ethernet (capability bit `eth_tx_header`) and RX timestamps on the raw UDP stream: the gateware finds the TX header at the start of a datagram, and `libm2sdr` aligns its RX buffers on the frames of the FPGA, through lost datagrams.
 - Qualified 1000BASE-X at `116 MB/s` in full duplex (2T2R `14.5 MSPS` in SC16, `29 MSPS` in SC8).
+- Added hardware RX timestamps and hardware timed TX to the SoapySDR driver over Ethernet (raw UDP): buffers aligned on the frames of the FPGA, TX paced on the transmit times. Measured the delay to the antenna on this link.
 
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------

@@ -27,7 +27,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define M2SDR_DMA_HEADER_SYNC_WORD 0x5aa55aa55aa55aa5ULL
 #define M2SDR_LITEETH_DEFAULT_SOCKET_BUFFER_BYTES (8 * 1024 * 1024)
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
 #define M2SDR_TIMEOUT_NOWAIT ((unsigned)-1)
@@ -110,6 +109,12 @@ static void m2sdr_write_dma_header(uint8_t *buf, uint64_t timestamp)
 
     memcpy(buf, &sync_word, sizeof(sync_word));
     memcpy(buf + 8, &timestamp, sizeof(timestamp));
+}
+
+void m2sdr_write_tx_header(void *header, uint64_t timestamp_ns)
+{
+    if (header)
+        m2sdr_write_dma_header((uint8_t *)header, timestamp_ns);
 }
 
 static int m2sdr_check_buffer_size(enum m2sdr_format format, unsigned samples_per_buffer, unsigned bytes_per_buffer)

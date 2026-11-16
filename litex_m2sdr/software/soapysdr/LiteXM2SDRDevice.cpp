@@ -745,7 +745,7 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
 
 
     /* Configure PCIe Synchronizer and DMA Headers. */
-    if (usesLibm2sdrStream()) {
+    if (usesStreamHeaders()) {
         SoapySDR::log(SOAPY_SDR_INFO, "Configuring DMA headers");
     /* Enable Synchronizer (PCIe). */
         if (isLitePCIe()) {
@@ -792,7 +792,8 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
                 _tx_dma_header_supported =
                     (caps.features & M2SDR_FEATURE_TIMED_TX) != 0;
                 _tx_gate_link_supported = isLitePCIe() ||
-                    (isLiteUSB() && (caps.features & M2SDR_FEATURE_USB3_TX_HEADER) != 0);
+                    (isLiteUSB() && (caps.features & M2SDR_FEATURE_USB3_TX_HEADER) != 0) ||
+                    (isLiteEth() && (caps.features & M2SDR_FEATURE_ETH_TX_HEADER) != 0);
                 _rfic_oversampling = (caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING) != 0;
             }
         }

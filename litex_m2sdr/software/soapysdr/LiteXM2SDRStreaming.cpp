@@ -201,6 +201,11 @@ static TimedTxMode get_kwargs_timed_tx_mode(
 
 #if USE_LITEETH
 static constexpr uint64_t LITEETH_PACE_RESYNC_BUFFERS = 1024;
+/* Hardware timed TX over LiteEth: TX FIFO of the gateware (eth_tx_streamer, 256 KiB), longest
+ * lead of a buffer on its transmit time, and age at which the board time is read again. */
+static constexpr double LITEETH_TX_FIFO_BYTES = 256.0 * 1024.0;
+static constexpr long long LITEETH_TX_LEAD_MAX_NS = 5000000;
+static constexpr std::chrono::milliseconds LITEETH_PACE_ANCHOR_MAX_AGE(500);
 static constexpr size_t VRT_SIGNAL_HEADER_BYTES = 20;
 static constexpr size_t VRT_RX_DATA_WORDS_DEFAULT = 256;
 static constexpr size_t VRT_RX_PAYLOAD_BYTES_DEFAULT = VRT_RX_DATA_WORDS_DEFAULT * sizeof(uint32_t);
@@ -266,6 +271,7 @@ static LiteEthUdpSettings make_liteeth_rx_udp_settings(
     const SoapySDR::Kwargs &device_args,
     const std::string &eth_ip,
     bool is_vrt,
+    bool framed,
     size_t bytes_per_complex,
     size_t channel_count)
 {
@@ -279,6 +285,8 @@ static LiteEthUdpSettings make_liteeth_rx_udp_settings(
     settings.tx_enable = !is_vrt;
     settings.buffer_bytes = is_vrt
         ? VRT_RX_PACKET_BYTES_DEFAULT
+        : framed
+        ? static_cast<size_t>(M2SDR_BUFFER_BYTES)
         : get_kwargs_size(stream_args, device_args, "udp_buf_complex", 4096) *
             bytes_per_complex * channel_count;
     settings.buffer_count = get_kwargs_size(stream_args, device_args, "udp_buf_count", 64);
@@ -290,6 +298,7 @@ static LiteEthUdpSettings make_liteeth_tx_udp_settings(
     const SoapySDR::Kwargs &stream_args,
     const SoapySDR::Kwargs &device_args,
     const std::string &eth_ip,
+    bool framed,
     size_t bytes_per_complex,
     size_t channel_count)
 {
@@ -298,8 +307,10 @@ static LiteEthUdpSettings make_liteeth_tx_udp_settings(
     settings.log_name = "LiteEth UDP";
     settings.remote_ip = get_kwargs_string(stream_args, device_args, "udp_ip", eth_ip.c_str());
     settings.port = get_kwargs_port(stream_args, device_args, "udp_port", 2345);
-    settings.buffer_bytes = get_kwargs_size(stream_args, device_args, "udp_buf_complex", 4096) *
-        bytes_per_complex * channel_count;
+    settings.buffer_bytes = framed
+        ? static_cast<size_t>(M2SDR_BUFFER_BYTES)
+        : get_kwargs_size(stream_args, device_args, "udp_buf_complex", 4096) *
+            bytes_per_complex * channel_count;
     settings.buffer_count = get_kwargs_size(stream_args, device_args, "udp_buf_count", 64);
     settings.sndbuf_bytes = get_kwargs_int(stream_args, device_args, "udp_sndbuf", 8 * 1024 * 1024);
     return settings;
@@ -463,7 +474,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             /* Lazy-init UDP helper (enable RX+TX to mirror DMA symmetry). */
             const bool is_vrt = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT);
             const LiteEthUdpSettings udp_settings = make_liteeth_rx_udp_settings(
-                searchArgs, _deviceArgs, _eth_ip, is_vrt,
+                searchArgs, _deviceArgs, _eth_ip, is_vrt, liteEthFramed(),
                 _bytesPerComplex, selected_channels.size());
             _liteeth_rx_port = udp_settings.port;
             if (!_udp_inited) {
@@ -483,9 +494,21 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 }
             }
 
+            /* RX header: each buffer is a frame of the FPGA, found with the sync word of its
+             * header, which carries the time of its first sample. */
+            if (_rx_dma_header_bytes != 0) {
+                if (_udp.buf_size != M2SDR_BUFFER_BYTES)
+                    throw std::runtime_error("LiteEth UDP buffers do not match the FPGA frames");
+                liteeth_udp_set_rx_frame_sync(&_udp, 1, M2SDR_DMA_HEADER_SYNC_WORD);
+                int rc = m2sdr_set_rx_header(_dev, true, true);
+                if (rc != M2SDR_ERR_OK)
+                    throw std::runtime_error(
+                        "m2sdr_set_rx_header failed: " + std::string(m2sdr_strerror(rc)));
+            }
+
             _rx_buf_size  = (_eth_mode == SoapyLiteXM2SDREthernetMode::VRT)
                             ? VRT_RX_PAYLOAD_BYTES_DEFAULT
-                            : _udp.buf_size;
+                            : _udp.buf_size - _rx_dma_header_bytes;
             _rx_buf_count = _udp.buf_count;
 
             _rx_stream.buf = std::malloc(_rx_buf_size * _rx_buf_count);
@@ -559,8 +582,8 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
          * In hardware mode air-times travel in the header and the gate holds/drops each buffer,
          * so the software timeline stays off and timed writes stamp the first buffer of each
          * burst directly (see writeStream()). "auto" falls back to the software timeline when
-         * the gateware has no gate (capability features CSR, read at open) or on the LiteEth transport; an explicit
-         * "hardware" there is a configuration error and fails loudly. */
+         * the gateware has no gate on this link (capability features CSR, read at open) or in
+         * eth_mode=vrt; an explicit "hardware" there is a configuration error and fails loudly. */
         TimedTxMode timed_tx_mode = get_kwargs_timed_tx_mode(searchArgs, _deviceArgs);
         const bool tx_gate_usable = _tx_dma_header_supported && _tx_gate_link_supported;
         if (timed_tx_mode == TimedTxMode::Auto) {
@@ -568,7 +591,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
         } else if (timed_tx_mode == TimedTxMode::Hardware && !tx_gate_usable) {
             throw std::runtime_error(
                 "timed_tx=hardware requested but the timed-TX gate is unavailable "
-                "(gate not advertised by this gateware's capability CSR, or LiteEth transport); "
+                "(not advertised for this link by the capability CSR of the gateware); "
                 "use timed_tx=software or update the gateware");
         }
         _tx_stream.timed_tx_hardware = (timed_tx_mode == TimedTxMode::Hardware);
@@ -627,7 +650,7 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
             }
             if (!_udp_inited) {
                 const LiteEthUdpSettings udp_settings = make_liteeth_tx_udp_settings(
-                    searchArgs, _deviceArgs, _eth_ip,
+                    searchArgs, _deviceArgs, _eth_ip, liteEthFramed(),
                     _bytesPerComplex, selected_channels.size());
                 init_liteeth_udp(&_udp, _eth_ip, udp_settings);
                 _udp_inited = true;
@@ -637,7 +660,20 @@ SoapySDR::Stream *SoapyLiteXM2SDR::setupStream(
                 }
             }
 
-            _tx_buf_size  = _udp.buf_size;
+            /* Hardware timed TX: each buffer is a frame of the FPGA and starts with the TX
+             * header, found by the gateware at the start of a datagram. */
+            if (_tx_stream.timed_tx_hardware && _udp.buf_size != M2SDR_BUFFER_BYTES)
+                throw std::runtime_error("LiteEth UDP buffers do not match the FPGA frames");
+            {
+                int rc = m2sdr_set_tx_header(_dev, _tx_stream.timed_tx_hardware);
+                if (rc != M2SDR_ERR_OK && _tx_stream.timed_tx_hardware)
+                    throw std::runtime_error(
+                        "m2sdr_set_tx_header failed: " + std::string(m2sdr_strerror(rc)));
+            }
+            if (_tx_stream.timed_tx_hardware)
+                (void)m2sdr_get_tx_underflow(_dev, &_tx_gate_underflow_last);
+
+            _tx_buf_size  = _udp.buf_size - _tx_dma_header_bytes;
             _tx_buf_count = _udp.buf_count;
 
             _tx_stream.buf = std::malloc(_tx_buf_size * _tx_buf_count);
@@ -799,6 +835,11 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
             (void)m2sdr_stream_release(_dev, M2SDR_RX);
         } else if (isLiteEth()) {
             std::free(_rx_stream.buf);
+            if (_rx_dma_header_bytes != 0) {
+                (void)m2sdr_set_rx_header(_dev, false, false);
+                if (_udp_inited)
+                    liteeth_udp_set_rx_frame_sync(&_udp, 0, 0);
+            }
         }
         _rx_stream.buf = NULL;
         _rx_stream.opened = false;
@@ -808,6 +849,8 @@ void SoapyLiteXM2SDR::closeStream(SoapySDR::Stream *stream) {
             (void)m2sdr_stream_release(_dev, M2SDR_TX);
         } else if (isLiteEth()) {
             std::free(_tx_stream.buf);
+            if (_tx_stream.timed_tx_hardware)
+                (void)m2sdr_set_tx_header(_dev, false);
         }
         _tx_stream.buf = NULL;
         _tx_stream.opened = false;
@@ -915,6 +958,7 @@ int SoapyLiteXM2SDR::activateStream(
             }
             _tx_stream.pace_host_anchor = std::chrono::steady_clock::now();
             _tx_stream.pace_board_valid = false;
+            _tx_stream.pace_time_valid = false;
             try {
                 _tx_stream.pace_board_start_ns = this->getHardwareTime("");
                 _tx_stream.pace_board_anchor_ns = _tx_stream.pace_board_start_ns;
@@ -1437,18 +1481,25 @@ int SoapyLiteXM2SDR::acquireReadBuffer(
             return static_cast<int>(payload_bytes / (_nChannels * _bytesPerComplex));
         }
 
-        buffs[0] = src;
+        buffs[0] = src + _rx_dma_header_bytes;
         handle   = 0; /* dummy for LiteEth path */
-        /* Raw UDP packets carry no timestamp; synthesize one from the board
-         * time anchored at activation. Lost packets shift this late, so use
-         * eth_mode=vrt when accurate RX time matters. */
+        /* With the RX header, each buffer carries the board time of its first sample, exact
+         * through lost datagrams. Without it, the time is synthesized from the board time
+         * anchored at activation, and lost packets shift it late. */
         _rx_stream.user_count++;
         if (_rx_stream.time_valid && !(flags & SOAPY_SDR_HAS_TIME)) {
             const size_t samples_per_buffer = getStreamMTU(stream);
-            timeNs = _rx_stream.time0_ns +
-                     samples_to_ns(_rx_stream.samplerate,
-                                   static_cast<long long>(_rx_stream.user_count - _rx_stream.time0_count) *
-                                   static_cast<long long>(samples_per_buffer));
+            struct m2sdr_metadata meta;
+            if (_rx_dma_header_bytes != 0 &&
+                m2sdr_get_buffer_metadata(_dev, M2SDR_RX, buffs[0], &meta) == M2SDR_ERR_OK &&
+                (meta.flags & M2SDR_META_FLAG_HAS_TIME)) {
+                timeNs = static_cast<long long>(meta.timestamp);
+            } else {
+                timeNs = _rx_stream.time0_ns +
+                         samples_to_ns(_rx_stream.samplerate,
+                                       static_cast<long long>(_rx_stream.user_count - _rx_stream.time0_count) *
+                                       static_cast<long long>(samples_per_buffer));
+            }
             flags |= SOAPY_SDR_HAS_TIME;
             if (timeNs < _rx_stream.last_time_ns)
                 timeNs = _rx_stream.last_time_ns;
@@ -1599,6 +1650,8 @@ int SoapyLiteXM2SDR::acquireWriteBuffer(
         if (!dst) {
             return SOAPY_SDR_TIMEOUT;
         }
+        /* The samples follow the TX header, written when the buffer is released. */
+        dst += _tx_dma_header_bytes;
         buffs[0] = dst;
         handle   = _tx_stream.user_count++;
         _tx_stream.pendingWriteBufs[handle] = dst;
@@ -1633,12 +1686,10 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
                 buf = it->second;
         } else if (isLiteEth()) {
             auto it = _tx_stream.pendingWriteBufs.find(handle);
-            if (it != _tx_stream.pendingWriteBufs.end()) {
+            if (it != _tx_stream.pendingWriteBufs.end())
                 buf = it->second;
-                _tx_stream.pendingWriteBufs.erase(it);
-            } else {
+            else
                 buf = reinterpret_cast<uint8_t*>(_tx_stream.remainderBuff);
-            }
         } else {
             return;
         }
@@ -1674,13 +1725,69 @@ void SoapyLiteXM2SDR::releaseWriteBuffer(
             _tx_stream.pendingWriteBufs.erase(it);
         }
     } else if (isLiteEth()) {
-        if (numElems >= mtu) {
+        const bool timed = (flags & SOAPY_SDR_HAS_TIME) != 0;
+        {
             auto it = _tx_stream.pendingWriteBufs.find(handle);
             if (it != _tx_stream.pendingWriteBufs.end()) {
+                /* Hardware timed TX: the header carries the transmit time of the buffer, 0
+                 * for a buffer that follows the previous one. */
+                if (_tx_dma_header_bytes != 0)
+                    m2sdr_write_tx_header(it->second - _tx_dma_header_bytes,
+                                          timed ? static_cast<uint64_t>(timeNs) : 0);
                 _tx_stream.pendingWriteBufs.erase(it);
             }
         }
-        if (_tx_stream.rate_pacing && _tx_stream.samplerate > 0.0) {
+
+        /* Hardware timed TX: the gate holds a buffer in the TX FIFO of the gateware until its
+         * transmit time, and UDP has no flow control, so a buffer sent too early overflows the
+         * FIFO. A buffer is sent a lead before its transmit time at the earliest, the lead being
+         * half of the FIFO at the stream rate. The transmit time of a buffer without a time
+         * follows from the last timed one. */
+        bool time_paced = false;
+        if (_tx_stream.timed_tx_hardware && _tx_stream.rate_pacing &&
+            _tx_stream.samplerate > 0.0 && _tx_stream.pace_board_valid) {
+            if (timed) {
+                _tx_stream.pace_time_base_ns = timeNs;
+                _tx_stream.pace_time_buffers = 0;
+                _tx_stream.pace_time_valid   = true;
+            }
+            if (_tx_stream.pace_time_valid) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - _tx_stream.pace_host_anchor > LITEETH_PACE_ANCHOR_MAX_AGE) {
+                    try {
+                        _tx_stream.pace_board_anchor_ns = this->getHardwareTime("");
+                        _tx_stream.pace_host_anchor = std::chrono::steady_clock::now();
+                    } catch (const std::exception &) {
+                        /* Keep pacing on the previous anchors. */
+                    }
+                }
+                const double bytes_per_s =
+                    _tx_stream.samplerate * _nChannels * _bytesPerComplex;
+                const long long lead_ns = std::min<long long>(
+                    LITEETH_TX_LEAD_MAX_NS,
+                    static_cast<long long>(0.5e9 * LITEETH_TX_FIFO_BYTES / bytes_per_s));
+                const long long buffer_time_ns = _tx_stream.pace_time_base_ns +
+                    samples_to_ns(_tx_stream.samplerate,
+                        static_cast<long long>(_tx_stream.pace_time_buffers) *
+                        static_cast<long long>(mtu));
+                const auto target = _tx_stream.pace_host_anchor + std::chrono::nanoseconds(
+                    buffer_time_ns - lead_ns - _tx_stream.pace_board_anchor_ns);
+                /* In slices: a stream being stopped does not wait for a far transmit time. */
+                while (!_tx_stream.stop_requested.load()) {
+                    const auto wait_now = std::chrono::steady_clock::now();
+                    if (target <= wait_now)
+                        break;
+                    std::this_thread::sleep_until(
+                        std::min(target, wait_now + std::chrono::milliseconds(10)));
+                }
+                _tx_stream.pace_time_buffers++;
+                if (flags & SOAPY_SDR_END_BURST)
+                    _tx_stream.pace_time_valid = false;
+                time_paced = true;
+            }
+        }
+
+        if (!time_paced && _tx_stream.rate_pacing && _tx_stream.samplerate > 0.0) {
             /* Refresh the (host, board) anchor pair at a coarse cadence; the
              * board-time query costs an Etherbone round trip, while host
              * oscillator drift between refreshes stays in the ppm range. */
