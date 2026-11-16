@@ -289,13 +289,50 @@ void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u)
 
 /* RX Path */
 
+void liteeth_udp_set_rx_frame_sync(struct liteeth_udp_ctrl *u, int enable, uint64_t sync_word)
+{
+    if (!u)
+        return;
+    u->rx_frame_sync_enable = enable ? 1 : 0;
+    u->rx_frame_sync_word   = sync_word;
+}
+
 /* accumulate exactly buf_size bytes into slot */
 static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
 {
-    uint8_t *dst = u->buf_rd + slot * u->buf_size + u->rx_assembling_bytes;
+    uint8_t *base = u->buf_rd + slot * u->buf_size;
+    uint8_t *dst  = base + u->rx_assembling_bytes;
 
-    while (u->rx_assembling_bytes < u->buf_size) {
-        ssize_t nb = udp_recv_dontwait(u, dst, u->buf_size - u->rx_assembling_bytes);
+    for (;;) {
+        ssize_t nb;
+
+        if (u->rx_assembling_bytes >= u->buf_size) {
+            uint64_t next = 0;
+            ssize_t peeked;
+
+            if (!u->rx_frame_sync_enable)
+                break;
+            /* The buffer is full. It is one frame only if the next datagram starts a frame:
+             * with a datagram lost in this frame and the first one of the next frame lost too,
+             * it would end with a datagram of the next frame. Look at the next datagram without
+             * taking it; the buffer waits until it is there. */
+            peeked = recvfrom(u->sock, &next, sizeof(next), MSG_DONTWAIT | MSG_PEEK, NULL, NULL);
+            if (peeked < 0) {
+                if (errno == EINTR)
+                    continue;
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    return 0; /* try later */
+                u->rx_recv_errors++;
+                return -1;
+            }
+            if ((size_t)peeked >= sizeof(next) && next == u->rx_frame_sync_word)
+                break;
+            u->rx_assembling_bytes = 0;
+            dst = base;
+            u->rx_frame_resyncs++;
+            continue;
+        }
+        nb = udp_recv_dontwait(u, dst, u->buf_size - u->rx_assembling_bytes);
         if (nb < 0) {
             if (errno == EINTR)
                 continue;
@@ -307,6 +344,24 @@ static int rx_fill_slot(struct liteeth_udp_ctrl *u, size_t slot)
         }
         if (nb == 0)
             return 0;
+        if (u->rx_frame_sync_enable) {
+            int frame_start = (size_t)nb >= sizeof(u->rx_frame_sync_word) &&
+                memcmp(dst, &u->rx_frame_sync_word, sizeof(u->rx_frame_sync_word)) == 0;
+
+            if (u->rx_assembling_bytes == 0) {
+                /* A buffer starts on a frame start. */
+                if (!frame_start) {
+                    u->rx_frame_sync_drops++;
+                    continue;
+                }
+            } else if (frame_start) {
+                /* Datagrams of the frame being assembled were lost: restart on this one. */
+                memmove(base, dst, (size_t)nb);
+                u->rx_assembling_bytes = 0;
+                dst = base;
+                u->rx_frame_resyncs++;
+            }
+        }
         u->rx_assembling_bytes += (size_t)nb;
         dst += nb;
     }

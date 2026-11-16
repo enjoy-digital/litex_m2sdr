@@ -61,6 +61,12 @@ struct liteeth_udp_ctrl {
     /* Internal RX assemble state */
     size_t        rx_assembling_bytes;
 
+    /* RX frame synchronization (see liteeth_udp_set_rx_frame_sync()). */
+    int           rx_frame_sync_enable;
+    uint64_t      rx_frame_sync_word;
+    uint64_t      rx_frame_sync_drops;   /* Datagrams dropped while looking for a frame start. */
+    uint64_t      rx_frame_resyncs;      /* Frames restarted on a frame start inside a buffer. */
+
     /* RX diagnostics */
     uint64_t      rx_buffers;
     uint64_t      rx_ring_full_events;
@@ -98,6 +104,13 @@ int  liteeth_udp_init(struct liteeth_udp_ctrl *u,
 void liteeth_udp_cleanup(struct liteeth_udp_ctrl *u);
 void liteeth_udp_process(struct liteeth_udp_ctrl *u, int timeout_ms);
 void liteeth_udp_flush_rx(struct liteeth_udp_ctrl *u);
+/* RX frame synchronization: the FPGA sends frames of buf_size bytes that start with sync_word
+ * (the RX header), as datagrams. With it enabled, a buffer always starts on the datagram that
+ * starts a frame: the datagrams received before the first frame start are dropped, and a frame
+ * start met inside a buffer (datagrams were lost) restarts the buffer. A full buffer is given
+ * once the next datagram is there and starts a frame; else it held datagrams of two frames and
+ * is dropped. Without it the datagrams are concatenated as they come. */
+void liteeth_udp_set_rx_frame_sync(struct liteeth_udp_ctrl *u, int enable, uint64_t sync_word);
 
 uint8_t *liteeth_udp_next_read_buffer (struct liteeth_udp_ctrl *u);
 uint8_t *liteeth_udp_next_write_buffer(struct liteeth_udp_ctrl *u);

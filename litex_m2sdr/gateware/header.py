@@ -284,6 +284,41 @@ class HeaderInserterExtractor(LiteXModule):
         # backward-compatible: software built against an older csr.h keeps addressing every
         # pre-gate register correctly on new gateware and vice versa.
 
+# TX Header Packet Marker --------------------------------------------------------------------------
+
+class TXHeaderPacketMarker(LiteXModule):
+    """Marks the frames of a TX stream received as packets (Ethernet UDP datagrams).
+
+    The TX header extractor finds the header of a host buffer with the first-word marker, which
+    the PCIe DMA gives. A packet link gives the end of each packet: the host sends a buffer as
+    several packets, and the header (sync word, then timestamp) starts the first one. first is
+    set on the first word of a packet when it is the sync word.
+
+    Counting the words of a buffer would not survive a lost packet. With the sync word, the
+    extractor finds the next buffer again: it waits for first after each frame. The sample
+    formats cannot give the sync word at the start of a packet (12-bit samples in 16-bit lanes).
+    """
+    def __init__(self, data_width=64, sync_word=0x5aa5_5aa5_5aa5_5aa5):
+        self.sink   = sink   = stream.Endpoint([("data", data_width)]) # i, with last (end of packet).
+        self.source = source = stream.Endpoint(dma_layout(data_width)) # o, with first (start of frame).
+
+        self.reset  = Signal() # i: stream disabled, the next word starts a packet.
+
+        # # #
+
+        packet_start = Signal(reset=1)
+        self.sync += [
+            If(self.reset,
+                packet_start.eq(1)
+            ).Elif(sink.valid & sink.ready,
+                packet_start.eq(sink.last)
+            )
+        ]
+        self.comb += [
+            sink.connect(source, keep={"valid", "ready", "data"}),
+            source.first.eq(packet_start & (sink.data[:64] == sync_word)),
+        ]
+
 # TX Header Extractor ------------------------------------------------------------------------------
 
 class TXHeaderExtractor(HeaderInserterExtractor):

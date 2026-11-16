@@ -491,14 +491,16 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
-#ifdef CSR_ETH_TX_STREAMER_ENABLE_ADDR
-    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
+#if defined(CSR_ETH_TX_STREAMER_ENABLE_ADDR) && defined(CSR_CROSSBAR_MUX_SEL_ADDR)
+    /* Crossbar first, with the streamer still disabled: the gateware holds the TX header
+     * extractor in reset while the selected streamer is disabled, so the first buffer of the
+     * stream is taken as a frame start. With the streamer enabled first, the extractor of a
+     * freshly loaded bitstream passes the first buffer as plain samples, header included. */
+    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 0) != 0)
         return M2SDR_ERR_IO;
-#else
-    return M2SDR_ERR_UNSUPPORTED;
-#endif
-#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
     m2sdr_loss_counters_base(dev, M2SDR_TX);
     return M2SDR_ERR_OK;
@@ -571,6 +573,8 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
     stats->so_rcvbuf_actual      = dev->udp.so_rcvbuf_actual_bytes;
     stats->so_sndbuf_requested   = dev->udp.so_sndbuf_bytes;
     stats->so_sndbuf_actual      = dev->udp.so_sndbuf_actual_bytes;
+    stats->rx_frame_sync_drops   = dev->udp.rx_frame_sync_drops;
+    stats->rx_frame_resyncs      = dev->udp.rx_frame_resyncs;
     return M2SDR_ERR_OK;
 }
 
@@ -843,12 +847,20 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
             eth_rx_needs_activate = 1;
         }
 
+        /* One UDP buffer per FPGA frame: the payload, plus the header when it is enabled. Both
+         * directions share the buffers, so they must agree on the size. */
+        size_t udp_buffer_bytes = (size_t)buffer_size * m2sdr_sample_size(format);
+        if (direction == M2SDR_RX ? dev->rx_header_enable : dev->tx_header_enable)
+            udp_buffer_bytes += M2SDR_DMA_HEADER_SIZE;
+        if (dev->udp_inited && liteeth_udp_buffer_size(&dev->udp) != udp_buffer_bytes)
+            return M2SDR_ERR_INVAL;
+
         if (!dev->udp_inited) {
             if (liteeth_udp_init(&dev->udp,
                                  NULL, listen_port,
                                  dev->eth_ip, listen_port,
                                  1, 1,
-                                 buffer_size * m2sdr_sample_size(format),
+                                 udp_buffer_bytes,
                                  num_buffers ? num_buffers : 0,
                                  0) < 0) {
                 return M2SDR_ERR_IO;
@@ -860,6 +872,10 @@ int m2sdr_sync_config(struct m2sdr_dev *dev,
         }
 
         if (eth_rx_needs_activate) {
+            /* With the RX header, the frames start with its sync word: buffers aligned on it,
+             * whatever the datagram the reception starts on and through lost datagrams. */
+            liteeth_udp_set_rx_frame_sync(&dev->udp, dev->rx_header_enable,
+                                          M2SDR_DMA_HEADER_SYNC_WORD);
             liteeth_udp_flush_rx(&dev->udp);
             rc = m2sdr_liteeth_rx_stream_activate(dev, &eth_rx_config);
             if (rc != M2SDR_ERR_OK)
@@ -1110,9 +1126,9 @@ static int m2sdr_liteeth_stream_stats(struct m2sdr_dev *dev,
 
     if (direction == M2SDR_RX) {
         stats->overflow_events =
-            udp.rx_kernel_drops + udp.rx_ring_full_events;
+            udp.rx_kernel_drops + udp.rx_ring_full_events + udp.rx_frame_resyncs;
         stats->overflow_buffers =
-            udp.rx_kernel_drops + udp.rx_ring_full_events;
+            udp.rx_kernel_drops + udp.rx_ring_full_events + udp.rx_frame_resyncs;
     }
     m2sdr_loss_counters_stats(dev, direction, stats);
 
@@ -1935,12 +1951,13 @@ int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow)
  * header inserter stamps each buffer when it starts forming (DMA plane); rx_offset is
  * subtracted so the stamp refers to when the first sample was at the ANTENNA. With both
  * offsets calibrated, TX and RX timestamps share one reference plane. 0 (the default)
- * keeps the historical DMA-plane stamping. LitePCIe and LiteUSB. */
+ * keeps the historical DMA-plane stamping. Every host link. */
 int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns)
 {
     if (!dev)
         return M2SDR_ERR_INVAL;
-    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE && dev->transport != M2SDR_TRANSPORT_LITEUSB)
+    if (dev->transport != M2SDR_TRANSPORT_LITEPCIE && dev->transport != M2SDR_TRANSPORT_LITEUSB &&
+        dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
     /* 64-bit CSR: high word at +0, low word at +4 (matches m2sdr_set_time). */
     if (m2sdr_reg_write(dev, CSR_HEADER_RX_OFFSET_ADDR + 0, (uint32_t)(offset_ns >> 32)) != 0)

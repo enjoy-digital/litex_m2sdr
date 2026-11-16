@@ -189,6 +189,10 @@ struct m2sdr_liteeth_udp_stats {
     int so_rcvbuf_actual;
     int so_sndbuf_requested;
     int so_sndbuf_actual;
+    /* With the RX header: datagrams dropped while looking for a frame start, and buffers
+     * restarted because datagrams of their frame were lost. */
+    uint64_t rx_frame_sync_drops;
+    uint64_t rx_frame_resyncs;
 };
 
 struct m2sdr_stream_stats {
@@ -500,6 +504,12 @@ enum m2sdr_feature_flag {
 #else
     M2SDR_FEATURE_STREAM_COUNTERS = 0,
 #endif
+    /* The Ethernet TX stream carries the TX header: hardware timed TX works over Ethernet. */
+#ifdef CSR_CAPABILITY_FEATURES_ETH_TX_HEADER_OFFSET
+    M2SDR_FEATURE_ETH_TX_HEADER = 1u << CSR_CAPABILITY_FEATURES_ETH_TX_HEADER_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_TX_HEADER = 0,
+#endif
     /* The USB3 TX stream carries the TX header: hardware timed TX works over USB3. */
 #ifdef CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET
     M2SDR_FEATURE_USB3_TX_HEADER = 1u << CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET,
@@ -745,9 +755,11 @@ void *m2sdr_get_handle(struct m2sdr_dev *dev);
 
 /* DMA header control */
 int  m2sdr_set_rx_header(struct m2sdr_dev *dev, bool enable, bool strip_header);
-/* The TX header (and timed TX) is supported on the PCIe link, and on the USB3 link when the
- * gateware marks its TX frames (M2SDR_FEATURE_USB3_TX_HEADER): enabling it elsewhere returns
- * M2SDR_ERR_UNSUPPORTED. */
+/* The TX header (and timed TX) is supported on the PCIe link, and on the USB3 and Ethernet
+ * links when the gateware marks their TX frames (M2SDR_FEATURE_USB3_TX_HEADER,
+ * M2SDR_FEATURE_ETH_TX_HEADER): enabling it elsewhere returns M2SDR_ERR_UNSUPPORTED.
+ * Over Ethernet, enable the headers before the streams are configured: a buffer is then one
+ * FPGA frame, header included. */
 int  m2sdr_set_tx_header(struct m2sdr_dev *dev, bool enable);
 
 /* GPIO helper (4-bit) */
@@ -990,7 +1002,7 @@ int m2sdr_get_tx_underflow(struct m2sdr_dev *dev, uint32_t *underflow);
  * RX timestamps share one reference plane (needed for absolute/multi-board timing; TX<->RX
  * self-consistency alone is already given by the loopback-calibrated tx_offset, which
  * absorbs the sum of both pipelines). 0 (default) keeps the historical DMA-plane stamping.
- * LitePCIe and LiteUSB. */
+ * Every host link. */
 int m2sdr_set_rx_offset(struct m2sdr_dev *dev, uint64_t offset_ns);
 
 /* Zero-copy buffer API.

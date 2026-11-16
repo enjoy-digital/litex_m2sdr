@@ -41,17 +41,17 @@ The capacity of a link sets which of these configurations it carries.
 |--------------------------|--------------------------|------------------------------------------|----------------------|
 | PCIe Gen2, one lane | 500 MB/s | 61.44 MSPS in SC16, with a small margin | Line rate |
 | PCIe Gen2, two or four lanes | 1000 or 2000 MB/s | 122.88 MSPS in the [oversampling mode](#rfic-oversampling) | Line rate |
-| Ethernet, 1000BASE-X | 125 MB/s | 30.72 MSPS in SC8 at most, to be checked on the setup | Line rate |
+| Ethernet, 1000BASE-X | 116 MB/s in full duplex | 14.5 MSPS in SC16, 29 MSPS in SC8 | Measured |
 | Ethernet, 2500BASE-X | 312.5 MB/s | 61.44 MSPS in SC8 | Line rate |
 | Ethernet, 5GBASE-R | 625 MB/s | 61.44 MSPS in SC8 | Line rate |
 | USB3 | 440 MB/s for RX alone, 370 MB/s in full duplex | 46.08 MSPS in SC16, 61.44 MSPS in SC8 | Measured |
 
-The PCIe and Ethernet figures are the line rates after the line coding. The protocol headers
-come out of them, so the usable rate is lower: the Ethernet rows also carry the UDP and IP
-headers of each packet. On 1000BASE-X, 2T2R at 30.72 MSPS in SC8 needs 122.9 MB/s for the
-samples alone: measure what the setup carries with the `eth-rx-rate-sweep` command of
-`m2sdr_util`. The USB3 figures were measured on the board with the samples checked, see
-[USB3 host link](#perf-usb3).
+The figures of PCIe and of the two faster Ethernet PHYs are the line rates after the line
+coding. The protocol headers come out of them, so the usable rate is lower: an Ethernet link
+also carries the UDP and IP headers of each packet, which leaves about 117 MB/s of samples on
+1000BASE-X. The 1000BASE-X and USB3 figures were measured on the board with the samples
+checked, see [Ethernet host link](#perf-eth) and [USB3 host link](#perf-usb3). On 1000BASE-X,
+2T2R at 30.72 MSPS in SC8 needs 122.9 MB/s and does not fit.
 
 Three more rules bound a configuration, whatever the link:
 
@@ -345,6 +345,21 @@ The host sends TX samples in datagrams of 1 KiB, in bursts and with scheduling j
 FIFO of 256 KiB absorbs this. The stream to the RFIC starts only when the FIFO is half full and
 stops when it is empty, until it is half full again. When the streamer is disabled, incoming
 data is discarded.
+
+UDP has no flow control: the host paces its writes at the sample rate. Around the half-full
+level the FIFO takes 128 KiB more or 128 KiB less, about a millisecond each way at 112 MB/s.
+A host that runs further ahead loses datagrams, and one that falls further behind underflows
+the RFIC ([Ethernet host link](#perf-eth)).
+
+**TX frames.** The host sends each 8 KiB buffer as 8 datagrams. With the TX header, the buffer
+starts with the sync word of the header: the gateware marks the first word of a datagram that
+is the sync word (`TXHeaderPacketMarker`), and the TX header extractor finds the header with
+this marker. Nothing is counted, so the frames are found again after a lost datagram. This
+makes [hardware timed TX](#streaming-timed-tx) work on this link. While the TX header is
+enabled the TX FIFOs are not primed, as over USB3.
+
+**RX frames.** With the RX header, the RX stream leaves in frames of 8 KiB that start with the
+header, and each frame ends a datagram. The library aligns its buffers on them.
 
 When Ethernet is the only host link, the RFIC core also gets a FIFO of depth 8192 on each
 stream. With PCIe in the same bitstream these FIFOs are not added: the DMA has its own buffering.

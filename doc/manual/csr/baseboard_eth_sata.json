@@ -779,12 +779,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet.",
+      "name": "eth_tx_header",
+      "offset": 13,
+      "reset": 1,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 13
+    "size": 14
    },
    {
     "access": "ro",

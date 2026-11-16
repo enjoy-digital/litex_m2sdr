@@ -2450,6 +2450,9 @@ bool m2sdr_tx_header_supported(struct m2sdr_dev *dev)
     if (dev->transport == M2SDR_TRANSPORT_LITEUSB)
         return m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
                (caps.features & M2SDR_FEATURE_USB3_TX_HEADER);
+    if (dev->transport == M2SDR_TRANSPORT_LITEETH)
+        return m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+               (caps.features & M2SDR_FEATURE_ETH_TX_HEADER);
     return false;
 }
 

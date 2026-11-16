@@ -15,6 +15,7 @@ The values are given in the units of their measurement.
 | TX latency floor | Drain time of the DMA ring | [Streaming](#streaming-latency-source) |
 | RF to SATA recording | 232.94 MiB/s sustained, in real time | [SATA storage](#perf-sata) |
 | USB3 sample stream | 368.6 MB/s in full duplex, 440 MB/s for RX alone | [USB3 host link](#perf-usb3) |
+| Ethernet sample stream, 1000BASE-X | 116 MB/s in full duplex | [Ethernet host link](#perf-eth) |
 
 The sample rate is the statement of `README.md`, and the TX offset is recorded in
 `litex_m2sdr/software/soapysdr/README.md`. The latency floor and the SATA figures were measured
@@ -152,6 +153,77 @@ paths of the board: a burst of tone, located in the RX samples by correlation.
 These delays are close to those of PCIe ([One reference plane](#streaming-timed-tx-plane)), which
 measured 1215 ns at 30.72 MSPS over a cable. The SoapySDR driver uses the same TX offset on
 both links. The method locates the edge of a burst to about one sample period.
+
+## Ethernet host link {#perf-eth}
+
+Measured by the maintainers, 2026-11-16, on a board in the LiteX Acorn Baseboard Mini with a
+1000BASE-X SFP module in the SFP 0 cage, an Ethernet-only bitstream and a PC with Linux on the
+same network. The method is the one of the [USB3 host link](#perf-usb3-method): digital
+loopback of the RFIC, ramp checked on every sample, samples counted against the board time of
+the RX frames, loss counters of the gateware read after each run.
+
+Two settings of the host matter:
+
+- The socket buffers. `net.core.rmem_max` and `net.core.wmem_max` were raised to 8 MiB. With the
+  default of 208 KiB the kernel dropped datagrams at each short stall of the reader.
+- The pacing of the writer. UDP has no flow control, and the TX FIFO of the gateware holds
+  2.5 ms of samples at 100 MB/s ([Sample streams](#links-eth-streams)). The runs pace the
+  writer on the clock of the host with a busy wait. With a sleep between the writes, the
+  wake-up was now and then late enough to empty the FIFO: one TX underflow per 15 to 30 s at
+  100 MB/s.
+
+### Full duplex {#perf-eth-fdx}
+
+Each run lasts 20 s. The stream rate is per direction.
+
+| Channels | Format | Sample rate | Stream | Result |
+|------------|--------|--------------------------|-------------------|------------------------------|
+| 2T2R | SC16 | 5, 10, 12.5, 13.5, 14 MSPS | 40 to 112 MB/s | Pass |
+| 2T2R | SC16 | 14.5 MSPS | 116 MB/s | Pass |
+| 2T2R | SC8 | 15.36, 20, 25, 27, 28 MSPS | 61.4 to 112 MB/s | Pass |
+| 2T2R | SC8 | 29 MSPS | 116 MB/s | Pass |
+| 1T1R | SC16 | 15.36, 25, 27, 28, 29 MSPS | 61.4 to 116 MB/s | Pass |
+| 1T1R | SC8 | 30.72, 50, 56, 58 MSPS | 61.4 to 116 MB/s | Pass |
+| 1T1R | SC8 | 61.44 MSPS | 122.9 MB/s | Fail: above the link |
+
+Three runs of 120 s at 100 MB/s: 2T2R at 12.5 MSPS in SC16 and 2T2R at 25 MSPS in SC8 pass;
+1T1R at 25 MSPS in SC16 had one TX underflow, a stall of the host.
+
+### RX alone {#perf-eth-rx}
+
+| Channels | Format | Sample rate | Stream | Result |
+|------------|--------|--------------------|-------------------|------------------------------|
+| 2T2R | SC16 | 14, 14.5 MSPS | 112, 116 MB/s | Pass |
+| 2T2R | SC16 | 15 MSPS | 120 MB/s | Fail: above the link |
+| 2T2R | SC8 | 28, 28.5, 29 MSPS | 112 to 116 MB/s | Pass |
+
+When the link is saturated the samples are lost in the FPGA, and the loss counters report
+it: 8 million words in 20 s at 15 MSPS, with no frame broken on the host side.
+
+### Timed TX {#perf-eth-timed-tx}
+
+With the digital loopback of the RFIC and a TX offset of 0, a timed burst comes back on the RX
+stream at a constant delay after its transmit time.
+
+| Sample rate (2T2R) | Buffers per burst | Delay | Spread over the bursts |
+|--------------------|-------------------|--------------------|--------------------------|
+| 1 MSPS | 2 | 7.9 to 8.6 µs | 0.7 sample period |
+| 2 MSPS | 4 | 4.1 to 4.5 µs | 0.8 sample period |
+| 5 MSPS | 1, 4 | 1.9 to 2.0 µs | 0.6 to 0.8 sample period |
+| 10 MSPS | 1, 4, 32 | 1.1 to 1.3 µs | 0.6 to 1.1 sample period |
+| 12.5 MSPS | 8, 16 | 1.0 to 1.1 µs | 0.5 to 0.8 sample period |
+
+Every burst is received at full length. A burst sent with a transmit time in the past loses its
+first buffer, and `header_tx_underflow` counts it. The delay to the antenna was not measured on
+this link.
+
+### Notes on the runs {#perf-eth-notes}
+
+- The network card of the host counted no error and no drop. The FPGA was between 66 and 73 °C.
+- `m2sdr_util ad9361-loopback-test` passes at 5 and 10 MSPS (80 MB/s) on this host and fails
+  above: its reader, in one thread with the check, does not follow 100 MB/s of datagrams, and
+  its writer is paced on that reader.
+- The figures are those of one board, one module and one host.
 
 ## SATA storage {#perf-sata}
 

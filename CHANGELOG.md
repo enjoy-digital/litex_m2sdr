@@ -27,6 +27,10 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
 - Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
+**Ethernet Host Link**
+- Added hardware timed TX over Ethernet (capability bit `eth_tx_header`) and RX timestamps on the raw UDP stream: the gateware finds the TX header at the start of a datagram, and `libm2sdr` aligns its RX buffers on the frames of the FPGA, through lost datagrams.
+- Qualified 1000BASE-X at `116 MB/s` in full duplex (2T2R `14.5 MSPS` in SC16, `29 MSPS` in SC8).
+
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------
 **Runtime Host Stack, SATA Workflows, Wide RFIC Modes, and Stability Hardening**

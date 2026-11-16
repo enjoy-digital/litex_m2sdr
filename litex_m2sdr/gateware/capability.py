@@ -32,7 +32,7 @@ class Capability(LiteXModule):
         # USB3.
         usb3_enabled=False, usb3_sfp=0, usb3_tx_header=False,
         # Stream.
-        stream_counters=False):
+        stream_counters=False, eth_tx_header=False):
 
         # API Version.
         # ------------
@@ -64,6 +64,8 @@ class Capability(LiteXModule):
                 description="USB3 TX stream marks its frames: TX header and hardware timed TX over USB3."),
             CSRField("stream_counters", size=1, offset=12, reset=int(stream_counters),
                 description="RFIC stream loss counters (RX overflow, TX underflow) are present."),
+            CSRField("eth_tx_header", size=1, offset=13, reset=int(eth_tx_header),
+                description="Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 

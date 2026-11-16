@@ -348,7 +348,6 @@ capability bit (`M2SDR_FEATURE_STREAM_COUNTERS`).
 
 With the TX header enabled, the end of each burst is such an interruption, so
 `underflow_events` is not filled; `m2sdr_get_tx_underflow()` counts the late timed buffers.
-The Ethernet side of this reporting was not run on hardware.
 
 ### Timestamps and timed TX {#sw-lib-time}
 
@@ -358,10 +357,15 @@ On TX, a timestamp in the metadata asks the gateware to hold the buffer until th
 reaches it. The mechanism is described in [Streaming](#streaming) and used in
 [Timed TX](#flow-timed-tx).
 
-The TX header works on PCIe and on USB3. It is not available over Ethernet yet: there
-`m2sdr_set_tx_header()` returns `M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission. Over
-USB3 a program can check the feature bit `M2SDR_FEATURE_USB3_TX_HEADER` of
-`m2sdr_get_capabilities()`, which an older bitstream does not set.
+The TX header works on PCIe, USB3 and Ethernet. Over USB3 and Ethernet a program can check
+the feature bits `M2SDR_FEATURE_USB3_TX_HEADER` and `M2SDR_FEATURE_ETH_TX_HEADER` of
+`m2sdr_get_capabilities()`, which an older bitstream does not set: `m2sdr_set_tx_header()`
+then returns `M2SDR_ERR_UNSUPPORTED`, and so does a timed transmission.
+
+Over Ethernet, enable the headers before the streams are configured: a buffer is then one frame
+of the FPGA, header included. With the RX header the library aligns the buffers on the frames,
+whatever the datagram the reception starts on, and finds the frames again after lost datagrams
+(`rx_frame_resyncs` in the UDP statistics, counted as RX overflows).
 
 TX timestamps are rounded to the 10 ns step of the board time (`M2SDR_TX_TIME_GRID_NS`).
 Setting the board time from the host is refused, with `M2SDR_ERR_STATE`, when Ethernet PTP
