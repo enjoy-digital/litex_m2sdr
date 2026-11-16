@@ -28,7 +28,9 @@ class Capability(LiteXModule):
         # Board.
         variant, jtagbone, eth_sfp, wr_sfp,
         # RFIC.
-        rfic_oversampling=0):
+        rfic_oversampling=0,
+        # USB3.
+        usb3_enabled=False, usb3_sfp=0):
 
         # API Version.
         # ------------
@@ -54,6 +56,8 @@ class Capability(LiteXModule):
                 description="Hardware timed-TX gate (and its timestamp-offset CSRs) is present."),
             CSRField("rfic_oversampling", size=1, offset=9, reset=int(rfic_oversampling),
                 description="RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present."),
+            CSRField("usb3", size=1, offset=10, reset=int(usb3_enabled),
+                description="USB3 (SFP-to-USB3 adapter) is present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 
@@ -83,13 +87,13 @@ class Capability(LiteXModule):
 
         # Ethernet Config.
         # ----------------
-        eth_speed_map  = {"1000basex": 0, "2500basex": 1}
+        eth_speed_map  = {"1000basex": 0, "2500basex": 1, "5000baser": 2}
         eth_speed_value = eth_speed_map[eth_speed] if eth_enabled else 0
         self._eth_config = CSRStatus(32, fields=[
             CSRField("speed", size=2, offset=0, reset=eth_speed_value, values=[
                 ("``0b00``", "1Gbps"),
                 ("``0b01``", "2.5Gbps"),
-                ("``0b10``", "Reserved"),
+                ("``0b10``", "5Gbps"),
                 ("``0b11``", "Reserved"),
             ], description="Ethernet speed configuration."),
             CSRField("ptp", size=1, offset=2, reset=int(eth_ptp), description="Ethernet PTP time discipline build support."),
@@ -142,5 +146,6 @@ class Capability(LiteXModule):
             CSRField("jtagbone", size=1, offset=2, reset=int(jtagbone), description="JTAGBone enabled."),
             CSRField("eth_sfp",  size=1, offset=3, reset=int(eth_sfp),  description="Ethernet SFP index."),
             CSRField("wr_sfp",   size=1, offset=4, reset=int(wr_sfp),   description="White Rabbit SFP index."),
+            CSRField("usb3_sfp", size=1, offset=5, reset=int(usb3_sfp), description="USB3 SFP index."),
             # Reserved bits.
         ], description="Board-level configuration.")

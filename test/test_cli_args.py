@@ -29,6 +29,7 @@ def test_rfic_clk_freq_policy():
     assert soc_mod.get_rfic_clk_freq(with_rfic_oversampling=True) == 491.52e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="1000basex") == 122.88e6
     assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="2500basex") == 245.76e6
+    assert soc_mod.get_rfic_clk_freq(with_eth=True, eth_phy="5000baser") == 245.76e6
     assert soc_mod.get_rfic_clk_freq(
         with_eth=True,
         eth_phy="1000basex",
@@ -344,3 +345,73 @@ def test_base_soc_rejects_pcie_eth_sata_triple_use():
             with_sata=True,
             with_jtagbone=False,
         )
+
+
+@pytest.mark.parametrize("kwargs", [
+    dict(with_pcie=True,  with_eth=True),
+    dict(with_pcie=True,  with_sata=True),
+    dict(with_pcie=False, with_eth=True, with_sata=True),
+])
+def test_base_soc_rejects_rfic_oversampling_with_eth_or_sata(kwargs):
+    # The Ethernet and SATA streamers are 64-bit: on the 128-bit oversampling datapath they would
+    # silently drop the second sample group of every word.
+    soc_mod = _load_soc_module()
+
+    with pytest.raises(ValueError, match="oversampling datapath is 128-bit"):
+        soc_mod.BaseSoC(
+            variant="baseboard",
+            with_jtagbone=False,
+            with_rfic_oversampling=True,
+            **kwargs,
+        )
+
+
+@pytest.mark.parametrize("eth_sfp,wr_sfp", [(0, 0), (0, 1), (1, 0)])
+def test_base_soc_rejects_eth_with_white_rabbit(eth_sfp, wr_sfp):
+    # Both cores use the Ethernet channel of the shared QPLL (and drive its reset).
+    soc_mod = _load_soc_module()
+
+    with pytest.raises(ValueError, match="Ethernet and White Rabbit cannot be enabled together"):
+        soc_mod.BaseSoC(
+            variant="baseboard",
+            with_pcie=False,
+            with_jtagbone=False,
+            with_eth=True,
+            eth_sfp=eth_sfp,
+            with_white_rabbit=True,
+            wr_sfp=wr_sfp,
+            wr_firmware="firmware.bram",
+        )
+
+
+@pytest.mark.parametrize("lanes", [2, 4])
+def test_base_soc_rejects_multi_lane_pcie_on_baseboard(lanes):
+    soc_mod = _load_soc_module()
+
+    with pytest.raises(ValueError, match="baseboard variant has one PCIe lane"):
+        soc_mod.BaseSoC(variant="baseboard", with_pcie=True, pcie_lanes=lanes, with_jtagbone=False)
+
+
+def test_sata_gen_help_states_the_gen3_sys_clk_requirement(monkeypatch, capsys):
+    soc_mod = _load_soc_module()
+
+    monkeypatch.setattr(sys, "argv", ["litex_m2sdr.py", "--help"])
+    with pytest.raises(SystemExit):
+        soc_mod.main()
+
+    assert "Gen3 requires --sys-clk-freq >= 150e6" in " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize("lanes", [2, 4])
+def test_m2_pcie_lanes_are_placed_on_their_m2_pins(lanes):
+    # M.2 lane 1 is GTP channel X0Y5 (D11) and lane 2 X0Y6 (B10); the PCIe IP's default puts
+    # lane 1 on X0Y6, which in x2 builds leaves the link stuck at x1.
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(variant="m2", with_pcie=True, pcie_lanes=lanes)
+    locs = {}
+    for command in soc.platform.toolchain.pre_placement_commands:
+        if command.startswith("set_property LOC GTPE2_CHANNEL"):
+            lane = int(command.split("pipe_lane[")[1].split("]")[0])
+            locs[lane] = command.split()[2]
+    expected = ["GTPE2_CHANNEL_X0Y7", "GTPE2_CHANNEL_X0Y5", "GTPE2_CHANNEL_X0Y6", "GTPE2_CHANNEL_X0Y4"]
+    assert [locs[lane] for lane in range(lanes)] == expected[:lanes]

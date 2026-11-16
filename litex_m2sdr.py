@@ -47,7 +47,7 @@ from litesata.frontend.arbitration import LiteSATACrossbar
 from litesata.frontend.identify    import LiteSATAIdentify, LiteSATAIdentifyCSR
 from litescope import LiteScopeAnalyzer
 
-from litex_m2sdr import Platform, _io_baseboard
+from litex_m2sdr import Platform, _io_baseboard, M2_PCIE_GT_LOCS
 
 from litex_m2sdr.gateware.capability       import Capability
 from litex_m2sdr.gateware.clock_discipline import MMCMPhaseDiscipline, PTPClock10Discipline
@@ -71,6 +71,7 @@ from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
+from litex_m2sdr.gateware.usb3        import USB3, USB3_VID, USB3_PID
 from litex_m2sdr.gateware.sata        import (
     SATA_HOST_BUFFER_BASE, SATA_HOST_BUFFER_SIZE, SATAHostBuffer,
     SATADMAMemoryRouter,
@@ -131,10 +132,11 @@ def _load_prepare_wr_environment(root_dir, wr_nic_dir=None):
 def get_rfic_clk_freq(with_eth=False, eth_phy="1000basex", with_rfic_oversampling=False):
     if with_eth:
         # Ethernet builds are limited by streaming bandwidth. Size the RFIC clock for 2T2R SC8:
-        # 1000BaseX -> 30.72MSPS, 2500BaseX -> 61.44MSPS.
+        # 1000BASE-X -> 30.72MSPS, 2500BASE-X/5GBASE-R -> 61.44MSPS.
         return {
             "1000basex" : 122.88e6,
             "2500basex" : 245.76e6,
+            "5000baser" : 245.76e6,
         }[eth_phy]
     return {
         False : 245.76e6, # Max rfic_clk for  61.44MSPS / 2T2R.
@@ -158,7 +160,8 @@ def get_eth_phy_kwargs(eth_phy):
 
 class CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_eth=False, eth_refclk_freq=125e6,
-        eth_refclk_direct=False, with_sata=False, with_white_rabbit=False):
+        eth_refclk_direct=False, with_sata=False, with_white_rabbit=False, with_idelayctrl=False,
+        with_usb3=False):
         self.rst              = Signal()
         self.cd_sys           = ClockDomain()
         self.cd_clk10         = ClockDomain()
@@ -170,6 +173,7 @@ class CRG(LiteXModule):
         self.cd_refclk_pcie   = ClockDomain()
         self.cd_refclk_eth    = ClockDomain()
         self.cd_refclk_sata   = ClockDomain()
+        self.cd_oob           = ClockDomain()
 
         self.cd_clk_125m_gtp  = ClockDomain()
         self.cd_clk_62m5_dmtd = ClockDomain()
@@ -203,9 +207,12 @@ class CRG(LiteXModule):
             self.cd_clk200.rst.eq(self.cd_idelay.rst),
             self.cd_clk100.clk.eq(pll.clkin),
         ]
-        # No IDELAY/ODELAY primitives are used by this target. An unused
-        # IDELAYCTRL can remain unplaced in Vivado; keep only its 200 MHz
-        # clock, which also supplies the MMCM phase-shift interfaces.
+        # IDelayCtrl: only when IDELAY/ODELAY primitives are used (the oversampling PHY's per-lane
+        # RX deskew IDELAYE2s, which need it calibrated by the 200 MHz reference; without it Vivado's
+        # DRC PLIDC-10 stops placement). An unused IDELAYCTRL can remain unplaced in Vivado, so other
+        # targets keep only its 200 MHz clock, which also supplies the MMCM phase-shift interfaces.
+        if with_idelayctrl:
+            self.idelayctrl = S7IDELAYCTRL(self.cd_idelay)
 
         # Ethernet PLL.
         # -------------
@@ -221,6 +228,14 @@ class CRG(LiteXModule):
             self.eth_pll = eth_pll = S7PLL()
             eth_pll.register_clkin(self.cd_sys.clk, sys_clk_freq)
             eth_pll.create_clkout(self.cd_refclk_eth, eth_refclk_freq, margin=0)
+
+        # USB3 Clocks.
+        # ------------
+        # OOB clock (LFPS detection) at sys_clk_freq/8. The QPLL GTGREFCLK reference is the 125MHz
+        # sys clock: the 100MHz oscillator through a BUFG gave USB3 link errors/Recoveries as soon
+        # as the AD9361 ran at 30.72MSPS (clean with the sys clock).
+        if with_usb3:
+            pll.create_clkout(self.cd_oob, sys_clk_freq/8, margin=0)
 
         # SATA PLL.
         # ---------
@@ -298,6 +313,9 @@ class BaseSoC(SoCMini):
         "sata_rx_streamer" : 29,
         "sata_tx_streamer" : 32,
 
+        # USB3.
+        "usb3"             : 22,
+
         # GPIO.
         "gpio"             : 21,
 
@@ -324,6 +342,7 @@ class BaseSoC(SoCMini):
         with_eth_ptp_rfic_clock = False,
         with_eth_vrt           = False, vrt_dst_ip="239.168.1.100", vrt_dst_port=4991,
         with_sata              = False, sata_gen=2,
+        with_usb3              = False, usb3_sfp=0, usb3_vid=USB3_VID, usb3_pid=USB3_PID, with_usb3_debug=False,
         with_white_rabbit      = False, wr_sfp=None, wr_dac_bits=16, wr_firmware=None,
         wr_nic_dir             = None,
         wr_cpu_type            = "urv", wr_cpu_variant=None, wr_cpu_memory="private", wr_cpu_boot="embedded",
@@ -338,6 +357,15 @@ class BaseSoC(SoCMini):
 
         if with_pcie_ptm and not with_pcie:
             raise ValueError("PCIe PTM requires PCIe to be enabled")
+
+        if with_pcie and (variant == "baseboard") and (pcie_lanes != 1):
+            raise ValueError("The baseboard variant has one PCIe lane: use --pcie-lanes=1.")
+
+        if with_rfic_oversampling and (with_eth or with_sata):
+            msg  = "The RFIC oversampling datapath is 128-bit and supports PCIe only: "
+            msg += "the Ethernet and SATA streamers are 64-bit. "
+            msg += "Use --with-rfic-oversampling without --with-eth and --with-sata."
+            raise ValueError(msg)
 
         # Platform ---------------------------------------------------------------------------------
 
@@ -359,6 +387,16 @@ class BaseSoC(SoCMini):
             msg += "or disable one SerDes protocol."
             raise ValueError(msg)
 
+        if with_usb3:
+            if variant != "baseboard":
+                raise ValueError("USB3 is only supported with --variant=baseboard (requires baseboard SFP resources).")
+            if with_eth or with_sata or with_white_rabbit:
+                raise ValueError("USB3 cannot be combined with Ethernet, SATA or White Rabbit (yet).")
+            if with_rfic_oversampling:
+                raise ValueError("USB3 bandwidth (~440MB/s) does not allow the RFIC oversampling datapath.")
+            if sys_clk_freq != 125e6:
+                raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
+
         if with_white_rabbit and (variant != "baseboard"):
             raise ValueError("White Rabbit is only supported with --variant=baseboard (requires baseboard SFP resources).")
         if with_white_rabbit and (wr_sfp is None):
@@ -371,6 +409,10 @@ class BaseSoC(SoCMini):
             raise ValueError("PTP RFIC clock discipline requires --with-eth-ptp.")
         if with_eth_ptp_rfic_clock and with_white_rabbit:
             raise ValueError("PTP RFIC clock discipline uses the non-White-Rabbit clk10 MMCM path.")
+        if with_eth and with_white_rabbit:
+            msg  = "Ethernet and White Rabbit cannot be enabled together: "
+            msg += "both use the Ethernet channel of the shared QPLL and drive its reset."
+            raise ValueError(msg)
 
         # SoCMini ----------------------------------------------------------------------------------
 
@@ -382,9 +424,14 @@ class BaseSoC(SoCMini):
 
         # Clocking ---------------------------------------------------------------------------------
 
-        # Match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
-        # divider configuration. 1000BASE-X already uses 125MHz here.
-        eth_refclk_freq = 125e6
+        # 1000BASE-X/2500BASE-X match the Acorn 2.5G bring-up's 125MHz reference and x25 QPLL
+        # divider configuration; 5GBASE-R uses a 103.125MHz reference for the 5.15625Gbaud
+        # line rate (x25 QPLL -> 2.578125GHz VCO).
+        eth_refclk_freq = {
+            "1000basex" : 125e6,
+            "2500basex" : 125e6,
+            "5000baser" : 103.125e6,
+        }[eth_phy] if with_eth else 125e6
 
         # General.
         self.crg = CRG(platform, sys_clk_freq,
@@ -393,6 +440,8 @@ class BaseSoC(SoCMini):
             eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata         = with_sata,
             with_white_rabbit = with_white_rabbit,
+            with_idelayctrl   = with_rfic_oversampling,
+            with_usb3         = with_usb3,
         )
 
         # Shared QPLL.
@@ -403,6 +452,7 @@ class BaseSoC(SoCMini):
             eth_refclk_freq = eth_refclk_freq,
             eth_refclk_direct = with_eth and (eth_phy == "2500basex"),
             with_sata       = with_sata,
+            with_usb3       = with_usb3,
         )
 
         # Capability -------------------------------------------------------------------------------
@@ -435,6 +485,9 @@ class BaseSoC(SoCMini):
             # White Rabbit Capabilities.
             wr_enabled      = with_white_rabbit,
 
+            # USB3 Capabilities.
+            usb3_enabled    = with_usb3,
+
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
 
@@ -446,6 +499,7 @@ class BaseSoC(SoCMini):
             jtagbone       = with_jtagbone,
             eth_sfp        = eth_sfp,
             wr_sfp         = capability_wr_sfp,
+            usb3_sfp       = usb3_sfp,
         )
 
         # SI5351 Clock Generator -------------------------------------------------------------------
@@ -533,8 +587,6 @@ class BaseSoC(SoCMini):
         if with_pcie:
             # PHY.
             # ----
-            if variant == "baseboard":
-                assert pcie_lanes == 1
             # Number of LitePCIe DMA channels. Defaults to 1 (DMA0 = RFIC I/Q stream, unchanged).
             # Downstream subclasses may request extra channels to stream side-band results of
             # custom RFIC-plane processing (see add_rfic_datapath()); DMA0 keeps its role.
@@ -548,7 +600,11 @@ class BaseSoC(SoCMini):
             )
             self.comb += ClockSignal("refclk_pcie").eq(self.pcie_phy.pcie_refclk)
             if variant == "baseboard":
-                self.pcie_phy.add_gt_loc_constraints(["GTPE2_CHANNEL_X0Y4"], by_pipe_lane=False)
+                self.pcie_phy.add_gt_loc_constraints([M2_PCIE_GT_LOCS[3]], by_pipe_lane=False) # PERp3.
+            if variant == "m2" and pcie_lanes > 1:
+                # The PCIe IP's default lane-1 LOC silently wins in x2 builds, putting lane 1 on
+                # M.2 lane 2 (B10/B6): the link can then only train x1.
+                self.pcie_phy.add_gt_loc_constraints(M2_PCIE_GT_LOCS[:pcie_lanes])
             self.pcie_phy.update_config({
                 "PCIe_Blk_Locn"            : "X0Y0",
                 "Base_Class_Menu"          : "Wireless_controller",
@@ -594,8 +650,11 @@ class BaseSoC(SoCMini):
             self.pcie_phy.use_external_qpll(qpll_channel=self.qpll.get_channel("pcie"))
             # The DMA synchronizer (when not bypassed by software) waits for
             # this PPS pulse before declaring synced; PCIe streaming liveness
-            # therefore depends on the time generator staying enabled.
-            self.comb += self.pcie_dma0.synchronizer.pps.eq(self.pps_gen.pps_pulse)
+            # therefore depends on the time generator staying enabled. Each
+            # DMA channel has its own synchronizer and needs the pulse.
+            for n in range(pcie_dmas):
+                pcie_dma = getattr(self, f"pcie_dma{n}")
+                self.comb += pcie_dma.synchronizer.pps.eq(self.pps_gen.pps_pulse)
 
             # Host <-> SoC DMA Bus.
             # ---------------------
@@ -646,19 +705,35 @@ class BaseSoC(SoCMini):
         if with_eth:
             # PHY.
             # ----
-            eth_phy_cls = {
-                "1000basex" : A7_1000BASEX,
-                "2500basex" : A7_2500BASEX,
-            }[eth_phy]
-            self.eth_phy = eth_phy_cls(
-                qpll_channel = self.qpll.get_channel("eth"),
-                data_pads    = self.platform.request("sfp", eth_sfp),
-                sys_clk_freq = sys_clk_freq,
-                rx_polarity  = 1, # Inverted on M2SDR.
-                tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
-                **get_eth_phy_kwargs(eth_phy),
-            )
-            self.eth_phy.pcs.add_csr()
+            if eth_phy == "5000baser":
+                # IEEE-style 5GBASE-R (64b/66b @ 5.15625Gbaud) through LiteEth's native BASE-R
+                # PCS/PMA stack. Imported here so builds with an older LiteEth keep working for
+                # the other PHYs (requires LiteEth master with the serial BASE-R tree).
+                from liteeth.phy.serial.baser.wrappers.a7_gtp import A7_GTP_5G_BASER
+                self.eth_phy = A7_GTP_5G_BASER(
+                    qpll_channel = self.qpll.get_channel("eth"),
+                    data_pads    = self.platform.request("sfp", eth_sfp),
+                    sys_clk_freq = sys_clk_freq,
+                    refclk_freq  = eth_refclk_freq,
+                    rx_polarity  = 1, # Inverted on M2SDR.
+                    tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
+                )
+                # Standard BASE-R diagnostics CSRs (reset, loopback, block lock/BER status, PRBS).
+                self.eth_phy.add_csr()
+            else:
+                eth_phy_cls = {
+                    "1000basex" : A7_1000BASEX,
+                    "2500basex" : A7_2500BASEX,
+                }[eth_phy]
+                self.eth_phy = eth_phy_cls(
+                    qpll_channel = self.qpll.get_channel("eth"),
+                    data_pads    = self.platform.request("sfp", eth_sfp),
+                    sys_clk_freq = sys_clk_freq,
+                    rx_polarity  = 1, # Inverted on M2SDR.
+                    tx_polarity  = 0, # Inverted on M2SDR and Acorn Baseboard Mini.
+                    **get_eth_phy_kwargs(eth_phy),
+                )
+                self.eth_phy.pcs.add_csr()
 
             # Core + MMAP (Etherbone).
             # ------------------------
@@ -814,6 +889,18 @@ class BaseSoC(SoCMini):
                     self.vrt_streamer.sink.timestamp_fra.eq(self.time_ps_vrt),
                 ]
 
+        # USB3 -------------------------------------------------------------------------------------
+
+        if with_usb3:
+            self.add_usb3(
+                platform     = platform,
+                sys_clk_freq = sys_clk_freq,
+                sfp          = usb3_sfp,
+                vid          = usb3_vid,
+                pid          = usb3_pid,
+                with_debug   = with_usb3_debug,
+            )
+
         # SATA -------------------------------------------------------------------------------------
 
         if with_sata:
@@ -827,7 +914,7 @@ class BaseSoC(SoCMini):
 
         # AD9361 RFIC ------------------------------------------------------------------------------
 
-        with_rfic_stream_fifos = with_eth and not with_pcie
+        with_rfic_stream_fifos = (with_eth or with_usb3) and not with_pcie
         self.ad9361 = AD9361RFIC(
             rfic_pads      = platform.request("ad9361_rfic"),
             spi_pads       = platform.request("ad9361_spi"),
@@ -843,6 +930,7 @@ class BaseSoC(SoCMini):
         )
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
+        self.ad9361.add_active_settings()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 
@@ -881,9 +969,10 @@ class BaseSoC(SoCMini):
         # Crossbar.
         # ---------
         # Port indices match the host-side TXSRC_*/RXDST_* enums in
-        # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA.
+        # litex_m2sdr/software/user/m2sdr_sata_lowlevel.h: 0=PCIe, 1=Eth, 2=SATA, 3=USB3.
         crossbar_sata_port = 2
-        self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=3, with_csr=True)
+        crossbar_usb3_port = 3
+        self.crossbar = stream.Crossbar(layout=dma_layout(128 if with_rfic_oversampling else 64), n=4, with_csr=True)
 
         # TX: Comms -> Crossbar -> Header.
         # --------------------------------
@@ -912,6 +1001,14 @@ class BaseSoC(SoCMini):
             ]
         if with_sata:
             self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})
+        if with_usb3:
+            self.comb += [
+                self.usb3.source.connect(self.crossbar.mux.sink3),
+                If(self.crossbar.mux.sel == crossbar_usb3_port,
+                    # Host writes whole frames from the TX enable: align the TX Header FSM on it.
+                    self.header.tx.reset.eq(~self.usb3._control.fields.tx_enable)
+                )
+            ]
         self.comb += self.crossbar.mux.source.connect(self.header.tx.sink)
 
         # RX: Header -> Crossbar -> Comms.
@@ -957,6 +1054,15 @@ class BaseSoC(SoCMini):
                 ]
             else:
                 self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
+        if with_usb3:
+            self.comb += [
+                self.crossbar.demux.source3.connect(self.usb3.sink),
+                If(self.crossbar.demux.sel == crossbar_usb3_port,
+                    # First frame sent to the host starts with a header: align the RX Header FSM
+                    # on the RX enable.
+                    self.header.rx.reset.eq(~self.usb3.rx_streamer.enable)
+                )
+            ]
         # Leds -------------------------------------------------------------------------------------
 
         led_pad = platform.request("user_led")
@@ -967,10 +1073,12 @@ class BaseSoC(SoCMini):
         self.comb += [
             led_tx_activity.eq((self.pcie_dma0.source.valid & self.pcie_dma0.source.ready if with_pcie else 0) |
                                (self.eth_tx_streamer.source.valid & self.eth_tx_streamer.source.ready if with_eth else 0) |
-                               (self.sata_tx_streamer.source.valid & self.sata_tx_streamer.source.ready if with_sata else 0)),
+                               (self.sata_tx_streamer.source.valid & self.sata_tx_streamer.source.ready if with_sata else 0) |
+                               (self.usb3.source.valid & self.usb3.source.ready if with_usb3 else 0)),
             led_rx_activity.eq((self.pcie_dma0.sink.valid & self.pcie_dma0.sink.ready if with_pcie else 0) |
                                (self.eth_rx_streamer.sink.valid & self.eth_rx_streamer.sink.ready if with_eth else 0) |
-                               (self.sata_rx_streamer.sink.valid & self.sata_rx_streamer.sink.ready if with_sata else 0)),
+                               (self.sata_rx_streamer.sink.valid & self.sata_rx_streamer.sink.ready if with_sata else 0) |
+                               (self.usb3.sink.valid & self.usb3.sink.ready & self.usb3.rx_streamer.enable if with_usb3 else 0)),
         ]
 
         self.comb += [
@@ -1103,7 +1211,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.refclk_tuning.connect(self.refclk_mmcm_ps_gen.command),
+                self.refclk_mmcm_ps_gen.command.data.eq(wr.dac_refclk_data),
+                self.refclk_mmcm_ps_gen.command.load.eq(wr.dac_refclk_load),
                 self.crg.refclk_mmcm.psen.eq(     self.refclk_mmcm_ps_gen.psen),
                 self.crg.refclk_mmcm.psincdec.eq( self.refclk_mmcm_ps_gen.psincdec),
                 self.refclk_mmcm_ps_gen.psdone.eq(self.crg.refclk_mmcm.psdone),
@@ -1117,7 +1226,8 @@ class BaseSoC(SoCMini):
                 width      = wr_dac_bits,
             )
             self.comb += [
-                wr.dmtd_tuning.connect(self.dmtd_mmcm_ps_gen.command),
+                self.dmtd_mmcm_ps_gen.command.data.eq(wr.dac_dmtd_data),
+                self.dmtd_mmcm_ps_gen.command.load.eq(wr.dac_dmtd_load),
                 self.crg.dmtd_mmcm.psen.eq(     self.dmtd_mmcm_ps_gen.psen),
                 self.crg.dmtd_mmcm.psincdec.eq( self.dmtd_mmcm_ps_gen.psincdec),
                 self.dmtd_mmcm_ps_gen.psdone.eq(self.crg.dmtd_mmcm.psdone),
@@ -1230,8 +1340,12 @@ class BaseSoC(SoCMini):
 
         # Ethernet transceiver clocks.
         if with_eth:
-            platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
-            platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+            if eth_phy == "5000baser":
+                # The BASE-R wrapper owns its transceiver clock constraints.
+                self.eth_phy.add_timing_constraints(platform)
+            else:
+                platform.add_period_constraint(self.eth_phy.txoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
+                platform.add_period_constraint(self.eth_phy.rxoutclk, 1e9/(self.eth_phy.tx_clk_freq/2))
             platform.add_false_path_constraints(self.eth_phy.txoutclk, self.eth_phy.rxoutclk, self.crg.cd_sys.clk)
             if eth_phy == "2500basex":
                 # The two halves of the RX gearbox exchange state/data on each
@@ -1354,6 +1468,23 @@ class BaseSoC(SoCMini):
                 self.crg.cd_sys.clk, eth_rx_clk, eth_tx_clk)
         else:
             self.platform.add_false_path_constraints(self.crg.cd_sys.clk, eth_rx_clk)
+
+    def add_usb3(self, platform, sys_clk_freq, sfp=0, vid=USB3_VID, pid=USB3_PID, with_debug=False):
+        """USB3 host interface on a baseboard SFP cage (USB3-PIPE, SFP-to-USB3 adapter): EP0
+        Wishbone bridge (CSRs, litex_server --usb), Bulk IN/OUT RFIC sample streams (Crossbar
+        port 3)."""
+        self.usb3 = USB3(platform,
+            sfp_pads     = platform.request("sfp", sfp),
+            qpll_channel = self.qpll.get_channel("usb3"),
+            refclk_freq  = sys_clk_freq,
+            sys_clk      = self.crg.cd_sys.clk,
+            sys_clk_freq = sys_clk_freq,
+            data_width   = 64,
+            vid          = vid,
+            pid          = pid,
+            with_debug   = with_debug,
+        )
+        self.bus.add_master(name="usb3", master=self.usb3.bus)
 
     def add_sata(self, platform, sys_clk_freq, sata_gen=2, with_pcie=False, pcie_msis=None):
         if with_pcie and pcie_msis is None:
@@ -1650,7 +1781,7 @@ def main():
     # Ethernet parameters.
     parser.add_argument("--with-eth",        action="store_true",     help="Enable Ethernet Communication.")
     parser.add_argument("--eth-sfp",         default=0, type=int,     help="Ethernet SFP.", choices=[0, 1])
-    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex"])
+    parser.add_argument("--eth-phy",         default="1000basex",     help="Ethernet PHY.", choices=["1000basex", "2500basex", "5000baser"])
     parser.add_argument("--eth-local-ip",    default="192.168.1.50",  help="Ethernet/Etherbone IP address.")
     parser.add_argument("--eth-udp-port",    default=2345, type=int,  help="Ethernet Remote port.")
     parser.add_argument("--with-eth-ptp",    action="store_true",     help="Enable LiteEth PTP and discipline the board time generator from it.")
@@ -1664,7 +1795,14 @@ def main():
 
     # SATA parameters.
     parser.add_argument("--with-sata",       action="store_true", help="Enable SATA Storage.")
-    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation.", choices=[1, 2, 3])
+    parser.add_argument("--sata-gen",        default=2, type=int, help="SATA Generation (Gen3 requires --sys-clk-freq >= 150e6).", choices=[1, 2, 3])
+
+    # USB3 parameters.
+    parser.add_argument("--with-usb3",       action="store_true",                 help="Enable USB3 Communication (SFP-to-USB3 adapter, baseboard).")
+    parser.add_argument("--usb3-sfp",        default=0, type=int,                 help="USB3 SFP.", choices=[0, 1])
+    parser.add_argument("--usb3-vid",        default=USB3_VID, type=lambda x: int(x, 0), help="USB3 Vendor ID.")
+    parser.add_argument("--usb3-pid",        default=USB3_PID, type=lambda x: int(x, 0), help="USB3 Product ID.")
+    parser.add_argument("--with-usb3-debug", action="store_true",                 help="Enable USB3 PHY debug CSRs (LTSSM, SerDes counters).")
 
     # GPIO parameters.
     parser.add_argument("--with-gpio",       action="store_true",     help="Enable GPIO support.")
@@ -1771,6 +1909,13 @@ def main():
         with_sata     = args.with_sata,
         sata_gen      = args.sata_gen,
 
+        # USB3.
+        with_usb3       = args.with_usb3,
+        usb3_sfp        = args.usb3_sfp,
+        usb3_vid        = args.usb3_vid,
+        usb3_pid        = args.usb3_pid,
+        with_usb3_debug = args.with_usb3_debug,
+
         # GPIOs.
         with_gpio     = args.with_gpio,
         pps_input     = args.pps_input,
@@ -1830,6 +1975,8 @@ def main():
                 r += "_vrt"
         if args.with_sata:
             r += f"_sata"
+        if args.with_usb3:
+            r += f"_usb3"
         if args.with_white_rabbit:
             r += f"_white_rabbit"
             if args.wr_cpu_type != "urv":

@@ -111,7 +111,9 @@ static void help(void) {
            "  -l, --loopback        Enable GPIO loopback mode (requires --enable).\n"
            "      --source MODE     Select gpio source: dma or csr (default: dma).\n"
            "  -o, --output-data V   Set GPIO output data (4-bit hex, requires csr source).\n"
-           "  -e, --output-enable V Set GPIO output enable (4-bit hex, requires csr source).\n");
+           "  -e, --output-enable V Set GPIO output enable (4-bit hex, requires csr source).\n"
+           "\n"
+           "The GPIO core is 4 bits wide; only bits 0 and 1 reach a pin of the board (TP1, TP2).\n");
     exit(1);
 }
 
@@ -119,6 +121,7 @@ static void help(void) {
 /*------*/
 
 int main(int argc, char **argv) {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     int option_index = 0;
     static uint8_t gpio_enable = 0;

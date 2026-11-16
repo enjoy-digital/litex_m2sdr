@@ -1,0 +1,3490 @@
+{
+ "argv": [
+  "--variant=m2",
+  "--with-pcie",
+  "--with-pcie-ptm",
+  "--with-rfic-oversampling",
+  "--with-gpio",
+  "--with-pcie-probe"
+ ],
+ "banks": {
+  "ad9361": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Reset the AD9361. `0b1`: Enable the AD9361.",
+      "name": "rst_n",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Reset the AD9361."
+       ],
+       [
+        "``0b1``",
+        "Enable the AD9361."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: AD9361 disabled. `0b1`: AD9361 enabled.",
+      "name": "enable",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "AD9361 disabled."
+       ],
+       [
+        "``0b1``",
+        "AD9361 enabled."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: Set to TX mode. `0b1`: Set to RX mode.",
+      "name": "txnrx",
+      "offset": 4,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Set to TX mode."
+       ],
+       [
+        "``0b1``",
+        "Set to RX mode."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: Disable AGC. `0b1`: Enable AGC.",
+      "name": "en_agc",
+      "offset": 5,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable AGC."
+       ],
+       [
+        "``0b1``",
+        "Enable AGC."
+       ]
+      ]
+     }
+    ],
+    "name": "config",
+    "offset": 0,
+    "reset": 0,
+    "size": 6
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "AD9361's control pins.",
+      "name": "ctrl",
+      "offset": 0,
+      "reset": 0,
+      "size": 4,
+      "values": [
+       [
+        "``0b0000``",
+        "All control pins low."
+       ],
+       [
+        "``0b1111``",
+        "All control pins high."
+       ]
+      ]
+     }
+    ],
+    "name": "ctrl",
+    "offset": 4,
+    "reset": 0,
+    "size": 4
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "AD9361's status pins.",
+      "name": "stat",
+      "offset": 0,
+      "reset": 0,
+      "size": 8,
+      "values": [
+       [
+        "``0b00000000``",
+        "All status pins low."
+       ],
+       [
+        "``0b11111111``",
+        "All status pins high."
+       ]
+      ]
+     }
+    ],
+    "name": "stat",
+    "offset": 8,
+    "reset": null,
+    "size": 8
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Sample format.",
+      "name": "mode",
+      "offset": 0,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "12-bit mode in SC16/Q11 transport containers."
+       ],
+       [
+        "``0b01``",
+        " 8-bit mode in SC8/Q7 transport containers."
+       ],
+       [
+        "``0b10``",
+        "BFP8 block-floating transport mode."
+       ]
+      ]
+     }
+    ],
+    "name": "bitmode",
+    "offset": 12,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Start SPI transfer.",
+      "name": "start",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "No action."
+       ],
+       [
+        "``0b1``",
+        "Start transfer."
+       ]
+      ]
+     },
+     {
+      "description": "Transfer length in bits.",
+      "name": "length",
+      "offset": 8,
+      "reset": 0,
+      "size": 8,
+      "values": [
+       [
+        "``  8``",
+        "8-bit transfer."
+       ],
+       [
+        "`` 16``",
+        "16-bit transfer."
+       ],
+       [
+        "`` 24``",
+        "24-bit transfer."
+       ]
+      ]
+     }
+    ],
+    "name": "spi_control",
+    "offset": 16,
+    "reset": 0,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Transfer status.",
+      "name": "done",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Transfer ongoing."
+       ],
+       [
+        "``0b1``",
+        "Transfer done."
+       ]
+      ]
+     }
+    ],
+    "name": "spi_status",
+    "offset": 20,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "SPI data to send to the AD9361.",
+    "fields": [],
+    "name": "spi_mosi",
+    "offset": 24,
+    "reset": 0,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "SPI data received from the AD9361.",
+    "fields": [],
+    "name": "spi_miso",
+    "offset": 28,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Selects between 1R1T and 2R2T modes",
+      "name": "mode",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "2R2T mode (8-way interleaving)"
+       ],
+       [
+        "``0b1``",
+        "1R1T mode (4-way interleaving)"
+       ]
+      ]
+     },
+     {
+      "description": "Reserved on this PHY (no internal loopback at 491.52 MHz); kept for register-layout compatibility with the standard PHY.",
+      "name": "loopback",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Rotate the RX slot decode by N DATA_CLK cycles relative to the RX_FRAME edge (2R2T). RX_FRAME has no per-lane delay, so its board skew can land the frame edge one capture cycle away from the data lanes at the doubled DATA_CLK - a whole-slot rotation of the assembled words that the per-lane deskew metric cannot see. The bring-up sweeps 0..3 against the sequence-level PRBS verify.",
+      "name": "rx_frame_offset",
+      "offset": 4,
+      "reset": 0,
+      "size": 2,
+      "values": []
+     }
+    ],
+    "name": "phy_control",
+    "offset": 32,
+    "reset": 0,
+    "size": 6
+   },
+   {
+    "access": "rw",
+    "description": "Load an IDELAYE2 tap value on an RX data lane (applies on write).",
+    "fields": [
+     {
+      "description": "IDELAYE2 tap value to load.",
+      "name": "value",
+      "offset": 0,
+      "reset": 0,
+      "size": 5,
+      "values": []
+     },
+     {
+      "description": "RX data lane to load (0-5).",
+      "name": "lane",
+      "offset": 8,
+      "reset": 0,
+      "size": 3,
+      "values": []
+     }
+    ],
+    "name": "phy_rx_deskew_idelay",
+    "offset": 36,
+    "reset": 0,
+    "size": 11
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Latch the per-lane error counters and clear them.",
+      "name": "latch",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "phy_rx_deskew_ctrl",
+    "offset": 40,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 0 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err0",
+    "offset": 44,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 1 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err1",
+    "offset": 48,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 2 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err2",
+    "offset": 52,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 3 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err3",
+    "offset": 56,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 4 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err4",
+    "offset": 60,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "ro",
+    "description": "Latched lane 5 error count.",
+    "fields": [],
+    "name": "phy_rx_deskew_err5",
+    "offset": 64,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Disable PRBS TX. `0b1`: Enable PRBS TX.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable PRBS TX."
+       ],
+       [
+        "``0b1``",
+        "Enable  PRBS TX."
+       ]
+      ]
+     }
+    ],
+    "name": "prbs_tx",
+    "offset": 68,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: PRBS RX Out-of-Sync. `0b1`: PRBS_RX Synchronized.",
+      "name": "synced",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "PRBS RX Out-of-Sync."
+       ],
+       [
+        "``0b1``",
+        "PRBS_RX Synchronized."
+       ]
+      ]
+     }
+    ],
+    "name": "prbs_rx",
+    "offset": 72,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Disable AGC Saturation Count. `0b1`: Enable AGC Saturation Count.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable AGC Saturation Count."
+       ],
+       [
+        "``0b1``",
+        "Enable  AGC Saturation Count."
+       ]
+      ]
+     },
+     {
+      "description": "Clear Saturation Count.",
+      "name": "clear",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Saturation Threshold (ABS, in RFIC 12-bit sample units).",
+      "name": "threshold",
+      "offset": 16,
+      "reset": 1536,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx1_low_control",
+    "offset": 76,
+    "reset": 100663296,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Saturation event count (one event per accepted beat).",
+      "name": "count",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx1_low_status",
+    "offset": 80,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Disable AGC Saturation Count. `0b1`: Enable AGC Saturation Count.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable AGC Saturation Count."
+       ],
+       [
+        "``0b1``",
+        "Enable  AGC Saturation Count."
+       ]
+      ]
+     },
+     {
+      "description": "Clear Saturation Count.",
+      "name": "clear",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Saturation Threshold (ABS, in RFIC 12-bit sample units).",
+      "name": "threshold",
+      "offset": 16,
+      "reset": 2016,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx1_high_control",
+    "offset": 84,
+    "reset": 132120576,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Saturation event count (one event per accepted beat).",
+      "name": "count",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx1_high_status",
+    "offset": 88,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Disable AGC Saturation Count. `0b1`: Enable AGC Saturation Count.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable AGC Saturation Count."
+       ],
+       [
+        "``0b1``",
+        "Enable  AGC Saturation Count."
+       ]
+      ]
+     },
+     {
+      "description": "Clear Saturation Count.",
+      "name": "clear",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Saturation Threshold (ABS, in RFIC 12-bit sample units).",
+      "name": "threshold",
+      "offset": 16,
+      "reset": 1536,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx2_low_control",
+    "offset": 92,
+    "reset": 100663296,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Saturation event count (one event per accepted beat).",
+      "name": "count",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx2_low_status",
+    "offset": 96,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Disable AGC Saturation Count. `0b1`: Enable AGC Saturation Count.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Disable AGC Saturation Count."
+       ],
+       [
+        "``0b1``",
+        "Enable  AGC Saturation Count."
+       ]
+      ]
+     },
+     {
+      "description": "Clear Saturation Count.",
+      "name": "clear",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Saturation Threshold (ABS, in RFIC 12-bit sample units).",
+      "name": "threshold",
+      "offset": 16,
+      "reset": 2016,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx2_high_control",
+    "offset": 100,
+    "reset": 132120576,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Saturation event count (one event per accepted beat).",
+      "name": "count",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "agc_count_rx2_high_status",
+    "offset": 104,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active host stream sample rate in samples/s.",
+    "fields": [],
+    "name": "active_sample_rate",
+    "offset": 108,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active RX center frequency in kHz.",
+    "fields": [],
+    "name": "active_rx_frequency_khz",
+    "offset": 112,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Active RX bandwidth in Hz.",
+    "fields": [],
+    "name": "active_bandwidth",
+    "offset": 116,
+    "reset": 0,
+    "size": 32
+   }
+  ],
+  "analyzer": [
+   {
+    "access": "rw",
+    "description": "Selected group of signals.",
+    "fields": [],
+    "name": "mux_value",
+    "offset": 0,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "1: trigger armed.",
+    "fields": [],
+    "name": "trigger_enable",
+    "offset": 4,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "1: the trigger has fired.",
+    "fields": [],
+    "name": "trigger_done",
+    "offset": 8,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "wo",
+    "description": "Write: push `trigger_mem_mask` and `trigger_mem_value` as one trigger condition.",
+    "fields": [],
+    "name": "trigger_mem_write",
+    "offset": 12,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "Mask of the trigger condition to push.",
+    "fields": [],
+    "name": "trigger_mem_mask",
+    "offset": 16,
+    "reset": 0,
+    "size": 27
+   },
+   {
+    "access": "rw",
+    "description": "Value of the trigger condition to push.",
+    "fields": [],
+    "name": "trigger_mem_value",
+    "offset": 20,
+    "reset": 0,
+    "size": 27
+   },
+   {
+    "access": "ro",
+    "description": "1: the memory of trigger conditions is full.",
+    "fields": [],
+    "name": "trigger_mem_full",
+    "offset": 24,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "Subsampling ratio minus one.",
+    "fields": [],
+    "name": "subsampler_value",
+    "offset": 28,
+    "reset": 0,
+    "size": 16
+   },
+   {
+    "access": "rw",
+    "description": "1: capture enabled.",
+    "fields": [],
+    "name": "storage_enable",
+    "offset": 32,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "1: the capture is complete.",
+    "fields": [],
+    "name": "storage_done",
+    "offset": 36,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "Number of samples to capture.",
+    "fields": [],
+    "name": "storage_length",
+    "offset": 40,
+    "reset": 0,
+    "size": 13
+   },
+   {
+    "access": "rw",
+    "description": "Number of samples kept before the trigger.",
+    "fields": [],
+    "name": "storage_offset",
+    "offset": 44,
+    "reset": 0,
+    "size": 13
+   },
+   {
+    "access": "ro",
+    "description": "Number of samples available in the capture memory.",
+    "fields": [],
+    "name": "storage_mem_level",
+    "offset": 48,
+    "reset": null,
+    "size": 13
+   },
+   {
+    "access": "ro",
+    "description": "Captured sample; each read moves to the next one.",
+    "fields": [],
+    "name": "storage_mem_data",
+    "offset": 52,
+    "reset": null,
+    "size": 27
+   }
+  ],
+  "capability": [
+   {
+    "access": "ro",
+    "description": "API Version of the gateware (e.g., 0x0100 for v1.0).",
+    "fields": [],
+    "name": "api_version",
+    "offset": 0,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Hardware feature presence bitfield.",
+    "fields": [
+     {
+      "description": "PCIe     is present.",
+      "name": "pcie",
+      "offset": 0,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Ethernet is present.",
+      "name": "eth",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "SATA     is present.",
+      "name": "sata",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "GPIO     is present.",
+      "name": "gpio",
+      "offset": 3,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "White Rabbit is present.",
+      "name": "wr",
+      "offset": 4,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "JTAGBone is present.",
+      "name": "jtagbone",
+      "offset": 5,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Ethernet PTP time discipline is present.",
+      "name": "eth_ptp",
+      "offset": 6,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Ethernet PTP can discipline the RFIC reference clock path.",
+      "name": "eth_ptp_rfic_clock",
+      "offset": 7,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Hardware timed-TX gate (and its timestamp-offset CSRs) is present.",
+      "name": "timed_tx",
+      "offset": 8,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present.",
+      "name": "rfic_oversampling",
+      "offset": 9,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "USB3 (SFP-to-USB3 adapter) is present.",
+      "name": "usb3",
+      "offset": 10,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "features",
+    "offset": 4,
+    "reset": null,
+    "size": 11
+   },
+   {
+    "access": "ro",
+    "description": "PCIe configuration. Valid only if features.pcie is set.",
+    "fields": [
+     {
+      "description": "PCIe speed configuration.",
+      "name": "speed",
+      "offset": 0,
+      "reset": 1,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "Gen1"
+       ],
+       [
+        "``0b01``",
+        "Gen2"
+       ]
+      ]
+     },
+     {
+      "description": "PCIe lanes configuration.",
+      "name": "lanes",
+      "offset": 2,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "X1"
+       ],
+       [
+        "``0b01``",
+        "X2"
+       ],
+       [
+        "``0b10``",
+        "X4"
+       ],
+       [
+        "``0b11``",
+        "Reserved"
+       ]
+      ]
+     },
+     {
+      "description": "PCIe Precision Time Measurement (PTM) enable status.",
+      "name": "ptm",
+      "offset": 4,
+      "reset": true,
+      "size": 1,
+      "values": [
+       [
+        "``0``",
+        "PTM disabled or not present."
+       ],
+       [
+        "``1``",
+        "PTM enabled."
+       ]
+      ]
+     }
+    ],
+    "name": "pcie_config",
+    "offset": 8,
+    "reset": null,
+    "size": 5
+   },
+   {
+    "access": "ro",
+    "description": "Ethernet configuration. Valid only if features.eth is set.",
+    "fields": [
+     {
+      "description": "Ethernet speed configuration.",
+      "name": "speed",
+      "offset": 0,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "1Gbps"
+       ],
+       [
+        "``0b01``",
+        "2.5Gbps"
+       ],
+       [
+        "``0b10``",
+        "5Gbps"
+       ],
+       [
+        "``0b11``",
+        "Reserved"
+       ]
+      ]
+     },
+     {
+      "description": "Ethernet PTP time discipline build support.",
+      "name": "ptp",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "PTP-to-RFIC-reference clock discipline build support.",
+      "name": "ptp_rfic_clock",
+      "offset": 3,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "eth_config",
+    "offset": 12,
+    "reset": null,
+    "size": 4
+   },
+   {
+    "access": "ro",
+    "description": "SATA configuration. Valid only if features.sata is set.",
+    "fields": [
+     {
+      "description": "SATA generation configuration.",
+      "name": "gen",
+      "offset": 0,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "Gen1"
+       ],
+       [
+        "``0b01``",
+        "Gen2"
+       ],
+       [
+        "``0b10``",
+        "Gen3"
+       ],
+       [
+        "``0b11``",
+        "Reserved"
+       ]
+      ]
+     },
+     {
+      "description": "SATA mode configuration.",
+      "name": "mode",
+      "offset": 2,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "Read-only"
+       ],
+       [
+        "``0b01``",
+        "Write-only"
+       ],
+       [
+        "``0b10``",
+        "Read+Write"
+       ],
+       [
+        "``0b11``",
+        "Reserved"
+       ]
+      ]
+     }
+    ],
+    "name": "sata_config",
+    "offset": 16,
+    "reset": null,
+    "size": 4
+   },
+   {
+    "access": "ro",
+    "description": "Board-level configuration.",
+    "fields": [
+     {
+      "description": "Board variant.",
+      "name": "variant",
+      "offset": 0,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "M.2"
+       ],
+       [
+        "``0b01``",
+        "Baseboard"
+       ],
+       [
+        "``0b10``",
+        "Reserved"
+       ],
+       [
+        "``0b11``",
+        "Reserved"
+       ]
+      ]
+     },
+     {
+      "description": "JTAGBone enabled.",
+      "name": "jtagbone",
+      "offset": 2,
+      "reset": 1,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Ethernet SFP index.",
+      "name": "eth_sfp",
+      "offset": 3,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "White Rabbit SFP index.",
+      "name": "wr_sfp",
+      "offset": 4,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "USB3 SFP index.",
+      "name": "usb3_sfp",
+      "offset": 5,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "board_info",
+    "offset": 20,
+    "reset": null,
+    "size": 6
+   }
+  ],
+  "clk10_discipline": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: MMCM fine phase discipline disabled. `0b1`: MMCM fine phase discipline enabled.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "MMCM fine phase discipline disabled."
+       ],
+       [
+        "``0b1``",
+        "MMCM fine phase discipline enabled."
+       ]
+      ]
+     },
+     {
+      "description": "Request one positive MMCM fine phase step.",
+      "name": "manual_inc",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Request one negative MMCM fine phase step.",
+      "name": "manual_dec",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Clear MMCM phase discipline counters.",
+      "name": "clear_counters",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 0,
+    "size": 9
+   },
+   {
+    "access": "rw",
+    "description": "Signed MMCM fine phase-step rate (two's complement, Q0.32 steps per update interval).",
+    "fields": [],
+    "name": "rate",
+    "offset": 4,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Number of sys_clk cycles between MMCM fine phase discipline updates.",
+    "fields": [],
+    "name": "update_cycles",
+    "offset": 8,
+    "reset": 125,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "MMCM fine phase shift request in progress.",
+      "name": "busy",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "A new MMCM fine phase shift request is currently being presented.",
+      "name": "pending",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Direction of the most recent MMCM fine phase step.",
+      "name": "last_direction",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Last completed/requested step was negative."
+       ],
+       [
+        "``0b1``",
+        "Last completed/requested step was positive."
+       ]
+      ]
+     }
+    ],
+    "name": "status",
+    "offset": 12,
+    "reset": null,
+    "size": 3
+   },
+   {
+    "access": "ro",
+    "description": "Number of completed MMCM fine phase steps.",
+    "fields": [],
+    "name": "step_count",
+    "offset": 16,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Number of completed positive MMCM fine phase steps.",
+    "fields": [],
+    "name": "inc_count",
+    "offset": 20,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Number of completed negative MMCM fine phase steps.",
+    "fields": [],
+    "name": "dec_count",
+    "offset": 24,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Number of MMCM fine phase step requests dropped while the MMCM DPS port was busy.",
+    "fields": [],
+    "name": "dropped_count",
+    "offset": 28,
+    "reset": null,
+    "size": 32
+   }
+  ],
+  "clk_measurement": [
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the system clock into `clk0_value`.",
+    "fields": [],
+    "name": "clk0_latch",
+    "offset": 0,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the system clock.",
+    "fields": [],
+    "name": "clk0_value",
+    "offset": 4,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the PCIe clock (0 without PCIe) into `clk1_value`.",
+    "fields": [],
+    "name": "clk1_latch",
+    "offset": 12,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the PCIe clock (0 without PCIe).",
+    "fields": [],
+    "name": "clk1_value",
+    "offset": 16,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the AD9361 reference clock (SI5351 output 0) into `clk2_value`.",
+    "fields": [],
+    "name": "clk2_latch",
+    "offset": 24,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the AD9361 reference clock (SI5351 output 0).",
+    "fields": [],
+    "name": "clk2_value",
+    "offset": 28,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the AD9361 data clock into `clk3_value`.",
+    "fields": [],
+    "name": "clk3_latch",
+    "offset": 36,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the AD9361 data clock.",
+    "fields": [],
+    "name": "clk3_value",
+    "offset": 40,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the board time reference clock (SI5351 output 1) into `clk4_value`.",
+    "fields": [],
+    "name": "clk4_latch",
+    "offset": 48,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the board time reference clock (SI5351 output 1).",
+    "fields": [],
+    "name": "clk4_value",
+    "offset": 52,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the counter of the FPGA 10 MHz clock into `clk5_value`.",
+    "fields": [],
+    "name": "clk5_latch",
+    "offset": 60,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Latched count of cycles of the FPGA 10 MHz clock.",
+    "fields": [],
+    "name": "clk5_value",
+    "offset": 64,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "wo",
+    "description": "Write: latch the six counters at the same time.",
+    "fields": [],
+    "name": "latch_all",
+    "offset": 72,
+    "reset": null,
+    "size": 1
+   }
+  ],
+  "crossbar": [
+   {
+    "access": "rw",
+    "description": "Selected multiplexer input.",
+    "fields": [],
+    "name": "mux_sel",
+    "offset": 0,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "Selected demultiplexer output.",
+    "fields": [],
+    "name": "demux_sel",
+    "offset": 4,
+    "reset": 0,
+    "size": 2
+   }
+  ],
+  "ctrl": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Write ``1`` to reset the full SoC (pulse reset).",
+      "name": "soc_rst",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Write ``1`` to reset the CPU(s) of the SoC (hold reset).",
+      "name": "cpu_rst",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "reset",
+    "offset": 0,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "Use this register as a scratch space to verify that software read/write accesses to the Wishbone/CSR bus are working correctly. The initial reset value of 0x12345678 can be used to verify endianness.",
+    "fields": [],
+    "name": "scratch",
+    "offset": 4,
+    "reset": 305419896,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Total number of Wishbone bus errors (timeouts) since start.",
+    "fields": [],
+    "name": "bus_errors",
+    "offset": 8,
+    "reset": null,
+    "size": 32
+   }
+  ],
+  "dna": [
+   {
+    "access": "ro",
+    "description": "Xilinx Device DNA identifier.",
+    "fields": [],
+    "name": "id",
+    "offset": 0,
+    "reset": null,
+    "size": 57
+   }
+  ],
+  "flash": [
+   {
+    "access": "rw",
+    "description": "SPI Control.",
+    "fields": [
+     {
+      "description": "SPI Xfer Start (Write ``1`` to start one Xfer).",
+      "name": "start",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "SPI Xfer Length (1..40 bits). Required for each Xfer, including in manual CS mode.",
+      "name": "length",
+      "offset": 8,
+      "reset": 0,
+      "size": 8,
+      "values": []
+     }
+    ],
+    "name": "spi_control",
+    "offset": 0,
+    "reset": 0,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "SPI Status.",
+    "fields": [
+     {
+      "description": "SPI Xfer Done (when read as ``1``).",
+      "name": "done",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "SPI mode",
+      "name": "mode",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Raw    : MOSI transfers aligned on core's data-width."
+       ],
+       [
+        "``0b1``",
+        "Aligned: MOSI transfers aligned on transfers' length."
+       ]
+      ]
+     },
+     {
+      "description": "Invalid length or divider rejected. Cleared by the next valid start.",
+      "name": "error",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "spi_status",
+    "offset": 4,
+    "reset": null,
+    "size": 3
+   },
+   {
+    "access": "rw",
+    "description": "SPI MOSI data (MSB-first serialization). Data is shifted when a Xfer is started.",
+    "fields": [],
+    "name": "spi_mosi",
+    "offset": 8,
+    "reset": 0,
+    "size": 40
+   },
+   {
+    "access": "ro",
+    "description": "SPI MISO data (MSB-first de-serialization).",
+    "fields": [],
+    "name": "spi_miso",
+    "offset": 16,
+    "reset": null,
+    "size": 40
+   },
+   {
+    "access": "rw",
+    "description": "SPI CS Chip-Select and Mode.",
+    "fields": [
+     {
+      "description": "SPI chip-select value.",
+      "name": "sel",
+      "offset": 0,
+      "reset": 1,
+      "size": 1,
+      "values": [
+       [
+        "``0b0..001``",
+        "Chip ``0`` selected for SPI Xfer."
+       ],
+       [
+        "``0b1..000``",
+        "Chip ``N`` selected for SPI Xfer."
+       ]
+      ]
+     },
+     {
+      "description": "SPI chip-select mode.",
+      "name": "mode",
+      "offset": 16,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Normal operation (CS handled by Core)."
+       ],
+       [
+        "``0b1``",
+        "Manual CS operation: CS follows ``sel`` continuously; Xfers still require ``start``/``length``. Useful to keep CS asserted across multiple Xfers."
+       ]
+      ]
+     }
+    ],
+    "name": "spi_cs",
+    "offset": 24,
+    "reset": 1,
+    "size": 17
+   },
+   {
+    "access": "rw",
+    "description": "SPI Loopback Mode.",
+    "fields": [
+     {
+      "description": "SPI loopback mode.",
+      "name": "mode",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Normal operation."
+       ],
+       [
+        "``0b1``",
+        "Loopback operation (MOSI to MISO)."
+       ]
+      ]
+     }
+    ],
+    "name": "spi_loopback",
+    "offset": 28,
+    "reset": 0,
+    "size": 1
+   }
+  ],
+  "flash_cs_n": [
+   {
+    "access": "rw",
+    "description": "GPIO Output(s) Control.",
+    "fields": [],
+    "name": "out",
+    "offset": 0,
+    "reset": 0,
+    "size": 1
+   }
+  ],
+  "gpio": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Enable/disable GPIO functionality.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "GPIO module disabled."
+       ],
+       [
+        "``0b1``",
+        "GPIO module enabled."
+       ]
+      ]
+     },
+     {
+      "description": "Select GPIO control source.",
+      "name": "source",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "GPIO controlled by Packer/Unpacker."
+       ],
+       [
+        "``0b1``",
+        "GPIO controlled by CSR."
+       ]
+      ]
+     },
+     {
+      "description": "Enable/disable internal loopback mode.",
+      "name": "loopback",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Normal operation (DDRTristate active)."
+       ],
+       [
+        "``0b1``",
+        "Loopback mode (o1 to i1, o2 to i2)."
+       ]
+      ]
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 0,
+    "size": 3
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "GPIO output data when in CSR mode.",
+      "name": "data",
+      "offset": 0,
+      "reset": 0,
+      "size": 4,
+      "values": [
+       [
+        "``0b0000``",
+        "All GPIO outputs low."
+       ],
+       [
+        "``0b1111``",
+        "All GPIO outputs high."
+       ]
+      ]
+     }
+    ],
+    "name": "_o",
+    "offset": 4,
+    "reset": 0,
+    "size": 4
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "Output enable (tristate control) when in CSR mode.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 4,
+      "values": [
+       [
+        "``0b0000``",
+        "All GPIO pins tristated."
+       ],
+       [
+        "``0b1111``",
+        "All GPIO pins driven."
+       ]
+      ]
+     }
+    ],
+    "name": "oe",
+    "offset": 8,
+    "reset": 0,
+    "size": 4
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "GPIO input data.",
+      "name": "data",
+      "offset": 0,
+      "reset": 0,
+      "size": 4,
+      "values": [
+       [
+        "``0b0000``",
+        "All GPIO inputs low."
+       ],
+       [
+        "``0b1111``",
+        "All GPIO inputs high."
+       ]
+      ]
+     }
+    ],
+    "name": "_i",
+    "offset": 12,
+    "reset": null,
+    "size": 4
+   }
+  ],
+  "header": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Module Disabled. `0b1`: Module Enabled.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 1,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Module Disabled."
+       ],
+       [
+        "``0b1``",
+        "Module Enabled."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: Header Inserter/Extractor Disabled. `0b1`: Header Inserter/Extractor Enabled.",
+      "name": "header_enable",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Header Inserter/Extractor Disabled."
+       ],
+       [
+        "``0b1``",
+        "Header Inserter/Extractor Enabled."
+       ]
+      ]
+     }
+    ],
+    "name": "tx_control",
+    "offset": 0,
+    "reset": 1,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "Frame Cycles (stream words of data_width/8 bytes)",
+    "fields": [],
+    "name": "tx_frame_cycles",
+    "offset": 4,
+    "reset": 511,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Module Disabled. `0b1`: Module Enabled.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 1,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Module Disabled."
+       ],
+       [
+        "``0b1``",
+        "Module Enabled."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: Header Inserter/Extractor Disabled. `0b1`: Header Inserter/Extractor Enabled.",
+      "name": "header_enable",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Header Inserter/Extractor Disabled."
+       ],
+       [
+        "``0b1``",
+        "Header Inserter/Extractor Enabled."
+       ]
+      ]
+     }
+    ],
+    "name": "rx_control",
+    "offset": 8,
+    "reset": 1,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "Frame Cycles (stream words of data_width/8 bytes)",
+    "fields": [],
+    "name": "rx_frame_cycles",
+    "offset": 12,
+    "reset": 511,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Last TX Header.",
+    "fields": [],
+    "name": "last_tx_header",
+    "offset": 16,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "Last TX Timestamp.",
+    "fields": [],
+    "name": "last_tx_timestamp",
+    "offset": 24,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "Last RX Header.",
+    "fields": [],
+    "name": "last_rx_header",
+    "offset": 32,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "Last RX Timestamp.",
+    "fields": [],
+    "name": "last_rx_timestamp",
+    "offset": 40,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "rw",
+    "description": "Timed-TX pipeline offset (ns): added to the FPGA time before comparing against the header air-time so the signal is on the air at exactly the timestamp (loopback-calibrated).",
+    "fields": [],
+    "name": "tx_offset",
+    "offset": 48,
+    "reset": 0,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "TX underflow count: timed frames that missed their air-time (dropped whole; the RFIC aired zeros for them).",
+    "fields": [],
+    "name": "tx_underflow",
+    "offset": 56,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "RX timestamp offset (ns): subtracted from the FPGA time before insertion into the RX header, referring the stamp back to the antenna plane (the mirror of tx_offset).",
+    "fields": [],
+    "name": "rx_offset",
+    "offset": 60,
+    "reset": 0,
+    "size": 64
+   }
+  ],
+  "icap": [
+   {
+    "access": "rw",
+    "description": "ICAP Address.",
+    "fields": [],
+    "name": "addr",
+    "offset": 0,
+    "reset": 0,
+    "size": 5
+   },
+   {
+    "access": "rw",
+    "description": "ICAP Write/Read Data.",
+    "fields": [],
+    "name": "data",
+    "offset": 4,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "ICAP Control. Write ``1`` to send a write to the ICAP.",
+    "fields": [],
+    "name": "write",
+    "offset": 8,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "ICAP Status. Write command done when read as ``1``.",
+    "fields": [],
+    "name": "done",
+    "offset": 12,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "ICAP Control. Write ``1`` to issue a read from the ICAP.",
+    "fields": [],
+    "name": "read",
+    "offset": 16,
+    "reset": 0,
+    "size": 1
+   }
+  ],
+  "leds": [
+   {
+    "access": "rw",
+    "description": "LED control inputs. Leave manual_enable cleared to follow the design.",
+    "fields": [
+     {
+      "description": "Override LED inputs from software instead of the design.",
+      "name": "manual_enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the time_running input when manual mode is enabled.",
+      "name": "time_running",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the time_valid input when manual mode is enabled.",
+      "name": "time_valid",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the pcie_present input when manual mode is enabled.",
+      "name": "pcie_present",
+      "offset": 3,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the pcie_link_up input when manual mode is enabled.",
+      "name": "pcie_link_up",
+      "offset": 4,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the dma_synced input when manual mode is enabled.",
+      "name": "dma_synced",
+      "offset": 5,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the eth_present input when manual mode is enabled.",
+      "name": "eth_present",
+      "offset": 6,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Drive the eth_link_up input when manual mode is enabled.",
+      "name": "eth_link_up",
+      "offset": 7,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Continuously assert generic transmit activity when manual mode is enabled.",
+      "name": "tx_activity",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Continuously assert generic receive activity when manual mode is enabled.",
+      "name": "rx_activity",
+      "offset": 9,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Continuously assert the PPS accent input when manual mode is enabled.",
+      "name": "pps_level",
+      "offset": 10,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 0,
+    "size": 11
+   },
+   {
+    "access": "rw",
+    "description": "One-shot LED test triggers.",
+    "fields": [
+     {
+      "description": "Inject a one-shot generic transmit activity trigger in manual mode.",
+      "name": "tx_activity",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Inject a one-shot generic receive activity trigger in manual mode.",
+      "name": "rx_activity",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Inject a one-shot PPS accent trigger in manual mode.",
+      "name": "pps",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "pulse",
+    "offset": 4,
+    "reset": 0,
+    "size": 3
+   },
+   {
+    "access": "ro",
+    "description": "Observed LED output status.",
+    "fields": [
+     {
+      "description": "Current LED PWM level.",
+      "name": "level",
+      "offset": 0,
+      "reset": 0,
+      "size": 8,
+      "values": []
+     },
+     {
+      "description": "Current PWM output state.",
+      "name": "output",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "status",
+    "offset": 8,
+    "reset": null,
+    "size": 9
+   }
+  ],
+  "pcie_dma0": [
+   {
+    "access": "rw",
+    "description": "DMA Writer Control. Write ``1`` to enable DMA Writer.",
+    "fields": [],
+    "name": "writer_enable",
+    "offset": 0,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "64-bit DMA descriptor to be written to the table.",
+    "fields": [
+     {
+      "description": "32-bit LSB Address of the descriptor (bytes-aligned).",
+      "name": "address_lsb",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     },
+     {
+      "description": "24-bit Length  of the descriptor (in bytes).",
+      "name": "length",
+      "offset": 32,
+      "reset": 0,
+      "size": 24,
+      "values": []
+     },
+     {
+      "description": "IRQ Disable Control of the descriptor.",
+      "name": "irq_disable",
+      "offset": 56,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Last Disable Control of the descriptor.",
+      "name": "last_disable",
+      "offset": 57,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "writer_table_value",
+    "offset": 4,
+    "reset": 0,
+    "size": 58
+   },
+   {
+    "access": "rw",
+    "description": "Write and 32-bit MSB Address of the descriptor (bytes-aligned)",
+    "fields": [
+     {
+      "description": "32-bit MSB Address of the descriptor (bytes-aligned), in 64-bit mode.",
+      "name": "address_msb",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "writer_table_we",
+    "offset": 12,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Mode Selection. ``0``: **Prog** mode / ``1``: **Loop** mode. **Prog** mode should be used to program the table by software and for cases where automatic refill of the table is not needed: A descriptor is only executed once and when all the descriptors have been executed (ie the table is empty), the DMA just stops until the next software refill. **Loop** mode should be used once the table has been filled by software in **Prog** mode and allow continuous Scatter-Gather DMA: Each descriptor sent to the DMA is refilled to the table.",
+    "fields": [],
+    "name": "writer_table_loop_prog_n",
+    "offset": 16,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Loop monitoring for software synchronization.",
+    "fields": [
+     {
+      "description": "Index of the last descriptor executed in the DMA descriptor table.",
+      "name": "index",
+      "offset": 0,
+      "reset": 0,
+      "size": 16,
+      "values": []
+     },
+     {
+      "description": "Loops of the DMA descriptor table since started.",
+      "name": "count",
+      "offset": 16,
+      "reset": 0,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "writer_table_loop_status",
+    "offset": 20,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Number descriptors in the table.",
+    "fields": [],
+    "name": "writer_table_level",
+    "offset": 24,
+    "reset": null,
+    "size": 9
+   },
+   {
+    "access": "rw",
+    "description": "A write to this register resets the table.",
+    "fields": [],
+    "name": "writer_table_reset",
+    "offset": 28,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "DMA Reader Control. Write ``1`` to enable DMA Reader.",
+    "fields": [],
+    "name": "reader_enable",
+    "offset": 32,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "64-bit DMA descriptor to be written to the table.",
+    "fields": [
+     {
+      "description": "32-bit LSB Address of the descriptor (bytes-aligned).",
+      "name": "address_lsb",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     },
+     {
+      "description": "24-bit Length  of the descriptor (in bytes).",
+      "name": "length",
+      "offset": 32,
+      "reset": 0,
+      "size": 24,
+      "values": []
+     },
+     {
+      "description": "IRQ Disable Control of the descriptor.",
+      "name": "irq_disable",
+      "offset": 56,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Last Disable Control of the descriptor.",
+      "name": "last_disable",
+      "offset": 57,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "reader_table_value",
+    "offset": 36,
+    "reset": 0,
+    "size": 58
+   },
+   {
+    "access": "rw",
+    "description": "Write and 32-bit MSB Address of the descriptor (bytes-aligned)",
+    "fields": [
+     {
+      "description": "32-bit MSB Address of the descriptor (bytes-aligned), in 64-bit mode.",
+      "name": "address_msb",
+      "offset": 0,
+      "reset": 0,
+      "size": 32,
+      "values": []
+     }
+    ],
+    "name": "reader_table_we",
+    "offset": 44,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "Mode Selection. ``0``: **Prog** mode / ``1``: **Loop** mode. **Prog** mode should be used to program the table by software and for cases where automatic refill of the table is not needed: A descriptor is only executed once and when all the descriptors have been executed (ie the table is empty), the DMA just stops until the next software refill. **Loop** mode should be used once the table has been filled by software in **Prog** mode and allow continuous Scatter-Gather DMA: Each descriptor sent to the DMA is refilled to the table.",
+    "fields": [],
+    "name": "reader_table_loop_prog_n",
+    "offset": 48,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Loop monitoring for software synchronization.",
+    "fields": [
+     {
+      "description": "Index of the last descriptor executed in the DMA descriptor table.",
+      "name": "index",
+      "offset": 0,
+      "reset": 0,
+      "size": 16,
+      "values": []
+     },
+     {
+      "description": "Loops of the DMA descriptor table since started.",
+      "name": "count",
+      "offset": 16,
+      "reset": 0,
+      "size": 16,
+      "values": []
+     }
+    ],
+    "name": "reader_table_loop_status",
+    "offset": 52,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Number descriptors in the table.",
+    "fields": [],
+    "name": "reader_table_level",
+    "offset": 56,
+    "reset": null,
+    "size": 9
+   },
+   {
+    "access": "rw",
+    "description": "A write to this register resets the table.",
+    "fields": [],
+    "name": "reader_table_reset",
+    "offset": 60,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "DMA Loopback Enable Control. Write ``1`` to enable DMA internal loopback (DMA Reader to DMA Writer).",
+    "fields": [],
+    "name": "loopback_enable",
+    "offset": 64,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [],
+    "name": "synchronizer_bypass",
+    "offset": 68,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b00`: Synchronization disabled. `0b01`: Reader and Writer to PPS Synchronization enabled. `0b10`: PPS Synchronization enabled. `0b11`: Reserved.",
+      "name": "mode",
+      "offset": 0,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "Synchronization disabled."
+       ],
+       [
+        "``0b01``",
+        "Reader and Writer to PPS Synchronization enabled."
+       ],
+       [
+        "``0b10``",
+        "PPS Synchronization enabled."
+       ],
+       [
+        "``0b11``",
+        "Reserved."
+       ]
+      ]
+     }
+    ],
+    "name": "synchronizer_enable",
+    "offset": 72,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "DMA Reader FIFO depth (in 128-bit words).",
+      "name": "depth",
+      "offset": 0,
+      "reset": 8192,
+      "size": 24,
+      "values": []
+     },
+     {
+      "description": "Software Scratchpad.",
+      "name": "scratch",
+      "offset": 24,
+      "reset": 0,
+      "size": 4,
+      "values": []
+     },
+     {
+      "description": "`0b0`: Report Instantaneous level. `0b1`: Report Minimal level since last clear.",
+      "name": "level_mode",
+      "offset": 31,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Report Instantaneous level."
+       ],
+       [
+        "``0b1``",
+        "Report `Minimal` level since last clear."
+       ]
+      ]
+     }
+    ],
+    "name": "buffering_reader_fifo_control",
+    "offset": 76,
+    "reset": 8192,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "DMA Reader FIFO level (in 128-bit words).",
+      "name": "level",
+      "offset": 0,
+      "reset": 0,
+      "size": 24,
+      "values": []
+     }
+    ],
+    "name": "buffering_reader_fifo_status",
+    "offset": 80,
+    "reset": null,
+    "size": 24
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "DMA Writer FIFO depth (in 128-bit words).",
+      "name": "depth",
+      "offset": 0,
+      "reset": 8192,
+      "size": 24,
+      "values": []
+     },
+     {
+      "description": "Software Scratchpad.",
+      "name": "scratch",
+      "offset": 24,
+      "reset": 0,
+      "size": 4,
+      "values": []
+     },
+     {
+      "description": "`0b0`: Report Instantaneous level. `0b1`: Report Maximal level since last clear.",
+      "name": "level_mode",
+      "offset": 31,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Report Instantaneous level."
+       ],
+       [
+        "``0b1``",
+        "Report `Maximal` level since last clear."
+       ]
+      ]
+     }
+    ],
+    "name": "buffering_writer_fifo_control",
+    "offset": 84,
+    "reset": 8192,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "DMA Writer FIFO level (in 128-bit words).",
+      "name": "level",
+      "offset": 0,
+      "reset": 0,
+      "size": 24,
+      "values": []
+     }
+    ],
+    "name": "buffering_writer_fifo_status",
+    "offset": 88,
+    "reset": null,
+    "size": 24
+   }
+  ],
+  "pcie_msi": [
+   {
+    "access": "rw",
+    "description": "MSI Enable Control. Write bit(s) to ``1`` to enable corresponding MSI IRQ(s).",
+    "fields": [],
+    "name": "enable",
+    "offset": 0,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "MSI Clear Control. Write bit(s) to ``1`` to clear corresponding MSI IRQ(s).",
+    "fields": [],
+    "name": "clear",
+    "offset": 4,
+    "reset": 0,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "MSI Vector Status. Current MSI IRQs vector value.",
+    "fields": [],
+    "name": "vector",
+    "offset": 8,
+    "reset": null,
+    "size": 32
+   }
+  ],
+  "pcie_phy": [
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Link Down. `0b1`: Link Up.",
+      "name": "status",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Link Down."
+       ],
+       [
+        "``0b1``",
+        "Link Up."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: 2.5 Gb/s. `0b1`: 5.0 Gb/s.",
+      "name": "rate",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "2.5 Gb/s."
+       ],
+       [
+        "``0b1``",
+        "5.0 Gb/s."
+       ]
+      ]
+     },
+     {
+      "description": "`0b00`: 1-Lane link. `0b01`: 2-Lane link. `0b10`: 4-Lane link. `0b11`: 8-Lane link.",
+      "name": "width",
+      "offset": 2,
+      "reset": 0,
+      "size": 2,
+      "values": [
+       [
+        "``0b00``",
+        "1-Lane link."
+       ],
+       [
+        "``0b01``",
+        "2-Lane link."
+       ],
+       [
+        "``0b10``",
+        "4-Lane link."
+       ],
+       [
+        "``0b11``",
+        "8-Lane link."
+       ]
+      ]
+     },
+     {
+      "description": "LTSSM State",
+      "name": "ltssm",
+      "offset": 4,
+      "reset": 0,
+      "size": 6,
+      "values": []
+     }
+    ],
+    "name": "link_status",
+    "offset": 0,
+    "reset": null,
+    "size": 10
+   },
+   {
+    "access": "ro",
+    "description": "MSI Enable Status. ``1``: MSI is enabled.",
+    "fields": [],
+    "name": "msi_enable",
+    "offset": 4,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "MSI-X Enable Status. ``1``: MSI-X is enabled.",
+    "fields": [],
+    "name": "msix_enable",
+    "offset": 8,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Bus Mastering Status. ``1``: Bus Mastering enabled.",
+    "fields": [],
+    "name": "bus_master_enable",
+    "offset": 12,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "Negiotiated Max Request Size (in bytes).",
+    "fields": [],
+    "name": "max_request_size",
+    "offset": 16,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "Negiotiated Max Payload Size (in bytes).",
+    "fields": [],
+    "name": "max_payload_size",
+    "offset": 20,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "History of LTSSM states",
+    "fields": [
+     {
+      "description": "New LTSSM state",
+      "name": "new",
+      "offset": 0,
+      "reset": 0,
+      "size": 6,
+      "values": []
+     },
+     {
+      "description": "Old LTSSM state",
+      "name": "old",
+      "offset": 6,
+      "reset": 0,
+      "size": 6,
+      "values": []
+     },
+     {
+      "description": "Overflow",
+      "name": "ovfl",
+      "offset": 30,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Is data valid",
+      "name": "valid",
+      "offset": 31,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "ltssm_tracer_history",
+    "offset": 24,
+    "reset": null,
+    "size": 32
+   }
+  ],
+  "pps_in": [
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "Synchronized PPS input level.",
+      "name": "level",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "One-cycle pulse on PPS rising edge.",
+      "name": "pulse",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "status",
+    "offset": 0,
+    "reset": null,
+    "size": 2
+   },
+   {
+    "access": "ro",
+    "description": "Number of detected PPS rising edges.",
+    "fields": [],
+    "name": "count",
+    "offset": 4,
+    "reset": null,
+    "size": 32
+   }
+  ],
+  "ptm_requester": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: PTM Requester Disabled. `0b1`: PTM Requester Enabled.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "PTM Requester Disabled."
+       ],
+       [
+        "``0b1``",
+        "PTM Requester Enabled."
+       ]
+      ]
+     },
+     {
+      "description": "Write 1: issue a PTM request (pulse).",
+      "name": "trigger",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: PTM Context Invalid. `0b1`: PTM Context Valid.",
+      "name": "valid",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "PTM Context Invalid."
+       ],
+       [
+        "``0b1``",
+        "PTM Context Valid."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: PTM Request Done. `0b1`: PTM Request Ongoing.",
+      "name": "busy",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "PTM Request Done."
+       ],
+       [
+        "``0b1``",
+        "PTM Request Ongoing."
+       ]
+      ]
+     }
+    ],
+    "name": "status",
+    "offset": 4,
+    "reset": null,
+    "size": 2
+   },
+   {
+    "access": "ro",
+    "description": "PHY TX logic delay (in ns).",
+    "fields": [],
+    "name": "phy_tx_delay",
+    "offset": 8,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "PHY RX logic delay (in ns).",
+    "fields": [],
+    "name": "phy_rx_delay",
+    "offset": 12,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Last PTM Master Time (in ns).",
+    "fields": [],
+    "name": "master_time",
+    "offset": 16,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "Last PTM Link Delay (in ns).",
+    "fields": [],
+    "name": "link_delay",
+    "offset": 24,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Last PTM T1 Time (in ns).",
+    "fields": [],
+    "name": "t1_time",
+    "offset": 28,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "ro",
+    "description": "Last PTM T4 Time (in ns).",
+    "fields": [],
+    "name": "t4_time",
+    "offset": 36,
+    "reset": null,
+    "size": 64
+   }
+  ],
+  "si5351": [
+   {
+    "access": "rw",
+    "description": "I2C speed mode (0: 100 kHz Standard-mode, 1: 400 kHz Fast-mode, 2: 1 MHz Fast-mode Plus, 3: reserved, 100 kHz), applied while ``active`` is 0.",
+    "fields": [],
+    "name": "i2c_phy_speed_mode",
+    "offset": 0,
+    "reset": 0,
+    "size": 2
+   },
+   {
+    "access": "rw",
+    "description": "Write 1 to enable the I2C master.",
+    "fields": [],
+    "name": "i2c_master_active",
+    "offset": 4,
+    "reset": 0,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "I2C transfer settings",
+    "fields": [
+     {
+      "description": "I2C tx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be transmitted.",
+      "name": "len_tx",
+      "offset": 0,
+      "reset": 0,
+      "size": 3,
+      "values": []
+     },
+     {
+      "description": "I2C rx Xfer length (in bytes). Set to a value greater than 4 to announce more data has to be received.",
+      "name": "len_rx",
+      "offset": 8,
+      "reset": 0,
+      "size": 3,
+      "values": []
+     },
+     {
+      "description": "I2C recover bus. If set, the I2C bus will be recovered.",
+      "name": "recover",
+      "offset": 16,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "i2c_master_settings",
+    "offset": 8,
+    "reset": 0,
+    "size": 17
+   },
+   {
+    "access": "rw",
+    "description": "I2C address of the next transfer.",
+    "fields": [],
+    "name": "i2c_master_addr",
+    "offset": 12,
+    "reset": 0,
+    "size": 7
+   },
+   {
+    "access": "rw",
+    "description": "Write: push the transmit data. Read: pop the received data.",
+    "fields": [],
+    "name": "i2c_master_rxtx",
+    "offset": 16,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "TX FIFO is not full.",
+      "name": "tx_ready",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "RX FIFO is not empty.",
+      "name": "rx_ready",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Transfer not acknowledged (address or data NACK), also set with bus_error.",
+      "name": "nack",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "I2C bus error on transfer.",
+      "name": "bus_error",
+      "offset": 9,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Another tx transfer is expected.",
+      "name": "tx_unfinished",
+      "offset": 16,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Another rx transfer is expected.",
+      "name": "rx_unfinished",
+      "offset": 17,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     }
+    ],
+    "name": "i2c_master_status",
+    "offset": 20,
+    "reset": null,
+    "size": 18
+   },
+   {
+    "access": "rw",
+    "description": "PWM Enable. Write ``1`` to enable PWM.",
+    "fields": [],
+    "name": "pwm_enable",
+    "offset": 24,
+    "reset": 1,
+    "size": 1
+   },
+   {
+    "access": "rw",
+    "description": "PWM Width. Defines the *Duty cycle* of the PWM. PWM is active high for *Width* ``sys_clk`` cycles and active low for *Period - Width* ``sys_clk`` cycles.",
+    "fields": [],
+    "name": "pwm_width",
+    "offset": 28,
+    "reset": 1024,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "PWM Period. Defines the *Period* of the PWM in ``sys_clk`` cycles.",
+    "fields": [],
+    "name": "pwm_period",
+    "offset": 32,
+    "reset": 2048,
+    "size": 32
+   },
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: SI5351B Version. `0b1`: SI5351C Version.",
+      "name": "version",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "SI5351B Version."
+       ],
+       [
+        "``0b1``",
+        "SI5351C Version."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: 10MHz ClkIn from FPGA (clk10). `0b1`: 10MHz ClkIn from uFL.",
+      "name": "clkin_src",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "10MHz ClkIn from FPGA (clk10)."
+       ],
+       [
+        "``0b1``",
+        "10MHz ClkIn from uFL."
+       ]
+      ]
+     },
+     {
+      "description": "`0b0`: SI5351B Spread spectrum disabled. `0b1`: SI5351B Spread spectrum enabled.",
+      "name": "ss_en",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "SI5351B Spread spectrum disabled."
+       ],
+       [
+        "``0b1``",
+        "SI5351B Spread spectrum enabled."
+       ]
+      ]
+     },
+     {
+      "description": "`0b1`: Gateware Sequencer Reset.",
+      "name": "seq_reset",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b1``",
+        "Gateware Sequencer Reset."
+       ]
+      ]
+     }
+    ],
+    "name": "control",
+    "offset": 36,
+    "reset": 0,
+    "size": 9
+   },
+   {
+    "access": "ro",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Gateware Sequencer Ongoing. `0b1`: Gateware Sequencer Done.",
+      "name": "seq_done",
+      "offset": 8,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Gateware Sequencer Ongoing."
+       ],
+       [
+        "``0b1``",
+        "Gateware Sequencer Done."
+       ]
+      ]
+     }
+    ],
+    "name": "status",
+    "offset": 40,
+    "reset": null,
+    "size": 9
+   }
+  ],
+  "time_gen": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Time Generator Disabled. `0b1`: Time Generator Enabled.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 1,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Time Generator Disabled."
+       ],
+       [
+        "``0b1``",
+        "Time Generator Enabled."
+       ]
+      ]
+     },
+     {
+      "description": "Write 1: latch the board time into `read_time` (pulse).",
+      "name": "read",
+      "offset": 1,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "Write 1: load `write_time` into the board time (pulse).",
+      "name": "write",
+      "offset": 2,
+      "reset": 0,
+      "size": 1,
+      "values": []
+     },
+     {
+      "description": "`0b0`: Sync (Re-)Alignment Disabled. `0b1`: Sync (Re-)Alignment Enabled.",
+      "name": "sync_enable",
+      "offset": 3,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Sync (Re-)Alignment Disabled."
+       ],
+       [
+        "``0b1``",
+        "Sync (Re-)Alignment Enabled."
+       ]
+      ]
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 1,
+    "size": 4
+   },
+   {
+    "access": "ro",
+    "description": "Read Time (ns) (FPGA Time -> SW).",
+    "fields": [],
+    "name": "read_time",
+    "offset": 4,
+    "reset": null,
+    "size": 64
+   },
+   {
+    "access": "rw",
+    "description": "Write Time (ns) (SW Time -> FPGA).",
+    "fields": [],
+    "name": "write_time",
+    "offset": 12,
+    "reset": 0,
+    "size": 64
+   },
+   {
+    "access": "rw",
+    "description": "Time Adjustment Value (ns) (SW -> FPGA).",
+    "fields": [],
+    "name": "time_adjustment",
+    "offset": 20,
+    "reset": 0,
+    "size": 64
+   },
+   {
+    "access": "rw",
+    "description": "Time Increment in ns per tick (Q8.24 format).",
+    "fields": [],
+    "name": "time_inc",
+    "offset": 28,
+    "reset": 167772160,
+    "size": 32
+   }
+  ],
+  "txrx_loopback": [
+   {
+    "access": "rw",
+    "description": "",
+    "fields": [
+     {
+      "description": "`0b0`: Normal: TX->RFIC and RFIC->RX. `0b1`: Loopback: TX stream routed into RX stream.",
+      "name": "enable",
+      "offset": 0,
+      "reset": 0,
+      "size": 1,
+      "values": [
+       [
+        "``0b0``",
+        "Normal: TX->RFIC and RFIC->RX."
+       ],
+       [
+        "``0b1``",
+        "Loopback: TX stream routed into RX stream."
+       ]
+      ]
+     }
+    ],
+    "name": "control",
+    "offset": 0,
+    "reset": 0,
+    "size": 1
+   }
+  ],
+  "xadc": [
+   {
+    "access": "ro",
+    "description": "Raw Temperature value from XADC. Temperature (\u00b0C) = ``Value`` x 503.975 / 4096 - 273.15.",
+    "fields": [],
+    "name": "temperature",
+    "offset": 0,
+    "reset": null,
+    "size": 12
+   },
+   {
+    "access": "ro",
+    "description": "Raw VCCINT value from XADC. VCCINT (V) = ``Value`` x 3 / 4096.",
+    "fields": [],
+    "name": "vccint",
+    "offset": 4,
+    "reset": null,
+    "size": 12
+   },
+   {
+    "access": "ro",
+    "description": "Raw VCCAUX value from XADC. VCCAUX (V) = ``Value`` x 3 / 4096.",
+    "fields": [],
+    "name": "vccaux",
+    "offset": 8,
+    "reset": null,
+    "size": 12
+   },
+   {
+    "access": "ro",
+    "description": "Raw VCCBRAM value from XADC. VCCBRAM (V) = ``Value`` x 3 / 4096.",
+    "fields": [],
+    "name": "vccbram",
+    "offset": 12,
+    "reset": null,
+    "size": 12
+   },
+   {
+    "access": "ro",
+    "description": "End of Conversion Status, ``1``: Conversion Done.",
+    "fields": [],
+    "name": "eoc",
+    "offset": 16,
+    "reset": null,
+    "size": 1
+   },
+   {
+    "access": "ro",
+    "description": "End of Sequence Status, ``1``: Sequence Done.",
+    "fields": [],
+    "name": "eos",
+    "offset": 20,
+    "reset": null,
+    "size": 1
+   }
+  ]
+ },
+ "config": "m2_pcie",
+ "target": "litex_m2sdr.py"
+}

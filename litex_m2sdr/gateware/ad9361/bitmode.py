@@ -333,7 +333,8 @@ class AD9361TXBitMode128b(LiteXModule):
     The wide datapath carries two (ia, qa, ib, qb) sample groups per 128-bit word, halving the
     sys-domain word rate so 2T2R @ 122.88 MSPS fits the 125 MHz fabric; the rfic side scatters
     128 -> 64 into the serializer (see AD9361RFIC). Both formats are normalized to two expanded
-    16-bit groups per word; BFP8 is not supported on the wide datapath.
+    16-bit groups per word; BFP8 is not supported on the wide datapath: every mode other than
+    8-bit is handled as 16-bit, so that an unsupported mode never stalls the stream.
     """
     def __init__(self):
         self.sink   = sink   = stream.Endpoint(dma_layout(128))
@@ -342,8 +343,9 @@ class AD9361TXBitMode128b(LiteXModule):
 
         # # #
 
-        # 16-bit: a 128-bit word already holds two 16-bit groups -> passthrough.
-        self.comb += If(mode == _16_BIT_MODE, sink.connect(source))
+        # 16-bit (and unsupported modes): a 128-bit word already holds two 16-bit groups ->
+        # passthrough.
+        self.comb += If(mode != _8_BIT_MODE, sink.connect(source))
 
         # 8-bit: a 128-bit word holds four sc8 groups (16 bytes). Split to two 64-bit halves
         # (two sc8 groups each), then sign-extend the 8 bytes to 8x16 = one 128-bit word.
@@ -363,7 +365,9 @@ class AD9361RXBitMode128b(LiteXModule):
 
     The rfic side gathers 64 -> 128 (two sample groups per word, see AD9361RFIC). 16-bit passes
     through; 8-bit rounds the 8 lanes to 8 bytes (two sc8 groups), then packs two such words
-    into one 128-bit DMA word (four sc8 groups). BFP8 is not supported on the wide datapath.
+    into one 128-bit DMA word (four sc8 groups). BFP8 is not supported on the wide datapath:
+    every mode other than 8-bit is handled as 16-bit, so that an unsupported mode never stalls
+    the stream.
     """
     def __init__(self):
         self.sink   = sink   = stream.Endpoint(dma_layout(128))
@@ -372,8 +376,8 @@ class AD9361RXBitMode128b(LiteXModule):
 
         # # #
 
-        # 16-bit: passthrough.
-        self.comb += If(mode == _16_BIT_MODE, sink.connect(source))
+        # 16-bit (and unsupported modes): passthrough.
+        self.comb += If(mode != _8_BIT_MODE, sink.connect(source))
 
         # 8-bit: round/pack each 128-bit word to 8 sc8 bytes, then pair two words.
         self.conv = conv = stream.Converter(64, 128)

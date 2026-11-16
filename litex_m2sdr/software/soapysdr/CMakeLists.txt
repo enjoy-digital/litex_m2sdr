@@ -98,11 +98,41 @@ find_package(SoapySDR "0.2.1" REQUIRED)
 
 add_definitions(-DUSE_LITEPCIE=1 -DUSE_LITEETH=1)
 
+########################################################################
+## LiteUSB (libusb-1.0): must match the libm2sdr build (user Makefile
+## builds LiteUSB when libusb-1.0 is found, LITEUSB=0 disables it).
+########################################################################
+
+option(ENABLE_LITEUSB "Enable the LiteUSB (USB3) transport (requires libusb-1.0)" ON)
+set(LITEUSB_LIBRARIES "")
+if(ENABLE_LITEUSB)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(LIBUSB QUIET libusb-1.0)
+    endif()
+    if(LIBUSB_FOUND)
+        find_path(LITEUSB_INCLUDE_DIR liteusb.h
+                  HINTS
+                    ${M2SDR_TREE_ROOT}
+                  PATH_SUFFIXES
+                    litex_m2sdr/libliteusb
+                    software/user/libliteusb
+                  NO_DEFAULT_PATH
+        )
+        include_directories(${LITEUSB_INCLUDE_DIR} ${LIBUSB_INCLUDE_DIRS})
+        add_definitions(-DUSE_LITEUSB=1)
+        set(LITEUSB_LIBRARIES ${LIBUSB_LIBRARIES})
+        message(STATUS "LiteUSB transport enabled")
+    else()
+        message(STATUS "libusb-1.0 not found: LiteUSB transport disabled")
+    endif()
+endif()
+
 SOAPY_SDR_MODULE_UTIL(
     TARGET SoapyLiteXM2SDR
     SOURCES LiteXM2SDRDevice.cpp LiteXM2SDRStreaming.cpp
     LiteXM2SDRRegistration.cpp
-    LIBRARIES ${LIBM2SDR_STATIC_LIBRARY} m
+    LIBRARIES ${LIBM2SDR_STATIC_LIBRARY} ${LITEUSB_LIBRARIES} m
 )
 
 # Keep AD9361/libm2sdr symbols private to this Soapy module. Gqrx/gr-osmosdr

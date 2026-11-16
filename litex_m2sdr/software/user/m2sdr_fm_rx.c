@@ -274,6 +274,7 @@ static struct option options[] = {
 };
 
 int main(int argc, char **argv) {
+    m2sdr_cli_handle_version(argc, argv);
     int c;
     int option_index;
 

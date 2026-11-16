@@ -103,6 +103,7 @@ def test_shared_qpll_can_use_system_clock_as_eth_reference(monkeypatch):
     ("1000basex", 156.25e6, 4, 1.25e9),
     ("2500basex", 125e6,    2, 3.125e9),
     ("2500basex", 156.25e6, 2, 3.125e9),
+    ("5000baser", 103.125e6, 1, 5.15625e9),
 ])
 def test_shared_qpll_eth_settings_generate_expected_linerate(monkeypatch, eth_phy, refclk_freq, out_div, expected_linerate):
     monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
@@ -131,3 +132,25 @@ def test_shared_qpll_rejects_unsupported_triple_use(monkeypatch):
 
     with pytest.raises(AssertionError):
         SharedQPLL(platform, with_pcie=True, with_eth=True, with_sata=True)
+
+
+def test_shared_qpll_usb3_uses_sys_refclk_at_5gbps(monkeypatch):
+    """Verify USB3 gets a GTGREFCLK PLL fed by the 125MHz sys clock with a 2.5GHz VCO (5Gbps, D=1) next to PCIe."""
+    monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
+    platform = _DummyPlatform()
+
+    dut = SharedQPLL(platform, with_pcie=True, with_usb3=True)
+
+    assert dut.channel_map == {"pcie": 0, "usb3": 1}
+    settings = dut.qpll.kwargs["qpllsettings1"]
+    assert settings.refclksel == 0b111
+    assert dut.qpll.kwargs["gtrefclk1"] is None
+    assert _qpll_linerate(125e6, settings, out_div=1) == 5e9
+
+
+def test_shared_qpll_rejects_three_configurations(monkeypatch):
+    """Verify three SerDes functions cannot share the two QPLL PLLs."""
+    monkeypatch.setattr(qpll_mod, "QPLL", _FakeQPLL)
+
+    with pytest.raises(AssertionError):
+        SharedQPLL(_DummyPlatform(), with_pcie=True, with_eth=True, with_usb3=True)

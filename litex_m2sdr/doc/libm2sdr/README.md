@@ -219,6 +219,13 @@ Use larger `m2sdr_sync_rx()` / `m2sdr_sync_tx()` requests when the application
 wants batching. For example, at 30.72 MS/s, a 2 ms SC16 RX request is about
 61440 samples even though each backend descriptor remains 8192 bytes.
 
+RX buffers are returned oldest first. After a pause in the reads, or a change
+that the next samples must reflect (a retune, a gain change), call
+`m2sdr_sync_rx_flush()`: it drops the samples received before the call, so the
+next `m2sdr_sync_rx()` returns samples captured after it. It takes well under a
+millisecond on every host link; over USB3 it also drops the samples the
+gateware FIFOs held while the host was not reading.
+
 ## Channel layout and stream packing
 
 `M2SDR_CHANNEL_LAYOUT_1T1R` selects the RF/PHY channel layout, but the current
@@ -236,7 +243,7 @@ active channel in software until a true packed 1T1R stream mode is added.
 - RF: `m2sdr_config_init`, `m2sdr_apply_config`, `m2sdr_apply_config_if_needed`, `m2sdr_set_rx_frequency`, `m2sdr_set_tx_frequency`, `m2sdr_set_sample_rate`, `m2sdr_set_bandwidth`, `m2sdr_set_rx_gain`, `m2sdr_set_rx_gain_mode`, `m2sdr_set_rx_gain_mode_all`, `m2sdr_set_agc_pin`, `m2sdr_set_tx_att`
   - `m2sdr_set_tx_att` uses positive-dB TX attenuation.
 - AGC monitor: `m2sdr_configure_agc_counter`, `m2sdr_clear_agc_counter`, `m2sdr_get_agc_count`
-- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
+- Streaming: `m2sdr_stream_config_init`, `m2sdr_stream_configure`, `m2sdr_sync_rx`, `m2sdr_sync_rx_flush`, `m2sdr_sync_tx`, `m2sdr_get_buffer`, `m2sdr_try_get_buffer`, `m2sdr_submit_buffer`, `m2sdr_release_buffer`
 - Stream diagnostics: `m2sdr_get_stream_stats`, `m2sdr_clear_stream_stats`
 - Time: `m2sdr_get_time`, `m2sdr_set_time`, `m2sdr_get_ptp_status`, `m2sdr_get_ptp_discipline_config`, `m2sdr_set_ptp_discipline_config`, `m2sdr_clear_ptp_counters`
 - Sensors: `m2sdr_get_fpga_dna`, `m2sdr_get_fpga_sensors`
@@ -284,6 +291,31 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 - `m2sdr_clear_ptp_counters()` clears the board-side discipline and identity counters. LiteEth protocol counters remain read-only in this first implementation.
 - Read-side time APIs continue to operate on the same logical board clock regardless of whether it is free-running, manually set, or disciplined from Ethernet PTP.
 - Use `m2sdr_bytes_to_samples()` / `m2sdr_samples_to_bytes()` instead of hard-coding sample sizes in applications.
+
+## Environment variables
+
+The library reads a few environment variables. They are debug and tuning switches for bring-up, not
+a stable interface; the defaults are the validated settings.
+
+| Variable | Effect |
+|---|---|
+| `M2SDR_VERBOSE_AD9361_INIT` | Any value other than empty, `0`, `false` or `no` prints the detailed AD9361 initialization log. |
+| `M2SDR_RF_CHANNEL` | `2` selects the second RF port pair (RX2/TX2) in 1T1R; default RX1/TX1. |
+| `M2SDR_RX_WAIT` | `mwaitx` makes the PCIe RX path wait for the next buffer with MONITORX/MWAITX on CPUs that support it. |
+| `M2SDR_FLASH_LEGACY` | When set, SPI flash access over Ethernet uses the slower register-by-register path. |
+| `M2SDR_FLASH_GAP_FRAMES` | Number of pacing frames after each SPI start of the fast Ethernet flash path. |
+| `M2SDR_DUMP_CLKS` | When set, prints the AD9361 clock chain computed for each sample-rate change. |
+| `M2SDR_MAX_DAC_CLK` | Maximum DAC clock in Hz used by the AD9361 clock chain computation. |
+| `M2SDR_DESKEW_DEBUG` | When set, prints the per-lane results of the RX deskew scan (oversampling gateware). |
+| `M2SDR_OC_NATIVE` | When set, rates above 61.44 MSPS run the normal AD9361 clock chain at full rate instead of the default wide mode. |
+| `M2SDR_OC_BBF_TUNE` | Baseband filter tune target in Hz above 61.44 MSPS (default `39000000`). |
+| `M2SDR_OC_BBF_FORCE` | When set, selects the register force-widening of the baseband filters instead of the chip tune. |
+| `M2SDR_OC_RX_FIR_FILE`, `M2SDR_OC_TX_FIR_FILE` | Tap files of the RX (up to 32 taps) and TX (up to 16 taps, designed for 245.76 MHz) equalizer FIR above 61.44 MSPS. |
+| `M2SDR_OC_RX_DELAY`, `M2SDR_OC_TX_DELAY` | Raw AD9361 RX/TX clock/data delay register byte (clock delay in bits 7:4, data delay in bits 3:0) above 61.44 MSPS. |
+| `M2SDR_QEC_KEXP` | RX quadrature tracking loop gain exponent (default `0x0a`). |
+| `M2SDR_RFPLL_CP_PERCENT` | RFPLL charge pump current as a percentage of the table value above 61.44 MSPS (default `30`). |
+
+The SoapySDR module also reads `LITEXM2SDR_ETH_IPS` (Ethernet discovery targets, see its README).
 
 ## Troubleshooting
 

@@ -8,7 +8,7 @@
 ## Overview
 
 The SoapySDR driver builds on the **LiteX-M2SDR** software stack, integrating with:
-- **`litepcie`** kernel driver for DMA-based streaming over PCIe.
+- **`m2sdr`** kernel driver (built on LitePCIe) for DMA-based streaming over PCIe.
 - **Etherbone/LiteEth UDP** routines for remote control and UDP/VRT streaming over Ethernet.
 - M2SDR board-specific controls (sample rate, frequency, gains, etc.).
 
@@ -122,6 +122,10 @@ You can pass device arguments to configure the driver. These are most useful whe
 - **Interface delay calibration**: `calibrate_delay=1|0`
   - `0` (default) keeps the AD9361 digital-interface clock/data delays from the driver defaults, which suit most boards.
   - `1` runs the PRBS delay scan (same procedure as `m2sdr_rf --calibrate-delay`, a few seconds at open) for boards whose timing eye sits at the edge of the defaults and RX/TX capture zeros or noise otherwise. The calibrated delays are persisted in the stored AD9361 init parameters, so later RFIC re-initializations (e.g. channel-mode changes) program them again. Ignored with `bypass_init=1`.
+- **Initial sample rate**: `init_samplerate=5e6`
+  - Sample rate (and RF bandwidth) programmed by the RF init at open, before the application sets its own (default `30.72e6`). A lower value avoids running the RFIC at full rate when the link or the host cannot sustain it (for example over USB3 while bringing a setup up). Ignored with `bypass_init=1`.
+- **Attach without RF init**: `bypass_init=1`
+  - Opens the device without initializing the SI5351 and the AD9361, for example after `m2sdr_rf` configured them. The driver starts from the sample rates and LO frequencies read back from the AD9361, and later `setSampleRate()`/`setFrequency()` calls reconfigure it as usual. The AD9361 must already be out of reset (opening fails otherwise), and it is left running on close.
 
 Example:
 ```bash

@@ -14,8 +14,8 @@ from liteeth.phy.a7_gtp import QPLLSettings, QPLL
 
 class SharedQPLL(LiteXModule):
     def __init__(self, platform, with_pcie=False, with_eth=False, eth_refclk_freq=156.25e6,
-        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False):
-        assert not (with_pcie and with_eth and with_sata) # QPLL only has 2 PLLs :(
+        eth_refclk_direct=False, eth_phy="1000basex", with_sata=False, with_usb3=False):
+        assert (with_pcie + with_eth + with_sata + with_usb3) <= 2 # QPLL only has 2 PLLs :(
 
         # PCIe QPLL Settings.
         qpll_pcie_settings = QPLLSettings(
@@ -29,9 +29,9 @@ class SharedQPLL(LiteXModule):
         qpll_eth_settings = QPLLSettings(
             # Match the original Acorn 2.5G topology on GTREFCLK0 while
             # preserving the existing internal reference for 1000BASE-X.
-            refclksel  = {"1000basex": 0b111, "2500basex": 0b001}[eth_phy],
-            fbdiv      = {"1000basex": 4, "2500basex": 5}[eth_phy],
-            fbdiv_45   = {125e6: 5, 156.25e6 : 4}[eth_refclk_freq],
+            refclksel  = {"1000basex": 0b111, "2500basex": 0b001, "5000baser": 0b111}[eth_phy],
+            fbdiv      = {"1000basex": 4, "2500basex": 5, "5000baser": 5}[eth_phy],
+            fbdiv_45   = {103.125e6: 5, 125e6: 5, 156.25e6: 4}[eth_refclk_freq],
             refclk_div = 1,
         )
 
@@ -40,6 +40,14 @@ class SharedQPLL(LiteXModule):
             refclksel  = 0b111,
             fbdiv      = 5,
             fbdiv_45   = 4,
+            refclk_div = 1,
+        )
+
+        # USB3 QPLL Settings (125MHz sys clock on GTGREFCLK, 2.5GHz VCO for 5Gbps).
+        qpll_usb3_settings = QPLLSettings(
+            refclksel  = 0b111,
+            fbdiv      = 4,
+            fbdiv_45   = 5,
             refclk_div = 1,
         )
 
@@ -64,6 +72,12 @@ class SharedQPLL(LiteXModule):
             configs["sata"] = QPLLConfig(
                 refclk   = ClockSignal("refclk_sata"),
                 settings = qpll_sata_settings,
+            )
+
+        if with_usb3:
+            configs["usb3"] = QPLLConfig(
+                refclk   = ClockSignal("sys"),
+                settings = qpll_usb3_settings,
             )
 
         # Shared QPLL.

@@ -148,3 +148,58 @@ def test_time_generator_external_discipline_write_and_adjust():
     assert samples["faster"] > 60
     assert samples["written"] >= 1_000_000
     assert samples["adjusted"] <= samples["written"] - 200
+
+
+def _run_time_change_cdc(sys_period, time_period, writes=100, spacing=53):
+    # Even periods only: the simulator rounds the half period of a clock down.
+    assert (sys_period % 2 == 0) and (time_period % 2 == 0)
+    dut = TimeGenerator(clk=ClockSignal("time"), clk_freq=100e6, with_csr=False)
+    dut.add_cdc()
+    write  = dut.write
+    counts = {"sent": 0, "seen": 0, "consecutive": 0}
+
+    def gen_time():
+        yield dut.enable.eq(1)
+        for i in range(writes*spacing + 64):
+            strobe = int((i % spacing == 20) and (counts["sent"] < writes))
+            yield write.eq(strobe)
+            yield dut.write_time.eq(1000*i)
+            counts["sent"] += strobe
+            yield
+
+    def gen_sys():
+        previous = 0
+        for _ in range((writes*spacing + 64)*time_period//sys_period + 64):
+            yield
+            change = (yield dut.time_change)
+            counts["seen"]        += change
+            counts["consecutive"] += change & previous
+            previous = change
+
+    run_simulation(dut, {"time": gen_time(), "sys": gen_sys()},
+        clocks={"sys": sys_period, "time": time_period})
+    return counts
+
+
+def test_time_generator_cdc_time_change_not_lost_with_slower_sys_clock():
+    """Validate each time change reaches sys when the crossing drops words (sys slower)."""
+    counts = _run_time_change_cdc(sys_period=22, time_period=20)
+    assert counts["sent"] == 100
+    assert counts["seen"] == counts["sent"]
+    assert counts["consecutive"] == 0
+
+
+def test_time_generator_cdc_time_change_is_one_cycle_with_faster_sys_clock():
+    """Validate a time change is a one-cycle pulse in sys when the crossing idles (sys faster)."""
+    counts = _run_time_change_cdc(sys_period=16, time_period=20)
+    assert counts["sent"] == 100
+    assert counts["seen"] == counts["sent"]
+    assert counts["consecutive"] == 0
+
+
+def test_time_generator_cdc_time_change_with_equal_clocks():
+    """Validate one sys pulse per time change with equal sys and time clock periods."""
+    counts = _run_time_change_cdc(sys_period=20, time_period=20)
+    assert counts["sent"] == 100
+    assert counts["seen"] == counts["sent"]
+    assert counts["consecutive"] == 0
