@@ -21,6 +21,10 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **Low Sample Rates**
 - Fixed RX aliasing below `2.5 MSPS`: the AD9361 RX and TX FIRs now use their dedicated tables, x4 below `1.25 MSPS` and x2 from `1.25` to `2.5 MSPS`, in `libm2sdr` as in the SoapySDR driver. The RX level is about `6 dB` higher below `1.25 MSPS` than above, with the same signal to noise ratio; between `1.25` and `2.5 MSPS` it differs from earlier versions of `libm2sdr`.
 
+**USB3 Host Link**
+- Added hardware timed TX over USB3: the USB3 TX stream carries the TX header, and the timed-TX gate holds each timed buffer as on PCIe (capability bit `usb3_tx_header`; an older USB3 bitstream keeps the software timeline).
+- Added the rates above `61.44 MSPS` over USB3 in 1T1R on the standard bitstream, up to `122.88 MSPS` in SC8; the SoapySDR driver accepts such a rate before the stream is set up.
+
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------
 **Runtime Host Stack, SATA Workflows, Wide RFIC Modes, and Stability Hardening**
