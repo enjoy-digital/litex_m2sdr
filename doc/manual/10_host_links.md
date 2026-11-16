@@ -367,6 +367,12 @@ enabled the TX FIFOs are not primed, as over USB3.
 **RX frames.** With the RX header, the RX stream leaves in frames of 8 KiB that start with the
 header, and each frame ends a datagram. The library aligns its buffers on them.
 
+**Start of the RX stream.** While nothing reads the RX stream, the RFIC RX FIFO fills with old
+samples. With the crossbar on port 1 and the raw UDP streamer disabled, the gateware holds the RX
+header in reset, which drains the stream: the library selects the port, waits 10 ms and then
+enables the streamer, so the stream opens on fresh samples and on the header of a frame. A
+bitstream older than this drain opens the stream with about 110 KB of old samples.
+
 When Ethernet is the only host link, the RFIC core also gets a FIFO of depth 8192 on each
 stream. With PCIe in the same bitstream these FIFOs are not added: the DMA has its own buffering.
 

@@ -32,6 +32,8 @@
 #define M2SDR_LITEETH_RX_RECOVERY_TIMEOUT_MS 50
 #define M2SDR_TIMEOUT_NOWAIT ((unsigned)-1)
 #define M2SDR_LITEETH_TX_DRAIN_DELAY_US 1000
+/* Time for the RFIC RX FIFO (8192 words) to drain at the RFIC clock, as M2SDR_LITEUSB_RX_START_DRAIN_US. */
+#define M2SDR_LITEETH_RX_START_DRAIN_US 10000
 
 /* Ethernet RX mode register (VRT builds). The SoC declares it at its top level
  * and the CSR generator prefixes such registers with the name of the top-level
@@ -422,14 +424,23 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
     switch (config->mode) {
     case M2SDR_LITEETH_RX_MODE_UDP:
 #ifdef CSR_ETH_RX_STREAMER_ENABLE_ADDR
+        /* While nothing read it, the RFIC RX FIFO filled with old samples. With the crossbar on
+         * Ethernet and the streamer still disabled, the gateware drains them: wait for it, or
+         * they would open the stream, stamped with the time they leave the FIFO. A gateware
+         * without this drain keeps them, and the wait changes nothing. */
+        if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 0) != 0)
+            return M2SDR_ERR_IO;
+#ifdef M2SDR_CSR_ETH_RX_MODE_ADDR
+        if (m2sdr_reg_write(dev, M2SDR_CSR_ETH_RX_MODE_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+#endif
+        if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
+            return M2SDR_ERR_IO;
+        usleep(M2SDR_LITEETH_RX_START_DRAIN_US);
         if (m2sdr_reg_write(dev, CSR_ETH_RX_STREAMER_ENABLE_ADDR, 1) != 0)
             return M2SDR_ERR_IO;
 #else
         return M2SDR_ERR_UNSUPPORTED;
-#endif
-#ifdef M2SDR_CSR_ETH_RX_MODE_ADDR
-        if (m2sdr_reg_write(dev, M2SDR_CSR_ETH_RX_MODE_ADDR, 1) != 0)
-            return M2SDR_ERR_IO;
 #endif
         break;
 
