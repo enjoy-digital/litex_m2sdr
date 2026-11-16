@@ -139,6 +139,27 @@ The AD9361 is specified up to 61.44 MSPS, and the standard PHY is constrained fo
 of this rate in 2R2T mode, 245.76 MHz. The sample rates above 61.44 MSPS belong to the
 [oversampling mode](#rfic-oversampling), which is Experimental.
 
+### Digital filters and low sample rates {#rfic-fir}
+
+The AD9361 decimates the ADC samples with half-band filters, then with a programmable FIR. The
+ADC cannot run below 25 MHz, so the half-band filters alone do not reach the low sample rates:
+below 2.5 MSPS the FIR decimates too. The TX side mirrors this with interpolation. The library
+and the SoapySDR driver select the FIR mode from the sample rate.
+
+| Sample rate        | FIR                          | RX passband      |
+|--------------------|------------------------------|------------------|
+| Below 1.25 MSPS    | Decimates by 4               | Flat to 0.40 *fs* |
+| 1.25 to 2.5 MSPS   | Decimates by 2               | Flat to 0.45 *fs* |
+| 2.5 MSPS and above | Bypassed                     | Set by the half-band filters |
+
+In the two FIR modes, a carrier outside the band is rejected by about 46 dB before it can fold
+into the band, as measured on the board at 1 MSPS and 2 MSPS.
+
+> The RX level of a given signal changes with the FIR mode. It is about 6 dB higher below
+> 1.25 MSPS than between 1.25 and 2.5 MSPS, and stays within 2 dB across 2.5 MSPS. The noise
+> floor moves by the same amount, so the signal to noise ratio is the same. A program that
+> compares levels across 1.25 MSPS must account for this step.
+
 ## Standard PHY {#rfic-phy}
 
 The standard PHY is deliberately simple: it has no delay element and no calibration logic
