@@ -423,6 +423,9 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
      * header module. _tx_dma_header_bytes is resolved per-stream in setupStream() from the
      * timed_tx mode: non-zero only when the hardware gate is engaged. */
     bool _tx_dma_header_supported = false;
+    /* The host link carries the TX header to the gate: PCIe, or USB3 with a gateware that
+     * marks its TX frames (M2SDR_FEATURE_USB3_TX_HEADER). */
+    bool _tx_gate_link_supported = false;
     size_t _tx_dma_header_bytes = 0;
 
     /* Timed-TX gate pipeline compensation (ns) written to CSR_HEADER_TX_OFFSET so a

@@ -788,9 +788,12 @@ SoapyLiteXM2SDR::SoapyLiteXM2SDR(const SoapySDR::Kwargs &args)
      * setupStream()). Left disabled until setupStream() configures the stream. */
         {
             struct m2sdr_capabilities caps;
-            if (m2sdr_get_capabilities(_dev, &caps) == M2SDR_ERR_OK)
+            if (m2sdr_get_capabilities(_dev, &caps) == M2SDR_ERR_OK) {
                 _tx_dma_header_supported =
                     (caps.features & M2SDR_FEATURE_TIMED_TX) != 0;
+                _tx_gate_link_supported = isLitePCIe() ||
+                    (isLiteUSB() && (caps.features & M2SDR_FEATURE_USB3_TX_HEADER) != 0);
+            }
         }
         m2sdr_set_tx_header(_dev, false);
 
@@ -2018,7 +2021,7 @@ void SoapyLiteXM2SDR::setSampleRate(
      * never written on a bitstream that lacks it. Auto (_tx_offset_ns < 0) derives the offset from
      * the deterministic gate+DMA pipeline latency (M2SDR_TX_PIPELINE_CYCLES) scaled to the active
      * rate; an explicit tx_offset device arg overrides. */
-    if (sample_rate_applied && _tx_dma_header_supported && rate > 0.0) {
+    if (sample_rate_applied && _tx_dma_header_supported && _tx_gate_link_supported && rate > 0.0) {
         long long tx_offset_ns = _tx_offset_ns;
         if (tx_offset_ns < 0) {
             const double cycles = (_nChannels >= 2) ? M2SDR_TX_PIPELINE_CYCLES_2T2R

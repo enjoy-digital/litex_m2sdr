@@ -133,6 +133,9 @@ extern const struct m2sdr_backend_ops m2sdr_liteusb_backend_ops;
 #endif
 
 void m2sdr_stream_cleanup(struct m2sdr_dev *dev);
+/* The link carries the TX header (first-word marker of each buffer): PCIe, USB3 with
+ * M2SDR_FEATURE_USB3_TX_HEADER. */
+bool m2sdr_tx_header_supported(struct m2sdr_dev *dev);
 
 /* MONITORX/MWAITX helpers (m2sdr_mwaitx.c) for the low-latency RX wait. */
 int m2sdr_mwaitx_supported(void);
