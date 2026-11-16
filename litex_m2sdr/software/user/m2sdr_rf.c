@@ -19,6 +19,7 @@
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_cal_store.h"
 #include "m2sdr_config.h"
 
 /* Help */
@@ -43,6 +44,8 @@ static void help(void)
            "      --refclk-freq HZ   Set the RefClk frequency in Hz (default: %" PRId64 ").\n"
            "      --refclk-ppm PPM   Compensate a measured RefClk error in ppm through the\n"
            "                         SI5351 PLL (positive = clock runs fast, default: 0).\n"
+           "                         'stored': the value of the calibration record of the\n"
+           "                         board (m2sdr_cal).\n"
            "      --sample-rate SPS  Set RF sample rate in SPS (default: %d, accepts 30.72e6\n"
            "                         or 20M). Rates above 61.44 MSPS select the\n"
            "                         wide-bandwidth mode (~100 MHz analog passband).\n"
@@ -148,6 +151,8 @@ int main(int argc, char **argv)
         { "bist_tone_freq", required_argument, NULL, 19 },
         { NULL, 0, NULL, 0 }
     };
+    bool refclk_ppm_stored = false;
+
     m2sdr_config_init(&cfg);
 
     m2sdr_cli_device_init(&cli_dev);
@@ -215,7 +220,9 @@ int main(int argc, char **argv)
                 return 1;
             break;
         case 25:
-            if (m2sdr_cli_parse_double_range(optarg, -M2SDR_REFCLK_PPM_MAX,
+            if (strcmp(optarg, "stored") == 0) {
+                refclk_ppm_stored = true;
+            } else if (m2sdr_cli_parse_double_range(optarg, -M2SDR_REFCLK_PPM_MAX,
                                              M2SDR_REFCLK_PPM_MAX, &cfg.refclk_ppm) != 0) {
                 m2sdr_cli_error("invalid refclk ppm '%s' (expected -%.0f to %.0f)",
                                 optarg, M2SDR_REFCLK_PPM_MAX, M2SDR_REFCLK_PPM_MAX);
@@ -333,6 +340,21 @@ int main(int argc, char **argv)
     if (m2sdr_open(&dev, m2sdr_cli_device_id(&cli_dev)) != 0) {
         fprintf(stderr, "Could not open device: %s\n", m2sdr_cli_device_id(&cli_dev));
         return 1;
+    }
+
+    /* Reference trim of the calibration record of the board (m2sdr_cal). */
+    if (refclk_ppm_stored) {
+        struct m2sdr_cal_record rec;
+        const enum m2sdr_cal_source source = m2sdr_cal_load(dev, M2SDR_CAL_FLASH_OFFSET, &rec);
+
+        if (source == M2SDR_CAL_SOURCE_NONE) {
+            fprintf(stderr, "No calibration record for this board: run m2sdr_cal measure --store.\n");
+            m2sdr_close(dev);
+            return 1;
+        }
+        cfg.refclk_ppm = rec.refclk_ppm;
+        printf("RefClk trim %+.3f ppm, from the calibration record in %s.\n", rec.refclk_ppm,
+               source == M2SDR_CAL_SOURCE_FLASH ? "the SPI flash" : "its file");
     }
 
     {

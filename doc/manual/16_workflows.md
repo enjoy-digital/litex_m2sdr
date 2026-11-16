@@ -930,9 +930,9 @@ read the sensor `ref_locked`.
 SoapySDRUtil --probe="driver=LiteXM2SDR,clock_source=external"
 ```
 
-Without an external reference, the error of the internal oscillator can be measured against a
-known carrier and removed with `--refclk-ppm`; see
-[m2sdr_rf: RFIC configuration](#sw-rf).
+Without an external reference, the error of the internal oscillator can be measured against
+cellular carriers with `m2sdr_cal` and removed with `--refclk-ppm`; see
+[m2sdr_cal: reference clock calibration](#sw-cal).
 
 ### Set the board time from the host {#flow-sync-set}
 
