@@ -335,9 +335,14 @@ library checks the `rfic_oversampling` capability bit and refuses 2T2R above 61.
 standard bitstream, with a message, instead of configuring an interface that cannot align.
 
 In 1T1R these rates also run over USB3, on a standard bitstream: 122.88 MSPS in SC8 is
-245.76 MB/s, see [Sample rates](#links-usb3-rates). In this mode the digital loopback of the
-RFIC returns the 12-bit samples with their lowest bit set, so a loopback test compares SC8
-samples or the 11 upper bits.
+245.76 MB/s, see [Sample rates](#links-usb3-rates).
+
+The library sets the delay between the TX clock and the TX data of the RFIC for this mode.
+In 1T1R on a standard bitstream the TX eye, measured as the data delay minus the clock delay
+in steps of about 0.3 ns, spans +2 to +12 at 76.8 MSPS, +1 to +9 at 92.16 MSPS and +1 to +7 at
+122.88 MSPS; the library uses +5. At the lower edge the RFIC reads the lowest bit of each
+12-bit TX sample as 1 while the 11 other bits are correct. `M2SDR_OC_TX_DELAY`
+([Tuning variables](#rfic-oversampling-tuning)) sets another value for a board whose eye differs.
 
 ### Oversampling PHY {#rfic-oversampling-phy}
 
