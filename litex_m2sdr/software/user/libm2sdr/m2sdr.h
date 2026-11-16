@@ -203,10 +203,17 @@ struct m2sdr_stream_stats {
     /* Current ring occupancy and observed high-water mark in descriptors. */
     uint64_t ring_level;
     uint64_t ring_high_water;
-    /* RX late-consumer diagnostics. */
+    /* RX late-consumer diagnostics. PCIe: DMA ring overruns seen by the host. Ethernet and
+     * USB3: also the samples lost in the FPGA since the stream was activated, when the gateware
+     * counts them (M2SDR_FEATURE_STREAM_COUNTERS): one event per loss episode, and the lost
+     * samples in buffers (rounded up). */
     uint64_t overflow_events;
     uint64_t overflow_buffers;
-    /* TX late-producer diagnostics. */
+    /* TX late-producer diagnostics. PCIe: DMA ring underruns seen by the host. Ethernet and
+     * USB3, with M2SDR_FEATURE_STREAM_COUNTERS: times the RFIC ran out of TX samples since the
+     * stream was activated (underflow_buffers stays 0). Not counted with the TX header enabled,
+     * where the end of each burst is such an interruption: m2sdr_get_tx_underflow() counts the
+     * late timed buffers there. */
     uint64_t underflow_events;
     uint64_t underflow_buffers;
     /* Transport-specific counters mirrored from LiteEth when available. */
@@ -485,6 +492,13 @@ enum m2sdr_feature_flag {
     M2SDR_FEATURE_USB3 = 1u << CSR_CAPABILITY_FEATURES_USB3_OFFSET,
 #else
     M2SDR_FEATURE_USB3 = 0,
+#endif
+    /* RFIC stream loss counters (RX overflow, TX underflow): the stream statistics of the
+     * Ethernet and USB3 links report the samples lost in the FPGA. */
+#ifdef CSR_CAPABILITY_FEATURES_STREAM_COUNTERS_OFFSET
+    M2SDR_FEATURE_STREAM_COUNTERS = 1u << CSR_CAPABILITY_FEATURES_STREAM_COUNTERS_OFFSET,
+#else
+    M2SDR_FEATURE_STREAM_COUNTERS = 0,
 #endif
     /* The USB3 TX stream carries the TX header: hardware timed TX works over USB3. */
 #ifdef CSR_CAPABILITY_FEATURES_USB3_TX_HEADER_OFFSET

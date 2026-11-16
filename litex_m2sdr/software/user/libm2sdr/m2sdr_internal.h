@@ -95,6 +95,12 @@ struct m2sdr_dev {
     uint64_t pcie_rx_overflow_events;
     uint64_t pcie_rx_overflow_buffers;
     uint64_t pcie_tx_underflow_events;
+    /* RFIC stream loss counters (gateware, free-running): values at the stream activation, and
+     * TX value kept at the deactivation (the end of a stream is one interruption). */
+    int      loss_supported;      /* 0: not read yet, 1: counters present, 2: absent. */
+    int      loss_rx_based, loss_tx_based, loss_tx_frozen;
+    uint32_t loss_rx_events_base, loss_rx_words_base;
+    uint32_t loss_tx_events_base, loss_tx_events_final;
     uint64_t pcie_tx_underflow_buffers;
     struct ad9361_rf_phy *ad9361_phy;
     /* Per-device snapshot of the AD9361_InitParam used at RF bring-up.

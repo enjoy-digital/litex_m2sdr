@@ -249,6 +249,89 @@ out:
     return ret;
 }
 
+/* RFIC stream loss counters */
+/*---------------------------*/
+
+/* The gateware counts, at the RFIC, the RX words that the stream did not take and the times the
+ * TX stream ran dry (free-running counters, M2SDR_FEATURE_STREAM_COUNTERS). The links whose
+ * buffering is in the FPGA (Ethernet, USB3) report them in their stream statistics, as
+ * differences from the activation of the stream. */
+static bool m2sdr_loss_counters_supported(struct m2sdr_dev *dev)
+{
+#ifdef CSR_AD9361_RX_OVERFLOW_EVENTS_ADDR
+    if (dev->loss_supported == 0) {
+        struct m2sdr_capabilities caps;
+
+        dev->loss_supported = (m2sdr_get_capabilities(dev, &caps) == M2SDR_ERR_OK &&
+                               (caps.features & M2SDR_FEATURE_STREAM_COUNTERS)) ? 1 : 2;
+    }
+    return dev->loss_supported == 1;
+#else
+    (void)dev;
+    return false;
+#endif
+}
+
+#ifdef CSR_AD9361_RX_OVERFLOW_EVENTS_ADDR
+static void m2sdr_loss_counters_base(struct m2sdr_dev *dev, enum m2sdr_direction direction)
+{
+    if (!m2sdr_loss_counters_supported(dev))
+        return;
+    if (direction == M2SDR_RX) {
+        dev->loss_rx_based =
+            m2sdr_reg_read(dev, CSR_AD9361_RX_OVERFLOW_EVENTS_ADDR, &dev->loss_rx_events_base) == 0 &&
+            m2sdr_reg_read(dev, CSR_AD9361_RX_OVERFLOW_WORDS_ADDR,  &dev->loss_rx_words_base)  == 0;
+    } else {
+        dev->loss_tx_frozen = 0;
+        dev->loss_tx_based  =
+            m2sdr_reg_read(dev, CSR_AD9361_TX_UNDERFLOW_EVENTS_ADDR, &dev->loss_tx_events_base) == 0;
+    }
+}
+
+/* Before a TX stream is stopped: the RFIC then runs out of samples, which is not an underflow. */
+static void m2sdr_loss_counters_freeze_tx(struct m2sdr_dev *dev)
+{
+    if (!dev->loss_tx_based || dev->loss_tx_frozen)
+        return;
+    if (m2sdr_reg_read(dev, CSR_AD9361_TX_UNDERFLOW_EVENTS_ADDR, &dev->loss_tx_events_final) == 0)
+        dev->loss_tx_frozen = 1;
+}
+
+static void m2sdr_loss_counters_stats(struct m2sdr_dev *dev,
+                                      enum m2sdr_direction direction,
+                                      struct m2sdr_stream_stats *stats)
+{
+    if (direction == M2SDR_RX && dev->loss_rx_based) {
+        uint32_t events = 0, words = 0;
+
+        if (m2sdr_reg_read(dev, CSR_AD9361_RX_OVERFLOW_EVENTS_ADDR, &events) != 0 ||
+            m2sdr_reg_read(dev, CSR_AD9361_RX_OVERFLOW_WORDS_ADDR,  &words)  != 0)
+            return;
+        events -= dev->loss_rx_events_base;
+        words  -= dev->loss_rx_words_base;
+        stats->overflow_events  += events;
+        /* 64-bit words to buffers, rounded up: a loss is never reported as 0 buffer. */
+        if (stats->buffer_size)
+            stats->overflow_buffers += ((uint64_t)words*8 + stats->buffer_size - 1)/stats->buffer_size;
+        if (events && !words)
+            stats->overflow_buffers += 1; /* Words are counted by 16. */
+    }
+    if (direction == M2SDR_TX && dev->loss_tx_based && !dev->tx_header_enable) {
+        uint32_t events = dev->loss_tx_events_final;
+
+        if (!dev->loss_tx_frozen &&
+            m2sdr_reg_read(dev, CSR_AD9361_TX_UNDERFLOW_EVENTS_ADDR, &events) != 0)
+            return;
+        stats->underflow_events += (uint32_t)(events - dev->loss_tx_events_base);
+    }
+}
+#else
+static void m2sdr_loss_counters_base(struct m2sdr_dev *dev, enum m2sdr_direction direction) { (void)dev; (void)direction; }
+static void m2sdr_loss_counters_freeze_tx(struct m2sdr_dev *dev) { (void)dev; }
+static void m2sdr_loss_counters_stats(struct m2sdr_dev *dev, enum m2sdr_direction direction,
+                                      struct m2sdr_stream_stats *stats) { (void)dev; (void)direction; (void)stats; }
+#endif
+
 void m2sdr_liteeth_rx_stream_config_init(struct m2sdr_liteeth_rx_stream_config *config)
 {
     if (!config)
@@ -374,6 +457,7 @@ int m2sdr_liteeth_rx_stream_activate(struct m2sdr_dev *dev,
 
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
+    m2sdr_loss_counters_base(dev, M2SDR_RX);
 
     return M2SDR_ERR_OK;
 }
@@ -416,6 +500,7 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
+    m2sdr_loss_counters_base(dev, M2SDR_TX);
     return M2SDR_ERR_OK;
 #else
     return M2SDR_ERR_UNSUPPORTED;
@@ -429,6 +514,7 @@ int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
+    m2sdr_loss_counters_freeze_tx(dev);
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     (void)m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0);
 #endif
@@ -557,6 +643,7 @@ static int m2sdr_liteusb_rx_stream_activate(struct m2sdr_dev *dev)
         return rc;
     if (liteusb_stream_start(dev->usb_rx) != 0)
         return M2SDR_ERR_IO;
+    m2sdr_loss_counters_base(dev, M2SDR_RX);
     return M2SDR_ERR_OK;
 }
 
@@ -565,6 +652,7 @@ static int m2sdr_liteusb_tx_stream_deactivate(struct m2sdr_dev *dev)
 {
     int status = M2SDR_ERR_OK;
 
+    m2sdr_loss_counters_freeze_tx(dev);
     if (dev->usb_tx) {
         (void)liteusb_stream_drain(dev->usb_tx, M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS);
         for (int i = 0; i < M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS; i++) {
@@ -597,7 +685,10 @@ static int m2sdr_liteusb_tx_stream_activate(struct m2sdr_dev *dev)
         return M2SDR_ERR_IO;
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, TXRX_PORT_LITEUSB) != 0)
         return M2SDR_ERR_IO;
-    return m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_TX_ENABLE_OFFSET, 1);
+    rc = m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_TX_ENABLE_OFFSET, 1);
+    if (rc == M2SDR_ERR_OK)
+        m2sdr_loss_counters_base(dev, M2SDR_TX);
+    return rc;
 }
 
 static void m2sdr_liteusb_stream_close(struct m2sdr_dev *dev, enum m2sdr_direction direction)
@@ -634,6 +725,7 @@ static int m2sdr_liteusb_stream_stats(struct m2sdr_dev *dev,
         stats->tx_buffers     = usb.buffers;
         stats->tx_send_errors = usb.errors;
     }
+    m2sdr_loss_counters_stats(dev, direction, stats);
     return M2SDR_ERR_OK;
 }
 #endif
@@ -1022,6 +1114,7 @@ static int m2sdr_liteeth_stream_stats(struct m2sdr_dev *dev,
         stats->overflow_buffers =
             udp.rx_kernel_drops + udp.rx_ring_full_events;
     }
+    m2sdr_loss_counters_stats(dev, direction, stats);
 
     return M2SDR_ERR_OK;
 }
