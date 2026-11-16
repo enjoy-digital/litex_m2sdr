@@ -30,7 +30,7 @@ class Capability(LiteXModule):
         # RFIC.
         rfic_oversampling=0,
         # USB3.
-        usb3_enabled=False, usb3_sfp=0):
+        usb3_enabled=False, usb3_sfp=0, usb3_tx_header=False):
 
         # API Version.
         # ------------
@@ -58,6 +58,8 @@ class Capability(LiteXModule):
                 description="RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present."),
             CSRField("usb3", size=1, offset=10, reset=int(usb3_enabled),
                 description="USB3 (SFP-to-USB3 adapter) is present."),
+            CSRField("usb3_tx_header", size=1, offset=11, reset=int(usb3_tx_header),
+                description="USB3 TX stream marks its frames: TX header and hardware timed TX over USB3."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 

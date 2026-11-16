@@ -109,12 +109,18 @@ class USB3TXStreamer(LiteXModule):
     full) before being forwarded so the RFIC is not underrun at start (as the Ethernet streamer).
 
     Disabled: Bulk OUT data drained, FIFO kept empty.
+
+    The first word of each host buffer (frame_bytes, counted from the enable) is marked with first,
+    as the PCIe DMA does: the TX header extractor finds the header (timestamp) of a buffer with
+    it. With framed set (TX header enabled), the FIFO is not primed: a timed frame waits in the
+    timed-TX gate, and must then leave without a delay that depends on the FIFO level.
     """
-    def __init__(self, data_width=64, fifo_depth=(256*1024)//8):
+    def __init__(self, data_width=64, fifo_depth=(256*1024)//8, frame_bytes=8192):
         self.sink   = sink   = stream.Endpoint([("data", 32), ("be", 4)])
         self.source = source = stream.Endpoint(dma_layout(data_width))
 
         self.enable  = Signal() # i
+        self.framed  = Signal() # i
         self.started = Signal() # o
 
         # # #
@@ -136,7 +142,23 @@ class USB3TXStreamer(LiteXModule):
             ).Else(
                 sink.ready.eq(1),
             ),
-            conv.source.connect(fifo.sink, omit={"valid_token_count"}),
+            conv.source.connect(fifo.sink, omit={"valid_token_count", "first", "last"}),
+        ]
+
+        # Framing: first on the first word of each host buffer.
+        frame_words = frame_bytes//(data_width//8)
+        frame_count = Signal(max=frame_words)
+        self.comb += fifo.sink.first.eq(frame_count == 0)
+        self.sync += [
+            If(~self.enable,
+                frame_count.eq(0)
+            ).Elif(fifo.sink.valid & fifo.sink.ready,
+                If(frame_count == (frame_words - 1),
+                    frame_count.eq(0)
+                ).Else(
+                    frame_count.eq(frame_count + 1)
+                )
+            )
         ]
 
         # Priming: forward once half full, until empty (underrun) or disabled.
@@ -145,14 +167,14 @@ class USB3TXStreamer(LiteXModule):
         self.sync += [
             If(~self.enable,
                 self.started.eq(0)
-            ).Elif(primed,
+            ).Elif(primed | self.framed,
                 self.started.eq(1)
             ).Elif(fifo.level == 0,
                 self.started.eq(0)
             )
         ]
         self.comb += [
-            fifo.source.connect(source, omit={"valid", "ready", "first", "last"}),
+            fifo.source.connect(source, omit={"valid", "ready", "last"}),
             source.valid.eq(fifo.source.valid & self.started),
             fifo.source.ready.eq(source.ready & self.started),
         ]
@@ -183,6 +205,8 @@ class USB3(LiteXModule):
 
         self.sink   = stream.Endpoint(dma_layout(data_width))
         self.source = stream.Endpoint(dma_layout(data_width))
+
+        self.tx_framed = Signal() # i: TX header enabled (see USB3TXStreamer).
 
         self._control = CSRStorage(fields=[
             CSRField("rx_enable", size=1, offset=0, description="Enable RX stream (RFIC -> Host, Bulk IN), flushes previous data."),
@@ -259,6 +283,7 @@ class USB3(LiteXModule):
         self.tx_streamer = tx_streamer = USB3TXStreamer(data_width=data_width)
         self.comb += [
             tx_streamer.enable.eq(self._control.fields.tx_enable),
+            tx_streamer.framed.eq(self.tx_framed),
             bulk_out.source.connect(tx_streamer.sink, omit={"first"}),
             tx_streamer.source.connect(self.source),
         ]
