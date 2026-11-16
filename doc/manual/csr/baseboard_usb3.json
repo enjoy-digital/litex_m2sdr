@@ -629,6 +629,33 @@
     "offset": 84,
     "reset": 0,
     "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "RX overflow events: times the RX stream started losing words.",
+    "fields": [],
+    "name": "rx_overflow_events",
+    "offset": 88,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "RX words lost (64-bit words, counted by 16).",
+    "fields": [],
+    "name": "rx_overflow_words",
+    "offset": 92,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "TX underflow events: times the TX stream ran dry after providing words.",
+    "fields": [],
+    "name": "tx_underflow_events",
+    "offset": 96,
+    "reset": null,
+    "size": 32
    }
   ],
   "capability": [
@@ -740,12 +767,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "RFIC stream loss counters (RX overflow, TX underflow) are present.",
+      "name": "stream_counters",
+      "offset": 12,
+      "reset": 1,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 12
+    "size": 13
    },
    {
     "access": "ro",

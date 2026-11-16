@@ -328,9 +328,27 @@ held while the host was not reading.
 sends that buffer at once, with the rest filled: the transmitted signal then holds a gap. Give
 each call a whole number of buffers, which `m2sdr_bytes_to_samples()` converts to samples.
 
-Over USB3, send several buffers per call at the high rates. Each call ends a USB transfer, and
-transfers of one buffer do not keep the gateware supplied at 245 MB/s. With 16 buffers per
-call the link was tested up to 368 MB/s in full duplex ([USB3 host link](#perf-usb3)).
+Over USB3, each call ends a USB transfer. One buffer per call reaches about 300 MB/s in full
+duplex; send several buffers per call above, where 4 buffers per call were tested at 368 MB/s
+([USB3 host link](#perf-usb3)).
+
+#### Lost samples {#sw-lib-loss}
+
+`m2sdr_get_stream_stats()` reports the RX overflows and the TX underflows of a stream since its
+activation. Over PCIe the library sees them on the DMA ring. Over Ethernet and USB3 the samples
+are lost in the FPGA: the gateware counts them at the RFIC ([Stream loss counters](#rfic-loss))
+and the library adds them to the same fields, when the bitstream has the `stream_counters`
+capability bit (`M2SDR_FEATURE_STREAM_COUNTERS`).
+
+| Field | Over Ethernet and USB3 |
+|----------------------|------------------------------------------------------------------|
+| `overflow_events` | Times the RX stream started losing samples |
+| `overflow_buffers` | Lost RX samples, in buffers, rounded up |
+| `underflow_events` | Times the RFIC ran out of TX samples; the stop of the stream is not counted |
+
+With the TX header enabled, the end of each burst is such an interruption, so
+`underflow_events` is not filled; `m2sdr_get_tx_underflow()` counts the late timed buffers.
+The Ethernet side of this reporting was not run on hardware.
 
 ### Timestamps and timed TX {#sw-lib-time}
 

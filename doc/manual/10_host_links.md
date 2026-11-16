@@ -757,12 +757,14 @@ in [The RFIC interface](#rfic).
 - **Timed TX.** The TX header and hardware timed TX need a bitstream with the `usb3_tx_header`
   capability bit. On an older bitstream the library refuses the TX header on this link, and
   the SoapySDR driver uses its software timeline.
-- **Overflow and underflow.** The link does not report RX overflows or TX underflows yet. The
-  FIFOs absorb the jitter of the host; a host that stalls for longer loses samples without a
-  count.
-- **TX buffering.** The gateware holds about a millisecond of TX samples at 245 MB/s. The host
-  must keep the transfers queued: a program that sends one 8 KiB buffer per call underflows
-  now and then at this rate, see [Writing samples](#sw-lib-tx-size).
+- **Overflow and underflow.** The FIFOs absorb the jitter of the host; a host that stalls for
+  longer loses samples in the FPGA. The gateware counts these losses at the RFIC
+  ([Stream loss counters](#rfic-loss)): the stream statistics of the library report them, and
+  the SoapySDR driver returns them as overflow and underflow. A bitstream without the
+  `stream_counters` capability bit does not count them.
+- **TX buffering.** The gateware holds about a millisecond of TX samples at 245 MB/s, and the
+  host must keep the transfers queued. The size of the writes sets the rate a program reaches,
+  see [Writing samples](#sw-lib-tx-size).
 - **LED.** The state of the USB3 link is not part of the "ready" condition of the status LED
   ([Status LED](#soc-led)).
 
