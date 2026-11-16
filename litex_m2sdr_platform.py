@@ -28,9 +28,6 @@ _io = [
     # Leds.
     ("user_led", 0, Pins("AB15"), IOStandard("LVCMOS33")), # FPGA_LED2.
 
-    # Debug.
-    ("debug", 0, Pins("V13"), IOStandard("LVCMOS33")), # SYNCDBG_CLK.
-
     # Ext Sync/ClkIn..
     ("sync_clk_in", 0, Pins("V13"), IOStandard("LVCMOS33")), # SYNCDBG_CLK.
     ("pps_in", 0, Pins("M2:NC22"), IOStandard("LVCMOS33")), # M.2 pin 22 / PPS_IN.
@@ -181,7 +178,7 @@ _connectors = [
         "PERn0"   : " C9", # 47 / PCIe_RX0_P.
         "PERp0"   : " D9", # 49 / PCIe_RX0_N.
         "REFClkn" : " E6", # 53 / PCIe_REF_CLK_N.
-        "REFClkp" : " F6", # 55 / PCIe_REF_CLK_N.
+        "REFClkp" : " F6", # 55 / PCIe_REF_CLK_P.
         "PERSTn"  : "A15", # 50 / PCIe_PERST / Bank16 / 3.3V.
 
         # SMB.
@@ -265,7 +262,7 @@ class Platform(Xilinx7SeriesPlatform):
     def do_finalize(self, fragment):
         Xilinx7SeriesPlatform.do_finalize(self, fragment)
         self.add_period_constraint(self.lookup_request("clk100",               0, loose=True), 1e9/100e6)          # Board 100MHz oscillator.
-        self.add_period_constraint(self.lookup_request("si5351_clk0",          0, loose=True), 1e9/38.4e6)         # Local VCTCXO.
+        self.add_period_constraint(self.lookup_request("si5351_clk0",          0, loose=True), 1e9/38.4e6)         # SI5351 CLK0 output (38.4MHz).
         self.add_period_constraint(self.lookup_request("si5351_clk1",          0, loose=True), 1e9/100e6)          # Time/PPS reference.
         self.add_period_constraint(self.lookup_request("ad9361_rfic:rx_clk_p", 0, loose=True), 1e9/self.rfic_clk_freq) # RF sample clock.
         self.add_period_constraint(self.lookup_request("sync_clk_in",          0, loose=True), 1e9/10e6)           # External sync/debug clock.

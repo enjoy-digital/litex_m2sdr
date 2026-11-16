@@ -1278,6 +1278,13 @@ static void info(void)
 #else
     bool eth_ptp_rfic_clock_enabled = false;
 #endif
+#ifdef CSR_CAPABILITY_FEATURES_USB3_OFFSET
+    bool usb3_enabled =
+        ((caps.features >> CSR_CAPABILITY_FEATURES_USB3_OFFSET) &
+         ((1 << CSR_CAPABILITY_FEATURES_USB3_SIZE) - 1)) != 0;
+#else
+    bool usb3_enabled = false;
+#endif
 
     {
         int variant = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
@@ -1291,6 +1298,7 @@ static void info(void)
     printf("  PCIe           : %s\n", pcie_enabled ? "Yes" : "No");
     printf("  Ethernet       : %s\n", eth_enabled  ? "Yes" : "No");
     printf("  SATA           : %s\n", sata_enabled ? "Yes" : "No");
+    printf("  USB3           : %s\n", usb3_enabled ? "Yes" : "No");
     printf("  GPIO           : %s\n", gpio_enabled ? "Yes" : "No");
     printf("  White Rabbit   : %s\n", wr_enabled   ? "Yes" : "No");
     printf("  JTAGBone       : %s\n", jtagbone_enabled ? "Yes" : "No");

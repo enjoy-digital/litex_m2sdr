@@ -285,6 +285,31 @@ if (m2sdr_get_capabilities(dev, &caps) == 0) {
 - Read-side time APIs continue to operate on the same logical board clock regardless of whether it is free-running, manually set, or disciplined from Ethernet PTP.
 - Use `m2sdr_bytes_to_samples()` / `m2sdr_samples_to_bytes()` instead of hard-coding sample sizes in applications.
 
+## Environment variables
+
+The library reads a few environment variables. They are debug and tuning switches for bring-up, not
+a stable interface; the defaults are the validated settings.
+
+| Variable | Effect |
+|---|---|
+| `M2SDR_VERBOSE_AD9361_INIT` | Any value other than empty, `0`, `false` or `no` prints the detailed AD9361 initialization log. |
+| `M2SDR_RF_CHANNEL` | `2` selects the second RF port pair (RX2/TX2) in 1T1R; default RX1/TX1. |
+| `M2SDR_RX_WAIT` | `mwaitx` makes the PCIe RX path wait for the next buffer with MONITORX/MWAITX on CPUs that support it. |
+| `M2SDR_FLASH_LEGACY` | When set, SPI flash access over Ethernet uses the slower register-by-register path. |
+| `M2SDR_FLASH_GAP_FRAMES` | Number of pacing frames after each SPI start of the fast Ethernet flash path. |
+| `M2SDR_DUMP_CLKS` | When set, prints the AD9361 clock chain computed for each sample-rate change. |
+| `M2SDR_MAX_DAC_CLK` | Maximum DAC clock in Hz used by the AD9361 clock chain computation. |
+| `M2SDR_DESKEW_DEBUG` | When set, prints the per-lane results of the RX deskew scan (oversampling gateware). |
+| `M2SDR_OC_NATIVE` | When set, rates above 61.44 MSPS run the normal AD9361 clock chain at full rate instead of the default wide mode. |
+| `M2SDR_OC_BBF_TUNE` | Baseband filter tune target in Hz above 61.44 MSPS (default `39000000`). |
+| `M2SDR_OC_BBF_FORCE` | When set, selects the register force-widening of the baseband filters instead of the chip tune. |
+| `M2SDR_OC_RX_FIR_FILE`, `M2SDR_OC_TX_FIR_FILE` | Tap files of the RX (up to 32 taps) and TX (up to 16 taps, designed for 245.76 MHz) equalizer FIR above 61.44 MSPS. |
+| `M2SDR_OC_RX_DELAY`, `M2SDR_OC_TX_DELAY` | Raw AD9361 RX/TX clock/data delay register byte (clock delay in bits 7:4, data delay in bits 3:0) above 61.44 MSPS. |
+| `M2SDR_QEC_KEXP` | RX quadrature tracking loop gain exponent (default `0x0a`). |
+| `M2SDR_RFPLL_CP_PERCENT` | RFPLL charge pump current as a percentage of the table value above 61.44 MSPS (default `30`). |
+
+The SoapySDR module also reads `LITEXM2SDR_ETH_IPS` (Ethernet discovery targets, see its README).
+
 ## Troubleshooting
 
 ### Symbol collisions with other SDR drivers

@@ -265,6 +265,10 @@ static int m2sdr_transport_error(struct m2sdr_dev *dev)
             return M2SDR_ERR_TIMEOUT;
     }
 #endif
+#ifdef USE_LITEUSB
+    if (dev && dev->usb && liteusb_last_error(dev->usb) == LITEUSB_ERROR_TIMEOUT)
+        return M2SDR_ERR_TIMEOUT;
+#endif
     (void)dev;
     return M2SDR_ERR_IO;
 }

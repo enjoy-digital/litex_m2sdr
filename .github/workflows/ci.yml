@@ -28,7 +28,8 @@ jobs:
             libpng-dev \
             libsoapysdr-dev \
             libsndfile1-dev \
-            libsamplerate0-dev
+            libsamplerate0-dev \
+            libusb-1.0-0-dev
 
       - name: Build Kernel Module
         run: |

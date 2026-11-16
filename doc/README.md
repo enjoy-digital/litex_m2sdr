@@ -26,6 +26,7 @@ Back to the [project README](../README.md).
 | Page | Description |
 |------|-------------|
 | [Ethernet](ethernet.md) | 1000BASE-X/2500BASE-X streaming on the Acorn Baseboard Mini, VRT. |
+| [USB3](usb3.md) | USB3 (5Gbps) control and streaming on the Acorn Baseboard Mini through an SFP-to-USB3 adapter (experimental). |
 | [SATA Workflows](sata-workflows.md) | Record/replay I/Q to/from an SSD with `m2sdr_sata`. |
 | [SATA Hardware Validation](sata-validation.md) | Measured SATA throughput and validity results. |
 | [Wide Analog Bandwidth](wide-bandwidth.md) | 122.88 MSPS RFIC overclock with ~100 MHz analog bandwidth. |

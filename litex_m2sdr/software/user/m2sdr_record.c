@@ -261,6 +261,12 @@ static void print_stream_summary(struct m2sdr_dev *dev, uint8_t quiet)
             fprintf(stderr,
                     "LiteEth UDP SO_RCVBUF capped; increase net.core.rmem_max for more RX headroom.\n");
         }
+    } else if (stats.transport == M2SDR_TRANSPORT_KIND_LITEUSB) {
+        fprintf(stderr,
+                "LiteUSB RX: buffers=%" PRIu64 " ring=%zu errors=%" PRIu64 "\n",
+                stats.rx_buffers,
+                stats.buffer_count,
+                stats.rx_recv_errors);
     }
 }
 
