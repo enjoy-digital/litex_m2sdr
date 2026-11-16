@@ -99,6 +99,63 @@ class AD9361RFICStreamBypass(LiteXModule):
         self.comb += self.sink.connect(self.source)
 
 
+class AD9361StreamCounters(LiteXModule):
+    """Counts the words lost at the PHY (rfic domain), with the counters in the sys domain.
+
+    RX: a word presented by the PHY (rx_valid) and not taken (rx_ready low) is lost. An event is
+    the first lost word after a taken one; the lost words are counted by 16.
+    TX: the PHY asks for a word (tx_ready) and gets none (tx_valid low) after having been given
+    words: one event per interruption.
+    """
+    def __init__(self):
+        self.rx_valid = Signal() # i (rfic).
+        self.rx_ready = Signal() # i (rfic).
+        self.tx_valid = Signal() # i (rfic).
+        self.tx_ready = Signal() # i (rfic).
+
+        self.rx_overflow_events  = Signal(32) # o (sys).
+        self.rx_overflow_words   = Signal(32) # o (sys).
+        self.tx_underflow_events = Signal(32) # o (sys).
+
+        # # #
+
+        # rfic domain: as little logic as possible (491.52MHz in the oversampling build).
+        rx_dropping = Signal()
+        rx_drop_cnt = Signal(4)
+        rx_event    = Signal()
+        rx_words16  = Signal()
+        tx_had_data = Signal()
+        tx_event    = Signal()
+        self.sync.rfic += [
+            rx_event.eq(0),
+            rx_words16.eq(0),
+            If(self.rx_valid,
+                rx_dropping.eq(~self.rx_ready),
+                If(~self.rx_ready,
+                    rx_event.eq(~rx_dropping),
+                    rx_drop_cnt.eq(rx_drop_cnt + 1),
+                    rx_words16.eq(rx_drop_cnt == 15),
+                )
+            ),
+            tx_event.eq(0),
+            If(self.tx_ready,
+                tx_had_data.eq(self.tx_valid),
+                tx_event.eq(~self.tx_valid & tx_had_data),
+            ),
+        ]
+
+        # sys domain: counters.
+        for name, pulse, count, step in [
+            ("rx_event",   rx_event,   self.rx_overflow_events,  1),
+            ("rx_words16", rx_words16, self.rx_overflow_words,   16),
+            ("tx_event",   tx_event,   self.tx_underflow_events, 1),
+        ]:
+            ps = PulseSynchronizer("rfic", "sys")
+            self.add_module(name=f"{name}_ps", module=ps)
+            self.comb += ps.i.eq(pulse)
+            self.sync += If(ps.o, count.eq(count + step))
+
+
 class AD9361RFIC(LiteXModule):
     def __init__(self, rfic_pads, spi_pads, sys_clk_freq,
         with_tx_fifo = False, tx_fifo_depth = 8192,
@@ -481,6 +538,35 @@ class AD9361RFIC(LiteXModule):
             iqs = iqs(channel=1),
             threshold_reset = AGC_DEFAULT_HIGH_THRESHOLD,
         )
+
+    def add_stream_counters(self):
+        # Samples lost at the RFIC, whatever the host link: the PHY cannot wait.
+        # - RX overflow: the PHY presents a word that the RX stream does not take (FIFOs full,
+        #   host link not reading fast enough): the word is lost.
+        # - TX underflow: the PHY asks for a word and the TX stream, which was providing words,
+        #   has none: zeros are transmitted until the stream resumes. The end of a transmission
+        #   counts as one, the software accounts for the ones it causes.
+        # The counters are free-running and wrap: the software works on differences. Added after
+        # the active settings: keeps the AD9361 CSR map (and csr.h) of the previous gateware.
+        self._rx_overflow_events = CSRStatus(32,
+            description="RX overflow events: times the RX stream started losing words.")
+        self._rx_overflow_words = CSRStatus(32,
+            description="RX words lost (64-bit words, counted by 16).")
+        self._tx_underflow_events = CSRStatus(32,
+            description="TX underflow events: times the TX stream ran dry after providing words.")
+
+        # # #
+
+        self.stream_counters = counters = AD9361StreamCounters()
+        self.comb += [
+            counters.rx_valid.eq(self.phy.source.valid),
+            counters.rx_ready.eq(self.phy.source.ready),
+            counters.tx_valid.eq(self.phy.sink.valid),
+            counters.tx_ready.eq(self.phy.sink.ready),
+            self._rx_overflow_events.status.eq(counters.rx_overflow_events),
+            self._rx_overflow_words.status.eq(counters.rx_overflow_words),
+            self._tx_underflow_events.status.eq(counters.tx_underflow_events),
+        ]
 
     def add_active_settings(self):
         # Last stream settings programmed by host software. These scratch CSRs let an independent
