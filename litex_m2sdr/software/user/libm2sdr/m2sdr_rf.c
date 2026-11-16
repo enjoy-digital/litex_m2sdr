@@ -1635,6 +1635,19 @@ static int m2sdr_wide_bandwidth_bringup(struct m2sdr_dev *dev,
                 (uint32_t)strtoul(getenv("M2SDR_OC_BBF_TUNE"), NULL, 0) : 39000000u);
         else
             ad9361_enable_oversampling(phy);
+        /* 1R1T on a standard image: the TX delay of ad9361_enable_oversampling() (clk 6 / data 7,
+         * measured in 2R2T) is on the lower edge of the TX eye. Measured eye in data - clk taps:
+         * +2..+12 at 76.8 MSPS, +1..+9 at 92.16 MSPS, +1..+7 at 122.88 MSPS; at +1 the lowest
+         * bit of each 12-bit TX sample is read as 1 by the chip. Use the middle, clk 0 / data 5.
+         * The oversampling image has another TX PHY and keeps its value; M2SDR_OC_TX_DELAY
+         * still overrides. */
+        if (!phy->pdata->rx2tx2 && getenv("M2SDR_OC_TX_DELAY") == NULL) {
+            struct m2sdr_capabilities caps;
+
+            if (m2sdr_get_capabilities(dev, &caps) != M2SDR_ERR_OK ||
+                !(caps.features & M2SDR_FEATURE_RFIC_OVERSAMPLING))
+                ad9361_spi_write(phy->spi, REG_TX_CLOCK_DATA_DELAY, 0x05);
+        }
 #ifdef CSR_AD9361_PHY_RX_DESKEW_IDELAY_ADDR
         /* 2R2T at the doubled rate runs 983Mbps per lane, where lane-to-lane
          * skew exceeds the eye; deskew per-lane before checking alignment
