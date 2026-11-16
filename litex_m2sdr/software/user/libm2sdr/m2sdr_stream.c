@@ -51,6 +51,9 @@
 #define M2SDR_LITEUSB_TX_BUFFER_COUNT    256
 #define M2SDR_LITEUSB_TX_BUFS_PER_XFER   4
 #define M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS 1000
+/* Time for the RFIC RX FIFO (8192 words) to drain at the RFIC clock, at least twice the sample
+ * rate: 7.5ms at the lowest sample rate (0.55MSPS). */
+#define M2SDR_LITEUSB_RX_START_DRAIN_US  10000
 
 /* Crossbar ports (litex_m2sdr.py: 0=PCIe, 1=Eth, 2=SATA, 3=USB3). */
 #define TXRX_PORT_LITEUSB 3
@@ -542,6 +545,10 @@ static int m2sdr_liteusb_rx_stream_activate(struct m2sdr_dev *dev)
         return rc;
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_DEMUX_SEL_ADDR, TXRX_PORT_LITEUSB) != 0)
         return M2SDR_ERR_IO;
+    /* While the crossbar pointed elsewhere, the RFIC RX FIFO filled with old samples. The
+     * disabled RX streamer drains them: wait for it, or they would open the stream, stamped
+     * with the time they leave the FIFO. */
+    usleep(M2SDR_LITEUSB_RX_START_DRAIN_US);
     rc = m2sdr_liteusb_set_enable(dev, CSR_USB3_CONTROL_RX_ENABLE_OFFSET, 1);
     if (rc != M2SDR_ERR_OK)
         return rc;
