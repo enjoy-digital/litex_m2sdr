@@ -618,28 +618,39 @@ static int m2sdr_configure_clocking(struct m2sdr_dev *dev,
  * decimation/interpolation, and programming it applies the FIR enables.
  *
  * Below 2.5 MSPS the half-band chain alone cannot keep the ADC above its 25 MHz
- * minimum, so the FIRs decimate/interpolate by 4 with the dedicated dec4/int4
- * tables (FIR passbands are normalized to the FIR input rate: the x1 tables
- * would leave the /4 decimation unfiltered). Above, the x1 tables are loaded
- * and the FIRs bypassed.
+ * minimum, so the FIRs decimate/interpolate, by 2 down to 1.25 MSPS and by 4
+ * below, with the dedicated dec2/int2 and dec4/int4 tables (FIR passbands are
+ * normalized to the FIR input rate: the x1 tables would leave the decimation
+ * unfiltered). Above, the x1 tables are loaded and the FIRs bypassed. The
+ * SoapySDR driver uses the same thresholds.
  *
  * The bypass flags are set directly rather than through ad9361_set_*_fir_en_dis(),
  * which would re-validate the clock chain at the previous rate (impossible when
- * leaving the x4 mode). */
+ * leaving the x2/x4 modes). */
 static int m2sdr_configure_fir(struct ad9361_rf_phy *phy, uint32_t samplerate)
 {
-    int low_rate = samplerate < 2500000;
+    AD9361_RXFIRConfig rx_cfg = rx_fir_config;
+    AD9361_TXFIRConfig tx_cfg = tx_fir_config;
+    int ratio = 1;
 
-    if (low_rate)
-        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to 4 (< 2.5 Msps Samplerate).\n");
+    if (samplerate < 1250000) {
+        rx_cfg = rx_fir_config_dec4;
+        tx_cfg = tx_fir_config_int4;
+        ratio  = 4;
+    } else if (samplerate < 2500000) {
+        rx_cfg = rx_fir_config_dec2;
+        tx_cfg = tx_fir_config_int2;
+        ratio  = 2;
+    }
+    if (ratio != 1)
+        M2SDR_LOGF("Setting TX/RX FIR Interpolation/Decimation to %d (< %s Msps Samplerate).\n",
+                   ratio, ratio == 4 ? "1.25" : "2.5");
 
-    phy->bypass_rx_fir = !low_rate;
-    phy->bypass_tx_fir = !low_rate;
-    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy,
-            low_rate ? rx_fir_config_dec4 : rx_fir_config)) != M2SDR_ERR_OK)
+    phy->bypass_rx_fir = (ratio == 1);
+    phy->bypass_tx_fir = (ratio == 1);
+    if (m2sdr_from_ad9361_rc(ad9361_set_rx_fir_config(phy, rx_cfg)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
-    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy,
-            low_rate ? tx_fir_config_int4 : tx_fir_config)) != M2SDR_ERR_OK)
+    if (m2sdr_from_ad9361_rc(ad9361_set_tx_fir_config(phy, tx_cfg)) != M2SDR_ERR_OK)
         return M2SDR_ERR_IO;
 
     return M2SDR_ERR_OK;

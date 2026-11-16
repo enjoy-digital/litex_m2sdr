@@ -16,6 +16,11 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Host software: `libm2sdr`, `m2sdr_util`, SoapySDR, `m2sdr_play`, and the FM helper utilities include the matching Ethernet/PTP/RFIC-reference controls and examples.
 - Source-build options: White Rabbit, SATA, VRT, 2.5G Ethernet, PCIe x4, and oversampling images remain available from source but are outside this first release artifact set.
 
+[> 2026 Q4 to date (Oct - Dec)
+------------------------------
+**Low Sample Rates**
+- Fixed RX aliasing below `2.5 MSPS`: the AD9361 RX and TX FIRs now use their dedicated tables, x4 below `1.25 MSPS` and x2 from `1.25` to `2.5 MSPS`, in `libm2sdr` as in the SoapySDR driver. The RX level is about `6 dB` higher below `1.25 MSPS` than above, with the same signal to noise ratio; between `1.25` and `2.5 MSPS` it differs from earlier versions of `libm2sdr`.
+
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------
 **Runtime Host Stack, SATA Workflows, Wide RFIC Modes, and Stability Hardening**
