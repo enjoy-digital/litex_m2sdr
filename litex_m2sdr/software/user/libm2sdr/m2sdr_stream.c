@@ -491,14 +491,16 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
     if (dev->transport != M2SDR_TRANSPORT_LITEETH)
         return M2SDR_ERR_UNSUPPORTED;
 
-#ifdef CSR_ETH_TX_STREAMER_ENABLE_ADDR
-    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
+#if defined(CSR_ETH_TX_STREAMER_ENABLE_ADDR) && defined(CSR_CROSSBAR_MUX_SEL_ADDR)
+    /* Crossbar first, with the streamer still disabled: the gateware holds the TX header
+     * extractor in reset while the selected streamer is disabled, so the first buffer of the
+     * stream is taken as a frame start. With the streamer enabled first, the extractor of a
+     * freshly loaded bitstream passes the first buffer as plain samples, header included. */
+    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 0) != 0)
         return M2SDR_ERR_IO;
-#else
-    return M2SDR_ERR_UNSUPPORTED;
-#endif
-#ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0)
+        return M2SDR_ERR_IO;
+    if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
     m2sdr_loss_counters_base(dev, M2SDR_TX);
     return M2SDR_ERR_OK;
