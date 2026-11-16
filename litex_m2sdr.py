@@ -63,7 +63,7 @@ from litex_m2sdr.gateware.pcie        import (
     LitePCIeWishboneBurstReadSlave,
     add_s7_pcie_timing_constraints,
 )
-from litex_m2sdr.gateware.header      import TXRXHeader
+from litex_m2sdr.gateware.header      import TXRXHeader, TXHeaderPacketMarker
 from litex_m2sdr.gateware.etherbone   import SharedLiteEthEtherbone
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
@@ -492,6 +492,9 @@ class BaseSoC(SoCMini):
             # RFIC stream loss counters (RX overflow, TX underflow), unconditional.
             stream_counters = True,
 
+            # Ethernet TX stream marks its buffers: TX header and hardware timed TX.
+            eth_tx_header   = with_eth,
+
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
 
@@ -852,10 +855,13 @@ class BaseSoC(SoCMini):
             eth_tx_streamer_primed = Signal()
             self.comb += eth_tx_streamer_primed.eq(
                 self.eth_tx_streamer.fifo.level[14] | self.eth_tx_streamer.fifo.level[15])
+            # TX header enabled: no priming, a timed frame waits in the timed-TX gate and must
+            # then leave without a delay that depends on the FIFO level (as the USB3 TX streamer).
+            self.eth_tx_streamer_no_priming = Signal()
             self.sync += [
                 If(~self.eth_tx_streamer.enable,
                     self.eth_tx_streamer_started.eq(0)
-                ).Elif(eth_tx_streamer_primed,
+                ).Elif(eth_tx_streamer_primed | self.eth_tx_streamer_no_priming,
                     self.eth_tx_streamer_started.eq(1)
                 ).Elif(self.eth_tx_streamer.fifo.level == 0,
                     self.eth_tx_streamer_started.eq(0)
@@ -996,13 +1002,26 @@ class BaseSoC(SoCMini):
                 )
             ]
         if with_eth:
+            # The host sends each buffer as UDP datagrams: mark the first word of a buffer that
+            # starts with the TX header (see TXHeaderPacketMarker), for the TX header extractor.
+            self.eth_tx_marker = eth_tx_marker = TXHeaderPacketMarker(data_width=64)
             self.comb += [
-                self.eth_tx_streamer.source.connect(self.crossbar.mux.sink1, omit={"error", "valid", "ready"}),
-                self.crossbar.mux.sink1.valid.eq(
+                eth_tx_marker.reset.eq(~self.eth_tx_streamer.enable),
+                self.eth_tx_streamer_no_priming.eq(self.header.tx.header_enable),
+                eth_tx_marker.sink.data.eq(self.eth_tx_streamer.source.data),
+                eth_tx_marker.sink.last.eq(self.eth_tx_streamer.source.last),
+                eth_tx_marker.sink.valid.eq(
                     self.eth_tx_streamer.source.valid & self.eth_tx_streamer_started & self.eth_tx_streamer.enable),
                 self.eth_tx_streamer.source.ready.eq(
-                    (self.crossbar.mux.sink1.ready & self.eth_tx_streamer_started) |
+                    (eth_tx_marker.sink.ready & self.eth_tx_streamer_started) |
                     ~self.eth_tx_streamer.enable),
+                eth_tx_marker.source.connect(self.crossbar.mux.sink1, omit={"last"}),
+                If(self.crossbar.mux.sel == 1,
+                    # Host writes whole buffers from the TX enable: align the TX Header FSM on it.
+                    self.header.tx.reset.eq(~self.eth_tx_streamer.enable),
+                    # TX header enabled: frames wait in the timed-TX gate, no FIFO priming after it.
+                    self.ad9361.tx_fifo_no_priming.eq(self.header.tx.header_enable),
+                ),
             ]
         if with_sata:
             self.comb += self.sata_tx_streamer.source.connect(self.crossbar.mux.sink2, omit={"error"})
