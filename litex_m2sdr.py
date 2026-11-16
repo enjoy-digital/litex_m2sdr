@@ -489,6 +489,9 @@ class BaseSoC(SoCMini):
             usb3_enabled    = with_usb3,
             usb3_tx_header  = with_usb3,
 
+            # RFIC stream loss counters (RX overflow, TX underflow), unconditional.
+            stream_counters = True,
+
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
 
@@ -932,6 +935,7 @@ class BaseSoC(SoCMini):
         self.ad9361.add_prbs()
         self.ad9361.add_agc()
         self.ad9361.add_active_settings()
+        self.ad9361.add_stream_counters()
 
         # TX/RX Header Extracter/Inserter ----------------------------------------------------------
 

@@ -3540,8 +3540,10 @@ static int rfic_loopback_test(int duration,
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
     /* Keep LiteEth TX packets in the Ethernet-side FIFO during the explicit
      * test prefill. Releasing the crossbar after prefill avoids startup gaps
-     * in the RFIC TX stream caused by host packet scheduling latency. */
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
+     * in the RFIC TX stream caused by host packet scheduling latency.
+     * LiteEth only: the crossbar port is the one of the link (the library
+     * selects it), and port 1 would take the TX stream away from another link. */
+    if (loopback_is_liteeth(dev) && m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 0) != 0) {
         fprintf(stderr, "m2sdr TX prefill hold failed\n");
         goto cleanup_disable_loopback;
     }
@@ -3577,7 +3579,7 @@ static int rfic_loopback_test(int duration,
     }
 
 #ifdef CSR_CROSSBAR_MUX_SEL_ADDR
-    if (m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
+    if (loopback_is_liteeth(dev) && m2sdr_reg_write(dev, CSR_CROSSBAR_MUX_SEL_ADDR, 1) != 0) {
         fprintf(stderr, "m2sdr TX prefill release failed\n");
         goto cleanup_disable_loopback;
     }
@@ -4047,7 +4049,12 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
         }
         rx_buffers++;
 
-        (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
+        /* The FPGA checker status is a register read: once per buffer it takes longer than a
+         * buffer lasts on the links where a register access is slow (USB3: 240 to 535 us for
+         * 33 us of samples at 30.72 MSPS), the reader falls behind and the stream overflows.
+         * Read it while looking for the sequence and with the periodic report. */
+        if (!host_synced)
+            (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
 
         if (!host_synced) {
             if (!rfic_prbs_find_sync(rx_buf, lanes_per_buf, seq, &phase, channel_layout)) {
@@ -4079,6 +4086,7 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
             uint64_t delta = checked_buffers - last_checked_buffers;
             double gbps = (double)delta * M2SDR_BUFFER_BYTES * 8.0 / ((double)elapsed * 1e6);
 
+            (void)m2sdr_get_fpga_prbs_rx_synced(dev, &fpga_synced);
             if (i % 10 == 0)
                 printf("\e[1mPRBS_Gbps\tRX_BUFFERS\tCHECKED\tERRORS\tSTALE\tFPGA_SYNC\tPHASE\tLANE_MOD\e[0m\n");
             i++;
@@ -4104,8 +4112,15 @@ static int rfic_prbs_loopback_test(int duration, int64_t sample_rate)
         printf(".\n");
         status = 0;
     } else {
+        struct m2sdr_stream_stats stats;
+
         printf("RFIC PRBS loopback test failed: %" PRIu64 " lane errors over %" PRIu64 " buffers (FPGA synced: %s).\n",
             total_errors, checked_buffers, fpga_synced ? "yes" : "no");
+        /* The sequence is checked across the buffers: lost RX samples give errors on every
+         * lane after them, without any fault of the RFIC interface. */
+        if (m2sdr_get_stream_stats(dev, M2SDR_RX, &stats) == M2SDR_ERR_OK && stats.overflow_events)
+            printf("The RX stream overflowed %" PRIu64 " times: the errors include the samples lost by the host link.\n",
+                (uint64_t)stats.overflow_events);
     }
 
 cleanup_disable_prbs:

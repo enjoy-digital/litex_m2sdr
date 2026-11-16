@@ -399,12 +399,12 @@ int liteusb_stream_write_submit(struct liteusb_stream *s)
         return LIBUSB_ERROR_INVALID_PARAM;
 
     s->cur_held = 0;
-    if (++s->cur_buf < s->bufs_per_xfer) {
-        /* Keep the transfers going while the slot fills. */
-        struct timeval tv = {0, 0};
-        libusb_handle_events_timeout_completed(s->conn->ctx, &tv, NULL);
+    /* No event processing here: the transfers in flight do not need it, and a poll per buffer
+     * costs TX throughput when a reader processes the events of the same context (279 against
+     * 308 MB/s in full duplex with one buffer per write, for a stream of 246 MB/s). The completed transfers
+     * are collected when a slot is needed (liteusb_stream_next_write_buffer()). */
+    if (++s->cur_buf < s->bufs_per_xfer)
         return 0;
-    }
     return liteusb_stream_flush(s);
 }
 

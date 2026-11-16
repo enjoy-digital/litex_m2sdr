@@ -317,6 +317,7 @@ read-only registers holds the build configuration as constants (`Capability`).
 | 9   | `rfic_oversampling`  | `--with-rfic-oversampling`                            |
 | 10  | `usb3`               | `--with-usb3`                                         |
 | 11  | `usb3_tx_header`     | `--with-usb3`: the USB3 TX stream carries the TX header |
+| 12  | `stream_counters`    | Always: the RFIC stream loss counters are present     |
 
 The configuration registers are meaningful only when the matching feature bit is set. The PCIe
 speed field is 0 for Gen1 and 1 for Gen2; the lanes field is 0, 1 or 2 for x1, x2 or x4.

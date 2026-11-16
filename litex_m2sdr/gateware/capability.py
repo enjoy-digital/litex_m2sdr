@@ -30,7 +30,9 @@ class Capability(LiteXModule):
         # RFIC.
         rfic_oversampling=0,
         # USB3.
-        usb3_enabled=False, usb3_sfp=0, usb3_tx_header=False):
+        usb3_enabled=False, usb3_sfp=0, usb3_tx_header=False,
+        # Stream.
+        stream_counters=False):
 
         # API Version.
         # ------------
@@ -60,6 +62,8 @@ class Capability(LiteXModule):
                 description="USB3 (SFP-to-USB3 adapter) is present."),
             CSRField("usb3_tx_header", size=1, offset=11, reset=int(usb3_tx_header),
                 description="USB3 TX stream marks its frames: TX header and hardware timed TX over USB3."),
+            CSRField("stream_counters", size=1, offset=12, reset=int(stream_counters),
+                description="RFIC stream loss counters (RX overflow, TX underflow) are present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 

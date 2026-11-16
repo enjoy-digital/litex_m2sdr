@@ -24,6 +24,8 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **USB3 Host Link**
 - Added hardware timed TX over USB3: the USB3 TX stream carries the TX header, and the timed-TX gate holds each timed buffer as on PCIe (capability bit `usb3_tx_header`; an older USB3 bitstream keeps the software timeline).
 - Added the rates above `61.44 MSPS` over USB3 in 1T1R on the standard bitstream, up to `122.88 MSPS` in SC8; the SoapySDR driver accepts such a rate before the stream is set up.
+- Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
+- Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
 [> 2026 Q2 to date (Apr - Jun)
 ------------------------------

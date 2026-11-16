@@ -105,12 +105,29 @@ delay the lowest bit of each TX sample was read as 1.
 - The link counted no error and no recovery during the runs of the tables. The FPGA was between
   66 and 73 °C.
 - The limit in full duplex, about 370 MB/s per direction, is lower than for RX alone.
-- With one 8 KiB buffer per call, the 245.8 MB/s runs lost TX samples in 5 runs of 15 to 20 s
-  out of 22: short bursts of zeros on the TX side, RX intact. One of these runs also counted
-  link errors, without a recovery. With 16 buffers per call, 8 runs out of 8 passed. See
-  [Writing samples](#sw-lib-tx-size).
-- The link does not report overflows and underflows yet: a program has no count of such a
-  loss. The figures are those of one board, one adapter and one host.
+- The size of the writes changes the TX rate that a program reaches, see
+  [Writing samples](#sw-lib-tx-size). With one 8 KiB buffer per call and a reader running, the
+  library reached 279 MB/s, little above the 245.8 MB/s of these configurations, and the stream
+  underflowed about 200 times per run of 30 s, mostly in its first seconds. The library no
+  longer processes the USB events at each buffer, and one buffer per call reaches 308 MB/s:
+  8 runs of 30 s at 245.8 MB/s gave 2 underflow events, in one run where the RX stream
+  overflowed too.
+- The figures are those of one board, one adapter and one host.
+
+### Loss counters {#perf-usb3-counters}
+
+The gateware counts the samples lost at the RFIC ([Stream loss counters](#rfic-loss)), and the
+stream statistics of the library report them. Measured on the same setup:
+
+| Run | RX overflow | TX underflow |
+|-----------------------------------------------------|---------------------------|--------------|
+| 2T2R at 30.72 MSPS in SC16, full duplex | 0 events | 0 events |
+| Reader stopped 5 times for 60 ms | 5 events, 6425 buffers | 0 events |
+| Writer stopped 5 times for 30 ms | 0 events | 5 events |
+| 2T2R at 61.44 MSPS in SC16, RX alone, above the link | 62 million words lost in 14 s | |
+
+The word count of the last run matches the samples missing against the board time. Stopping
+the TX stream is not counted as an underflow.
 
 ### Timed TX {#perf-usb3-timed-tx}
 

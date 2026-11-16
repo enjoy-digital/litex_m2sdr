@@ -46,7 +46,7 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 12 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 13 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
@@ -68,6 +68,7 @@ Fields of `features`:
 | `rfic_` `oversampling` | 9 | RFIC oversampling datapath (128-bit, 491.52 MHz, 2T2R@122.88) is present. |
 | `usb3` | 10 | USB3 (SFP-to-USB3 adapter) is present. |
 | `usb3_tx_header` | 11 | USB3 TX stream marks its frames: TX header and hardware timed TX over USB3. |
+| `stream_counters` | 12 | RFIC stream loss counters (RX overflow, TX underflow) are present. |
 
 Fields of `pcie_config`:
 
@@ -483,6 +484,9 @@ Bank `ad9361`.
 | `active_sample_` `rate` | `0x006c` | 32 | rw | Active host stream sample rate in samples/s. Reset `0x0`. |
 | `active_rx_` `frequency_khz` | `0x0070` | 32 | rw | Active RX center frequency in kHz. Reset `0x0`. |
 | `active_` `bandwidth` | `0x0074` | 32 | rw | Active RX bandwidth in Hz. Reset `0x0`. |
+| `rx_overflow_` `events` | `0x0078` | 32 | ro | RX overflow events: times the RX stream started losing words. |
+| `rx_overflow_` `words` | `0x007c` | 32 | ro | RX words lost (64-bit words, counted by 16). |
+| `tx_underflow_` `events` | `0x0080` | 32 | ro | TX underflow events: times the TX stream ran dry after providing words. |
 
 Fields of `config`:
 

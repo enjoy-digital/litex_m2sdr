@@ -582,6 +582,26 @@ The library uses the PRBS to calibrate the interface delays of the AD9361 and fo
 verifications of the [oversampling mode](#rfic-oversampling-bringup).
 [Debugging](#debugging) gives the commands.
 
+## Stream loss counters {#rfic-loss}
+
+The PHY cannot wait for the host. An RX word that the stream does not take is lost, and when the
+TX stream runs dry the PHY transmits zeros. Three counters record this at the PHY, so for every
+host link.
+
+| Register | Counts |
+|----------------------------------------------------|--------------------------------------------------|
+| `ad9361_rx_overflow_events` | Times the RX stream started losing words |
+| `ad9361_rx_overflow_words` | Lost RX words of 64 bits, counted by 16 |
+| `ad9361_tx_underflow_events` | Times the TX stream ran dry after providing words |
+
+The counters run freely and wrap; the software works on differences. An RX word is also lost
+while no stream reads the RFIC, so a count only means something from the activation of a
+stream. The end of a transmission is one TX event. The library applies both rules and reports
+the result in its stream statistics ([Lost samples](#sw-lib-loss)).
+
+The logic in the RFIC clock domain is a few flip-flops, and the counters are in the system
+clock domain. The registers follow the earlier ones of the block, whose addresses do not change.
+
 ## Saturation counters {#rfic-agc}
 
 Four counters tell the host when the RX signal gets close to the full scale of the converter.

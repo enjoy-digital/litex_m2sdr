@@ -2213,12 +2213,37 @@ int SoapyLiteXM2SDR::readStreamStatus(
     const auto timeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(std::chrono::microseconds(timeoutUs));
     const auto exitTime = std::chrono::high_resolution_clock::now() + timeout;
 
+    /* Ethernet and USB3: the samples are lost in the FPGA, where the host does not see them.
+     * The stream statistics report them when the gateware counts them (the counts restart at
+     * each stream activation). */
+    auto fpgaLoss = [this](const bool rx) -> bool {
+        if (isLitePCIe())
+            return false;
+        const auto now = std::chrono::steady_clock::now();
+        auto &last_poll = _fpga_loss_poll_last[rx ? 0 : 1];
+        if (now - last_poll < std::chrono::milliseconds(100))
+            return false;
+        last_poll = now;
+        struct m2sdr_stream_stats stats;
+        if (m2sdr_get_stream_stats(_dev, rx ? M2SDR_RX : M2SDR_TX, &stats) != M2SDR_ERR_OK)
+            return false;
+        uint64_t &last = rx ? _rx_fpga_overflow_last : _tx_fpga_underflow_last;
+        const uint64_t count = rx ? stats.overflow_events : stats.underflow_events;
+        const bool lost = count > last;
+        last = count;
+        return lost;
+    };
+
     /* Poll for status events until the timeout expires; events raised by the
      * streaming threads during the wait must be reported, not swallowed. */
     while (true) {
         if (stream == RX_STREAM) {
             if (_rx_stream.overflow) {
                 _rx_stream.overflow = false;
+                SoapySDR::log(SOAPY_SDR_SSI, "O");
+                return SOAPY_SDR_OVERFLOW;
+            }
+            if (fpgaLoss(true)) {
                 SoapySDR::log(SOAPY_SDR_SSI, "O");
                 return SOAPY_SDR_OVERFLOW;
             }
@@ -2249,6 +2274,10 @@ int SoapyLiteXM2SDR::readStreamStatus(
                     SoapySDR::log(SOAPY_SDR_SSI, "U");
                     return SOAPY_SDR_UNDERFLOW;
                 }
+            }
+            if (fpgaLoss(false)) {
+                SoapySDR::log(SOAPY_SDR_SSI, "U");
+                return SOAPY_SDR_UNDERFLOW;
             }
         }
 

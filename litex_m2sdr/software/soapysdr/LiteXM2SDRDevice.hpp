@@ -445,6 +445,13 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
      * air-time), polled in readStreamStatus() when the hardware gate is engaged. */
     uint32_t _tx_gate_underflow_last = 0;
 
+    /* Samples lost in the FPGA on the Ethernet and USB3 links (RFIC stream loss counters of the
+     * gateware, through the stream statistics): last values reported by readStreamStatus(),
+     * polled at most every 100 ms. */
+    uint64_t _rx_fpga_overflow_last  = 0;
+    uint64_t _tx_fpga_underflow_last = 0;
+    std::chrono::steady_clock::time_point _fpga_loss_poll_last[2];
+
     struct liteeth_udp_ctrl _udp;
     bool _udp_inited = false;
     /* RF (SI5351/AD9361) initialized at open: false with bypass_init=1, the RFIC is then left as found on close. */
