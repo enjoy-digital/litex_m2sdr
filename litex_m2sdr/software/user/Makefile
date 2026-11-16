@@ -120,7 +120,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
 CLI_OBJS = m2sdr_cli.o
 TOOL_OBJS = m2sdr_tool.o
 HOST_QUEUE_OBJS = m2sdr_host_queue.o
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -166,7 +166,7 @@ M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
-core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue
+core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp
 
 examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
@@ -191,6 +191,9 @@ test-sata-hostio: tests/test_m2sdr_sata_hostio
 
 test-host-queue: tests/test_m2sdr_host_queue
 	./tests/test_m2sdr_host_queue
+
+test-liteeth-udp: tests/test_liteeth_udp_frame_sync
+	./tests/test_liteeth_udp_frame_sync
 
 tests/test_libm2sdr: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -217,6 +220,9 @@ tests/test_m2sdr_flash: tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o $(LITEUS
 # The test provides the eb_*() functions.
 tests/test_si5351_trim: tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o $(LITEUSB_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_si5351_trim.o libm2sdr/m2sdr_si5351_i2c.o -lm $(LITEUSB_OBJS) $(TRANSPORT_LIBS)
+
+tests/test_liteeth_udp_frame_sync: tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_liteeth_udp_frame_sync.o libliteeth/liteeth_udp.o
 
 tests/test_m2sdr_host_queue: tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_host_queue.o $(HOST_QUEUE_OBJS) $(PTHREAD_LIBS)
