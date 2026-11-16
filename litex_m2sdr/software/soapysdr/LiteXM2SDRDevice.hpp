@@ -426,6 +426,12 @@ class DLL_EXPORT SoapyLiteXM2SDR : public SoapySDR::Device {
     /* The host link carries the TX header to the gate: PCIe, or USB3 with a gateware that
      * marks its TX frames (M2SDR_FEATURE_USB3_TX_HEADER). */
     bool _tx_gate_link_supported = false;
+    /* RFIC oversampling image (2T2R above 61.44 MSPS); a standard image runs these rates in
+     * 1T1R only. */
+    bool _rfic_oversampling = false;
+    /* Rate above 61.44 MSPS requested while the RFIC was in 2T2R on a standard image: applied
+     * by setupStream() once a single-channel stream has switched the RFIC to 1T1R. */
+    double _deferredSampleRate = 0.0;
     size_t _tx_dma_header_bytes = 0;
 
     /* Timed-TX gate pipeline compensation (ns) written to CSR_HEADER_TX_OFFSET so a
