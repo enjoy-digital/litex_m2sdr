@@ -1082,6 +1082,13 @@ class BaseSoC(SoCMini):
                 ]
             else:
                 self.comb += self.crossbar.demux.source1.connect(self.eth_rx_streamer.sink)
+            # Raw UDP stream disabled: the RX Header in reset drains the stream, with the old
+            # samples of the RFIC RX FIFO, and the first frame sent to the host starts with a
+            # header.
+            eth_rx_raw = (self.eth_rx_mode.fields.sel == 1) if with_eth_vrt else 1
+            self.comb += If((self.crossbar.demux.sel == 1) & eth_rx_raw,
+                self.header.rx.reset.eq(~self.eth_rx_streamer.enable)
+            )
         if with_usb3:
             self.comb += [
                 self.crossbar.demux.source3.connect(self.usb3.sink),
