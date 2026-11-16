@@ -80,10 +80,25 @@ def test_pcie_usb3_soc_shares_qpll():
     ({"variant": "m2"},                                   "baseboard"),
     ({"variant": "baseboard", "with_eth": True},          "cannot be combined"),
     ({"variant": "baseboard", "with_sata": True},         "cannot be combined"),
-    ({"variant": "baseboard", "with_rfic_oversampling": True}, "oversampling"),
     ({"variant": "baseboard", "sys_clk_freq": int(100e6)}, "125MHz"),
 ])
 def test_usb3_soc_rejects_unsupported_combinations(kwargs, message):
     soc_mod = _load_soc_module()
     with pytest.raises(ValueError, match=message):
         soc_mod.BaseSoC(with_pcie=False, with_usb3=True, with_jtagbone=False, **kwargs)
+
+
+def test_usb3_soc_with_rfic_oversampling_uses_the_128bit_datapath():
+    soc_mod = _load_soc_module()
+    soc = soc_mod.BaseSoC(
+        variant="baseboard",
+        with_pcie=False,
+        with_usb3=True,
+        with_rfic_oversampling=True,
+        with_jtagbone=False,
+    )
+
+    assert len(soc.usb3.sink.data) == 128
+    assert len(soc.usb3.source.data) == 128
+    assert len(soc.crossbar.mux.sink3.data) == 128
+    assert soc.header.tx.data_width == 128

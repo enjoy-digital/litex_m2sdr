@@ -392,8 +392,6 @@ class BaseSoC(SoCMini):
                 raise ValueError("USB3 is only supported with --variant=baseboard (requires baseboard SFP resources).")
             if with_eth or with_sata or with_white_rabbit:
                 raise ValueError("USB3 cannot be combined with Ethernet, SATA or White Rabbit (yet).")
-            if with_rfic_oversampling:
-                raise ValueError("USB3 bandwidth (~440MB/s) does not allow the RFIC oversampling datapath.")
             if sys_clk_freq != 125e6:
                 raise ValueError("USB3 requires sys_clk_freq == 125MHz (USB3 QPLL reference).")
 
@@ -900,6 +898,9 @@ class BaseSoC(SoCMini):
                 vid          = usb3_vid,
                 pid          = usb3_pid,
                 with_debug   = with_usb3_debug,
+                # Oversampling: 128-bit datapath. The link carries 2T2R up to about 92MSPS in SC8
+                # in full duplex (USB3 capacity), not the 122.88MSPS of the PCIe builds.
+                data_width   = 128 if with_rfic_oversampling else 64,
             )
 
         # SATA -------------------------------------------------------------------------------------
@@ -1474,7 +1475,8 @@ class BaseSoC(SoCMini):
         else:
             self.platform.add_false_path_constraints(self.crg.cd_sys.clk, eth_rx_clk)
 
-    def add_usb3(self, platform, sys_clk_freq, sfp=0, vid=USB3_VID, pid=USB3_PID, with_debug=False):
+    def add_usb3(self, platform, sys_clk_freq, sfp=0, vid=USB3_VID, pid=USB3_PID, with_debug=False,
+        data_width=64):
         """USB3 host interface on a baseboard SFP cage (USB3-PIPE, SFP-to-USB3 adapter): EP0
         Wishbone bridge (CSRs, litex_server --usb), Bulk IN/OUT RFIC sample streams (Crossbar
         port 3)."""
@@ -1484,7 +1486,7 @@ class BaseSoC(SoCMini):
             refclk_freq  = sys_clk_freq,
             sys_clk      = self.crg.cd_sys.clk,
             sys_clk_freq = sys_clk_freq,
-            data_width   = 64,
+            data_width   = data_width,
             vid          = vid,
             pid          = pid,
             with_debug   = with_debug,

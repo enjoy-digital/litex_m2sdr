@@ -169,3 +169,33 @@ def test_usb3_tx_streamer_framed_forwards_without_priming():
 
     run_simulation(dut, [gen(), _collect_first(dut.source, 1, out, max_cycles=64)])
     assert out == [(0x0000000200000001, 1)]
+
+# 128-bit datapath (RFIC oversampling) -------------------------------------------------------------
+
+def test_usb3_rx_streamer_splits_128bit_words_low_word_first():
+    dut = USB3RXStreamer(data_width=128, fifo_depth=16)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield
+        yield from _send(dut.sink, [0x0f0e0d0c0b0a09080706050403020100])
+
+    run_simulation(dut, [gen(), _collect(dut.source, 4, out)])
+    assert out == [0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c]
+
+
+def test_usb3_tx_streamer_128bit_marks_frames_and_merges_low_word_first():
+    # 64-byte frames: 4 words of 128 bits, 16 Bulk OUT words of 32 bits.
+    dut = USB3TXStreamer(data_width=128, fifo_depth=16, frame_bytes=64)
+    out = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.framed.eq(1)
+        yield
+        yield from _send(dut.sink, list(range(32)))
+
+    run_simulation(dut, [gen(), _collect_first(dut.source, 8, out)])
+    assert [first for _, first in out] == [1, 0, 0, 0]*2
+    assert out[0][0] == 0x00000003000000020000000100000000
