@@ -317,6 +317,11 @@ The 1T1R layout selects one channel of the RFIC, but the host stream keeps the s
 layout. A program that needs a stable sample layout uses the 2T2R layout and separates the
 channels itself.
 
+The RX buffers come out oldest first. A program that changes the tuning or the gain and wants
+the next samples to reflect it first drops the samples already received (`m2sdr_sync_rx_flush()`).
+The call takes well under a millisecond. Over USB3 it also drops the samples that the gateware
+held while the host was not reading.
+
 ### Timestamps and timed TX {#sw-lib-time}
 
 Each buffer can carry a 16-byte header with a timestamp (`M2SDR_HEADER_BYTES`). On RX, the
