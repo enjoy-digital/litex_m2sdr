@@ -19,9 +19,7 @@ pairs an Analog Devices AD9361 RFIC with an AMD/Xilinx Artix-7 XC7A200T FPGA. Pl
 slot with antennas connected, it streams and records radio samples with the tools of the project
 or with any SoapySDR application.
 
-![The LiteX-M2SDR board, revision R01, next to a 2 euro coin. The gold edge is the M.2
-connector. The larger copper heatsink sits on the FPGA and the smaller one on the RFIC, between
-the RF connectors.](m2sdr_board_heatsinks.jpg){width=60%}
+![The LiteX-M2SDR board (revision R01), with a heatsink on the FPGA and on the RFIC.](m2sdr_board_heatsinks.jpg){width=60%}
 
 | Item | Value |
 |--------------------|------------------------------------------------------------------------|

@@ -59,8 +59,7 @@ Two limits come with a plain M.2 slot:
 A slot of 80 mm takes the board directly. Secure it with the screw of the slot: the RF cables pull
 on the module.
 
-![A mini PC with the board in its M.2 slot. Look at the back of the case: it carries SMA
-connectors, two of them with an antenna.](m2sdr_mini_pc.jpg){width=55%}
+![A mini PC with the board in its M.2 slot and the RF connectors brought to the back of the case.](m2sdr_mini_pc.jpg){width=55%}
 
 The public issue tracker of the repository also reports first tests in an external NVMe
 enclosure with a Thunderbolt port. This setup is not part of the [status table](#intro-status).
@@ -71,8 +70,7 @@ A PCIe card with several M.2 slots takes several boards in one PC: four boards o
 an ASUS Hyper M.2 x16 Gen 4 card give eight transmit and eight receive channels in one PCIe x16
 slot.
 
-![Four LiteX-M2SDR boards on an ASUS Hyper M.2 x16 Gen 4 card. Each board carries a heatsink on
-its FPGA and on its RFIC.](m2sdr_hyper_m2_8t8r.png){width=55%}
+![Four LiteX-M2SDR boards on an ASUS Hyper M.2 x16 Gen 4 card.](m2sdr_hyper_m2_8t8r.png){width=55%}
 
 Such a card has no PCIe switch: it splits the 16 lanes of the slot into four links of four lanes.
 The motherboard must support this split, called PCIe bifurcation, and it must be enabled for the
@@ -90,10 +88,8 @@ breaks the four lanes out to separate connectors, which gives the board Ethernet
 schematic is public: `doc/litex_acorn_baseboard_mini_schematic.pdf` in this repository, and the
 repository `enjoy-digital/litex-acorn-baseboard` for the connector reference.
 
-![The LiteX-M2SDR on the LiteX Acorn Baseboard Mini, with a heatsink on the FPGA and on the RFIC.
-A copper SFP module carries Ethernet, a Power over Ethernet splitter on the Ethernet cable feeds a
-USB-C connector of the baseboard, and an antenna is connected with a coaxial
-pigtail.](m2sdr_baseboard_ethernet.png){width=80%}
+![The LiteX-M2SDR on the LiteX Acorn Baseboard Mini: Ethernet through a copper SFP module, power from a
+Power over Ethernet splitter.](m2sdr_baseboard_ethernet.png){width=80%}
 
 ### Connectors {#carriers-baseboard-connectors}
 
