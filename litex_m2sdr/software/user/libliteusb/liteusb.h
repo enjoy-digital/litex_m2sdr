@@ -107,6 +107,12 @@ int liteusb_stream_stop(struct liteusb_stream *s);
 /* RX: next received buffer (valid until the next call), NULL on timeout/error. */
 uint8_t *liteusb_stream_next_read_buffer(struct liteusb_stream *s, int timeout_ms);
 
+/* RX: drop the received buffers (completed transfers, including a buffer returned and not yet
+ * consumed) and resubmit their slots, without cancelling the transfers in flight. Returns the
+ * number of buffers dropped; *was_full (optional) is set when every slot had completed, i.e. the
+ * host had stopped reading and the device side may still hold older data. */
+size_t liteusb_stream_discard(struct liteusb_stream *s, int *was_full);
+
 /* TX: next free buffer, NULL on timeout/error; submit it (sent once its slot is full), flush
  * (send a partially filled slot), drain (wait for all the submitted transfers). */
 uint8_t *liteusb_stream_next_write_buffer(struct liteusb_stream *s, int timeout_ms);

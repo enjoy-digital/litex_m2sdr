@@ -51,6 +51,9 @@
 #define M2SDR_LITEUSB_TX_BUFFER_COUNT    256
 #define M2SDR_LITEUSB_TX_BUFS_PER_XFER   4
 #define M2SDR_LITEUSB_TX_DRAIN_TIMEOUT_MS 1000
+/* RX samples the gateware still holds once the host has stopped reading (FIFOs behind the Bulk IN
+ * endpoint): 48KB measured, with a margin (see m2sdr_sync_rx_flush()). */
+#define M2SDR_LITEUSB_RX_BACKLOG_BYTES   (64*1024)
 
 /* Crossbar ports (litex_m2sdr.py: 0=PCIe, 1=Eth, 2=SATA, 3=USB3). */
 #define TXRX_PORT_LITEUSB 3
@@ -1627,6 +1630,47 @@ int m2sdr_sync_rx(struct m2sdr_dev *dev,
     }
 
     return M2SDR_ERR_OK;
+}
+
+int m2sdr_sync_rx_flush(struct m2sdr_dev *dev)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (!dev->rx_configured)
+        return M2SDR_ERR_STATE;
+
+    if (dev->transport == M2SDR_TRANSPORT_LITEPCIE) {
+        /* The DMA writes the ring without back-pressure: dropping the buffers received is
+         * enough. */
+        char *buf;
+        while (m2sdr_wait_rx_buffer(dev, &buf, M2SDR_TIMEOUT_NOWAIT) == M2SDR_ERR_OK)
+            ;
+        return M2SDR_ERR_OK;
+#ifdef USE_LITEETH
+    } else if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
+        liteeth_udp_flush_rx(&dev->udp);
+        return M2SDR_ERR_OK;
+#endif
+#ifdef USE_LITEUSB
+    } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
+        int was_full = 0;
+        size_t backlog;
+
+        liteusb_stream_discard(dev->usb_rx, &was_full);
+        if (!was_full)
+            return M2SDR_ERR_OK;
+        /* The host had stopped reading: the gateware FIFOs filled behind the ring and their
+         * samples come first in the resubmitted transfers. Drop them too (they arrive at the
+         * link rate, faster than the RFIC produces). */
+        for (backlog = 0; backlog < M2SDR_LITEUSB_RX_BACKLOG_BYTES;
+             backlog += liteusb_stream_buffer_size(dev->usb_rx)) {
+            if (!liteusb_stream_next_read_buffer(dev->usb_rx, (int)dev->rx_timeout_ms))
+                return M2SDR_ERR_TIMEOUT;
+        }
+        return M2SDR_ERR_OK;
+#endif
+    }
+    return M2SDR_ERR_UNSUPPORTED;
 }
 
 int m2sdr_sync_tx(struct m2sdr_dev *dev,

@@ -324,6 +324,42 @@ uint8_t *liteusb_stream_next_read_buffer(struct liteusb_stream *s, int timeout_m
     return s->ring + (s->cur_slot*s->bufs_per_xfer + s->cur_buf)*s->buf_size;
 }
 
+size_t liteusb_stream_discard(struct liteusb_stream *s, int *was_full)
+{
+    struct timeval tv = {0, 0};
+    size_t dropped = 0;
+    size_t done    = 0;
+
+    if (was_full)
+        *was_full = 0;
+    if (!s || !s->is_rx || !s->started)
+        return 0;
+
+    /* Completed slots follow the read cursor in order (one endpoint): drop and resubmit them
+     * up to the first slot still in flight. The transfers in flight are left running. An event
+     * pass does not always reap every completed transfer: poll again (without waiting) before
+     * taking a slot as in flight. */
+    s->cur_held = 0;
+    while (done < s->slot_count) {
+        struct liteusb_slot *slot = &s->slots[s->cur_slot];
+        if (slot->state == SLOT_SUBMITTED) {
+            libusb_handle_events_timeout_completed(s->conn->ctx, &tv, NULL);
+            if (slot->state == SLOT_SUBMITTED)
+                break;
+        }
+        if (slot->state == SLOT_DONE && slot->bufs > s->cur_buf)
+            dropped += slot->bufs - s->cur_buf;
+        if (liteusb_slot_submit(s, s->cur_slot, s->bufs_per_xfer) != 0)
+            break;
+        s->cur_buf  = 0;
+        s->cur_slot = (s->cur_slot + 1) % s->slot_count;
+        done++;
+    }
+    if (was_full)
+        *was_full = (done == s->slot_count);
+    return dropped;
+}
+
 /* TX */
 /*----*/
 
