@@ -117,6 +117,54 @@ def test_header_extractor():
     assert [l for _, l in out_payload[:3]] == [0, 0, 1]
 
 
+def test_header_inserter_reset_drains_then_starts_on_header():
+    """In reset (stream disabled), the inserter drains its sink and sends nothing downstream, even
+    with the source stalled; the first word sent after the reset is a header."""
+    dut = HeaderInserterExtractor(mode="inserter", data_width=64, with_csr=False)
+
+    header = 0x1122334455667788
+    drained = []
+    captured = []
+
+    def gen():
+        yield dut.enable.eq(1)
+        yield dut.header_enable.eq(1)
+        yield dut.frame_cycles.eq(4)
+        yield dut.header.eq(header)
+        yield dut.timestamp.eq(0x1000)
+        yield dut.sink.valid.eq(1)
+        yield dut.sink.data.eq(0xdead)
+
+        # Stream disabled: reset asserted, source stalled.
+        yield dut.reset.eq(1)
+        yield dut.source.ready.eq(0)
+        for _ in range(16):
+            yield
+            drained.append((yield dut.sink.ready))
+            assert (yield dut.source.valid) == 0
+
+        # Stream enabled.
+        yield dut.sink.data.eq(0xbeef)
+        yield dut.reset.eq(0)
+        yield dut.source.ready.eq(1)
+        for _ in range(12):
+            yield
+
+    @passive
+    def mon():
+        while True:
+            if (yield dut.source.valid) and (yield dut.source.ready):
+                captured.append((yield dut.source.data))
+            yield
+
+    run_simulation(dut, [gen(), mon()])
+
+    assert all(drained[1:])
+    assert captured[0] == header
+    assert captured[1] == 0x1000
+    assert set(captured[2:6]) == {0xbeef}
+
+
 def test_header_inserter_single_word_128():
     """128-bit: the inserter emits the whole header ([timestamp|sync] in ONE word, low half =
     sync = first buffer bytes) and then the payload, with correct framing flags."""
