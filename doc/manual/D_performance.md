@@ -75,6 +75,23 @@ Each run lasts 20 s. The stream rate is per direction.
 Three runs of 120 s at 245.8 MB/s also pass, with 29.5 GB checked in each direction per run:
 2T2R at 30.72 MSPS in SC16, 2T2R at 61.44 MSPS in SC8 and 1T1R at 61.44 MSPS in SC16.
 
+### 1T1R above 61.44 MSPS {#perf-usb3-oversampling}
+
+The rates of the [oversampling mode](#rfic-oversampling), in 1T1R on the standard USB3
+bitstream, 20 s per run in full duplex unless noted.
+
+| Format | Sample rate | Stream | Result |
+|--------|--------------------|-------------------|------------------------------------------|
+| SC8 | 76.8, 92.16 MSPS | 153.6, 184.3 MB/s | Pass |
+| SC8 | 122.88 MSPS | 245.8 MB/s | Pass, also over 120 s |
+| SC16 | 76.8, 92.16 MSPS | 307.2, 368.6 MB/s | Pass on the sample count, see below |
+| SC16 | 107.52 MSPS, RX alone | 430.1 MB/s | Pass |
+| SC16 | 122.88 MSPS, RX alone | 491.5 MB/s | Fail: 453 MB/s received |
+
+In this mode the digital loopback of the RFIC returns the 12-bit samples with their lowest bit
+set. The SC8 runs are checked on every sample; the SC16 runs are checked on the number of
+samples against the board time, in both directions.
+
 ### RX alone {#perf-usb3-rx}
 
 | Channels | Format | Sample rate | Stream | Result |
