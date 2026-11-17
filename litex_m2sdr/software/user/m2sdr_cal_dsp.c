@@ -67,35 +67,67 @@ static double median(double *v, int n)
 /* Channel numbers */
 /*-----------------*/
 
+/* 3GPP TS 36.101 table 5.7.3-1: band, F_DL_low (MHz), N_Offs-DL, last N_DL. */
+static const struct { unsigned band; double f_low; unsigned n_offs, n_last; } lte_bands[] = {
+    {  1, 2110.0,     0,   599 },
+    {  2, 1930.0,   600,  1199 },
+    {  3, 1805.0,  1200,  1949 },
+    {  4, 2110.0,  1950,  2399 },
+    {  5,  869.0,  2400,  2649 },
+    {  7, 2620.0,  2750,  3449 },
+    {  8,  925.0,  3450,  3799 },
+    { 12,  729.0,  5010,  5179 },
+    { 13,  746.0,  5180,  5279 },
+    { 20,  791.0,  6150,  6449 },
+    { 28,  758.0,  9210,  9659 },
+    { 32, 1452.0,  9920, 10359 },
+    { 38, 2570.0, 37750, 38249 },
+    { 40, 2300.0, 38650, 39649 },
+    { 41, 2496.0, 39650, 41589 },
+    { 42, 3400.0, 41590, 43589 },
+    { 43, 3600.0, 43590, 45589 },
+};
+#define LTE_BANDS (sizeof(lte_bands) / sizeof(lte_bands[0]))
+
 double m2sdr_cal_earfcn_to_hz(unsigned earfcn)
 {
-    /* 3GPP TS 36.101 table 5.7.3-1: band, F_DL_low (MHz), N_Offs-DL, last N_DL. */
-    static const struct { double f_low; unsigned n_offs, n_last; } bands[] = {
-        { 2110.0,     0,   599 }, /*  1 */
-        { 1930.0,   600,  1199 }, /*  2 */
-        { 1805.0,  1200,  1949 }, /*  3 */
-        { 2110.0,  1950,  2399 }, /*  4 */
-        {  869.0,  2400,  2649 }, /*  5 */
-        { 2620.0,  2750,  3449 }, /*  7 */
-        {  925.0,  3450,  3799 }, /*  8 */
-        {  729.0,  5010,  5179 }, /* 12 */
-        {  746.0,  5180,  5279 }, /* 13 */
-        {  791.0,  6150,  6449 }, /* 20 */
-        {  758.0,  9210,  9659 }, /* 28 */
-        { 1452.0,  9920, 10359 }, /* 32 */
-        { 2570.0, 37750, 38249 }, /* 38 */
-        { 2300.0, 38650, 39649 }, /* 40 */
-        { 2496.0, 39650, 41589 }, /* 41 */
-        { 3400.0, 41590, 43589 }, /* 42 */
-        { 3600.0, 43590, 45589 }, /* 43 */
-    };
     size_t i;
 
-    for (i = 0; i < sizeof(bands) / sizeof(bands[0]); i++) {
-        if (earfcn >= bands[i].n_offs && earfcn <= bands[i].n_last)
-            return (bands[i].f_low + 0.1 * (earfcn - bands[i].n_offs)) * 1e6;
+    for (i = 0; i < LTE_BANDS; i++) {
+        if (earfcn >= lte_bands[i].n_offs && earfcn <= lte_bands[i].n_last)
+            return (lte_bands[i].f_low + 0.1 * (earfcn - lte_bands[i].n_offs)) * 1e6;
     }
     return 0.0;
+}
+
+int m2sdr_cal_hz_to_earfcn(double freq_hz, unsigned *band)
+{
+    size_t i;
+
+    for (i = 0; i < LTE_BANDS; i++) {
+        const double n = (freq_hz / 1e6 - lte_bands[i].f_low) / 0.1;
+        if (n > -0.01 && fabs(n - round(n)) < 0.01 &&
+            lte_bands[i].n_offs + (unsigned)llround(n) <= lte_bands[i].n_last) {
+            if (band)
+                *band = lte_bands[i].band;
+            return (int)(lte_bands[i].n_offs + (unsigned)llround(n));
+        }
+    }
+    return -1;
+}
+
+int m2sdr_cal_hz_to_arfcn(double freq_hz)
+{
+    double n = (freq_hz / 1e6 - 935.0) / 0.2;
+
+    if (fabs(n - round(n)) < 0.01 && n > -0.01 && n < 124.01)
+        return (int)llround(n);
+    if (fabs(n - round(n)) < 0.01 && n > -49.01 && n < 0)
+        return 1024 + (int)llround(n);
+    n = (freq_hz / 1e6 - 1805.2) / 0.2;
+    if (fabs(n - round(n)) < 0.01 && n > -0.01 && n < 373.01)
+        return 512 + (int)llround(n);
+    return -1;
 }
 
 double m2sdr_cal_arfcn_to_hz(unsigned arfcn)
@@ -117,9 +149,9 @@ double m2sdr_cal_arfcn_to_hz(unsigned arfcn)
 #define LTE_HALF     9600                /* Samples per half frame (5 ms): PSS period. */
 #define LTE_CP       9                   /* Cyclic prefix of the symbols 1 to 6 of a slot. */
 #define LTE_SCS      15000.0             /* Subcarrier spacing: ambiguity of the CP estimate. */
-#define LTE_PSS_STEP 2500.0              /* Frequency step of the PSS search. */
 #define LTE_PSS_HALF_FRAMES 8            /* Half frames accumulated by the PSS search. */
 #define LTE_PSS_MIN_METRIC  8.0          /* PSS peak over mean for a detection. */
+#define LTE_PSS_MIN_MATCH   0.07         /* Share of the signal energy that correlates with the PSS. */
 #define LTE_BLOCK_SLOTS     40           /* Slots per partial CP estimate (20 ms). */
 #define LTE_CP_MIN_QUALITY  3.0          /* CP correlation peak over its median. */
 
@@ -144,7 +176,8 @@ static void lte_pss(unsigned u, float complex *p)
 }
 
 /* Cyclic prefix correlation of `slots` slots from x, folded on the slot: argument of the peak. */
-static double lte_cp_phase(const float complex *x, size_t slots, double *peak_over_median)
+static double lte_cp_phase(const float complex *x, size_t slots, double *peak_over_median,
+                           double *profile)
 {
     double complex fold[LTE_SLOT];
     double complex win[LTE_SLOT];
@@ -181,6 +214,8 @@ static double lte_cp_phase(const float complex *x, size_t slots, double *peak_ov
         if (top)
             best += win[n];
     }
+    if (profile)
+        memcpy(profile, mag, sizeof(mag));
     if (peak_over_median) {
         const double med = median(mag, LTE_SLOT);
         *peak_over_median = med > 0 ? best_mag / med : 0;
@@ -192,14 +227,16 @@ int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_
                            struct m2sdr_cal_estimate *est)
 {
     static const unsigned roots[3] = { 25, 29, 34 };
-    const int hyps = (int)ceil(max_cfo_hz / LTE_PSS_STEP);
-    size_t half_frames;
+    size_t half_frames, slots, blocks, b;
     float complex pss[3][LTE_N];
     float complex ref[LTE_N];
-    float *acc;
-    double best_metric = 0, best_fh = 0;
+    float *acc, *energy;
+    double cp_quality = 0, frac;
+    double best_metric = 0, best_fh = 0, best_match = 0;
+    double pss_energy = 0;
+    double sum = 0, sum2 = 0;
     int best_root = 0;
-    int r, h, n;
+    int hyps, r, h, n;
 
     if (!x || !est || max_cfo_hz <= 0)
         return -1;
@@ -208,24 +245,62 @@ int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_
         return -1;
     est->power_db = mean_power_db(x, count);
 
+    /* Cyclic prefix first: the phase turned over one FFT length gives the offset modulo the
+     * subcarrier spacing, and a capture without a clear cyclic prefix is not an LTE carrier. */
+    slots = (count - LTE_N) / LTE_SLOT;
+    frac  = lte_cp_phase(x, slots, &cp_quality, NULL) / (2.0 * M_PI) * LTE_SCS;
+    est->quality = 0;
+    est->cp_quality = cp_quality;
+    if (cp_quality < LTE_CP_MIN_QUALITY)
+        return 0;
+
     half_frames = (count - LTE_N) / LTE_HALF;
     if (half_frames > LTE_PSS_HALF_FRAMES)
         half_frames = LTE_PSS_HALF_FRAMES;
 
-    acc = malloc(LTE_HALF * sizeof(*acc));
-    if (!acc)
+    acc    = malloc(LTE_HALF * sizeof(*acc));
+    energy = calloc(LTE_HALF, sizeof(*energy));
+    if (!acc || !energy) {
+        free(acc);
+        free(energy);
         return -1;
+    }
     for (r = 0; r < 3; r++)
         lte_pss(roots[r], pss[r]);
+    for (n = 0; n < LTE_N; n++)
+        pss_energy += crealf(pss[0][n]) * crealf(pss[0][n]) + cimagf(pss[0][n]) * cimagf(pss[0][n]);
 
-    /* PSS search: every timing of a half frame, every root, every frequency hypothesis. The
-     * correlations of the half frames are added without their phase. */
+    /* Energy of the signal under the PSS at every timing, added over the half frames: the
+     * correlation is compared to it, so that a burst of power is not taken for a PSS. */
+    {
+        size_t f, t;
+        for (f = 0; f < half_frames; f++) {
+            const float complex *p = x + f * LTE_HALF;
+            double e = 0;
+            for (n = 0; n < LTE_N; n++)
+                e += crealf(p[n]) * crealf(p[n]) + cimagf(p[n]) * cimagf(p[n]);
+            for (t = 0; t < LTE_HALF; t++) {
+                energy[t] += (float)e;
+                e += crealf(p[t + LTE_N]) * crealf(p[t + LTE_N]) + cimagf(p[t + LTE_N]) * cimagf(p[t + LTE_N])
+                   - crealf(p[t]) * crealf(p[t]) - cimagf(p[t]) * cimagf(p[t]);
+                if (e < 0)
+                    e = 0;
+            }
+        }
+    }
+
+    /* PSS search: every timing of a half frame, every root, and the offsets that the cyclic
+     * prefix allows, one subcarrier apart. The correlations of the half frames are added
+     * without their phase. The PSS identifies the carrier and selects the offset. */
+    hyps = (int)floor((max_cfo_hz + 0.5 * LTE_SCS) / LTE_SCS);
     for (r = 0; r < 3; r++) {
         for (h = -hyps; h <= hyps; h++) {
-            const double fh = h * LTE_PSS_STEP;
-            double peak = 0, sum = 0;
+            const double fh = frac + h * LTE_SCS;
+            double peak = 0, total = 0, match = 0;
             size_t f, t;
 
+            if (fabs(fh) > max_cfo_hz)
+                continue;
             for (n = 0; n < LTE_N; n++)
                 ref[n] = conjf(pss[r][n] * cexpf(I * (float)(2.0 * M_PI * fh * n / FS)));
             memset(acc, 0, LTE_HALF * sizeof(*acc));
@@ -239,53 +314,89 @@ int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_
                 }
             }
             for (t = 0; t < LTE_HALF; t++) {
-                sum += acc[t];
-                if (acc[t] > peak)
-                    peak = acc[t];
+                total += acc[t];
+                if (acc[t] > peak) {
+                    peak  = acc[t];
+                    match = energy[t] > 0 ? acc[t] / (energy[t] * pss_energy) : 0;
+                }
             }
-            if (sum > 0 && peak * LTE_HALF / sum > best_metric) {
-                best_metric = peak * LTE_HALF / sum;
+            if (total > 0 && peak * LTE_HALF / total > best_metric) {
+                best_metric = peak * LTE_HALF / total;
+                best_match  = match;
                 best_fh     = fh;
                 best_root   = r;
             }
         }
     }
     free(acc);
+    free(energy);
 
     est->quality = best_metric;
+    est->match   = best_match;
     est->id      = (int)roots[best_root];
-    if (best_metric < LTE_PSS_MIN_METRIC)
+    if (best_metric < LTE_PSS_MIN_METRIC || best_match < LTE_PSS_MIN_MATCH)
         return 0;
 
-    /* Cyclic prefix: the phase turned over one FFT length gives the offset modulo the
-     * subcarrier spacing. The PSS hypothesis selects the period. */
-    {
-        const size_t slots  = (count - LTE_N) / LTE_SLOT;
-        const size_t blocks = slots / LTE_BLOCK_SLOTS;
-        double cp_quality   = 0;
-        const double frac   = lte_cp_phase(x, slots, &cp_quality) / (2.0 * M_PI) * LTE_SCS;
-        const double cfo    = frac + LTE_SCS * round((best_fh - frac) / LTE_SCS);
-        double sum = 0, sum2 = 0;
-        size_t b;
-
-        /* A PSS without a clear cyclic prefix, or the two disagreeing by more than a step of
-         * the search, is not a carrier tuned on its centre: another carrier leaks in, or the
-         * PSS of a neighbour is seen through the filter. */
-        if (cp_quality < LTE_CP_MIN_QUALITY || fabs(cfo - best_fh) > LTE_PSS_STEP)
-            return 0;
-
-        for (b = 0; b < blocks; b++) {
-            double d = lte_cp_phase(x + b * LTE_BLOCK_SLOTS * LTE_SLOT, LTE_BLOCK_SLOTS, NULL)
-                       / (2.0 * M_PI) * LTE_SCS - frac;
-            d -= LTE_SCS * round(d / LTE_SCS);
-            sum  += d;
-            sum2 += d * d;
-        }
-        est->found     = true;
-        est->cfo_hz    = cfo;
-        est->count     = (int)blocks;
-        est->spread_hz = blocks > 1 ? sqrt(fmax(0.0, sum2 / blocks - (sum / blocks) * (sum / blocks))) : 0.0;
+    /* Spread of the cyclic prefix estimate over blocks of the capture. */
+    blocks = slots / LTE_BLOCK_SLOTS;
+    for (b = 0; b < blocks; b++) {
+        double d = lte_cp_phase(x + b * LTE_BLOCK_SLOTS * LTE_SLOT, LTE_BLOCK_SLOTS, NULL, NULL)
+                   / (2.0 * M_PI) * LTE_SCS - frac;
+        d -= LTE_SCS * round(d / LTE_SCS);
+        sum  += d;
+        sum2 += d * d;
     }
+    est->found     = true;
+    est->cfo_hz    = best_fh;
+    est->count     = (int)blocks;
+    est->spread_hz = blocks > 1 ? sqrt(fmax(0.0, sum2 / blocks - (sum / blocks) * (sum / blocks))) : 0.0;
+    return 0;
+}
+
+/* Channel of a wide capture */
+/*---------------------------*/
+
+#define CHAN_TAPS 65
+
+int m2sdr_cal_channelize(const float complex *x, size_t count, double offset_hz,
+                         float complex *y, size_t *out_count)
+{
+    const double fs_in = FS * M2SDR_CAL_SCAN_DECIM;
+    const size_t ny = count / M2SDR_CAL_SCAN_DECIM > CHAN_TAPS ? (count - CHAN_TAPS) / M2SDR_CAL_SCAN_DECIM : 0;
+    float complex taps[CHAN_TAPS];
+    double complex mean = 0;
+    double tsum = 0;
+    size_t i;
+    int k;
+
+    if (!x || !y || !out_count || !ny)
+        return -1;
+
+    /* Low-pass at 0.7 MHz (the PSS and its neighbourhood, a GSM carrier), moved to the offset:
+     * the mix and the filter are one complex filter. */
+    for (k = 0; k < CHAN_TAPS; k++) {
+        const double t  = k - (CHAN_TAPS - 1) / 2.0;
+        const double fc = 0.7e6 / fs_in;
+        const double s  = t == 0 ? 2 * fc : sin(2 * M_PI * fc * t) / (M_PI * t);
+        const double w  = s * (0.54 - 0.46 * cos(2 * M_PI * k / (CHAN_TAPS - 1)));
+        tsum   += w;
+        taps[k] = (float complex)(w * cexp(I * 2.0 * M_PI * offset_hz * t / fs_in));
+    }
+    for (k = 0; k < CHAN_TAPS; k++)
+        taps[k] /= (float)tsum;
+    for (i = 0; i < ny; i++) {
+        const float complex *p = x + i * M2SDR_CAL_SCAN_DECIM;
+        float complex a = 0;
+        for (k = 0; k < CHAN_TAPS; k++)
+            a += p[k] * taps[CHAN_TAPS - 1 - k];
+        /* The filter leaves the channel at its offset: bring it to 0 at the output rate. */
+        y[i] = a * cexpf(-I * (float)(2.0 * M_PI * fmod(offset_hz * (double)i * M2SDR_CAL_SCAN_DECIM / fs_in, 1.0)));
+        mean += y[i];
+    }
+    mean /= (double)ny;
+    for (i = 0; i < ny; i++)
+        y[i] -= (float complex)mean;
+    *out_count = ny;
     return 0;
 }
 

@@ -192,6 +192,14 @@ static void test_numbers(void)
     CHECK(fabs(m2sdr_cal_arfcn_to_hz(1000) - 930.2e6) < 1, "ARFCN 1000");
     CHECK(fabs(m2sdr_cal_arfcn_to_hz(512) - 1805.2e6) < 1, "ARFCN 512");
     CHECK(m2sdr_cal_arfcn_to_hz(300) == 0.0, "ARFCN out of the bands");
+    {
+        unsigned band = 0;
+        CHECK(m2sdr_cal_hz_to_earfcn(1815e6, &band) == 1300 && band == 3, "1815 MHz to EARFCN");
+        CHECK(m2sdr_cal_hz_to_earfcn(806e6, &band) == 6300 && band == 20, "806 MHz to EARFCN");
+        CHECK(m2sdr_cal_hz_to_earfcn(1815.05e6, NULL) == -1, "off the raster");
+        CHECK(m2sdr_cal_hz_to_arfcn(952e6) == 85 && m2sdr_cal_hz_to_arfcn(930.2e6) == 1000 &&
+              m2sdr_cal_hz_to_arfcn(1805.2e6) == 512 && m2sdr_cal_hz_to_arfcn(700e6) == -1, "frequency to ARFCN");
+    }
     /* A clock 3 ppm fast receives an 816 MHz carrier 2448 Hz low. */
     CHECK(fabs(m2sdr_cal_refclk_ppm(-2448.0, 816e6) - 3.0) < 1e-9, "ppm sign");
 }
@@ -204,6 +212,32 @@ static void test_iq(void)
     m2sdr_cal_iq_to_complex(iq, 2, 4, 12, x);
     CHECK(fabs(creal(x[0]) - 0.5) < 1e-6 && fabs(cimag(x[0]) + 0.5) < 1e-6, "iq scale");
     CHECK(cabs(x[0] + x[1]) < 1e-6, "mean not removed");
+}
+
+/* A tone 1 kHz above a channel 1.3 MHz from the centre of a wide capture comes out at 1 kHz with
+ * its amplitude; a tone 1.5 MHz further is filtered out. */
+static void test_channelize(void)
+{
+    const double fs_in = FS * M2SDR_CAL_SCAN_DECIM;
+    const size_t n = 200000;
+    float complex *x = malloc(n * sizeof(*x));
+    float complex *y = malloc(n / M2SDR_CAL_SCAN_DECIM * sizeof(*y));
+    double complex a = 0;
+    double p = 0;
+    size_t ny = 0, i;
+
+    for (i = 0; i < n; i++)
+        x[i] = (float complex)(cexp(I * 2 * M_PI * (1.3e6 + 1000.0) * (double)i / fs_in) +
+                               cexp(I * 2 * M_PI * (2.8e6) * (double)i / fs_in));
+    CHECK(m2sdr_cal_channelize(x, n, 1.3e6, y, &ny) == 0 && ny > n / M2SDR_CAL_SCAN_DECIM - 100, "channelize");
+    for (i = 0; i + 1 < ny; i++) {
+        a += conj(y[i]) * y[i + 1];
+        p += creal(y[i]) * creal(y[i]) + cimag(y[i]) * cimag(y[i]);
+    }
+    CHECK(fabs(carg(a) / (2 * M_PI) * FS - 1000.0) < 1.0, "channel tone at %.1f Hz", carg(a) / (2 * M_PI) * FS);
+    CHECK(fabs(p / (double)ny - 1.0) < 0.05, "channel power %.3f", p / (double)ny);
+    free(x);
+    free(y);
 }
 
 static void test_store(void)
@@ -234,6 +268,7 @@ int main(void)
 {
     test_numbers();
     test_iq();
+    test_channelize();
     test_store();
     test_lte(-2450.0, 2, 0.002, 1234, 5.0);
     test_lte(+7400.0, 0, 0.01, 0, 5.0);       /* Near half the subcarrier spacing. */

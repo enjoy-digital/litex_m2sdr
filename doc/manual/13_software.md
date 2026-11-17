@@ -534,6 +534,7 @@ cellular networks, which a macro base station keeps within 0.05 ppm. It needs an
 RX port and takes a few seconds.
 
 ```sh
+./m2sdr_cal scan                                       # Find the carriers received here
 ./m2sdr_cal measure lte:816e6 earfcn:1300 arfcn:85     # Measure on three carriers
 ./m2sdr_cal measure --apply --store earfcn:1300        # Trim the reference, store the result
 ./m2sdr_cal show                                       # Print the stored record
@@ -547,7 +548,20 @@ RX port and takes a few seconds.
 | `gsm:FREQ` | GSM carrier with a BCCH, by its frequency | Frequency of the FCCH bursts |
 | `arfcn:N` | GSM carrier, by its ARFCN (GSM 900, DCS 1800) | The same |
 
-The utility configures the RFIC at 1.92 MSPS without a trim, captures each carrier a few times
+`scan` searches bands for the carriers that can be used, and prints them with a first value of
+the error and the `measure` command for them. A band is given by its name (`lte20`, `lte3`,
+`gsm900`, see `--help`) or as a range, `lte:791e6-821e6` or `gsm:925e6-960e6`; without a band,
+the scan covers the LTE and GSM bands in use in Europe. The scan captures 5 MHz at a time at
+7.68 MSPS and tests the channel raster in it, 100 kHz for LTE and 200 kHz for GSM.
+
+An LTE carrier is identified on its centre only. From a raster point next to the centre the PSS
+still correlates, weaker, and the error read is wrong by 5 or 10 kHz, several ppm. The scan
+keeps the strongest of neighbouring detections, then keeps the carriers that agree with each
+other, since they are all seen with one clock: the other detections are counted and left out.
+With one band and few carriers this vote is weak, and the scan says so when no two carriers
+agree. A carrier whose cyclic prefix is not clear is not listed.
+
+`measure` configures the RFIC at 1.92 MSPS without a trim, captures each carrier a few times
 (`--repeat`, `--duration`) and prints the error that each one gives. The result is their median.
 Several carriers, of different operators or bands, protect against one that is off: a
 repeater, or a frequency that is not the centre of a carrier. An LTE frequency must be the

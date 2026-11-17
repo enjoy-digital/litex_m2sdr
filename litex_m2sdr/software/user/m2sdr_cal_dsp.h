@@ -40,6 +40,8 @@ struct m2sdr_cal_estimate {
     int    count;         /* LTE: blocks used. GSM: FCCH bursts used. */
     int    id;            /* LTE: PSS root (25, 29, 34), N_ID_2 = 0, 1, 2. GSM: unused. */
     double power_db;      /* Mean power of the capture, dB full scale. */
+    double cp_quality;    /* LTE: peak of the cyclic prefix correlation over its median. */
+    double match;         /* LTE: share of the energy under the PSS that correlates with it, 0 to 1. */
 };
 
 /* Interleaved I/Q of one channel to complex, scaled to full scale 1.0. `bits` is 12 for SC16
@@ -48,8 +50,14 @@ struct m2sdr_cal_estimate {
 void m2sdr_cal_iq_to_complex(const int16_t *iq, size_t count, unsigned stride, unsigned bits,
                              float complex *x);
 
-/* LTE downlink, FDD or TDD, normal cyclic prefix, tuned on the centre of the carrier. The PSS
- * identifies the signal and gives the offset within +-max_cfo_hz, the cyclic prefix refines it.
+/* LTE downlink, FDD or TDD, normal cyclic prefix, tuned on the centre of the carrier.
+ *
+ * The frequency must be the centre. From a raster point next to it, the PSS still correlates,
+ * weaker, through the ambiguity of its Zadoff-Chu sequence between frequency and time, and the
+ * offset read is wrong by a third or two thirds of the subcarrier spacing (5 or 10 kHz). The
+ * scan of m2sdr_cal keeps the strongest of neighbouring detections for this reason. The PSS
+ * cyclic prefix gives the offset modulo the subcarrier spacing, the PSS identifies the signal
+ * and selects the offset within +-max_cfo_hz.
  * Returns 0, or -1 on a bad argument or allocation failure; a signal that is not found gives
  * found = false. */
 int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_hz,
@@ -58,6 +66,13 @@ int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_
 /* GSM downlink, tuned on a carrier with a BCCH: frequency of the FCCH bursts. */
 int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_hz,
                            struct m2sdr_cal_estimate *est);
+
+/* Scan: a capture M2SDR_CAL_SCAN_DECIM times as fast holds several carriers. This extracts the
+ * one offset_hz from its centre, at M2SDR_CAL_SAMPLE_RATE, for the estimators. y holds
+ * count / M2SDR_CAL_SCAN_DECIM samples at most; *out_count is the number written. */
+#define M2SDR_CAL_SCAN_DECIM 4
+int m2sdr_cal_channelize(const float complex *x, size_t count, double offset_hz,
+                         float complex *y, size_t *out_count);
 
 /* Reference clock error, in ppm, for a signal received cfo_hz away from freq_hz: positive when
  * the clock runs fast, which lowers the received frequency. This is the value that
@@ -68,6 +83,10 @@ double m2sdr_cal_refclk_ppm(double cfo_hz, double freq_hz);
  * 0 when the number is not in a supported band. */
 double m2sdr_cal_earfcn_to_hz(unsigned earfcn);
 double m2sdr_cal_arfcn_to_hz(unsigned arfcn);
+/* The reverse: number of a downlink frequency on the raster of a supported band, -1 otherwise.
+ * *band (optional) is the LTE band. */
+int m2sdr_cal_hz_to_earfcn(double freq_hz, unsigned *band);
+int m2sdr_cal_hz_to_arfcn(double freq_hz);
 
 #ifdef __cplusplus
 }

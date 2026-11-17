@@ -9,10 +9,12 @@
  * Description:
  * Measures the error of the reference clock of the board against cellular downlink signals,
  * whose carriers are within 0.05 ppm for a macro base station: the frequency offset of LTE
- * carriers (PSS and cyclic prefix) and of GSM carriers (FCCH bursts). The result can be applied
+ * carriers (cyclic prefix and PSS) and of GSM carriers (FCCH bursts). A scan lists the carriers
+ * received in a band. The result can be applied
  * to the board (SI5351 trim) and stored, in a file and in the SPI flash of the board.
  *
  * Usage Example:
+ *     ./m2sdr_cal scan
  *     ./m2sdr_cal measure lte:816e6 earfcn:1300 arfcn:85
  *     ./m2sdr_cal measure --apply --store lte:816e6 lte:1815e6
  *     ./m2sdr_cal show
@@ -162,6 +164,56 @@ static bool confirm(const char *question, bool yes)
 /* Capture and measure */
 /*---------------------*/
 
+/* RFIC and RX stream for the captures. The reference is used without a trim: what is measured
+ * is its error. */
+static int rf_setup(struct m2sdr_dev *dev, const struct cal_options *opt, double sample_rate,
+                    int64_t bandwidth, double freq_hz)
+{
+    const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    struct m2sdr_config cfg;
+    int rc;
+
+    m2sdr_config_init(&cfg);
+    cfg.sample_rate    = (int64_t)sample_rate;
+    cfg.bandwidth      = bandwidth;
+    cfg.rx_freq        = (int64_t)llround(freq_hz);
+    cfg.tx_att         = 89;
+    cfg.refclk_ppm     = 0.0;
+    cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
+    if (opt->refclk_freq)
+        cfg.refclk_freq = opt->refclk_freq;
+    if (opt->sync) {
+        if (strcmp(opt->sync, "internal") == 0) {
+            cfg.clock_source = M2SDR_CLOCK_SOURCE_INTERNAL;
+        } else if (strcmp(opt->sync, "external") == 0) {
+            cfg.clock_source = M2SDR_CLOCK_SOURCE_EXTERNAL;
+        } else if (strcmp(opt->sync, "fpga") == 0) {
+            cfg.clock_source = M2SDR_CLOCK_SOURCE_SI5351C_FPGA;
+        } else {
+            m2sdr_cli_invalid_choice("sync", opt->sync, "internal, external or fpga");
+            return -1;
+        }
+    }
+    if (opt->manual_gain) {
+        cfg.rx_gain1 = cfg.rx_gain2 = opt->rx_gain;
+    } else {
+        cfg.program_rx_gains      = false;
+        cfg.program_rx_gain_modes = true;
+        cfg.rx_gain_mode1 = cfg.rx_gain_mode2 = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
+    }
+    rc = m2sdr_apply_config(dev, &cfg);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+        return -1;
+    }
+    rc = m2sdr_sync_config(dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11, 0, per_buf, 0, 2000);
+    if (rc != M2SDR_ERR_OK) {
+        fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
+        return -1;
+    }
+    return 0;
+}
+
 /* One capture of `count` samples of the selected channel, tuned on freq_hz. */
 static int capture(struct m2sdr_dev *dev, const struct cal_options *opt, double freq_hz,
                    int16_t *raw, float complex *x, size_t count)
@@ -246,7 +298,6 @@ static int cmd_measure(struct m2sdr_dev *dev, const struct cal_options *opt,
 {
     const size_t count = (size_t)(opt->duration_s * M2SDR_CAL_SAMPLE_RATE);
     const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
-    struct m2sdr_config cfg;
     struct m2sdr_fpga_sensors sensors;
     struct m2sdr_cal_record rec;
     double ppm[CAL_MAX_SIGNALS];
@@ -262,45 +313,8 @@ static int cmd_measure(struct m2sdr_dev *dev, const struct cal_options *opt,
         goto out;
     }
 
-    /* The reference is measured without a trim: the result is its error. */
-    m2sdr_config_init(&cfg);
-    cfg.sample_rate    = (int64_t)M2SDR_CAL_SAMPLE_RATE;
-    cfg.bandwidth      = CAL_BANDWIDTH_HZ;
-    cfg.rx_freq        = (int64_t)llround(signals[0].freq_hz);
-    cfg.tx_att         = 89;
-    cfg.refclk_ppm     = 0.0;
-    cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
-    if (opt->refclk_freq)
-        cfg.refclk_freq = opt->refclk_freq;
-    if (opt->sync) {
-        if (strcmp(opt->sync, "internal") == 0) {
-            cfg.clock_source = M2SDR_CLOCK_SOURCE_INTERNAL;
-        } else if (strcmp(opt->sync, "external") == 0) {
-            cfg.clock_source = M2SDR_CLOCK_SOURCE_EXTERNAL;
-        } else if (strcmp(opt->sync, "fpga") == 0) {
-            cfg.clock_source = M2SDR_CLOCK_SOURCE_SI5351C_FPGA;
-        } else {
-            m2sdr_cli_invalid_choice("sync", opt->sync, "internal, external or fpga");
-            goto out;
-        }
-    }
-    if (opt->manual_gain) {
-        cfg.rx_gain1 = cfg.rx_gain2 = opt->rx_gain;
-    } else {
-        cfg.program_rx_gains      = false;
-        cfg.program_rx_gain_modes = true;
-        cfg.rx_gain_mode1 = cfg.rx_gain_mode2 = M2SDR_RX_GAIN_MODE_SLOW_ATTACK_AGC;
-    }
-    rc = m2sdr_apply_config(dev, &cfg);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_apply_config failed: %s\n", m2sdr_strerror(rc));
+    if (rf_setup(dev, opt, M2SDR_CAL_SAMPLE_RATE, CAL_BANDWIDTH_HZ, signals[0].freq_hz) != 0)
         goto out;
-    }
-    rc = m2sdr_sync_config(dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11, 0, per_buf, 0, 2000);
-    if (rc != M2SDR_ERR_OK) {
-        fprintf(stderr, "m2sdr_sync_config failed: %s\n", m2sdr_strerror(rc));
-        goto out;
-    }
 
     printf("Measuring %d signal%s, %d capture%s of %.2f s each, RX%u, %s:\n",
            nsignals, nsignals == 1 ? "" : "s", opt->repeat, opt->repeat == 1 ? "" : "s",
@@ -410,6 +424,316 @@ out:
     return status;
 }
 
+/* Scan */
+/*------*/
+
+#define SCAN_SAMPLE_RATE  (M2SDR_CAL_SAMPLE_RATE * M2SDR_CAL_SCAN_DECIM)   /* 7.68 MSPS. */
+#define SCAN_BANDWIDTH_HZ 7000000
+#define SCAN_STEP_HZ      5e6       /* Between two captures: the carriers 2.5 MHz around each. */
+#define SCAN_LTE_S        0.10      /* Capture for LTE carriers. */
+#define SCAN_GSM_S        0.30      /* Capture for GSM carriers: six FCCH bursts. */
+#define SCAN_MAX_FOUND    1024
+#define SCAN_LTE_MERGE_HZ 450e3     /* Detections closer than this are one carrier. */
+#define SCAN_AGREE_PPM    0.75      /* Detections within this of each other agree. */
+
+struct scan_range {
+    enum m2sdr_cal_signal kind;
+    double start_hz, stop_hz;
+    char   name[24];
+};
+
+struct scan_found {
+    enum m2sdr_cal_signal kind;
+    double freq_hz;
+    double ppm;
+    double power_db;
+    double quality;
+    int    count;
+    int    id;
+    bool   confirmed;              /* Another carrier gives the same error. */
+};
+
+static const struct { const char *name; enum m2sdr_cal_signal kind; double start_mhz, stop_mhz; } scan_bands[] = {
+    { "lte28",   M2SDR_CAL_SIGNAL_LTE,  758.0,  803.0 },
+    { "lte20",   M2SDR_CAL_SIGNAL_LTE,  791.0,  821.0 },
+    { "lte8",    M2SDR_CAL_SIGNAL_LTE,  925.0,  960.0 },
+    { "lte3",    M2SDR_CAL_SIGNAL_LTE, 1805.0, 1880.0 },
+    { "lte1",    M2SDR_CAL_SIGNAL_LTE, 2110.0, 2170.0 },
+    { "lte7",    M2SDR_CAL_SIGNAL_LTE, 2620.0, 2690.0 },
+    { "lte5",    M2SDR_CAL_SIGNAL_LTE,  869.0,  894.0 },
+    { "lte2",    M2SDR_CAL_SIGNAL_LTE, 1930.0, 1990.0 },
+    { "lte4",    M2SDR_CAL_SIGNAL_LTE, 2110.0, 2155.0 },
+    { "lte12",   M2SDR_CAL_SIGNAL_LTE,  729.0,  746.0 },
+    { "lte13",   M2SDR_CAL_SIGNAL_LTE,  746.0,  756.0 },
+    { "lte38",   M2SDR_CAL_SIGNAL_LTE, 2570.0, 2620.0 },
+    { "lte40",   M2SDR_CAL_SIGNAL_LTE, 2300.0, 2400.0 },
+    { "gsm900",  M2SDR_CAL_SIGNAL_GSM,  925.0,  960.0 },
+    { "gsm1800", M2SDR_CAL_SIGNAL_GSM, 1805.0, 1880.0 },
+};
+#define SCAN_BANDS (sizeof(scan_bands) / sizeof(scan_bands[0]))
+
+/* Bands scanned without an argument: the ones in use in Europe. */
+static const char *const scan_default[] = { "lte28", "lte20", "lte8", "gsm900", "lte3", "gsm1800", "lte1", "lte7" };
+
+/* A band name, or lte:START-STOP / gsm:START-STOP in Hz. */
+static int parse_scan_range(const char *text, struct scan_range *range)
+{
+    const char *colon = strchr(text, ':');
+    size_t i;
+
+    memset(range, 0, sizeof(*range));
+    for (i = 0; i < SCAN_BANDS; i++) {
+        if (strcmp(text, scan_bands[i].name) == 0) {
+            range->kind     = scan_bands[i].kind;
+            range->start_hz = scan_bands[i].start_mhz * 1e6;
+            range->stop_hz  = scan_bands[i].stop_mhz * 1e6;
+            snprintf(range->name, sizeof(range->name), "%s", text);
+            return 0;
+        }
+    }
+    if (colon && (strncmp(text, "lte:", 4) == 0 || strncmp(text, "gsm:", 4) == 0)) {
+        char buf[64];
+        char *dash;
+
+        snprintf(buf, sizeof(buf), "%s", colon + 1);
+        dash = strchr(buf + 1, '-');
+        if (!dash)
+            return -1;
+        *dash = '\0';
+        if (m2sdr_cli_parse_double(buf, &range->start_hz) != 0 ||
+            m2sdr_cli_parse_double(dash + 1, &range->stop_hz) != 0)
+            return -1;
+        if (range->start_hz < 70e6 || range->stop_hz > 6e9 || range->stop_hz - range->start_hz < 1e6)
+            return -1;
+        range->kind = text[0] == 'l' ? M2SDR_CAL_SIGNAL_LTE : M2SDR_CAL_SIGNAL_GSM;
+        snprintf(range->name, sizeof(range->name), "%s %.0f-%.0f MHz", text[0] == 'l' ? "LTE" : "GSM",
+                 range->start_hz / 1e6, range->stop_hz / 1e6);
+        return 0;
+    }
+    return -1;
+}
+
+static int cmp_found(const void *a, const void *b)
+{
+    const struct scan_found *x = a, *y = b;
+    if (x->kind != y->kind)
+        return (int)x->kind - (int)y->kind;
+    return (x->freq_hz > y->freq_hz) - (x->freq_hz < y->freq_hz);
+}
+
+/* The PSS of an LTE carrier is also seen, weaker, on the raster points next to its centre: of
+ * the detections close to each other, the strongest PSS is the carrier. Detections of the same
+ * frequency are one. Returns the number kept, sorted, at the start of the table. */
+static int scan_merge(struct scan_found *found, int nfound)
+{
+    int kept = 0, i, j;
+
+    qsort(found, (size_t)nfound, sizeof(*found), cmp_found);
+    for (i = 0; i < nfound; i++)
+        found[i].confirmed = true;                     /* Used as "kept" in this pass. */
+    for (i = 0; i < nfound; i++) {
+        for (j = 0; j < nfound; j++) {
+            if (j == i || found[j].kind != found[i].kind)
+                continue;
+            if (found[i].kind == M2SDR_CAL_SIGNAL_LTE && fabs(found[j].freq_hz - found[i].freq_hz) < SCAN_LTE_MERGE_HZ &&
+                (found[j].quality > found[i].quality || (found[j].quality == found[i].quality && j < i)))
+                found[i].confirmed = false;
+            if (fabs(found[j].freq_hz - found[i].freq_hz) < 1.0 && j < i)
+                found[i].confirmed = false;
+        }
+    }
+    for (i = 0; i < nfound; i++) {
+        if (found[i].confirmed) {
+            found[kept] = found[i];
+            found[kept++].confirmed = false;
+        }
+    }
+    return kept;
+}
+
+static int cmd_scan(struct m2sdr_dev *dev, const struct cal_options *opt,
+                    const struct scan_range *ranges, int nranges)
+{
+    const unsigned per_buf = m2sdr_bytes_to_samples(M2SDR_FORMAT_SC16_Q11, M2SDR_BUFFER_BYTES);
+    const size_t max_count = (size_t)(SCAN_GSM_S * SCAN_SAMPLE_RATE);
+    struct scan_found *found;
+    int16_t *raw;
+    float complex *x, *y;
+    int nfound = 0, kept = 0, status = 1;
+    int r, i, j;
+
+    raw   = malloc(((max_count * 2 + per_buf - 1) / per_buf + 1) * per_buf * 2 * sizeof(*raw));
+    x     = malloc(max_count * sizeof(*x));
+    y     = malloc((max_count / M2SDR_CAL_SCAN_DECIM + 1) * sizeof(*y));
+    found = calloc(SCAN_MAX_FOUND, sizeof(*found));
+    if (!raw || !x || !y || !found) {
+        fprintf(stderr, "Out of memory\n");
+        goto out;
+    }
+    if (rf_setup(dev, opt, SCAN_SAMPLE_RATE, SCAN_BANDWIDTH_HZ, ranges[0].start_hz) != 0)
+        goto out;
+
+    for (r = 0; r < nranges; r++) {
+        const struct scan_range *range = &ranges[r];
+        const bool   lte    = range->kind == M2SDR_CAL_SIGNAL_LTE;
+        const double raster = lte ? 100e3 : 200e3;
+        /* A carrier has to lie in the band: half of the narrowest LTE carrier, one GSM channel. */
+        const double first  = ceil((range->start_hz + (lte ? 0.7e6 : 0.2e6)) / raster - 1e-6) * raster;
+        const double last   = floor((range->stop_hz - (lte ? 0.7e6 : 0.2e6)) / raster + 1e-6) * raster;
+        const size_t count  = (size_t)((lte ? SCAN_LTE_S : SCAN_GSM_S) * SCAN_SAMPLE_RATE);
+        const int    before = nfound;
+        double centre;
+
+        printf("Scanning %s, %.1f to %.1f MHz ", range->name, first / 1e6, last / 1e6);
+        fflush(stdout);
+        for (centre = first + SCAN_STEP_HZ / 2; centre - SCAN_STEP_HZ / 2 <= last; centre += SCAN_STEP_HZ) {
+            double f;
+
+            if (capture(dev, opt, centre, raw, x, count) != 0)
+                goto out;
+            /* LTE: every third raster point first. A carrier is also seen, weaker, from the
+             * points next to its centre, so one of them finds it; the points around a detection
+             * are then tested, and the merge keeps the strongest. GSM: every channel. */
+            {
+                const int npoints = (int)llround(SCAN_STEP_HZ / raster);
+                const int margin  = lte ? 2 : 0;
+                bool tested[64 + 4] = { false };
+                bool hit[64 + 4]    = { false };
+                int pass, k;
+
+                for (pass = 0; pass < (lte ? 2 : 1); pass++) {
+                    for (k = -margin; k < npoints + margin; k++) {
+                        struct m2sdr_cal_estimate est;
+                        size_t ny = 0;
+                        bool want;
+                        int rc;
+
+                        f = centre - SCAN_STEP_HZ / 2 + k * raster;
+                        if (f < first - 1.0 || f > last + 1.0 || tested[k + margin])
+                            continue;
+                        if (!lte) {
+                            want = true;
+                        } else if (pass == 0) {
+                            want = k >= 0 && k < npoints && (llround(f / raster) % 3) == 0;
+                        } else {
+                            int d;
+                            want = false;
+                            for (d = -2; d <= 2; d++) {
+                                if (k + d >= -margin && k + d < npoints + margin && hit[k + d + margin])
+                                    want = true;
+                            }
+                        }
+                        if (!want)
+                            continue;
+                        tested[k + margin] = true;
+                        if (m2sdr_cal_channelize(x, count, f - centre, y, &ny) != 0)
+                            goto out;
+                        rc = lte ? m2sdr_cal_lte_estimate(y, ny, opt->max_ppm * 1e-6 * f, &est)
+                                 : m2sdr_cal_gsm_estimate(y, ny, opt->max_ppm * 1e-6 * f, &est);
+                        if (rc != 0 || !est.found || nfound >= SCAN_MAX_FOUND)
+                            continue;
+                        if (pass == 0)
+                            hit[k + margin] = true;
+                        found[nfound].kind     = range->kind;
+                        found[nfound].freq_hz  = f;
+                        found[nfound].ppm      = m2sdr_cal_refclk_ppm(est.cfo_hz, f);
+                        found[nfound].power_db = est.power_db;
+                        found[nfound].quality  = est.quality;
+                        found[nfound].count    = est.count;
+                        found[nfound].id       = est.id;
+                        nfound++;
+                    }
+                }
+            }
+            printf(".");
+            fflush(stdout);
+        }
+        /* Keep the carriers of the band only: the table stays small over a long scan. */
+        nfound = before + scan_merge(found + before, nfound - before);
+        printf(" %d\n", nfound - before);
+    }
+
+    /* Bands that overlap give the same carrier twice. */
+    kept = scan_merge(found, nfound);
+
+    /* One clock, one error. An LTE carrier whose centre was not identified leaves a detection
+     * next to it that reads wrong by 5 or 10 kHz: the carriers that agree with another one are
+     * confirmed, the ones far from them are left out. GSM carriers have no such ambiguity. */
+    {
+        int best = -1, best_votes = 0, dropped = 0;
+
+        for (i = 0; i < kept; i++) {
+            int votes = 0;
+            for (j = 0; j < kept; j++)
+                votes += j != i && fabs(found[j].ppm - found[i].ppm) < SCAN_AGREE_PPM;
+            if (votes > best_votes || (votes == best_votes && votes > 0 && best >= 0 &&
+                found[i].kind == M2SDR_CAL_SIGNAL_GSM && found[best].kind != M2SDR_CAL_SIGNAL_GSM)) {
+                best_votes = votes;
+                best = i;
+            }
+        }
+        if (best >= 0) {
+            const double consensus = found[best].ppm;
+            for (i = 0, j = 0; i < kept; i++) {
+                if (fabs(found[i].ppm - consensus) < 2 * SCAN_AGREE_PPM) {
+                    found[j] = found[i];
+                    found[j++].confirmed = true;
+                } else {
+                    dropped++;
+                }
+            }
+            kept = j;
+            if (dropped)
+                printf("%d detection%s left out: more than %.1f ppm from the carriers that agree.\n", dropped,
+                       dropped == 1 ? "" : "s", 2 * SCAN_AGREE_PPM);
+        }
+    }
+
+    if (!kept) {
+        printf("\nNo LTE or GSM carrier found: check the antenna, the bands of the region and --max-ppm.\n");
+        goto out;
+    }
+    printf("\n%d carrier%s usable for the calibration:\n", kept, kept == 1 ? "" : "s");
+    printf("%-4s %12s %-16s %10s %11s  %s\n", "Type", "Frequency", "Channel", "Error", "Power", "Detection");
+    for (i = 0; i < kept; i++) {
+        char channel[32];
+        if (found[i].kind == M2SDR_CAL_SIGNAL_LTE) {
+            unsigned band = 0;
+            const int earfcn = m2sdr_cal_hz_to_earfcn(found[i].freq_hz, &band);
+            if (earfcn >= 0)
+                snprintf(channel, sizeof(channel), "B%u EARFCN %d", band, earfcn);
+            else
+                snprintf(channel, sizeof(channel), "-");
+            printf("%-4s %8.1f MHz %-16s %+6.3f ppm %6.1f dBFS  PSS root %d, metric %.0f\n", "LTE",
+                   found[i].freq_hz / 1e6, channel, found[i].ppm, found[i].power_db, found[i].id, found[i].quality);
+        } else {
+            const int arfcn = m2sdr_cal_hz_to_arfcn(found[i].freq_hz);
+            if (arfcn >= 0)
+                snprintf(channel, sizeof(channel), "ARFCN %d", arfcn);
+            else
+                snprintf(channel, sizeof(channel), "-");
+            printf("%-4s %8.1f MHz %-16s %+6.3f ppm %6.1f dBFS  %d FCCH bursts\n", "GSM",
+                   found[i].freq_hz / 1e6, channel, found[i].ppm, found[i].power_db, found[i].count);
+        }
+    }
+    if (!found[0].confirmed)
+        printf("\nNo two carriers agree: an LTE entry may be next to the centre of its carrier and read wrong\n"
+               "by several ppm. Scan more bands, or check the carriers with measure.\n");
+    printf("\nThe error of a scan is a first value, from a short capture. To measure on these carriers:\n  m2sdr_cal measure");
+    for (i = 0; i < kept && i < CAL_MAX_SIGNALS; i++)
+        printf(" %s:%.1fe6", found[i].kind == M2SDR_CAL_SIGNAL_LTE ? "lte" : "gsm", found[i].freq_hz / 1e6);
+    printf("\n");
+    status = 0;
+
+out:
+    (void)m2sdr_stream_deactivate(dev, M2SDR_RX);
+    free(raw);
+    free(x);
+    free(y);
+    free(found);
+    return status;
+}
+
 static int cmd_show(struct m2sdr_dev *dev, const struct cal_options *opt)
 {
     struct m2sdr_cal_record rec;
@@ -486,13 +810,18 @@ static int cmd_clear(struct m2sdr_dev *dev, const struct cal_options *opt)
 static void help(void)
 {
     printf("M2SDR Reference Clock Calibration Utility.\n"
-           "usage: m2sdr_cal [options] measure SIGNAL...\n"
+           "usage: m2sdr_cal [options] scan [BAND...]\n"
+           "       m2sdr_cal [options] measure SIGNAL...\n"
            "       m2sdr_cal [options] show\n"
            "       m2sdr_cal [options] clear\n"
            "\n"
            "Measures the error of the reference clock against cellular downlink carriers.\n"
            "\n"
-           "Signals:\n"
+           "Bands (scan): lte1 lte2 lte3 lte4 lte5 lte7 lte8 lte12 lte13 lte20 lte28 lte38 lte40,\n"
+           "  gsm900 gsm1800, or a range: lte:START-STOP, gsm:START-STOP in Hz (lte:791e6-821e6).\n"
+           "  Without a band: lte28 lte20 lte8 gsm900 lte3 gsm1800 lte1 lte7.\n"
+           "\n"
+           "Signals (measure):\n"
            "  lte:FREQ       LTE carrier, FREQ its centre in Hz (816e6).\n"
            "  earfcn:N       LTE carrier, by its downlink EARFCN.\n"
            "  gsm:FREQ       GSM carrier with a BCCH, FREQ in Hz (952e6).\n"
@@ -552,6 +881,8 @@ int main(int argc, char **argv)
     struct m2sdr_cli_device cli_dev;
     struct cal_options opt;
     struct cal_signal signals[CAL_MAX_SIGNALS];
+    struct scan_range ranges[CAL_MAX_SIGNALS];
+    int nranges = 0;
     struct m2sdr_dev *dev = NULL;
     const char *cmd;
     int nsignals = 0;
@@ -657,8 +988,24 @@ int main(int argc, char **argv)
             m2sdr_cli_error("measure needs at least one signal");
             return 1;
         }
+    } else if (strcmp(cmd, "scan") == 0) {
+        for (; optind < argc; optind++) {
+            if (nranges >= CAL_MAX_SIGNALS) {
+                m2sdr_cli_error("too many bands (%d at most)", CAL_MAX_SIGNALS);
+                return 1;
+            }
+            if (parse_scan_range(argv[optind], &ranges[nranges]) != 0) {
+                m2sdr_cli_error("invalid band '%s' (expected a band as lte20 or gsm900, or lte:START-STOP, gsm:START-STOP)", argv[optind]);
+                return 1;
+            }
+            nranges++;
+        }
+        if (!nranges) {
+            for (; nranges < (int)(sizeof(scan_default) / sizeof(scan_default[0])); nranges++)
+                (void)parse_scan_range(scan_default[nranges], &ranges[nranges]);
+        }
     } else if (strcmp(cmd, "show") != 0 && strcmp(cmd, "clear") != 0) {
-        m2sdr_cli_error("unknown command '%s' (expected measure, show or clear)", cmd);
+        m2sdr_cli_error("unknown command '%s' (expected scan, measure, show or clear)", cmd);
         return 1;
     }
 
@@ -669,7 +1016,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if (strcmp(cmd, "measure") == 0)
+    if (strcmp(cmd, "scan") == 0)
+        status = cmd_scan(dev, &opt, ranges, nranges);
+    else if (strcmp(cmd, "measure") == 0)
         status = cmd_measure(dev, &opt, signals, nsignals);
     else if (strcmp(cmd, "show") == 0)
         status = cmd_show(dev, &opt);

@@ -326,12 +326,15 @@ Measures the error of the reference clock against cellular downlink carriers (LT
 cyclic prefix; GSM: FCCH bursts), trims the reference and stores the result.
 
 ```bash
+m2sdr_cal [options] scan [BAND...]
 m2sdr_cal [options] measure SIGNAL...
 m2sdr_cal [options] show
 m2sdr_cal [options] clear
 ```
 
-Signals: `lte:FREQ` (centre of the carrier, Hz), `earfcn:N`, `gsm:FREQ` (carrier with a BCCH), `arfcn:N`.
+Bands (`scan`): `lte1`, `lte3`, `lte7`, `lte8`, `lte20`, `lte28`, `gsm900`, `gsm1800` and others (see `--help`), or a range `lte:START-STOP`, `gsm:START-STOP` in Hz. Without a band, the bands in use in Europe. The scan lists the carriers usable for the calibration and prints the `measure` command for them.
+
+Signals (`measure`): `lte:FREQ` (centre of the carrier, Hz), `earfcn:N`, `gsm:FREQ` (carrier with a BCCH), `arfcn:N`.
 
 Relevant options:
 - `--duration S`, `--repeat N` (capture length and count per signal, default `0.5` and `3`)
@@ -345,6 +348,8 @@ Relevant options:
 
 Examples:
 ```bash
+./m2sdr_cal scan
+./m2sdr_cal scan lte20 gsm900
 ./m2sdr_cal measure lte:816e6 earfcn:1300 arfcn:85
 ./m2sdr_cal measure --apply --store earfcn:1300 arfcn:85
 ./m2sdr_rf --refclk-ppm stored
