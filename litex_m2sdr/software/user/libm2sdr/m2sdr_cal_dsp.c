@@ -404,7 +404,7 @@ static double lte_cp_phase(const float complex *x, size_t slots, double *peak_ov
         bool top = mag[n] > 0.5 * best_mag;
         for (k = -LTE_CP; top && k <= LTE_CP; k++) {
             const int m = (n + k + LTE_SLOT) % LTE_SLOT;
-            if (mag[m] > mag[n] || (mag[m] == mag[n] && m < n && k < 0))
+            if (mag[m] > mag[n] || (m < n && k < 0 && mag[m] == mag[n]))
                 top = false;
         }
         if (top)
@@ -431,7 +431,7 @@ int m2sdr_cal_lte_estimate(const float complex *x, size_t count, double max_cfo_
     double best_metric = 0, best_fh = 0, best_match = 0, best_peak = 0;
     double pss_energy = 0;
     double sum = 0, sum2 = 0;
-    struct { double peak, metric, match, fh; long time; } cand[LTE_MAX_HYPS];
+    struct { double peak, metric, match, fh; long time; } cand[LTE_MAX_HYPS] = { { 0 } };
     int ncand = 0;
     int best_root = 0;
     int hyps, h, n;
