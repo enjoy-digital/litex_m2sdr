@@ -787,12 +787,20 @@
       "reset": 1,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host.",
+      "name": "eth_tx_status",
+      "offset": 14,
+      "reset": 1,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 14
+    "size": 15
    },
    {
     "access": "ro",
@@ -1480,6 +1488,35 @@
     "offset": 8,
     "reset": 2345,
     "size": 16
+   }
+  ],
+  "eth_tx_status": [
+   {
+    "access": "ro",
+    "description": "Words of 64 bits in the Ethernet TX FIFO.",
+    "fields": [],
+    "name": "fifo_level",
+    "offset": 0,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Depth of the Ethernet TX FIFO, in words of 64 bits.",
+    "fields": [],
+    "name": "fifo_depth",
+    "offset": 4,
+    "reset": null,
+    "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Datagrams dropped for lack of room in the Ethernet TX FIFO (free-running).",
+    "fields": [],
+    "name": "drops",
+    "offset": 8,
+    "reset": null,
+    "size": 32
    }
   ],
   "eth_tx_streamer": [

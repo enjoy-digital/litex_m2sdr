@@ -1012,12 +1012,20 @@
       "reset": 0,
       "size": 1,
       "values": []
+     },
+     {
+      "description": "Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host.",
+      "name": "eth_tx_status",
+      "offset": 14,
+      "reset": 0,
+      "size": 1,
+      "values": []
      }
     ],
     "name": "features",
     "offset": 4,
     "reset": null,
-    "size": 14
+    "size": 15
    },
    {
     "access": "ro",

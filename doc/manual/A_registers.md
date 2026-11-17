@@ -46,7 +46,7 @@ Bank `capability`.
 | Register | Offset | Bits | Access | Description |
 |----------------------------|-------------|--------|---------|----------------------------------------|
 | `api_version` | `0x0000` | 32 | ro | API Version of the gateware (e.g., 0x0100 for v1.0). |
-| `features` | `0x0004` | 14 | ro | Hardware feature presence bitfield. |
+| `features` | `0x0004` | 15 | ro | Hardware feature presence bitfield. |
 | `pcie_config` | `0x0008` | 5 | ro | PCIe configuration. Valid only if features.pcie is set. |
 | `eth_config` | `0x000c` | 4 | ro | Ethernet configuration. Valid only if features.eth is set. |
 | `sata_config` | `0x0010` | 4 | ro | SATA configuration. Valid only if features.sata is set. |
@@ -864,7 +864,7 @@ Bank `eth_tx_streamer`.
 
 ## Ethernet TX status {#reg-eth-tx-status}
 
-Defined by `UDPTXStatus` (litex_m2sdr/gateware/udp.py).
+Defined by `UDPTXStatus` (`litex_m2sdr/gateware/udp.py`).
 
 Present with `--with-eth`, capability bit `eth_tx_status`. The host library reads the level
 to send the TX stream at the rate at which the board transmits it.
