@@ -343,6 +343,162 @@ static void test_phase_noise(void)
     free(x);
 }
 
+/* Demodulation */
+
+#define DEMOD_COUNT (1u << 19)
+
+static double test_rrc(double t, double alpha)
+{
+    if (fabs(t) < 1e-9)
+        return 1.0 - alpha + 4.0 * alpha / M_PI;
+    if (fabs(fabs(t) - 1.0 / (4.0 * alpha)) < 1e-9)
+        return alpha / sqrt(2.0) * ((1.0 + 2.0 / M_PI) * sin(M_PI / (4.0 * alpha)) +
+                                    (1.0 - 2.0 / M_PI) * cos(M_PI / (4.0 * alpha)));
+    return (sin(M_PI * t * (1.0 - alpha)) + 4.0 * alpha * t * cos(M_PI * t * (1.0 + alpha))) /
+           (M_PI * t * (1.0 - 16.0 * alpha * alpha * t * t));
+}
+
+struct mod_signal {
+    enum m2sdr_modulation modulation;
+    double symbol_rate, rolloff, freq_hz;
+    double evm;                 /* Noise added, as the EVM it gives after the matched filter. */
+    double gain_db, quad_deg;   /* Transmitter impairments: I over Q, angle error. */
+    double complex offset;      /* Added to the symbols. */
+};
+
+/* Random symbols under a root raised cosine, of amplitude 0.25, at FS. */
+static void make_modulated(float complex *x, size_t count, const struct mod_signal *sig)
+{
+    static float complex points[256];
+    const int npoints = m2sdr_constellation(sig->modulation, points);
+    const double sps = FS / sig->symbol_rate;
+    const size_t nsym = (size_t)((double)count / sps) + 40;
+    double complex *a = malloc(nsym * sizeof(*a));
+    const double gi = pow(10.0, sig->gain_db / 20.0), q = sig->quad_deg * M_PI / 180.0;
+    size_t n, k;
+
+    if (!a) {
+        failures++;
+        return;
+    }
+    for (k = 0; k < nsym; k++) {
+        const float complex p = points[(int)(rng_uniform() * npoints) % npoints];
+        /* I scaled, Q leaning towards I. */
+        a[k] = gi * crealf(p) + cimagf(p) * sin(q) + I * cimagf(p) * cos(q) + sig->offset;
+    }
+    for (n = 0; n < count; n++) {
+        const double t = (double)n / sps + 3.37;          /* In symbols, off the sample grid. */
+        const long k0 = (long)floor(t) - 12, k1 = (long)floor(t) + 12;
+        double complex v = 0;
+        long kk;
+
+        for (kk = k0 < 0 ? 0 : k0; kk <= k1 && kk < (long)nsym; kk++)
+            v += a[kk] * test_rrc(t - (double)kk, sig->rolloff);
+        x[n] = (float complex)(0.25 * v * cexp(I * (2.0 * M_PI * sig->freq_hz * (double)n / FS + 0.7)));
+    }
+    free(a);
+    /* Noise of the full band that leaves `evm` after the filter matched to the symbols. */
+    add_noise(x, count, 0.0625 * sig->evm * sig->evm * sps);
+}
+
+static void test_demod(void)
+{
+    static const struct mod_signal signals[] = {
+        { M2SDR_MOD_BPSK,   50000.0,  0.35,   1234.0, 0.05, 0, 0, 0 },
+        { M2SDR_MOD_QPSK,   50000.0,  0.35,  -4321.0, 0.05, 0, 0, 0 },
+        { M2SDR_MOD_8PSK,   31250.0,  0.22,  20000.0, 0.03, 0, 0, 0 },
+        { M2SDR_MOD_16QAM,  37000.0,  0.22, -80000.0, 0.03, 0, 0, 0 },
+        { M2SDR_MOD_32QAM,  64000.0,  0.50,    500.0, 0.02, 0, 0, 0 },
+        { M2SDR_MOD_64QAM, 100000.0,  0.15, 150000.0, 0.02, 0, 0, 0 },
+        { M2SDR_MOD_128QAM, 25000.0,  0.35,  -1000.0, 0.01, 0, 0, 0 },
+        { M2SDR_MOD_256QAM, 20000.0,  0.35,   3000.0, 0.01, 0, 0, 0 },
+    };
+    float complex *x = malloc(DEMOD_COUNT * sizeof(*x));
+    struct m2sdr_demod_result *res = malloc(sizeof(*res));
+    struct m2sdr_demod_config cfg;
+    struct mod_signal sig;
+    char name[64];
+    unsigned i;
+
+    if (!x || !res) {
+        failures++;
+        return;
+    }
+
+    /* Everything found from the signal. */
+    for (i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        memset(&cfg, 0, sizeof(cfg));
+        memset(x, 0, DEMOD_COUNT * sizeof(*x));
+        make_modulated(x, DEMOD_COUNT, &signals[i]);
+        printf("Demodulation, %s, %.0f symbols/s, roll-off %.2f, automatic:\n",
+               m2sdr_modulation_name(signals[i].modulation), signals[i].symbol_rate, signals[i].rolloff);
+        CHECK("demod", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0);
+        CHECK("signal and lock", res->signal && res->locked);
+        snprintf(name, sizeof(name), "modulation (%s)", m2sdr_modulation_name(res->modulation));
+        CHECK(name, res->modulation == signals[i].modulation);
+        CHECK_NEAR("symbol rate (Hz)", res->symbol_rate, signals[i].symbol_rate, 1e-5 * signals[i].symbol_rate);
+        CHECK_NEAR("roll-off", res->rolloff, signals[i].rolloff, 0.001);
+        CHECK_NEAR("carrier offset (Hz)", res->freq_offset_hz, signals[i].freq_hz, 2e-4 * signals[i].symbol_rate);
+        CHECK_NEAR("EVM (%)", 100.0 * res->evm_rms, 100.0 * signals[i].evm, 15.0 * signals[i].evm);
+        CHECK_NEAR("MER (dB)", res->mer_db, -20.0 * log10(signals[i].evm), 1.3);
+        CHECK_NEAR("signal power (dBFS)", res->power_db, 20.0 * log10(0.25), 0.5);
+        CHECK("symbols and eye", res->symbols >= 2000 && res->eye_traces == M2SDR_DEMOD_EYE_TRACES);
+    }
+
+    /* Transmitter impairments on 16QAM. The rotation of the constellation is not resolved, so
+     * I and Q can come out swapped: the signs are not checked. */
+    printf("Demodulation, impairments:\n");
+    memset(&cfg, 0, sizeof(cfg));
+    sig = signals[3];
+    sig.evm      = 0.005;
+    sig.gain_db  = 0.5;
+    sig.quad_deg = 2.0;
+    sig.offset   = 0.02 - 0.01 * I;
+    memset(x, 0, DEMOD_COUNT * sizeof(*x));
+    make_modulated(x, DEMOD_COUNT, &sig);
+    CHECK("demod", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && res->locked);
+    CHECK_NEAR("gain imbalance (dB)", fabs(res->gain_imbalance_db), 0.5, 0.05);
+    CHECK_NEAR("quadrature error (deg)", fabs(res->quadrature_deg), 2.0, 0.15);
+    CHECK_NEAR("origin offset (dB)", res->iq_offset_db, 10.0 * log10(0.02 * 0.02 + 0.01 * 0.01), 0.5);
+    /* The impairments are in the EVM: gain and angle errors, and the offset. */
+    CHECK("EVM above the noise", res->evm_rms > 0.03 && res->evm_rms < 0.06);
+
+    /* Settings given. */
+    printf("Demodulation, settings given:\n");
+    memset(x, 0, DEMOD_COUNT * sizeof(*x));
+    make_modulated(x, DEMOD_COUNT, &signals[5]);
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.modulation  = M2SDR_MOD_64QAM;
+    cfg.symbol_rate = 100000.0;
+    cfg.rolloff     = 0.15;
+    cfg.max_symbols = 1000;
+    CHECK("demod", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && res->locked);
+    CHECK("symbols", res->symbols == 1000);
+    CHECK_NEAR("EVM (%)", 100.0 * res->evm_rms, 2.0, 0.3);
+    /* A symbol rate off by 20 ppm is taken by the timing. */
+    cfg.symbol_rate = 100002.0;
+    cfg.max_symbols = 0;
+    CHECK("demod, rate off", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && res->locked);
+    CHECK_NEAR("symbol rate (Hz)", res->symbol_rate, 100000.0, 0.5);
+    CHECK_NEAR("EVM (%)", 100.0 * res->evm_rms, 2.0, 0.3);
+    /* The wrong modulation does not lock. */
+    cfg.symbol_rate = 0;
+    cfg.modulation  = M2SDR_MOD_QPSK;
+    CHECK("64QAM read as QPSK", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && res->signal && !res->locked);
+
+    printf("Demodulation, no signal:\n");
+    memset(&cfg, 0, sizeof(cfg));
+    memset(x, 0, DEMOD_COUNT * sizeof(*x));
+    add_noise(x, DEMOD_COUNT, 0.01);
+    CHECK("noise", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && !res->signal);
+    add_tone(x, DEMOD_COUNT, 100000.0, -6.0, 0.0);
+    CHECK("tone", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) == 0 && !res->locked);
+    cfg.rolloff = 3.0;
+    CHECK("bad roll-off", m2sdr_demod(x, DEMOD_COUNT, FS, &cfg, res) != 0);
+    free(res);
+    free(x);
+}
+
 /* Report mode of m2sdr_analyzer */
 /*-------------------------------*/
 
@@ -439,6 +595,7 @@ int main(int argc, char **argv)
     test_arguments(x);
     free(x);
     test_phase_noise();
+    test_demod();
     if (failures) {
         printf("test_m2sdr_analysis: %d FAILED\n", failures);
         return 1;
