@@ -27,7 +27,7 @@ typedef struct { float r, i; } cal_cpx;
 
 static void cal_fft_run(const struct m2sdr_fft *fft, const cal_cpx *in, cal_cpx *out, int n)
 {
-    float complex vi[256], vo[256];
+    float complex vi[256] = { 0 }, vo[256];
     int i;
 
     for (i = 0; i < n; i++)

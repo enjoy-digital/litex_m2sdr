@@ -20,7 +20,9 @@
 
 double m2sdr_power_db(double power)
 {
-    return power > 1e-20 ? 10.0 * log10(power) : -200.0;
+    if (power <= 1e-20)
+        return -200.0;
+    return 10.0 * log10(power);
 }
 
 static int cmp_float(const void *a, const void *b)
