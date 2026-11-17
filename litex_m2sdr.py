@@ -64,6 +64,7 @@ from litex_m2sdr.gateware.pcie        import (
     add_s7_pcie_timing_constraints,
 )
 from litex_m2sdr.gateware.header      import TXRXHeader, TXHeaderPacketMarker
+from litex_m2sdr.gateware.udp         import UDPPacketDropper
 from litex_m2sdr.gateware.etherbone   import SharedLiteEthEtherbone
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
@@ -849,7 +850,16 @@ class BaseSoC(SoCMini):
                 data_width = 64,
                 with_csr   = True,
             )
-            self.comb += eth_streamer_port.source.connect(self.eth_tx_streamer.sink)
+            # A full TX FIFO would stall the UDP port, and with it the receive path of the whole
+            # core, Etherbone included: the board would not answer any more, for as long as the
+            # timed-TX gate holds a frame. A datagram that does not fit is dropped whole.
+            self.eth_tx_dropper = UDPPacketDropper(eth_streamer_port.source.description)
+            self.comb += [
+                eth_streamer_port.source.connect(self.eth_tx_dropper.sink),
+                self.eth_tx_dropper.source.connect(self.eth_tx_streamer.sink),
+                self.eth_tx_dropper.room.eq(
+                    self.eth_tx_streamer.fifo.level < (eth_tx_streamer_fifo_depth - 256)),
+            ]
 
             self.eth_tx_streamer_started = Signal()
             eth_tx_streamer_primed = Signal()

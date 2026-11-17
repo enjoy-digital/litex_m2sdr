@@ -351,6 +351,12 @@ level the FIFO takes 128 KiB more or 128 KiB less, about a millisecond each way 
 A host that runs further ahead loses datagrams, and one that falls further behind underflows
 the RFIC ([Ethernet host link](#perf-eth)).
 
+A datagram that does not fit in the TX FIFO is dropped whole (`UDPPacketDropper`). The UDP port
+of the streamer never stalls: a stalled port stalls the receive path of the whole LiteEth core,
+and the board would stop answering, Etherbone included, for as long as the FIFO stays full. This
+matters with timed TX, where the gate holds a frame until its transmit time: a burst larger than
+the FIFO, sent ahead of its time, is cut to what the FIFO holds.
+
 **TX frames.** The host sends each 8 KiB buffer as 8 datagrams. With the TX header, the buffer
 starts with the sync word of the header: the gateware marks the first word of a datagram that
 is the sync word (`TXHeaderPacketMarker`), and the TX header extractor finds the header with
