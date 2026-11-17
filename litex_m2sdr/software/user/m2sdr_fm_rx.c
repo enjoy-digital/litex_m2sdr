@@ -72,18 +72,28 @@ static int write_wav_header(FILE *f, int channels, uint32_t data_bytes) {
 /* RDS */
 /*-----*/
 
+/* Text for a terminal: the codes above ASCII belong to the RDS character table, not to the
+ * one of the terminal. */
+static const char *rds_ascii(const char *text, char *out, size_t size) {
+    size_t i;
+    for (i = 0; text[i] && i + 1 < size; i++)
+        out[i] = ((unsigned char)text[i] < 0x20 || (unsigned char)text[i] > 0x7e) ? '?' : text[i];
+    out[i] = '\0';
+    return out;
+}
+
 /* What was decoded so far, on one line of stderr, when it differs from the last line. */
 static void print_rds(const struct m2sdr_fm_rds_info *info) {
     static char last[256];
-    char line[256];
+    char line[256], text[M2SDR_FM_RDS_RT_LEN + 1];
     size_t n = 0;
 
     n += (size_t)snprintf(line + n, sizeof(line) - n, "RDS: PI=%04X PTY=%u (%s)%s%s", info->pi, info->pty,
         m2sdr_fm_rds_pty_name(info->pty), info->tp ? " TP" : "", info->ta ? " TA" : "");
     if (info->ps_valid)
-        n += (size_t)snprintf(line + n, sizeof(line) - n, " PS=\"%s\"", info->ps);
+        n += (size_t)snprintf(line + n, sizeof(line) - n, " PS=\"%s\"", rds_ascii(info->ps, text, sizeof(text)));
     if (info->rt_valid)
-        n += (size_t)snprintf(line + n, sizeof(line) - n, " RT=\"%s\"", info->rt);
+        n += (size_t)snprintf(line + n, sizeof(line) - n, " RT=\"%s\"", rds_ascii(info->rt, text, sizeof(text)));
     if (info->ct_valid) {
         /* Local time of the station, and its offset from UTC. */
         const int minutes = info->ct_offset * 30;
