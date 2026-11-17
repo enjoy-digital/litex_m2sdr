@@ -756,10 +756,17 @@ with a cable and an attenuator from TX to RX, the board is its own test source. 
 then makes `m2sdr_analyzer` leave the RFIC as `m2sdr_rf` set it.
 
 ```sh
-m2sdr_rf --sample-rate 1920000 --rx-freq 2450000000 --tx-freq 2450000000 --tx-att 30 --rx-gain 30
-m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 16qam --qam-symbol-rate 120000 &
-m2sdr_analyzer --no-rf-init --freq 2450e6 --sample-rate 1.92e6 --view modulation
+m2sdr_rf --sample-rate 1920000 --rx-freq 2490000000 --tx-freq 2490400000 --tx-att 10 --rx-gain 40
+m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 64qam --qam-symbol-rate 120000 &
+m2sdr_analyzer --no-rf-init --freq 2490e6 --sample-rate 1.92e6 --view modulation
 ```
+
+> [!TIP]
+> Keep a narrow signal away from the centre of the capture, as above with TX 400 kHz above RX.
+> The RFIC removes its DC offset with a loop that also removes the lowest frequencies of a
+> signal sitting on the centre: 64QAM at 30000 symbols/s read 4 to 5 % of EVM on the centre and
+> 1.6 % beside it, on one board through a cable. Beside the centre, the EVM of the board, TX
+> into RX, is 1.6 to 1.9 % (MER 35 dB) from 30000 to 1000000 symbols/s.
 
 #### Phase noise {#sw-analyzer-pn}
 
@@ -793,16 +800,32 @@ button of the view in `~/.config/litex_m2sdr/pn_floor_<FPGA DNA>.csv`. It is dra
 trace, and the points within 3 dB of it are marked: there, the reading is the board.
 
 ```sh
-m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --tx-tone --tx-att 30 --rx-gain 30 \
-    --report --pn-floor-save
+m2sdr_rf --sample-rate 7680000 --rx-freq 2490000000 --tx-freq 2490000000 --tx-att 10 --rx-gain 40
+m2sdr_gen --sample-rate 7680000 --signal tone --tone-freq 100000 --amplitude 0.5 &
+m2sdr_analyzer --no-rf-init --freq 2490e6 --sample-rate 7.68e6 --report \
+    --pn-samples 4194304 --pn-floor-save
 ```
 
-`--tx-tone` sends the built-in tone of the RFIC on TX, at the centre plus a thirty-second of
-the sample rate, with the attenuation of `--tx-att`. It is the one case where the utility
-transmits, and it is meant for a cable with an attenuator. A floor taken this way holds the
-noise of both synthesizers of the RFIC, TX and RX, so it is an upper bound of what the board
-adds to an external source; it is valid for the frequency, the sample rate and the gain it was
-taken with.
+A floor taken this way, through a cable and an attenuator from TX to RX, holds the noise of
+both synthesizers of the RFIC, TX and RX: it is an upper bound of what the board adds to an
+external source, valid for the frequency it was taken at. The levels matter: the carrier is
+set 10 to 20 dB under full scale, so that the noise of the receiver stays under the phase noise.
+
+| Offset | TX and RX synthesizers together, 2490 MHz |
+|---------|---------------------------------------------|
+| 100 Hz | -88 dBc/Hz |
+| 1 kHz | -96 dBc/Hz |
+| 10 kHz | -104 dBc/Hz |
+| 100 kHz | -102 dBc/Hz |
+| 1 MHz | -110 dBc/Hz |
+
+These are the readings of one board with a 30 dB attenuator, 0.5 to 0.7 degree RMS when
+integrated; the amplitude noise is 6 to 20 dB lower at every offset.
+
+`--tx-tone` sends the built-in tone of the RFIC instead, at the centre plus a thirty-second of
+the sample rate, with the attenuation of `--tx-att`; with it the utility transmits by itself.
+This tone is a quick check of a path, not a reference: its readings change from one run to
+the next, and its own noise sets a floor near -92 dBc/Hz.
 
 The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
 `m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
