@@ -5,6 +5,8 @@
 # Copyright (c) 2026 Enjoy-Digital <enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+import os
+
 import pytest
 
 from litex_m2sdr.gateware.dfx import DEFAULT_DFX_PBLOCK, validate_dfx_pblock
@@ -57,3 +59,42 @@ def test_dfx_region_replaces_the_rfic_hook_at_the_datapath_width(lanes, oversamp
         soc.platform.toolchain.additional_commands)
     assert DEFAULT_DFX_PBLOCK in commands
     assert f"-generic DATA_WIDTH={width}" in commands   # Alternate RM matches the static width.
+
+
+def test_dfx_rm_tcl_implements_only_the_rm_in_the_locked_static():
+    from litex_m2sdr.gateware.dfx import dfx_rm_tcl
+
+    tcl = dfx_rm_tcl("img", "mydsp", ["rm.v"], "xc7a200tsbg484-3", 128)
+    order = [next(i for i, line in enumerate(tcl) if line.startswith(cmd)) for cmd in
+        ("synth_design -mode out_of_context", "open_checkpoint img_static_routed.dcp",
+         "read_checkpoint -cell", "route_design", "pr_verify -full_check img_passthrough_routed.dcp",
+         "write_bitstream")]
+    assert order == sorted(order)                      # Verified before any partial is written.
+    assert not any(line.startswith("synth_design -top") for line in tcl)  # No static synthesis.
+    assert any("$dfx_width != 128" in line for line in tcl)
+    with pytest.raises(ValueError):
+        dfx_rm_tcl("img", "../evil", ["rm.v"], "xc7a200tsbg484-3", 128)
+    with pytest.raises(ValueError):
+        dfx_rm_tcl("img", "mydsp", ["rm.v"], "xc7a200tsbg484-3", 32)
+
+
+@pytest.mark.parametrize("oversampling, width", [(False, 64), (True, 128)])
+def test_dfx_rm_build_reads_the_image_contract(tmp_path, oversampling, width):
+    import importlib.util, json
+    spec = importlib.util.spec_from_file_location("dfx_rm_build",
+        os.path.join(os.path.dirname(__file__), "..", "scripts", "dfx_rm_build.py"))
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    build = tmp_path / "img"
+    (build / "gateware").mkdir(parents=True)
+    argv = ["litex_m2sdr.py", "--with-dfx"] + (["--with-rfic-oversampling"] if oversampling else [])
+    (build / "build_info.json").write_text(json.dumps(
+        {"command": {"argv": argv}, "platform": {"device": "xc7a200tsbg484-3"}}))
+    (build / "gateware" / "img.bit").write_bytes(b"\x00\x09img;PARTIAL=FALSE;Version=2024.2\x00")
+    with pytest.raises(SystemExit):                    # No locked static checkpoint yet.
+        script.image_contract(str(build))
+    for suffix in ("static_routed.dcp", "passthrough_routed.dcp"):
+        (build / "gateware" / f"img_{suffix}").write_bytes(b"")
+    contract = script.image_contract(str(build))
+    assert (contract["data_width"], contract["vivado"], contract["part"]) == (width, "2024.2", "xc7a200tsbg484-3")

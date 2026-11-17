@@ -1845,6 +1845,7 @@ static const char *dfx_rm_name(uint32_t rm_id)
     switch (rm_id) {
     case 0: return "passthrough";
     case 1: return "loopback";
+    case 2: return "channel_swap";
     default: return "unknown";
     }
 }

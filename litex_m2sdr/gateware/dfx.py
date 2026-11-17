@@ -25,7 +25,7 @@ DFX_MODULE_NAME = "m2sdr_dfx_datapath"
 DEFAULT_DFX_PBLOCK = "SLICE_X84Y50:SLICE_X163Y99"
 DFX_DATA_WIDTHS = (64, 128)
 # rm_id values reported by the shipped reconfigurable modules.
-DFX_RM_IDS = {"passthrough": 0, "loopback": 1}
+DFX_RM_IDS = {"passthrough": 0, "loopback": 1, "channel_swap": 2}
 
 
 def validate_dfx_pblock(value):
@@ -270,12 +270,63 @@ class DFXRFICDatapath(LiteXModule):
             ]
 
 
+def dfx_rm_tcl(build_name, rm_name, sources, part, data_width):
+    """Vivado Tcl implementing one RM against the locked static checkpoint.
+
+    Only the RM is synthesized (out of context) and placed/routed: the static design,
+    its partition pins and routing come from ``{build_name}_static_routed.dcp``, which
+    the full build writes after ``lock_design -level routing``. ``pr_verify`` against
+    the full build's passthrough configuration then proves the static part is
+    identical to the image the board runs. Shared by the full build and
+    ``scripts/dfx_rm_build.py``.
+    """
+    if not re.fullmatch(r"[a-z][a-z0-9_]*", rm_name):
+        raise ValueError(f"RM name must match [a-z][a-z0-9_]*, got {rm_name!r}")
+    if data_width not in DFX_DATA_WIDTHS:
+        raise ValueError(f"DFX data width must be one of {DFX_DATA_WIDTHS}, got {data_width}")
+    find_cell = f"set dfx_cell [lindex [get_cells -hierarchical -filter {{NAME =~ *{DFX_CELL_NAME}}}] 0]"
+    rm = f"{build_name}_{rm_name}"
+    return [
+        f"create_project -in_memory -part {part}",
+        *[f"read_verilog {{{os.path.abspath(source)}}}" for source in sources],
+        f"synth_design -mode out_of_context -top {DFX_MODULE_NAME} -part {part} -generic DATA_WIDTH={data_width}",
+        f"write_checkpoint -force {rm}_synth.dcp",
+        "close_project",
+
+        f"open_checkpoint {build_name}_static_routed.dcp",
+        find_cell,
+        # The black box keeps the partition ports: refuse an RM built for the other width.
+        f"set dfx_width [llength [get_pins -of_objects $dfx_cell -filter {{REF_PIN_NAME =~ tx_sink_data*}}]]",
+        f"if {{$dfx_width != {data_width}}} {{ error \"Static region is $dfx_width bits wide, RM was built for {data_width}\" }}",
+        f"read_checkpoint -cell $dfx_cell {rm}_synth.dcp",
+        "opt_design",
+        "place_design",
+        "route_design",
+        f"write_checkpoint -force {rm}_routed.dcp",
+        f"report_drc -file {rm}_drc.rpt",
+        f"report_timing_summary -datasheet -max_paths 10 -file {rm}_timing.rpt",
+        f"report_utilization -pblocks [get_pblocks pblock_rfic_dfx] -file {rm}_pblock_utilization.rpt",
+        "set dfx_wns [get_property SLACK [get_timing_paths -delay_type max -max_paths 1]]",
+        "set dfx_whs [get_property SLACK [get_timing_paths -delay_type min -max_paths 1]]",
+        f"if {{$dfx_wns < 0 || $dfx_whs < 0}} {{ error \"RM {rm_name} misses timing: WNS $dfx_wns WHS $dfx_whs\" }}",
+        # Static placement, routing and partition pins must equal the full build's.
+        f"pr_verify -full_check {build_name}_passthrough_routed.dcp {rm}_routed.dcp",
+        # read_checkpoint/pr_verify invalidate Tcl handles: resolve the RM again.
+        find_cell,
+        f"write_bitstream -force -bin_file -cell $dfx_cell {rm}_partial.bit",
+        "close_design",
+    ]
+
+
+def _litex_format_escape(line):
+    """additional_commands go through str.format(build_name=...): escape Tcl braces."""
+    return line.replace("{", "{{").replace("}", "}}").replace("{{build_name}}", "{build_name}")
+
+
 def add_dfx_build_commands(platform, pblock, alternate_rm_source, data_width):
     """Extend LiteX's Vivado flow: default (passthrough) config, then the alternate RM."""
 
     pblock = validate_dfx_pblock(pblock)
-    alternate_rm_source = os.path.abspath(alternate_rm_source)
-    tcl_alternate_source = "{{" + alternate_rm_source + "}}"
     find_cell = f"set dfx_cell [lindex [get_cells -hierarchical -filter {{{{NAME =~ *{DFX_CELL_NAME}}}}}] 0]"
 
     platform.toolchain.pre_optimize_commands += [
@@ -301,31 +352,16 @@ def add_dfx_build_commands(platform, pblock, alternate_rm_source, data_width):
         "write_checkpoint -force {build_name}_passthrough_routed.dcp",
         "write_checkpoint -force -cell $dfx_cell {build_name}_passthrough_rm_routed.dcp",
         "write_bitstream -force -bin_file -cell $dfx_cell {build_name}_passthrough_partial.bit",
+        # Locked static checkpoint: later RMs are implemented against it only
+        # (scripts/dfx_rm_build.py), the static part is never rebuilt.
         "update_design -black_box -cell $dfx_cell",
         "lock_design -level routing",
         "write_checkpoint -force {build_name}_static_routed.dcp",
         "close_project",
-
-        f"create_project -in_memory -part {platform.device}",
-        f"read_verilog {tcl_alternate_source}",
-        f"synth_design -mode out_of_context -top {DFX_MODULE_NAME} -part {platform.device} -generic DATA_WIDTH={data_width}",
-        "write_checkpoint -force {build_name}_loopback_synth.dcp",
-        "close_project",
-
-        "open_checkpoint {build_name}_static_routed.dcp",
-        find_cell,
-        "read_checkpoint -cell $dfx_cell {build_name}_loopback_synth.dcp",
-        "opt_design",
-        "place_design",
-        "route_design",
-        "write_checkpoint -force {build_name}_loopback_routed.dcp",
-        "report_drc -file {build_name}_loopback_drc.rpt",
-        "report_timing_summary -datasheet -max_paths 10 -file {build_name}_loopback_timing.rpt",
-        "report_utilization -pblocks [get_pblocks pblock_rfic_dfx] -file {build_name}_loopback_pblock_utilization.rpt",
-        # read_checkpoint invalidates Tcl handles to design objects. Resolve
-        # the RM again after implementation before partial bitstream output.
-        find_cell,
-        "write_bitstream -force -bin_file -cell $dfx_cell {build_name}_loopback_partial.bit",
-        "pr_verify -full_check {build_name}_passthrough_routed.dcp {build_name}_loopback_routed.dcp",
-        "close_design",
-    ]
+    ] + [_litex_format_escape(line) for line in dfx_rm_tcl(
+        build_name = "{build_name}",
+        rm_name    = "loopback",
+        sources    = [alternate_rm_source],
+        part       = platform.device,
+        data_width = data_width,
+    )]
