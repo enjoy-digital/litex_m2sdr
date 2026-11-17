@@ -13,80 +13,29 @@
 #include <string.h>
 
 #include "m2sdr_cal.h"
+#include "m2sdr_fft.h"
 
 /* FFT */
 /*-----*/
 
-/* Radix-2 FFT of the short blocks used here (64 to 256 points): the library has no FFT
- * dependency. The inverse is not scaled. */
+/* The short blocks used here (64 to 256 points), as pairs of floats. */
 typedef struct { float r, i; } cal_cpx;
 
-struct cal_fft {
-    int n;
-    float complex *w;              /* n / 2 twiddles. */
-    unsigned short *rev;           /* Bit-reversed indexes. */
-};
+#define cal_fft       m2sdr_fft
+#define cal_fft_alloc m2sdr_fft_alloc
+#define cal_fft_free  m2sdr_fft_free
 
-static void cal_fft_free(struct cal_fft *fft)
+static void cal_fft_run(const struct m2sdr_fft *fft, const cal_cpx *in, cal_cpx *out, int n)
 {
-    if (fft) {
-        free(fft->w);
-        free(fft->rev);
-        free(fft);
-    }
-}
-
-static struct cal_fft *cal_fft_alloc(int n, int inverse)
-{
-    struct cal_fft *fft = calloc(1, sizeof(*fft));
-    int i, j, bits = 0;
-
-    if (!fft || n < 2 || (n & (n - 1)))
-        goto fail;
-    while ((1 << bits) < n)
-        bits++;
-    fft->n   = n;
-    fft->w   = malloc((size_t)(n / 2) * sizeof(*fft->w));
-    fft->rev = malloc((size_t)n * sizeof(*fft->rev));
-    if (!fft->w || !fft->rev)
-        goto fail;
-    for (i = 0; i < n / 2; i++)
-        fft->w[i] = (float complex)cexp((inverse ? 2.0 : -2.0) * M_PI * I * i / n);
-    for (i = 0; i < n; i++) {
-        unsigned r = 0;
-        for (j = 0; j < bits; j++)
-            r |= (unsigned)((i >> j) & 1) << (bits - 1 - j);
-        fft->rev[i] = (unsigned short)r;
-    }
-    return fft;
-
-fail:
-    cal_fft_free(fft);
-    return NULL;
-}
-
-static void cal_fft(const struct cal_fft *fft, const cal_cpx *in, cal_cpx *out)
-{
-    const int n = fft->n;
-    float complex v[256];
-    int i, k, len;
+    float complex vi[256], vo[256];
+    int i;
 
     for (i = 0; i < n; i++)
-        v[fft->rev[i]] = in[i].r + I * in[i].i;
-    for (len = 2; len <= n; len <<= 1) {
-        const int half = len / 2, step = n / len;
-        for (i = 0; i < n; i += len) {
-            for (k = 0; k < half; k++) {
-                const float complex a = v[i + k];
-                const float complex b = v[i + k + half] * fft->w[k * step];
-                v[i + k]        = a + b;
-                v[i + k + half] = a - b;
-            }
-        }
-    }
+        vi[i] = in[i].r + I * in[i].i;
+    m2sdr_fft_run(fft, vi, vo);
     for (i = 0; i < n; i++) {
-        out[i].r = crealf(v[i]);
-        out[i].i = cimagf(v[i]);
+        out[i].r = crealf(vo[i]);
+        out[i].i = cimagf(vo[i]);
     }
 }
 
@@ -254,7 +203,7 @@ static void lte_pss(unsigned u, float complex *p)
         in[k].r = (float)cos(ph);
         in[k].i = (float)sin(ph);
     }
-    cal_fft(cfg, in, out);
+    cal_fft_run(cfg, in, out, LTE_N);
     for (n = 0; n < LTE_N; n++)
         p[n] = (out[n].r + I * out[n].i) / (float)sqrt(62.0);
     cal_fft_free(cfg);
@@ -337,7 +286,7 @@ static double lte_pss_first_test(const float complex *x, size_t count, size_t ha
             in[bin].r = (float)cos(ph);
             in[bin].i = (float)sin(ph);
         }
-        cal_fft(cfg, in, out);
+        cal_fft_run(cfg, in, out, PRE_N);
         for (n = 0; n < PRE_N; n++) {
             ref[n] = out[n].r - I * out[n].i;
             ref_energy += (double)out[n].r * out[n].r + (double)out[n].i * out[n].i;
@@ -738,7 +687,7 @@ int m2sdr_cal_gsm_estimate(const float complex *x, size_t count, double max_cfo_
                 in[k].r = crealf(v);
                 in[k].i = cimagf(v);
             }
-            cal_fft(cfg, in, out);
+            cal_fft_run(cfg, in, out, GSM_WIN);
             for (k = 0; k < GSM_WIN; k++) {
                 const double p = (double)out[k].r * out[k].r + (double)out[k].i * out[k].i;
                 total += p;

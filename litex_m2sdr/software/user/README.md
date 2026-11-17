@@ -64,7 +64,7 @@ Core user tools build with the standard C/C++ toolchain and do not require the o
 - libsndfile development headers/libraries (`libsndfile1-dev`)
 - libsamplerate development headers/libraries (`libsamplerate0-dev`)
 
-`m2sdr_scan` and `m2sdr_check` additionally require:
+`m2sdr_scan`, `m2sdr_check` and the window of `m2sdr_analyzer` additionally require:
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
@@ -494,6 +494,37 @@ Example usage:
 ~~~~
 
 Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and expects stripped sample payloads when DMA headers are enabled.
+
+---
+
+### m2sdr_analyzer
+Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures and time-domain statistics. It only receives. `--report` works without a display; the window needs SDL2 and cimgui.
+
+**Usage**:
+```bash
+m2sdr_analyzer [options]                # Board RX
+m2sdr_analyzer [options] --file PATH    # SigMF or raw capture
+```
+
+Relevant options:
+- `--freq HZ`, `--sample-rate HZ`, `--bandwidth HZ`, `--rx-gain DB` (default: slow AGC), `--channel N`
+- `--refclk-ppm PPM|stored|none` (default: the calibration record of the board when it has one)
+- `--file PATH`, with `--format sc16|sc8`, `--nbits N`, `--nchannels N`, `--frame-header`, `--frame-size N`, `--capture-index N`, `--offset S` for raw files
+- `--fft-len N`, `--window hann|flattop|blackman-harris|rect`, `--averages N`
+- `--channel-bw HZ`, `--channel-offset HZ`, `--channel-spacing HZ` (channel power, ACPR, occupied bandwidth)
+- `--ref-offset DB` (added to the levels, to read dBm at the connector)
+- `--report`, `--json`, `--export-csv PATH` (one capture, no display)
+- `--view spectrum|time|statistics` (view shown first)
+
+Window: left click places the selected marker, the wheel zooms, a right drag moves the span, a double click shows it all. Space runs or stops, `P` puts the marker on the peak, `F` shows the full span, `R` restarts the traces.
+
+Examples:
+```bash
+./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6
+./m2sdr_analyzer --freq 2.45e9 --report --channel-bw 1e6
+./m2sdr_analyzer --file capture.sigmf-meta
+./m2sdr_analyzer --file tone.bin --nchannels 1 --sample-rate 1e6 --report --json
+```
 
 ---
 

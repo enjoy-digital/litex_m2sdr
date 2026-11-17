@@ -27,6 +27,9 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
 - Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
+**Signal Analysis**
+- Added `m2sdr_analyzer`: spectrum with traces, markers and a waterfall, channel power, ACPR, occupied bandwidth, tone figures (SNR, SINAD, SFDR, THD) and time-domain statistics, on the board RX or on a SigMF or raw capture, in a Dear ImGui window or as a text or JSON report without a display. The measurements are in libm2sdr (`m2sdr_analysis.h`).
+
 **Calibration**
 - Added `m2sdr_cal`: scans bands for LTE and GSM carriers, measures the error of the reference clock on LTE carriers (PSS and cyclic prefix) and GSM carriers (FCCH), trims the reference and stores the result in a file or in the SPI flash. `m2sdr_rf --refclk-ppm stored` uses the record, and `m2sdr_cal measure --refclk-ppm stored` checks it. The estimators and the record are in libm2sdr (`m2sdr_cal.h`).
 
