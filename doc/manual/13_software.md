@@ -416,7 +416,7 @@ The utilities are small command-line programs, one per task. They share the devi
 | `m2sdr_cal` | Measure the error of the reference clock on LTE and GSM carriers, store it |
 | `m2sdr_record` | Receive samples to a file or to a pipe, raw or SigMF |
 | `m2sdr_play` | Transmit samples from a file or from a pipe, raw or SigMF |
-| `m2sdr_gen` | Transmit a tone, noise, a PRBS or an OFDM signal |
+| `m2sdr_gen` | Transmit a tone, noise, a PRBS, an OFDM signal or a PSK/QAM carrier |
 | `m2sdr_check` | Inspect a recording in a window: time, spectrum, constellation |
 | `m2sdr_analyzer` | Measure a signal, live or from a recording: spectrum, markers, channel power |
 | `m2sdr_sigmf` | Print and validate SigMF metadata |
@@ -698,7 +698,8 @@ m2sdr_scan --preset-load fm_band.scan --no-ui \
 
 ### m2sdr_analyzer: signal analyser {#sw-analyzer}
 
-`m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives. It
+`m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives,
+unless its test tone is asked for. It
 configures the RFIC itself and applies the calibration record of the board when it has one
 ([m2sdr_cal](#sw-cal)), so that the frequencies it reads are right.
 
@@ -714,6 +715,8 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Spectrum | Live, average, max hold and min hold traces, markers, the channel, a waterfall |
 | Time | I and Q, and the power, against time |
 | Statistics | CCDF of the power next to the one of Gaussian noise, and Q against I |
+| Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
+| Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -744,9 +747,123 @@ and the host and a capture has a hole. `m2sdr_analyzer` reads the loss counters 
 around each capture, takes it again, and says so when it could not get a clean one: over 1 GbE
 this is the case above about 14 MSPS, since both channels are streamed.
 
+#### Modulation {#sw-analyzer-demod}
+
+The Modulation view, and `--demod` with `--report`, demodulate the strongest signal of the
+capture when it is a single carrier with PSK or QAM symbols under a root raised cosine, a
+raised cosine or a rectangular pulse.
+
+```sh
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view modulation
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --demod
+m2sdr_analyzer --file capture.sigmf-meta --report --demod --modulation 64qam --symbol-rate 5e6
+```
+
+The symbol rate, the roll-off and the modulation, from BPSK to 256QAM, are found from the
+signal; `--symbol-rate`, `--rolloff`, `--modulation` and `--pulse` give them instead. The
+sample rate is a few times the bandwidth of the signal, four samples per symbol at least.
+
+| Figure | Meaning |
+|--------------------|-------------------------------------------------------------------------|
+| EVM, RMS and peak | Error vector of the symbols, in percent of the RMS of the constellation |
+| MER | The same as a ratio, in dB |
+| Magnitude and phase errors | The two parts of the error vector |
+| Origin offset | Carrier leakage, in dB under the constellation |
+| I/Q gain imbalance, quadrature error | Of the transmitter; their sign depends on the rotation found |
+| Symbol rate, carrier | As measured, with the reference of the board |
+
+- **Decisions:** the symbols are compared with the nearest points of the constellation, not
+  with the symbols sent. The EVM is right while symbol errors are rare, and reads low beyond.
+  The view and the report say "not locked" when the EVM is too large for the constellation,
+  above a quarter of the distance between its points: the figures are then not valid.
+- **Carrier loop:** the phase is followed by a loop a hundredth of the symbol rate wide, so
+  slower phase noise, of the source or of the board, is not in the EVM.
+- **Rotation:** the constellation is shown at one of its symmetric positions; the bits are not
+  decoded.
+- **Not supported:** offset QPSK, GMSK and other constant-envelope schemes, APSK, OFDM, and a
+  roll-off near zero without the symbol rate given.
+
+`m2sdr_gen --signal qam` sends random symbols of a chosen modulation, symbol rate and roll-off:
+with a cable and an attenuator from TX to RX, the board is its own test source. `--no-rf-init`
+then makes `m2sdr_analyzer` leave the RFIC as `m2sdr_rf` set it.
+
+```sh
+m2sdr_rf --sample-rate 1920000 --rx-freq 2490000000 --tx-freq 2490400000 --tx-att 10 --rx-gain 40
+m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 64qam --qam-symbol-rate 120000 &
+m2sdr_analyzer --no-rf-init --freq 2490e6 --sample-rate 1.92e6 --view modulation
+```
+
+> [!TIP]
+> Keep a narrow signal away from the centre of the capture, as above with TX 400 kHz above RX.
+> The RFIC removes its DC offset with a loop that also removes the lowest frequencies of a
+> signal sitting on the centre: 64QAM at 30000 symbols/s read 4 to 5 % of EVM on the centre and
+> 1.6 % beside it, on one board through a cable. Beside the centre, the EVM of the board, TX
+> into RX, is 1.6 to 1.9 % (MER 35 dB) from 30000 to 1000000 symbols/s.
+
+#### Phase noise {#sw-analyzer-pn}
+
+The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
+capture: L(f) in dBc/Hz against the offset from the carrier, the amplitude noise next to it,
+the phase error integrated between two offsets (`--pn-from`, `--pn-to`), the jitter, the
+residual FM and the discrete spurs.
+
+```sh
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view phase-noise
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise --pn-samples 4194304
+```
+
+- **Tuning:** the capture is tuned a little off the carrier, here 100 kHz below: the centre
+  holds the DC offset and the LO leakage of the receiver, and is not searched.
+- **Sample rate:** the carrier must stand 10 dB above everything else in the capture, noise
+  included, so a low sample rate around it is the one to use. The offsets go up to half of it.
+- **Capture length:** the lowest offset is a few times the sample rate over the number of
+  samples (`--pn-samples`): 2^20 samples at 1.92 MSPS start near 10 Hz.
+
+> [!IMPORTANT]
+> The reading is the phase noise of the source plus the one of the board: its synthesizers,
+> its reference, and the noise of its receiver, which counts as phase for one half and as
+> amplitude for the other. A source cleaner than the board reads as the board. Phase noise
+> equal to the amplitude noise and flat means that the reading is the noise of the receiver:
+> the signal is too weak.
+
+To tell the two apart, the board keeps a floor: a reading taken with a source cleaner than it,
+or with its own test tone through a cable from TX to RX, stored with `--pn-floor-save` or the
+button of the view in `~/.config/litex_m2sdr/pn_floor_<FPGA DNA>.csv`. It is drawn under the
+trace, and the points within 3 dB of it are marked: there, the reading is the board.
+
+```sh
+m2sdr_rf --sample-rate 7680000 --rx-freq 2490000000 --tx-freq 2490000000 --tx-att 10 --rx-gain 40
+m2sdr_gen --sample-rate 7680000 --signal tone --tone-freq 100000 --amplitude 0.5 &
+m2sdr_analyzer --no-rf-init --freq 2490e6 --sample-rate 7.68e6 --report \
+    --pn-samples 4194304 --pn-floor-save
+```
+
+A floor taken this way, through a cable and an attenuator from TX to RX, holds the noise of
+both synthesizers of the RFIC, TX and RX: it is an upper bound of what the board adds to an
+external source, valid for the frequency it was taken at. The levels matter: the carrier is
+set 10 to 20 dB under full scale, so that the noise of the receiver stays under the phase noise.
+
+| Offset | TX and RX synthesizers together, 2490 MHz |
+|---------|---------------------------------------------|
+| 100 Hz | -88 dBc/Hz |
+| 1 kHz | -96 dBc/Hz |
+| 10 kHz | -104 dBc/Hz |
+| 100 kHz | -102 dBc/Hz |
+| 1 MHz | -110 dBc/Hz |
+
+These are the readings of one board with a 30 dB attenuator, 0.5 to 0.7 degree RMS when
+integrated; the amplitude noise is 6 to 20 dB lower at every offset.
+
+`--tx-tone` sends the built-in tone of the RFIC instead, at the centre plus a thirty-second of
+the sample rate, with the attenuation of `--tx-att`; with it the utility transmits by itself.
+This tone is a quick check of a path, not a reference: its readings change from one run to
+the next, and its own noise sets a floor near -92 dBc/Hz.
+
 The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
 `m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
-`m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures.
+`m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures. `m2sdr_phase_noise()`
+gives the phase noise of a carrier and `m2sdr_demod()` the symbols and the EVM of a PSK or QAM
+signal.
 
 ### m2sdr_sata: SATA storage {#sw-sata}
 

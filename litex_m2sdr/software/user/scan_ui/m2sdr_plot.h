@@ -24,6 +24,7 @@ enum m2sdr_plot_unit {
     M2SDR_PLOT_PLAIN = 0,   /* The number. */
     M2SDR_PLOT_FREQ  = 1,   /* Hz, shown in Hz, kHz, MHz or GHz. */
     M2SDR_PLOT_TIME  = 2,   /* Seconds, shown in s, ms, us or ns. */
+    M2SDR_PLOT_LOG_FREQ = 3,   /* log10 of Hz: a line per decade, labelled in Hz, kHz or MHz. */
 };
 
 struct m2sdr_plot {
@@ -55,6 +56,9 @@ float m2sdr_plot_y(const struct m2sdr_plot *plot, double y);
 /* Trace of n values spread evenly from xa to xb. With more values than pixels, each pixel shows
  * the range of its values. */
 void m2sdr_plot_trace(struct m2sdr_plot *plot, const float *y, size_t n, double xa, double xb, ImU32 color);
+
+/* Line through n points of any spacing. */
+void m2sdr_plot_xy(struct m2sdr_plot *plot, const float *x, const float *y, size_t n, ImU32 color);
 
 /* Points, as dots. */
 void m2sdr_plot_points(struct m2sdr_plot *plot, const float *x, const float *y, size_t n, float radius, ImU32 color);

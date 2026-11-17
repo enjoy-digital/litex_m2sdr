@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -56,6 +58,14 @@
 #define AN_SETTLE_US           30000         /* After a change of the RFIC. */
 #define AN_CAPTURE_RETRIES     3             /* Captures redone when samples were lost. */
 #define AN_FRAME_HEADER_BYTES  16
+#define AN_PN_DEFAULT_LOG2      20            /* Samples of a phase noise capture: 2^20. */
+#define AN_PN_MIN_LOG2          16
+#define AN_PN_MAX_LOG2          23
+#define AN_PN_FLOOR_MARGIN_DB   3.0           /* A reading this close to the floor is the floor. */
+#define AN_DEMOD_DEFAULT_LOG2   18            /* Samples of a demodulation capture: 2^18. */
+#define AN_DEMOD_MIN_LOG2       14
+#define AN_DEMOD_MAX_LOG2       22
+#define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 
 /* Settings */
@@ -76,6 +86,12 @@ struct an_settings {
     double chan_bw_hz;             /* 0: no channel measurement. */
     double chan_spacing_hz;        /* 0: the bandwidth. */
     double ref_offset_db;          /* Added to the levels: dBFS to dBm at the connector. */
+    bool   pn_on;                  /* Phase noise of the strongest carrier. */
+    int    pn_log2;                /* Its capture: 2^pn_log2 samples. */
+    double pn_lo_hz, pn_hi_hz;     /* Integration limits; 0: the offsets measured. */
+    bool   demod_on;               /* Demodulation of the strongest signal. */
+    int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
+    struct m2sdr_demod_config demod;
 };
 
 static const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
@@ -91,6 +107,10 @@ struct an_source {
     double trim_ppm;
     const char *sync;
     int64_t refclk_freq;
+    bool   no_rf_init;             /* The RFIC is left as another utility set it. */
+    bool   tx_tone;                /* Test tone on TX, from the RFIC itself. */
+    int    tx_att;
+    uint64_t dna;
     struct an_settings applied;    /* What the RFIC is set to. */
     bool   configured;
     /* File. */
@@ -183,6 +203,20 @@ static int live_apply(struct an_source *src, const struct an_settings *set, char
     bool changed = false;
     int rc;
 
+    if (src->no_rf_init) {
+        /* Only the stream: frequency, rate and gain are the ones of the utility that set the
+         * RFIC, and the settings here only label the results. */
+        if (!src->configured) {
+            rc = m2sdr_sync_config(src->dev, M2SDR_RX, M2SDR_FORMAT_SC16_Q11, 0, per_buf, 0, 2000);
+            if (rc != M2SDR_ERR_OK) {
+                snprintf(err, err_len, "RX stream configuration failed: %s", m2sdr_strerror(rc));
+                return -1;
+            }
+            src->configured = true;
+        }
+        *now = *set;
+        return 0;
+    }
     if (!src->configured) {
         struct m2sdr_config cfg;
 
@@ -190,7 +224,15 @@ static int live_apply(struct an_source *src, const struct an_settings *set, char
         cfg.sample_rate    = (int64_t)set->sample_rate;
         cfg.bandwidth      = bandwidth;
         cfg.rx_freq        = (int64_t)llround(set->freq_hz);
-        cfg.tx_att         = 89;              /* The analyser only receives. */
+        cfg.tx_att         = 89;              /* The analyser only receives, */
+        if (src->tx_tone) {
+            /* unless asked for its test tone: the built-in tone of the RFIC, a thirty-second of
+             * the sample rate above the centre, the TX synthesizer on the RX frequency. */
+            cfg.tx_att         = src->tx_att;
+            cfg.tx_freq        = (int64_t)llround(set->freq_hz);
+            cfg.bist_tx_tone   = true;
+            cfg.bist_tone_freq = (int32_t)(set->sample_rate / 32.0);
+        }
         cfg.refclk_ppm     = src->trim_ppm;
         cfg.channel_layout = M2SDR_CHANNEL_LAYOUT_2T2R;
         if (src->refclk_freq)
@@ -251,6 +293,8 @@ static int live_apply(struct an_source *src, const struct an_settings *set, char
     }
     if (set->freq_hz != now->freq_hz) {
         rc = m2sdr_set_rx_frequency(src->dev, (uint64_t)llround(set->freq_hz));
+        if (rc == M2SDR_ERR_OK && src->tx_tone)
+            rc = m2sdr_set_tx_frequency(src->dev, (uint64_t)llround(set->freq_hz));
         if (rc != M2SDR_ERR_OK) {
             snprintf(err, err_len, "frequency %.0f refused: %s", set->freq_hz, m2sdr_strerror(rc));
             return -1;
@@ -440,7 +484,7 @@ static int file_capture(struct an_source *src, const struct an_settings *set, fl
     const size_t set_bytes = (size_t)src->nchannels * 2u * (size_t)src->sample_bytes;
 
     if (count > src->total_sets) {
-        snprintf(err, err_len, "the file holds %llu samples, the capture needs %zu: lower the FFT length or the averages",
+        snprintf(err, err_len, "the file holds %llu samples, the capture needs %zu: lower the FFT length, the averages or the samples of the measurement",
                  (unsigned long long)src->total_sets, count);
         return -1;
     }
@@ -505,6 +549,10 @@ struct an_result {
     double obw_lo_hz, obw_hi_hz;
     bool   obw_valid;
     double noise_db_hz;
+    struct m2sdr_phase_noise pn;
+    bool   pn_valid;               /* Measured, with a carrier. */
+    struct m2sdr_demod_result demod;
+    bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -516,6 +564,10 @@ static size_t capture_samples(const struct an_settings *set)
 
     if (count < (size_t)set->fft_len)
         count = (size_t)set->fft_len;
+    if (set->pn_on && count < ((size_t)1 << set->pn_log2))
+        count = (size_t)1 << set->pn_log2;
+    if (set->demod_on && count < ((size_t)1 << set->demod_log2))
+        count = (size_t)1 << set->demod_log2;
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
 }
 
@@ -573,10 +625,124 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
     } else {
         res->obw_valid = m2sdr_psd_obw(&res->psd, -half, half, 0.99, &res->obw_lo_hz, &res->obw_hi_hz) == 0;
     }
+    res->pn_valid = false;
+    if (set->pn_on) {
+        const size_t n = count < ((size_t)1 << set->pn_log2) ? count : (size_t)1 << set->pn_log2;
+
+        res->pn_valid = m2sdr_phase_noise(x, n, set->sample_rate, set->freq_hz, set->pn_lo_hz, set->pn_hi_hz,
+                                          &res->pn) == 0 && res->pn.found;
+        /* The jitter needs the RF frequency of the carrier, known once it is found. */
+        if (res->pn_valid && set->freq_hz + res->pn.carrier_hz > 0)
+            res->pn.jitter_s = res->pn.rms_rad / (2.0 * M_PI * (set->freq_hz + res->pn.carrier_hz));
+    }
+    res->demod_valid = false;
+    if (set->demod_on) {
+        const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
+
+        res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
+    }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
     return 0;
 }
+
+/* Phase noise floor */
+/*-------------------*/
+
+/* Phase noise read with a source cleaner than the board, or with its own test tone: what the
+ * board adds. Kept per board, in a text file. */
+struct an_floor {
+    int    points;
+    double offset_hz[M2SDR_PN_MAX_POINTS];
+    double l_dbc_hz[M2SDR_PN_MAX_POINTS];
+    double freq_hz, sample_rate;   /* Of the capture it comes from. */
+    char   path[1024];
+};
+
+static int floor_default_path(uint64_t dna, char *path, size_t len)
+{
+    char cal[1024], *slash;
+
+    if (m2sdr_cal_default_path(dna, cal, sizeof(cal)) != 0)
+        return -1;
+    slash = strrchr(cal, '/');
+    if (!slash)
+        return -1;
+    *slash = '\0';
+    return snprintf(path, len, "%.900s/pn_floor_%014llx.csv", cal, (unsigned long long)dna) < (int)len ? 0 : -1;
+}
+
+static int floor_load(struct an_floor *fl, const char *path)
+{
+    FILE *f = fopen(path, "r");
+    char line[256];
+
+    fl->points = 0;
+    if (!f)
+        return -1;
+    while (fgets(line, sizeof(line), f)) {
+        double a, b;
+
+        if (sscanf(line, "# freq_hz=%lf sample_rate=%lf", &a, &b) == 2) {
+            fl->freq_hz     = a;
+            fl->sample_rate = b;
+        } else if (sscanf(line, "%lf,%lf", &a, &b) == 2 && a > 0 && fl->points < M2SDR_PN_MAX_POINTS) {
+            fl->offset_hz[fl->points] = a;
+            fl->l_dbc_hz[fl->points]  = b;
+            fl->points++;
+        }
+    }
+    fclose(f);
+    snprintf(fl->path, sizeof(fl->path), "%.1023s", path);
+    return fl->points >= 2 ? 0 : -1;
+}
+
+static int floor_save(struct an_floor *fl, const char *path, const struct an_result *res)
+{
+    char dir[1024], *p;
+    FILE *f;
+    int i;
+
+    /* Directories of the path. */
+    if (snprintf(dir, sizeof(dir), "%s", path) < (int)sizeof(dir)) {
+        for (p = dir + 1; *p; p++) {
+            if (*p == '/') {
+                *p = '\0';
+                (void)mkdir(dir, 0755);
+                *p = '/';
+            }
+        }
+    }
+    f = fopen(path, "w");
+    if (!f)
+        return -1;
+    fprintf(f, "# M2SDR phase noise floor: offset_hz,l_dbc_hz\n");
+    fprintf(f, "# freq_hz=%.0f sample_rate=%.0f\n", res->set.freq_hz + res->pn.carrier_hz, res->set.sample_rate);
+    for (i = 0; i < res->pn.points; i++)
+        fprintf(f, "%.3f,%.3f\n", res->pn.offset_hz[i], res->pn.l_dbc_hz[i]);
+    if (fclose(f) != 0)
+        return -1;
+    return floor_load(fl, path);
+}
+
+/* Value of a trace of phase noise at an offset, between its points; NAN out of them. */
+static double pn_interp(const double *offset_hz, const double *value, int points, double at_hz)
+{
+    int i;
+
+    if (points < 2 || at_hz < offset_hz[0] || at_hz > offset_hz[points - 1])
+        return NAN;
+    for (i = 1; i < points; i++) {
+        if (offset_hz[i] >= at_hz) {
+            const double t = log(at_hz / offset_hz[i - 1]) / log(offset_hz[i] / offset_hz[i - 1]);
+            return value[i - 1] + t * (value[i] - value[i - 1]);
+        }
+    }
+    return NAN;
+}
+
+static const double pn_spots[] = { 100.0, 1e3, 1e4, 1e5, 1e6, 1e7 };
+#define PN_SPOTS ((int)(sizeof(pn_spots) / sizeof(pn_spots[0])))
 
 /* Report */
 /*--------*/
@@ -589,7 +755,7 @@ static void print_json_number(const char *name, double value, bool last)
         printf("    \"%s\": null%s\n", name, last ? "" : ",");
 }
 
-static void report_json(const struct an_source *src, const struct an_result *res)
+static void report_json(const struct an_source *src, const struct an_result *res, const struct an_floor *fl)
 {
     const struct an_settings *set = &res->set;
     const double off = set->ref_offset_db;
@@ -661,11 +827,76 @@ static void report_json(const struct an_source *src, const struct an_result *res
     print_json_number("gain_imbalance_db", res->stats.gain_imbalance_db, false);
     print_json_number("quadrature_deg", res->stats.quadrature_deg, false);
     print_json_number("clipped", res->stats.clipped, true);
-    printf("  }\n");
+    printf("  }%s\n", set->pn_on || set->demod_on ? "," : "");
+    if (set->demod_on) {
+        const struct m2sdr_demod_result *d = &res->demod;
+
+        printf("  \"modulation\": {\n");
+        printf("    \"signal\": %s,\n", res->demod_valid && d->signal ? "true" : "false");
+        printf("    \"locked\": %s%s\n", res->demod_valid && d->locked ? "true" : "false",
+               res->demod_valid && d->signal ? "," : "");
+        if (res->demod_valid && d->signal) {
+            printf("    \"type\": \"%s\",\n", m2sdr_modulation_name(d->modulation));
+            print_json_number("symbol_rate", d->symbol_rate, false);
+            print_json_number("rolloff", d->rolloff, false);
+            print_json_number("carrier_hz", set->freq_hz + d->freq_offset_hz, false);
+            print_json_number("carrier_offset_hz", d->freq_offset_hz, false);
+            print_json_number("power_db", d->power_db + off, false);
+            printf("    \"symbols\": %zu,\n", d->symbols);
+            print_json_number("evm_rms_percent", 100.0 * d->evm_rms, false);
+            print_json_number("evm_peak_percent", 100.0 * d->evm_peak, false);
+            print_json_number("mer_db", d->mer_db, false);
+            print_json_number("magnitude_error_percent", 100.0 * d->mag_err_rms, false);
+            print_json_number("phase_error_deg", d->phase_err_deg, false);
+            print_json_number("origin_offset_db", d->iq_offset_db, false);
+            print_json_number("gain_imbalance_db", d->gain_imbalance_db, false);
+            print_json_number("quadrature_deg", d->quadrature_deg, true);
+        }
+        printf("  }%s\n", set->pn_on ? "," : "");
+    }
+    if (set->pn_on) {
+        const struct m2sdr_phase_noise *pn = &res->pn;
+
+        printf("  \"phase_noise\": {\n");
+        printf("    \"found\": %s,\n", res->pn_valid ? "true" : "false");
+        if (res->pn_valid) {
+            print_json_number("carrier_hz", set->freq_hz + pn->carrier_hz, false);
+            print_json_number("carrier_db", pn->carrier_db + off, false);
+            print_json_number("integrated_from_hz", pn->lo_hz, false);
+            print_json_number("integrated_to_hz", pn->hi_hz, false);
+            print_json_number("rms_deg", pn->rms_deg, false);
+            print_json_number("jitter_s", pn->jitter_s, false);
+            print_json_number("residual_fm_hz", pn->residual_fm_hz, false);
+            printf("    \"offsets_hz\": [");
+            for (i = 0; i < pn->points; i++)
+                printf("%s%.3f", i ? ", " : "", pn->offset_hz[i]);
+            printf("],\n    \"l_dbc_hz\": [");
+            for (i = 0; i < pn->points; i++)
+                printf("%s%.3f", i ? ", " : "", pn->l_dbc_hz[i]);
+            printf("],\n    \"am_dbc_hz\": [");
+            for (i = 0; i < pn->points; i++)
+                printf("%s%.3f", i ? ", " : "", pn->am_dbc_hz[i]);
+            printf("],\n    \"floor_dbc_hz\": [");
+            for (i = 0; fl && fl->points && i < pn->points; i++) {
+                const double v = pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn->offset_hz[i]);
+                if (isfinite(v))
+                    printf("%s%.3f", i ? ", " : "", v);
+                else
+                    printf("%snull", i ? ", " : "");
+            }
+            printf("],\n    \"spurs\": [");
+            for (i = 0; i < pn->nspurs; i++)
+                printf("%s{\"offset_hz\": %.3f, \"level_dbc\": %.3f}", i ? ", " : "", pn->spur_hz[i], pn->spur_dbc[i]);
+            printf("]\n");
+        } else {
+            printf("    \"carrier_hz\": null\n");
+        }
+        printf("  }\n");
+    }
     printf("}\n");
 }
 
-static void report_text(const struct an_source *src, const struct an_result *res)
+static void report_text(const struct an_source *src, const struct an_result *res, const struct an_floor *fl)
 {
     const struct an_settings *set = &res->set;
     const double off = set->ref_offset_db;
@@ -721,6 +952,65 @@ static void report_text(const struct an_source *src, const struct an_result *res
     printf("  I/Q        : gain imbalance %+.3f dB, quadrature error %+.3f degrees\n",
            res->stats.gain_imbalance_db, res->stats.quadrature_deg);
     printf("  Clipping   : %.4f %% of the samples\n", 100.0 * res->stats.clipped);
+
+    if (set->demod_on) {
+        const struct m2sdr_demod_result *d = &res->demod;
+
+        printf("\nModulation:\n");
+        if (!res->demod_valid || !d->signal) {
+            printf("  No signal with a symbol rate was found: tune on it, with a sample rate of a few\n"
+                   "  times its bandwidth, or give --symbol-rate.\n");
+        } else {
+            printf("  Type       : %s%s\n", m2sdr_modulation_name(d->modulation),
+                   d->locked ? "" : " (NOT LOCKED: the figures below are not valid)");
+            printf("  Symbol rate: %.3f symbols/s, roll-off %.2f\n", d->symbol_rate, d->rolloff);
+            printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre), %.2f %s\n",
+                   (set->freq_hz + d->freq_offset_hz) / 1e6, d->freq_offset_hz, d->power_db + off, unit);
+            printf("  EVM        : %.2f %% RMS, %.2f %% peak, over %zu symbols\n", 100.0 * d->evm_rms, 100.0 * d->evm_peak, d->symbols);
+            printf("  MER        : %.1f dB\n", d->mer_db);
+            printf("  Errors     : magnitude %.2f %% RMS, phase %.2f degrees RMS\n", 100.0 * d->mag_err_rms, d->phase_err_deg);
+            printf("  I/Q        : origin offset %.1f dB, gain imbalance %+.3f dB, quadrature error %+.3f degrees\n",
+                   d->iq_offset_db, d->gain_imbalance_db, d->quadrature_deg);
+        }
+    }
+
+    if (set->pn_on) {
+        const struct m2sdr_phase_noise *pn = &res->pn;
+
+        printf("\nPhase noise:\n");
+        if (!res->pn_valid) {
+            printf("  No carrier stands %.0f dB above the rest of the capture.\n", 10.0);
+            return;
+        }
+        printf("  Carrier    : %.6f MHz, %.2f %s, %zu samples\n", (set->freq_hz + pn->carrier_hz) / 1e6,
+               pn->carrier_db + off, unit, (size_t)1 << set->pn_log2);
+        for (i = 0; i < PN_SPOTS; i++) {
+            const double l = pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn_spots[i]);
+            const double am = pn_interp(pn->offset_hz, pn->am_dbc_hz, pn->points, pn_spots[i]);
+            const double floor = fl && fl->points ? pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn_spots[i]) : NAN;
+            char freq[32];
+
+            if (!isfinite(l))
+                continue;
+            if (pn_spots[i] >= 1e6)
+                snprintf(freq, sizeof(freq), "%.0f MHz", pn_spots[i] / 1e6);
+            else if (pn_spots[i] >= 1e3)
+                snprintf(freq, sizeof(freq), "%.0f kHz", pn_spots[i] / 1e3);
+            else
+                snprintf(freq, sizeof(freq), "%.0f Hz", pn_spots[i]);
+            printf("  %-10s : %7.1f dBc/Hz (AM %7.1f)", freq, l, am);
+            if (isfinite(floor))
+                printf(", floor %7.1f%s", floor, l - floor < AN_PN_FLOOR_MARGIN_DB ? ": the reading is the floor of the board" : "");
+            printf("\n");
+        }
+        printf("  Integrated : %.4f degrees RMS from %.0f Hz to %.0f Hz\n", pn->rms_deg, pn->lo_hz, pn->hi_hz);
+        printf("  Jitter     : %.3f ps RMS\n", pn->jitter_s * 1e12);
+        printf("  Residual FM: %.2f Hz RMS\n", pn->residual_fm_hz);
+        for (i = 0; i < pn->nspurs && i < 8; i++)
+            printf("  Spur       : %12.1f Hz  %7.1f dBc\n", pn->spur_hz[i], pn->spur_dbc[i]);
+        if (!fl || !fl->points)
+            printf("  No floor of the board is stored: the reading includes its own phase noise.\n");
+    }
 }
 
 static int export_csv(const char *path, const struct an_result *res)
@@ -737,7 +1027,8 @@ static int export_csv(const char *path, const struct an_result *res)
     return fclose(f) == 0 ? 0 : -1;
 }
 
-static int run_report(struct an_source *src, const struct an_settings *set, bool json, const char *csv_path)
+static int run_report(struct an_source *src, const struct an_settings *set, bool json, const char *csv_path,
+                      struct an_floor *fl, const char *floor_save_path)
 {
     const size_t count = capture_samples(set);
     float complex *x = malloc(count * sizeof(*x));
@@ -760,9 +1051,20 @@ static int run_report(struct an_source *src, const struct an_settings *set, bool
         goto out;
     }
     if (json)
-        report_json(src, res);
+        report_json(src, res, fl);
     else
-        report_text(src, res);
+        report_text(src, res, fl);
+    if (floor_save_path) {
+        if (!res->pn_valid) {
+            fprintf(stderr, "No carrier: no floor stored.\n");
+            goto out;
+        }
+        if (floor_save(fl, floor_save_path, res) != 0) {
+            fprintf(stderr, "Could not write %s: %s\n", floor_save_path, strerror(errno));
+            goto out;
+        }
+        fprintf(stderr, "Phase noise stored as the floor of the board in %s.\n", floor_save_path);
+    }
     if (csv_path && export_csv(csv_path, res) != 0) {
         fprintf(stderr, "Could not write %s: %s\n", csv_path, strerror(errno));
         goto out;
@@ -835,6 +1137,11 @@ struct an_ui {
     int    wf_palette;
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
+    /* Phase noise. */
+    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation. */
+    bool   pn_am;
+    struct an_floor *fl;
+    const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
@@ -1513,6 +1820,306 @@ static void draw_statistics(struct an_ui *ui)
     }
 }
 
+static void draw_phase_noise(struct an_ui *ui, bool *changed)
+{
+    static const char *const sizes[] = { "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304", "8388608" };
+    static float lx[M2SDR_PN_MAX_POINTS], l[M2SDR_PN_MAX_POINTS], am[M2SDR_PN_MAX_POINTS];
+    static float fx[M2SDR_PN_MAX_POINTS], fy[M2SDR_PN_MAX_POINTS];
+    const struct m2sdr_phase_noise *pn = &ui->res.pn;
+    const struct an_floor *fl = ui->fl;
+    struct m2sdr_plot plot;
+    double top = -200.0, bottom = 0.0;
+    int idx = ui->set.pn_log2 - AN_PN_MIN_LOG2, i, nf = 0;
+    char text[160];
+
+    igSetNextItemWidth(110.0f);
+    if (igCombo_Str_arr("Samples", &idx, sizes, AN_PN_MAX_LOG2 - AN_PN_MIN_LOG2 + 1, -1)) {
+        ui->set.pn_log2 = idx + AN_PN_MIN_LOG2;
+        *changed = true;
+    }
+    igSameLine(0.0f, 16.0f);
+    if (input_scaled("From (Hz)", &ui->set.pn_lo_hz, 1.0, "%.0f"))
+        *changed = true;
+    igSameLine(0.0f, 16.0f);
+    if (input_scaled("To (Hz)", &ui->set.pn_hi_hz, 1.0, "%.0f"))
+        *changed = true;
+    igSameLine(0.0f, 16.0f);
+    igCheckbox("AM noise", &ui->pn_am);
+    if (ui->floor_path) {
+        igSameLine(0.0f, 16.0f);
+        if (igButton("Store as floor", (ImVec2){ 0.0f, 0.0f }) && ui->res.pn_valid) {
+            if (floor_save(ui->fl, ui->floor_path, &ui->res) == 0)
+                snprintf(ui->message, sizeof(ui->message), "Floor written to %.200s", ui->floor_path);
+            else
+                snprintf(ui->message, sizeof(ui->message), "Could not write %.200s", ui->floor_path);
+        }
+    }
+
+    if (!ui->res.set.pn_on) {
+        igTextUnformatted("Waiting for a capture.", NULL);
+        return;
+    }
+    if (!ui->res.pn_valid) {
+        igTextUnformatted("No carrier stands 10 dB above the rest of the capture: lower the sample rate around it, "
+                          "or tune on it.", NULL);
+        return;
+    }
+    for (i = 0; i < pn->points; i++) {
+        lx[i] = (float)log10(pn->offset_hz[i]);
+        l[i]  = (float)pn->l_dbc_hz[i];
+        am[i] = (float)pn->am_dbc_hz[i];
+        if (l[i] > top)
+            top = l[i];
+        if (l[i] < bottom)
+            bottom = l[i];
+        if (ui->pn_am && am[i] < bottom)
+            bottom = am[i];
+    }
+    for (i = 0; fl && i < fl->points; i++) {
+        if (fl->offset_hz[i] < pn->offset_hz[0] || fl->offset_hz[i] > pn->offset_hz[pn->points - 1])
+            continue;
+        fx[nf] = (float)log10(fl->offset_hz[i]);
+        fy[nf] = (float)fl->l_dbc_hz[i];
+        if (fy[nf] < bottom)
+            bottom = fy[nf];
+        nf++;
+    }
+    top    = 10.0 * ceil(top / 10.0) + 10.0;
+    bottom = 10.0 * floor(bottom / 10.0) - 10.0;
+    if (!m2sdr_plot_begin(&plot, "##pn", (ImVec2){ 0.0f, 0.0f }, lx[0], lx[pn->points - 1], M2SDR_PLOT_LOG_FREQ,
+                          bottom, top, "L(f), dBc/Hz, against the offset from the carrier"))
+        return;
+    /* Integration range. */
+    m2sdr_plot_band(&plot, log10(pn->lo_hz), log10(pn->hi_hz), 0x18ffffffu);
+    if (nf >= 2)
+        m2sdr_plot_xy(&plot, fx, fy, (size_t)nf, 0xffa0a0a0u);
+    if (ui->pn_am)
+        m2sdr_plot_xy(&plot, lx, am, (size_t)pn->points, 0xffffa040u);
+    m2sdr_plot_xy(&plot, lx, l, (size_t)pn->points, 0xff40d0ffu);
+    /* Points that are the floor of the board, not the source. */
+    for (i = 0; i < pn->points && nf >= 2; i++) {
+        const double floor = pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn->offset_hz[i]);
+        if (isfinite(floor) && pn->l_dbc_hz[i] - floor < AN_PN_FLOOR_MARGIN_DB)
+            m2sdr_plot_points(&plot, &lx[i], &l[i], 1, 2.5f, 0xff4040ffu);
+    }
+    for (i = 0; i < pn->nspurs && i < 8; i++) {
+        snprintf(text, sizeof(text), "%.0f dBc", pn->spur_dbc[i]);
+        m2sdr_plot_marker(&plot, log10(pn->spur_hz[i]), pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn->spur_hz[i]),
+                          text, 0xffc0c0ffu);
+    }
+    snprintf(text, sizeof(text), "yellow: phase%s%s", ui->pn_am ? ", blue: amplitude" : "",
+             nf >= 2 ? ", grey: floor of the board, red: reading at the floor" : ", no floor stored");
+    m2sdr_plot_text(&plot, 8.0f, -20.0f, text, 0xffc8c8c8u);
+    if (plot.hovered) {
+        const double f = pow(10.0, plot.mouse_x);
+        snprintf(text, sizeof(text), "%.0f Hz  %.1f dBc/Hz", f, pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, f));
+        m2sdr_plot_text(&plot, -220.0f, 4.0f, text, 0xffffffffu);
+        m2sdr_plot_vline(&plot, plot.mouse_x, 0x40ffffffu);
+    }
+    m2sdr_plot_end(&plot);
+}
+
+static void draw_modulation(struct an_ui *ui, bool *changed)
+{
+    static const char *const mods[] = { "Auto", "BPSK", "QPSK", "8PSK", "16QAM", "32QAM", "64QAM", "128QAM", "256QAM" };
+    static const char *const pulses[] = { "Root raised cosine", "Raised cosine", "Rectangular" };
+    static const char *const sizes[] = { "16384", "32768", "65536", "131072", "262144", "524288", "1048576", "2097152", "4194304" };
+    static float sx[M2SDR_DEMOD_MAX_SYMBOLS], sy[M2SDR_DEMOD_MAX_SYMBOLS], evm[M2SDR_DEMOD_MAX_SYMBOLS];
+    static float complex points[256];
+    static float px[256], py[256];
+    const struct m2sdr_demod_result *d = &ui->res.demod;
+    struct m2sdr_plot plot;
+    ImVec2 avail;
+    float side, lim = 1.0f, eye_h;
+    int mod = (int)ui->set.demod.modulation, pulse = (int)ui->set.demod.pulse;
+    int idx = ui->set.demod_log2 - AN_DEMOD_MIN_LOG2, npoints, i, m, rail;
+    float evm_top = 1.0f;
+    size_t k;
+
+    igSetNextItemWidth(90.0f);
+    if (igCombo_Str_arr("Type", &mod, mods, M2SDR_MOD_COUNT, -1)) {
+        ui->set.demod.modulation = (enum m2sdr_modulation)mod;
+        *changed = true;
+    }
+    igSameLine(0.0f, 12.0f);
+    igSetNextItemWidth(170.0f);
+    if (igCombo_Str_arr("Pulse", &pulse, pulses, 3, -1)) {
+        ui->set.demod.pulse = (enum m2sdr_pulse)pulse;
+        *changed = true;
+    }
+    igSameLine(0.0f, 12.0f);
+    if (input_scaled("Symbols/s (0: auto)", &ui->set.demod.symbol_rate, 1.0, "%.1f"))
+        *changed = true;
+    igSameLine(0.0f, 12.0f);
+    {
+        double a = ui->set.demod.rolloff;
+        if (input_scaled("Roll-off (0: auto)", &a, 1.0, "%.2f") && (a == 0 || (a >= 0.05 && a <= 1.0))) {
+            ui->set.demod.rolloff = a;
+            *changed = true;
+        }
+    }
+    igSetNextItemWidth(110.0f);
+    if (igCombo_Str_arr("Samples", &idx, sizes, AN_DEMOD_MAX_LOG2 - AN_DEMOD_MIN_LOG2 + 1, -1)) {
+        ui->set.demod_log2 = idx + AN_DEMOD_MIN_LOG2;
+        *changed = true;
+    }
+
+    if (!ui->res.set.demod_on) {
+        igTextUnformatted("Waiting for a capture.", NULL);
+        return;
+    }
+    if (!ui->res.demod_valid || !d->signal) {
+        igTextUnformatted("No signal with a symbol rate was found: tune on it, with a sample rate of a few times its "
+                          "bandwidth, or give the symbol rate.", NULL);
+        return;
+    }
+    igSameLine(0.0f, 16.0f);
+    if (d->locked)
+        igTextColored((ImVec4){ 0.4f, 1.0f, 0.4f, 1.0f }, "%s locked", m2sdr_modulation_name(d->modulation));
+    else
+        igTextColored((ImVec4){ 1.0f, 0.4f, 0.3f, 1.0f }, "%s NOT LOCKED: the figures are not valid", m2sdr_modulation_name(d->modulation));
+
+    npoints = m2sdr_constellation(d->modulation, points);
+    for (i = 0; i < npoints; i++) {
+        px[i] = crealf(points[i]);
+        py[i] = cimagf(points[i]);
+        if (fabsf(px[i]) > lim)
+            lim = fabsf(px[i]);
+        if (fabsf(py[i]) > lim)
+            lim = fabsf(py[i]);
+    }
+    lim *= 1.25f;
+    for (k = 0; k < d->symbols; k++) {
+        sx[k]  = crealf(d->sym[k]);
+        sy[k]  = cimagf(d->sym[k]);
+        evm[k] = 100.0f * cabsf(d->sym[k] - d->ref[k]);
+        if (evm[k] > evm_top)
+            evm_top = evm[k];
+    }
+
+    igGetContentRegionAvail(&avail);
+    side = avail.y - 170.0f < 0.5f * avail.x ? avail.y - 170.0f : 0.5f * avail.x;
+    if (side < 120.0f)
+        side = 120.0f;
+    eye_h = 0.5f * side;
+
+    /* Constellation: the symbols, and the points they are compared with. */
+    if (m2sdr_plot_begin(&plot, "##const", (ImVec2){ side, side }, -lim, lim, M2SDR_PLOT_PLAIN, -lim, lim, "Q against I")) {
+        m2sdr_plot_points(&plot, sx, sy, d->symbols, 1.0f, 0xc040d0ffu);
+        for (i = 0; i < npoints; i++) {
+            const float x = m2sdr_plot_x(&plot, px[i]), y = m2sdr_plot_y(&plot, py[i]);
+            ImDrawList_AddLine(plot.dl, (ImVec2){ x - 5.0f, y }, (ImVec2){ x + 5.0f, y }, 0xffffffffu, 1.0f);
+            ImDrawList_AddLine(plot.dl, (ImVec2){ x, y - 5.0f }, (ImVec2){ x, y + 5.0f }, 0xffffffffu, 1.0f);
+        }
+        m2sdr_plot_end(&plot);
+    }
+    igSameLine(0.0f, 8.0f);
+
+    /* Eye diagrams of I and of Q: two symbols, the decisions at the two vertical lines. */
+    igBeginGroup();
+    for (rail = 0; rail < 2; rail++) {
+        if (m2sdr_plot_begin(&plot, rail ? "##eyeq" : "##eyei", (ImVec2){ avail.x - side - 8.0f, eye_h },
+                             -0.5, 1.5, M2SDR_PLOT_PLAIN, -lim, lim, rail ? "Eye, Q, against symbols" : "Eye, I, against symbols")) {
+            static float ex[M2SDR_DEMOD_EYE_POINTS], ey[M2SDR_DEMOD_EYE_POINTS];
+
+            m2sdr_plot_vline(&plot, 0.0, 0x60ffffffu);
+            m2sdr_plot_vline(&plot, 1.0, 0x60ffffffu);
+            for (i = 0; i < d->eye_traces; i++) {
+                for (m = 0; m < M2SDR_DEMOD_EYE_POINTS; m++) {
+                    ex[m] = (float)(m - 4) / 8.0f;
+                    ey[m] = rail ? cimagf(d->eye[i][m]) : crealf(d->eye[i][m]);
+                }
+                m2sdr_plot_xy(&plot, ex, ey, M2SDR_DEMOD_EYE_POINTS, rail ? 0x6040a0ffu : 0x60ffa040u);
+            }
+            m2sdr_plot_end(&plot);
+        }
+    }
+    igEndGroup();
+
+    /* Error of each symbol. */
+    if (m2sdr_plot_begin(&plot, "##evm", (ImVec2){ 0.0f, 0.0f }, 0.0, (double)(d->symbols - 1), M2SDR_PLOT_PLAIN,
+                         0.0, 1.1 * evm_top, "Error vector of each symbol, % of the RMS of the constellation")) {
+        m2sdr_plot_trace(&plot, evm, d->symbols, 0.0, (double)(d->symbols - 1), 0xff60ff60u);
+        m2sdr_plot_hline(&plot, 100.0 * d->evm_rms, 0xc0ffffffu);
+        m2sdr_plot_end(&plot);
+    }
+}
+
+static void draw_modulation_results(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_demod_result *d = &res->demod;
+
+    igSeparatorText("Modulation");
+    if (!res->demod_valid || !d->signal) {
+        igTextUnformatted("No signal.", NULL);
+        return;
+    }
+    if (igBeginTable("##demod", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
+        label_value("Type", "%s%s", m2sdr_modulation_name(d->modulation), d->locked ? "" : " (not locked)");
+        label_value("Symbol rate", "%.3f /s", d->symbol_rate);
+        label_value("Roll-off", "%.2f", d->rolloff);
+        label_value("Carrier", "%.6f MHz", (res->set.freq_hz + d->freq_offset_hz) / 1e6);
+        label_value("Carrier offset", "%+.1f Hz", d->freq_offset_hz);
+        label_value("Power", "%.2f dBFS", d->power_db);
+        label_value("EVM", "%.2f %% RMS", 100.0 * d->evm_rms);
+        label_value("EVM peak", "%.2f %%", 100.0 * d->evm_peak);
+        label_value("MER", "%.1f dB", d->mer_db);
+        label_value("Magnitude error", "%.2f %% RMS", 100.0 * d->mag_err_rms);
+        label_value("Phase error", "%.2f deg RMS", d->phase_err_deg);
+        label_value("Origin offset", "%.1f dB", d->iq_offset_db);
+        label_value("I/Q gain", "%+.3f dB", d->gain_imbalance_db);
+        label_value("Quadrature", "%+.3f deg", d->quadrature_deg);
+        label_value("Symbols", "%zu", d->symbols);
+        igEndTable();
+    }
+}
+
+static void draw_pn_results(struct an_ui *ui)
+{
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_phase_noise *pn = &res->pn;
+    const struct an_floor *fl = ui->fl;
+    char name[32];
+    int i;
+
+    igSeparatorText("Phase noise");
+    if (!res->pn_valid) {
+        igTextUnformatted("No carrier.", NULL);
+        return;
+    }
+    if (igBeginTable("##pn", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
+        label_value("Carrier", "%.6f MHz", (res->set.freq_hz + pn->carrier_hz) / 1e6);
+        label_value("Level", "%.2f dBFS", pn->carrier_db);
+        for (i = 0; i < PN_SPOTS; i++) {
+            const double l = pn_interp(pn->offset_hz, pn->l_dbc_hz, pn->points, pn_spots[i]);
+            const double floor = fl && fl->points ? pn_interp(fl->offset_hz, fl->l_dbc_hz, fl->points, pn_spots[i]) : NAN;
+
+            if (!isfinite(l))
+                continue;
+            m2sdr_plot_format(name, sizeof(name), pn_spots[i], pn_spots[i], M2SDR_PLOT_FREQ);
+            if (isfinite(floor))
+                label_value(name, "%.1f dBc/Hz (floor %.1f)", l, floor);
+            else
+                label_value(name, "%.1f dBc/Hz", l);
+        }
+        label_value("Integrated", "%.4f deg RMS", pn->rms_deg);
+        label_value("Jitter", "%.3f ps RMS", pn->jitter_s * 1e12);
+        label_value("Residual FM", "%.2f Hz RMS", pn->residual_fm_hz);
+        label_value("Range", "%.0f Hz to %.0f Hz", pn->lo_hz, pn->hi_hz);
+        for (i = 0; i < pn->nspurs && i < 5; i++) {
+            snprintf(name, sizeof(name), "Spur %.0f Hz", pn->spur_hz[i]);
+            label_value(name, "%.1f dBc", pn->spur_dbc[i]);
+        }
+        igEndTable();
+    }
+    if (!fl || !fl->points) {
+        igPushTextWrapPos(0.0f);
+        igTextUnformatted("No floor stored: the reading includes the phase noise of the board.", NULL);
+        igPopTextWrapPos();
+    }
+}
+
 static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
 {
     const struct an_result *res = &ui->res;
@@ -1521,6 +2128,15 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     const float *trace = marker_trace(ui);
     char text[64];
     int m, i;
+
+    if (ui->tab == 3) {
+        draw_pn_results(ui);
+        goto status;
+    }
+    if (ui->tab == 4) {
+        draw_modulation_results(ui);
+        goto status;
+    }
 
     igSeparatorText("Markers");
     for (m = 0; m < UI_MARKERS; m++) {
@@ -1625,6 +2241,7 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
         igEndTable();
     }
 
+status:
     igSeparatorText("Status");
     {
         double capture_ms, analysis_ms;
@@ -1659,7 +2276,8 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     }
 }
 
-static int run_gui(struct an_source *src, const struct an_settings *set, int first_view)
+static int run_gui(struct an_source *src, const struct an_settings *set, int first_view, struct an_floor *fl,
+                   const char *floor_path)
 {
     const char *glsl_version = "#version 130";
     struct an_shared sh;
@@ -1684,6 +2302,9 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
     ui.range_db    = 130.0;
     ui.wf_on       = true;
     ui.wf_auto     = true;
+    ui.fl          = fl;
+    ui.floor_path  = floor_path;
+    ui.tab         = first_view;
     view_full(&ui);
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -1789,18 +2410,45 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                     const int select = first_view;
 
                     first_view = -1;
+                    int tab = ui.tab;
+
                     if (igBeginTabItem("Spectrum", NULL, select == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 0;
                         draw_spectrum(&ui, &changed);
                         igEndTabItem();
                     }
                     if (igBeginTabItem("Time", NULL, select == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 1;
                         draw_time(&ui);
                         igEndTabItem();
                     }
                     if (igBeginTabItem("Statistics", NULL, select == 2 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 2;
                         draw_statistics(&ui);
                         igEndTabItem();
                     }
+                    if (igBeginTabItem("Phase noise", NULL, select == 3 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 3;
+                        draw_phase_noise(&ui, &changed);
+                        igEndTabItem();
+                    }
+                    if (igBeginTabItem("Modulation", NULL, select == 4 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 4;
+                        draw_modulation(&ui, &changed);
+                        igEndTabItem();
+                    }
+                    /* The phase noise and the demodulation need their own captures: they are
+                     * measured while their view is shown. */
+                    if (select < 0 && (tab == 3) != ui.set.pn_on) {
+                        ui.set.pn_on = tab == 3;
+                        changed = true;
+                    }
+                    if (select < 0 && (tab == 4) != ui.set.demod_on) {
+                        ui.set.demod_on = tab == 4;
+                        changed = true;
+                    }
+                    if (select < 0)
+                        ui.tab = tab;
                     igEndTabBar();
                 }
             }
@@ -1863,7 +2511,7 @@ static void help(void)
            "       m2sdr_analyzer [options] --file PATH      SigMF or raw capture\n"
            "\n"
            "Spectrum with markers, channel power, occupied bandwidth and ACPR, the figures of a\n"
-           "tone, and time-domain statistics. It only receives.\n"
+           "tone, time-domain statistics and phase noise. It only receives, unless --tx-tone is given.\n"
            "\n");
     m2sdr_cli_print_device_help();
     printf("\n"
@@ -1899,8 +2547,32 @@ static void help(void)
            "      --ref-offset DB    Added to the levels, to read dBm at the connector: the board\n"
            "                         has no absolute level calibration.\n"
            "\n"
+           "Modulation options:\n"
+           "      --demod            With --report: demodulate the strongest signal, a single carrier\n"
+           "                         with PSK or QAM: constellation, EVM, MER, I/Q errors.\n"
+           "      --modulation NAME  auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
+           "                         (default: auto).\n"
+           "      --symbol-rate HZ   Symbols per second (default: found from the signal).\n"
+           "      --rolloff A        Roll-off of the pulse (default: found from the signal).\n"
+           "      --pulse NAME       Transmit pulse: rrc, rc or rect (default: rrc).\n"
+           "      --demod-samples N  Samples of its capture (default: %d).\n"
+           "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
+           "                         --freq and --sample-rate then only label the results.\n"
+           "\n"
+           "Phase noise options:\n"
+           "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
+           "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
+           "      --pn-from HZ, --pn-to HZ   Integration limits (default: the offsets measured).\n"
+           "      --pn-floor PATH    File of the floor of the board (default: one per board,\n"
+           "                         ~/.config/litex_m2sdr/pn_floor_<dna>.csv).\n"
+           "      --pn-floor-save    With --report: store the phase noise read as this floor.\n"
+           "      --tx-tone          Board: send the test tone of the RFIC on TX, at the centre plus a\n"
+           "                         thirty-second of the sample rate. For a cable from TX to RX.\n"
+           "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
+           "\n"
            "Output options:\n"
-           "      --view NAME        View shown first: spectrum, time or statistics.\n"
+           "      --view NAME        View shown first: spectrum, time, statistics, phase-noise or\n"
+           "                         modulation.\n"
            "      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
            "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
@@ -1909,7 +2581,8 @@ static void help(void)
            "Window: left click places the selected marker, the wheel zooms, a right drag moves the\n"
            "span, a double click shows it all. Space: run or stop. P: marker to the peak. F: full\n"
            "span. R: restart the traces.\n",
-           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES);
+           AN_DEFAULT_FREQ_HZ, AN_DEFAULT_SAMPLE_RATE, M2SDR_BUFFER_BYTES, AN_DEFAULT_FFT_LEN, AN_DEFAULT_AVERAGES,
+           1 << AN_DEMOD_DEFAULT_LOG2, 1 << AN_PN_DEFAULT_LOG2, AN_TX_TONE_ATT_DB);
 }
 
 /* Main */
@@ -1947,12 +2620,30 @@ int main(int argc, char **argv)
         { "json",            no_argument,       NULL, 25 },
         { "export-csv",      required_argument, NULL, 26 },
         { "view",            required_argument, NULL, 27 },
+        { "phase-noise",     no_argument,       NULL, 28 },
+        { "pn-samples",      required_argument, NULL, 29 },
+        { "pn-from",         required_argument, NULL, 30 },
+        { "pn-to",           required_argument, NULL, 31 },
+        { "pn-floor",        required_argument, NULL, 32 },
+        { "pn-floor-save",   no_argument,       NULL, 33 },
+        { "tx-tone",         no_argument,       NULL, 34 },
+        { "tx-att",          required_argument, NULL, 35 },
+        { "demod",           no_argument,       NULL, 36 },
+        { "modulation",      required_argument, NULL, 37 },
+        { "symbol-rate",     required_argument, NULL, 38 },
+        { "rolloff",         required_argument, NULL, 39 },
+        { "pulse",           required_argument, NULL, 40 },
+        { "demod-samples",   required_argument, NULL, 41 },
+        { "no-rf-init",      no_argument,       NULL, 42 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
     struct an_settings set;
     struct an_source src;
-    const char *file = NULL, *csv_path = NULL, *trim = NULL;
+    const char *file = NULL, *csv_path = NULL, *trim = NULL, *floor_arg = NULL, *floor_path = NULL;
+    static struct an_floor fl;
+    static char floor_default[1024];
+    bool floor_store = false;
     bool report = false, json = false, freq_given = false, rate_given = false, nbits_given = false;
     double offset_s = 0.0;
     int capture_index = 0, view = 0;
@@ -1975,6 +2666,9 @@ int main(int argc, char **argv)
     src.nchannels    = 2;
     src.frame_size   = M2SDR_BUFFER_BYTES;
     src.loop         = true;
+    src.tx_att       = AN_TX_TONE_ATT_DB;
+    set.pn_log2      = AN_PN_DEFAULT_LOG2;
+    set.demod_log2   = AN_DEMOD_DEFAULT_LOG2;
 
     while ((c = getopt_long(argc, argv, "hd:c:i:p:", options, NULL)) != -1) {
         double v;
@@ -2139,8 +2833,91 @@ int main(int argc, char **argv)
                 view = 1;
             } else if (strcmp(optarg, "statistics") == 0) {
                 view = 2;
+            } else if (strcmp(optarg, "phase-noise") == 0) {
+                view = 3;
+            } else if (strcmp(optarg, "modulation") == 0) {
+                view = 4;
             } else {
-                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time or statistics");
+                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise or modulation");
+                return 1;
+            }
+            break;
+        case 28: set.pn_on = true; break;
+        case 29:
+            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_PN_MIN_LOG2) || v > (double)(1 << AN_PN_MAX_LOG2)) {
+                m2sdr_cli_error("invalid phase noise samples '%s' (expected %d to %d)", optarg,
+                                1 << AN_PN_MIN_LOG2, 1 << AN_PN_MAX_LOG2);
+                return 1;
+            }
+            /* The power of two at or below. */
+            for (set.pn_log2 = AN_PN_MIN_LOG2; (double)((size_t)2 << set.pn_log2) <= v; set.pn_log2++)
+                ;
+            break;
+        case 30:
+            if (m2sdr_cli_parse_double(optarg, &set.pn_lo_hz) != 0 || set.pn_lo_hz < 0) {
+                m2sdr_cli_error("invalid offset '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 31:
+            if (m2sdr_cli_parse_double(optarg, &set.pn_hi_hz) != 0 || set.pn_hi_hz < 0) {
+                m2sdr_cli_error("invalid offset '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 32: floor_arg = optarg; break;
+        case 33: floor_store = true; break;
+        case 36: set.demod_on = true; break;
+        case 37:
+            for (n = M2SDR_MOD_AUTO; n < M2SDR_MOD_COUNT; n++) {
+                if (strcasecmp(optarg, m2sdr_modulation_name((enum m2sdr_modulation)n)) == 0)
+                    break;
+            }
+            if (n == M2SDR_MOD_COUNT) {
+                m2sdr_cli_invalid_choice("modulation", optarg, "auto, bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
+                return 1;
+            }
+            set.demod.modulation = (enum m2sdr_modulation)n;
+            break;
+        case 38:
+            if (m2sdr_cli_parse_double(optarg, &set.demod.symbol_rate) != 0 || set.demod.symbol_rate < 0) {
+                m2sdr_cli_error("invalid symbol rate '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 39:
+            if (m2sdr_cli_parse_double(optarg, &set.demod.rolloff) != 0 ||
+                (set.demod.rolloff != 0 && (set.demod.rolloff < 0.05 || set.demod.rolloff > 1.0))) {
+                m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1, or 0 to find it)", optarg);
+                return 1;
+            }
+            break;
+        case 40:
+            if (strcmp(optarg, "rrc") == 0) {
+                set.demod.pulse = M2SDR_PULSE_RRC;
+            } else if (strcmp(optarg, "rc") == 0) {
+                set.demod.pulse = M2SDR_PULSE_RC;
+            } else if (strcmp(optarg, "rect") == 0) {
+                set.demod.pulse = M2SDR_PULSE_RECT;
+            } else {
+                m2sdr_cli_invalid_choice("pulse", optarg, "rrc, rc or rect");
+                return 1;
+            }
+            break;
+        case 41:
+            if (m2sdr_cli_parse_double(optarg, &v) != 0 || v < (double)(1 << AN_DEMOD_MIN_LOG2) || v > (double)(1 << AN_DEMOD_MAX_LOG2)) {
+                m2sdr_cli_error("invalid demodulation samples '%s' (expected %d to %d)", optarg,
+                                1 << AN_DEMOD_MIN_LOG2, 1 << AN_DEMOD_MAX_LOG2);
+                return 1;
+            }
+            for (set.demod_log2 = AN_DEMOD_MIN_LOG2; (double)((size_t)2 << set.demod_log2) <= v; set.demod_log2++)
+                ;
+            break;
+        case 42: src.no_rf_init = true; break;
+        case 34: src.tx_tone = true; break;
+        case 35:
+            if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
+                m2sdr_cli_error("invalid TX attenuation '%s' (expected 0 to 89)", optarg);
                 return 1;
             }
             break;
@@ -2152,8 +2929,22 @@ int main(int argc, char **argv)
         m2sdr_cli_error("unexpected argument '%s'", argv[optind]);
         return 1;
     }
-    if ((json || csv_path) && !report) {
-        m2sdr_cli_error("--json and --export-csv go with --report");
+    if ((json || csv_path || floor_store) && !report) {
+        m2sdr_cli_error("--json, --export-csv and --pn-floor-save go with --report");
+        return 1;
+    }
+    if (floor_store)
+        set.pn_on = true;
+    if (view == 3)
+        set.pn_on = true;
+    if (view == 4)
+        set.demod_on = true;
+    if (src.no_rf_init && (file || src.tx_tone)) {
+        m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
+        return 1;
+    }
+    if (src.tx_tone && file) {
+        m2sdr_cli_error("--tx-tone is for a board");
         return 1;
     }
 
@@ -2217,12 +3008,27 @@ int main(int argc, char **argv)
         }
     }
 
+    /* Floor of the phase noise: the file given, or the one of the board. */
+    if (floor_arg) {
+        floor_path = floor_arg;
+    } else if (src.live && m2sdr_get_fpga_dna(src.dev, &src.dna) == M2SDR_ERR_OK &&
+               floor_default_path(src.dna, floor_default, sizeof(floor_default)) == 0) {
+        floor_path = floor_default;
+    }
+    if (floor_path && floor_load(&fl, floor_path) != 0 && floor_arg && !floor_store)
+        fprintf(stderr, "No phase noise floor in %s.\n", floor_path);
+    if (floor_store && !floor_path) {
+        m2sdr_cli_error("--pn-floor-save needs a board or --pn-floor PATH");
+        source_close(&src);
+        return 1;
+    }
+
     (void)view;
     if (report) {
-        status = run_report(&src, &set, json, csv_path);
+        status = run_report(&src, &set, json, csv_path, &fl, floor_store ? floor_path : NULL);
     } else {
 #ifdef M2SDR_ANALYZER_GUI
-        status = run_gui(&src, &set, view);
+        status = run_gui(&src, &set, view, &fl, floor_path);
 #else
         fprintf(stderr, "This build has no window (SDL2 or cimgui was missing): use --report.\n");
         status = 1;

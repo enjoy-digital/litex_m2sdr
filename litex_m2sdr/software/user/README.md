@@ -389,6 +389,7 @@ Example usage without PPS:
 ./m2sdr_gen --sample-rate 30720000 --signal white --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal prbs --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal ofdm --ofdm-fft-size 1024 --ofdm-cp-len 128 --ofdm-carriers 800 --ofdm-modulation qpsk --amplitude 0.5
+./m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 16qam --qam-symbol-rate 120000 --qam-rolloff 0.35
 ~~~~
 
 OFDM mode currently generates repeated random OFDM symbols in real time with configurable FFT size, cyclic prefix length, occupied carrier count, modulation (`qpsk` or `16qam`), and PRBS seed. It is intended as a simple waveform generator rather than a complete framed modem/PHY.
@@ -500,7 +501,7 @@ Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and
 ---
 
 ### m2sdr_analyzer
-Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures and time-domain statistics. It only receives. `--report` works without a display; the window needs SDL2 and cimgui.
+Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures, time-domain statistics and the phase noise of a carrier. It only receives, unless `--tx-tone` is given. `--report` works without a display; the window needs SDL2 and cimgui.
 
 **Usage**:
 ```bash
@@ -516,7 +517,12 @@ Relevant options:
 - `--channel-bw HZ`, `--channel-offset HZ`, `--channel-spacing HZ` (channel power, ACPR, occupied bandwidth)
 - `--ref-offset DB` (added to the levels, to read dBm at the connector)
 - `--report`, `--json`, `--export-csv PATH` (one capture, no display)
-- `--view spectrum|time|statistics` (view shown first)
+- `--phase-noise` (with `--report`), `--pn-samples N`, `--pn-from HZ`, `--pn-to HZ` (phase noise of the strongest carrier, integration limits)
+- `--pn-floor PATH`, `--pn-floor-save` (floor of the board, default `~/.config/litex_m2sdr/pn_floor_<dna>.csv`)
+- `--tx-tone`, `--tx-att DB` (test tone of the RFIC on TX, for a cable from TX to RX; the one case where the utility transmits)
+- `--demod` (with `--report`), `--modulation NAME`, `--symbol-rate HZ`, `--rolloff A`, `--pulse rrc|rc|rect`, `--demod-samples N` (PSK/QAM demodulation: EVM, MER, I/Q errors; found from the signal by default)
+- `--no-rf-init` (leave the RFIC as `m2sdr_rf` set it)
+- `--view spectrum|time|statistics|phase-noise|modulation` (view shown first)
 
 Window: left click places the selected marker, the wheel zooms, a right drag moves the span, a double click shows it all. Space runs or stops, `P` puts the marker on the peak, `F` shows the full span, `R` restarts the traces.
 
@@ -525,6 +531,10 @@ Examples:
 ./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6
 ./m2sdr_analyzer --freq 2.45e9 --report --channel-bw 1e6
 ./m2sdr_analyzer --file capture.sigmf-meta
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view phase-noise
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view modulation
+./m2sdr_analyzer --file capture.sigmf-meta --report --demod
 ./m2sdr_analyzer --file tone.bin --nchannels 1 --sample-rate 1e6 --report --json
 ```
 

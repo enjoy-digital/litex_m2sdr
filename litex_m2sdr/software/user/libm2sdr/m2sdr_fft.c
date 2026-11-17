@@ -71,9 +71,14 @@ void m2sdr_fft_run(const struct m2sdr_fft *fft, const float complex *in, float c
         for (i = 0; i < n; i += len) {
             float complex *a = out + i, *b = out + i + half;
             for (k = 0; k < half; k++) {
-                const float complex t = b[k] * fft->w[k * step];
-                b[k] = a[k] - t;
-                a[k] = a[k] + t;
+                /* The product by hand: the one of C99 checks for infinities at each call. */
+                const float wr = crealf(fft->w[k * step]), wi = cimagf(fft->w[k * step]);
+                const float br = crealf(b[k]), bi = cimagf(b[k]);
+                const float tr = br * wr - bi * wi, ti = br * wi + bi * wr;
+                const float ar = crealf(a[k]), ai = cimagf(a[k]);
+
+                b[k] = (ar - tr) + I * (ai - ti);
+                a[k] = (ar + tr) + I * (ai + ti);
             }
         }
     }

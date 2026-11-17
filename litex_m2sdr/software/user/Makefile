@@ -139,6 +139,8 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_cal_dsp.o \
 	libm2sdr/m2sdr_fft.o \
 	libm2sdr/m2sdr_analysis_spectrum.o \
+	libm2sdr/m2sdr_analysis_pn.o \
+	libm2sdr/m2sdr_analysis_demod.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \

@@ -150,6 +150,134 @@ struct m2sdr_iq_stats {
 /* `clip` is the level counted as clipped (0.999 for samples scaled by their converter range). */
 int m2sdr_iq_stats(const float complex *x, size_t count, double clip, struct m2sdr_iq_stats *stats);
 
+/* Phase noise */
+/*-------------*/
+
+#define M2SDR_PN_POINTS_PER_DECADE 20
+#define M2SDR_PN_MAX_POINTS        160
+#define M2SDR_PN_MAX_SPURS         16
+
+/* Phase noise of the strongest carrier of a capture.
+ *
+ * The carrier is brought to zero frequency, its frequency offset and its mean phase are
+ * removed, and the signal is split into its phase and its amplitude. L(f) is the spectral
+ * density of the phase, single sideband, in dBc/Hz; the density of the relative amplitude is
+ * given next to it. Offsets are spaced evenly on a log scale, with a longer transform for the
+ * lower ones.
+ *
+ * The centre of the capture is not searched: it holds the DC offset and the LO leakage of the
+ * receiver, so the capture is tuned a little off the carrier.
+ *
+ * What is measured is the sum of the source and of the receiver: its local oscillator and its
+ * reference add their own phase noise, and its noise figure and its converters add a floor,
+ * half of it as phase and half as amplitude. */
+struct m2sdr_phase_noise {
+    bool   found;                                 /* A carrier stands out of the capture. */
+    double carrier_hz;                            /* From the centre of the capture. */
+    double carrier_db;                            /* dBFS. */
+    int    points;
+    double offset_hz[M2SDR_PN_MAX_POINTS];
+    double l_dbc_hz[M2SDR_PN_MAX_POINTS];         /* Phase noise. */
+    double am_dbc_hz[M2SDR_PN_MAX_POINTS];        /* Amplitude noise. */
+    /* Integrated between lo_hz and hi_hz, both sidebands. */
+    double lo_hz, hi_hz;
+    double rms_rad;                               /* Phase error. */
+    double rms_deg;
+    double jitter_s;                              /* 0 when the carrier frequency is not given. */
+    double residual_fm_hz;                        /* RMS frequency deviation. */
+    /* Discrete lines of the phase, the strongest first; they are part of L(f) above. */
+    int    nspurs;
+    double spur_hz[M2SDR_PN_MAX_SPURS];
+    double spur_dbc[M2SDR_PN_MAX_SPURS];
+};
+
+/* carrier_freq_hz is the RF frequency of the carrier, for the jitter (0: not computed).
+ * The integration goes from lo_hz to hi_hz, clamped to the offsets measured (0, 0: all of
+ * them). Returns 0, or -1 on a bad argument or allocation failure; without a carrier,
+ * found = false. A capture of 2^20 samples or more gives five decades of offsets. */
+int m2sdr_phase_noise(const float complex *x, size_t count, double sample_rate, double carrier_freq_hz,
+                      double lo_hz, double hi_hz, struct m2sdr_phase_noise *pn);
+
+/* Demodulation */
+/*--------------*/
+
+enum m2sdr_modulation {
+    M2SDR_MOD_AUTO   = 0,     /* Found among the ones below. */
+    M2SDR_MOD_BPSK   = 1,
+    M2SDR_MOD_QPSK   = 2,
+    M2SDR_MOD_8PSK   = 3,
+    M2SDR_MOD_16QAM  = 4,
+    M2SDR_MOD_32QAM  = 5,
+    M2SDR_MOD_64QAM  = 6,
+    M2SDR_MOD_128QAM = 7,
+    M2SDR_MOD_256QAM = 8,
+    M2SDR_MOD_COUNT  = 9,
+};
+
+enum m2sdr_pulse {
+    M2SDR_PULSE_RRC  = 0,     /* Root raised cosine at the transmitter: matched filter here. */
+    M2SDR_PULSE_RC   = 1,     /* Raised cosine at the transmitter: no filter here. */
+    M2SDR_PULSE_RECT = 2,     /* Rectangular symbols: integration over a symbol. */
+};
+
+#define M2SDR_DEMOD_MAX_SYMBOLS 8192
+#define M2SDR_DEMOD_EYE_TRACES  128
+#define M2SDR_DEMOD_EYE_POINTS  17      /* Two symbols, eight points per symbol. */
+
+struct m2sdr_demod_config {
+    enum m2sdr_modulation modulation;
+    enum m2sdr_pulse pulse;
+    double symbol_rate;       /* Symbols per second; 0: found from the signal. */
+    double rolloff;           /* Of the pulse, 0.05 to 1; 0: found from the signal. */
+    size_t max_symbols;       /* Symbols analysed; 0: M2SDR_DEMOD_MAX_SYMBOLS. */
+};
+
+/* Single-carrier PSK or QAM signal: the strongest signal of the capture.
+ *
+ * The symbols are compared with the nearest points of the constellation, not with the symbols
+ * sent: the EVM is right while symbol errors are rare, and reads low once the points merge.
+ * `locked` tells whether the EVM is small enough against the spacing of the constellation for
+ * the figures to mean something. The carrier phase is followed by a loop a hundredth of the
+ * symbol rate wide: slower phase noise of the source or of the receiver is not in the EVM.
+ * The rotation of the constellation is not resolved: a multiple of its symmetry remains. */
+struct m2sdr_demod_result {
+    bool   signal;            /* A signal and its symbol rate were found. */
+    bool   locked;            /* Carrier and symbols recovered: the figures are valid. */
+    enum m2sdr_modulation modulation;
+    double symbol_rate;       /* Used, Hz. */
+    double rolloff;           /* Used. */
+    double freq_offset_hz;    /* Carrier, from the centre of the capture. */
+    double power_db;          /* Of the signal in its band, dBFS. */
+    size_t symbols;
+    double evm_rms;           /* Fractions of the RMS of the constellation: 0.02 is 2 %. */
+    double evm_peak;
+    double mer_db;
+    double mag_err_rms;       /* Fraction. */
+    double phase_err_deg;     /* RMS. */
+    double iq_offset_db;      /* Origin offset over the RMS of the constellation. */
+    double gain_imbalance_db; /* I over Q. */
+    double quadrature_deg;
+    /* Received symbols and the points they were compared with, the constellation scaled to a
+     * mean power of 1. */
+    float complex sym[M2SDR_DEMOD_MAX_SYMBOLS];
+    float complex ref[M2SDR_DEMOD_MAX_SYMBOLS];
+    /* Eye diagram: traces of two symbols after the receive filter, the symbol instants at
+     * points 4 and 12. */
+    int    eye_traces;
+    float complex eye[M2SDR_DEMOD_EYE_TRACES][M2SDR_DEMOD_EYE_POINTS];
+};
+
+const char *m2sdr_modulation_name(enum m2sdr_modulation modulation);
+
+/* Points of a constellation, scaled to a mean power of 1; returns their number (0 for AUTO).
+ * points holds 256 entries. */
+int m2sdr_constellation(enum m2sdr_modulation modulation, float complex *points);
+
+/* Returns 0, or -1 on a bad argument or allocation failure. Without a signal, signal = false;
+ * with one that does not demodulate, locked = false and the figures are what was read. */
+int m2sdr_demod(const float complex *x, size_t count, double sample_rate,
+                const struct m2sdr_demod_config *cfg, struct m2sdr_demod_result *res);
+
 #ifdef __cplusplus
 }
 #endif
