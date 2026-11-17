@@ -27,6 +27,12 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
 - Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
+**FM Utilities**
+- Reworked `m2sdr_fm_tx` and `m2sdr_fm_rx` on a modulator and a demodulator in `libm2sdr` (`m2sdr_fm.h`), with offline tests (`make test-fm`): about 14 times less CPU time at `1 MSPS`.
+- Added stereo decoding to `m2sdr_fm_rx` (pilot PLL): `--mode stereo` wrote the mono signal on both channels. Added a channel filter and a 15 kHz audio low-pass, which removes the pilot from the audio.
+- Fixed `m2sdr_fm_tx`: deviation steps of `244 Hz` that silenced quiet audio, a pre-emphasis that kept oscillating at half the sample rate after a step in the audio, text written on stdout in front of the I/Q samples, and audio above 15 kHz reaching the pilot. The audio is now limited to the deviation after the pre-emphasis.
+- Fixed `m2sdr_fm_radio.py`: its `m2sdr_rf` options were not accepted, so the frequency and the gain were not applied.
+
 **Calibration**
 - Added `m2sdr_cal`: scans bands for LTE and GSM carriers, measures the error of the reference clock on LTE carriers (PSS and cyclic prefix) and GSM carriers (FCCH), trims the reference and stores the result in a file or in the SPI flash. `m2sdr_rf --refclk-ppm stored` uses the record, and `m2sdr_cal measure --refclk-ppm stored` checks it. The estimators and the record are in libm2sdr (`m2sdr_cal.h`).
 

@@ -672,14 +672,20 @@ m2sdr_fm_tx [options] input output
 - **output**: I/Q bin file or `-` for stdout.
 
 **Options**:
-- `--sample-rate` (short: `-s`, default=500000)
-- `--deviation` (short: `-d`, default=75000)
+- `--sample-rate` (short: `-s`, default=1000000; at least 64000 in mono and 128000 in stereo)
+- `--deviation` (short: `-d`, default=75000: deviation of full-scale audio)
 - `--bits` (short: `-b`, default=12)
 - `--format` (values: `sc16|sc8`, default=sc16; `-8`/`--sc8` selects 8-bit I/Q samples)
-- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
+- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu; `eu` is 50 us, `us` is 75 us)
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
 - `--input-channels` (short: `-i`, for stdin)
-- `--input-sample-rate` (short: `-f`, for stdin)
+- `--input-sample-rate` (short: `-f`, for stdin, default=44100)
+
+The audio is resampled, pre-emphasized, limited to full scale, low-pass filtered at 15 kHz and,
+in stereo, multiplexed with a 19 kHz pilot at 10 % and the L-R subcarrier at 38 kHz. The
+pre-emphasis raises the high frequencies (14 dB at 15 kHz with 50 us): leave headroom in the
+source. The number of limited samples is reported at the end. Messages go to stderr, stdout
+carries only the I/Q samples.
 
 Example:
 ~~~~
@@ -727,12 +733,20 @@ m2sdr_fm_rx [options] input output
 - **output**: WAV file or `-` for stdout (pipe to ffplay/ffmpeg for playback).
 
 **Options**:
-- `--sample-rate` (short: `-s`, default=500000)
-- `--deviation` (short: `-d`, default=75000)
-- `--bits` (short: `-b`, default=12)
+- `--sample-rate` (short: `-s`, default=1000000; at least 64000 in mono and 128000 in stereo)
+- `--deviation` (short: `-d`, default=75000: deviation of full-scale audio)
+- `--bits` (short: `-b`, accepted for symmetry with `m2sdr_fm_tx`: the level of the samples does not matter)
 - `--format` (values: `sc16|sc8`, default=sc16; `-8`/`--sc8` selects 8-bit I/Q samples)
-- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu)
+- `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu; `eu` is 50 us, `us` is 75 us)
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
+
+The receiver filters the channel (about 200 kHz wide), demodulates, applies the de-emphasis and
+a 15 kHz low-pass, and writes 16-bit audio at 44100 Hz. In stereo it locks on the 19 kHz pilot
+and decodes the two channels; without a pilot, both channels carry the mono signal.
+
+Both utilities use the modulator and demodulator of libm2sdr (`libm2sdr/m2sdr_fm.h`).
+`make test-fm` runs their offline tests: tones through the modulator and the demodulator, then
+through the two utilities with files and pipes.
 
 Example:
 ~~~~
