@@ -19,6 +19,7 @@ jobs:
         run: make -C litex_m2sdr/software/user clean all
       - name: Check optional GUI utilities
         run: |
+          test -x litex_m2sdr/software/user/m2sdr_analyzer
           test -x litex_m2sdr/software/user/m2sdr_check
           test -x litex_m2sdr/software/user/m2sdr_scan
       - name: Check libm2sdr exported symbols

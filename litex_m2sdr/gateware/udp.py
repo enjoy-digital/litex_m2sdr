@@ -8,7 +8,8 @@ from migen import *
 
 from litex.gen import *
 
-from litex.soc.interconnect import stream
+from litex.soc.interconnect     import stream
+from litex.soc.interconnect.csr import *
 
 # UDP Packet Dropper -------------------------------------------------------------------------------
 
@@ -48,4 +49,30 @@ class UDPPacketDropper(LiteXModule):
             sink.connect(source, omit={"valid", "ready"}),
             source.valid.eq(sink.valid & ~drop),
             sink.ready.eq(source.ready | drop),
+        ]
+
+# UDP TX Status ------------------------------------------------------------------------------------
+
+class UDPTXStatus(LiteXModule):
+    """Level of the TX FIFO behind a UDP port, for the flow control of the host.
+
+    UDP has no flow control: a host that sends faster than the RFIC transmits fills the FIFO, and
+    the packets that do not fit are dropped. With the level, the host holds itself back, at the
+    rate at which the board empties the FIFO: the one of its own sample clock.
+    """
+    def __init__(self, fifo_depth):
+        self.fifo_level = Signal(32) # i: words in the FIFO.
+        self.drops      = Signal(32) # i: packets dropped.
+
+        self._fifo_level = CSRStatus(32, description="Words of 64 bits in the Ethernet TX FIFO.")
+        self._fifo_depth = CSRStatus(32, description="Depth of the Ethernet TX FIFO, in words of 64 bits.",
+            reset = fifo_depth)
+        self._drops      = CSRStatus(32, description="Datagrams dropped for lack of room in the Ethernet TX FIFO (free-running).")
+
+        # # #
+
+        self.comb += [
+            self._fifo_level.status.eq(self.fifo_level),
+            self._fifo_depth.status.eq(fifo_depth),
+            self._drops.status.eq(self.drops),
         ]

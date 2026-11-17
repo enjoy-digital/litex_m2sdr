@@ -64,7 +64,7 @@ Core user tools build with the standard C/C++ toolchain and do not require the o
 - libsndfile development headers/libraries (`libsndfile1-dev`)
 - libsamplerate development headers/libraries (`libsamplerate0-dev`)
 
-`m2sdr_scan` and `m2sdr_check` additionally require:
+`m2sdr_scan`, `m2sdr_check` and the window of `m2sdr_analyzer` additionally require:
 - `pkg-config`
 - SDL2 development headers/libraries (`libsdl2-dev`)
 - OpenGL development headers/libraries (`libgl1-mesa-dev`)
@@ -389,6 +389,7 @@ Example usage without PPS:
 ./m2sdr_gen --sample-rate 30720000 --signal white --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal prbs --amplitude 0.5
 ./m2sdr_gen --sample-rate 30720000 --signal ofdm --ofdm-fft-size 1024 --ofdm-cp-len 128 --ofdm-carriers 800 --ofdm-modulation qpsk --amplitude 0.5
+./m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 16qam --qam-symbol-rate 120000 --qam-rolloff 0.35
 ~~~~
 
 OFDM mode currently generates repeated random OFDM symbols in real time with configurable FFT size, cyclic prefix length, occupied carrier count, modulation (`qpsk` or `16qam`), and PRBS seed. It is intended as a simple waveform generator rather than a complete framed modem/PHY.
@@ -416,6 +417,8 @@ Common playback options:
 - `--timed-start`
 - `--host-buffers N`
 - `--prefill N`
+- `--sample-rate HZ` (older gateware only: pace the stream over Ethernet on the host clock; taken from a SigMF file when not given. With the `eth_tx_status` capability, libm2sdr paces on the TX FIFO of the board and no rate is needed)
+- `--no-flow-control` (Ethernet: do not hold the stream back on the TX FIFO of the board)
 
 SigMF input:
 - `--capture-index`
@@ -494,6 +497,48 @@ Example usage:
 ~~~~
 
 Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and expects stripped sample payloads when DMA headers are enabled.
+
+---
+
+### m2sdr_analyzer
+Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures, time-domain statistics and the phase noise of a carrier. It only receives, unless `--tx-tone` is given. `--report` works without a display; the window needs SDL2 and cimgui.
+
+**Usage**:
+```bash
+m2sdr_analyzer [options]                # Board RX
+m2sdr_analyzer [options] --file PATH    # SigMF or raw capture
+```
+
+Relevant options:
+- `--freq HZ`, `--sample-rate HZ`, `--bandwidth HZ`, `--rx-gain DB` (default: slow AGC), `--channel N`
+- `--refclk-ppm PPM|stored|none` (default: the calibration record of the board when it has one)
+- `--file PATH`, with `--format sc16|sc8`, `--nbits N`, `--nchannels N`, `--frame-header`, `--frame-size N`, `--capture-index N`, `--offset S` for raw files
+- `--fft-len N`, `--window hann|flattop|blackman-harris|rect`, `--averages N`
+- `--channel-bw HZ`, `--channel-offset HZ`, `--channel-spacing HZ` (channel power, ACPR, occupied bandwidth)
+- `--ref-offset DB` (added to the levels, to read dBm at the connector)
+- `--report`, `--json`, `--export-csv PATH` (one capture, no display)
+- `--phase-noise` (with `--report`), `--pn-samples N`, `--pn-from HZ`, `--pn-to HZ` (phase noise of the strongest carrier, integration limits)
+- `--pn-floor PATH`, `--pn-floor-save` (floor of the board, default `~/.config/litex_m2sdr/pn_floor_<dna>.csv`)
+- `--tx-tone`, `--tx-att DB` (test tone of the RFIC on TX, for a cable from TX to RX; the one case where the utility transmits)
+- `--demod` (with `--report`), `--modulation NAME`, `--symbol-rate HZ`, `--rolloff A`, `--pulse rrc|rc|rect`, `--demod-samples N` (PSK/QAM demodulation: EVM, MER, I/Q errors; found from the signal by default)
+- `--lte` (with `--report`: LTE downlink carrier, FDD, normal cyclic prefix: cell, MIB, EVM, data blocks; sample rate 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS)
+- `--no-rf-init` (leave the RFIC as `m2sdr_rf` set it)
+- `--view spectrum|time|statistics|phase-noise|modulation|lte` (view shown first)
+
+Window: left click places the selected marker, the wheel zooms, a right drag moves the span, a double click shows it all. Space runs or stops, `P` puts the marker on the peak, `F` shows the full span, `R` restarts the traces.
+
+Examples:
+```bash
+./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6
+./m2sdr_analyzer --freq 2.45e9 --report --channel-bw 1e6
+./m2sdr_analyzer --file capture.sigmf-meta
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view phase-noise
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view modulation
+./m2sdr_analyzer --file capture.sigmf-meta --report --demod
+./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6 --view lte
+./m2sdr_analyzer --file tone.bin --nchannels 1 --sample-rate 1e6 --report --json
+```
 
 ---
 

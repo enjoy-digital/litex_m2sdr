@@ -27,6 +27,13 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stream loss counters at the RFIC (RX overflow, TX underflow, capability bit `stream_counters`): the stream statistics of `libm2sdr` and the SoapySDR stream status report the samples lost in the FPGA over USB3 and Ethernet.
 - Fixed the USB3 TX rate with small writes (one buffer per call: `279` to `308 MB/s` in full duplex) and the `m2sdr_util` AD9361 loopback and PRBS tests over USB3.
 
+**Signal Analysis**
+- Added `m2sdr_analyzer`: spectrum with traces, markers and a waterfall, channel power, ACPR, occupied bandwidth, tone figures (SNR, SINAD, SFDR, THD) and time-domain statistics, on the board RX or on a SigMF or raw capture, in a Dear ImGui window or as a text or JSON report without a display. The measurements are in libm2sdr (`m2sdr_analysis.h`).
+- Added the phase noise of a carrier to `m2sdr_analyzer`: L(f) and amplitude noise against the offset, integrated phase error, jitter, residual FM and spurs, with a floor of the board stored per board and drawn under the trace.
+- Added the demodulation of single-carrier PSK and QAM signals to `m2sdr_analyzer` (BPSK to 256QAM, symbol rate, roll-off and modulation found from the signal): constellation, eye diagrams, EVM, MER, magnitude and phase errors, origin offset, I/Q gain imbalance and quadrature error.
+- Added the analysis of an LTE downlink carrier to `m2sdr_analyzer` (FDD, normal cyclic prefix): cell identity, MIB decoded from the PBCH, carrier offset, RSRP, EVM of the reference signals and of the PBCH, resource grid, and for a cell of one antenna port the modulation and EVM of each block of data.
+- Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
+
 **FM Utilities**
 - Reworked `m2sdr_fm_tx` and `m2sdr_fm_rx` on a modulator and a demodulator in `libm2sdr` (`m2sdr_fm.h`), with offline tests (`make test-fm`): about 14 times less CPU time at `1 MSPS`.
 - Added stereo decoding to `m2sdr_fm_rx` (pilot PLL): `--mode stereo` wrote the mono signal on both channels. Added a channel filter and a 15 kHz audio low-pass, which removes the pilot from the audio.
@@ -39,6 +46,8 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **Ethernet Host Link**
 - Added hardware timed TX over Ethernet (capability bit `eth_tx_header`) and RX timestamps on the raw UDP stream: the gateware finds the TX header at the start of a datagram, and `libm2sdr` aligns its RX buffers on the frames of the FPGA, through lost datagrams.
 - Qualified 1000BASE-X at `116 MB/s` in full duplex (2T2R `14.5 MSPS` in SC16, `29 MSPS` in SC8).
+- Added flow control of the Ethernet TX stream (capability bit `eth_tx_status`): the gateware gives the level of its TX FIFO and the datagrams it dropped, and `libm2sdr` holds `m2sdr_sync_tx()` and `m2sdr_submit_buffer()` back on that level, so the host sends at the rate of the sample clock of the board and no datagram is dropped. Without it, `m2sdr_play` and `m2sdr_gen` sent as fast as the host could and the signal was sent in pieces.
+- With an older gateware, `m2sdr_play` sends at the sample rate on the clock of the host, from the SigMF metadata or `--sample-rate`.
 - Fixed the start of an Ethernet RX stream: about `110 KB` of old samples, left in the RFIC RX FIFO, opened it with compressed timestamps. The gateware drains them while the UDP streamer is disabled, and `libm2sdr` waits `10 ms` for it before enabling the streamer.
 - Fixed a loss of the Ethernet control link: a full TX FIFO stalled the receive path of the whole LiteEth core, so the board stopped answering while the timed TX gate held a frame. The datagrams that do not fit are now dropped.
 

@@ -70,6 +70,7 @@ Fields of `features`:
 | `usb3_tx_header` | 11 | USB3 TX stream marks its frames: TX header and hardware timed TX over USB3. |
 | `stream_counters` | 12 | RFIC stream loss counters (RX overflow, TX underflow) are present. |
 | `eth_tx_header` | 13 | Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet. |
+| `eth_tx_status` | 14 | Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host. |
 
 Fields of `pcie_config`:
 
@@ -860,6 +861,21 @@ Bank `eth_tx_streamer`.
 | `enable` | `0x0000` | 1 | rw | Enable Module Reset `0x1`. |
 | `ip_address` | `0x0004` | 32 | rw | IP Address Reset `0x0`. |
 | `udp_port` | `0x0008` | 16 | rw | UDP Port Reset `0x929`. |
+
+## Ethernet TX status {#reg-eth-tx-status}
+
+Defined by `UDPTXStatus` (litex_m2sdr/gateware/udp.py).
+
+Present with `--with-eth`, capability bit `eth_tx_status`. The host library reads the level
+to send the TX stream at the rate at which the board transmits it.
+
+Bank `eth_tx_status`.
+
+| Register | Offset | Bits | Access | Description |
+|----------------------------|-------------|--------|---------|----------------------------------------|
+| `fifo_level` | `0x0000` | 32 | ro | Words of 64 bits in the Ethernet TX FIFO. |
+| `fifo_depth` | `0x0004` | 32 | ro | Depth of the Ethernet TX FIFO, in words of 64 bits. |
+| `drops` | `0x0008` | 32 | ro | Datagrams dropped for lack of room in the Ethernet TX FIFO (free-running). |
 
 ## Ethernet RX mode {#reg-eth-rx-mode}
 

@@ -25,6 +25,7 @@
 #include "liteusb.h"
 #endif
 #include "m2sdr_si5351_i2c.h"
+#include "m2sdr_eth_flow.h"
 
 struct ad9361_rf_phy;
 
@@ -72,6 +73,11 @@ struct m2sdr_dev {
     int rx_header_enable;
     int rx_strip_header;
     int tx_header_enable;
+    /* Ethernet TX flow control on the level of the TX FIFO of the FPGA
+     * (M2SDR_FEATURE_ETH_TX_STATUS). */
+    struct m2sdr_eth_flow eth_tx_flow;
+    int      eth_tx_flow_disabled;   /* Asked off by the application. */
+    uint32_t eth_tx_drops_base;      /* Dropped datagrams counter of the FPGA at the stream start. */
     enum m2sdr_format rx_format;
     enum m2sdr_format tx_format;
     uint8_t zero_copy;

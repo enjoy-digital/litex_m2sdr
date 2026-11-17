@@ -29,6 +29,7 @@ __pycache__
 !/litex_m2sdr/software/user/*.c
 /litex_m2sdr/software/user/tests/test_*
 !/litex_m2sdr/software/user/tests/*.c
+/litex_m2sdr/software/user/tests/analysis_capture*
 
 # scripts/ test-utility binaries (built by scripts/Makefile; sources are *.c)
 /scripts/timed_tx_selftest
