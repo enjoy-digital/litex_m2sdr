@@ -416,6 +416,8 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
         memset(payload + generated_bytes, 0, payload_bytes - generated_bytes);
 }
 
+#define GEN_PACE_LEAD_S 0.004      /* Samples sent ahead of their time over Ethernet. */
+
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
@@ -437,6 +439,10 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     int use_pcie_dma = 0;
     int stream_configured = 0;
     int exit_status = 1;
+    bool pace_init = false, pace_tx = false;
+    uint64_t fpga_underflows = 0;
+    uint64_t paced_samples = 0;
+    struct timespec pace_start = { 0, 0 };
     enum m2sdr_format format = use_8bit ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
     unsigned payload_bytes = M2SDR_BUFFER_BYTES - (enable_header ? M2SDR_HEADER_BYTES : 0);
     unsigned samples_per_buf = m2sdr_bytes_to_samples(format, payload_bytes);
@@ -607,6 +613,14 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             void *buf_wr = NULL;
             unsigned num_samples = 0;
             struct m2sdr_metadata meta = {0};
+
+            if (!pace_init) {
+                enum m2sdr_transport_kind kind = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+                pace_init = true;
+                pace_tx   = m2sdr_get_transport(dev, &kind) == 0 && kind == M2SDR_TRANSPORT_KIND_LITEETH;
+                clock_gettime(CLOCK_MONOTONIC, &pace_start);
+            }
             int rc;
             size_t buf_payload_bytes;
 
@@ -639,6 +653,21 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                 goto cleanup;
             }
             total_buffers++;
+
+            /* Ethernet has no flow control: the board drops what its TX FIFO cannot take. The
+             * samples are sent at their rate, a few milliseconds ahead, on the clock of the
+             * host; the FIFO takes the difference with the clock of the board for minutes. */
+            if (pace_tx) {
+                struct timespec now;
+                double ahead;
+
+                paced_samples += num_samples;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                ahead = (double)paced_samples / (2.0 * sample_rate) -
+                        ((double)(now.tv_sec - pace_start.tv_sec) + 1e-9 * (double)(now.tv_nsec - pace_start.tv_nsec));
+                if (ahead > GEN_PACE_LEAD_S)
+                    usleep((useconds_t)((ahead - GEN_PACE_LEAD_S) * 1e6));
+            }
         }
 
         /* Statistics every 200ms */
@@ -648,6 +677,16 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             if (i % 10 == 0)
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   UNDERFLOWS\e[0m\n");
             i++;
+            /* Off PCIe, the underflows are the ones the FPGA counts at the RFIC. */
+            if (!use_pcie_dma) {
+                struct m2sdr_stream_stats tx_stats;
+
+                memset(&tx_stats, 0, sizeof(tx_stats));
+                if (m2sdr_get_stream_stats(dev, M2SDR_TX, &tx_stats) == 0) {
+                    sw_underflows       = (int64_t)(tx_stats.underflow_events - fpga_underflows);
+                    fpga_underflows     = tx_stats.underflow_events;
+                }
+            }
             /* Print statistics */
             printf("%10.2f %10" PRIu64 " %10" PRIu64 " %10" PRIu64 "\n",
                    (double)(total_buffers - last_buffers) * M2SDR_BUFFER_BYTES * 8 / ((double)duration * 1e6),

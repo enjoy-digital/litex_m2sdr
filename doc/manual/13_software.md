@@ -416,7 +416,7 @@ The utilities are small command-line programs, one per task. They share the devi
 | `m2sdr_cal` | Measure the error of the reference clock on LTE and GSM carriers, store it |
 | `m2sdr_record` | Receive samples to a file or to a pipe, raw or SigMF |
 | `m2sdr_play` | Transmit samples from a file or from a pipe, raw or SigMF |
-| `m2sdr_gen` | Transmit a tone, noise, a PRBS or an OFDM signal |
+| `m2sdr_gen` | Transmit a tone, noise, a PRBS, an OFDM signal or a PSK/QAM carrier |
 | `m2sdr_check` | Inspect a recording in a window: time, spectrum, constellation |
 | `m2sdr_analyzer` | Measure a signal, live or from a recording: spectrum, markers, channel power |
 | `m2sdr_sigmf` | Print and validate SigMF metadata |
@@ -684,6 +684,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Time | I and Q, and the power, against time |
 | Statistics | CCDF of the power next to the one of Gaussian noise, and Q against I |
 | Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
+| Modulation | Constellation, eye diagrams and error of each symbol of a PSK or QAM signal |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -713,6 +714,52 @@ When the host or the link does not follow the sample rate, samples are lost betw
 and the host and a capture has a hole. `m2sdr_analyzer` reads the loss counters of the stream
 around each capture, takes it again, and says so when it could not get a clean one: over 1 GbE
 this is the case above about 14 MSPS, since both channels are streamed.
+
+#### Modulation {#sw-analyzer-demod}
+
+The Modulation view, and `--demod` with `--report`, demodulate the strongest signal of the
+capture when it is a single carrier with PSK or QAM symbols under a root raised cosine, a
+raised cosine or a rectangular pulse.
+
+```sh
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view modulation
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --demod
+m2sdr_analyzer --file capture.sigmf-meta --report --demod --modulation 64qam --symbol-rate 5e6
+```
+
+The symbol rate, the roll-off and the modulation, from BPSK to 256QAM, are found from the
+signal; `--symbol-rate`, `--rolloff`, `--modulation` and `--pulse` give them instead. The
+sample rate is a few times the bandwidth of the signal, four samples per symbol at least.
+
+| Figure | Meaning |
+|--------------------|-------------------------------------------------------------------------|
+| EVM, RMS and peak | Error vector of the symbols, in percent of the RMS of the constellation |
+| MER | The same as a ratio, in dB |
+| Magnitude and phase errors | The two parts of the error vector |
+| Origin offset | Carrier leakage, in dB under the constellation |
+| I/Q gain imbalance, quadrature error | Of the transmitter; their sign depends on the rotation found |
+| Symbol rate, carrier | As measured, with the reference of the board |
+
+- **Decisions:** the symbols are compared with the nearest points of the constellation, not
+  with the symbols sent. The EVM is right while symbol errors are rare, and reads low beyond.
+  The view and the report say "not locked" when the EVM is too large for the constellation,
+  above a quarter of the distance between its points: the figures are then not valid.
+- **Carrier loop:** the phase is followed by a loop a hundredth of the symbol rate wide, so
+  slower phase noise, of the source or of the board, is not in the EVM.
+- **Rotation:** the constellation is shown at one of its symmetric positions; the bits are not
+  decoded.
+- **Not supported:** offset QPSK, GMSK and other constant-envelope schemes, APSK, OFDM, and a
+  roll-off near zero without the symbol rate given.
+
+`m2sdr_gen --signal qam` sends random symbols of a chosen modulation, symbol rate and roll-off:
+with a cable and an attenuator from TX to RX, the board is its own test source. `--no-rf-init`
+then makes `m2sdr_analyzer` leave the RFIC as `m2sdr_rf` set it.
+
+```sh
+m2sdr_rf --sample-rate 1920000 --rx-freq 2450000000 --tx-freq 2450000000 --tx-att 30 --rx-gain 30
+m2sdr_gen --sample-rate 1920000 --signal qam --qam-modulation 16qam --qam-symbol-rate 120000 &
+m2sdr_analyzer --no-rf-init --freq 2450e6 --sample-rate 1.92e6 --view modulation
+```
 
 #### Phase noise {#sw-analyzer-pn}
 
@@ -760,7 +807,8 @@ taken with.
 The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
 `m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
 `m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures. `m2sdr_phase_noise()`
-gives the phase noise of a carrier.
+gives the phase noise of a carrier and `m2sdr_demod()` the symbols and the EVM of a PSK or QAM
+signal.
 
 ### m2sdr_sata: SATA storage {#sw-sata}
 

@@ -499,6 +499,27 @@ static int demod_symbols(const float complex *z, size_t n, const struct constell
      * carrier phase at the first symbol. */
     theta = (carg(line) - c->power_phase) / c->power;
     phase = theta;
+    /* The line gives the phase of the whole block: the one of its start is refined on the
+     * first symbols against their decisions, so that the loop starts settled. */
+    {
+        const size_t head = n < 64 ? n : 64;
+        int pass;
+
+        for (pass = 0; pass < 2; pass++) {
+            double complex acc = 0;
+            double scale = 0;
+
+            for (k = 0; k < head; k++)
+                scale += cabsf(z[k]);
+            scale = scale > 0 ? (double)head / scale : 1.0;
+            for (k = 0; k < head; k++) {
+                const float complex v = z[k] * (float complex)cexp(-I * (phase + 2.0 * M_PI * freq * (double)k));
+                acc += v * conjf(slice(c, v * (float)scale));
+            }
+            if (cabs(acc) > 0)
+                phase += carg(acc);
+        }
+    }
 
     /* Decision-directed loop over the symbols. */
     for (k = 0; k < n; k++) {
