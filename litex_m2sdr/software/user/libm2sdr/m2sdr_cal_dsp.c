@@ -404,7 +404,7 @@ static double lte_cp_phase(const float complex *x, size_t slots, double *peak_ov
         bool top = mag[n] > 0.5 * best_mag;
         for (k = -LTE_CP; top && k <= LTE_CP; k++) {
             const int m = (n + k + LTE_SLOT) % LTE_SLOT;
-            if (mag[m] > mag[n] || (mag[m] == mag[n] && m < n && k < 0))
+            if (mag[m] > mag[n] || (m < n && k < 0 && mag[m] == mag[n]))
                 top = false;
         }
         if (top)
