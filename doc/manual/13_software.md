@@ -413,6 +413,7 @@ The utilities are small command-line programs, one per task. They share the devi
 |--------------------------|---------------------------------------------------------------------|
 | `m2sdr_util` | Board information, self tests, registers, clocks, PTP status, flash |
 | `m2sdr_rf` | Configure the RFIC and the reference clock |
+| `m2sdr_cal` | Measure the error of the reference clock on LTE and GSM carriers, store it |
 | `m2sdr_record` | Receive samples to a file or to a pipe, raw or SigMF |
 | `m2sdr_play` | Transmit samples from a file or from a pipe, raw or SigMF |
 | `m2sdr_gen` | Transmit a tone, noise, a PRBS or an OFDM signal |
@@ -522,8 +523,77 @@ started with `--bist-tx-tone`, `--bist-rx-tone` and `--bist-prbs`.
 
 `--refclk-ppm` removes the frequency error of the reference without an external reference.
 Measure the offset of a known carrier, compute `ppm = -offset_hz / carrier_hz * 1e6` and pass
-the result. A positive value means that the clock runs fast. The clock generator and the
-reference selection are described in [Time synchronisation](#timing).
+the result. A positive value means that the clock runs fast. `m2sdr_cal` does this measurement
+on cellular carriers, and `--refclk-ppm stored` takes the value of its record. The clock
+generator and the reference selection are described in [Time synchronisation](#timing).
+
+### m2sdr_cal: reference clock calibration {#sw-cal}
+
+`m2sdr_cal` measures the error of the reference clock against the downlink carriers of the
+cellular networks, which a macro base station keeps within 0.05 ppm. It needs an antenna on an
+RX port and takes a few seconds.
+
+```sh
+./m2sdr_cal scan                                       # Find the carriers received here
+./m2sdr_cal measure lte:816e6 earfcn:1300 arfcn:85     # Measure on three carriers
+./m2sdr_cal measure --apply --store earfcn:1300        # Trim the reference, store the result
+./m2sdr_cal show                                       # Print the stored record
+./m2sdr_rf --refclk-ppm stored                         # Use it at the RF initialisation
+./m2sdr_cal measure --refclk-ppm stored earfcn:1300    # Check it: what remains with the trim
+```
+
+| Signal | Meaning | Method |
+|---------------|----------------------------------------------|-----------------------------------------|
+| `lte:FREQ` | LTE carrier, by its centre frequency in Hz | PSS, then phase of the cyclic prefix |
+| `earfcn:N` | LTE carrier, by its downlink EARFCN | The same |
+| `gsm:FREQ` | GSM carrier with a BCCH, by its frequency | Frequency of the FCCH bursts |
+| `arfcn:N` | GSM carrier, by its ARFCN (GSM 900, DCS 1800) | The same |
+
+`scan` searches bands for the carriers that can be used, and prints them with a first value of
+the error and the `measure` command for them. A band is given by its name (`lte20`, `lte3`,
+`gsm900`, see `--help`) or as a range, `lte:791e6-821e6` or `gsm:925e6-960e6`; without a band,
+the scan covers the LTE and GSM bands in use in Europe. The scan captures 5 MHz at a time at
+7.68 MSPS and tests the channel raster in it, 100 kHz for LTE and 200 kHz for GSM, on the cores
+of the host. A band takes a few seconds, and the default scan about half a minute.
+
+An LTE carrier is identified on its centre only. From a raster point next to the centre the PSS
+still correlates, weaker, and the error read is wrong by 5 or 10 kHz, several ppm. The scan
+keeps the strongest of neighbouring detections, then keeps the carriers that agree with each
+other, since they are all seen with one clock: the other detections are counted and left out.
+With one band and few carriers this vote is weak, and the scan says so when no two carriers
+agree. A carrier whose cyclic prefix is not clear is not listed.
+
+`measure` configures the RFIC at 1.92 MSPS without a trim, captures each carrier a few times
+(`--repeat`, `--duration`) and prints the error that each one gives. The result is their median.
+Several carriers, of different operators or bands, protect against one that is off: a
+repeater, or a frequency that is not the centre of a carrier. An LTE frequency must be the
+centre of the carrier, where the PSS is; a signal that is not identified is reported as not
+found and not used. `--max-ppm` bounds the error searched, 15 ppm by default.
+
+`--apply` trims the reference by the result and measures again; the trim lasts until the next
+RF initialisation. `--store` writes the result, with its date, the temperature of the FPGA and
+the carriers used, in a file of the host: `~/.config/litex_m2sdr/cal_<FPGA DNA>.bin`.
+`--store-flash` writes it in the SPI flash of the board, so that it follows the board from one
+host to another. `m2sdr_rf --refclk-ppm stored` reads the flash first, then the file, and refuses
+the record of another board.
+
+`measure --refclk-ppm PPM` trims the reference by a value first, or by the one of the record
+with `stored`, and reports what remains: this checks a stored calibration, close to zero while
+it holds. The error of the reference is then the trim plus what remains, and it is this sum that
+`--apply` and `--store` use, so that the same command refreshes a record.
+
+The estimators and the record are functions of libm2sdr, declared in `libm2sdr/m2sdr_cal.h`:
+`m2sdr_cal_lte_estimate()` and `m2sdr_cal_gsm_estimate()` take a capture at 1.92 MSPS, and
+`m2sdr_cal_load()` reads the record of an open board. Another program can use them as the
+utility does.
+
+> [!WARNING]
+> `--store-flash` erases and writes one block of 64 KiB of the configuration flash, at offset
+> `0x00ff0000` by default: the end of the operational slot, above the bitstream. The utility asks
+> before it does. A bitstream image larger than 7.9 MiB would overwrite the record.
+
+The error of an oscillator changes with its temperature, by a few tenths of a ppm over the
+range of a board: measure it warm, in the conditions of use.
 
 ### Streaming utilities {#sw-streaming-tools}
 
