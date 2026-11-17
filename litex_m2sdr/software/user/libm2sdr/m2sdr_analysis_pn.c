@@ -123,9 +123,14 @@ static int cmp_float(const void *a, const void *b)
     return (x > y) - (x < y);
 }
 
+struct pn_spur {
+    double hz;
+    double power;
+};
+
 static int cmp_spur(const void *a, const void *b)
 {
-    const double x = ((const double *)a)[1], y = ((const double *)b)[1];
+    const double x = ((const struct pn_spur *)a)->power, y = ((const struct pn_spur *)b)->power;
     return (x < y) - (x > y);
 }
 
@@ -138,7 +143,7 @@ static void find_spurs(const struct pn_stage *st, struct m2sdr_phase_noise *pn)
     const double ratio = pow(10.0, (st->segments >= 8 ? PN_SPUR_DB : PN_SPUR_SINGLE_DB) / 10.0);
     /* The median of an averaged periodogram is below its mean. */
     const double bias = st->segments <= 1 ? log(2.0) : pow(1.0 - 1.0 / (9.0 * st->segments), 3.0);
-    double (*found)[2] = malloc(n * sizeof(*found));
+    struct pn_spur *found = malloc(n * sizeof(struct pn_spur));
     float local[2 * PN_SPUR_WINDOW + 1];
     size_t k, count = 0;
 
@@ -168,15 +173,15 @@ static void find_spurs(const struct pn_stage *st, struct m2sdr_phase_noise *pn)
 
             if (!(line > 0))
                 continue;
-            found[count][0] = ((double)k + moment / sum) * st->bin_hz;
-            found[count][1] = line;
+            found[count].hz    = ((double)k + moment / sum) * st->bin_hz;
+            found[count].power = line;
             count++;
         }
     }
     qsort(found, count, sizeof(*found), cmp_spur);
     for (k = 0; k < count && k < M2SDR_PN_MAX_SPURS; k++) {
-        pn->spur_hz[k]  = found[k][0];
-        pn->spur_dbc[k] = m2sdr_power_db(found[k][1]);
+        pn->spur_hz[k]  = found[k].hz;
+        pn->spur_dbc[k] = m2sdr_power_db(found[k].power);
         pn->nspurs++;
     }
     free(found);
