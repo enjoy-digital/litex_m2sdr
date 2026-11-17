@@ -16,6 +16,8 @@
 module m2sdr_dfx_datapath #(
     parameter DATA_WIDTH = 64
 ) (
+    input  wire                  clk,
+    input  wire                  rst,
     input  wire [31:0]           control,
 
     input  wire                  tx_sink_valid,
@@ -41,6 +43,21 @@ module m2sdr_dfx_datapath #(
     output wire [DATA_WIDTH-1:0] rx_source_data,
     output wire                  rx_source_first,
     output wire                  rx_source_last,
+
+    input  wire                  sb_sink_valid,
+    output wire                  sb_sink_ready,
+    input  wire [DATA_WIDTH-1:0] sb_sink_data,
+    input  wire                  sb_sink_first,
+    input  wire                  sb_sink_last,
+
+    output wire                  sb_source_valid,
+    input  wire                  sb_source_ready,
+    output wire [DATA_WIDTH-1:0] sb_source_data,
+    output wire                  sb_source_first,
+    output wire                  sb_source_last,
+
+    input  wire [63:0]           time_ns,
+    output wire [31:0]           sb_status,
 
     output wire [7:0]            rm_id
 );
@@ -78,6 +95,14 @@ module m2sdr_dfx_datapath #(
     assign rx_source_data  = swap_rx ? swap_channels(rx_sink_data, sc8) : rx_sink_data;
     assign rx_source_first = rx_sink_first;
     assign rx_source_last  = rx_sink_last;
+
+    // Side band (DMA1) unused: nothing to the host, host words are accepted and dropped.
+    assign sb_sink_ready   = 1'b1;
+    assign sb_source_valid = 1'b0;
+    assign sb_source_data  = {DATA_WIDTH{1'b0}};
+    assign sb_source_first = 1'b0;
+    assign sb_source_last  = 1'b0;
+    assign sb_status       = 32'd0;
 
     assign rm_id = 8'd2;
 endmodule

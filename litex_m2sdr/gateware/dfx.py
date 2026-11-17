@@ -185,45 +185,64 @@ class DFXRFICDatapath(LiteXModule):
 
     Takes the place of BaseSoC.add_rfic_datapath(): the reconfigurable module (RM) sits between
     the host streams (after header/loopback) and the AD9361, on raw I/Q sample words. Every RM
-    implements the same ports: four streams of `data_width`, a 32-bit RM-defined control word
-    and an 8-bit RM identifier.
+    implements the same ports: the sys clock and a reset (also held while isolated), four I/Q
+    streams of `data_width`, a 32-bit RM-defined control word,
+    an 8-bit RM identifier, and the side band: two streams of `data_width` to and from a host DMA
+    channel of their own (`sb_sink` from the host, `sb_source` to the host), the 64-bit board time
+    in ns and a 32-bit RM-defined status word.
     """
 
-    def __init__(self, platform, isolate, default_rm_source, data_width=64):
+    def __init__(self, platform, isolate, default_rm_source, data_width=64, time=None):
         if data_width not in DFX_DATA_WIDTHS:
             raise ValueError(f"The M2SDR DFX datapath supports {DFX_DATA_WIDTHS}-bit streams.")
 
         # Registered partition boundary: no combinational path may cross the region, since the
         # static routing is locked after the default RM and cannot be re-timed for another RM
         # (a loopback RM otherwise links TX and RX header logic through the region).
-        for name in ("tx_in", "tx_out", "rx_in", "rx_out"):
+        for name in ("tx_in", "tx_out", "rx_in", "rx_out", "sb_in", "sb_out"):
             setattr(self, name, stream.Buffer(dma_layout(data_width), pipe_valid=True, pipe_ready=True))
         self.tx_sink   = self.tx_in.sink     # Host TX samples.
         self.tx_source = self.tx_out.source  # -> RFIC.
         self.rx_sink   = self.rx_in.sink     # RFIC RX samples.
         self.rx_source = self.rx_out.source  # -> Host RX.
+        self.sb_sink   = self.sb_in.sink     # Side band from the host (DMA reader).
+        self.sb_source = self.sb_out.source  # Side band to the host (DMA writer).
         tx_sink, tx_source = self.tx_in.source, self.tx_out.sink
         rx_sink, rx_source = self.rx_in.source, self.rx_out.sink
+        sb_sink, sb_source = self.sb_in.source, self.sb_out.sink
 
         self._control = CSRStorage(32, description="Control word, defined by the active RM.")
         self._status  = CSRStatus(fields=[
             CSRField("isolated", size=1, offset=0,
                 description="The static shell is isolating the reconfigurable region."),
             CSRField("rm_id", size=8, offset=8,
-                description="Identifier of the active RM (0: passthrough, 1: loopback)."),
+                description="Identifier of the active RM (0: passthrough, 1: loopback, 2: channel_swap)."),
         ])
+        self._sb_status = CSRStatus(32, description="Side-band status word, defined by the active RM.")
 
         platform.add_source(default_rm_source)
 
-        rm = {name: stream.Endpoint(dma_layout(data_width)) for name in ("tx", "rx")}
+        rm = {name: stream.Endpoint(dma_layout(data_width)) for name in ("tx", "rx", "sb")}
         rm_tx_sink_ready = Signal()
         rm_rx_sink_ready = Signal()
+        rm_sb_sink_ready = Signal()
         rm_id = Signal(8)
+        rm_sb_status = Signal(32)
+        rm_rst = Signal()
+        self.sync += rm_rst.eq(ResetSignal("sys") | isolate)
+        # Board time and status are registered on the static side too (no path crosses the region).
+        time_r = Signal(64)
+        if time is not None:
+            self.sync += time_r.eq(time)
+        self.sync += self._sb_status.status.eq(Mux(isolate, 0, rm_sb_status))
 
         self.specials += Instance(DFX_MODULE_NAME,
             name=DFX_CELL_NAME,
             attr={("keep_hierarchy", "yes")},
             p_DATA_WIDTH=data_width,
+            i_clk=ClockSignal("sys"),
+            # Held in reset while isolated, so an RM also starts clean after every load.
+            i_rst=rm_rst,
             i_control=self._control.storage,
 
             i_tx_sink_valid=tx_sink.valid,
@@ -250,6 +269,21 @@ class DFXRFICDatapath(LiteXModule):
             o_rx_source_first=rm["rx"].first,
             o_rx_source_last=rm["rx"].last,
 
+            i_sb_sink_valid=sb_sink.valid,
+            o_sb_sink_ready=rm_sb_sink_ready,
+            i_sb_sink_data=sb_sink.data,
+            i_sb_sink_first=sb_sink.first,
+            i_sb_sink_last=sb_sink.last,
+
+            o_sb_source_valid=rm["sb"].valid,
+            i_sb_source_ready=sb_source.ready,
+            o_sb_source_data=rm["sb"].data,
+            o_sb_source_first=rm["sb"].first,
+            o_sb_source_last=rm["sb"].last,
+
+            i_time_ns=time_r,
+            o_sb_status=rm_sb_status,
+
             o_rm_id=rm_id,
         )
 
@@ -258,10 +292,12 @@ class DFXRFICDatapath(LiteXModule):
             # RFIC samples are intentionally drained while the region is
             # unavailable; back-pressuring the converter can wedge its path.
             rx_sink.ready.eq(Mux(isolate, 1, rm_rx_sink_ready)),
+            # Host side-band words wait during reconfiguration (the host stops DMA1 around a load).
+            sb_sink.ready.eq(Mux(isolate, 0, rm_sb_sink_ready)),
             self._status.fields.isolated.eq(isolate),
             self._status.fields.rm_id.eq(rm_id),
         ]
-        for name, source in (("tx", tx_source), ("rx", rx_source)):
+        for name, source in (("tx", tx_source), ("rx", rx_source), ("sb", sb_source)):
             self.comb += [
                 source.valid.eq(Mux(isolate, 0, rm[name].valid)),
                 source.data.eq(Mux(isolate, 0, rm[name].data)),

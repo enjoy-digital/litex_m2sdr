@@ -615,6 +615,8 @@ class BaseSoC(SoCMini):
             # Downstream subclasses may request extra channels to stream side-band results of
             # custom RFIC-plane processing (see add_rfic_datapath()); DMA0 keeps its role.
             assert pcie_dmas >= 1
+            if with_dfx:
+                pcie_dmas = max(pcie_dmas, 2)  # DMA1: side band of the reconfigurable datapath.
             self.pcie_phy = S7PCIEPHY(platform, platform.request(f"pcie_x{pcie_lanes}_{variant}"),
                 data_width                = {1: 64, 2: 64, 4: 128}[pcie_lanes],
                 bar0_size                 = 0x10_0000,
@@ -1499,6 +1501,7 @@ class BaseSoC(SoCMini):
             isolate           = self.icap.isolate,
             default_rm_source = os.path.join(dfx_dir, "m2sdr_dfx_datapath_passthrough.v"),
             data_width        = data_width,
+            time              = self.time_gen.time,
         )
         add_dfx_build_commands(
             platform            = platform,
@@ -1512,6 +1515,15 @@ class BaseSoC(SoCMini):
             rfic_source.connect(self.rfic_dfx.rx_sink),
             self.rfic_dfx.rx_source.connect(rx_sink),
         ]
+        # Side band: DMA1 to and from the RM (--with-dfx reserves it). Without PCIe, the host never
+        # sends and RM results are discarded.
+        if hasattr(self, "pcie_dma1"):
+            self.comb += [
+                self.pcie_dma1.source.connect(self.rfic_dfx.sb_sink),
+                self.rfic_dfx.sb_source.connect(self.pcie_dma1.sink),
+            ]
+        else:
+            self.comb += self.rfic_dfx.sb_source.ready.eq(1)
 
     # SATA -----------------------------------------------------------------------------------------
 

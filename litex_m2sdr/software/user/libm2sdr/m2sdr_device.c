@@ -1220,7 +1220,18 @@ int m2sdr_get_device_list_ex(const struct m2sdr_discovery_config *config,
         return rc;
 
     for (size_t i = 0; i < target_count && found < max; i++) {
-        if (m2sdr_probe_discovered_one(&targets[i], &list[found]) == M2SDR_ERR_OK)
+        bool duplicate = false;
+
+        if (m2sdr_probe_discovered_one(&targets[i], &list[found]) != M2SDR_ERR_OK)
+            continue;
+        /* A gateware with several DMA channels (eg the DFX side band on DMA1) exposes one
+         * /dev/m2sdrN per channel: list the board once, through its first node. */
+        for (size_t j = 0; j < found && list[found].addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE; j++) {
+            if (list[j].addr.transport == M2SDR_TRANSPORT_KIND_LITEPCIE && list[found].info.serial[0] &&
+                strcmp(list[j].info.serial, list[found].info.serial) == 0)
+                duplicate = true;
+        }
+        if (!duplicate)
             found++;
     }
 

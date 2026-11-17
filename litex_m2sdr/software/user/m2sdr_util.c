@@ -1871,6 +1871,10 @@ static void dfx_status(void)
         printf("RM control       : 0x%08" PRIx32 "\n", m2sdr_read32(conn, CSR_RFIC_DFX_CONTROL_ADDR));
     }
 #endif
+#ifdef CSR_RFIC_DFX_SB_STATUS_ADDR
+    printf("Side-band status : 0x%08" PRIx32 " (DMA1, the second /dev/m2sdrN of this board)\n",
+        m2sdr_read32(conn, CSR_RFIC_DFX_SB_STATUS_ADDR));
+#endif
     m2sdr_close_dev(conn);
 }
 
@@ -1919,6 +1923,13 @@ static void dfx_load(const char *filename)
 
     word_count = payload_size / 4;
     printf("Loading %zu bytes (%zu words) from %s...\n", payload_size, word_count, filename);
+#ifdef CSR_PCIE_DMA1_WRITER_ENABLE_ADDR
+    /* The side band (DMA1) stops while the region is isolated: words in flight are lost.
+     * Bit 0 is the enable; bit 1 reads back the engine's idle status. */
+    if ((m2sdr_read32(conn, CSR_PCIE_DMA1_WRITER_ENABLE_ADDR) & 1) ||
+        (m2sdr_read32(conn, CSR_PCIE_DMA1_READER_ENABLE_ADDR) & 1))
+        fprintf(stderr, "Warning: DMA1 (DFX side band) is running; its data around the load is lost.\n");
+#endif
     m2sdr_write32(conn, CSR_ICAP_BITSTREAM_CONTROL_ADDR, DFX_CONTROL_START);
 
     for (size_t i = 0; i < word_count; i++) {
