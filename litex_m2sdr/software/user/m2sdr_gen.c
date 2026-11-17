@@ -619,6 +619,17 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
 
                 pace_init = true;
                 pace_tx   = m2sdr_get_transport(dev, &kind) == 0 && kind == M2SDR_TRANSPORT_KIND_LITEETH;
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+                /* A gateware with the level of its TX FIFO: the library holds the stream back on
+                 * it, at the rate of the board, and the clock of the host is left out. */
+                if (pace_tx) {
+                    struct m2sdr_liteeth_udp_stats udp_stats;
+
+                    memset(&udp_stats, 0, sizeof(udp_stats));
+                    if (m2sdr_liteeth_get_udp_stats(dev, &udp_stats) == 0 && udp_stats.tx_flow_control)
+                        pace_tx = false;
+                }
+#endif
                 clock_gettime(CLOCK_MONOTONIC, &pace_start);
             }
             int rc;
@@ -654,7 +665,7 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             }
             total_buffers++;
 
-            /* Ethernet has no flow control: the board drops what its TX FIFO cannot take. The
+            /* Ethernet with no flow control: the board drops what its TX FIFO cannot take. The
              * samples are sent at their rate, a few milliseconds ahead, on the clock of the
              * host; the FIFO takes the difference with the clock of the board for minutes. */
             if (pace_tx) {
