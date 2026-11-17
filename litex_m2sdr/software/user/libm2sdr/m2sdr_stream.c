@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "config.h"
 #include "csr.h"
@@ -495,6 +496,178 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev)
     return M2SDR_ERR_OK;
 }
 
+/* Ethernet TX flow control */
+
+#define ETH_TX_FLOW_POLL_S     0.004     /* Between two reads of the FIFO level. */
+#define ETH_TX_FLOW_MIN_DT_S   0.002     /* Shortest interval that gives a rate. */
+#define ETH_TX_FLOW_MAX_WAIT_S 1.0       /* A buffer is sent after this long, room or not. */
+#define ETH_TX_FLOW_MIN_RATES  5         /* Readings of the rate before it is used. */
+
+static double m2sdr_monotonic_s(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
+}
+
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+/* A register of the flow control. A read fails now and then on a link busy with the streams,
+ * at the start of one above all: it is asked again. */
+static int m2sdr_liteeth_tx_flow_read(struct m2sdr_dev *dev, uint32_t addr, uint32_t *value)
+{
+    int attempt;
+
+    for (attempt = 0; attempt < 3; attempt++) {
+        if (m2sdr_reg_read(dev, addr, value) == 0)
+            return 0;
+    }
+    return -1;
+}
+#endif
+
+/* Start of a TX stream: is the level of the TX FIFO readable, and how deep is the FIFO? */
+static void m2sdr_liteeth_tx_flow_start(struct m2sdr_dev *dev)
+{
+    dev->eth_tx_flow       = 0;
+    dev->eth_tx_poll_time  = 0;
+    dev->eth_tx_rate       = 0;
+    dev->eth_tx_rate_count = 0;
+    dev->eth_tx_sent       = 0;
+    dev->eth_tx_flow_waits = 0;
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+    {
+        struct m2sdr_capabilities caps;
+        uint32_t depth = 0, drops = 0;
+
+        if (dev->eth_tx_flow_disabled)
+            return;
+        if (m2sdr_get_capabilities(dev, &caps) != M2SDR_ERR_OK || !(caps.features & M2SDR_FEATURE_ETH_TX_STATUS))
+            return;
+        if (m2sdr_liteeth_tx_flow_read(dev, CSR_ETH_TX_STATUS_FIFO_DEPTH_ADDR, &depth) != 0 || depth == 0)
+            return;
+        if (m2sdr_liteeth_tx_flow_read(dev, CSR_ETH_TX_STATUS_DROPS_ADDR, &drops) != 0)
+            return;
+        dev->eth_tx_fifo_bytes = depth * 8u;
+        dev->eth_tx_drops_base = drops;
+        dev->eth_tx_flow       = 1;
+    }
+#endif
+}
+
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+static int m2sdr_cmp_double(const void *a, const void *b)
+{
+    const double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* Level of the FIFO now, and from it and the bytes sent since the last read, the rate at which
+ * the board empties it. Returns the time of the read.
+ *
+ * The rate kept is the median of the last readings. A reading is wrong when the process is
+ * held between the read and its time stamp, too high or too low, and the board takes nothing
+ * while its FIFO refills after it ran empty: a mean would follow these, the waits computed from
+ * it would be too long or too short, and the FIFO would run empty or overflow. A stream that
+ * really stops, a timed buffer that waits for its time, brings the median to zero after a few
+ * readings. */
+static double m2sdr_liteeth_tx_flow_poll(struct m2sdr_dev *dev)
+{
+    enum { RATES = sizeof(dev->eth_tx_rates) / sizeof(dev->eth_tx_rates[0]) };
+    uint32_t words = 0;
+    uint32_t level;
+    double now;
+
+    if (m2sdr_liteeth_tx_flow_read(dev, CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR, &words) != 0)
+        return m2sdr_monotonic_s();
+    now   = m2sdr_monotonic_s();
+    level = words * 8u;
+    if (dev->eth_tx_poll_time > 0 && now - dev->eth_tx_poll_time >= ETH_TX_FLOW_MIN_DT_S) {
+        const double taken = (double)dev->eth_tx_level + (double)dev->eth_tx_sent - (double)level;
+        double sorted[RATES];
+        unsigned n;
+
+        dev->eth_tx_rates[dev->eth_tx_rate_count % RATES] = taken > 0 ? taken / (now - dev->eth_tx_poll_time) : 0.0;
+        dev->eth_tx_rate_count++;
+        n = dev->eth_tx_rate_count < RATES ? dev->eth_tx_rate_count : RATES;
+        memcpy(sorted, dev->eth_tx_rates, n * sizeof(sorted[0]));
+        qsort(sorted, n, sizeof(sorted[0]), m2sdr_cmp_double);
+        /* The first readings count the bytes still on their way to the board as taken by it:
+         * no rate until there are enough of them, the stream is held on the level alone. */
+        dev->eth_tx_rate = n >= ETH_TX_FLOW_MIN_RATES ? sorted[n / 2] : 0.0;
+        if (dev->eth_tx_rate < 1.0)
+            dev->eth_tx_rate = 0;
+    } else if (dev->eth_tx_poll_time > 0) {
+        /* Closer to the last read than that: no rate from it, and the bytes sent stay counted
+         * from that read, so that the next one spans a long enough time. */
+        return now;
+    }
+    dev->eth_tx_level     = level;
+    dev->eth_tx_sent      = 0;
+    dev->eth_tx_poll_time = now;
+    return now;
+}
+#endif
+
+/* After a buffer of `bytes` is sent: wait while the FIFO holds more than four fifths of its
+ * depth. The stream starts when it is half full, a datagram is dropped when it is full, and
+ * what it holds is the time the host can be late by: it is kept as full as the reads allow.
+ * Between two reads, the level is followed from the bytes sent and the rate of the board. */
+static void m2sdr_liteeth_tx_flow_wait(struct m2sdr_dev *dev, size_t bytes)
+{
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+    double now, waited = 0, high;
+    bool held = false;
+
+    if (!dev->eth_tx_flow)
+        return;
+    dev->eth_tx_sent += bytes;
+    high = 0.8 * (double)dev->eth_tx_fifo_bytes;
+    now  = m2sdr_monotonic_s();
+    for (;;) {
+        double level, wait;
+
+        if (dev->eth_tx_poll_time == 0 || now - dev->eth_tx_poll_time >= ETH_TX_FLOW_POLL_S)
+            now = m2sdr_liteeth_tx_flow_poll(dev);
+        level = (double)dev->eth_tx_level + (double)dev->eth_tx_sent - dev->eth_tx_rate * (now - dev->eth_tx_poll_time);
+        if (level <= high || waited >= ETH_TX_FLOW_MAX_WAIT_S)
+            break;
+        /* Until the level is back at the mark; with no rate yet, a short wait and a new read. */
+        wait = dev->eth_tx_rate > 0 ? (level - high) / dev->eth_tx_rate : 0.0005;
+        if (wait < 0.0001)
+            wait = 0.0001;
+        if (wait > ETH_TX_FLOW_POLL_S)
+            wait = ETH_TX_FLOW_POLL_S;
+        usleep((useconds_t)(wait * 1e6));
+        held = true;
+        {
+            const double after = m2sdr_monotonic_s();
+            waited += after - now;
+            now     = after;
+        }
+        if (dev->eth_tx_rate <= 0)
+            now = m2sdr_liteeth_tx_flow_poll(dev);
+    }
+    if (held)
+        dev->eth_tx_flow_waits++;
+#else
+    (void)dev;
+    (void)bytes;
+#endif
+}
+
+int m2sdr_liteeth_set_tx_flow_control(struct m2sdr_dev *dev, bool enable)
+{
+    if (!dev)
+        return M2SDR_ERR_INVAL;
+    if (dev->transport != M2SDR_TRANSPORT_LITEETH)
+        return M2SDR_ERR_UNSUPPORTED;
+    dev->eth_tx_flow_disabled = enable ? 0 : 1;
+    if (!enable)
+        dev->eth_tx_flow = 0;
+    return M2SDR_ERR_OK;
+}
+
 int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
 {
     if (!dev)
@@ -514,6 +687,7 @@ int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev)
     if (m2sdr_reg_write(dev, CSR_ETH_TX_STREAMER_ENABLE_ADDR, 1) != 0)
         return M2SDR_ERR_IO;
     m2sdr_loss_counters_base(dev, M2SDR_TX);
+    m2sdr_liteeth_tx_flow_start(dev);
     return M2SDR_ERR_OK;
 #else
     return M2SDR_ERR_UNSUPPORTED;
@@ -586,6 +760,20 @@ int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
     stats->so_sndbuf_actual      = dev->udp.so_sndbuf_actual_bytes;
     stats->rx_frame_sync_drops   = dev->udp.rx_frame_sync_drops;
     stats->rx_frame_resyncs      = dev->udp.rx_frame_resyncs;
+    stats->tx_flow_control       = dev->eth_tx_flow;
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+    if (dev->eth_tx_flow) {
+        uint32_t words = 0, drops = 0;
+
+        stats->tx_fifo_bytes = dev->eth_tx_fifo_bytes;
+        stats->tx_flow_rate  = (uint64_t)dev->eth_tx_rate;
+        stats->tx_flow_waits = dev->eth_tx_flow_waits;
+        if (m2sdr_liteeth_tx_flow_read(dev, CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR, &words) == 0)
+            stats->tx_fifo_level = (uint64_t)words * 8u;
+        if (m2sdr_liteeth_tx_flow_read(dev, CSR_ETH_TX_STATUS_DROPS_ADDR, &drops) == 0)
+            stats->tx_fpga_drops = (uint32_t)(drops - dev->eth_tx_drops_base);
+    }
+#endif
     return M2SDR_ERR_OK;
 }
 
@@ -1878,6 +2066,7 @@ int m2sdr_sync_tx(struct m2sdr_dev *dev,
             copied += to_copy;
             if (liteeth_udp_write_submit(&dev->udp) < 0)
                 return M2SDR_ERR_IO;
+            m2sdr_liteeth_tx_flow_wait(dev, dev->udp.buf_size);
 #ifdef USE_LITEUSB
         } else if (dev->transport == M2SDR_TRANSPORT_LITEUSB) {
             unsigned wait_ms = timeout_ms ? timeout_ms : dev->tx_timeout_ms;
@@ -2123,6 +2312,7 @@ int m2sdr_submit_buffer(struct m2sdr_dev *dev,
     if (dev->transport == M2SDR_TRANSPORT_LITEETH) {
         if (liteeth_udp_write_submit(&dev->udp) < 0)
             return M2SDR_ERR_IO;
+        m2sdr_liteeth_tx_flow_wait(dev, dev->udp.buf_size);
         return M2SDR_ERR_OK;
     }
 #ifdef USE_LITEUSB

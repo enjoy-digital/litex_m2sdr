@@ -72,6 +72,19 @@ struct m2sdr_dev {
     int rx_header_enable;
     int rx_strip_header;
     int tx_header_enable;
+    /* Ethernet TX flow control on the level of the TX FIFO of the FPGA
+     * (M2SDR_FEATURE_ETH_TX_STATUS). */
+    int      eth_tx_flow;            /* 0: off or not available, 1: active. */
+    int      eth_tx_flow_disabled;   /* Asked off by the application. */
+    uint32_t eth_tx_fifo_bytes;      /* Depth of the FIFO. */
+    uint32_t eth_tx_level;           /* Bytes in it at the last poll. */
+    double   eth_tx_poll_time;       /* Time of that poll, seconds; 0: none yet. */
+    double   eth_tx_rate;            /* Bytes per second that the board takes; 0: not known. */
+    double   eth_tx_rates[9];        /* The last readings of it. */
+    unsigned eth_tx_rate_count;
+    uint64_t eth_tx_sent;            /* Bytes sent since the last poll. */
+    uint64_t eth_tx_flow_waits;      /* Buffers held back. */
+    uint32_t eth_tx_drops_base;      /* Dropped datagrams counter of the FPGA at the stream start. */
     enum m2sdr_format rx_format;
     enum m2sdr_format tx_format;
     uint8_t zero_copy;

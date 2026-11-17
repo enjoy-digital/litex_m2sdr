@@ -275,7 +275,10 @@ static void help(void)
     puts("      --host-buffers N  Queue N DMA buffers read from input.");
     puts("      --prefill N       Wait for N queued buffers before starting playback.");
     puts("      --sample-rate HZ  Sample rate of the stream, to pace it over Ethernet, which has no");
-    puts("                        flow control (default: the one of a SigMF file).");
+    puts("                        flow control (default: the one of a SigMF file). Not needed with a");
+    puts("                        gateware that gives the level of its TX FIFO: the stream is then");
+    puts("                        held back on it.");
+    puts("      --no-flow-control Ethernet: do not hold the stream back on the TX FIFO of the board.");
     puts("");
     puts("SigMF input:");
     puts("      --capture-index N Select capture index from SigMF metadata (default: 0).");
@@ -289,12 +292,16 @@ static void help(void)
 /* Samples sent ahead of their time over Ethernet. */
 #define PLAY_PACE_LEAD_S 0.004
 
+/* --no-flow-control: the stream is not held back on the TX FIFO of the board. */
+static bool play_no_flow_control;
+
 static void m2sdr_play(const char *device_id, const char *filename, uint32_t loops, uint8_t quiet,
                        uint8_t timed_start, enum m2sdr_format format, unsigned header_bytes,
                        uint64_t start_offset_bytes, uint64_t end_offset_bytes,
                        unsigned host_buffers, unsigned prefill_buffers, double sample_rate)
 {
-    double pace_rate = 0.0;            /* Samples of the stream per second; 0: not paced. */
+    bool eth_flow_control = false;     /* The library paces the stream on the board. */
+    double pace_rate = 0.0;            /* Samples of the stream per second; 0: not paced here. */
     uint64_t paced_samples = 0;
     struct timespec pace_start = { 0, 0 };
     struct m2sdr_dev *dev = NULL;
@@ -379,6 +386,8 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         use_pcie_dma = true;
     } else
 #endif
+    if (play_no_flow_control)
+        (void)m2sdr_liteeth_set_tx_flow_control(dev, false);
     {
         int rc = m2sdr_sync_config(dev, M2SDR_TX, format,
                                    0, samples_per_buf, 0, 1000);
@@ -389,11 +398,22 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
         }
     }
 
-    /* Ethernet has no flow control: the board drops what its TX FIFO cannot take, so the
-     * samples are sent at their rate, on the clock of the host. The stream carries one or two
-     * channels, as the RFIC is set. PCIe and USB3 hold the host back by themselves. */
+    /* Ethernet has no flow control: the board drops what its TX FIFO cannot take. A gateware
+     * that gives the level of this FIFO lets the library hold the stream back on it. Without
+     * it, the samples are sent at their rate, on the clock of the host; the stream carries one
+     * or two channels, as the RFIC is set. PCIe and USB3 hold the host back by themselves. */
     if (transport == M2SDR_TRANSPORT_KIND_LITEETH) {
-        if (format == M2SDR_FORMAT_BFP8_Q11) {
+        struct m2sdr_liteeth_udp_stats udp_stats;
+
+        memset(&udp_stats, 0, sizeof(udp_stats));
+        if (m2sdr_liteeth_get_udp_stats(dev, &udp_stats) == 0 && udp_stats.tx_flow_control) {
+            /* The library holds the stream back on the level of the TX FIFO of the board: the
+             * pace is the sample clock of the board, and no rate is needed. */
+            eth_flow_control = true;
+            if (!quiet)
+                fprintf(stderr, "Ethernet: flow control on the TX FIFO of the board (%" PRIu64 " KiB).\n",
+                        udp_stats.tx_fifo_bytes / 1024);
+        } else if (format == M2SDR_FORMAT_BFP8_Q11) {
             fprintf(stderr, "BFP8 blocks are not paced over Ethernet: the board drops what it cannot take.\n");
         } else if (sample_rate > 0) {
             unsigned channels = 2;
@@ -572,6 +592,23 @@ static void m2sdr_play(const char *device_id, const char *filename, uint32_t loo
 
     exit_status = 0;
 
+    /* What the stream lost on its way: the times the RFIC ran out of samples, and with the flow
+     * control the datagrams that the board had no room for. */
+    if (transport == M2SDR_TRANSPORT_KIND_LITEETH && !quiet) {
+        struct m2sdr_liteeth_udp_stats udp_stats;
+        struct m2sdr_stream_stats tx_stats;
+
+        memset(&udp_stats, 0, sizeof(udp_stats));
+        memset(&tx_stats, 0, sizeof(tx_stats));
+        (void)m2sdr_get_stream_stats(dev, M2SDR_TX, &tx_stats);
+        if (eth_flow_control && m2sdr_liteeth_get_udp_stats(dev, &udp_stats) == 0)
+            fprintf(stderr, "Ethernet: %" PRIu64 " TX underflows, %" PRIu64 " datagrams dropped by the board, "
+                            "board rate %.3f MB/s.\n", tx_stats.underflow_events, udp_stats.tx_fpga_drops,
+                    (double)udp_stats.tx_flow_rate / 1e6);
+        else
+            fprintf(stderr, "Ethernet: %" PRIu64 " TX underflows.\n", tx_stats.underflow_events);
+    }
+
 cleanup:
     if (source.enabled && m2sdr_play_source_finish(&source) != 0)
         exit_status = 1;
@@ -618,6 +655,7 @@ int main(int argc, char **argv)
         { "host-buffers", required_argument, NULL, 4 },
         { "prefill", required_argument, NULL, 5 },
         { "sample-rate", required_argument, NULL, 6 },
+        { "no-flow-control", no_argument, NULL, 7 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -676,6 +714,9 @@ int main(int argc, char **argv)
                 m2sdr_cli_error("invalid sample rate '%s'", optarg);
                 return 1;
             }
+            break;
+        case 7:
+            play_no_flow_control = true;
             break;
         case 'q':
             quiet = 1;

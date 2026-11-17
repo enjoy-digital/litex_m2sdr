@@ -619,25 +619,41 @@ default and 0 means forever.
 | `--prefill` | play | Wait for N queued buffers before starting |
 | `--timed-start` | play | Start after the next full second of the board time |
 | `--capture-index` | play | Select a capture of a SigMF recording |
-| `--sample-rate` | play | Sample rate of the stream, to pace it over Ethernet |
+| `--sample-rate` | play | Sample rate of the stream, to pace it over Ethernet with an older gateware |
+| `--no-flow-control` | play | Ethernet: do not hold the stream back on the TX FIFO of the board |
 
 The host queue of `--host-buffers` absorbs short stalls of a pipe or of a slow disk. It does
 not help when the destination is slower than the stream all the time.
 
-Over Ethernet nothing holds the host back: the board drops the datagrams that its TX FIFO
-cannot take, and the signal sent is then in pieces. `m2sdr_play` therefore sends the samples at
-their rate, which it takes from a SigMF recording or from `--sample-rate`; it reads from the
-board whether the stream carries one channel or two. Without a rate it sends as fast as the
-link takes it, as before, and says so. PCIe and USB3 hold the host back by themselves.
+Over Ethernet nothing holds the host back by itself: UDP has no flow control, and the board
+drops the datagrams that its TX FIFO cannot take, so that the signal sent is in pieces.
+
+- **Gateware with the capability bit `eth_tx_status`:** the board gives the level of its TX
+  FIFO, and libm2sdr holds `m2sdr_sync_tx()` and `m2sdr_submit_buffer()` back on it. The host
+  then sends at the rate at which the board transmits, the one of its own sample clock: no
+  sample rate is given, and nothing is dropped however long the transmission lasts. This serves
+  `m2sdr_play`, `m2sdr_gen` and any program on these two calls.
+  `m2sdr_liteeth_set_tx_flow_control()` turns it off for a program that paces its buffers
+  itself, as `m2sdr_play --no-flow-control` does, and `m2sdr_liteeth_get_udp_stats()` gives
+  the level, the rate found and the datagrams dropped.
+- **Older gateware:** `m2sdr_play` sends the samples at their rate on the clock of the host.
+  It takes the rate from a SigMF recording or from `--sample-rate`, and reads from the board
+  whether the stream carries one channel or two. The TX FIFO takes the difference between the
+  two clocks for minutes; over a longer run a short gap or a dropped datagram is to be expected
+  from time to time. Without a rate it sends as fast as the link takes it, and says so.
 
 ```sh
-m2sdr_play --sample-rate 7680000 tx_file.bin 0     # Raw file, in a loop, at its rate
-m2sdr_play capture.sigmf-meta                      # The rate is in the metadata
+m2sdr_play tx_file.bin 0                           # New gateware: paced by the board
+m2sdr_play --sample-rate 7680000 tx_file.bin 0     # Older gateware: raw file at its rate
+m2sdr_play capture.sigmf-meta                      # Older gateware: rate from the metadata
 ```
 
-The pace is the clock of the host. The TX FIFO of the board takes its difference with the
-clock of the board for minutes; over a longer run a short gap or a dropped datagram is to be
-expected from time to time.
+At its end, `m2sdr_play` prints the times the RFIC ran out of samples (TX underflows) and the
+datagrams that the board dropped. The TX FIFO of the board holds 256 KiB, 17 ms of a 2T2R
+stream at 1.92 MSPS and 4 ms at 7.68 MSPS: this is how late the host can be, with either
+method. A host busy with other work underflows at the high rates.
+
+PCIe and USB3 hold the host back by themselves.
 
 `m2sdr_gen` computes a signal and transmits it: `--signal tone`, `white`, `prbs` or `ofdm`,
 with `--tone-freq` and `--amplitude`. With `--pps-freq` and `--gpio-pin` it also toggles a GPIO
