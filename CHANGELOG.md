@@ -34,6 +34,12 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added the analysis of an LTE downlink carrier to `m2sdr_analyzer` (FDD, normal cyclic prefix): cell identity, MIB decoded from the PBCH, carrier offset, RSRP, EVM of the reference signals and of the PBCH, resource grid, and for a cell of one antenna port the modulation and EVM of each block of data.
 - Added `m2sdr_gen --signal qam`: random PSK or QAM symbols under a root raised cosine, as a test source. `m2sdr_gen` now sends at the sample rate over Ethernet, where it used to send as fast as the host could and the board dropped most of the datagrams, and reports the TX underflows counted by the FPGA.
 
+**FM Utilities**
+- Reworked `m2sdr_fm_tx` and `m2sdr_fm_rx` on a modulator and a demodulator in `libm2sdr` (`m2sdr_fm.h`), with offline tests (`make test-fm`): about 14 times less CPU time at `1 MSPS`.
+- Added stereo decoding to `m2sdr_fm_rx` (pilot PLL): `--mode stereo` wrote the mono signal on both channels. Added a channel filter and a 15 kHz audio low-pass, which removes the pilot from the audio.
+- Fixed `m2sdr_fm_tx`: deviation steps of `244 Hz` that silenced quiet audio, a pre-emphasis that kept oscillating at half the sample rate after a step in the audio, text written on stdout in front of the I/Q samples, and audio above 15 kHz reaching the pilot. The audio is now limited to the deviation after the pre-emphasis.
+- Fixed `m2sdr_fm_radio.py`: its `m2sdr_rf` options were not accepted, so the frequency and the gain were not applied.
+
 **Calibration**
 - Added `m2sdr_cal`: scans bands for LTE and GSM carriers, measures the error of the reference clock on LTE carriers (PSS and cyclic prefix) and GSM carriers (FCCH), trims the reference and stores the result in a file or in the SPI flash. `m2sdr_rf --refclk-ppm stored` uses the record, and `m2sdr_cal measure --refclk-ppm stored` checks it. The estimators and the record are in libm2sdr (`m2sdr_cal.h`).
 

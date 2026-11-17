@@ -671,6 +671,30 @@ m2sdr_gen --sample-rate 30720000 --signal tone --tone-freq 1e6 --amplitude 0.5
 I/Q samples, placed in a pipe with `m2sdr_play` or `m2sdr_record`. The recipe
 [FM broadcast in a pipe](#flow-fm) gives the commands.
 
+| Option | Meaning |
+|---|---|
+| `--sample-rate` | I/Q sample rate, 1 MSPS by default |
+| `--deviation` | Deviation of full-scale audio, 75 kHz by default |
+| `--emphasis` | `eu` for 50 µs, `us` for 75 µs, `none` |
+| `--mode` | `mono`, or `stereo` with the 19 kHz pilot and the L-R subcarrier at 38 kHz |
+| `--format` | `sc16` or `sc8` I/Q samples |
+
+Table: Main options of `m2sdr_fm_tx` and `m2sdr_fm_rx`.
+
+The transmitter limits the audio to full scale after the pre-emphasis, so that the deviation
+stays within `--deviation`, and reports the number of samples it limited. The pre-emphasis
+raises the high frequencies by up to 14 dB at 15 kHz with 50 µs: a source close to full scale
+needs some headroom.
+
+In stereo, the receiver decodes the two channels once it has locked on the pilot. Without a
+pilot it writes the mono signal on both channels. A small tuning offset is a constant level
+after the demodulation, and is removed from the audio.
+
+The signal processing is in libm2sdr, declared in `libm2sdr/m2sdr_fm.h`. The modulator and
+the demodulator work at an integer fraction of the I/Q rate, between 160 and 500 kSPS, and
+the utilities resample the audio to and from this rate. Another program can use them as the
+utilities do.
+
 ### Inspection utilities {#sw-inspect}
 
 `m2sdr_check` opens a recording in a window and shows the I/Q samples in time, the

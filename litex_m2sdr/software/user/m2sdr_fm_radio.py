@@ -30,7 +30,7 @@ GAIN_MIN_DB     = 0
 GAIN_MAX_DB     = 73
 
 FM_DEVIATION    = 75_000     # -d 75000
-FM_BW_KHZ       = 12         # -b 12
+FM_BITS         = 12         # -b 12
 
 DEBOUNCE_DELAY  = 0.5
 
@@ -77,10 +77,10 @@ def run_gui(
         rx_freq_hz = int(current_freq_mhz * 1e6)
         cmd = [
             "./m2sdr_rf",
-            "-samplerate", str(samplerate),
-            "-rx_freq",    str(rx_freq_hz),
-            "-rx_gain",    str(current_gain_db),
-            "-chan",       str(CHAN_DEFAULT),
+            "--sample-rate",    str(samplerate),
+            "--rx-freq",        str(rx_freq_hz),
+            "--rx-gain",        str(current_gain_db),
+            "--channel-layout", str(CHAN_DEFAULT),
         ]
         try:
             subprocess.run(cmd, check=False)
@@ -90,7 +90,7 @@ def run_gui(
     def _spawn_pcm_proc():
         fm_cmd = (
             f"./m2sdr_record -q - | "
-            f"./m2sdr_fm_rx -s {samplerate} -d {FM_DEVIATION} -b {FM_BW_KHZ} -e {fm_region} "
+            f"./m2sdr_fm_rx -s {samplerate} -d {FM_DEVIATION} -b {FM_BITS} -e {fm_region} "
             f"-m {current_mode} - -"
         )
         try:
@@ -444,7 +444,7 @@ def main():
     parser.add_argument("--freq",            type=float, default=100.0,         help="Default FM frequency (MHz)")
     parser.add_argument("--volume",          type=float, default=1.0,           help="Default volume [0.0–1.0]")
     parser.add_argument("--gain",            type=int,   default=0,             help="Default RX gain (dB)")
-    parser.add_argument("--fm-region",       type=str,   default="eu",          help="De-emphasis region (eu/us/jp)")
+    parser.add_argument("--fm-region",       type=str,   default="eu",          choices=["eu", "us"], help="De-emphasis region: eu (50 us) or us (75 us)")
     args = parser.parse_args()
 
     run_gui(

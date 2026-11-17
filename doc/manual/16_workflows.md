@@ -160,6 +160,14 @@ m2sdr_record - \
 ```
 
 Set `--rx-freq` to a local station. The de-emphasis is `eu` or `us` depending on the region.
+The receiver prints `Stereo pilot locked` when it decodes the two channels of the station.
+
+A recording is demodulated the same way, without the board:
+
+```sh
+m2sdr_record station.iq 40000000
+m2sdr_fm_rx --sample-rate 1000000 --mode stereo station.iq station.wav
+```
 
 ### Transmit {#flow-fm-tx}
 
@@ -172,7 +180,18 @@ ffmpeg -re -stream_loop -1 -i music.mp3 -f s16le -ac 1 -ar 44100 - \
 | m2sdr_play --format sc16 -
 ```
 
+The source must leave headroom for the pre-emphasis. When the transmitter reports limited
+samples, lower the level, for instance with `-filter:a volume=0.5` in `ffmpeg`.
+
 > Transmit in the FM broadcast band only into a cable with attenuators or a shielded setup.
+
+Without the board, the transmitter and the receiver chained through a file or a pipe check a
+setup: the audio that comes out is the audio that went in.
+
+```sh
+m2sdr_fm_tx --sample-rate 1000000 --mode stereo music.wav - \
+| m2sdr_fm_rx --sample-rate 1000000 --mode stereo - copy.wav
+```
 
 ## Ethernet streaming {#flow-ethernet}
 
