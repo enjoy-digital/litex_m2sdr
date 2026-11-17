@@ -613,7 +613,175 @@ them.
 
 Generic processing blocks, such as oscillators, mixers and filters, are gathered in LiteDSP
 (<https://github.com/enjoy-digital/litedsp>), which this hook is meant to host.
-[Building the gateware](#building-gateware) shows how to build a subclass.
+[Building the gateware](#building-gateware) shows how to build a subclass, and [Reconfigurable
+processing](#streaming-dfx) makes the hook replaceable at runtime.
+
+## Reconfigurable processing {#streaming-dfx}
+
+A build with `--with-dfx` turns the user processing hook into a region of the FPGA that can be
+reprogrammed while the rest of the design keeps running. The Xilinx 7-series name for this is
+Dynamic Function eXchange, DFX. A partial bitstream, loaded over the host link, replaces the
+processing without a reboot, a new PCIe enumeration or a reload of the driver.
+
+![DFX build. The reconfigurable partition takes the place of the user processing hook; the second
+DMA channel and the ICAP loader reach it besides the samples.](stream_dfx.svg)
+
+| Property                 | Value                                                           |
+|-----------------------------------|-----------------------------------------------------------------------------|
+| Option                   | `--with-dfx`, Vivado only, off by default                       |
+| Partition                | The user processing hook, 64 or 128 bits on the system clock    |
+| Default region           | Clock region X1Y1: 4000 slices, 80 DSP48E1, 40 RAMB36           |
+| Default module           | Passthrough: a DFX build behaves like a stock build             |
+| Side band                | PCIe DMA channel 1, reserved for the module                     |
+| Load                     | Partial bitstream through the ICAP, about 0.5 s                 |
+| Partial bitstream        | About 0.85 MB, against 4.5 MB for a full image                  |
+| Capability bit           | 14, `dfx`                                                       |
+
+### Why partial bitstreams {#streaming-dfx-why}
+
+The static part of the design, with the host links, the clocks, the RFIC interface and the
+flash, is built and timing-closed once. A new module is placed and routed only inside its region,
+against the locked routing of the static part. For the oversampling build, this takes about
+two minutes instead of seven.
+
+Loading a module is volatile. It never writes the configuration flash, the PCIe link and the
+driver stay up, and a power cycle returns to the flashed image. The loader accepts only partial
+bitstreams, so a full image cannot overwrite the static part by mistake.
+
+One board can carry several functions over time, including functions that do not fit together.
+Typical modules:
+
+- A channeliser that splits the RX band and decimates before the host.
+- A spectrum monitor that sends averaged spectra instead of samples.
+- An energy or burst detector that sends timestamped events.
+- A correlator that searches a known preamble.
+- A decimating front end for long recordings at a lower rate.
+- TX processing: pulse shaping, interpolation, predistortion or a test signal generator.
+- Test modules: loopbacks, pattern checkers, channel swaps.
+
+### The partition {#streaming-dfx-partition}
+
+The static shell registers every stream at the boundary of the region, valid and data in one
+direction and ready in the other. No combinational path crosses the boundary. The registers add
+two cycles of latency in each direction and cost no throughput.
+
+![Static shell of the partition, as the hierarchy of the SoC lists it. A register on each stream
+surrounds the black box that each module fills.](stream_dfx_shell.svg)
+
+During a load, the shell isolates the region and holds the module in reset. The TX and side band
+inputs are held back and the outputs are suppressed, while the RX samples of the RFIC core are
+drained so that the core is not blocked.
+
+The static part closes timing at 125 MHz with a small margin. A path that leaves a boundary
+register must end in a register of the module: the loopback module registers the inputs of its
+detector for that reason. `--sys-clk-freq` lowers the clock of the whole design when a module needs
+more time.
+
+### Module interface {#streaming-dfx-interface}
+
+Every module is a Verilog module `m2sdr_dfx_datapath` with one parameter and fixed ports. The
+streams have the meaning of the [hook arguments](#streaming-hook-method).
+
+| Port              | Direction | Content                                                        |
+|--------------------------|--------------|-----------------------------------------------------------------------|
+| `DATA_WIDTH`      | Parameter | 64, or 128 in the oversampling build                           |
+| `clk`, `rst`      | In        | System clock; reset, also held while the region is isolated    |
+| `control`         | In        | 32 bits from `rfic_dfx_control`, defined by the module         |
+| `tx_sink`         | In        | TX samples from the host                                       |
+| `tx_source`       | Out       | TX samples to the RFIC core                                    |
+| `rx_sink`         | In        | RX samples from the RFIC core                                  |
+| `rx_source`       | Out       | RX samples to the host                                         |
+| `sb_sink`         | In        | Side band from the host, DMA channel 1                         |
+| `sb_source`       | Out       | Side band to the host, DMA channel 1                           |
+| `time_ns`         | In        | Board time in ns, 64 bits                                      |
+| `sb_status`       | Out       | 32 bits read in `rfic_dfx_sb_status`, defined by the module    |
+| `rm_id`           | Out       | 8-bit identifier read in `rfic_dfx_status`                     |
+
+The interface is part of the static image. A module with other ports needs a new full build, and
+a partial bitstream fits only the static image it was built against.
+
+### Side band {#streaming-dfx-sideband}
+
+The second DMA channel carries the results of the module to the host and the data that the
+control word cannot carry, such as coefficients or commands. The samples keep DMA channel 0. The
+driver creates one device per channel, so the side band is the second `/dev/m2sdrN` of the board.
+
+The side band has no framing: a module that sends records gives them a header with a type, a
+length and the board time. A module drops a record that finds the side band busy and counts it
+in its status word, so that the RX path never waits for the host.
+
+A low-rate side band needs small DMA buffers. The driver hands buffers to the host in groups of
+8 buffers of 8 KiB by default, so a record every millisecond reaches the host about every two
+seconds. The buffer size and the group are set per channel:
+
+```sh
+sudo modprobe m2sdr dma_buffer_size=8192,512 dma_buffer_per_irq=8,1
+```
+
+### Modules of the repository {#streaming-dfx-modules}
+
+| `rm_id` | Module         | Function                                                     |
+|-------------|-------------------------|-------------------------------------------------------------------------|
+| 0       | `passthrough`  | Default; echoes the side band, for `dma-test` on DMA channel 1 |
+| 1       | `loopback`     | `control[0]`: host TX to host RX at the RFIC side; burst detector |
+| 2       | `channel_swap` | `control[0]` swaps RX1 and RX2, `control[1]` TX1 and TX2      |
+
+The loopback module also measures the mean of |I| + |Q| on channel A, over about 2^k words, and
+detects bursts with a threshold and a hysteresis. It sends a 32-byte record for every burst and a
+level record about every 1.05 ms, each with the board time.
+
+| Control bits | Detector setting                                            |
+|-------------------|----------------------------------------------------------------------|
+| `[1]`        | Detector on                                                 |
+| `[7:4]`      | k: the level is the mean over about 2^k RX words            |
+| `[31:16]`    | Threshold: a burst starts above it and ends at half of it   |
+
+| Record   | Bytes 0 to 7 | Bytes 8 to 15 | 16 to 19    | 20 to 23   | 24 to 27  | 28 to 31     |
+|--------|-----------|-----------|-----------|----------|------------|---------------------|
+| Burst    | Start time   | End time      | Burst words | Peak level | Sequence  | `0x44455431` |
+| Level    | Time         | 0             | RX words    | Level      | Sequence  | `0x53544131` |
+
+The status word is the count of dropped records in its upper half and the count of sent records
+in its lower half.
+
+### Loading a module {#streaming-dfx-load}
+
+`m2sdr_util` reads the state of the region and loads a partial bitstream. It refuses a file
+whose Vivado header does not mark it as partial, and warns when DMA channel 1 is enabled, since
+the side band words around a load are lost.
+
+```sh
+m2sdr_util dfx-status
+m2sdr_util dfx-load build/<build>/gateware/<build>_loopback_partial.bit
+m2sdr_util reg-write <rfic_dfx_control address> 0x00280042
+m2sdr_record -d /dev/m2sdr1 records.bin
+```
+
+The register write enables the detector with k = 4 and a threshold of 40. The address of
+`rfic_dfx_control` is in the `csr.h` of the build ([Locations that move](#soc-csr-moving)).
+
+### Building {#streaming-dfx-build}
+
+A full DFX build implements the static part with the passthrough module and the loopback module,
+checks that both configurations share the same static part, and writes their partial bitstreams
+next to the full image.
+
+```sh
+./litex_m2sdr.py --variant=m2 --with-pcie --pcie-lanes=4 \
+    --with-rfic-oversampling --with-dfx --build
+```
+
+`scripts/dfx_rm_build.py` builds a new module against the locked static part of a full build,
+without placing or routing the static part again. It writes the partial bitstream only when the
+Vivado version matches the image, timing is met and the static part is proven identical.
+
+```sh
+./scripts/dfx_rm_build.py build/<build> --name mydsp my_dsp.v
+```
+
+A JSON file next to the partial bitstream records the hash of the full image it fits. Keep the
+full image and its partial bitstreams together; a new full build is a new static part, and the
+partial bitstreams of the previous one no longer fit.
 
 ## Packets for VRT {#streaming-vrt}
 
@@ -635,10 +803,13 @@ links](#host-links).
 | `gateware/loopback.py`        | `TXRXLoopback`                                                   |
 | `gateware/cdc.py`             | `ValueStrobeCDC`, `AsyncFIFORegistered`, `ClockDomainCrossingRegistered` |
 | `gateware/rfic.py`            | `RFICDataFramer`, `RFICDataPacketizer`                           |
+| `gateware/dfx.py`             | `DFXRFICDatapath`, `M2SDRICAP`, DFX build commands               |
+| `gateware/dfx/*.v`            | Reconfigurable modules: passthrough, loopback, channel swap      |
 | `software/user/libm2sdr/m2sdr.h` | Header layout, timed TX and low latency functions             |
 | `software/kernel/main.c`      | DMA ring, module parameters, synchronizer arming                 |
 | `test/test_header.py`         | Header frames, gate decisions, offsets                           |
 | `test/test_time_core.py`, `test_loopback.py`, `test_rfic.py` | Unit tests                        |
+| `test/test_dfx.py`, `test/dfx/` | DFX build, boundary, modules; detector testbench |
 
 The paths of the gateware and software files are relative to `litex_m2sdr/`.
 

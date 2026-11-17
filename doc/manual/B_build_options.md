@@ -53,6 +53,10 @@ refuses it with Ethernet, SATA or USB3. The BFP8 format does not exist on this b
 | `--pcie-dmas` | `1` | DMA channels; channel 0 carries the samples |
 | `--with-pcie-ptm` | off | PCIe PTM requester; needs `--with-pcie`, PCIe Gen2 x1 only |
 | `--with-pcie-reset-workaround` | off | Toggle the PCIe reset until the link is up |
+| `--with-dfx` | off | The user processing hook becomes a reconfigurable partition; reserves DMA channel 1 |
+| `--dfx-pblock` | X1Y1 | Slice range of the partition; its DSP and RAM columns are added |
+
+The default region of `--dfx-pblock` is the clock region X1Y1, `SLICE_X84Y50:SLICE_X163Y99`.
 
 `--pcie-dmas` above 1 serves the designs that extend the gateware
 ([Extending the gateware](#build-extend)). The PPS input of the start synchroniser of every

@@ -227,9 +227,11 @@ the extra DMA channels, then `pps_in`, so the address of a block depends on the 
 | `--pcie-dmas 2`                        | Absent     | `0x15000`   | `0x15800` |
 | With SATA                              | `0x15000`  | Absent      | `0x15800` |
 | PCIe, SATA and `--pcie-dmas 2`         | `0x15000`  | `0x15800`   | `0x16000` |
+| PCIe and `--with-dfx`                  | Absent     | `0x15000`   | `0x16800` |
 
 These addresses were read on elaborations of the script with PCIe, Ethernet, USB3, SATA and two
-DMA channels. In a White Rabbit build the `pps_in` registers are absent.
+DMA channels. In a White Rabbit build the `pps_in` registers are absent. A DFX build reserves the
+second DMA channel and places `rfic_dfx` after `pps_in`, at `0x17000`.
 
 `main` holds the registers that the SoC declares itself. `main_sata_streamer_control` is its
 first register in a SATA build. With `--with-eth-vrt`, `main_eth_rx_mode` comes first, at
@@ -319,6 +321,8 @@ read-only registers holds the build configuration as constants (`Capability`).
 | 11  | `usb3_tx_header`     | `--with-usb3`: the USB3 TX stream carries the TX header |
 | 12  | `stream_counters`    | Always: the RFIC stream loss counters are present     |
 | 13  | `eth_tx_header`      | `--with-eth`: the Ethernet TX stream carries the TX header |
+| 14  | `eth_tx_status`      | `--with-eth`: the Ethernet TX FIFO level and dropped datagrams are readable |
+| 15  | `dfx`                | `--with-dfx` ([Reconfigurable processing](#streaming-dfx)) |
 
 The configuration registers are meaningful only when the matching feature bit is set. The PCIe
 speed field is 0 for Gen1 and 1 for Gen2; the lanes field is 0, 1 or 2 for x1, x2 or x4.
