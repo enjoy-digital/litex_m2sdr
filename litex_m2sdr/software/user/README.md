@@ -416,6 +416,8 @@ Common playback options:
 - `--timed-start`
 - `--host-buffers N`
 - `--prefill N`
+- `--sample-rate HZ` (older gateware only: pace the stream over Ethernet on the host clock; taken from a SigMF file when not given. With the `eth_tx_status` capability, libm2sdr paces on the TX FIFO of the board and no rate is needed)
+- `--no-flow-control` (Ethernet: do not hold the stream back on the TX FIFO of the board)
 
 SigMF input:
 - `--capture-index`

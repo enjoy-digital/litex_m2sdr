@@ -128,6 +128,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_flash.o \
 	libm2sdr/m2sdr_device.o \
 	libm2sdr/m2sdr_stream.o \
+	libm2sdr/m2sdr_eth_flow.o \
 	libm2sdr/m2sdr_mwaitx.o \
 	libm2sdr/m2sdr_rf.o \
 	libm2sdr/m2sdr_sata.o \
@@ -167,12 +168,15 @@ M2SDR_IMGUI_SRCS := \
 M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
+TEST_PROGS += tests/test_m2sdr_eth_flow
+
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp
 
 examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
 	LD_LIBRARY_PATH=libm2sdr:$${LD_LIBRARY_PATH} ./tests/test_libm2sdr
+	./tests/test_m2sdr_eth_flow
 	./tests/test_m2sdr_flash
 	./tests/test_si5351_trim
 	./tests/test_m2sdr_cal
@@ -215,6 +219,9 @@ tests/test_m2sdr_sata_cli: tests/test_m2sdr_sata_cli.o | $(BUILD_FLAGS_FILE)
 
 tests/test_m2sdr_sata_hostio: tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_sata_hostio.o m2sdr_sata_hostio.o -lm
+
+tests/test_m2sdr_eth_flow: tests/test_m2sdr_eth_flow.o libm2sdr/m2sdr_eth_flow.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_eth_flow.o libm2sdr/m2sdr_eth_flow.o -lm
 
 # The test provides the eb_*() functions.
 tests/test_m2sdr_flash: tests/test_m2sdr_flash.o libm2sdr/m2sdr_flash.o $(LITEUSB_OBJS) | $(BUILD_FLAGS_FILE)
