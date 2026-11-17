@@ -244,6 +244,105 @@ static void test_arguments(float complex *x)
     m2sdr_psd_free(&psd);
 }
 
+/* Phase noise */
+
+#define PN_COUNT (1u << 20)
+
+static double rng_gauss(void)
+{
+    return sqrt(-2.0 * log(rng_uniform())) * cos(2.0 * M_PI * rng_uniform());
+}
+
+/* Value of a trace at an offset, between its points. */
+static double pn_at(const struct m2sdr_phase_noise *pn, const double *trace, double offset_hz)
+{
+    int i;
+
+    for (i = 1; i < pn->points; i++) {
+        if (pn->offset_hz[i] >= offset_hz) {
+            const double t = log(offset_hz / pn->offset_hz[i - 1]) / log(pn->offset_hz[i] / pn->offset_hz[i - 1]);
+            return trace[i - 1] + t * (trace[i] - trace[i - 1]);
+        }
+    }
+    return NAN;
+}
+
+static void test_phase_noise(void)
+{
+    float complex *x = malloc(PN_COUNT * sizeof(*x));
+    struct m2sdr_phase_noise *pn = malloc(sizeof(*pn));
+    const double f0 = 50012.3;
+    double walk = 0;
+    size_t i;
+
+    if (!x || !pn) {
+        failures++;
+        return;
+    }
+
+    /* White phase noise of 0.01 rad and white amplitude noise of 0.003, both RMS, and a
+     * sinusoidal phase of 0.002 rad at 20 kHz: flat at sigma^2 / fs, a line at (b/2)^2. */
+    printf("Phase noise, white:\n");
+    for (i = 0; i < PN_COUNT; i++) {
+        const double t = (double)i / FS;
+        const double ph = 2.0 * M_PI * f0 * t + 0.4 + 0.01 * rng_gauss() + 0.002 * sin(2.0 * M_PI * 20000.0 * t);
+        x[i] = (float complex)(0.5 * (1.0 + 0.003 * rng_gauss()) * cexp(I * ph));
+    }
+    CHECK("phase noise", m2sdr_phase_noise(x, PN_COUNT, FS, 1e9, 0.0, 0.0, pn) == 0);
+    CHECK("carrier found", pn->found);
+    CHECK_NEAR("carrier offset (Hz)", pn->carrier_hz, f0, 0.01);
+    CHECK_NEAR("carrier level (dBFS)", pn->carrier_db, -6.02, 0.05);
+    CHECK("five decades of offsets", pn->points >= 5 * M2SDR_PN_POINTS_PER_DECADE - 10 &&
+          pn->offset_hz[0] < 10.0 && pn->offset_hz[pn->points - 1] > 300000.0);
+    CHECK_NEAR("L at 1 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 1000.0), -100.0, 0.7);
+    CHECK_NEAR("L at 100 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 100000.0), -100.0, 0.3);
+    CHECK_NEAR("AM at 1 kHz (dBc/Hz)", pn_at(pn, pn->am_dbc_hz, 1000.0), 10.0 * log10(9e-6 / FS), 0.7);
+    CHECK_NEAR("AM at 100 kHz (dBc/Hz)", pn_at(pn, pn->am_dbc_hz, 100000.0), 10.0 * log10(9e-6 / FS), 0.3);
+    CHECK_NEAR("integrated phase (rad)", pn->rms_rad, sqrt(1e-4 + 2e-6), 3e-4);
+    CHECK_NEAR("jitter at 1 GHz (fs)", pn->jitter_s * 1e15, 1e15 * sqrt(1e-4 + 2e-6) / (2.0 * M_PI * 1e9), 60.0);
+    CHECK("one spur", pn->nspurs >= 1);
+    CHECK_NEAR("spur offset (Hz)", pn->spur_hz[0], 20000.0, 1.0);
+    CHECK_NEAR("spur level (dBc)", pn->spur_dbc[0], -60.0, 0.5);
+    /* Between two limits: 2 * L * width. */
+    CHECK("phase noise, limits", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 1000.0, 11000.0, pn) == 0);
+    CHECK_NEAR("integrated 1 to 11 kHz (rad)", pn->rms_rad, sqrt(2.0 * 1e-10 * 10000.0), 1.5e-4);
+    CHECK_NEAR("no jitter without a frequency", pn->jitter_s, 0.0, 0.0);
+
+    /* Random walk of the phase, 1e-4 rad per sample: sigma^2 * fs / (2 pi f)^2, 20 dB per
+     * decade, on a carrier that is not on a bin. */
+    printf("Phase noise, random walk:\n");
+    for (i = 0; i < PN_COUNT; i++) {
+        walk += 1e-4 * rng_gauss();
+        x[i] = (float complex)(0.25 * cexp(I * (2.0 * M_PI * -123456.7 * (double)i / FS + walk)));
+    }
+    CHECK("phase noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && pn->found);
+    CHECK_NEAR("L at 100 Hz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 100.0), 10.0 * log10(1e-8 * FS / (4.0 * M_PI * M_PI * 1e4)), 2.0);
+    CHECK_NEAR("L at 1 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 1000.0), 10.0 * log10(1e-8 * FS / (4.0 * M_PI * M_PI * 1e6)), 1.0);
+    CHECK_NEAR("L at 10 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 10000.0), 10.0 * log10(1e-8 * FS / (4.0 * M_PI * M_PI * 1e8)), 0.5);
+    CHECK_NEAR("L at 100 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 100000.0), 10.0 * log10(1e-8 * FS / (4.0 * M_PI * M_PI * 1e10)), 0.7);
+    CHECK("AM far below", pn_at(pn, pn->am_dbc_hz, 1000.0) < -140.0);
+
+    /* Clean carrier in additive noise: the noise is phase for one half and amplitude for the
+     * other, N / (2 fs A^2) each. */
+    printf("Phase noise, additive noise:\n");
+    memset(x, 0, PN_COUNT * sizeof(*x));
+    add_tone(x, PN_COUNT, 200000.0, -6.0206, 0.0);
+    add_noise(x, PN_COUNT, 1e-4);
+    CHECK("phase noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && pn->found);
+    CHECK_NEAR("L at 10 kHz (dBc/Hz)", pn_at(pn, pn->l_dbc_hz, 10000.0), 10.0 * log10(1e-4 / (2.0 * FS * 0.25)), 0.4);
+    CHECK_NEAR("AM at 10 kHz (dBc/Hz)", pn_at(pn, pn->am_dbc_hz, 10000.0), 10.0 * log10(1e-4 / (2.0 * FS * 0.25)), 0.4);
+
+    printf("Phase noise, no carrier:\n");
+    memset(x, 0, PN_COUNT * sizeof(*x));
+    add_noise(x, PN_COUNT, 0.01);
+    CHECK("noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && !pn->found);
+    add_tone(x, PN_COUNT, 10000.0, -20.0, 0.0);     /* As strong as the noise: not enough. */
+    CHECK("carrier in as much noise", m2sdr_phase_noise(x, PN_COUNT, FS, 0.0, 0.0, 0.0, pn) == 0 && !pn->found);
+    CHECK("too short", m2sdr_phase_noise(x, 1000, FS, 0.0, 0.0, 0.0, pn) != 0);
+    free(pn);
+    free(x);
+}
+
 /* Report mode of m2sdr_analyzer */
 /*-------------------------------*/
 
@@ -339,6 +438,7 @@ int main(int argc, char **argv)
     test_stats(x);
     test_arguments(x);
     free(x);
+    test_phase_noise();
     if (failures) {
         printf("test_m2sdr_analysis: %d FAILED\n", failures);
         return 1;
