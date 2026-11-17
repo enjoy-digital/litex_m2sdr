@@ -32,5 +32,6 @@ setup(
         "Programming Language :: Python",
     ],
     packages                      = find_packages(exclude=['test*']),
+    package_data                  = {"litex_m2sdr.gateware": ["dfx/*.v"]},
     py_modules                    = ['litex_m2sdr_platform'],
 )

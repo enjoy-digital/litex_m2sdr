@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdarg.h>
 #include <inttypes.h>
 #include <unistd.h>
@@ -1285,6 +1286,13 @@ static void info(void)
 #else
     bool usb3_enabled = false;
 #endif
+#ifdef CSR_CAPABILITY_FEATURES_DFX_OFFSET
+    bool dfx_enabled =
+        ((caps.features >> CSR_CAPABILITY_FEATURES_DFX_OFFSET) &
+         ((1 << CSR_CAPABILITY_FEATURES_DFX_SIZE) - 1)) != 0;
+#else
+    bool dfx_enabled = false;
+#endif
 
     {
         int variant = (caps.board_info >> CSR_CAPABILITY_BOARD_INFO_VARIANT_OFFSET) & ((1 << CSR_CAPABILITY_BOARD_INFO_VARIANT_SIZE) - 1);
@@ -1310,6 +1318,7 @@ static void info(void)
         ((1 << CSR_CAPABILITY_FEATURES_RFIC_OVERSAMPLING_SIZE) - 1);
     printf("  Oversampling   : %s\n", rfic_oversampling_enabled ? "Yes (128-bit, 2T2R@122.88)" : "No");
 #endif
+    printf("  DFX Datapath   : %s\n", dfx_enabled ? "Yes" : "No");
 
     if (pcie_enabled) {
         int pcie_speed = (caps.pcie_config >> CSR_CAPABILITY_PCIE_CONFIG_SPEED_OFFSET) & ((1 << CSR_CAPABILITY_PCIE_CONFIG_SPEED_SIZE) - 1);
@@ -1704,6 +1713,278 @@ static void flash_reload(void)
 }
 
 #endif /* CSR_FLASH_BASE */
+
+/* Dynamic Function eXchange */
+/*----------------------------*/
+
+#ifdef CSR_ICAP_BITSTREAM_DATA_ADDR
+
+#define DFX_STATUS_BUSY      (1u << CSR_ICAP_BITSTREAM_STATUS_BUSY_OFFSET)
+#define DFX_STATUS_DONE      (1u << CSR_ICAP_BITSTREAM_STATUS_DONE_OFFSET)
+#define DFX_STATUS_ISOLATED  (1u << CSR_ICAP_BITSTREAM_STATUS_ISOLATED_OFFSET)
+#define DFX_STATUS_READY     (1u << CSR_ICAP_BITSTREAM_STATUS_READY_OFFSET)
+
+#define DFX_CONTROL_START    (1u << CSR_ICAP_BITSTREAM_CONTROL_START_OFFSET)
+#define DFX_CONTROL_FINISH   (1u << CSR_ICAP_BITSTREAM_CONTROL_FINISH_OFFSET)
+#define DFX_CONTROL_RELEASE  (1u << CSR_ICAP_BITSTREAM_CONTROL_RELEASE_OFFSET)
+
+static uint16_t dfx_be16(const uint8_t *p)
+{
+    return ((uint16_t)p[0] << 8) | p[1];
+}
+
+static uint32_t dfx_be32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8)  |  (uint32_t)p[3];
+}
+
+static bool dfx_is_bit_filename(const char *filename)
+{
+    const char *suffix = strrchr(filename, '.');
+    return suffix && !strcasecmp(suffix, ".bit");
+}
+
+/* Return the raw configuration payload embedded in a Vivado .bit file and
+ * whether its design field marks it as a partial bitstream. */
+static bool dfx_bit_payload(const uint8_t *data, size_t size,
+                            const uint8_t **payload, size_t *payload_size,
+                            bool *partial)
+{
+    static const char partial_tag[] = "PARTIAL=TRUE";
+
+    size_t pos = 0;
+    uint16_t length;
+    uint8_t tag;
+
+    if (size < 4)
+        return false;
+    length = dfx_be16(data + pos);
+    pos += 2;
+    if ((length == 0) || (length > size - pos))
+        return false;
+    pos += length;
+
+    if (size - pos < 3)
+        return false;
+    length = dfx_be16(data + pos);
+    pos += 2;
+    if ((length != 1) || (length > size - pos))
+        return false;
+    tag = data[pos++];
+    *partial = false;
+
+    for (;;) {
+        if (tag == 'e') {
+            uint32_t bitstream_size;
+            if (size - pos < 4)
+                return false;
+            bitstream_size = dfx_be32(data + pos);
+            pos += 4;
+            if ((bitstream_size == 0) || (bitstream_size > size - pos))
+                return false;
+            *payload = data + pos;
+            *payload_size = bitstream_size;
+            return true;
+        }
+
+        if ((tag < 'a') || (tag > 'd') || (size - pos < 2))
+            return false;
+        length = dfx_be16(data + pos);
+        pos += 2;
+        if (length > size - pos)
+            return false;
+        if (tag == 'a') {
+            for (size_t i = 0; i + sizeof(partial_tag) - 1 <= length; i++)
+                if (!memcmp(data + pos + i, partial_tag, sizeof(partial_tag) - 1))
+                    *partial = true;
+        }
+        pos += length;
+        if (pos == size)
+            return false;
+        tag = data[pos++];
+    }
+}
+
+static uint8_t *dfx_read_file(const char *filename, size_t *size)
+{
+    FILE *f;
+    long file_size;
+    uint8_t *data;
+
+    f = fopen(filename, "rb");
+    if (!f) {
+        perror(filename);
+        return NULL;
+    }
+    if ((fseek(f, 0, SEEK_END) != 0) || ((file_size = ftell(f)) <= 0) ||
+        (fseek(f, 0, SEEK_SET) != 0)) {
+        fprintf(stderr, "Unable to determine size of '%s'\n", filename);
+        fclose(f);
+        return NULL;
+    }
+    data = malloc((size_t)file_size);
+    if (!data) {
+        fprintf(stderr, "Unable to allocate %ld bytes for '%s'\n", file_size, filename);
+        fclose(f);
+        return NULL;
+    }
+    if (fread(data, 1, (size_t)file_size, f) != (size_t)file_size) {
+        fprintf(stderr, "Unable to read '%s'\n", filename);
+        free(data);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *size = (size_t)file_size;
+    return data;
+}
+
+static const char *dfx_rm_name(uint32_t rm_id)
+{
+    switch (rm_id) {
+    case 0: return "passthrough";
+    case 1: return "loopback";
+    default: return "unknown";
+    }
+}
+
+static void dfx_status(void)
+{
+    struct m2sdr_dev *conn = m2sdr_open_dev();
+    uint32_t status = m2sdr_read32(conn, CSR_ICAP_BITSTREAM_STATUS_ADDR);
+
+    printf("DFX status       : %s%s%s\n",
+        (status & DFX_STATUS_BUSY) ? "busy" : "idle",
+        (status & DFX_STATUS_DONE) ? ", complete" : "",
+        (status & DFX_STATUS_ISOLATED) ? ", isolated" : ", connected");
+    printf("FIFO ready       : %s\n", (status & DFX_STATUS_READY) ? "Yes" : "No");
+    printf("Words accepted   : %" PRIu32 "\n",
+        m2sdr_read32(conn, CSR_ICAP_BITSTREAM_WORDS_ADDR));
+#ifdef CSR_RFIC_DFX_STATUS_ADDR
+    {
+        uint32_t raw = m2sdr_read32(conn, CSR_RFIC_DFX_STATUS_ADDR);
+        uint32_t rm_id = (raw >> CSR_RFIC_DFX_STATUS_RM_ID_OFFSET) &
+            ((1u << CSR_RFIC_DFX_STATUS_RM_ID_SIZE) - 1u);
+        printf("Active RM        : %s (%" PRIu32 ")\n", dfx_rm_name(rm_id), rm_id);
+        printf("RM control       : 0x%08" PRIx32 "\n", m2sdr_read32(conn, CSR_RFIC_DFX_CONTROL_ADDR));
+    }
+#endif
+    m2sdr_close_dev(conn);
+}
+
+static void dfx_load(const char *filename)
+{
+    struct m2sdr_dev *conn;
+    uint8_t *file_data;
+    const uint8_t *payload;
+    size_t file_size;
+    size_t payload_size;
+    size_t word_count;
+    bool partial;
+    uint32_t status;
+    double deadline;
+
+    file_data = dfx_read_file(filename, &file_size);
+    if (!file_data)
+        exit(1);
+    /* Only a .bit header proves a partial: a full bitstream sent to ICAP would
+     * overwrite the static shell, PCIe included, and drop the host link. */
+    if (!dfx_is_bit_filename(filename) ||
+        !dfx_bit_payload(file_data, file_size, &payload, &payload_size, &partial)) {
+        fprintf(stderr, "'%s' is not a Vivado .bit file\n", filename);
+        free(file_data);
+        exit(1);
+    }
+    if (!partial) {
+        fprintf(stderr, "'%s' is not a partial bitstream (no PARTIAL=TRUE in its header)\n", filename);
+        free(file_data);
+        exit(1);
+    }
+    if ((payload_size == 0) || ((payload_size & 3u) != 0)) {
+        fprintf(stderr, "DFX payload size (%zu) is not a non-zero multiple of four\n", payload_size);
+        free(file_data);
+        exit(1);
+    }
+
+    conn = m2sdr_open_dev();
+    status = m2sdr_read32(conn, CSR_ICAP_BITSTREAM_STATUS_ADDR);
+    if (status & DFX_STATUS_BUSY) {
+        fprintf(stderr, "A DFX transfer is already active\n");
+        free(file_data);
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    word_count = payload_size / 4;
+    printf("Loading %zu bytes (%zu words) from %s...\n", payload_size, word_count, filename);
+    m2sdr_write32(conn, CSR_ICAP_BITSTREAM_CONTROL_ADDR, DFX_CONTROL_START);
+
+    for (size_t i = 0; i < word_count; i++) {
+        deadline = monotonic_seconds() + 5.0;
+        do {
+            status = m2sdr_read32(conn, CSR_ICAP_BITSTREAM_STATUS_ADDR);
+            if (status & DFX_STATUS_READY)
+                break;
+            if (!keep_running || (monotonic_seconds() >= deadline)) {
+                fprintf(stderr, "DFX FIFO did not become ready at word %zu; region remains isolated\n", i);
+                free(file_data);
+                m2sdr_close_dev(conn);
+                exit(1);
+            }
+            usleep(10);
+        } while (1);
+        m2sdr_write32(conn, CSR_ICAP_BITSTREAM_DATA_ADDR, dfx_be32(payload + 4*i));
+    }
+
+    m2sdr_write32(conn, CSR_ICAP_BITSTREAM_CONTROL_ADDR, DFX_CONTROL_FINISH);
+    deadline = monotonic_seconds() + 10.0;
+    do {
+        status = m2sdr_read32(conn, CSR_ICAP_BITSTREAM_STATUS_ADDR);
+        if (!(status & DFX_STATUS_BUSY) && (status & DFX_STATUS_DONE))
+            break;
+        if (!keep_running || (monotonic_seconds() >= deadline)) {
+            fprintf(stderr, "DFX completion timed out; region remains isolated\n");
+            free(file_data);
+            m2sdr_close_dev(conn);
+            exit(1);
+        }
+        usleep(1000);
+    } while (1);
+
+    if (m2sdr_read32(conn, CSR_ICAP_BITSTREAM_WORDS_ADDR) != word_count) {
+        fprintf(stderr, "DFX word-count mismatch; region remains isolated\n");
+        free(file_data);
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+
+    status = icap_read(conn, ICAP_STAT_REG);
+    printf("ICAP status      : 0x%08" PRIx32 "\n", status);
+    if (status & (ICAP_STAT_CRC_ERROR | ICAP_STAT_ID_ERROR | ICAP_STAT_DEC_ERROR)) {
+        fprintf(stderr, "ICAP rejected the partial bitstream (STAT=0x%08" PRIx32 "); region remains isolated\n",
+            status);
+        free(file_data);
+        m2sdr_close_dev(conn);
+        exit(1);
+    }
+    m2sdr_write32(conn, CSR_ICAP_BITSTREAM_CONTROL_ADDR, DFX_CONTROL_RELEASE);
+#ifdef CSR_RFIC_DFX_STATUS_ADDR
+    {
+        uint32_t raw = m2sdr_read32(conn, CSR_RFIC_DFX_STATUS_ADDR);
+        uint32_t rm_id = (raw >> CSR_RFIC_DFX_STATUS_RM_ID_OFFSET) &
+            ((1u << CSR_RFIC_DFX_STATUS_RM_ID_SIZE) - 1u);
+        printf("DFX load complete: active RM is %s (%" PRIu32 ").\n",
+            dfx_rm_name(rm_id), rm_id);
+    }
+#else
+    printf("DFX load complete.\n");
+#endif
+    free(file_data);
+    m2sdr_close_dev(conn);
+}
+
+#endif /* CSR_ICAP_BITSTREAM_DATA_ADDR */
 
 /* DMA */
 /*-----*/
@@ -4368,6 +4649,14 @@ static void help(void)
            "      commanded ppm and LO lock. Run m2sdr_rf first.\n"
 #endif
            "\n"
+#ifdef CSR_ICAP_BITSTREAM_DATA_ADDR
+           "dfx commands:\n"
+           "  dfx-status\n"
+           "      Show partial-reconfiguration and active datapath status.\n"
+           "  dfx-load FILE\n"
+           "      Load a matching Vivado partial .bit file (PARTIAL=TRUE) through ICAP.\n"
+           "\n"
+#endif
 #ifdef  CSR_SI5351_BASE
            "si5351 commands:\n"
            "  si5351-init\n"
@@ -4858,6 +5147,19 @@ int main(int argc, char **argv)
     }
     else if (cmd_is(cmd, "flash_reload", "flash-reload"))
         flash_reload();
+#endif
+
+    /* Dynamic Function eXchange cmds. */
+#ifdef CSR_ICAP_BITSTREAM_DATA_ADDR
+    else if (cmd_is(cmd, "dfx_status", "dfx-status"))
+        dfx_status();
+    else if (cmd_is(cmd, "dfx_load", "dfx-load")) {
+        const char *filename;
+        if (!have_args(optind, argc, 1))
+            goto show_help;
+        filename = argv[optind++];
+        dfx_load(filename);
+    }
 #endif
 
 #ifdef USE_LITEPCIE

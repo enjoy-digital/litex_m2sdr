@@ -70,6 +70,13 @@ from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
 from litex_m2sdr.gateware.gpio        import GPIO
 from litex_m2sdr.gateware.loopback    import TXRXLoopback
+from litex_m2sdr.gateware.dfx         import (
+    DEFAULT_DFX_PBLOCK,
+    DFXRFICDatapath,
+    M2SDRICAP,
+    add_dfx_build_commands,
+    validate_dfx_pblock,
+)
 from litex_m2sdr.gateware.rfic        import RFICDataPacketizer
 from litex_m2sdr.gateware.vrt         import VRTSignalPacketStreamer
 from litex_m2sdr.gateware.usb3        import USB3, USB3_VID, USB3_PID
@@ -353,6 +360,8 @@ class BaseSoC(SoCMini):
         with_gpio              = False,
         pps_input              = "m2",
         with_rfic_oversampling = False,
+        with_dfx               = False,
+        dfx_pblock             = DEFAULT_DFX_PBLOCK,
     ):
         if pps_input in ("tp1", "tp2") and with_gpio:
             raise ValueError("PPS input on TP1/TP2 cannot be used with --with-gpio.")
@@ -484,6 +493,9 @@ class BaseSoC(SoCMini):
             # GPIO Capabilities.
             gpio_enabled    = with_gpio,
 
+            # Dynamic Function eXchange Capabilities.
+            dfx_enabled     = with_dfx,
+
             # White Rabbit Capabilities.
             wr_enabled      = with_white_rabbit,
 
@@ -577,7 +589,7 @@ class BaseSoC(SoCMini):
 
         # ICAP -------------------------------------------------------------------------------------
 
-        self.icap = ICAP()
+        self.icap = M2SDRICAP() if with_dfx else ICAP()
         self.icap.add_reload()
 
         # XADC -------------------------------------------------------------------------------------
@@ -991,12 +1003,18 @@ class BaseSoC(SoCMini):
         # Loopback <-> RFIC, through the user extension hook (transparent by default, see
         # add_rfic_datapath()): downstream subclasses insert on-FPGA processing here, at the raw
         # RFIC sample plane.
-        self.add_rfic_datapath(
+        rfic_datapath = dict(
             rfic_sink   = self.ad9361.sink,              # Processed TX samples -> RFIC.
             rfic_source = self.ad9361.source,            # RFIC RX samples -> processing.
             tx_source   = self.txrx_loopback.tx_source,  # Host TX samples (post Header/Gate/Loopback).
             rx_sink     = self.txrx_loopback.rx_sink,    # -> Host RX (pre Loopback/Header timestamping).
         )
+        if with_dfx:
+            # The hook's processing becomes a DFX partition, swappable at runtime over ICAP.
+            self.add_rfic_dfx_datapath(platform, dfx_pblock,
+                data_width = 128 if with_rfic_oversampling else 64, **rfic_datapath)
+        else:
+            self.add_rfic_datapath(**rfic_datapath)
 
         # Crossbar.
         # ---------
@@ -1468,6 +1486,33 @@ class BaseSoC(SoCMini):
             rfic_source.connect(rx_sink),
         ]
 
+    def add_rfic_dfx_datapath(self, platform, pblock, data_width, rfic_sink, rfic_source, tx_source, rx_sink):
+        """Dynamic Function eXchange variant of add_rfic_datapath() (--with-dfx).
+
+        The default reconfigurable module (RM) is a passthrough, so the image behaves like the
+        stock design until an alternate RM is loaded with ``m2sdr_util dfx-load``. See
+        doc/dynamic-function-exchange.md.
+        """
+        dfx_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "litex_m2sdr", "gateware", "dfx")
+        self.rfic_dfx = DFXRFICDatapath(
+            platform          = platform,
+            isolate           = self.icap.isolate,
+            default_rm_source = os.path.join(dfx_dir, "m2sdr_dfx_datapath_passthrough.v"),
+            data_width        = data_width,
+        )
+        add_dfx_build_commands(
+            platform            = platform,
+            pblock              = pblock,
+            alternate_rm_source = os.path.join(dfx_dir, "m2sdr_dfx_datapath_loopback.v"),
+            data_width          = data_width,
+        )
+        self.comb += [
+            tx_source.connect(self.rfic_dfx.tx_sink),
+            self.rfic_dfx.tx_source.connect(rfic_sink),
+            rfic_source.connect(self.rfic_dfx.rx_sink),
+            self.rfic_dfx.rx_source.connect(rx_sink),
+        ]
+
     # SATA -----------------------------------------------------------------------------------------
 
     def _sata_dma_wishbone_bus(self, mode):
@@ -1823,6 +1868,12 @@ def main():
     parser.add_argument("--driver",           action="store_true",       help="Generate PCIe driver from LitePCIe (override local version).")
     parser.add_argument("--without-jtagbone", action="store_true",       help="Disable JTAGBone support.")
 
+    # Dynamic Function eXchange parameters.
+    parser.add_argument("--with-dfx", action="store_true",
+        help="Build the RFIC-plane datapath (add_rfic_datapath) as a Vivado Dynamic Function eXchange partition.")
+    parser.add_argument("--dfx-pblock", default=DEFAULT_DFX_PBLOCK, type=validate_dfx_pblock,
+        help="SLICE range reserved for the RFIC datapath DFX partition (default: clock region X1Y1).")
+
     # RFIC parameters.
     parser.add_argument("--with-rfic-oversampling", action="store_true", help="Double the RFIC clock to enable the oversampling mode.")
 
@@ -1937,6 +1988,8 @@ def main():
 
         # RFIC.
         with_rfic_oversampling = args.with_rfic_oversampling,
+        with_dfx               = args.with_dfx,
+        dfx_pblock             = args.dfx_pblock,
 
         # PCIe.
         with_pcie     = args.with_pcie,
@@ -2045,6 +2098,8 @@ def main():
                 r += f"_{args.wr_cpu_boot}"
         if args.with_rfic_oversampling:
             r += "_rfic_oversampling"
+        if args.with_dfx:
+            r += "_dfx"
         if args.without_jtagbone:
             r += "_no_jtagbone"
         return r

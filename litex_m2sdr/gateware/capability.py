@@ -32,7 +32,9 @@ class Capability(LiteXModule):
         # USB3.
         usb3_enabled=False, usb3_sfp=0, usb3_tx_header=False,
         # Stream.
-        stream_counters=False, eth_tx_header=False, eth_tx_status=False):
+        stream_counters=False, eth_tx_header=False, eth_tx_status=False,
+        # Dynamic Function eXchange.
+        dfx_enabled=False):
 
         # API Version.
         # ------------
@@ -68,6 +70,8 @@ class Capability(LiteXModule):
                 description="Ethernet TX stream marks its buffers: TX header and hardware timed TX over Ethernet."),
             CSRField("eth_tx_status", size=1, offset=14, reset=int(eth_tx_status),
                 description="Ethernet TX FIFO level and dropped datagrams are readable: flow control of the host."),
+            CSRField("dfx",      size=1, offset=15, reset=int(dfx_enabled),
+                description="TX/RX datapath Dynamic Function eXchange is present."),
             # Reserved bits for future features.
         ], description="Hardware feature presence bitfield.")
 
