@@ -725,12 +725,26 @@ m2sdr_fm_tx [options] input output
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
 - `--input-channels` (short: `-i`, for stdin)
 - `--input-sample-rate` (short: `-f`, for stdin, default=44100)
+- `--rds` (enable RDS with the default identification and name; any option below also enables it)
+- `--rds-pi` (Programme Identification, four hexadecimal digits, default=1000)
+- `--rds-ps` (Programme Service name, up to 8 characters, default=M2SDR)
+- `--rds-rt` (RadioText, up to 64 characters)
+- `--rds-pty` (Programme Type, 0 to 31, default=0)
+- `--rds-ct` (clock time each minute: `now` for the system clock, or a UTC time in seconds since 1970)
 
 The audio is resampled, pre-emphasized, limited to full scale, low-pass filtered at 15 kHz and,
 in stereo, multiplexed with a 19 kHz pilot at 10 % and the L-R subcarrier at 38 kHz. The
 pre-emphasis raises the high frequencies (14 dB at 15 kHz with 50 us): leave headroom in the
 source. The number of limited samples is reported at the end. Messages go to stderr, stdout
 carries only the I/Q samples.
+
+RDS is sent on a 57 kHz subcarrier locked on the third harmonic of the pilot, at 4 % of the
+deviation (3 kHz), taken from the audio: groups 0A (PI, PTY, PS), 2A (RadioText) and 4A (clock
+time, at each minute), per EN 50067 / IEC 62106. It needs a sample rate of 128000 at least.
+
+~~~~
+./m2sdr_fm_tx --mode stereo --rds-pi F212 --rds-ps "M2SDR FM" --rds-rt "Hello from the LiteX-M2SDR" --rds-ct now music.wav - | ./m2sdr_play -
+~~~~
 
 Example:
 ~~~~
@@ -784,14 +798,26 @@ m2sdr_fm_rx [options] input output
 - `--format` (values: `sc16|sc8`, default=sc16; `-8`/`--sc8` selects 8-bit I/Q samples)
 - `--emphasis` (short: `-e`, values: `us|eu|none`, default=eu; `eu` is 50 us, `us` is 75 us)
 - `--mode` (short: `-m`, values: `mono|stereo`, default=mono)
+- `--rds` (short: `-r`, decode RDS and print it on stderr)
 
 The receiver filters the channel (about 200 kHz wide), demodulates, applies the de-emphasis and
 a 15 kHz low-pass, and writes 16-bit audio at 44100 Hz. In stereo it locks on the 19 kHz pilot
 and decodes the two channels; without a pilot, both channels carry the mono signal.
 
+With `--rds`, the receiver decodes the 57 kHz subcarrier, in mono as in stereo, and prints a
+line each time a field changes, then the number of groups and of wrong blocks at the end.
+Blocks with a wrong checkword are dropped, not corrected.
+
+~~~~
+./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --mode stereo --rds - station.wav
+RDS: PI=F212 PTY=10 (Pop music) PS="M2SDR FM" RT="Hello from the LiteX-M2SDR" CT=2026-11-17 13:35 +01:00
+~~~~
+
 Both utilities use the modulator and demodulator of libm2sdr (`libm2sdr/m2sdr_fm.h`).
 `make test-fm` runs their offline tests: tones through the modulator and the demodulator, then
-through the two utilities with files and pipes.
+through the two utilities with files and pipes; for RDS, the blocks against the tables of
+EN 50067, the decoder on a reference signal written from the standard, and encoder to decoder
+with noise, a tuning offset and a sample clock error.
 
 Example:
 ~~~~

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause
  *
- * M2SDR broadcast FM: modulator and demodulator between audio and I/Q samples.
+ * M2SDR broadcast FM: modulator and demodulator between audio and I/Q samples, with RDS.
  *
  * This file is part of LiteX-M2SDR.
  *
@@ -153,6 +153,613 @@ static inline const float *fm_delay_window(const struct fm_delay *d)
     return d->hist + d->pos;
 }
 
+/* RDS: blocks */
+/*-------------*/
+
+#define FM_RDS_POLY  0x5b9u  /* x^10 + x^8 + x^7 + x^5 + x^4 + x^3 + 1 */
+
+/* Offset words A, B, C, C', D (EN 50067, annex A). */
+static const uint16_t fm_rds_offsets[5] = { 0x0fc, 0x198, 0x168, 0x350, 0x1b4 };
+
+/* Remainder of a 26-bit word divided by the generator polynomial. */
+static uint32_t fm_rds_remainder(uint32_t word)
+{
+    int i;
+
+    for (i = 25; i >= 10; i--)
+        if (word & (1u << i))
+            word ^= FM_RDS_POLY << (i - 10);
+    return word & 0x3ff;
+}
+
+uint32_t m2sdr_fm_rds_encode_block(uint16_t data, enum m2sdr_fm_rds_offset offset)
+{
+    const uint32_t word = (uint32_t)data << 10;
+
+    return word | (fm_rds_remainder(word) ^ fm_rds_offsets[offset]);
+}
+
+/* The remainder of a block without error is its offset word: the checkword cancels the one
+ * of the information bits. */
+int m2sdr_fm_rds_decode_block(uint32_t block, uint16_t *data)
+{
+    const uint32_t rem = fm_rds_remainder(block & 0x3ffffff);
+    int i;
+
+    for (i = 0; i < 5; i++) {
+        if (rem == fm_rds_offsets[i]) {
+            if (data)
+                *data = (uint16_t)(block >> 10);
+            return i;
+        }
+    }
+    return -1;
+}
+
+const char *m2sdr_fm_rds_pty_name(unsigned pty)
+{
+    static const char *const names[32] = {
+        "None", "News", "Current affairs", "Information", "Sport", "Education", "Drama",
+        "Culture", "Science", "Varied", "Pop music", "Rock music", "Easy listening",
+        "Light classical", "Serious classical", "Other music", "Weather", "Finance",
+        "Children's programmes", "Social affairs", "Religion", "Phone-in", "Travel", "Leisure",
+        "Jazz music", "Country music", "National music", "Oldies music", "Folk music",
+        "Documentary", "Alarm test", "Alarm",
+    };
+
+    return (pty < 32) ? names[pty] : "";
+}
+
+/* RDS: shaped biphase symbol */
+/*----------------------------*/
+
+/* Impulse response of the shaping filter cos(pi * f * td / 4) up to f = 2 / td, where td is
+ * the bit period and u the time in bit periods. */
+static double fm_rds_shape(double u)
+{
+    const double d = 1.0 - 64.0 * u * u;
+
+    if (fabs(d) < 1e-9)
+        return 1.0;
+    return (4.0 / M_PI) * cos(4.0 * M_PI * u) / d;
+}
+
+/* A bit is a pair of opposite impulses half a bit apart through this filter, centred here on
+ * the middle of the bit. */
+static double fm_rds_pulse(double u)
+{
+    return fm_rds_shape(u + 0.25) - fm_rds_shape(u - 0.25);
+}
+
+/* RDS: encoder */
+/*--------------*/
+
+#define FM_RDS_SPAN   3    /* Bits kept on each side of the symbol: it is 66 dB down beyond. */
+#define FM_RDS_RES    64   /* Points per bit in the table of the symbol. */
+#define FM_RDS_TABLE  ((2 * FM_RDS_SPAN + 2) * FM_RDS_RES + 1)
+#define FM_RDS_UNIX_MJD 40587  /* Modified Julian Day of 1970-01-01. */
+
+struct fm_rds_tx {
+    struct m2sdr_fm_rds_config cfg;
+    bool     stereo;                     /* For the decoder identification. */
+    char     ps[M2SDR_FM_RDS_PS_LEN];
+    char     rt[M2SDR_FM_RDS_RT_LEN];
+    unsigned rt_segments;                /* Groups 2A of one pass over the text. */
+    float    pulse[FM_RDS_TABLE];
+    double   phase, step;                /* Position in the bit, 0 to 1, and its step per sample. */
+    float    sym[2 * FM_RDS_SPAN + 1];   /* Symbols around the current bit, +-1. */
+    uint32_t blocks[4];                  /* Group being sent. */
+    unsigned bit;                        /* Its next bit, 0 to 103. */
+    unsigned prev;                       /* Last bit after the differential coding. */
+    uint64_t bits;                       /* Bits sent. */
+    unsigned groups, ps_seg, rt_seg;
+};
+
+static void fm_rds_tx_init(struct fm_rds_tx *e, const struct m2sdr_fm_rds_config *cfg, double rate,
+                           bool stereo)
+{
+    size_t len;
+    double peak = 0.0;
+    int i, k;
+
+    memset(e, 0, sizeof(*e));
+    e->cfg    = *cfg;
+    e->stereo = stereo;
+    e->step   = M2SDR_FM_RDS_BITRATE / rate;
+
+    /* Name padded with spaces. Text ended by a carriage return when shorter than its 64
+     * characters, then padded to whole groups of four characters. */
+    memset(e->ps, ' ', sizeof(e->ps));
+    memcpy(e->ps, cfg->ps, strnlen(cfg->ps, sizeof(e->ps)));
+    memset(e->rt, ' ', sizeof(e->rt));
+    len = strnlen(cfg->rt, sizeof(e->rt));
+    memcpy(e->rt, cfg->rt, len);
+    if (len > 0 && len < sizeof(e->rt))
+        e->rt[len++] = '\r';
+    e->rt_segments = (unsigned)((len + 3) / 4);
+
+    /* Table of the symbol, scaled so that a stream of identical bits, a sine at the bit rate,
+     * has an amplitude of 1. */
+    for (i = 0; i < FM_RDS_TABLE; i++)
+        e->pulse[i] = (float)fm_rds_pulse((double)i / FM_RDS_RES - (FM_RDS_SPAN + 1));
+    for (i = 0; i < FM_RDS_RES; i++) {
+        double sum = 0.0;
+
+        for (k = 0; k < 2 * FM_RDS_SPAN + 2; k++)
+            sum += e->pulse[i + k * FM_RDS_RES];
+        if (fabs(sum) > peak)
+            peak = fabs(sum);
+    }
+    for (i = 0; i < FM_RDS_TABLE; i++)
+        e->pulse[i] = (float)(e->pulse[i] / peak);
+}
+
+/* Next group: clock time when the group ends on a minute, else name and text in turn. */
+static void fm_rds_tx_group(struct fm_rds_tx *e)
+{
+    const struct m2sdr_fm_rds_config *c = &e->cfg;
+    const double start = (double)c->ct_unix_time + (double)e->bits / M2SDR_FM_RDS_BITRATE;
+    const double end   = start + 104.0 / M2SDR_FM_RDS_BITRATE;
+    uint16_t b[4];
+    int i;
+
+    b[0] = c->pi;
+    b[1] = (uint16_t)((c->tp ? 0x0400 : 0) | ((c->pty & 31u) << 5));
+    if (c->ct && floor(end / 60.0) > floor(start / 60.0)) {
+        /* 4A: Modified Julian Day, hour and minute in UTC, local offset in half hours. */
+        const int64_t  minutes = (int64_t)floor(end / 60.0);
+        const int64_t  days    = (minutes >= 0) ? minutes / 1440 : -((-minutes + 1439) / 1440);
+        const unsigned in_day  = (unsigned)(minutes - days * 1440);
+        const uint32_t mjd     = (uint32_t)(days + FM_RDS_UNIX_MJD) & 0x1ffff;
+        const unsigned hour    = in_day / 60, minute = in_day % 60;
+        const unsigned offset  = (unsigned)abs(c->ct_offset) & 31u;
+
+        b[1] |= (4u << 12) | (mjd >> 15);
+        b[2]  = (uint16_t)(((mjd & 0x7fff) << 1) | (hour >> 4));
+        b[3]  = (uint16_t)(((hour & 15u) << 12) | (minute << 6) |
+                           (c->ct_offset < 0 ? 0x20 : 0) | offset);
+    } else if (e->rt_segments && (e->groups & 1)) {
+        /* 2A: four characters of the text, at their segment address. */
+        const unsigned char *t = (const unsigned char *)&e->rt[4 * e->rt_seg];
+
+        b[1] |= (2u << 12) | e->rt_seg;
+        b[2]  = (uint16_t)((t[0] << 8) | t[1]);
+        b[3]  = (uint16_t)((t[2] << 8) | t[3]);
+        if (++e->rt_seg == e->rt_segments)
+            e->rt_seg = 0;
+    } else {
+        /* 0A: flags, no alternative frequency, two characters of the name. The decoder
+         * identification is sent one bit per group: its last bit, stereo, with address 3. */
+        const unsigned char *t = (const unsigned char *)&e->ps[2 * e->ps_seg];
+
+        b[1] |= (c->ta ? 0x10 : 0) | (c->music ? 0x08 : 0) | e->ps_seg;
+        if (e->stereo && e->ps_seg == 3)
+            b[1] |= 0x04;
+        b[2]  = 0xe0cd;
+        b[3]  = (uint16_t)((t[0] << 8) | t[1]);
+        e->ps_seg = (e->ps_seg + 1) & 3;
+    }
+    e->groups++;
+
+    e->blocks[0] = m2sdr_fm_rds_encode_block(b[0], M2SDR_FM_RDS_OFFSET_A);
+    e->blocks[1] = m2sdr_fm_rds_encode_block(b[1], M2SDR_FM_RDS_OFFSET_B);
+    e->blocks[2] = m2sdr_fm_rds_encode_block(b[2], M2SDR_FM_RDS_OFFSET_C);
+    e->blocks[3] = m2sdr_fm_rds_encode_block(b[3], M2SDR_FM_RDS_OFFSET_D);
+    for (i = 0; i < 4; i++)
+        e->blocks[i] &= 0x3ffffff;
+}
+
+/* Next bit of the stream, differentially coded: a 1 inverts the previous output. */
+static float fm_rds_tx_symbol(struct fm_rds_tx *e)
+{
+    unsigned bit;
+
+    if (e->bit == 0)
+        fm_rds_tx_group(e);
+    bit = (e->blocks[e->bit / 26] >> (25 - e->bit % 26)) & 1;
+    if (++e->bit == 104)
+        e->bit = 0;
+    e->bits++;
+    e->prev ^= bit;
+    return e->prev ? 1.0f : -1.0f;
+}
+
+/* One sample of the data signal, before the subcarrier: the symbols of the bits around the
+ * current one, each at its place in the table. */
+static inline float fm_rds_tx_sample(struct fm_rds_tx *e)
+{
+    const float  x = ((float)e->phase + 0.5f) * FM_RDS_RES;
+    const int    k = (int)x;
+    const float  f = x - (float)k;
+    const float *p = e->pulse + k;
+    float acc = 0.0f;
+    int i;
+
+    for (i = 0; i <= 2 * FM_RDS_SPAN; i++) {
+        const float *q = p + (2 * FM_RDS_SPAN - i) * FM_RDS_RES;
+
+        acc += e->sym[i] * (q[0] + f * (q[1] - q[0]));
+    }
+    e->phase += e->step;
+    if (e->phase >= 1.0) {
+        e->phase -= 1.0;
+        memmove(e->sym, e->sym + 1, 2 * FM_RDS_SPAN * sizeof(e->sym[0]));
+        e->sym[2 * FM_RDS_SPAN] = fm_rds_tx_symbol(e);
+    }
+    return acc;
+}
+
+/* RDS: decoder */
+/*--------------*/
+
+#define FM_RDS_RX_RATE_MIN  19000.0  /* Lowest rate of the data signal: 16 samples per bit. */
+#define FM_RDS_PASS_HZ       2400.0  /* Data signal after the subcarrier is removed... */
+#define FM_RDS_STOP_HZ       8000.0  /* ...and stop band of its decimation filter. */
+#define FM_RDS_MF_SPAN            2  /* Bits on each side in the matched filter. */
+#define FM_RDS_COSTAS_HZ       20.0  /* Natural frequency of the subcarrier loop. */
+#define FM_RDS_POWER_BITS      50.0  /* Time constant of the level estimate. */
+#define FM_RDS_TIMING_GAIN     0.05  /* Bit clock correction, in bits per unit of error. */
+#define FM_RDS_SYNC_SPAN          3  /* Blocks between the two offset words that give the sync. */
+#define FM_RDS_SYNC_LOSS         12  /* Wrong blocks in a row that end it. */
+#define FM_RDS_HIST              32  /* Samples kept for the bit clock: over half a bit. */
+
+struct fm_rds_rx {
+    /* Subcarrier removed with a free 57 kHz phasor, then decimation. */
+    double   nco_c, nco_s, step_c, step_s;
+    float   *dec_taps;
+    unsigned dec_count, decim, dec_phase;
+    struct fm_delay dec_i, dec_q;
+
+    /* Matched filter: the shaped biphase symbol. */
+    float   *mf_taps;
+    unsigned mf_count;
+    struct fm_delay mf_i, mf_q;
+
+    /* Subcarrier phase (Costas loop) and level. */
+    double   psi, freq, kp, ki;
+    float    power, power_alpha;
+
+    /* Bit clock. */
+    double   tau, tau_step;
+    unsigned quarter;                    /* Samples in a quarter of a bit. */
+    float    hist_re[FM_RDS_HIST], hist_mag[FM_RDS_HIST];
+    unsigned hist_pos;
+
+    /* Bits, blocks and groups. */
+    unsigned prev_bit;
+    uint32_t reg;                        /* Last 26 bits. */
+    uint64_t bit_count;
+    bool     have_prev;                  /* An offset word was seen at prev_at, in block prev_block. */
+    uint64_t prev_at;
+    unsigned prev_block;
+    unsigned block, bits_in_block, bad_run;
+    bool     group_good, version_b;
+    uint16_t data[4];
+
+    /* Name and text being received. */
+    char     ps[M2SDR_FM_RDS_PS_LEN];
+    unsigned ps_mask;
+    char     rt[M2SDR_FM_RDS_RT_LEN];
+    unsigned rt_mask;
+    int      rt_flag;
+
+    struct m2sdr_fm_rds_info info;
+};
+
+static void fm_rds_rx_free(struct fm_rds_rx *d)
+{
+    if (!d)
+        return;
+    free(d->dec_taps);
+    free(d->dec_i.hist);
+    free(d->dec_q.hist);
+    free(d->mf_taps);
+    free(d->mf_i.hist);
+    free(d->mf_q.hist);
+    free(d);
+}
+
+static struct fm_rds_rx *fm_rds_rx_new(double mpx_rate)
+{
+    struct fm_rds_rx *d = calloc(1, sizeof(*d));
+    double rate, spb, wn, energy = 0.0;
+    unsigned i;
+
+    if (!d)
+        return NULL;
+    d->nco_c  = 1.0;
+    d->step_c = cos(2.0 * M_PI * M2SDR_FM_RDS_HZ / mpx_rate);
+    d->step_s = sin(2.0 * M_PI * M2SDR_FM_RDS_HZ / mpx_rate);
+    d->decim  = (unsigned)(mpx_rate / FM_RDS_RX_RATE_MIN);
+    if (d->decim < 1)
+        d->decim = 1;
+    rate = mpx_rate / d->decim;
+    spb  = rate / M2SDR_FM_RDS_BITRATE;
+
+    d->dec_taps = fm_lowpass_design(mpx_rate, FM_RDS_PASS_HZ, FM_RDS_STOP_HZ, 1, &d->dec_count);
+    if (!d->dec_taps || fm_delay_init(&d->dec_i, d->dec_count) != 0 ||
+        fm_delay_init(&d->dec_q, d->dec_count) != 0)
+        goto fail;
+
+    d->mf_count = 2 * (unsigned)lrint(FM_RDS_MF_SPAN * spb) + 1;
+    d->mf_taps  = malloc(d->mf_count * sizeof(*d->mf_taps));
+    if (!d->mf_taps || fm_delay_init(&d->mf_i, d->mf_count) != 0 ||
+        fm_delay_init(&d->mf_q, d->mf_count) != 0)
+        goto fail;
+    for (i = 0; i < d->mf_count; i++) {
+        const double p = fm_rds_pulse(((double)i - (d->mf_count - 1) / 2.0) / spb);
+
+        d->mf_taps[i] = (float)p;
+        energy       += p * p;
+    }
+    for (i = 0; i < d->mf_count; i++)
+        d->mf_taps[i] = (float)(d->mf_taps[i] / sqrt(energy));
+
+    /* Second-order loop, damping 0.707; its phase detector has a unit slope. */
+    wn     = 2.0 * M_PI * FM_RDS_COSTAS_HZ / rate;
+    d->kp  = 2.0 * M_SQRT1_2 * wn;
+    d->ki  = wn * wn;
+    d->power_alpha = (float)(1.0 / (FM_RDS_POWER_BITS * spb));
+
+    d->tau_step = 1.0 / spb;
+    d->quarter  = (unsigned)lrint(spb / 4.0);
+    if (d->quarter < 1 || 2 * d->quarter >= FM_RDS_HIST)
+        goto fail;
+    d->rt_flag = -1;
+    return d;
+
+fail:
+    fm_rds_rx_free(d);
+    return NULL;
+}
+
+/* Characters as received, the control codes as spaces. */
+static void fm_rds_rx_chars(char *dst, const uint16_t *words, unsigned count)
+{
+    unsigned i;
+
+    for (i = 0; i < count; i++) {
+        const unsigned c = (words[i / 2] >> ((i & 1) ? 0 : 8)) & 0xff;
+
+        dst[i] = (char)((c < 0x20 && c != '\r') || c == 0x7f ? ' ' : c);
+    }
+}
+
+/* Text: `width` characters per segment. It is complete with all its segments, or with those
+ * up to the one that holds the carriage return. */
+static void fm_rds_rx_text(struct fm_rds_rx *d, unsigned seg, unsigned width, int flag,
+                           const uint16_t *words)
+{
+    const unsigned len = 16 * width;
+    unsigned need = 16, end = len, i;
+    char text[M2SDR_FM_RDS_RT_LEN + 1];
+
+    /* The A/B flag changes with a new text. */
+    if (flag != d->rt_flag) {
+        memset(d->rt, ' ', sizeof(d->rt));
+        d->rt_mask = 0;
+        d->rt_flag = flag;
+    }
+    fm_rds_rx_chars(&d->rt[seg * width], words, width);
+    d->rt_mask |= 1u << seg;
+
+    for (i = 0; i < len; i++) {
+        if (d->rt[i] == '\r') {
+            end  = i;
+            need = i / width + 1;
+            break;
+        }
+    }
+    if ((d->rt_mask & ((1u << need) - 1)) != (1u << need) - 1)
+        return;
+    while (end > 0 && d->rt[end - 1] == ' ')
+        end--;
+    memcpy(text, d->rt, end);
+    text[end] = '\0';
+    if (!d->info.rt_valid || strcmp(text, d->info.rt) != 0) {
+        memcpy(d->info.rt, text, end + 1);
+        d->info.rt_valid = true;
+        d->info.updates++;
+    }
+}
+
+/* A group with its four blocks right. */
+static void fm_rds_rx_group(struct fm_rds_rx *d)
+{
+    struct m2sdr_fm_rds_info *info = &d->info;
+    const uint16_t *b = d->data;
+    const unsigned type = b[1] >> 12;
+    const unsigned pty  = (b[1] >> 5) & 31;
+    const bool     tp   = (b[1] >> 10) & 1;
+
+    info->groups++;
+    if (!info->pi_valid || info->pi != b[0]) {
+        /* Another station: what was received so far is not its name nor its text. */
+        info->pi       = b[0];
+        info->pi_valid = true;
+        info->ps_valid = info->rt_valid = info->ct_valid = false;
+        d->ps_mask = d->rt_mask = 0;
+        d->rt_flag = -1;
+        info->updates++;
+    }
+    if (info->pty != pty || info->tp != tp) {
+        info->pty = (uint8_t)pty;
+        info->tp  = tp;
+        info->updates++;
+    }
+
+    if (type == 0) {
+        /* 0A, 0B: flags and two characters of the name. */
+        const unsigned seg = b[1] & 3;
+        const bool ta = (b[1] >> 4) & 1, music = (b[1] >> 3) & 1;
+
+        if (info->ta != ta || info->music != music) {
+            info->ta    = ta;
+            info->music = music;
+            info->updates++;
+        }
+        fm_rds_rx_chars(&d->ps[2 * seg], &b[3], 2);
+        d->ps_mask |= 1u << seg;
+        if (d->ps_mask == 0xf && (!info->ps_valid || memcmp(info->ps, d->ps, sizeof(d->ps)) != 0)) {
+            memcpy(info->ps, d->ps, sizeof(d->ps));
+            info->ps[sizeof(d->ps)] = '\0';
+            info->ps_valid = true;
+            info->updates++;
+        }
+    } else if (type == 2) {
+        /* 2A: four characters of the text. 2B: two, the third block repeats the PI. */
+        if (d->version_b)
+            fm_rds_rx_text(d, b[1] & 15, 2, (b[1] >> 4) & 1, &b[3]);
+        else
+            fm_rds_rx_text(d, b[1] & 15, 4, (b[1] >> 4) & 1, &b[2]);
+    } else if (type == 4 && !d->version_b) {
+        /* 4A: clock time. */
+        const uint32_t mjd    = ((uint32_t)(b[1] & 3) << 15) | (b[2] >> 1);
+        const unsigned hour   = ((b[2] & 1u) << 4) | (b[3] >> 12);
+        const unsigned minute = (b[3] >> 6) & 63;
+        const int      offset = (b[3] & 0x20) ? -(int)(b[3] & 31) : (int)(b[3] & 31);
+
+        if (hour < 24 && minute < 60) {
+            info->ct_unix_time = ((int64_t)mjd - FM_RDS_UNIX_MJD) * 86400 + hour * 3600 + minute * 60;
+            info->ct_offset    = offset;
+            info->ct_valid     = true;
+            info->updates++;
+        }
+    }
+}
+
+/* One received bit. Without sync, every bit is tried as the end of a block: two offset words
+ * at the distance and in the order of the blocks give the sync. With it, a block ends every
+ * 26 bits, and a run of wrong checkwords ends the sync. */
+static void fm_rds_rx_bit(struct fm_rds_rx *d, unsigned bit)
+{
+    static const unsigned char block_of[5] = { 0, 1, 2, 2, 3 };
+    uint16_t data = 0;
+    int offset;
+
+    d->reg = ((d->reg << 1) | bit) & 0x3ffffff;
+    d->bit_count++;
+
+    if (!d->info.synced) {
+        unsigned block;
+
+        offset = m2sdr_fm_rds_decode_block(d->reg, &data);
+        if (offset < 0)
+            return;
+        block = block_of[offset];
+        if (d->have_prev) {
+            const uint64_t dist = d->bit_count - d->prev_at;
+
+            if (dist % 26 == 0 && dist / 26 <= FM_RDS_SYNC_SPAN &&
+                (d->prev_block + dist / 26) % 4 == block) {
+                d->info.synced   = true;
+                d->block         = (block + 1) & 3;
+                d->bits_in_block = 0;
+                d->bad_run       = 0;
+                d->group_good    = false;   /* Until a first block of a group. */
+            }
+        }
+        d->have_prev  = true;
+        d->prev_at    = d->bit_count;
+        d->prev_block = block;
+        return;
+    }
+
+    if (++d->bits_in_block < 26)
+        return;
+    d->bits_in_block = 0;
+    offset = m2sdr_fm_rds_decode_block(d->reg, &data);
+    d->info.blocks++;
+    if (offset >= 0 && block_of[offset] == d->block) {
+        d->bad_run = 0;
+        if (d->block == 0)
+            d->group_good = true;
+        if (d->block == 2)
+            d->version_b = (offset == M2SDR_FM_RDS_OFFSET_CP);
+        d->data[d->block] = data;
+        /* The version bit of the second block and the offset word of the third agree. */
+        if (d->block == 3 && d->group_good && d->version_b == (((d->data[1] >> 11) & 1) != 0))
+            fm_rds_rx_group(d);
+    } else {
+        d->info.block_errors++;
+        d->group_good = false;
+        if (++d->bad_run >= FM_RDS_SYNC_LOSS) {
+            d->info.synced = false;
+            d->have_prev   = false;
+        }
+    }
+    d->block = (d->block + 1) & 3;
+}
+
+/* One sample of the multiplex. */
+static inline void fm_rds_rx_sample(struct fm_rds_rx *d, float mpx)
+{
+    const double c = d->nco_c, s = d->nco_s;
+    const double norm = 1.5 - 0.5 * (c * c + s * s);
+    const unsigned mask = FM_RDS_HIST - 1;
+    float bi, bq, yi, yq, vr, vi, pc, ps, err, level;
+
+    /* Subcarrier down to zero, low-pass, decimation. */
+    fm_delay_push(&d->dec_i, mpx * (float)c);
+    fm_delay_push(&d->dec_q, -mpx * (float)s);
+    d->nco_c = (c * d->step_c - s * d->step_s) * norm;
+    d->nco_s = (s * d->step_c + c * d->step_s) * norm;
+    if (++d->dec_phase < d->decim)
+        return;
+    d->dec_phase = 0;
+    bi = fm_dot(d->dec_taps, fm_delay_window(&d->dec_i), d->dec_count);
+    bq = fm_dot(d->dec_taps, fm_delay_window(&d->dec_q), d->dec_count);
+
+    /* Matched filter. */
+    fm_delay_push(&d->mf_i, bi);
+    fm_delay_push(&d->mf_q, bq);
+    yi = fm_dot(d->mf_taps, fm_delay_window(&d->mf_i), d->mf_count);
+    yq = fm_dot(d->mf_taps, fm_delay_window(&d->mf_q), d->mf_count);
+
+    /* Subcarrier phase: the data are on the real axis when the product of the two axes
+     * averages to zero. The inversion that remains does not matter to the differential
+     * coding. */
+    pc = cosf((float)d->psi);
+    ps = sinf((float)d->psi);
+    vr = yi * pc + yq * ps;
+    vi = yq * pc - yi * ps;
+    d->power += d->power_alpha * (vr * vr + vi * vi - d->power);
+    level = d->power + 1e-20f;
+    err   = vr * vi / level;
+    if (err > 1.0f)
+        err = 1.0f;
+    else if (err < -1.0f)
+        err = -1.0f;
+    d->freq += d->ki * err;
+    d->psi  += d->freq + d->kp * err;
+    if (d->psi > M_PI)
+        d->psi -= 2.0 * M_PI;
+    else if (d->psi < -M_PI)
+        d->psi += 2.0 * M_PI;
+
+    /* Bit clock: the matched filter output peaks in the middle of a bit. The sample taken is
+     * a quarter of a bit old, and the levels a quarter of a bit before and after it steer
+     * the clock. */
+    d->hist_pos = (d->hist_pos + 1) & mask;
+    d->hist_re[d->hist_pos]  = vr;
+    d->hist_mag[d->hist_pos] = sqrtf(vr * vr + vi * vi);
+    d->tau += d->tau_step;
+    if (d->tau >= 1.0) {
+        const float late   = d->hist_mag[d->hist_pos];
+        const float early  = d->hist_mag[(d->hist_pos - 2 * d->quarter) & mask];
+        const unsigned bit = d->hist_re[(d->hist_pos - d->quarter) & mask] > 0.0f;
+
+        err = (late - early) / sqrtf(level);
+        if (err > 1.0f)
+            err = 1.0f;
+        else if (err < -1.0f)
+            err = -1.0f;
+        d->tau -= 1.0 + FM_RDS_TIMING_GAIN * err;
+        fm_rds_rx_bit(d, bit ^ d->prev_bit);
+        d->prev_bit = bit;
+    }
+}
+
 /* Modulator */
 /*-----------*/
 
@@ -171,9 +778,11 @@ struct m2sdr_fm_tx {
     unsigned lpf_count;
     struct fm_delay lpf[2];
 
-    /* Pilot: a unit phasor turned by a fixed step. */
+    /* Pilot: a unit phasor turned by a fixed step. The RDS subcarrier is its third harmonic. */
     double   pilot_c, pilot_s;
     double   step_c, step_s;
+    float    audio_level;        /* Share of the deviation left to the audio. */
+    struct fm_rds_tx *rds;
 
     /* Interpolator: one set of taps per output phase, in the order of the window. */
     float   *interp_taps;
@@ -190,6 +799,7 @@ struct m2sdr_fm_tx {
 
 void m2sdr_fm_config_init(struct m2sdr_fm_config *cfg)
 {
+    memset(cfg, 0, sizeof(*cfg));
     cfg->sample_rate = 1e6;
     cfg->deviation   = M2SDR_FM_DEVIATION_HZ;
     cfg->tau         = M2SDR_FM_TAU_EU;
@@ -199,8 +809,14 @@ void m2sdr_fm_config_init(struct m2sdr_fm_config *cfg)
 
 static bool fm_config_valid(const struct m2sdr_fm_config *cfg)
 {
-    const double min_rate = cfg->stereo ? M2SDR_FM_MIN_RATE_STEREO : M2SDR_FM_MIN_RATE_MONO;
+    double min_rate = cfg->stereo ? M2SDR_FM_MIN_RATE_STEREO : M2SDR_FM_MIN_RATE_MONO;
 
+    if (cfg->rds.enable) {
+        if (min_rate < M2SDR_FM_MIN_RATE_RDS)
+            min_rate = M2SDR_FM_MIN_RATE_RDS;
+        if (cfg->rds.pty > 31 || abs(cfg->rds.ct_offset) > 31)
+            return false;
+    }
     return cfg->sample_rate >= min_rate && cfg->sample_rate <= 1e9 &&
            cfg->deviation > 0.0 && cfg->deviation <= 0.4 * cfg->sample_rate &&
            cfg->tau >= 0.0 && cfg->tau < 1e-3;
@@ -216,6 +832,7 @@ void m2sdr_fm_tx_free(struct m2sdr_fm_tx *tx)
     free(tx->interp_taps);
     free(tx->mpx.hist);
     free(tx->sine);
+    free(tx->rds);
     free(tx);
 }
 
@@ -254,6 +871,18 @@ struct m2sdr_fm_tx *m2sdr_fm_tx_new(const struct m2sdr_fm_config *cfg)
     tx->pilot_s = 0.0;
     tx->step_c  = cos(2.0 * M_PI * M2SDR_FM_PILOT_HZ / tx->audio_rate);
     tx->step_s  = sin(2.0 * M_PI * M2SDR_FM_PILOT_HZ / tx->audio_rate);
+
+    /* The pilot and the RDS subcarrier take their share of the deviation from the audio. */
+    tx->audio_level = 1.0f;
+    if (cfg->stereo)
+        tx->audio_level -= (float)M2SDR_FM_PILOT_LEVEL;
+    if (cfg->rds.enable) {
+        tx->audio_level -= (float)M2SDR_FM_RDS_LEVEL;
+        tx->rds = malloc(sizeof(*tx->rds));
+        if (!tx->rds)
+            goto fail;
+        fm_rds_tx_init(tx->rds, &cfg->rds, tx->audio_rate, cfg->stereo);
+    }
 
     /* Interpolator: removes the images of the multiplex around the multiples of its rate. */
     if (tx->interp > 1) {
@@ -351,27 +980,35 @@ static inline void fm_tx_modulate(struct m2sdr_fm_tx *tx, float mpx, int16_t *iq
 
 size_t m2sdr_fm_tx_process(struct m2sdr_fm_tx *tx, const float *audio, size_t frames, int16_t *iq)
 {
-    const float audio_level = 1.0f - (float)M2SDR_FM_PILOT_LEVEL;
+    const float audio_level = tx->audio_level;
     size_t n;
     unsigned m;
 
     for (n = 0; n < frames; n++) {
+        const double c = tx->pilot_c, s = tx->pilot_s;
         float mpx;
 
         if (tx->channels == 2) {
             const float l = fm_tx_audio(tx, 0, audio[2 * n + 0]);
             const float r = fm_tx_audio(tx, 1, audio[2 * n + 1]);
-            const double c = tx->pilot_c, s = tx->pilot_s;
-            const double norm = 1.5 - 0.5 * (c * c + s * s);
 
             /* The L-R subcarrier is sin(2 * phase) for a pilot sin(phase): both cross zero
              * upwards together. */
             mpx = audio_level * (0.5f * (l + r) + 0.5f * (l - r) * (float)(2.0 * s * c)) +
                   (float)M2SDR_FM_PILOT_LEVEL * (float)s;
+        } else {
+            mpx = audio_level * fm_tx_audio(tx, 0, audio[n]);
+        }
+        /* RDS: the data signal on sin(3 * phase), in phase with the third harmonic of the
+         * pilot. In mono the pilot is not sent, and the subcarrier is a plain 57 kHz. */
+        if (tx->rds)
+            mpx += (float)M2SDR_FM_RDS_LEVEL * fm_rds_tx_sample(tx->rds) *
+                   (float)(s * (3.0 - 4.0 * s * s));
+        if (tx->channels == 2 || tx->rds) {
+            const double norm = 1.5 - 0.5 * (c * c + s * s);
+
             tx->pilot_c = (c * tx->step_c - s * tx->step_s) * norm;
             tx->pilot_s = (s * tx->step_c + c * tx->step_s) * norm;
-        } else {
-            mpx = fm_tx_audio(tx, 0, audio[n]);
         }
 
         if (tx->interp == 1) {
@@ -443,6 +1080,9 @@ struct m2sdr_fm_rx {
 
     /* DC block of L+R, and of L-R to keep them alike. */
     float    dc_r, dc_x1[2], dc_y1[2];
+    float    audio_gain;         /* Back to full scale: the audio shares the deviation. */
+
+    struct fm_rds_rx *rds;
 };
 
 void m2sdr_fm_rx_free(struct m2sdr_fm_rx *rx)
@@ -455,6 +1095,7 @@ void m2sdr_fm_rx_free(struct m2sdr_fm_rx *rx)
     free(rx->lpf_taps);
     free(rx->lpf_m.hist);
     free(rx->lpf_s.hist);
+    fm_rds_rx_free(rx->rds);
     free(rx);
 }
 
@@ -523,6 +1164,16 @@ struct m2sdr_fm_rx *m2sdr_fm_rx_new(const struct m2sdr_fm_config *cfg)
         goto fail;
 
     rx->dc_r = (float)exp(-2.0 * M_PI * FM_DC_BLOCK_HZ / audio_rate);
+
+    /* A signal with RDS leaves its share less to the audio; the pilot is counted once
+     * locked. */
+    rx->audio_gain = 1.0f;
+    if (cfg->rds.enable) {
+        rx->audio_gain = 1.0f / (1.0f - (float)M2SDR_FM_RDS_LEVEL);
+        rx->rds = fm_rds_rx_new(rx->mpx_rate);
+        if (!rx->rds)
+            goto fail;
+    }
     return rx;
 
 fail:
@@ -543,6 +1194,14 @@ unsigned m2sdr_fm_rx_decimation(const struct m2sdr_fm_rx *rx)
 bool m2sdr_fm_rx_pilot_locked(const struct m2sdr_fm_rx *rx)
 {
     return rx->locked;
+}
+
+void m2sdr_fm_rx_rds(const struct m2sdr_fm_rx *rx, struct m2sdr_fm_rds_info *info)
+{
+    if (rx->rds)
+        *info = rx->rds->info;
+    else
+        memset(info, 0, sizeof(*info));
 }
 
 /* Pilot PLL on one multiplex sample. Returns sin(2 * phase), the L-R subcarrier. */
@@ -580,6 +1239,9 @@ static inline int fm_rx_mpx(struct m2sdr_fm_rx *rx, float mpx, float *audio)
 {
     float m, s, y;
 
+    if (rx->rds)
+        fm_rds_rx_sample(rx->rds, mpx);
+
     /* L+R, and L-R brought back from its subcarrier, with their de-emphasis. */
     rx->de_m += (1.0f - rx->de_a) * (mpx - rx->de_m);
     fm_delay_push(&rx->lpf_m, rx->de_m);
@@ -597,6 +1259,7 @@ static inline int fm_rx_mpx(struct m2sdr_fm_rx *rx, float mpx, float *audio)
     y = m - rx->dc_x1[0] + rx->dc_r * rx->dc_y1[0];
     rx->dc_x1[0] = m;
     rx->dc_y1[0] = y;
+    y *= rx->audio_gain;
     if (rx->channels == 1) {
         audio[0] = y;
         return 1;
@@ -608,10 +1271,12 @@ static inline int fm_rx_mpx(struct m2sdr_fm_rx *rx, float mpx, float *audio)
     rx->dc_x1[1] = s;
     rx->dc_y1[1] = m;
     if (rx->locked) {
-        const float gain = 1.0f / (1.0f - (float)M2SDR_FM_PILOT_LEVEL);
+        const float level = 1.0f - (float)M2SDR_FM_PILOT_LEVEL -
+                            (rx->rds ? (float)M2SDR_FM_RDS_LEVEL : 0.0f);
 
-        audio[0] = (y + m) * gain;
-        audio[1] = (y - m) * gain;
+        y /= rx->audio_gain;
+        audio[0] = (y + m) / level;
+        audio[1] = (y - m) / level;
     } else {
         audio[0] = y;
         audio[1] = y;

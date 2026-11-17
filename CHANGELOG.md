@@ -39,6 +39,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 - Added stereo decoding to `m2sdr_fm_rx` (pilot PLL): `--mode stereo` wrote the mono signal on both channels. Added a channel filter and a 15 kHz audio low-pass, which removes the pilot from the audio.
 - Fixed `m2sdr_fm_tx`: deviation steps of `244 Hz` that silenced quiet audio, a pre-emphasis that kept oscillating at half the sample rate after a step in the audio, text written on stdout in front of the I/Q samples, and audio above 15 kHz reaching the pilot. The audio is now limited to the deviation after the pre-emphasis.
 - Fixed `m2sdr_fm_radio.py`: its `m2sdr_rf` options were not accepted, so the frequency and the gain were not applied.
+- Added RDS (EN 50067 / IEC 62106) to `m2sdr_fm_tx` and `m2sdr_fm_rx`: the transmitter sends PI, PTY, the PS name, RadioText and the clock time (`--rds-pi`, `--rds-ps`, `--rds-rt`, `--rds-pty`, `--rds-ct`, groups 0A, 2A and 4A) on a 57 kHz subcarrier locked on the pilot, and `m2sdr_fm_rx --rds` decodes and prints them. Checked offline, not yet on a receiver nor on a broadcast station.
 
 **Calibration**
 - Added `m2sdr_cal`: scans bands for LTE and GSM carriers, measures the error of the reference clock on LTE carriers (PSS and cyclic prefix) and GSM carriers (FCCH), trims the reference and stores the result in a file or in the SPI flash. `m2sdr_rf --refclk-ppm stored` uses the record, and `m2sdr_cal measure --refclk-ppm stored` checks it. The estimators and the record are in libm2sdr (`m2sdr_cal.h`).

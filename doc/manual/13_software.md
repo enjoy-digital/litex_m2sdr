@@ -690,6 +690,31 @@ In stereo, the receiver decodes the two channels once it has locked on the pilot
 pilot it writes the mono signal on both channels. A small tuning offset is a constant level
 after the demodulation, and is removed from the audio.
 
+Both utilities handle the Radio Data System (RDS), the data that a station sends next to its
+audio on a subcarrier at 57 kHz, three times the pilot. The transmitter adds it with
+`--rds` or any of the options below, and the receiver decodes it with `--rds`.
+
+| Option of `m2sdr_fm_tx` | Meaning |
+|---|---|
+| `--rds-pi` | Programme Identification, four hexadecimal digits |
+| `--rds-ps` | Programme Service name, the 8 characters that a receiver displays |
+| `--rds-rt` | RadioText, up to 64 characters |
+| `--rds-pty` | Programme Type, 0 to 31 |
+| `--rds-ct` | Clock time each minute: `now`, or a UTC time in seconds since 1970 |
+
+Table: RDS options of `m2sdr_fm_tx`.
+
+The transmitter sends the name and the flags in groups 0A, the text in groups 2A and the
+clock time in a group 4A that ends on each minute. The subcarrier takes 4 % of the
+deviation, 3 kHz, from the audio. The receiver recovers the subcarrier and the bit clock on
+their own, so it also decodes a mono station. It checks each block with its checkword, drops
+the wrong ones without correcting them, and prints a line on stderr each time a field
+changes:
+
+```
+RDS: PI=F212 PTY=10 (Pop music) PS="M2SDR FM" RT="Hello" CT=2026-11-17 13:35 +01:00
+```
+
 The signal processing is in libm2sdr, declared in `libm2sdr/m2sdr_fm.h`. The modulator and
 the demodulator work at an integer fraction of the I/Q rate, between 160 and 500 kSPS, and
 the utilities resample the audio to and from this rate. Another program can use them as the

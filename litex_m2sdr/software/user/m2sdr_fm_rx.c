@@ -10,12 +10,14 @@
  * This utility FM demodulates interleaved I/Q samples into audio. It reads the I/Q samples
  * from a file or stdin, demodulates them with the demodulator of libm2sdr (m2sdr_fm.h: channel
  * filter, discriminator, stereo decoder, de-emphasis), resamples the audio to 44.1 kHz and
- * writes a WAV file, or raw 16-bit PCM to stdout.
+ * writes a WAV file, or raw 16-bit PCM to stdout. With --rds, it prints what the station
+ * sends on its RDS subcarrier.
  *
  * Usage Example:
  *     ./m2sdr_rf --sample-rate 1e6 --rx-freq 100e6 --rx-gain 20 --chan 1t1r
  *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 - music.wav
  *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
+ *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --mode stereo --rds - station.wav
  *
  */
 
@@ -28,6 +30,7 @@
 #include <inttypes.h>
 #include <getopt.h>
 #include <samplerate.h>
+#include <time.h>
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
@@ -66,6 +69,47 @@ static int write_wav_header(FILE *f, int channels, uint32_t data_bytes) {
     return (fwrite(h, 1, sizeof(h), f) == sizeof(h)) ? 0 : -1;
 }
 
+/* RDS */
+/*-----*/
+
+/* Text for a terminal: the codes above ASCII belong to the RDS character table, not to the
+ * one of the terminal. */
+static const char *rds_ascii(const char *text, char *out, size_t size) {
+    size_t i;
+    for (i = 0; text[i] && i + 1 < size; i++)
+        out[i] = ((unsigned char)text[i] < 0x20 || (unsigned char)text[i] > 0x7e) ? '?' : text[i];
+    out[i] = '\0';
+    return out;
+}
+
+/* What was decoded so far, on one line of stderr, when it differs from the last line. */
+static void print_rds(const struct m2sdr_fm_rds_info *info) {
+    static char last[256];
+    char line[256], text[M2SDR_FM_RDS_RT_LEN + 1];
+    size_t n = 0;
+
+    n += (size_t)snprintf(line + n, sizeof(line) - n, "RDS: PI=%04X PTY=%u (%s)%s%s", info->pi, info->pty,
+        m2sdr_fm_rds_pty_name(info->pty), info->tp ? " TP" : "", info->ta ? " TA" : "");
+    if (info->ps_valid)
+        n += (size_t)snprintf(line + n, sizeof(line) - n, " PS=\"%s\"", rds_ascii(info->ps, text, sizeof(text)));
+    if (info->rt_valid)
+        n += (size_t)snprintf(line + n, sizeof(line) - n, " RT=\"%s\"", rds_ascii(info->rt, text, sizeof(text)));
+    if (info->ct_valid) {
+        /* Local time of the station, and its offset from UTC. */
+        const int minutes = info->ct_offset * 30;
+        time_t t = (time_t)(info->ct_unix_time + minutes * 60);
+        struct tm tm;
+        if (gmtime_r(&t, &tm))
+            snprintf(line + n, sizeof(line) - n, " CT=%04d-%02d-%02d %02d:%02d %c%02d:%02d", tm.tm_year + 1900,
+                tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, minutes < 0 ? '-' : '+',
+                abs(minutes) / 60, abs(minutes) % 60);
+    }
+    if (strcmp(line, last) != 0) {
+        fprintf(stderr, "%s\n", line);
+        memcpy(last, line, sizeof(last));
+    }
+}
+
 /* FM Demodulation */
 /*-----------------*/
 
@@ -95,15 +139,17 @@ static int demodulate_fm(FILE *infile, FILE *outfile, const struct m2sdr_fm_conf
     int audio_channels = cfg->stereo ? 2 : 1;
     size_t audio_frames, out_frames = 0;
     uint64_t clipped = 0;
+    struct m2sdr_fm_rds_info rds;
+    unsigned rds_updates = 0;
     bool pilot = false;
     int ret = -1;
     int eof = 0;
 
     *pcm_bytes = 0;
     if (!rx) {
-        m2sdr_cli_error("unsupported FM settings (sample rate %.0f SPS: at least %.0f in %s, deviation at most 0.4 x sample rate)",
+        m2sdr_cli_error("unsupported FM settings (sample rate %.0f SPS: at least %.0f in %s, %.0f with RDS, deviation at most 0.4 x sample rate)",
             cfg->sample_rate, cfg->stereo ? M2SDR_FM_MIN_RATE_STEREO : M2SDR_FM_MIN_RATE_MONO,
-            cfg->stereo ? "stereo" : "mono");
+            cfg->stereo ? "stereo" : "mono", M2SDR_FM_MIN_RATE_RDS);
         return -1;
     }
 
@@ -153,6 +199,13 @@ static int demodulate_fm(FILE *infile, FILE *outfile, const struct m2sdr_fm_conf
             pilot = !pilot;
             fprintf(stderr, "Stereo pilot %s\n", pilot ? "locked" : "lost");
         }
+        if (cfg->rds.enable) {
+            m2sdr_fm_rx_rds(rx, &rds);
+            if (rds.updates != rds_updates) {
+                rds_updates = rds.updates;
+                print_rds(&rds);
+            }
+        }
 
         if (!resampler) {
             if (write_pcm(outfile, audio, frames * audio_channels, pcm, &clipped) != 0)
@@ -192,6 +245,11 @@ static int demodulate_fm(FILE *infile, FILE *outfile, const struct m2sdr_fm_conf
 
     if (clipped)
         fprintf(stderr, "Warning: %" PRIu64 " audio samples limited to full scale; check --deviation.\n", clipped);
+    if (cfg->rds.enable) {
+        m2sdr_fm_rx_rds(rx, &rds);
+        fprintf(stderr, "RDS: %" PRIu64 " groups, %" PRIu64 " wrong blocks of %" PRIu64 "\n",
+            rds.groups, rds.block_errors, rds.blocks);
+    }
     ret = 0;
     goto cleanup;
 
@@ -227,6 +285,7 @@ static void help(int status) {
            "-8, --sc8             Input is 8-bit I/Q samples (SC8 Q7).\n"
            "-e, --emphasis type   Set de-emphasis to us (75 us), eu (50 us) or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
+           "-r, --rds             Decode the RDS subcarrier and print it on stderr: PI, PTY, PS, RT, CT.\n"
            "\n"
            "Arguments:\n"
            "input                 Input I/Q bin file ('-' for stdin).\n"
@@ -252,6 +311,7 @@ static struct option options[] = {
     { "sc8",        no_argument,       NULL, '8' },
     { "emphasis",   required_argument, NULL, 'e' },
     { "mode",       required_argument, NULL, 'm' },
+    { "rds",        no_argument,       NULL, 'r' },
     { NULL,         0,                 NULL, 0 }
 };
 
@@ -274,7 +334,7 @@ int main(int argc, char **argv) {
 
     /* Parse command-line options */
     for (;;) {
-        c = getopt_long(argc, argv, "hs:d:b:8e:m:", options, &option_index);
+        c = getopt_long(argc, argv, "hs:d:b:8e:m:r", options, &option_index);
         if (c == -1) break;
         switch (c) {
         case 'h':
@@ -312,6 +372,9 @@ int main(int argc, char **argv) {
             break;
         case 'm':
             mode = optarg;
+            break;
+        case 'r':
+            cfg.rds.enable = true;
             break;
         default:
             exit(1);
