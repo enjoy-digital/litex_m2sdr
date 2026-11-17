@@ -35,11 +35,15 @@
 
 #include "liblitepcie.h"
 #include "m2sdr.h"
+#include "m2sdr_analysis.h"
 #include "m2sdr_cli.h"
 #include "m2sdr_tool.h"
 #include "kissfft/kiss_fft.h"
 #include "config.h"
 #include "csr.h"
+
+/* This file names its samples I and Q: the imaginary unit of <complex.h> is not used here. */
+#undef I
 
 /* Variables */
 /*-----------*/
@@ -222,6 +226,91 @@ static void m2sdr_write32(struct m2sdr_dev *dev, uint32_t addr, uint32_t val)
 }
 #endif
 
+/* Single-carrier PSK or QAM under a root raised cosine */
+/*-----------------------------------------------------*/
+
+#define QAM_SPAN   8                 /* Symbols of the pulse on each side. */
+#define QAM_PHASES 64                /* Table points per symbol. */
+#define QAM_PEAK   1.8               /* Peaks of the filtered signal over its corner symbols. */
+
+struct qam_state {
+    float complex points[256];
+    int    npoints;
+    double step;                     /* Symbols per sample. */
+    double frac;                     /* Position in the current symbol. */
+    float complex symbols[2 * QAM_SPAN];
+    float  pulse[2 * QAM_SPAN * QAM_PHASES + 2];
+    float  scale;
+    uint32_t lfsr;
+};
+
+/* Settings of --signal qam. */
+static enum m2sdr_modulation qam_modulation = M2SDR_MOD_QPSK;
+static double qam_symbol_rate = 0.0;      /* 0: a sixteenth of the sample rate. */
+static double qam_rolloff     = 0.35;
+
+static double qam_rrc(double t, double alpha)
+{
+    if (fabs(t) < 1e-9)
+        return 1.0 - alpha + 4.0 * alpha / M_PI;
+    if (fabs(fabs(t) - 1.0 / (4.0 * alpha)) < 1e-9)
+        return alpha / sqrt(2.0) * ((1.0 + 2.0 / M_PI) * sin(M_PI / (4.0 * alpha)) +
+                                    (1.0 - 2.0 / M_PI) * cos(M_PI / (4.0 * alpha)));
+    return (sin(M_PI * t * (1.0 - alpha)) + 4.0 * alpha * t * cos(M_PI * t * (1.0 + alpha))) /
+           (M_PI * t * (1.0 - 16.0 * alpha * alpha * t * t));
+}
+
+static float complex qam_random_symbol(struct qam_state *st)
+{
+    st->lfsr ^= st->lfsr << 13;
+    st->lfsr ^= st->lfsr >> 17;
+    st->lfsr ^= st->lfsr << 5;
+    return st->points[(st->lfsr >> 8) % (uint32_t)st->npoints];
+}
+
+static void qam_init(struct qam_state *st, double sample_rate, uint32_t seed)
+{
+    float corner = 0;
+    int i;
+
+    memset(st, 0, sizeof(*st));
+    st->npoints = m2sdr_constellation(qam_modulation, st->points);
+    st->step    = (qam_symbol_rate > 0 ? qam_symbol_rate : sample_rate / 16.0) / sample_rate;
+    st->lfsr    = seed | 1u;
+    for (i = 0; i <= 2 * QAM_SPAN * QAM_PHASES; i++)
+        st->pulse[i] = (float)qam_rrc((double)i / QAM_PHASES - QAM_SPAN, qam_rolloff);
+    for (i = 0; i < st->npoints; i++) {
+        if (cabsf(st->points[i]) > corner)
+            corner = cabsf(st->points[i]);
+    }
+    st->scale = 1.0f / (corner * (float)QAM_PEAK);
+    for (i = 0; i < 2 * QAM_SPAN; i++)
+        st->symbols[i] = qam_random_symbol(st);
+}
+
+/* One sample: the symbols within QAM_SPAN of it, each under the pulse. */
+static void qam_next_sample(struct qam_state *st, float *i_out, float *q_out)
+{
+    float complex acc = 0;
+    int j;
+
+    for (j = 0; j < 2 * QAM_SPAN; j++) {
+        /* Symbol j is frac + QAM_SPAN - 1 - j symbols before the sample. */
+        const double u = (st->frac + (double)(2 * QAM_SPAN - 1 - j)) * QAM_PHASES;
+        const int k = (int)u;
+        acc += st->symbols[j] * (st->pulse[k] + (float)(u - k) * (st->pulse[k + 1] - st->pulse[k]));
+    }
+    acc *= st->scale;
+    *i_out = fminf(fmaxf(crealf(acc), -1.0f), 1.0f);
+    *q_out = fminf(fmaxf(cimagf(acc), -1.0f), 1.0f);
+    st->frac += st->step;
+    while (st->frac >= 1.0) {
+        memmove(st->symbols, st->symbols + 1, (2 * QAM_SPAN - 1) * sizeof(st->symbols[0]));
+        st->symbols[2 * QAM_SPAN - 1] = qam_random_symbol(st);
+        st->frac -= 1.0;
+    }
+}
+
 struct gen_signal_state {
     const char *signal_type;
     double amplitude;
@@ -235,6 +324,7 @@ struct gen_signal_state {
     uint64_t sample_count;
     uint32_t lfsr;
     struct ofdm_state *ofdm;
+    struct qam_state *qam;
 };
 
 static int8_t gen_float_to_sc8(float sample)
@@ -267,6 +357,10 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
                 st->phi -= 2 * M_PI;
         } else if (strcmp(st->signal_type, "ofdm") == 0) {
             ofdm_next_sample(st->ofdm, &I, &Q);
+            I *= st->amplitude;
+            Q *= st->amplitude;
+        } else if (strcmp(st->signal_type, "qam") == 0) {
+            qam_next_sample(st->qam, &I, &Q);
             I *= st->amplitude;
             Q *= st->amplitude;
         } else if (strcmp(st->signal_type, "white") == 0) {
@@ -322,6 +416,8 @@ static void gen_fill_payload(uint8_t *payload, size_t payload_bytes, struct gen_
         memset(payload + generated_bytes, 0, payload_bytes - generated_bytes);
 }
 
+#define GEN_PACE_LEAD_S 0.004      /* Samples sent ahead of their time over Ethernet. */
+
 /* Signal (DMA TX) with GPIO PPS */
 /*-----------------------------*/
 
@@ -343,6 +439,10 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     int use_pcie_dma = 0;
     int stream_configured = 0;
     int exit_status = 1;
+    bool pace_init = false, pace_tx = false;
+    uint64_t fpga_underflows = 0;
+    uint64_t paced_samples = 0;
+    struct timespec pace_start = { 0, 0 };
     enum m2sdr_format format = use_8bit ? M2SDR_FORMAT_SC8_Q7 : M2SDR_FORMAT_SC16_Q11;
     unsigned payload_bytes = M2SDR_BUFFER_BYTES - (enable_header ? M2SDR_HEADER_BYTES : 0);
     unsigned samples_per_buf = m2sdr_bytes_to_samples(format, payload_bytes);
@@ -468,6 +568,16 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
     gen.use_8bit = use_8bit;
     gen.lfsr = (uint32_t)rand() | 1u;
     gen.ofdm = &ofdm;
+    {
+        static struct qam_state qam;
+
+        if (strcmp(signal_type, "qam") == 0) {
+            qam_init(&qam, sample_rate, gen.lfsr);
+            printf("  QAM: %s, %.0f symbols/s, roll-off %.2f\n", m2sdr_modulation_name(qam_modulation),
+                   qam.step * sample_rate, qam_rolloff);
+        }
+        gen.qam = &qam;
+    }
 
     /* Test Loop */
     last_time = get_time_ms();
@@ -503,6 +613,25 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             void *buf_wr = NULL;
             unsigned num_samples = 0;
             struct m2sdr_metadata meta = {0};
+
+            if (!pace_init) {
+                enum m2sdr_transport_kind kind = M2SDR_TRANSPORT_KIND_UNKNOWN;
+
+                pace_init = true;
+                pace_tx   = m2sdr_get_transport(dev, &kind) == 0 && kind == M2SDR_TRANSPORT_KIND_LITEETH;
+#ifdef CSR_ETH_TX_STATUS_FIFO_LEVEL_ADDR
+                /* A gateware with the level of its TX FIFO: the library holds the stream back on
+                 * it, at the rate of the board, and the clock of the host is left out. */
+                if (pace_tx) {
+                    struct m2sdr_liteeth_udp_stats udp_stats;
+
+                    memset(&udp_stats, 0, sizeof(udp_stats));
+                    if (m2sdr_liteeth_get_udp_stats(dev, &udp_stats) == 0 && udp_stats.tx_flow_control)
+                        pace_tx = false;
+                }
+#endif
+                clock_gettime(CLOCK_MONOTONIC, &pace_start);
+            }
             int rc;
             size_t buf_payload_bytes;
 
@@ -535,6 +664,21 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
                 goto cleanup;
             }
             total_buffers++;
+
+            /* Ethernet with no flow control: the board drops what its TX FIFO cannot take. The
+             * samples are sent at their rate, a few milliseconds ahead, on the clock of the
+             * host; the FIFO takes the difference with the clock of the board for minutes. */
+            if (pace_tx) {
+                struct timespec now;
+                double ahead;
+
+                paced_samples += num_samples;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                ahead = (double)paced_samples / (2.0 * sample_rate) -
+                        ((double)(now.tv_sec - pace_start.tv_sec) + 1e-9 * (double)(now.tv_nsec - pace_start.tv_nsec));
+                if (ahead > GEN_PACE_LEAD_S)
+                    usleep((useconds_t)((ahead - GEN_PACE_LEAD_S) * 1e6));
+            }
         }
 
         /* Statistics every 200ms */
@@ -544,6 +688,16 @@ static void m2sdr_gen(const char *device_id, double sample_rate, double frequenc
             if (i % 10 == 0)
                 printf("\e[1mSPEED(Gbps)   BUFFERS   SIZE(MB)   UNDERFLOWS\e[0m\n");
             i++;
+            /* Off PCIe, the underflows are the ones the FPGA counts at the RFIC. */
+            if (!use_pcie_dma) {
+                struct m2sdr_stream_stats tx_stats;
+
+                memset(&tx_stats, 0, sizeof(tx_stats));
+                if (m2sdr_get_stream_stats(dev, M2SDR_TX, &tx_stats) == 0) {
+                    sw_underflows       = (int64_t)(tx_stats.underflow_events - fpga_underflows);
+                    fpga_underflows     = tx_stats.underflow_events;
+                }
+            }
             /* Print statistics */
             printf("%10.2f %10" PRIu64 " %10" PRIu64 " %10" PRIu64 "\n",
                    (double)(total_buffers - last_buffers) * M2SDR_BUFFER_BYTES * 8 / ((double)duration * 1e6),
@@ -597,13 +751,17 @@ static void help(void) {
            "  -i, --ip ADDR                  Target IP address for Etherbone.\n"
            "      --port PORT                Port number (default: 1234).\n"
            "      --sample-rate HZ           Set sample rate in Hz (default: 30720000).\n"
-           "      --signal TYPE              Set signal type: tone, white, prbs, or ofdm.\n"
+           "      --signal TYPE              Set signal type: tone, white, prbs, ofdm, or qam.\n"
            "      --tone-freq HZ             Set tone frequency in Hz (default: 1000).\n"
            "      --ofdm-fft-size N          OFDM FFT size (default: 1024).\n"
            "      --ofdm-cp-len N            OFDM cyclic prefix length (default: 32).\n"
            "      --ofdm-carriers N          OFDM occupied carriers (default: 200).\n"
            "      --ofdm-modulation MOD      OFDM modulation: qpsk or 16qam (default: qpsk).\n"
            "      --ofdm-seed N              OFDM PRBS seed (default: 1).\n"
+           "      --qam-modulation MOD       qam: bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam\n"
+           "                                 (default: qpsk). Random symbols under a root raised cosine.\n"
+           "      --qam-symbol-rate HZ       qam: symbols per second (default: sample rate / 16).\n"
+           "      --qam-rolloff A            qam: roll-off of the pulse (default: 0.35).\n"
            "      --amplitude A              Set amplitude (0.0 to 1.0, default: 1.0).\n"
            "      --pps-freq HZ              Enable PPS/toggle on GPIO.\n"
            "      --gpio-pin N               Select GPIO pin for PPS (0-3, default: 0).\n"
@@ -657,6 +815,9 @@ int main(int argc, char **argv) {
         { "ofdm-carriers", required_argument, NULL, 5 },
         { "ofdm-modulation", required_argument, NULL, 6 },
         { "ofdm-seed", required_argument, NULL, 7 },
+        { "qam-modulation", required_argument, NULL, 9 },
+        { "qam-symbol-rate", required_argument, NULL, 10 },
+        { "qam-rolloff", required_argument, NULL, 11 },
         { "format", required_argument, NULL, 1 },
         { "8bit", no_argument, NULL, 2 },
         { NULL, 0, NULL, 0 }
@@ -689,8 +850,9 @@ int main(int argc, char **argv) {
         case 't':
             strncpy(signal_type, optarg, sizeof(signal_type) - 1);
             signal_type[sizeof(signal_type) - 1] = '\0';
-            if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0 && strcmp(signal_type, "ofdm") != 0) {
-                m2sdr_cli_invalid_choice("signal", signal_type, "tone, white, prbs, or ofdm");
+            if (strcmp(signal_type, "tone") != 0 && strcmp(signal_type, "white") != 0 && strcmp(signal_type, "prbs") != 0 &&
+                strcmp(signal_type, "ofdm") != 0 && strcmp(signal_type, "qam") != 0) {
+                m2sdr_cli_invalid_choice("signal", signal_type, "tone, white, prbs, ofdm, or qam");
                 exit(1);
             }
             break;
@@ -772,6 +934,32 @@ int main(int argc, char **argv) {
         case 7:
             if (m2sdr_cli_parse_u32(optarg, &ofdm_seed) != 0) {
                 m2sdr_cli_error("invalid OFDM seed '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 9: {
+            int m;
+
+            for (m = M2SDR_MOD_BPSK; m < M2SDR_MOD_COUNT; m++) {
+                if (strcasecmp(optarg, m2sdr_modulation_name((enum m2sdr_modulation)m)) == 0)
+                    break;
+            }
+            if (m == M2SDR_MOD_COUNT) {
+                m2sdr_cli_invalid_choice("qam-modulation", optarg, "bpsk, qpsk, 8psk, 16qam, 32qam, 64qam, 128qam or 256qam");
+                return 1;
+            }
+            qam_modulation = (enum m2sdr_modulation)m;
+            break;
+        }
+        case 10:
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e9, &qam_symbol_rate) != 0) {
+                m2sdr_cli_error("invalid symbol rate '%s'", optarg);
+                return 1;
+            }
+            break;
+        case 11:
+            if (m2sdr_cli_parse_double_range(optarg, 0.05, 1.0, &qam_rolloff) != 0) {
+                m2sdr_cli_error("invalid roll-off '%s' (expected 0.05 to 1)", optarg);
                 return 1;
             }
             break;

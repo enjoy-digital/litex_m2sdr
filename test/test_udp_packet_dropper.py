@@ -71,3 +71,23 @@ def test_decision_is_held_for_the_packet():
     out, stalls, drops = _run(PACKETS, lambda n, i: (i == 0) if n == 0 else (i != 0) if n == 1 else 1)
     assert [w for w, _ in out] == PACKETS[0] + PACKETS[2]
     assert stalls == [] and drops == 1
+
+
+# UDPTXStatus ---------------------------------------------------------------------------------------
+
+def test_tx_status_reports_level_depth_and_drops():
+    from litex_m2sdr.gateware.udp import UDPTXStatus
+
+    dut = UDPTXStatus(fifo_depth=32768)
+    seen = {}
+
+    def gen():
+        yield dut.fifo_level.eq(12345)
+        yield dut.drops.eq(7)
+        yield
+        seen["level"] = (yield dut._fifo_level.status)
+        seen["depth"] = (yield dut._fifo_depth.status)
+        seen["drops"] = (yield dut._drops.status)
+
+    run_simulation(dut, gen())
+    assert seen == {"level": 12345, "depth": 32768, "drops": 7}

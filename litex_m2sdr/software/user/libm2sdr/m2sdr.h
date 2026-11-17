@@ -193,6 +193,17 @@ struct m2sdr_liteeth_udp_stats {
      * restarted because datagrams of their frame were lost. */
     uint64_t rx_frame_sync_drops;
     uint64_t rx_frame_resyncs;
+    /* TX flow control on the level of the TX FIFO of the FPGA, with M2SDR_FEATURE_ETH_TX_STATUS:
+     * 1 when the library holds the host back on it. Then the depth and the level of the FIFO
+     * in bytes, the rate at which the board empties it in bytes per second (0: not known yet),
+     * the buffers held back, and the datagrams that the FPGA dropped since the stream was
+     * activated: 0 while the flow control does its work. */
+    int tx_flow_control;
+    uint64_t tx_fifo_bytes;
+    uint64_t tx_fifo_level;
+    uint64_t tx_flow_rate;
+    uint64_t tx_flow_waits;
+    uint64_t tx_fpga_drops;
 };
 
 struct m2sdr_stream_stats {
@@ -503,6 +514,12 @@ enum m2sdr_feature_flag {
     M2SDR_FEATURE_STREAM_COUNTERS = 1u << CSR_CAPABILITY_FEATURES_STREAM_COUNTERS_OFFSET,
 #else
     M2SDR_FEATURE_STREAM_COUNTERS = 0,
+#endif
+    /* The level of the Ethernet TX FIFO is readable: the library holds the host back on it. */
+#ifdef CSR_CAPABILITY_FEATURES_ETH_TX_STATUS_OFFSET
+    M2SDR_FEATURE_ETH_TX_STATUS = 1u << CSR_CAPABILITY_FEATURES_ETH_TX_STATUS_OFFSET,
+#else
+    M2SDR_FEATURE_ETH_TX_STATUS = 0,
 #endif
     /* The Ethernet TX stream carries the TX header: hardware timed TX works over Ethernet. */
 #ifdef CSR_CAPABILITY_FEATURES_ETH_TX_HEADER_OFFSET
@@ -945,6 +962,14 @@ int m2sdr_liteeth_rx_stream_deactivate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_tx_stream_activate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_tx_stream_deactivate(struct m2sdr_dev *dev);
 int m2sdr_liteeth_set_rx_timeout_recovery(struct m2sdr_dev *dev, bool enable);
+/* Ethernet has no flow control of its own: a host that sends faster than the board transmits
+ * fills the TX FIFO of the FPGA, which then drops datagrams. With M2SDR_FEATURE_ETH_TX_STATUS
+ * the library reads the level of that FIFO and holds m2sdr_sync_tx() and
+ * m2sdr_submit_buffer() back on it, so the host sends at the rate of the sample clock of the
+ * board, whatever it is. On by default when the gateware has it; an application that paces its
+ * buffers itself, on their transmit time for example, turns it off before it configures the
+ * TX stream. */
+int m2sdr_liteeth_set_tx_flow_control(struct m2sdr_dev *dev, bool enable);
 int m2sdr_liteeth_get_udp_stats(struct m2sdr_dev *dev,
                                 struct m2sdr_liteeth_udp_stats *stats);
 

@@ -64,7 +64,7 @@ from litex_m2sdr.gateware.pcie        import (
     add_s7_pcie_timing_constraints,
 )
 from litex_m2sdr.gateware.header      import TXRXHeader, TXHeaderPacketMarker
-from litex_m2sdr.gateware.udp         import UDPPacketDropper
+from litex_m2sdr.gateware.udp         import UDPPacketDropper, UDPTXStatus
 from litex_m2sdr.gateware.etherbone   import SharedLiteEthEtherbone
 from litex_m2sdr.gateware.led         import StatusLed
 from litex_m2sdr.gateware.measurement import MultiClkMeasurement
@@ -301,6 +301,7 @@ class BaseSoC(SoCMini):
         "eth_phy"          : 14,
         "eth_rx_streamer"  : 15,
         "eth_tx_streamer"  : 16,
+        "eth_tx_status"    : 43,
         "eth_ptp"          : 37,
         "ptp_discipline"   : 38,
         "ptp_identity"     : 39,
@@ -495,6 +496,9 @@ class BaseSoC(SoCMini):
 
             # Ethernet TX stream marks its buffers: TX header and hardware timed TX.
             eth_tx_header   = with_eth,
+
+            # Ethernet TX FIFO level and dropped datagrams, for the flow control of the host.
+            eth_tx_status   = with_eth,
 
             # Timed TX (the TXRXHeader timed-TX gate is unconditional in this gateware).
             timed_tx        = True,
@@ -859,6 +863,13 @@ class BaseSoC(SoCMini):
                 self.eth_tx_dropper.source.connect(self.eth_tx_streamer.sink),
                 self.eth_tx_dropper.room.eq(
                     self.eth_tx_streamer.fifo.level < (eth_tx_streamer_fifo_depth - 256)),
+            ]
+            # Level of the TX FIFO for the host: it sends at the rate at which the board
+            # transmits, and nothing is dropped.
+            self.eth_tx_status = UDPTXStatus(fifo_depth=eth_tx_streamer_fifo_depth)
+            self.comb += [
+                self.eth_tx_status.fifo_level.eq(self.eth_tx_streamer.fifo.level),
+                self.eth_tx_status.drops.eq(self.eth_tx_dropper.drops),
             ]
 
             self.eth_tx_streamer_started = Signal()
