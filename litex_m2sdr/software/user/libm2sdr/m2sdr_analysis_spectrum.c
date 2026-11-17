@@ -32,11 +32,11 @@ static int cmp_float(const void *a, const void *b)
 /* Bins of a range of frequencies, clamped to the spectrum. Returns -1 when it holds no bin. */
 static int psd_range(const struct m2sdr_psd *psd, double lo_hz, double hi_hz, size_t *k0, size_t *k1)
 {
-    const double half = (double)(psd->bins / 2);
-    double a, b;
+    double half, a, b;
 
     if (!psd || !psd->power || !psd->bins || !(hi_hz >= lo_hz))
         return -1;
+    half = (double)(psd->bins / 2);
     a = ceil(lo_hz / psd->bin_hz + half - 1e-9);
     b = floor(hi_hz / psd->bin_hz + half + 1e-9);
     if (a < 0)
