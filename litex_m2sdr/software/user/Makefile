@@ -70,16 +70,16 @@ CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
-.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue clean install install_dev check analyze-libm2sdr
+.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-analyzer clean install install_dev check analyze-libm2sdr
 
 ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
-                m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan m2sdr_cal
+                m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan m2sdr_cal m2sdr_analyzer
 
 # Which core binaries to build per interface.
 ifneq ($(filter $(INTERFACE),USE_LITEETH USE_LITEUSB),)
-  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata m2sdr_cal
+  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata m2sdr_cal m2sdr_analyzer
 else ifneq ($(filter $(INTERFACE),USE_RUNTIME USE_LITEPCIE),)
-  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_sata m2sdr_cal
+  CORE_BINARIES := m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_gpio m2sdr_sata m2sdr_cal m2sdr_analyzer
 endif
 
 BINARIES := $(CORE_BINARIES)
@@ -120,7 +120,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
 CLI_OBJS = m2sdr_cli.o
 TOOL_OBJS = m2sdr_tool.o
 HOST_QUEUE_OBJS = m2sdr_host_queue.o
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal tests/test_m2sdr_analysis
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -137,6 +137,8 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_sigmf.o \
 	libm2sdr/m2sdr_cal.o \
 	libm2sdr/m2sdr_cal_dsp.o \
+	libm2sdr/m2sdr_fft.o \
+	libm2sdr/m2sdr_analysis_spectrum.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -171,7 +173,7 @@ all: $(PROGS)
 TEST_PROGS += tests/test_m2sdr_eth_flow
 
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
-core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp
+core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-analyzer
 
 examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
@@ -180,6 +182,15 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_flash
 	./tests/test_si5351_trim
 	./tests/test_m2sdr_cal
+	./tests/test_m2sdr_analysis
+
+# Report mode of m2sdr_analyzer on a capture file of known content.
+test-analyzer: m2sdr_analyzer tests/test_m2sdr_analysis
+	./tests/test_m2sdr_analysis --write tests/analysis_capture.sc16
+	./m2sdr_analyzer --report --json --file tests/analysis_capture.sc16 --nchannels 1 --sample-rate 1e6 \
+		--freq 100e6 --fft-len 4096 --window flattop --channel-bw 100e3 --channel-offset -200e3 \
+		> tests/analysis_capture.json
+	./tests/test_m2sdr_analysis --check tests/analysis_capture.json
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
@@ -299,6 +310,25 @@ m2sdr_rf: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_rf.o
 m2sdr_cal: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_cal.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_cal.o $(M2SDR_LINK_LIBS)
 
+# m2sdr_analyzer always has its report mode; its window needs SDL2 and cimgui.
+ifeq ($(and $(filter 1,$(HAVE_SDL2)),$(filter 1,$(HAVE_CIMGUI))),1)
+M2SDR_ANALYZER_CFLAGS := -DM2SDR_ANALYZER_GUI -I. $(SDL2_CFLAGS)
+M2SDR_ANALYZER_OBJS   := $(SCAN_UI_DIR)/m2sdr_plot.o $(M2SDR_IMGUI_OBJS)
+M2SDR_ANALYZER_LIBS   := $(SDL2_LIBS) -lGL -ldl -lstdc++
+endif
+
+m2sdr_analyzer.o: m2sdr_analyzer.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) $(M2SDR_ANALYZER_CFLAGS) -o $@ $<
+
+$(SCAN_UI_DIR)/m2sdr_plot.o: $(SCAN_UI_DIR)/m2sdr_plot.c $(BUILD_FLAGS_FILE)
+	$(CC) -c $(CFLAGS) -I. -o $@ $<
+
+m2sdr_analyzer: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_analyzer.o $(M2SDR_ANALYZER_OBJS) $(M2SDR_LINK_LIBS) $(M2SDR_ANALYZER_LIBS) -pthread
+
+tests/test_m2sdr_analysis: $(LIBM2SDR_STATIC) tests/test_m2sdr_analysis.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_analysis.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
@@ -350,7 +380,7 @@ clean:
 	rm -f .build-flags .build-flags-* m2sdr_revision.h
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
-	rm -f tests/*.o tests/*.d $(TEST_PROGS)
+	rm -f tests/*.o tests/*.d $(TEST_PROGS) tests/analysis_capture.*
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f libliteusb/*.o libliteusb/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
@@ -437,6 +467,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_sigmf.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_cal.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_analysis.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \

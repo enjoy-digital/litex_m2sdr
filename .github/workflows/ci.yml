@@ -57,13 +57,14 @@ jobs:
           test -x m2sdr_fm_tx
           test -x m2sdr_fm_rx
           test -x m2sdr_sata
+          test -x m2sdr_analyzer
           test -x m2sdr_check
           test -x m2sdr_scan
           for bin in m2sdr_util m2sdr_rf m2sdr_gen m2sdr_play m2sdr_record m2sdr_gpio m2sdr_fm_tx m2sdr_fm_rx m2sdr_sata; do
             ldd "$bin" | tee "/tmp/ldd_${bin}.txt"
             ! grep -q "not found" "/tmp/ldd_${bin}.txt"
           done
-          for bin in m2sdr_check m2sdr_scan; do
+          for bin in m2sdr_analyzer m2sdr_check m2sdr_scan; do
             ldd "$bin" | tee "/tmp/ldd_${bin}.txt"
             ! grep -q "not found" "/tmp/ldd_${bin}.txt"
           done

@@ -418,6 +418,7 @@ The utilities are small command-line programs, one per task. They share the devi
 | `m2sdr_play` | Transmit samples from a file or from a pipe, raw or SigMF |
 | `m2sdr_gen` | Transmit a tone, noise, a PRBS or an OFDM signal |
 | `m2sdr_check` | Inspect a recording in a window: time, spectrum, constellation |
+| `m2sdr_analyzer` | Measure a signal, live or from a recording: spectrum, markers, channel power |
 | `m2sdr_sigmf` | Print and validate SigMF metadata |
 | `m2sdr_sata` | Capture to, replay from and manage the SATA storage |
 | `m2sdr_gpio` | Configure and drive the GPIO pins |
@@ -427,7 +428,8 @@ The utilities are small command-line programs, one per task. They share the devi
 
 The usual order is to configure the RFIC once with `m2sdr_rf`, then to stream with
 `m2sdr_record`, `m2sdr_play` or `m2sdr_gen`. The RFIC keeps its configuration between
-commands. `m2sdr_scan` and the capture commands of `m2sdr_sata` configure the RFIC themselves.
+commands. `m2sdr_scan`, `m2sdr_analyzer`, `m2sdr_cal` and the capture commands of `m2sdr_sata`
+configure the RFIC themselves.
 
 TX power is set as an attenuation in dB, a positive number, in all utilities: a larger value
 means less power. The reference page of the utilities is `litex_m2sdr/software/user/README.md`.
@@ -442,6 +444,7 @@ The other utilities, the library and the SoapySDR driver are built in every case
 | `m2sdr_fm_tx`, `m2sdr_fm_rx` | libsndfile, libsamplerate |
 | `m2sdr_check` | SDL2, OpenGL, the `cimgui` submodule |
 | `m2sdr_scan` | SDL2, OpenGL, libpng, the `cimgui` submodule |
+| The window of `m2sdr_analyzer` | SDL2, OpenGL, the `cimgui` submodule |
 
 ```sh
 sudo apt install pkg-config libsndfile1-dev libsamplerate0-dev \
@@ -692,6 +695,58 @@ m2sdr_scan --start-freq 88000000 --stop-freq 108000000 \
 m2sdr_scan --preset-load fm_band.scan --no-ui \
     --export-csv fm_band.csv --export-png fm_band.png
 ```
+
+### m2sdr_analyzer: signal analyser {#sw-analyzer}
+
+`m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives. It
+configures the RFIC itself and applies the calibration record of the board when it has one
+([m2sdr_cal](#sw-cal)), so that the frequencies it reads are right.
+
+```sh
+m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6          # Window on the board RX
+m2sdr_analyzer --file capture.sigmf-meta                     # Window on a recording
+m2sdr_analyzer --freq 2.45e9 --report                        # One capture, figures as text
+m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
+```
+
+| View | Shows |
+|------------|---------------------------------------------------------------------------------|
+| Spectrum | Live, average, max hold and min hold traces, markers, the channel, a waterfall |
+| Time | I and Q, and the power, against time |
+| Statistics | CCDF of the power next to the one of Gaussian noise, and Q against I |
+
+The figures are next to the views, and `--report` prints the same ones for one capture:
+
+| Figures | Content |
+|----------------|-----------------------------------------------------------------------------|
+| Peaks | Lines that stand above the noise, with their frequency and level |
+| Tone | Level, SNR, SINAD, SFDR, THD and harmonics of the strongest line |
+| Channel | Power of a channel (`--channel-bw`, `--channel-offset`), ACPR, occupied bandwidth (99 %), noise density |
+| Time domain | Mean and peak power, PAPR, DC offset, I/Q gain imbalance and quadrature error, clipping |
+
+A capture is one block of contiguous samples, `--fft-len` and `--averages` set its length and
+the resolution bandwidth. The window is Hann by default; a flat-top window reads the level of a
+tone within 0.01 dB, a Blackman-Harris window shows weak signals next to strong ones. The tone
+figures are always taken with a Blackman-Harris window.
+
+In the window, a left click places the selected marker, the wheel zooms around the mouse, a
+right drag moves the span and a double click shows it all. A marker gives the level and the
+noise density at its frequency, and its distance to the first marker.
+
+> [!NOTE]
+> The levels are in dBFS: the board has no absolute level calibration, and the gain of the RFIC
+> changes them. `--ref-offset` adds a value measured with a known source, to read dBm at the
+> connector for one gain and one frequency. The AGC is on by default; a manual gain
+> (`--rx-gain`) keeps the levels comparable from one capture to the next.
+
+When the host or the link does not follow the sample rate, samples are lost between the RFIC
+and the host and a capture has a hole. `m2sdr_analyzer` reads the loss counters of the stream
+around each capture, takes it again, and says so when it could not get a clean one: over 1 GbE
+this is the case above about 14 MSPS, since both channels are streamed.
+
+The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
+`m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
+`m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures.
 
 ### m2sdr_sata: SATA storage {#sw-sata}
 
