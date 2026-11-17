@@ -159,6 +159,31 @@ bool m2sdr_plot_begin(struct m2sdr_plot *plot, const char *id, ImVec2 size,
         ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ plot->p0.x + 5.0f, plot->p0.y + 3.0f }, COL_LABEL, y_label, NULL);
 
     /* Horizontal axis. */
+    if (x_unit == M2SDR_PLOT_LOG_FREQ) {
+        int decade, m;
+
+        for (decade = (int)floor(x0); decade <= (int)ceil(x1); decade++) {
+            for (m = 1; m < 10; m++) {
+                const double lx = decade + log10((double)m);
+                const float x = m2sdr_plot_x(plot, lx);
+
+                if (lx < x0 - 1e-9 || lx > x1 + 1e-9)
+                    continue;
+                ImDrawList_AddLine(plot->dl, (ImVec2){ x, plot->p0.y }, (ImVec2){ x, plot->p1.y },
+                                   m == 1 ? COL_GRID : (COL_GRID & 0x00ffffffu) | 0x18000000u, 1.0f);
+                if (m != 1)
+                    continue;
+                m2sdr_plot_format(text, sizeof(text), pow(10.0, decade), pow(10.0, decade), M2SDR_PLOT_FREQ);
+                igCalcTextSize(&ts, text, NULL, false, -1.0f);
+                if (x + 0.5f * ts.x > plot->p1.x + PLOT_MARGIN_RIGHT)
+                    continue;
+                ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ x - 0.5f * ts.x, plot->p1.y + 4.0f }, COL_LABEL, text, NULL);
+            }
+        }
+        ImDrawList_AddRect(plot->dl, plot->p0, plot->p1, COL_FRAME, 0.0f, 0, 1.0f);
+        ImDrawList_PushClipRect(plot->dl, plot->p0, plot->p1, true);
+        return true;
+    }
     step = nice_step(x1 - x0, (int)((plot->p1.x - plot->p0.x) / 110.0f));
     for (v = ceil(x0 / step - 1e-9) * step; v <= x1 + 1e-9 * step; v += step) {
         const float x = m2sdr_plot_x(plot, v);
@@ -299,4 +324,13 @@ void m2sdr_plot_text(struct m2sdr_plot *plot, float dx, float dy, const char *te
     const float x = dx >= 0 ? plot->p0.x + dx : plot->p1.x + dx;
     const float y = dy >= 0 ? plot->p0.y + dy : plot->p1.y + dy;
     ImDrawList_AddText_Vec2(plot->dl, (ImVec2){ x, y }, color, text, NULL);
+}
+
+void m2sdr_plot_xy(struct m2sdr_plot *plot, const float *x, const float *y, size_t n, ImU32 color)
+{
+    size_t i;
+
+    for (i = 1; i < n; i++)
+        ImDrawList_AddLine(plot->dl, (ImVec2){ m2sdr_plot_x(plot, x[i - 1]), m2sdr_plot_y(plot, y[i - 1]) },
+                           (ImVec2){ m2sdr_plot_x(plot, x[i]), m2sdr_plot_y(plot, y[i]) }, color, 1.5f);
 }

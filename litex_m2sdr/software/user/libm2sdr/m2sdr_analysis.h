@@ -150,6 +150,54 @@ struct m2sdr_iq_stats {
 /* `clip` is the level counted as clipped (0.999 for samples scaled by their converter range). */
 int m2sdr_iq_stats(const float complex *x, size_t count, double clip, struct m2sdr_iq_stats *stats);
 
+/* Phase noise */
+/*-------------*/
+
+#define M2SDR_PN_POINTS_PER_DECADE 20
+#define M2SDR_PN_MAX_POINTS        160
+#define M2SDR_PN_MAX_SPURS         16
+
+/* Phase noise of the strongest carrier of a capture.
+ *
+ * The carrier is brought to zero frequency, its frequency offset and its mean phase are
+ * removed, and the signal is split into its phase and its amplitude. L(f) is the spectral
+ * density of the phase, single sideband, in dBc/Hz; the density of the relative amplitude is
+ * given next to it. Offsets are spaced evenly on a log scale, with a longer transform for the
+ * lower ones.
+ *
+ * The centre of the capture is not searched: it holds the DC offset and the LO leakage of the
+ * receiver, so the capture is tuned a little off the carrier.
+ *
+ * What is measured is the sum of the source and of the receiver: its local oscillator and its
+ * reference add their own phase noise, and its noise figure and its converters add a floor,
+ * half of it as phase and half as amplitude. */
+struct m2sdr_phase_noise {
+    bool   found;                                 /* A carrier stands out of the capture. */
+    double carrier_hz;                            /* From the centre of the capture. */
+    double carrier_db;                            /* dBFS. */
+    int    points;
+    double offset_hz[M2SDR_PN_MAX_POINTS];
+    double l_dbc_hz[M2SDR_PN_MAX_POINTS];         /* Phase noise. */
+    double am_dbc_hz[M2SDR_PN_MAX_POINTS];        /* Amplitude noise. */
+    /* Integrated between lo_hz and hi_hz, both sidebands. */
+    double lo_hz, hi_hz;
+    double rms_rad;                               /* Phase error. */
+    double rms_deg;
+    double jitter_s;                              /* 0 when the carrier frequency is not given. */
+    double residual_fm_hz;                        /* RMS frequency deviation. */
+    /* Discrete lines of the phase, the strongest first; they are part of L(f) above. */
+    int    nspurs;
+    double spur_hz[M2SDR_PN_MAX_SPURS];
+    double spur_dbc[M2SDR_PN_MAX_SPURS];
+};
+
+/* carrier_freq_hz is the RF frequency of the carrier, for the jitter (0: not computed).
+ * The integration goes from lo_hz to hi_hz, clamped to the offsets measured (0, 0: all of
+ * them). Returns 0, or -1 on a bad argument or allocation failure; without a carrier,
+ * found = false. A capture of 2^20 samples or more gives five decades of offsets. */
+int m2sdr_phase_noise(const float complex *x, size_t count, double sample_rate, double carrier_freq_hz,
+                      double lo_hz, double hi_hz, struct m2sdr_phase_noise *pn);
+
 #ifdef __cplusplus
 }
 #endif

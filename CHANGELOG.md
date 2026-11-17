@@ -29,6 +29,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 
 **Signal Analysis**
 - Added `m2sdr_analyzer`: spectrum with traces, markers and a waterfall, channel power, ACPR, occupied bandwidth, tone figures (SNR, SINAD, SFDR, THD) and time-domain statistics, on the board RX or on a SigMF or raw capture, in a Dear ImGui window or as a text or JSON report without a display. The measurements are in libm2sdr (`m2sdr_analysis.h`).
+- Added the phase noise of a carrier to `m2sdr_analyzer`: L(f) and amplitude noise against the offset, integrated phase error, jitter, residual FM and spurs, with a floor of the board stored per board and drawn under the trace.
 
 **Calibration**
 - Added `m2sdr_cal`: scans bands for LTE and GSM carriers, measures the error of the reference clock on LTE carriers (PSS and cyclic prefix) and GSM carriers (FCCH), trims the reference and stores the result in a file or in the SPI flash. `m2sdr_rf --refclk-ppm stored` uses the record, and `m2sdr_cal measure --refclk-ppm stored` checks it. The estimators and the record are in libm2sdr (`m2sdr_cal.h`).

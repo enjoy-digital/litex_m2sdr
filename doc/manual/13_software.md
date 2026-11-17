@@ -666,7 +666,8 @@ m2sdr_scan --preset-load fm_band.scan --no-ui \
 
 ### m2sdr_analyzer: signal analyser {#sw-analyzer}
 
-`m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives. It
+`m2sdr_analyzer` measures a signal on the RX of a board or in a recording. It only receives,
+unless its test tone is asked for. It
 configures the RFIC itself and applies the calibration record of the board when it has one
 ([m2sdr_cal](#sw-cal)), so that the frequencies it reads are right.
 
@@ -682,6 +683,7 @@ m2sdr_analyzer --file tone.bin --sample-rate 1e6 --report --json
 | Spectrum | Live, average, max hold and min hold traces, markers, the channel, a waterfall |
 | Time | I and Q, and the power, against time |
 | Statistics | CCDF of the power next to the one of Gaussian noise, and Q against I |
+| Phase noise | L(f) of the strongest carrier, its amplitude noise, the floor of the board |
 
 The figures are next to the views, and `--report` prints the same ones for one capture:
 
@@ -712,9 +714,53 @@ and the host and a capture has a hole. `m2sdr_analyzer` reads the loss counters 
 around each capture, takes it again, and says so when it could not get a clean one: over 1 GbE
 this is the case above about 14 MSPS, since both channels are streamed.
 
+#### Phase noise {#sw-analyzer-pn}
+
+The Phase noise view, and `--phase-noise` with `--report`, measure the strongest carrier of the
+capture: L(f) in dBc/Hz against the offset from the carrier, the amplitude noise next to it,
+the phase error integrated between two offsets (`--pn-from`, `--pn-to`), the jitter, the
+residual FM and the discrete spurs.
+
+```sh
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view phase-noise
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise --pn-samples 4194304
+```
+
+- **Tuning:** the capture is tuned a little off the carrier, here 100 kHz below: the centre
+  holds the DC offset and the LO leakage of the receiver, and is not searched.
+- **Sample rate:** the carrier must stand 10 dB above everything else in the capture, noise
+  included, so a low sample rate around it is the one to use. The offsets go up to half of it.
+- **Capture length:** the lowest offset is a few times the sample rate over the number of
+  samples (`--pn-samples`): 2^20 samples at 1.92 MSPS start near 10 Hz.
+
+> [!IMPORTANT]
+> The reading is the phase noise of the source plus the one of the board: its synthesizers,
+> its reference, and the noise of its receiver, which counts as phase for one half and as
+> amplitude for the other. A source cleaner than the board reads as the board. Phase noise
+> equal to the amplitude noise and flat means that the reading is the noise of the receiver:
+> the signal is too weak.
+
+To tell the two apart, the board keeps a floor: a reading taken with a source cleaner than it,
+or with its own test tone through a cable from TX to RX, stored with `--pn-floor-save` or the
+button of the view in `~/.config/litex_m2sdr/pn_floor_<FPGA DNA>.csv`. It is drawn under the
+trace, and the points within 3 dB of it are marked: there, the reading is the board.
+
+```sh
+m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --tx-tone --tx-att 30 --rx-gain 30 \
+    --report --pn-floor-save
+```
+
+`--tx-tone` sends the built-in tone of the RFIC on TX, at the centre plus a thirty-second of
+the sample rate, with the attenuation of `--tx-att`. It is the one case where the utility
+transmits, and it is meant for a cable with an attenuator. A floor taken this way holds the
+noise of both synthesizers of the RFIC, TX and RX, so it is an upper bound of what the board
+adds to an external source; it is valid for the frequency, the sample rate and the gain it was
+taken with.
+
 The measurements are functions of libm2sdr, declared in `libm2sdr/m2sdr_analysis.h`:
 `m2sdr_psd_compute()` gives an averaged spectrum, and `m2sdr_psd_peaks()`, `m2sdr_psd_tone()`,
-`m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures.
+`m2sdr_psd_acpr()`, `m2sdr_psd_obw()` and `m2sdr_iq_stats()` the figures. `m2sdr_phase_noise()`
+gives the phase noise of a carrier.
 
 ### m2sdr_sata: SATA storage {#sw-sata}
 

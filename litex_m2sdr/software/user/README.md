@@ -498,7 +498,7 @@ Current SigMF support writes SigMF 1.2.6 `.sigmf-data` + `.sigmf-meta` pairs and
 ---
 
 ### m2sdr_analyzer
-Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures and time-domain statistics. It only receives. `--report` works without a display; the window needs SDL2 and cimgui.
+Signal analyser on the board RX or on a recording: spectrum with markers, channel power, ACPR, occupied bandwidth, tone figures, time-domain statistics and the phase noise of a carrier. It only receives, unless `--tx-tone` is given. `--report` works without a display; the window needs SDL2 and cimgui.
 
 **Usage**:
 ```bash
@@ -514,7 +514,10 @@ Relevant options:
 - `--channel-bw HZ`, `--channel-offset HZ`, `--channel-spacing HZ` (channel power, ACPR, occupied bandwidth)
 - `--ref-offset DB` (added to the levels, to read dBm at the connector)
 - `--report`, `--json`, `--export-csv PATH` (one capture, no display)
-- `--view spectrum|time|statistics` (view shown first)
+- `--phase-noise` (with `--report`), `--pn-samples N`, `--pn-from HZ`, `--pn-to HZ` (phase noise of the strongest carrier, integration limits)
+- `--pn-floor PATH`, `--pn-floor-save` (floor of the board, default `~/.config/litex_m2sdr/pn_floor_<dna>.csv`)
+- `--tx-tone`, `--tx-att DB` (test tone of the RFIC on TX, for a cable from TX to RX; the one case where the utility transmits)
+- `--view spectrum|time|statistics|phase-noise` (view shown first)
 
 Window: left click places the selected marker, the wheel zooms, a right drag moves the span, a double click shows it all. Space runs or stops, `P` puts the marker on the peak, `F` shows the full span, `R` restarts the traces.
 
@@ -523,6 +526,8 @@ Examples:
 ./m2sdr_analyzer --freq 1852.5e6 --sample-rate 7.68e6
 ./m2sdr_analyzer --freq 2.45e9 --report --channel-bw 1e6
 ./m2sdr_analyzer --file capture.sigmf-meta
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --view phase-noise
+./m2sdr_analyzer --freq 2449.9e6 --sample-rate 1.92e6 --report --phase-noise
 ./m2sdr_analyzer --file tone.bin --nchannels 1 --sample-rate 1e6 --report --json
 ```
 
