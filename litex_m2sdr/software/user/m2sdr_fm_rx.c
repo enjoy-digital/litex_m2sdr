@@ -7,8 +7,10 @@
  * Copyright (c) 2024-2026 Enjoy-Digital <enjoy-digital.fr>
  *
  * Description:
- * This utility FM demodulates interleaved 16-bit I/Q samples into a WAV audio file.
- * It reads I/Q samples from an input file or stdin, applies FM demodulation, and writes the audio samples to an output file or stdout.
+ * This utility FM demodulates interleaved I/Q samples into audio. It reads the I/Q samples
+ * from a file or stdin, demodulates them with the demodulator of libm2sdr (m2sdr_fm.h: channel
+ * filter, discriminator, stereo decoder, de-emphasis), resamples the audio to 44.1 kHz and
+ * writes a WAV file, or raw 16-bit PCM to stdout.
  *
  * Usage Example:
  *     ./m2sdr_rf --sample-rate 1e6 --rx-freq 100e6 --rx-gain 20 --chan 1t1r
@@ -16,8 +18,6 @@
  *     ./m2sdr_record - | ./m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 --emphasis eu --mode stereo - - | ffmpeg -f s16le -ac 2 -ar 44100 -i - -f alsa default
  *
  */
-
-/* Dependencies: libsamplerate, math.h */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -31,230 +31,212 @@
 
 #include "m2sdr.h"
 #include "m2sdr_cli.h"
+#include "m2sdr_fm.h"
 
 /* Constants */
 /*-----------*/
 
-#define CHUNK_SIZE 512
-#define AUDIO_RATE 44100.0  /* Default output audio sample rate */
+#define IQ_FRAMES  16384    /* I/Q samples read per pass. */
+#define AUDIO_RATE 44100.0  /* Output audio sample rate. */
 
-/* FM Demodulation Functions */
-/*---------------------------*/
+/* WAV header */
+/*------------*/
 
-static void demodulate_fm(FILE *infile, FILE *outfile, double samplerate, double deviation, int bits, double tau, const char *mode, enum m2sdr_format format) {
-    /* Demodulate interleaved 16-bit I/Q samples to audio in streaming fashion */
-    int audio_channels = (strcmp(mode, "stereo") == 0) ? 2 : 1;
-    const double max_val = 32767.0;
+static void put_le(uint8_t *p, uint32_t value, int bytes) {
+    for (int i = 0; i < bytes; i++)
+        p[i] = (uint8_t)(value >> (8 * i));
+}
 
-    /* De-emphasis constants */
-    double a1 = 0.0, b0 = 0.0, b1 = 0.0;
-    if (tau > 0.0) {
-        double alpha = exp(-1.0 / (AUDIO_RATE * tau));
-        a1 = alpha;
-        b0 = 1.0 - alpha;
-        b1 = 0.0;
-    }
-    static double prev_y[1] = {0.0};
+/* 16-bit PCM header; written first with no data, then again with the final size. */
+static int write_wav_header(FILE *f, int channels, uint32_t data_bytes) {
+    uint8_t h[44];
 
-    /* Setup buffers */
-    int16_t *iq_chunk = malloc(sizeof(int16_t) * CHUNK_SIZE * 2);
-    if (!iq_chunk) {
-        fprintf(stderr, "Error: Memory allocation failed for I/Q chunk\n");
-        exit(1);
-    }
-    int8_t *iq8_chunk = NULL;
-    if (format == M2SDR_FORMAT_SC8_Q7) {
-        iq8_chunk = malloc(sizeof(int8_t) * CHUNK_SIZE * 2);
-        if (!iq8_chunk) {
-            fprintf(stderr, "Error: Memory allocation failed for I/Q chunk\n");
-            free(iq_chunk);
-            exit(1);
+    memcpy(h + 0, "RIFF", 4);
+    put_le(h + 4, 36 + data_bytes, 4);
+    memcpy(h + 8, "WAVEfmt ", 8);
+    put_le(h + 16, 16, 4);                                  /* Size of the fmt chunk. */
+    put_le(h + 20, 1, 2);                                   /* PCM. */
+    put_le(h + 22, (uint32_t)channels, 2);
+    put_le(h + 24, (uint32_t)AUDIO_RATE, 4);
+    put_le(h + 28, (uint32_t)AUDIO_RATE * channels * 2, 4); /* Bytes per second. */
+    put_le(h + 32, (uint32_t)channels * 2, 2);              /* Bytes per frame. */
+    put_le(h + 34, 16, 2);                                  /* Bits per sample. */
+    memcpy(h + 36, "data", 4);
+    put_le(h + 40, data_bytes, 4);
+    return (fwrite(h, 1, sizeof(h), f) == sizeof(h)) ? 0 : -1;
+}
+
+/* FM Demodulation */
+/*-----------------*/
+
+/* Audio to 16-bit PCM, limited to full scale. */
+static int write_pcm(FILE *out, const float *audio, size_t samples, int16_t *pcm, uint64_t *clipped) {
+    for (size_t k = 0; k < samples; k++) {
+        float v = audio[k] * 32767.0f;
+        if (v > 32767.0f) {
+            v = 32767.0f;
+            (*clipped)++;
+        } else if (v < -32767.0f) {
+            v = -32767.0f;
+            (*clipped)++;
         }
+        pcm[k] = (int16_t)lrintf(v);
     }
-    float *audio_chunk = malloc(sizeof(float) * CHUNK_SIZE);
-    if (!audio_chunk) {
-        fprintf(stderr, "Error: Memory allocation failed for audio chunk\n");
-        free(iq_chunk);
-        exit(1);
+    return (fwrite(pcm, sizeof(int16_t), samples, out) == samples) ? 0 : -1;
+}
+
+static int demodulate_fm(FILE *infile, FILE *outfile, const struct m2sdr_fm_config *cfg, enum m2sdr_format format, uint64_t *pcm_bytes) {
+    struct m2sdr_fm_rx *rx = m2sdr_fm_rx_new(cfg);
+    SRC_STATE *resampler = NULL;
+    SRC_DATA data;
+    int16_t *iq = NULL, *pcm = NULL;
+    int8_t *iq8 = NULL;
+    float *audio = NULL, *resampled = NULL;
+    int audio_channels = cfg->stereo ? 2 : 1;
+    size_t audio_frames, out_frames = 0;
+    uint64_t clipped = 0;
+    bool pilot = false;
+    int ret = -1;
+    int eof = 0;
+
+    *pcm_bytes = 0;
+    if (!rx) {
+        m2sdr_cli_error("unsupported FM settings (sample rate %.0f SPS: at least %.0f in %s, deviation at most 0.4 x sample rate)",
+            cfg->sample_rate, cfg->stereo ? M2SDR_FM_MIN_RATE_STEREO : M2SDR_FM_MIN_RATE_MONO,
+            cfg->stereo ? "stereo" : "mono");
+        return -1;
     }
 
-    /* Resampling for decimation from samplerate to AUDIO_RATE */
-    int resampling_needed = (samplerate != AUDIO_RATE);
-    SRC_STATE *src_state = NULL;
-    SRC_DATA src_data;
-    float *resampled_chunk = NULL;
-    int max_out_frames = 0;
-    double src_ratio = AUDIO_RATE / samplerate;
-    if (resampling_needed) {
-        max_out_frames = (int)(CHUNK_SIZE * src_ratio) + 1024;
-        resampled_chunk = malloc(sizeof(float) * max_out_frames);
-        if (!resampled_chunk) {
-            fprintf(stderr, "Error: Memory allocation failed for resampled chunk\n");
-            free(iq_chunk);
-            free(audio_chunk);
-            exit(1);
-        }
-
+    /* The demodulator gives the audio at its own rate: resample to the output rate. */
+    memset(&data, 0, sizeof(data));
+    data.src_ratio = AUDIO_RATE / m2sdr_fm_rx_audio_rate(rx);
+    audio_frames   = IQ_FRAMES / m2sdr_fm_rx_decimation(rx) + 1;
+    out_frames     = audio_frames;
+    if (fabs(data.src_ratio - 1.0) > 1e-9) {
         int error;
-        src_state = src_new(SRC_SINC_BEST_QUALITY, 1, &error);
-        if (!src_state) {
-            fprintf(stderr, "Error: Failed to initialize resampler\n");
-            free(iq_chunk);
-            free(audio_chunk);
-            free(resampled_chunk);
-            exit(1);
+        if (!src_is_valid_ratio(data.src_ratio)) {
+            m2sdr_cli_error("cannot resample %.0f Hz audio to %.0f Hz", m2sdr_fm_rx_audio_rate(rx), AUDIO_RATE);
+            goto cleanup;
         }
+        resampler = src_new(SRC_SINC_MEDIUM_QUALITY, audio_channels, &error);
+        if (!resampler) {
+            m2sdr_cli_error("resampler: %s", src_strerror(error));
+            goto cleanup;
+        }
+        out_frames = (size_t)(audio_frames * data.src_ratio) + 1024;
     }
 
-    static double prev_phase = 0.0;
+    iq        = malloc(sizeof(int16_t) * 2 * IQ_FRAMES);
+    iq8       = malloc(sizeof(int8_t) * 2 * IQ_FRAMES);
+    audio     = malloc(sizeof(float) * audio_frames * audio_channels);
+    resampled = malloc(sizeof(float) * out_frames * audio_channels);
+    pcm       = malloc(sizeof(int16_t) * out_frames * audio_channels);
+    if (!iq || !iq8 || !audio || !resampled || !pcm) {
+        m2sdr_cli_error("memory allocation failed");
+        goto cleanup;
+    }
 
-    /* Process in chunks */
-    while (1) {
-        size_t frames_read = 0;
+    while (!eof) {
+        size_t count, frames;
+
         if (format == M2SDR_FORMAT_SC8_Q7) {
-            size_t bytes_read = fread(iq8_chunk, sizeof(int8_t), CHUNK_SIZE * 2, infile);
-            frames_read = bytes_read / 2;
-            for (size_t k = 0; k < frames_read * 2; k++) {
-                iq_chunk[k] = (int16_t)iq8_chunk[k];
-            }
+            count = fread(iq8, 2 * sizeof(int8_t), IQ_FRAMES, infile);
+            for (size_t k = 0; k < 2 * count; k++)
+                iq[k] = iq8[k];
         } else {
-            size_t bytes_read = fread(iq_chunk, sizeof(int16_t), CHUNK_SIZE * 2, infile);
-            frames_read = bytes_read / 2;
+            count = fread(iq, 2 * sizeof(int16_t), IQ_FRAMES, infile);
         }
-        if (frames_read == 0) break;
+        eof = (count < IQ_FRAMES);
 
-        for (size_t k = 0; k < frames_read; k++) {
-            double I = iq_chunk[k * 2] / (double)(1 << (bits - 1));
-            double Q = iq_chunk[k * 2 + 1] / (double)(1 << (bits - 1));
-            double phase = atan2(Q, I);
-            double phase_diff = phase - prev_phase;
-            if (phase_diff > M_PI) phase_diff -= 2 * M_PI;
-            if (phase_diff < -M_PI) phase_diff += 2 * M_PI;
-            prev_phase = phase;
-            audio_chunk[k] = (phase_diff * samplerate) / (2 * M_PI * deviation);
+        frames = m2sdr_fm_rx_process(rx, iq, count, audio);
+        if (cfg->stereo && m2sdr_fm_rx_pilot_locked(rx) != pilot) {
+            pilot = !pilot;
+            fprintf(stderr, "Stereo pilot %s\n", pilot ? "locked" : "lost");
         }
 
-        float *process_buffer = audio_chunk;
-        size_t process_frames = frames_read;
+        if (!resampler) {
+            if (write_pcm(outfile, audio, frames * audio_channels, pcm, &clipped) != 0)
+                goto write_error;
+            *pcm_bytes += frames * audio_channels * sizeof(int16_t);
+        } else {
+            /* The resampler gives its last samples once the end of the input is flagged. */
+            data.data_in      = audio;
+            data.input_frames = (long)frames;
+            data.end_of_input = eof;
+            for (;;) {
+                size_t n;
+                int err;
 
-        if (resampling_needed) {
-            src_data.data_in = audio_chunk;
-            src_data.input_frames = frames_read;
-            src_data.data_out = resampled_chunk;
-            src_data.output_frames = max_out_frames;
-            src_data.src_ratio = src_ratio;
-            src_data.end_of_input = (frames_read < CHUNK_SIZE) ? 1 : 0;
-
-            int err = src_process(src_state, &src_data);
-            if (err) {
-                fprintf(stderr, "Error: Resampling failed: %s\n", src_strerror(err));
-                free(iq_chunk);
-                free(audio_chunk);
-                free(resampled_chunk);
-                src_delete(src_state);
-                exit(1);
-            }
-
-            process_frames = src_data.output_frames_gen;
-            process_buffer = resampled_chunk;
-        }
-
-        if (tau > 0.0) {
-            /* Apply de-emphasis when requested; otherwise leave the demodulated
-             * audio untouched. */
-            for (size_t i = 0; i < process_frames; i++) {
-                double x = process_buffer[i];
-                double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
-                prev_y[0] = y;
-                process_buffer[i] = y;
+                data.data_out      = resampled;
+                data.output_frames = (long)out_frames;
+                err = src_process(resampler, &data);
+                if (err) {
+                    m2sdr_cli_error("resampler: %s", src_strerror(err));
+                    goto cleanup;
+                }
+                data.data_in      += data.input_frames_used * audio_channels;
+                data.input_frames -= data.input_frames_used;
+                n = (size_t)data.output_frames_gen * audio_channels;
+                if (write_pcm(outfile, resampled, n, pcm, &clipped) != 0)
+                    goto write_error;
+                *pcm_bytes += n * sizeof(int16_t);
+                if (data.input_frames == 0 && (!eof || data.output_frames_gen == 0))
+                    break;
             }
         }
 
-        /* Write audio to output */
-        for (size_t i = 0; i < process_frames; i++) {
-            int16_t audio_sample = (int16_t)(process_buffer[i] * max_val);
-            fwrite(&audio_sample, sizeof(int16_t), 1, outfile);
-            if (audio_channels == 2) fwrite(&audio_sample, sizeof(int16_t), 1, outfile); /* Duplicate for stereo */
-        }
+        /* In a pipe, give the audio to the player as it comes. */
+        if (outfile == stdout && fflush(outfile) != 0)
+            goto write_error;
     }
 
-    /* Flush any remaining resampled data */
-    if (resampling_needed) {
-        src_data.input_frames = 0;
-        src_data.end_of_input = 1;
-        src_data.data_out = resampled_chunk;
-        src_data.output_frames = max_out_frames;
+    if (clipped)
+        fprintf(stderr, "Warning: %" PRIu64 " audio samples limited to full scale; check --deviation.\n", clipped);
+    ret = 0;
+    goto cleanup;
 
-        int err = src_process(src_state, &src_data);
-        if (err) {
-            fprintf(stderr, "Error: Resampling flush failed: %s\n", src_strerror(err));
-            free(iq_chunk);
-            free(audio_chunk);
-            free(resampled_chunk);
-            src_delete(src_state);
-            exit(1);
-        }
+write_error:
+    m2sdr_cli_error("could not write the audio");
 
-        size_t process_frames = src_data.output_frames_gen;
-        float *process_buffer = resampled_chunk;
-
-        if (tau > 0.0) {
-            /* Apply de-emphasis when requested; otherwise leave the demodulated
-             * audio untouched. */
-            for (size_t i = 0; i < process_frames; i++) {
-                double x = process_buffer[i];
-                double y = b0 * x + b1 * prev_y[0] + a1 * prev_y[0];
-                prev_y[0] = y;
-                process_buffer[i] = y;
-            }
-        }
-
-        /* Write audio to output */
-        for (size_t i = 0; i < process_frames; i++) {
-            int16_t audio_sample = (int16_t)(process_buffer[i] * max_val);
-            fwrite(&audio_sample, sizeof(int16_t), 1, outfile);
-            if (audio_channels == 2) fwrite(&audio_sample, sizeof(int16_t), 1, outfile); /* Duplicate for stereo */
-        }
-    }
-
-    if (outfile == stdout) fflush(outfile);
-
-    /* Cleanup */
-    free(iq_chunk);
-    free(iq8_chunk);
-    free(audio_chunk);
-    if (resampling_needed) {
-        free(resampled_chunk);
-        src_delete(src_state);
-    }
+cleanup:
+    free(iq);
+    free(iq8);
+    free(audio);
+    free(resampled);
+    free(pcm);
+    if (resampler) src_delete(resampler);
+    m2sdr_fm_rx_free(rx);
+    return ret;
 }
 
 /* Help */
 /*------*/
 
-static void help(void) {
+static void help(int status) {
     /* Display usage information */
-    printf("M2SDR FM Receiver Utility\n"
+    fprintf(status ? stderr : stdout,
+           "M2SDR FM Receiver Utility\n"
            "usage: m2sdr_fm_rx [options] input output\n"
            "\n"
            "Options:\n"
            "-h, --help            Display this help message.\n"
-           "-s, --sample-rate sps  Set I/Q sample rate in SPS (default: 500000).\n"
-           "-d, --deviation dev   Set FM deviation in Hz (default: 75000).\n"
-           "-b, --bits bits       Set bits per I/Q sample (≤16, default: 12).\n"
+           "-s, --sample-rate sps  Set I/Q sample rate in SPS (default: 1000000).\n"
+           "-d, --deviation dev   Set FM deviation of full-scale audio in Hz (default: 75000).\n"
+           "-b, --bits bits       Set bits per I/Q sample (accepted for symmetry with m2sdr_fm_tx; the level of the samples does not matter).\n"
            "    --format FMT      Sample format: sc16 or sc8 (default: sc16).\n"
            "-8, --sc8             Input is 8-bit I/Q samples (SC8 Q7).\n"
-           "-e, --emphasis type   Set de-emphasis to us, eu or none (default: eu).\n"
+           "-e, --emphasis type   Set de-emphasis to us (75 us), eu (50 us) or none (default: eu).\n"
            "-m, --mode mode       Set mode to mono or stereo (default: mono).\n"
            "\n"
            "Arguments:\n"
            "input                 Input I/Q bin file ('-' for stdin).\n"
-           "output                Output WAV file ('-' for stdout).\n"
+           "output                Output WAV file ('-' for raw 16-bit PCM at 44100 Hz on stdout).\n"
            "\n"
            "Example:\n"
-           "m2sdr_fm_rx --sample-rate 500000 --deviation 75000 --bits 12 input.bin output.wav\n"
-           "Note: This version processes in streaming mode without global normalization.\n");
-    exit(1);
+           "m2sdr_fm_rx --sample-rate 1000000 --deviation 75000 --bits 12 input.bin output.wav\n"
+           "Note: In stereo, the two channels are decoded when the 19 kHz pilot is received, and carry\n"
+           "      the mono signal otherwise.\n");
+    exit(status);
 }
 
 /* Main */
@@ -280,13 +262,15 @@ int main(int argc, char **argv) {
 
     char *input_file = NULL;
     char *output_file = NULL;
-    double samplerate = 1000000.0;
-    double deviation = 75000.0;
+    struct m2sdr_fm_config cfg;
     int bits = 12;
-    bool bits_set = false;
     enum m2sdr_format format = M2SDR_FORMAT_SC16_Q11;
     char *emphasis_type = "eu";
     char *mode = "mono";
+    uint64_t pcm_bytes = 0;
+    int ret;
+
+    m2sdr_fm_config_init(&cfg);
 
     /* Parse command-line options */
     for (;;) {
@@ -294,16 +278,16 @@ int main(int argc, char **argv) {
         if (c == -1) break;
         switch (c) {
         case 'h':
-            help();
+            help(0);
             break;
         case 's':
-            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &samplerate) != 0) {
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e9, &cfg.sample_rate) != 0) {
                 m2sdr_cli_error("invalid sample rate '%s'", optarg);
                 return 1;
             }
             break;
         case 'd':
-            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e15, &deviation) != 0) {
+            if (m2sdr_cli_parse_double_range(optarg, 1.0, 1.0e9, &cfg.deviation) != 0) {
                 m2sdr_cli_error("invalid FM deviation '%s'", optarg);
                 return 1;
             }
@@ -313,19 +297,15 @@ int main(int argc, char **argv) {
                 m2sdr_cli_error("invalid bits value '%s' (expected 1 to 16)", optarg);
                 return 1;
             }
-            bits_set = true;
             break;
         case 1:
             if (m2sdr_cli_parse_format(optarg, &format) != 0 || format == M2SDR_FORMAT_BFP8_Q11) {
                 m2sdr_cli_invalid_choice("format", optarg, "sc16 or sc8");
                 return 1;
             }
-            if (format == M2SDR_FORMAT_SC8_Q7 && !bits_set)
-                bits = 8;
             break;
         case '8':
             format = M2SDR_FORMAT_SC8_Q7;
-            if (!bits_set) bits = 8;
             break;
         case 'e':
             emphasis_type = optarg;
@@ -339,28 +319,28 @@ int main(int argc, char **argv) {
     }
 
     /* Set tau based on emphasis type */
-    double tau = 0.0;
     if (strcmp(emphasis_type, "us") == 0) {
-        tau = 75e-6;
+        cfg.tau = M2SDR_FM_TAU_US;
     } else if (strcmp(emphasis_type, "eu") == 0) {
-        tau = 50e-6;
+        cfg.tau = M2SDR_FM_TAU_EU;
     } else if (strcmp(emphasis_type, "none") == 0) {
-        tau = 0.0;
+        cfg.tau = 0.0;
     } else {
-        fprintf(stderr, "Error: Invalid emphasis type '%s'. Must be 'us', 'eu', or 'none'.\n", emphasis_type);
+        m2sdr_cli_invalid_choice("emphasis", emphasis_type, "us, eu or none");
         exit(1);
     }
 
     /* Validate mode */
     if (strcmp(mode, "mono") != 0 && strcmp(mode, "stereo") != 0) {
-        fprintf(stderr, "Error: Invalid mode '%s'. Must be 'mono' or 'stereo'.\n", mode);
+        m2sdr_cli_invalid_choice("mode", mode, "mono or stereo");
         exit(1);
     }
+    cfg.stereo = (strcmp(mode, "stereo") == 0);
 
     /* Validate positional arguments */
     if (optind + 2 != argc) {
         fprintf(stderr, "Error: Both input and output arguments are required\n");
-        help();
+        help(1);
     }
     input_file = argv[optind];
     output_file = argv[optind + 1];
@@ -381,56 +361,33 @@ int main(int argc, char **argv) {
     }
 
     /* Write WAV header if output is a file */
-    int audio_channels = (strcmp(mode, "stereo") == 0) ? 2 : 1;
-    if (outfile != stdout) {
-        char riff[4] = {'R', 'I', 'F', 'F'};
-        fwrite(riff, 1, 4, outfile);
-        uint32_t file_size = 0;  // Placeholder
-        fwrite(&file_size, 1, 4, outfile);
-        char wave[4] = {'W', 'A', 'V', 'E'};
-        fwrite(wave, 1, 4, outfile);
-        char fmt[4] = {'f', 'm', 't', ' '};
-        fwrite(fmt, 1, 4, outfile);
-        uint32_t fmt_size = 16;
-        fwrite(&fmt_size, 1, 4, outfile);
-        uint16_t audio_format = 1;  // PCM
-        fwrite(&audio_format, 1, 2, outfile);
-        uint16_t num_channels = audio_channels;
-        fwrite(&num_channels, 1, 2, outfile);
-        uint32_t sample_rate = (uint32_t)AUDIO_RATE;
-        fwrite(&sample_rate, 1, 4, outfile);
-        uint32_t byte_rate = sample_rate * num_channels * 2;
-        fwrite(&byte_rate, 1, 4, outfile);
-        uint16_t block_align = num_channels * 2;
-        fwrite(&block_align, 1, 2, outfile);
-        uint16_t bits_per_sample = 16;
-        fwrite(&bits_per_sample, 1, 2, outfile);
-        char data[4] = {'d', 'a', 't', 'a'};
-        fwrite(data, 1, 4, outfile);
-        uint32_t data_size = 0;  // Placeholder
-        fwrite(&data_size, 1, 4, outfile);
+    int audio_channels = cfg.stereo ? 2 : 1;
+    if (outfile != stdout && write_wav_header(outfile, audio_channels, 0) != 0) {
+        fprintf(stderr, "Error: Could not write %s\n", output_file);
+        exit(1);
     }
 
     /* Perform FM demodulation */
-    demodulate_fm(infile, outfile, samplerate, deviation, bits, tau, mode, format);
+    ret = demodulate_fm(infile, outfile, &cfg, format, &pcm_bytes);
 
     /* Update WAV header sizes if output is a file */
     if (outfile != stdout) {
-        fflush(outfile);
-        long total_size = ftell(outfile);
-        // Update RIFF chunk size
-        fseek(outfile, 4, SEEK_SET);
-        uint32_t riff_size = total_size - 8;
-        fwrite(&riff_size, 1, 4, outfile);
-        // Update data subchunk size
-        fseek(outfile, 40, SEEK_SET);
-        uint32_t data_size = total_size - 44;
-        fwrite(&data_size, 1, 4, outfile);
+        /* A WAV file holds 4 GiB at most: longer recordings keep the largest size. */
+        uint32_t data_bytes = (pcm_bytes > 0xffffffffull - 36) ? 0xffffffffu - 36 : (uint32_t)pcm_bytes;
+        if (fseek(outfile, 0, SEEK_SET) != 0 || write_wav_header(outfile, audio_channels, data_bytes) != 0) {
+            m2sdr_cli_error("could not update the header of %s", output_file);
+            ret = -1;
+        }
     }
 
     /* Cleanup */
-    fclose(infile);
-    if (outfile != stdout) fclose(outfile);
+    if (infile != stdin) fclose(infile);
+    if (outfile != stdout && fclose(outfile) != 0 && ret == 0) {
+        m2sdr_cli_error("could not write %s", output_file);
+        ret = -1;
+    }
+    if (ret != 0)
+        return 1;
 
     /* Report completion */
     /* Keep stdout reserved for PCM samples when the tool is used in a pipe. */

@@ -70,7 +70,7 @@ CXX     = $(CROSS_COMPILE)g++
 AR      = ar
 .DEFAULT_GOAL := all
 FORCE:
-.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue clean install install_dev check analyze-libm2sdr
+.PHONY: FORCE all core-tools core-tests examples test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-fm clean install install_dev check analyze-libm2sdr
 
 ALL_BINARIES := m2sdr_util m2sdr_rf m2sdr_gpio m2sdr_play m2sdr_record m2sdr_sigmf m2sdr_sata \
                 m2sdr_gen m2sdr_fm_tx m2sdr_fm_rx m2sdr_check m2sdr_scan m2sdr_cal
@@ -86,6 +86,7 @@ BINARIES := $(CORE_BINARIES)
 
 ifeq ($(and $(filter 1,$(HAVE_SNDFILE)),$(filter 1,$(HAVE_SAMPLERATE))),1)
   BINARIES += m2sdr_fm_tx m2sdr_fm_rx
+  FM_BINARIES := m2sdr_fm_tx m2sdr_fm_rx
 else
   ifneq ($(HAVE_SNDFILE),1)
     $(warning sndfile pkg-config metadata not found; skipping FM audio tools)
@@ -120,7 +121,7 @@ EXAMPLES = ../../doc/libm2sdr/example_sync_rx ../../doc/libm2sdr/example_sync_tx
 CLI_OBJS = m2sdr_cli.o
 TOOL_OBJS = m2sdr_tool.o
 HOST_QUEUE_OBJS = m2sdr_host_queue.o
-TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal
+TEST_PROGS = tests/test_libm2sdr tests/test_m2sdr_sigmf tests/test_sigmf_capture_smoke tests/test_sigmf_cli tests/test_m2sdr_sata_cli tests/test_m2sdr_sata_hostio tests/test_m2sdr_host_queue tests/test_m2sdr_flash tests/test_si5351_trim tests/test_liteeth_udp_frame_sync tests/test_m2sdr_cal tests/test_m2sdr_fm
 
 LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_si5351_i2c.o \
@@ -136,6 +137,7 @@ LIBM2SDR_OBJS = \
 	libm2sdr/m2sdr_sigmf.o \
 	libm2sdr/m2sdr_cal.o \
 	libm2sdr/m2sdr_cal_dsp.o \
+	libm2sdr/m2sdr_fm.o \
 	libm2sdr/m2sdr_hal_litepcie.o \
 	libm2sdr/m2sdr_hal_liteeth.o \
 	liblitepcie/litepcie_dma.o \
@@ -168,7 +170,7 @@ M2SDR_IMGUI_OBJS := $(M2SDR_IMGUI_SRCS:.cpp=.o)
 
 all: $(PROGS)
 core-tools: $(CORE_BINARIES) $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
-core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp
+core-tests: core-tools test-libm2sdr test-sigmf test-sigmf-smoke test-sigmf-cli test-sata-cli test-sata-hostio test-host-queue test-liteeth-udp test-fm
 
 examples: $(LIBM2SDR_STATIC) $(EXAMPLES)
 test-libm2sdr: $(TEST_PROGS)
@@ -176,6 +178,7 @@ test-libm2sdr: $(TEST_PROGS)
 	./tests/test_m2sdr_flash
 	./tests/test_si5351_trim
 	./tests/test_m2sdr_cal
+	./tests/test_m2sdr_fm
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
@@ -197,6 +200,10 @@ test-host-queue: tests/test_m2sdr_host_queue
 
 test-liteeth-udp: tests/test_liteeth_udp_frame_sync
 	./tests/test_liteeth_udp_frame_sync
+
+# With --tools, the round trip also goes through m2sdr_fm_tx and m2sdr_fm_rx, when they are built.
+test-fm: tests/test_m2sdr_fm $(FM_BINARIES)
+	./tests/test_m2sdr_fm $(if $(FM_BINARIES),--tools)
 
 tests/test_libm2sdr: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) tests/test_libm2sdr.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
@@ -295,6 +302,9 @@ m2sdr_cal: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_cal.o
 tests/test_m2sdr_cal: $(LIBM2SDR_STATIC) tests/test_m2sdr_cal.o kissfft/kiss_fft.o | $(BUILD_FLAGS_FILE)
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_cal.o kissfft/kiss_fft.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
 
+tests/test_m2sdr_fm: $(LIBM2SDR_STATIC) tests/test_m2sdr_fm.o | $(BUILD_FLAGS_FILE)
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ tests/test_m2sdr_fm.o $(LIBM2SDR_STATIC) -lm $(TRANSPORT_LIBS)
+
 m2sdr_play: $(LIBM2SDR_STATIC) $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o
 	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) $(TOOL_OBJS) $(HOST_QUEUE_OBJS) m2sdr_play.o $(M2SDR_LINK_LIBS) $(PTHREAD_LIBS)
 
@@ -315,11 +325,11 @@ m2sdr_check: $(LIBM2SDR_STATIC) kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sd
 	$(CXX) $(LINK_CXXFLAGS) $(LDFLAGS) -o $@ kissfft/kiss_fft.o $(CLI_OBJS) $(TOOL_OBJS) m2sdr_check.o $(M2SDR_IMGUI_OBJS) $(M2SDR_LINK_LIBS) $(SDL2_LIBS) -lGL -ldl -pthread -lstdc++
 endif
 
-m2sdr_fm_tx: $(CLI_OBJS) m2sdr_fm_tx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_tx.o -lm $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
+m2sdr_fm_tx: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_fm_tx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_tx.o $(M2SDR_LINK_LIBS) $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
 
-m2sdr_fm_rx: $(CLI_OBJS) m2sdr_fm_rx.o
-	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_rx.o -lm $(SNDFILE_LIBS) $(SAMPLERATE_LIBS)
+m2sdr_fm_rx: $(LIBM2SDR_STATIC) $(CLI_OBJS) m2sdr_fm_rx.o
+	$(CC) $(LINK_CFLAGS) $(LDFLAGS) -o $@ $(CLI_OBJS) m2sdr_fm_rx.o $(M2SDR_LINK_LIBS) $(SAMPLERATE_LIBS)
 
 m2sdr_fm_tx.o: m2sdr_fm_tx.c $(BUILD_FLAGS_FILE)
 	$(CC) -c $(CFLAGS) $(SNDFILE_CFLAGS) $(SAMPLERATE_CFLAGS) -o $@ $<
@@ -430,6 +440,7 @@ install_dev: $(LIBM2SDR_STATIC) $(LIBM2SDR_SHARED)
 	install -m 644 libm2sdr/m2sdr.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_sigmf.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -m 644 libm2sdr/m2sdr_cal.h $(PREFIX)/include/litex_m2sdr/libm2sdr
+	install -m 644 libm2sdr/m2sdr_fm.h $(PREFIX)/include/litex_m2sdr/libm2sdr
 	install -d $(PREFIX)/share/litex_m2sdr/examples
 	@for ex in example_sync_rx example_sync_tx example_tone_tx example_rx_n; do \
 		if [ -f ../../doc/libm2sdr/$$ex.c ]; then \

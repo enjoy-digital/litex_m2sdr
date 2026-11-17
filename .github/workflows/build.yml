@@ -27,6 +27,8 @@ jobs:
           nm -D --defined-only litex_m2sdr/software/user/libm2sdr/libm2sdr.so.1 | grep -q " m2sdr_get_eb_handle$"
       - name: Run libm2sdr unit checks (PCIe)
         run: make -C litex_m2sdr/software/user test-libm2sdr
+      - name: Run FM utilities round trip
+        run: make -C litex_m2sdr/software/user test-fm
       - name: Build libm2sdr with ASan/UBSan
         run: |
           make -C litex_m2sdr/software/user clean \
