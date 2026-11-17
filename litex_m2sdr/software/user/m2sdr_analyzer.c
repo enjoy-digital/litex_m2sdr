@@ -65,6 +65,7 @@
 #define AN_DEMOD_DEFAULT_LOG2   18            /* Samples of a demodulation capture: 2^18. */
 #define AN_DEMOD_MIN_LOG2       14
 #define AN_DEMOD_MAX_LOG2       22
+#define AN_LTE_SECONDS          0.045         /* Capture of an LTE analysis: a whole frame wherever it starts. */
 #define AN_TX_TONE_ATT_DB       60            /* Default attenuation of the test tone. */
 #define AN_MIN_PERIOD_MS        40.0          /* Between two results shown. */
 
@@ -92,6 +93,7 @@ struct an_settings {
     bool   demod_on;               /* Demodulation of the strongest signal. */
     int    demod_log2;             /* Its capture: 2^demod_log2 samples. */
     struct m2sdr_demod_config demod;
+    bool   lte_on;                 /* LTE downlink carrier. */
 };
 
 static const char *const window_names[] = { "Hann", "Flat-top", "Blackman-Harris", "Rectangular" };
@@ -553,6 +555,8 @@ struct an_result {
     bool   pn_valid;               /* Measured, with a carrier. */
     struct m2sdr_demod_result demod;
     bool   demod_valid;            /* Measured; demod.signal and demod.locked say what was found. */
+    struct m2sdr_lte_result lte;
+    bool   lte_valid;              /* Measured: the sample rate was one of LTE; lte.found says the rest. */
     float complex time[AN_TIME_POINTS];
     size_t time_count;
     bool   lost;                   /* Samples were lost in the capture. */
@@ -568,6 +572,8 @@ static size_t capture_samples(const struct an_settings *set)
         count = (size_t)1 << set->pn_log2;
     if (set->demod_on && count < ((size_t)1 << set->demod_log2))
         count = (size_t)1 << set->demod_log2;
+    if (set->lte_on && count < (size_t)(AN_LTE_SECONDS * set->sample_rate))
+        count = (size_t)(AN_LTE_SECONDS * set->sample_rate);
     return count < AN_TIME_POINTS ? AN_TIME_POINTS : count;
 }
 
@@ -640,6 +646,12 @@ static int analyse(const float complex *x, size_t count, const struct an_setting
         const size_t n = count < ((size_t)1 << set->demod_log2) ? count : (size_t)1 << set->demod_log2;
 
         res->demod_valid = m2sdr_demod(x, n, set->sample_rate, &set->demod, &res->demod) == 0;
+    }
+    res->lte_valid = false;
+    if (set->lte_on) {
+        const size_t n = (size_t)(AN_LTE_SECONDS * set->sample_rate);
+
+        res->lte_valid = m2sdr_lte_analyse(x, count < n ? count : n, set->sample_rate, &res->lte) == 0;
     }
     res->time_count = count < AN_TIME_POINTS ? count : AN_TIME_POINTS;
     memcpy(res->time, x, res->time_count * sizeof(*x));
@@ -827,7 +839,44 @@ static void report_json(const struct an_source *src, const struct an_result *res
     print_json_number("gain_imbalance_db", res->stats.gain_imbalance_db, false);
     print_json_number("quadrature_deg", res->stats.quadrature_deg, false);
     print_json_number("clipped", res->stats.clipped, true);
-    printf("  }%s\n", set->pn_on || set->demod_on ? "," : "");
+    printf("  }%s\n", set->pn_on || set->demod_on || set->lte_on ? "," : "");
+    if (set->lte_on) {
+        const struct m2sdr_lte_result *l = &res->lte;
+        static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
+
+        printf("  \"lte\": {\n");
+        printf("    \"found\": %s%s\n", res->lte_valid && l->found ? "true" : "false", res->lte_valid && l->found ? "," : "");
+        if (res->lte_valid && l->found) {
+            printf("    \"cell_id\": %d,\n", l->cell_id);
+            print_json_number("carrier_hz", set->freq_hz + l->freq_error_hz, false);
+            print_json_number("carrier_offset_hz", l->freq_error_hz, false);
+            printf("    \"mib\": %s,\n", l->mib ? "true" : "false");
+            if (l->mib) {
+                printf("    \"ports\": %d,\n", l->ports);
+                printf("    \"n_rb\": %d,\n", l->n_rb);
+                printf("    \"sfn\": %d,\n", l->sfn);
+                printf("    \"phich_duration\": \"%s\",\n", l->phich_duration ? "extended" : "normal");
+                printf("    \"phich_resource\": \"%s\",\n", phich[l->phich_resource & 3]);
+            }
+            printf("    \"analysed_rb\": %d,\n", l->analysed_rb);
+            print_json_number("rsrp_db", l->rsrp_db + off, false);
+            print_json_number("rssi_db", l->rssi_db + off, false);
+            print_json_number("pss_db", l->pss_db + off, false);
+            print_json_number("sss_db", l->sss_db + off, false);
+            print_json_number("rs_evm_percent", 100.0 * l->rs_evm, false);
+            if (l->mib)
+                print_json_number("pbch_evm_percent", 100.0 * l->pbch_evm, false);
+            printf("    \"data_analysed\": %s", l->data ? "true" : "false");
+            if (l->data) {
+                printf(",\n    \"data_blocks\": %d,\n", l->data_blocks);
+                printf("    \"data_modulation\": \"%s\",\n", m2sdr_modulation_name(l->data_modulation));
+                print_json_number("data_evm_percent", 100.0 * l->data_evm, true);
+            } else {
+                printf("\n");
+            }
+        }
+        printf("  }%s\n", set->pn_on || set->demod_on ? "," : "");
+    }
     if (set->demod_on) {
         const struct m2sdr_demod_result *d = &res->demod;
 
@@ -952,6 +1001,39 @@ static void report_text(const struct an_source *src, const struct an_result *res
     printf("  I/Q        : gain imbalance %+.3f dB, quadrature error %+.3f degrees\n",
            res->stats.gain_imbalance_db, res->stats.quadrature_deg);
     printf("  Clipping   : %.4f %% of the samples\n", 100.0 * res->stats.clipped);
+
+    if (set->lte_on) {
+        const struct m2sdr_lte_result *l = &res->lte;
+        static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
+
+        printf("\nLTE downlink:\n");
+        if (!res->lte_valid) {
+            printf("  The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS.\n");
+        } else if (!l->found) {
+            printf("  No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier\n"
+                   "  with a normal cyclic prefix.\n", l->sync_quality);
+        } else {
+            printf("  Cell       : identity %d (group %d, sector %d)\n", l->cell_id, l->n_id_1, l->n_id_2);
+            printf("  Carrier    : %.6f MHz (%+.1f Hz from the centre)\n", (set->freq_hz + l->freq_error_hz) / 1e6, l->freq_error_hz);
+            if (l->mib)
+                printf("  MIB        : %d resource blocks, %d antenna port%s, frame %d, PHICH %s, %s\n", l->n_rb, l->ports,
+                       l->ports == 1 ? "" : "s", l->sfn, l->phich_duration ? "extended" : "normal", phich[l->phich_resource & 3]);
+            else
+                printf("  MIB        : not decoded (the PBCH of one and of two antenna ports was tried)\n");
+            printf("  Analysed   : %d resource blocks around the centre\n", l->analysed_rb);
+            printf("  Levels     : RSRP %.1f %s, RSSI %.1f %s, PSS %.1f, SSS %.1f %s per element\n", l->rsrp_db + off, unit,
+                   l->rssi_db + off, unit, l->pss_db + off, l->sss_db + off, unit);
+            printf("  EVM        : reference signals %.2f %%", 100.0 * l->rs_evm);
+            if (l->mib)
+                printf(", PBCH %.2f %%", 100.0 * l->pbch_evm);
+            printf("\n");
+            if (l->data)
+                printf("  Data       : %d blocks in use, mostly %s, EVM %.2f %% against the nearest points\n", l->data_blocks,
+                       l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none", 100.0 * l->data_evm);
+            else if (l->mib)
+                printf("  Data       : not analysed, the cell has %d antenna ports\n", l->ports);
+        }
+    }
 
     if (set->demod_on) {
         const struct m2sdr_demod_result *d = &res->demod;
@@ -1138,10 +1220,14 @@ struct an_ui {
     bool   wf_on;
     bool   wf_auto;                /* Levels to be set from the next result. */
     /* Phase noise. */
-    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation. */
+    int    tab;                    /* View shown: 0 spectrum, 1 time, 2 statistics, 3 phase noise, 4 modulation, 5 LTE. */
     bool   pn_am;
     struct an_floor *fl;
     const char *floor_path;        /* Where "Store as floor" writes; NULL: nowhere. */
+    /* LTE: resource grid and blocks as textures, redrawn with each result. */
+    GLuint lte_grid_tex, lte_block_tex;
+    unsigned lte_seq;
+    uint32_t *lte_rgba;
     float  wf_floor_db, wf_ceil_db;
     char   message[256];
 };
@@ -2075,6 +2161,187 @@ static void draw_modulation_results(struct an_ui *ui)
     }
 }
 
+static void lte_texture(GLuint *tex, const uint32_t *rgba, int width, int height)
+{
+    if (!*tex) {
+        glGenTextures(1, tex);
+        glBindTexture(GL_TEXTURE_2D, *tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, *tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+}
+
+/* Textures of the frame: a column per symbol or per slot, the highest subcarrier at the top. */
+static void lte_textures(struct an_ui *ui)
+{
+    static const uint32_t block_colors[M2SDR_MOD_COUNT] = {
+        0xff282828u, 0xff808080u, 0xffff9040u, 0xff808080u, 0xff60ff60u, 0xff808080u, 0xff40d0ffu, 0xff808080u, 0xff4040ffu,
+    };
+    const struct m2sdr_lte_result *l = &ui->res.lte;
+    const int k = l->subcarriers, rb = l->analysed_rb;
+    int q, a, ns, b;
+
+    if (!ui->lte_rgba)
+        ui->lte_rgba = malloc((size_t)M2SDR_LTE_FRAME_SYMBOLS * M2SDR_LTE_MAX_SUBCARRIERS * sizeof(uint32_t));
+    if (!ui->lte_rgba || k <= 0 || rb <= 0)
+        return;
+    /* From 40 dB under a reference element to 10 dB above. */
+    for (a = 0; a < k; a++) {
+        for (q = 0; q < M2SDR_LTE_FRAME_SYMBOLS; q++)
+            ui->lte_rgba[(size_t)(k - 1 - a) * M2SDR_LTE_FRAME_SYMBOLS + (size_t)q] =
+                palette_color(ui->wf_palette, (float)((l->grid_db[q][a] - (l->rsrp_db - 40.0)) / 50.0));
+    }
+    lte_texture(&ui->lte_grid_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SYMBOLS, k);
+    for (b = 0; b < rb; b++) {
+        for (ns = 0; ns < M2SDR_LTE_FRAME_SLOTS; ns++)
+            ui->lte_rgba[(size_t)(rb - 1 - b) * M2SDR_LTE_FRAME_SLOTS + (size_t)ns] = block_colors[l->rb_modulation[ns][b] % M2SDR_MOD_COUNT];
+    }
+    lte_texture(&ui->lte_block_tex, ui->lte_rgba, M2SDR_LTE_FRAME_SLOTS, rb);
+}
+
+static void draw_lte(struct an_ui *ui, bool live, bool *changed)
+{
+    static const double rates[5] = { 1.92e6, 3.84e6, 7.68e6, 15.36e6, 30.72e6 };
+    static float px[M2SDR_LTE_MAX_POINTS], py[M2SDR_LTE_MAX_POINTS];
+    const struct m2sdr_lte_result *l = &ui->res.lte;
+    struct m2sdr_plot plot;
+    ImTextureRef tex;
+    ImVec2 avail;
+    float side, left_w;
+    double half_mhz;
+    char text[160];
+    int i;
+
+    if (live) {
+        igTextUnformatted("Sample rate:", NULL);
+        for (i = 0; i < 5; i++) {
+            snprintf(text, sizeof(text), "%.2f MSPS", rates[i] / 1e6);
+            igSameLine(0.0f, 8.0f);
+            if (igSmallButton(text)) {
+                ui->set.sample_rate = rates[i];
+                ui->set.bandwidth   = 0;
+                view_full(ui);
+                traces_reset(ui);
+                *changed = true;
+            }
+        }
+    }
+    if (!ui->res.set.lte_on) {
+        igTextUnformatted("Waiting for a capture.", NULL);
+        return;
+    }
+    if (!ui->res.lte_valid) {
+        igTextUnformatted("The sample rate must be 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS: it sets how many resource "
+                          "blocks around the centre are analysed.", NULL);
+        return;
+    }
+    if (!l->found) {
+        igText("No cell found (PSS quality %.1f): the capture is tuned on the centre of an FDD carrier with a "
+               "normal cyclic prefix.", l->sync_quality);
+        return;
+    }
+    if (ui->lte_seq != ui->seq) {
+        lte_textures(ui);
+        ui->lte_seq = ui->seq;
+    }
+    tex._TexData = NULL;
+    half_mhz     = 0.5 * 0.015 * (double)l->subcarriers;
+
+    igGetContentRegionAvail(&avail);
+    side   = avail.y < 0.42f * avail.x ? avail.y : 0.42f * avail.x;
+    left_w = avail.x - side - 8.0f;
+    igBeginGroup();
+    if (m2sdr_plot_begin(&plot, "##ltegrid", (ImVec2){ left_w, 0.68f * avail.y }, 0.0, 10.0, M2SDR_PLOT_PLAIN,
+                         -half_mhz, half_mhz, "Resource grid of a frame: MHz from the centre against ms")) {
+        tex._TexID = (ImTextureID)(uintptr_t)ui->lte_grid_tex;
+        ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
+        m2sdr_plot_text(&plot, 8.0f, 22.0f, "Resource grid of a frame: MHz from the centre against ms", 0xffffffffu);
+        m2sdr_plot_end(&plot);
+    }
+    if (m2sdr_plot_begin(&plot, "##lteblocks", (ImVec2){ left_w, 0.0f }, 0.0, 10.0, M2SDR_PLOT_PLAIN,
+                         0.0, (double)l->analysed_rb, "")) {
+        tex._TexID = (ImTextureID)(uintptr_t)ui->lte_block_tex;
+        ImDrawList_AddImage(plot.dl, tex, plot.p0, plot.p1, (ImVec2){ 0.0f, 0.0f }, (ImVec2){ 1.0f, 1.0f }, 0xffffffffu);
+        m2sdr_plot_text(&plot, 8.0f, 4.0f, l->data ? "Blocks of data against ms: QPSK blue, 16QAM green, 64QAM yellow, 256QAM red"
+                                                   : "Blocks of data: not analysed with more than one antenna port",
+                        0xffffffffu);
+        m2sdr_plot_end(&plot);
+    }
+    igEndGroup();
+    igSameLine(0.0f, 8.0f);
+
+    /* Equalised symbols: data, PBCH and reference signals. */
+    if (m2sdr_plot_begin(&plot, "##lteconst", (ImVec2){ side, side }, -1.6, 1.6, M2SDR_PLOT_PLAIN, -1.6, 1.6,
+                         "Data yellow, PBCH blue, reference signals white")) {
+        for (i = 0; i < l->ndata; i++) {
+            px[i] = crealf(l->data_points[i]);
+            py[i] = cimagf(l->data_points[i]);
+        }
+        m2sdr_plot_points(&plot, px, py, (size_t)l->ndata, 1.0f, 0xc040d0ffu);
+        for (i = 0; i < l->npbch; i++) {
+            px[i] = crealf(l->pbch_points[i]);
+            py[i] = cimagf(l->pbch_points[i]);
+        }
+        m2sdr_plot_points(&plot, px, py, (size_t)l->npbch, 1.5f, 0xffffa040u);
+        for (i = 0; i < l->nrs; i++) {
+            px[i] = crealf(l->rs_points[i]);
+            py[i] = cimagf(l->rs_points[i]);
+        }
+        m2sdr_plot_points(&plot, px, py, (size_t)l->nrs, 1.0f, 0xc0ffffffu);
+        m2sdr_plot_end(&plot);
+    }
+}
+
+static void draw_lte_results(struct an_ui *ui)
+{
+    static const char *const phich[4] = { "1/6", "1/2", "1", "2" };
+    const struct an_result *res = &ui->res;
+    const struct m2sdr_lte_result *l = &res->lte;
+
+    igSeparatorText("LTE downlink");
+    if (!res->lte_valid || !l->found) {
+        igTextUnformatted("No cell.", NULL);
+        return;
+    }
+    if (igBeginTable("##lte", 2, ImGuiTableFlags_SizingStretchProp, (ImVec2){ 0.0f, 0.0f }, 0.0f)) {
+        label_value("Cell identity", "%d (%d, %d)", l->cell_id, l->n_id_1, l->n_id_2);
+        label_value("Carrier", "%.6f MHz", (res->set.freq_hz + l->freq_error_hz) / 1e6);
+        label_value("Carrier offset", "%+.1f Hz", l->freq_error_hz);
+        if (l->mib) {
+            label_value("Resource blocks", "%d", l->n_rb);
+            label_value("Antenna ports", "%d", l->ports);
+            label_value("Frame number", "%d", l->sfn);
+            label_value("PHICH", "%s, %s", l->phich_duration ? "extended" : "normal", phich[l->phich_resource & 3]);
+        } else {
+            label_value("MIB", "not decoded");
+        }
+        label_value("Analysed", "%d blocks", l->analysed_rb);
+        label_value("RSRP", "%.1f dBFS", l->rsrp_db);
+        label_value("RSSI", "%.1f dBFS", l->rssi_db);
+        label_value("PSS, SSS", "%.1f, %.1f dBFS", l->pss_db, l->sss_db);
+        label_value("RS EVM", "%.2f %%", 100.0 * l->rs_evm);
+        if (l->mib)
+            label_value("PBCH EVM", "%.2f %%", 100.0 * l->pbch_evm);
+        if (l->data) {
+            label_value("Data blocks", "%d", l->data_blocks);
+            label_value("Data, mostly", "%s", l->data_blocks ? m2sdr_modulation_name(l->data_modulation) : "none");
+            label_value("Data EVM", "%.2f %%", 100.0 * l->data_evm);
+        }
+        igEndTable();
+    }
+    igPushTextWrapPos(0.0f);
+    if (l->data)
+        igTextUnformatted("The control channels are not decoded: a block is taken as the constellation it fits best, "
+                          "and its EVM is against the nearest points.", NULL);
+    else if (l->mib)
+        igTextUnformatted("Data are not analysed: with several antenna ports, one receiver does not separate them.", NULL);
+    igPopTextWrapPos();
+}
+
 static void draw_pn_results(struct an_ui *ui)
 {
     const struct an_result *res = &ui->res;
@@ -2135,6 +2402,10 @@ static void draw_results(struct an_ui *ui, struct an_shared *sh, bool *changed)
     }
     if (ui->tab == 4) {
         draw_modulation_results(ui);
+        goto status;
+    }
+    if (ui->tab == 5) {
+        draw_lte_results(ui);
         goto status;
     }
 
@@ -2437,6 +2708,15 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
                         draw_modulation(&ui, &changed);
                         igEndTabItem();
                     }
+                    if (igBeginTabItem("LTE", NULL, select == 5 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                        tab = 5;
+                        draw_lte(&ui, src->live && !src->no_rf_init, &changed);
+                        igEndTabItem();
+                    }
+                    if (select < 0 && (tab == 5) != ui.set.lte_on) {
+                        ui.set.lte_on = tab == 5;
+                        changed = true;
+                    }
                     /* The phase noise and the demodulation need their own captures: they are
                      * measured while their view is shown. */
                     if (select < 0 && (tab == 3) != ui.set.pn_on) {
@@ -2493,6 +2773,7 @@ static int run_gui(struct an_source *src, const struct an_settings *set, int fir
         free(ui.trace[t]);
     free(ui.avg_lin);
     free(ui.wf_rgba);
+    free(ui.lte_rgba);
     free(ui.res.psd.power);
     free(sh.res.psd.power);
     pthread_mutex_destroy(&sh.lock);
@@ -2559,6 +2840,12 @@ static void help(void)
            "      --no-rf-init       Board: leave the RFIC as it is, set by m2sdr_rf, and only receive;\n"
            "                         --freq and --sample-rate then only label the results.\n"
            "\n"
+           "LTE options:\n"
+           "      --lte              With --report: analyse an LTE downlink carrier, FDD with a normal\n"
+           "                         cyclic prefix, tuned on its centre: cell, MIB, EVM, data blocks.\n"
+           "                         The sample rate is 1.92, 3.84, 7.68, 15.36 or 30.72 MSPS, for\n"
+           "                         6, 15, 25, 50 or 100 resource blocks around the centre.\n"
+           "\n"
            "Phase noise options:\n"
            "      --phase-noise      With --report: phase noise of the strongest carrier.\n"
            "      --pn-samples N     Samples of its capture (default: %d): more reach lower offsets.\n"
@@ -2571,8 +2858,8 @@ static void help(void)
            "      --tx-att DB        Attenuation of the test tone (default: %d).\n"
            "\n"
            "Output options:\n"
-           "      --view NAME        View shown first: spectrum, time, statistics, phase-noise or\n"
-           "                         modulation.\n"
+           "      --view NAME        View shown first: spectrum, time, statistics, phase-noise,\n"
+           "                         modulation or lte.\n"
            "      --report           Measure one capture and print the result, without a display.\n"
            "      --json             With --report: JSON.\n"
            "      --export-csv PATH  With --report: write the spectrum to a CSV file.\n"
@@ -2635,6 +2922,7 @@ int main(int argc, char **argv)
         { "pulse",           required_argument, NULL, 40 },
         { "demod-samples",   required_argument, NULL, 41 },
         { "no-rf-init",      no_argument,       NULL, 42 },
+        { "lte",             no_argument,       NULL, 43 },
         { NULL, 0, NULL, 0 }
     };
     struct m2sdr_cli_device cli_dev;
@@ -2837,8 +3125,10 @@ int main(int argc, char **argv)
                 view = 3;
             } else if (strcmp(optarg, "modulation") == 0) {
                 view = 4;
+            } else if (strcmp(optarg, "lte") == 0) {
+                view = 5;
             } else {
-                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise or modulation");
+                m2sdr_cli_invalid_choice("view", optarg, "spectrum, time, statistics, phase-noise, modulation or lte");
                 return 1;
             }
             break;
@@ -2914,6 +3204,7 @@ int main(int argc, char **argv)
                 ;
             break;
         case 42: src.no_rf_init = true; break;
+        case 43: set.lte_on = true; break;
         case 34: src.tx_tone = true; break;
         case 35:
             if (m2sdr_cli_parse_int_range(optarg, 0, 89, &src.tx_att) != 0) {
@@ -2939,6 +3230,8 @@ int main(int argc, char **argv)
         set.pn_on = true;
     if (view == 4)
         set.demod_on = true;
+    if (view == 5)
+        set.lte_on = true;
     if (src.no_rf_init && (file || src.tx_tone)) {
         m2sdr_cli_error("--no-rf-init is for a board, without --tx-tone");
         return 1;

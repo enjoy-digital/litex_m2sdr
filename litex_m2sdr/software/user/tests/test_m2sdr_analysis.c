@@ -511,6 +511,7 @@ struct lte_signal {
     double cfo_hz;
     double evm;                 /* Noise added, as the EVM it gives on a resource element. */
     size_t delay;               /* Samples ahead of the first frame. */
+    double amp;                 /* Of a resource element; 0: 0.02. */
 };
 
 /* Frames of a cell with one antenna port: synchronisation signals, reference signals, PBCH,
@@ -522,7 +523,7 @@ static size_t make_lte(float complex *x, size_t max, const struct lte_signal *si
     static float sss[LTE_SYNC_LEN];
     static uint8_t bch[LTE_PBCH_BITS];
     const int d = 1 << sig->rate_index, n = 128 * d, k = 12 * sig->n_rb;
-    const double fs = 1920000.0 * d, amp = 0.02;
+    const double fs = 1920000.0 * d, amp = sig->amp > 0 ? sig->amp : 0.02;
     const float complex *cons[3] = { qpsk, qam16, qam64 };
     const int ncons[3] = { 4, 16, 64 };
     float complex *grid = calloc((size_t)k, sizeof(*grid));
@@ -695,6 +696,29 @@ static void test_lte(void)
     free(x);
 }
 
+/* Frames of a cell as a capture file, to be analysed or sent: SC16, the same on two channels,
+ * five frames that can be played in a loop. */
+static int write_lte(const char *path)
+{
+    static const struct lte_signal sig = { 301, 25, 400, 2, 0.0, 0.0, 0, 0.012 };
+    const size_t max = 5 * 76800;
+    float complex *x = malloc(max * sizeof(*x));
+    FILE *f = fopen(path, "wb");
+    size_t count, i;
+
+    if (!x || !f)
+        return 1;
+    count = make_lte(x, max, &sig);
+    for (i = 0; i < count; i++) {
+        const short v[4] = { (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f),
+                             (short)lrintf(crealf(x[i]) * 2047.0f), (short)lrintf(cimagf(x[i]) * 2047.0f) };
+        if (fwrite(v, sizeof(v), 1, f) != 1)
+            return 1;
+    }
+    free(x);
+    return fclose(f) == 0 && count == max ? 0 : 1;
+}
+
 /* Report mode of m2sdr_analyzer */
 /*-------------------------------*/
 
@@ -773,6 +797,35 @@ static int check_report(const char *path)
     return 0;
 }
 
+static int check_lte_report(const char *path)
+{
+    static char json[32768];
+    FILE *f = fopen(path, "rb");
+    size_t n;
+
+    if (!f) {
+        printf("test_m2sdr_analysis: cannot open %s\n", path);
+        return 1;
+    }
+    n = fread(json, 1, sizeof(json) - 1, f);
+    fclose(f);
+    json[n] = '\0';
+    printf("LTE report of m2sdr_analyzer:\n");
+    CHECK_NEAR("cell identity", json_number(json, "lte", "cell_id"), 301, 0);
+    CHECK_NEAR("resource blocks", json_number(json, "lte", "n_rb"), 25, 0);
+    CHECK_NEAR("antenna ports", json_number(json, "lte", "ports"), 1, 0);
+    CHECK_NEAR("carrier offset (Hz)", json_number(json, "lte", "carrier_offset_hz"), 0.0, 2.0);
+    CHECK("reference signal EVM under 1 %", json_number(json, "lte", "rs_evm_percent") < 1.0);
+    CHECK("data EVM under 1 %", json_number(json, "lte", "data_evm_percent") < 1.0);
+    CHECK("data blocks", json_number(json, "lte", "data_blocks") >= 20 * 12 - 12);
+    if (failures) {
+        printf("test_m2sdr_analysis: %d FAILED\n", failures);
+        return 1;
+    }
+    printf("test_m2sdr_analysis: LTE report checked\n");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     float complex *x;
@@ -781,6 +834,10 @@ int main(int argc, char **argv)
         return write_capture(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--check") == 0)
         return check_report(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--write-lte") == 0)
+        return write_lte(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "--check-lte") == 0)
+        return check_lte_report(argv[2]);
 
     x = malloc(COUNT * sizeof(*x));
     if (!x)

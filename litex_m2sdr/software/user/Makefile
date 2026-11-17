@@ -191,6 +191,10 @@ test-analyzer: m2sdr_analyzer tests/test_m2sdr_analysis
 		--freq 100e6 --fft-len 4096 --window flattop --channel-bw 100e3 --channel-offset -200e3 \
 		> tests/analysis_capture.json
 	./tests/test_m2sdr_analysis --check tests/analysis_capture.json
+	./tests/test_m2sdr_analysis --write-lte tests/analysis_capture_lte.sc16
+	./m2sdr_analyzer --report --json --lte --file tests/analysis_capture_lte.sc16 --sample-rate 7.68e6 \
+		> tests/analysis_capture_lte.json
+	./tests/test_m2sdr_analysis --check-lte tests/analysis_capture_lte.json
 
 test-sigmf: tests/test_m2sdr_sigmf
 	./tests/test_m2sdr_sigmf
@@ -377,7 +381,7 @@ clean:
 	rm -f .build-flags .build-flags-* m2sdr_revision.h
 	rm -f liblitepcie/*.a liblitepcie/*.o liblitepcie/*.d
 	rm -f libm2sdr/*.a libm2sdr/*.o libm2sdr/*.d
-	rm -f tests/*.o tests/*.d $(TEST_PROGS) tests/analysis_capture.*
+	rm -f tests/*.o tests/*.d $(TEST_PROGS) tests/analysis_capture.* tests/analysis_capture_lte.*
 	rm -f libliteeth/*.a libliteeth/*.o libliteeth/*.d
 	rm -f libliteusb/*.o libliteusb/*.d
 	rm -f ad9361/*.o ad9361/*.d ad9361/*~
