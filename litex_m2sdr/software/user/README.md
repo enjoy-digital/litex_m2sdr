@@ -416,6 +416,7 @@ Common playback options:
 - `--timed-start`
 - `--host-buffers N`
 - `--prefill N`
+- `--sample-rate HZ` (pace the stream over Ethernet, which has no flow control; taken from a SigMF file when not given)
 
 SigMF input:
 - `--capture-index`

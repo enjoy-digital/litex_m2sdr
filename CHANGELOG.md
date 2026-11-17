@@ -33,6 +33,7 @@ The LiteX M2 SDR project is actively under development. We maintain this changel
 **Ethernet Host Link**
 - Added hardware timed TX over Ethernet (capability bit `eth_tx_header`) and RX timestamps on the raw UDP stream: the gateware finds the TX header at the start of a datagram, and `libm2sdr` aligns its RX buffers on the frames of the FPGA, through lost datagrams.
 - Qualified 1000BASE-X at `116 MB/s` in full duplex (2T2R `14.5 MSPS` in SC16, `29 MSPS` in SC8).
+- Fixed `m2sdr_play` over Ethernet below the link rate: it sent as fast as the host could, the board dropped the datagrams its TX FIFO could not take, and the signal was sent in pieces. It now sends at the sample rate, from the SigMF metadata or `--sample-rate`.
 - Fixed the start of an Ethernet RX stream: about `110 KB` of old samples, left in the RFIC RX FIFO, opened it with compressed timestamps. The gateware drains them while the UDP streamer is disabled, and `libm2sdr` waits `10 ms` for it before enabling the streamer.
 - Fixed a loss of the Ethernet control link: a full TX FIFO stalled the receive path of the whole LiteEth core, so the board stopped answering while the timed TX gate held a frame. The datagrams that do not fit are now dropped.
 

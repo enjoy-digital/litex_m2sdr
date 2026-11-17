@@ -619,9 +619,25 @@ default and 0 means forever.
 | `--prefill` | play | Wait for N queued buffers before starting |
 | `--timed-start` | play | Start after the next full second of the board time |
 | `--capture-index` | play | Select a capture of a SigMF recording |
+| `--sample-rate` | play | Sample rate of the stream, to pace it over Ethernet |
 
 The host queue of `--host-buffers` absorbs short stalls of a pipe or of a slow disk. It does
 not help when the destination is slower than the stream all the time.
+
+Over Ethernet nothing holds the host back: the board drops the datagrams that its TX FIFO
+cannot take, and the signal sent is then in pieces. `m2sdr_play` therefore sends the samples at
+their rate, which it takes from a SigMF recording or from `--sample-rate`; it reads from the
+board whether the stream carries one channel or two. Without a rate it sends as fast as the
+link takes it, as before, and says so. PCIe and USB3 hold the host back by themselves.
+
+```sh
+m2sdr_play --sample-rate 7680000 tx_file.bin 0     # Raw file, in a loop, at its rate
+m2sdr_play capture.sigmf-meta                      # The rate is in the metadata
+```
+
+The pace is the clock of the host. The TX FIFO of the board takes its difference with the
+clock of the board for minutes; over a longer run a short gap or a dropped datagram is to be
+expected from time to time.
 
 `m2sdr_gen` computes a signal and transmits it: `--signal tone`, `white`, `prbs` or `ofdm`,
 with `--tone-freq` and `--amplitude`. With `--pps-freq` and `--gpio-pin` it also toggles a GPIO
